@@ -11,6 +11,22 @@ make dev
 make dev-web
 ```
 
+## 只读曲库扫描
+
+在 `.env` 将 `WILDSTRING_MUSIC_DIR` 指向音乐目录。仓库根目录 `data/` 用于本地测试音乐，已从 Git 和 Docker 构建上下文排除；它与存放 SQLite 的 `WILDSTRING_DATA_DIR` 是两个目录。
+
+```sh
+make scan
+make scan SCAN_ARGS=--full
+make docker-scan
+```
+
+默认依据文件大小与纳秒修改时间做增量扫描；`--full` 强制重新读取标签。缺失记录保留，坏文件单独记录错误；根目录不可读、扫描中根目录身份变化或目录遍历不完整时，不批量标记文件缺失。外部重命名目前不自动识别为同一曲目。
+
+扫描进程使用跨进程文件锁，只有一个扫描可运行。运行记录与已导入文件逐步持久化；中断后重扫可跳过已导入且未变化的文件，旧运行标为 interrupted。当前不是通用后台任务队列，也没有网页扫描按钮。
+
+CLI 输出 JSON。模块退出码：0 完成、1 根目录失败、2 完成但存在文件/遍历错误、3 已有扫描运行；Make 会将非零结果报告为失败。扫描报告和计数可以通过 [曲库 API](../contracts/library-api.md) 查询。
+
 API 默认 `127.0.0.1:18780`，React 默认 `127.0.0.1:18781`。开发配置开放 `/docs`，容器生产配置关闭开发文档。开发代理读取 `.env` 中的 API 端口；模型密钥不要放在 `VITE_` 变量中。
 
 `make setup` 创建 `.env`、`runtime/`、默认 `music/`，安装锁定依赖和 pre-commit hook，保留已有配置。音乐目录可在 `.env` 更改，不移动原文件。
@@ -44,7 +60,9 @@ make docker-down
 
 如果宿主机需要代理联网，在本地 `.env` 设置 `DOCKER_HTTP_PROXY` 与 `DOCKER_HTTPS_PROXY`，地址使用 Docker 可访问的宿主机网关，例如 `http://host.docker.internal:7890`。它们仅作为构建参数传入，不配置为运行容器环境变量。不要在容器内使用宿主机的 `127.0.0.1` 代理地址。
 
-当前基座尚无数据库迁移、账号或音乐处理，健康检查不代表完整 MVP 完成。数据库落地时补充迁移、备份和恢复步骤。
+运行目录保存 `wildstring.sqlite3` 和扫描锁，SQLite 使用 WAL。当前只提供 v1 schema 的事务初始化；不支持更高版本数据库自动降级。备份应使用 SQLite backup API 获取一致快照，不在运行时仅复制主文件并遗漏 WAL。
+
+当前仍无管理员认证、元数据修复写回或播放器，健康检查不代表完整 MVP 完成。写回方案见 [服务端修复](architecture/metadata-repair.md)。
 
 ## 发布镜像
 

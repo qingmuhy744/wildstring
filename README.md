@@ -18,7 +18,9 @@
 
 第一阶段使用 **Python 3.12 / FastAPI + React / TypeScript**，提供自托管服务与网页端。MVP 主线：导入本地曲库 → 浏览与播放 → 查看本地歌词 → 自然语言找歌 → 预览、保存并播放 AI 歌单。
 
-当前已建立工程基座：配置、健康检查、React 服务连接页、依赖锁定、pre-commit、Make、Docker 与 GitHub Actions。**音乐导入、播放器、歌词和 AI 业务尚未实现。** 详见 [MVP 范围](docs/product/scope.md)。
+当前已有工程基座、SQLite 曲库、只读增量扫描，以及分页查询与关键词搜索 API。网页仍是服务连接页；**网页曲库浏览、元数据修复、播放、歌词和 AI 业务尚未实现。** 详见 [MVP 范围](docs/product/scope.md)。
+
+服务端元数据整理将支持手动/批量编辑、差异预览和显式写回，减少使用 mp3tag 前后下载与上传整首音频的重复传输，见 [整理设计](docs/architecture/metadata-repair.md)。
 
 ## 本地开发
 
@@ -28,16 +30,20 @@
 make setup         # 安装锁定依赖、创建 .env、安装 Git hook
 make dev           # 终端一：API http://127.0.0.1:18780
 make dev-web       # 终端二：React http://127.0.0.1:18781
+make scan          # 只读扫描 .env 中配置的音乐目录
 make ci            # 提交检查、后端测试、Web 构建、锁文件核验
 ```
 
 `make setup` 保留已有 `.env`。通过 `WILDSTRING_MUSIC_DIR` 指向自己的音乐目录；个人曲库、运行数据与模型密钥不入库。
+
+仓库根目录 `data/` 已从 Git 和 Docker 构建上下文排除，可存放本地测试音乐。全量刷新使用 `make scan SCAN_ARGS=--full`。扫描结果写入运行目录中的 SQLite，正常重扫保留曲目 ID。
 
 ## Docker
 
 ```sh
 make docker-up       # 构建、启动并等待健康检查
 make docker-smoke    # 实测 API、Web、FFmpeg、非 root 与只读音乐目录
+make docker-scan     # 在运行容器内扫描只读挂载的曲库
 make docker-status
 make docker-down     # 停止服务，保留数据卷
 ```

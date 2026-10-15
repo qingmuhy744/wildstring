@@ -6,12 +6,13 @@ PYTHON ?= python3
 COMPOSE ?= docker compose
 PROJECT ?= wildstring
 LOG_ARGS ?= -f --tail=100
+SCAN_ARGS ?=
 export UV_CACHE_DIR ?= $(CURDIR)/.cache/uv
 export PRE_COMMIT_HOME ?= $(CURDIR)/.cache/pre-commit
 RUN = $(UV) run --frozen --project backend
 DOCKER = $(COMPOSE) --project-directory "$(CURDIR)" --env-file .env -p "$(PROJECT)" -f deploy/compose.yaml
 
-.PHONY: help env setup sync dev dev-web check hooks-check lint format format-check security test build-web ci health docker-config docker-build docker-up docker-pull docker-down docker-status docker-logs docker-smoke
+.PHONY: help env setup sync dev dev-web scan check hooks-check lint format format-check security test build-web ci health docker-config docker-build docker-up docker-pull docker-down docker-status docker-logs docker-smoke docker-scan
 
 help: ## Show available commands
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "  make %-17s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -31,6 +32,9 @@ dev: env ## Run the Python API at 127.0.0.1:18780 with reload
 
 dev-web: ## Run React at 127.0.0.1:18781 with an API proxy
 	npm --prefix frontend/web run dev
+
+scan: env ## Scan the configured music directory; use SCAN_ARGS=--full to refresh all tags
+	$(RUN) python -m wildstring.scan $(SCAN_ARGS)
 
 hooks-check: ## Check tracked and new project files
 	$(RUN) python scripts/run_pre_commit.py
@@ -87,3 +91,6 @@ docker-logs: env ## Follow application logs
 
 docker-smoke: env ## Verify HTTP, packaged Web, FFmpeg, UID and music mount
 	$(DOCKER) exec -T api python -m wildstring.smokecheck
+
+docker-scan: env ## Scan through the running container with its read-only music mount
+	$(DOCKER) exec -T api python -m wildstring.scan $(SCAN_ARGS)

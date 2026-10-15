@@ -2,6 +2,7 @@
 
 import logging
 import os
+import sqlite3
 from contextlib import asynccontextmanager
 from importlib.metadata import version
 from tempfile import TemporaryFile
@@ -11,16 +12,21 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from wildstring.config import Settings
+from wildstring.database import Database
+from wildstring.library.api import library_router
+from wildstring.library.repository import LibraryRepository
 
 logger = logging.getLogger(__name__)
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     current = settings if settings is not None else Settings()
+    database = Database(current.data_dir)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         current.data_dir.mkdir(parents=True, exist_ok=True)
+        database.initialize()
         yield
 
     development = current.environment != "production"
@@ -55,11 +61,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except OSError:
             logger.warning("Music directory is not readable")
             checks["music_directory"] = "unavailable"
+        try:
+            checks["database"] = "ok" if database.check_ready() else "unavailable"
+        except (sqlite3.Error, OSError):
+            checks["database"] = "unavailable"
         available = all(result == "ok" for result in checks.values())
         return JSONResponse(
             {"status": "ok" if available else "unavailable", "checks": checks},
             status_code=200 if available else 503,
         )
+
+    app.include_router(library_router(LibraryRepository(database, current.music_dir)))
 
     if current.web_dir is not None:
         app.mount("/", StaticFiles(directory=current.web_dir, html=True), name="web")
