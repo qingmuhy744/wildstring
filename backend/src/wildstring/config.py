@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -23,3 +23,9 @@ class Settings(BaseSettings):
     @classmethod
     def resolve_directory(cls, value: Path) -> Path:
         return value.expanduser().resolve()
+
+    @model_validator(mode="after")
+    def keep_runtime_outside_music(self):
+        if self.data_dir.is_relative_to(self.music_dir):
+            raise ValueError("Runtime data directory must be outside the read-only music directory")
+        return self

@@ -10,6 +10,7 @@
 .env.*
 !.env.example
 runtime
+/data
 music
 artifacts
 docs

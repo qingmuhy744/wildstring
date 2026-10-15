@@ -10,18 +10,6 @@ from wildstring.config import Settings
 from wildstring.main import create_app
 
 
-@pytest.fixture
-def settings(tmp_path: Path) -> Settings:
-    music = tmp_path / "music"
-    music.mkdir()
-    return Settings(
-        _env_file=None,
-        environment="test",
-        data_dir=tmp_path / "data",
-        music_dir=music,
-    )
-
-
 def test_startup_and_readiness_do_not_modify_music(settings: Settings):
     original = settings.music_dir / "track.txt"
     original.write_bytes(b"fixture, not an audio file")
@@ -29,8 +17,13 @@ def test_startup_and_readiness_do_not_modify_music(settings: Settings):
         assert client.get("/health").json()["status"] == "ok"
         response = client.get("/health/ready")
         assert response.status_code == 200
-        assert response.json()["checks"] == {"data_directory": "ok", "music_directory": "ok"}
-        assert list(settings.data_dir.iterdir()) == []
+        assert response.json()["checks"] == {
+            "data_directory": "ok",
+            "music_directory": "ok",
+            "database": "ok",
+        }
+        assert (settings.data_dir / "wildstring.sqlite3").is_file()
+        assert not list(settings.data_dir.glob("tmp*"))
     assert original.read_bytes() == b"fixture, not an audio file"
     assert list(settings.music_dir.iterdir()) == [original]
 
@@ -48,7 +41,7 @@ def test_missing_music_is_unready_but_process_is_alive(settings: Settings):
 
 def test_lost_data_mount_is_reported(settings: Settings):
     with TestClient(create_app(settings)) as client:
-        settings.data_dir.rmdir()
+        settings.data_dir.rename(settings.data_dir.with_name("unmounted-data"))
         response = client.get("/health/ready")
         assert response.status_code == 503
         assert response.json()["checks"]["data_directory"] == "unavailable"
@@ -76,3 +69,16 @@ def test_packaged_web_does_not_shadow_health_endpoints(settings: Settings, tmp_p
 def test_invalid_port_is_rejected(port: int):
     with pytest.raises(ValidationError):
         Settings(_env_file=None, port=port)
+
+
+def test_runtime_cannot_be_inside_the_music_directory(tmp_path: Path):
+    with pytest.raises(ValidationError, match="outside"):
+        Settings(_env_file=None, music_dir=tmp_path, data_dir=tmp_path / "runtime")
+
+
+def test_missing_database_is_reported(settings: Settings):
+    with TestClient(create_app(settings)) as client:
+        (settings.data_dir / "wildstring.sqlite3").unlink()
+        response = client.get("/health/ready")
+        assert response.status_code == 503
+        assert response.json()["checks"]["database"] == "unavailable"

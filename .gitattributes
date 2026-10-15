@@ -3,5 +3,6 @@
 *.jpg binary
 *.flac binary
 *.mp3 binary
+*.m4a binary
 # Preserve the original pasted conversation verbatim, including its final blank lines.
 docs/research/*-original-discussion.txt -whitespace
