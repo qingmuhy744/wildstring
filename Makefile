@@ -10,6 +10,7 @@ SCAN_ARGS ?=
 export UV_CACHE_DIR ?= $(CURDIR)/.cache/uv
 export PRE_COMMIT_HOME ?= $(CURDIR)/.cache/pre-commit
 RUN = $(UV) run --frozen --project backend
+ANDROID = ./frontend/android/gradlew -p frontend/android --console=plain
 DOCKER = $(COMPOSE) --project-directory "$(CURDIR)" --env-file .env -p "$(PROJECT)" -f deploy/compose.yaml
 
 .PHONY: help env setup sync dev dev-web android-design scan import-music admin check hooks-check lint format format-check security test build-web browser-install test-web web-test-server ci health docker-config docker-build docker-up docker-pull docker-down docker-status docker-logs docker-smoke docker-scan docker-import docker-admin
@@ -35,6 +36,29 @@ dev-web: ## Run React at 127.0.0.1:18781 with an API proxy
 
 android-design: ## Preview the Android design at http://127.0.0.1:18782/android-v1.html
 	$(RUN) python -m http.server 18782 --bind 127.0.0.1 --directory docs/design
+
+.PHONY: android-check android-test android-assemble android-package android-ci android-connected-test android-locks
+android-check: ## Run Android Lint (requires JDK 21 and Android SDK 36.1)
+	$(ANDROID) :app:lintDebug
+
+android-test: ## Run Android unit tests
+	$(ANDROID) :app:testDebugUnitTest
+
+android-assemble: ## Build an installable debug APK
+	$(ANDROID) :app:assembleDebug
+
+android-package: android-assemble ## Copy APK and SHA256SUMS into artifacts/android
+	$(PYTHON) scripts/package_android.py
+
+android-ci: ## Check, test and package the native Android application
+	$(ANDROID) :app:lintDebug :app:testDebugUnitTest :app:assembleDebug
+	$(PYTHON) scripts/package_android.py
+
+android-connected-test: ## Run native UI/playback tests on a connected emulator/device
+	$(ANDROID) :app:connectedDebugAndroidTest
+
+android-locks: ## Refresh Android dependency locks and SHA-256 verification metadata
+	$(ANDROID) :app:assembleDebug :app:testDebugUnitTest :app:lintDebug :app:assembleDebugAndroidTest --write-locks --write-verification-metadata sha256
 
 scan: env ## Rescan the managed library; use SCAN_ARGS=--full to refresh all tags
 	$(RUN) python -m wildstring.scan $(SCAN_ARGS)

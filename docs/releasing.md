@@ -32,15 +32,17 @@ PR 工作流只具有仓库读取权限。
 
 ## Android 当前状态
 
-Android 当前交付 [首版设计](product/android-v1.md) 与 [可点击草图](design/android-v1.html)，尚无 `frontend/android` 工程、Gradle Wrapper 或 APK 构建任务。合并这批设计只触发现有 Python/Web/容器检查；Actions 中目前没有可安装的 APK，HTML 草图也不是 APK。
+Android 已增加 [`frontend/android`](../frontend/android/README.md) 原生工程和独立的 **Android APK** 工作流。PR、main 和手动触发会按路径执行 Android Lint、单元测试、APK 构建及模拟器验证；全部成功后上传 `wildstring-android-debug` 产物。实际可下载状态以对应 Actions 运行结果为准。[首版设计](product/android-v1.md) 与 [可点击草图](design/android-v1.html) 继续作为交互资料。
 
 | 流程 | 当前产物 |
 | --- | --- |
 | PR / main 的 `CI` | 检查和测试结果，不生成 Android 安装包 |
 | 发布 GitHub Release 的 `Release` | 容器镜像、Web ZIP 与校验和 |
-| 计划中的 Android CI | 客户端工程实现后，执行检查/测试与 `assembleDebug`，上传可下载的 debug APK；尚未接入 |
+| `Android APK` | 执行 Android 检查、测试与 `assembleDebug`，模拟器验证通过后上传 debug APK 与 SHA256SUMS，保留 30 天 |
 
-第一个测试 APK 需要在同一交付中补齐 Kotlin/Compose/Media3 工程、锁定的构建依赖、Make 入口和 Actions 产物上传，并实测 APK 可以安装与运行。正式 release 包还需要独立的版本与签名配置；私钥仅放在未跟踪的本地文件或 CI secrets 中。不能以设计 PR 或现有 Web CI 通过代替 Android 构建成功。
+打开工作流运行页的 **Artifacts → wildstring-android-debug**，下载并解压 ZIP 后安装其中的 APK；`SHA256SUMS` 用于核对文件完整性。安装包也可通过 `make android-ci` 生成到本地 `artifacts/android/`。生产 APK 不含测试曲库、示例歌词或夹具音频。
+
+这仍是 debug 测试包，CI 使用临时 debug 签名；跨运行更新可能需要卸载旧测试包。正式 release 包需要独立的版本与签名配置，私钥仅放在未跟踪的本地文件或 CI secrets 中。现有 Web Release 流程不会自动发布 Android 正式版。
 
 ## 本地 Web 打包验证
 

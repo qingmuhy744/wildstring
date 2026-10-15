@@ -1,6 +1,6 @@
 # ADR 0003：Android 原生客户端
 
-日期：2026-10-15。状态：用户已指定技术方向；本文细化首版架构，依赖版本与实现尚未落地。
+日期：2026-10-15。状态：技术方向已落地到 `frontend/android` 首个原生测试版，构建与设备验证结果分别记录。
 
 ## 决策
 
@@ -50,7 +50,7 @@ flowchart TD
 
 ## 连接、会话与网络边界
 
-现有认证使用 7 天可撤销 Cookie，会话在服务端持久化；没有移动端 Bearer 或 refresh-token 接口。首批沿用同一会话机制，统一处理 Cookie 过期、退出与 401；不在客户端自行延长有效期。`Auth.require_client` 目前只接受 `web`，A1 将白名单明确扩展为 `web` 和 `android`，保留 Web 的跨源防护与正常测试。
+现有认证使用 7 天可撤销 Cookie，会话在服务端持久化；没有移动端 Bearer 或 refresh-token 接口。原生端沿用同一会话机制，统一处理 Cookie 过期、退出与 401；不在客户端自行延长有效期。`Auth.require_client` 已将白名单扩展为 `web` 和 `android`，保留 Web 的跨源防护与正常测试；对旧服务的明确标头错误可在同一地址使用 Web 标识兼容重试。
 
 API、音频 Range、封面使用同一个以连接空间隔离的认证上下文，确保 Media3 后台请求和图片加载不会漏 Cookie。API Host、路径、Cookie 的 domain/path/secure/expiry 都按协议匹配；改变 base URL 先关闭旧播放器和客户端，清理会话、缓存及旧任务。跨 origin 重定向拒绝携带认证，也不跟随 HTTPS→HTTP 降级。
 
@@ -74,4 +74,8 @@ API、音频 Range、封面使用同一个以连接空间隔离的认证上下�
 
 首个实现里程碑要交付 Make 入口和 CI 中不含私钥的 debug 构建；发布签名仅使用本地未跟踪配置或 CI secrets。运行既有 `make ci` 防止后端兼容改动回归；涉及部署行为再执行容器验收。Android 单元/Compose/设备测试补充验证 Cookie 认证串流、Range、后台生命周期、队列恢复、音频焦点、歌词与服务端版本冲突。
 
-实施顺序与产品验收见 [Android 第一版](../product/android-v1.md)。本次没有引入 Kotlin/Gradle 依赖或生成 APK；当前测试仅能验证文档和设计草图。
+首个原生测试版使用 AGP 8.13.2、Gradle 8.13、JDK 21、Kotlin 2.2.21、Compose BOM 2025.10.00、Media3 1.9.3、Room 2.8.4、Retrofit 3.0.0/OkHttp 4.12.0 与 Hilt 2.57.2。连接配置目前由 SessionStore 保存，Cookie 用 Keystore AES-GCM 加密，不进入 Room；DataStore 用于后续更多非敏感偏好。
+
+当前网络配置采用 HTTPS 默认拒绝明文，debug 仅针对 localhost/127.0.0.1/10.0.2.2 显式开启 HTTP 联调；前述任意自托管地址 HTTP 开关仍为后续方案，不在本包中全局启用。源接口、图片和音频统一使用带 OriginGuard 的 OkHttp，禁止跟随重定向。
+
+实施顺序与产品验收见 [Android 第一版](../product/android-v1.md)，本轮 APK 实际构建与模拟器测试以工作流结果为准，真实国产设备后台和编码兼容另行验收。

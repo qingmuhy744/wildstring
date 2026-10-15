@@ -70,7 +70,7 @@ class Auth:
     @staticmethod
     def require_client(request: Request) -> None:
         # Cross-site forms cannot set this header; no cross-origin CORS access is enabled.
-        if request.headers.get("x-wildstring-client") != "web":
+        if request.headers.get("x-wildstring-client") not in {"web", "android"}:
             raise HTTPException(403, "client_header_required")
 
     def login(self, username: str, password: str) -> str:

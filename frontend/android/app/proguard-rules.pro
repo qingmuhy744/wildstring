@@ -1,0 +1,2 @@
+-keepattributes Signature,RuntimeVisibleAnnotations,AnnotationDefault
+-keep class dev.wildstring.app.data.** { *; }
