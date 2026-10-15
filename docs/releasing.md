@@ -30,6 +30,20 @@ PR 工作流只具有仓库读取权限。
 
 当前不会自动创建 Release、发布测试版本或更新远程服务器。原生安装包待客户端工程和签名方案确定后接入。
 
+## Android 当前状态
+
+Android 当前交付 [首版设计](product/android-v1.md) 与 [可点击草图](design/android-v1.html)，尚无 `frontend/android` 工程、Gradle Wrapper 或 APK 构建任务。合并这批设计只触发现有 Python/Web/容器检查；Actions 中目前没有可安装的 APK，HTML 草图也不是 APK。
+
+| 流程 | 当前产物 |
+| --- | --- |
+| PR / main 的 `CI` | 检查和测试结果，不生成 Android 安装包 |
+| 发布 GitHub Release 的 `Release` | 容器镜像、Web ZIP 与校验和 |
+| 计划中的 Android CI | 客户端工程实现后，执行检查/测试与 `assembleDebug`，上传可下载的 debug APK；尚未接入 |
+
+第一个测试 APK 需要在同一交付中补齐 Kotlin/Compose/Media3 工程、锁定的构建依赖、Make 入口和 Actions 产物上传，并实测 APK 可以安装与运行。正式 release 包还需要独立的版本与签名配置；私钥仅放在未跟踪的本地文件或 CI secrets 中。不能以设计 PR 或现有 Web CI 通过代替 Android 构建成功。
+
+## 本地 Web 打包验证
+
 本地验证当前开发版打包，不触发外部发布：
 
 ```sh
