@@ -1,5 +1,6 @@
 """Application factory and foundation health endpoints."""
 
+import asyncio
 import logging
 import os
 import sqlite3
@@ -18,6 +19,7 @@ from wildstring.library.api import library_router
 from wildstring.library.listening import listening_router
 from wildstring.library.playlists import PlaylistStore, playlist_router
 from wildstring.library.repository import LibraryRepository
+from wildstring.management import Management, management_router
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +30,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     auth = Auth(database, current)
     repository = LibraryRepository(database, current.library_dir)
     playlists = PlaylistStore(repository)
+    management = Management(current, repository)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -41,7 +44,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             and not auth.configured()
         ):
             auth.set_password(current.admin_password.get_secret_value(), only_if_empty=True)
-        yield
+        management.start()
+        try:
+            yield
+        finally:
+            await asyncio.to_thread(management.stop)
 
     development = current.environment != "production"
     app = FastAPI(
@@ -89,6 +96,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(library_router(repository, auth))
     app.include_router(listening_router(repository, auth))
     app.include_router(playlist_router(playlists, auth))
+    app.include_router(management_router(management, auth))
 
     if current.web_dir is not None:
         app.mount("/", StaticFiles(directory=current.web_dir, html=True), name="web")

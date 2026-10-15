@@ -60,7 +60,9 @@ def fingerprint(value: os.stat_result) -> tuple[int, int, int, int]:
     return value.st_dev, value.st_ino, value.st_size, value.st_mtime_ns
 
 
-def scan_library(settings: Settings, *, full: bool = False, _lock_owned: bool = False) -> dict:
+def scan_library(
+    settings: Settings, *, full: bool = False, _lock_owned: bool = False, on_start=None
+) -> dict:
     settings.data_dir.mkdir(parents=True, exist_ok=True)
     lock = FileLock(settings.data_dir / "library-scan.lock", timeout=0)
     if not _lock_owned:
@@ -73,6 +75,8 @@ def scan_library(settings: Settings, *, full: bool = False, _lock_owned: bool = 
         database.initialize()
         repository = LibraryRepository(database, settings.library_dir)
         run_id = repository.begin_scan()
+        if on_start is not None:
+            on_start(run_id)
         counts = dict.fromkeys(COUNTERS, 0)
         complete = True
 

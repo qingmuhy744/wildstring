@@ -22,6 +22,8 @@ import { NowPlaying } from './now-playing';
 import { PlayerBar, usePlayer } from './player';
 import { PlaylistEditor } from './playlist-editor';
 import { QueuePanel } from './queue-panel';
+import { Management } from './management';
+import { MetadataEditor } from './metadata-editor';
 import { Pagination, TrackList } from './track-list';
 import type { TrackOperations } from './track-actions';
 
@@ -50,6 +52,12 @@ const icons: Record<View, string> = {
 
 export function Library({ onLogout }: { onLogout: () => Promise<void> }) {
   const [view, setView] = useState<View>('tracks');
+  const [manageOpen, setManageOpen] = useState(false);
+  const [editingTrack, setEditingTrack] = useState<Track | null>(null);
+  useEffect(() => {
+    if (manageOpen) window.scrollTo({ top: 0 });
+  }, [manageOpen]);
+  const refreshLibrary = useCallback(() => setRevision((value) => value + 1), []);
   const [album, setAlbum] = useState<Album | null>(null);
   const [selectedArtist, setSelectedArtist] = useState<Artist | null>(null);
   const [artistView, setArtistView] = useState<'tracks' | 'albums'>('tracks');
@@ -229,6 +237,7 @@ export function Library({ onLogout }: { onLogout: () => Promise<void> }) {
     setOffset(0);
   }
   function switchView(target: View) {
+    setManageOpen(false);
     setView(target);
     setAlbum(null);
     setSelectedArtist(null);
@@ -315,6 +324,7 @@ export function Library({ onLogout }: { onLogout: () => Promise<void> }) {
     playlists: catalog.filter((item) => item.kind === 'manual'),
     onAdd: addToPlaylist,
     onCreate: (track) => setEditor({ initial: null, track }),
+    onEdit: setEditingTrack,
     ...(activePlaylist?.kind === 'manual'
       ? {
           onRemove: (track: Track) => void editPlaylistTrack(track),
@@ -414,7 +424,7 @@ export function Library({ onLogout }: { onLogout: () => Promise<void> }) {
           {(Object.keys(labels) as View[]).map((target) => (
             <button
               key={target}
-              className={`nav-button ${view === target ? 'nav-current' : ''}`}
+              className={`nav-button ${view === target && !manageOpen ? 'nav-current' : ''}`}
               onClick={() => switchView(target)}
             >
               <span aria-hidden="true">{icons[target]}</span>
@@ -437,6 +447,15 @@ export function Library({ onLogout }: { onLogout: () => Promise<void> }) {
             <span>☷</span>播放队列 <small>{player.queue.length}</small>
           </button>
           <div className="sidebar-bottom">
+            <button
+              className={`nav-button manage-entry ${manageOpen ? 'nav-current' : ''}`}
+              onClick={() => {
+                setManageOpen(true);
+                setQueueOpen(false);
+              }}
+            >
+              <span aria-hidden="true">⚙</span>管理
+            </button>
             <span className="local-dot" /> 私人曲库 · 原音直放
             <p>
               音乐不设限，
@@ -448,7 +467,15 @@ export function Library({ onLogout }: { onLogout: () => Promise<void> }) {
             </button>
           </div>
         </aside>
-        <main className="library">
+        {manageOpen && (
+          <Management
+            revision={revision}
+            onBack={() => setManageOpen(false)}
+            onEdit={setEditingTrack}
+            onChanged={refreshLibrary}
+          />
+        )}
+        <main className="library" hidden={manageOpen}>
           <header className="topbar">
             <div>
               <span className="eyebrow">YOUR OWN COLLECTION</span>
@@ -461,13 +488,18 @@ export function Library({ onLogout }: { onLogout: () => Promise<void> }) {
               className="mobile-section"
               aria-label="浏览方式"
               value={view}
-              onChange={(event) => switchView(event.target.value as View)}
+              onChange={(event) =>
+                event.target.value === 'manage'
+                  ? setManageOpen(true)
+                  : switchView(event.target.value as View)
+              }
             >
               {(Object.keys(labels) as View[]).map((target) => (
                 <option key={target} value={target}>
                   {labels[target]}
                 </option>
               ))}
+              <option value="manage">管理</option>
             </select>
             <form className="search" onSubmit={search} role="search" autoComplete="off">
               <label className="sr-only" htmlFor="search">
@@ -864,6 +896,20 @@ export function Library({ onLogout }: { onLogout: () => Promise<void> }) {
           initial={editor.initial}
           onClose={() => setEditor(null)}
           onSaved={saveEditor}
+        />
+      )}
+      {editingTrack && (
+        <MetadataEditor
+          track={editingTrack}
+          onClose={() => setEditingTrack(null)}
+          onSaved={async (id) => {
+            const updated = await api<Track>(`/tracks/${id}`);
+            player.refreshTrack(updated);
+            setAlbum(null);
+            setSelectedArtist(null);
+            refreshLibrary();
+            setNotice('歌曲信息已保存');
+          }}
         />
       )}
     </>

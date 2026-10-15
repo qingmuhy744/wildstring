@@ -8,6 +8,7 @@ export interface TrackOperations {
   playlists: Playlist[];
   onAdd: (track: Track, playlist: Playlist) => Promise<void>;
   onCreate: (track: Track) => void;
+  onEdit?: (track: Track) => void;
   onRemove?: (track: Track) => void;
   onMove?: (track: Track, direction: -1 | 1) => void;
 }
@@ -40,6 +41,12 @@ export function TrackActions({
           if (panel.current) {
             panel.current.style.left = `${Math.max(12, Math.min(innerWidth - 252, box.right - 240))}px`;
             panel.current.style.top = `${Math.max(12, Math.min(innerHeight - 330, box.bottom + 8))}px`;
+            requestAnimationFrame(() => {
+              const node = panel.current;
+              if (node?.matches(':popover-open')) {
+                node.style.top = `${Math.max(12, Math.min(innerHeight - node.getBoundingClientRect().height - 12, box.bottom + 8))}px`;
+              }
+            });
           }
         }}
       >
@@ -54,6 +61,16 @@ export function TrackActions({
         aria-label={`操作 ${track.title}`}
       >
         <p className="ellipsis">{track.title}</p>
+        {operations.onEdit && (
+          <button
+            onClick={() => {
+              operations.onEdit!(track);
+              hide();
+            }}
+          >
+            编辑歌曲信息
+          </button>
+        )}
         <button
           onClick={() => {
             player.playNext(track);
