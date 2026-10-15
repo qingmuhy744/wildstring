@@ -19,7 +19,8 @@ def settings(tmp_path: Path) -> Settings:
         _env_file=None,
         environment="test",
         data_dir=tmp_path / "data",
-        music_dir=music,
+        music_dir=tmp_path / "source",
+        library_dir=music,
     )
 
 

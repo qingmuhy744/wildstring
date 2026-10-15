@@ -28,6 +28,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         current.data_dir.mkdir(parents=True, exist_ok=True)
+        current.library_dir.mkdir(parents=True, exist_ok=True)
         database.initialize()
         if (
             current.admin_password is not None
@@ -63,7 +64,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             logger.warning("Data directory is not writable")
             checks["data_directory"] = "unavailable"
         try:
-            with os.scandir(current.music_dir) as entries:
+            with os.scandir(current.library_dir) as entries:
                 next(entries, None)
             checks["music_directory"] = "ok"
         except OSError:
@@ -80,7 +81,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
 
     app.include_router(auth.router())
-    app.include_router(library_router(LibraryRepository(database, current.music_dir), auth))
+    app.include_router(library_router(LibraryRepository(database, current.library_dir), auth))
 
     if current.web_dir is not None:
         app.mount("/", StaticFiles(directory=current.web_dir, html=True), name="web")

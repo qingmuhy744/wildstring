@@ -18,7 +18,7 @@
 
 第一阶段使用 **Python 3.12 / FastAPI + React / TypeScript**，提供自托管服务与网页端。MVP 主线：导入本地曲库 → 浏览与播放 → 查看本地歌词 → 自然语言找歌 → 预览、保存并播放 AI 歌单。
 
-当前已有工程基座、SQLite 只读增量扫描、管理员登录、网页曲库浏览与搜索，以及原文件串流和网页播放队列。支持播放/暂停、上一首/下一首、进度跳转和桌面音量。**元数据修复、歌词、转码和 AI 业务仍待实现。** 详见 [MVP 范围](docs/product/scope.md)。
+当前已有工程基座、SQLite 托管曲库、只读源导入与目录整理、管理员登录、歌曲/专辑视图、封面与本地滚动歌词，以及原音串流和网页队列。支持播放/暂停、上一首/下一首、进度跳转和桌面音量。**元数据修复、转码和 AI 业务仍待实现。** 详见 [MVP 范围](docs/product/scope.md)。
 
 服务端元数据整理将支持手动/批量编辑、差异预览和显式写回，减少使用 mp3tag 前后下载与上传整首音频的重复传输，见 [整理设计](docs/architecture/metadata-repair.md)。
 
@@ -30,7 +30,8 @@
 make setup         # 安装锁定依赖、创建 .env、安装 Git hook
 make dev           # 终端一：API http://127.0.0.1:18780
 make dev-web       # 终端二：React http://127.0.0.1:18781
-make scan          # 只读扫描 .env 中配置的音乐目录
+make import-music  # 从只读源复制到托管库，整理目录并入库
+make scan          # 重扫托管副本
 make admin         # 首次交互设置 admin 密码；修改密码会撤销会话
 make browser-install # 首次安装浏览器测试使用的 Chromium
 make ci            # 提交检查、后端测试、Web 构建、锁文件核验
@@ -38,22 +39,23 @@ make ci            # 提交检查、后端测试、Web 构建、锁文件核验
 
 `make setup` 保留已有 `.env`。通过 `WILDSTRING_MUSIC_DIR` 指向自己的音乐目录；个人曲库、运行数据与模型密钥不入库。
 
-仓库根目录 `data/` 已从 Git 和 Docker 构建上下文排除，可存放本地测试音乐。全量刷新使用 `make scan SCAN_ARGS=--full`。扫描结果写入运行目录中的 SQLite，正常重扫保留曲目 ID。
+仓库根目录 `data/` 已从 Git 和 Docker 构建上下文排除，可存放本地测试音乐。导入使用 `make import-music`；托管副本默认位于 `runtime/library/`。全量重扫使用 `make scan SCAN_ARGS=--full`。按“专辑艺人/专辑/CD01/01 - 歌名”整理副本，保留原件；重复导入不覆盖已有修改，见 [托管规则](contracts/managed-library.md)。
 
 ## Docker
 
 ```sh
 make docker-up       # 构建、启动并等待健康检查
 make docker-smoke    # 实测 API、Web、FFmpeg、非 root 与只读音乐目录
-make docker-scan     # 在运行容器内扫描只读挂载的曲库
+make docker-import   # 从只读源导入到持久卷 /data/library
+make docker-scan     # 重扫托管副本
 make docker-admin    # 首次设置容器的 admin 密码
 make docker-status
 make docker-down     # 停止服务，保留数据卷
 ```
 
-容器内包含 Web，访问 [本地野弦](http://127.0.0.1:18780)。默认仅绑定回环地址，音乐目录只读挂载，运行数据放在持久卷。首次设置管理员后登录；可选在未跟踪的 `.env` 提供 `WILDSTRING_ADMIN_PASSWORD` 仅初始化首次密码，重置使用 Make 命令。HTTPS 部署设置 `WILDSTRING_COOKIE_SECURE=true`。
+容器内包含 Web，访问 [本地野弦](http://127.0.0.1:18780)。默认仅绑定回环地址，导入源只读挂载，托管曲库和运行数据放在持久卷。首次设置管理员后登录；可选在未跟踪的 `.env` 提供 `WILDSTRING_ADMIN_PASSWORD` 仅初始化首次密码，重置使用 Make 命令。HTTPS 部署设置 `WILDSTRING_COOKIE_SECURE=true`。
 
-原音播放遵循浏览器的编码支持；不能解码时有错误提示，暂不自动转码。队列仅保存在当前页面。见 [播放与认证接口](contracts/playback-auth-api.md)。
+原音播放遵循浏览器的编码支持；不能解码时有错误提示，暂不自动转码。封面优先内嵌正面图片，再读同名图片或目录 cover/folder/front；同名 LRC 优先于内嵌歌词，支持逐行滚动与点击跳转。见 [封面、专辑和歌词](contracts/local-library-assets.md)。队列仅保存在当前页面。见 [播放与认证接口](contracts/playback-auth-api.md)。
 
 ## 分支与提交规范
 

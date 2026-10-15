@@ -114,3 +114,89 @@ test('串流遇到会话失效会返回登录页', async ({ page }) => {
   await expect(page.getByRole('heading', { name: '欢迎回来' })).toBeVisible();
   await expect(page.locator('audio')).toHaveCount(0);
 });
+
+test('歌曲与专辑切换、真实封面和专辑曲号顺序', async ({ page }) => {
+  await login(page);
+  const cover = page.getByRole('table').locator('img').first();
+  await expect
+    .poll(() => cover.evaluate((image: HTMLImageElement) => image.naturalWidth))
+    .toBeGreaterThan(0);
+  await page
+    .getByRole('group', { name: '曲库显示方式' })
+    .getByRole('button', { name: '专辑', exact: true })
+    .click();
+  const album = page.getByRole('button', { name: '打开专辑 合成测试专辑', exact: true });
+  await expect(album).toBeVisible();
+  await expect(album).toContainText('2 首');
+  await expect
+    .poll(() => album.locator('img').evaluate((image: HTMLImageElement) => image.naturalWidth))
+    .toBeGreaterThan(0);
+  await album.click();
+  await expect(page.getByRole('heading', { name: '合成测试专辑', exact: true })).toBeVisible();
+  await expect(page.getByRole('table').getByRole('row').nth(1)).toContainText('晴天测试曲');
+  await page.getByRole('button', { name: '播放专辑', exact: true }).click();
+  await expect.poll(async () => (await audio(page)).time).toBeGreaterThan(0.1);
+  await expect(page.getByRole('region', { name: '音乐播放器' })).toContainText('晴天测试曲');
+  await page
+    .getByRole('group', { name: '曲库显示方式' })
+    .getByRole('button', { name: '歌曲', exact: true })
+    .click();
+  await expect(page.getByRole('table').getByRole('row').nth(1)).toContainText('夜晚测试曲');
+  expect((await audio(page)).paused).toBe(false);
+});
+
+test('同名 LRC、歌词点击跳转、跟随高亮与切歌后的内嵌歌词', async ({ page }, testInfo) => {
+  await login(page);
+  await page.getByRole('button', { name: '播放 晴天测试曲', exact: true }).click();
+  await page.getByRole('button', { name: '显示歌词', exact: true }).click();
+  const panel = page.getByRole('complementary', { name: '正在播放与歌词' });
+  await expect(panel).toContainText('同名 LRC · 逐行同步');
+  await expect(panel.locator('[aria-current="true"]')).toHaveText('侧车第一行');
+  await panel.getByRole('button', { name: '跳转到 0:06：侧车第三行', exact: true }).click();
+  await expect.poll(async () => (await audio(page)).time).toBeGreaterThanOrEqual(5.9);
+  await expect(panel.locator('[aria-current="true"]')).toHaveText('侧车第三行');
+  await page.getByRole('button', { name: '暂停', exact: true }).click();
+  await panel.locator('.lyric-scroll').hover();
+  await page.mouse.wheel(0, 120);
+  await expect(panel.getByRole('button', { name: '跟随播放', exact: true })).toBeEnabled();
+  await panel.getByRole('button', { name: '跟随播放', exact: true }).click();
+  await expect(panel.getByRole('button', { name: '跟随播放', exact: true })).toBeDisabled();
+  await page.screenshot({ path: `../../artifacts/lyrics-${testInfo.project.name}.png` });
+  await panel.getByRole('button', { name: '关闭播放详情' }).click();
+  await page.getByRole('button', { name: '播放 夜晚测试曲', exact: true }).click();
+  await page.getByRole('button', { name: '查看封面与歌词', exact: true }).click();
+  await expect(panel).toContainText('内嵌歌词 · 逐行同步');
+  await expect(panel.locator('[aria-current="true"]')).toHaveText('内嵌第一行');
+  await expect(panel).not.toContainText('侧车第一行');
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+
+test('纯文本和缺失歌词不阻断播放', async ({ page }) => {
+  await login(page);
+  await page.route('**/tracks/*/lyrics', (route) =>
+    route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        kind: 'plain',
+        source: 'embedded',
+        lines: [{ time_ms: null, text: '纯文本没有虚构时间轴' }],
+      }),
+    }),
+  );
+  await page.getByRole('button', { name: '播放全部', exact: true }).click();
+  await page.getByRole('button', { name: '显示歌词', exact: true }).click();
+  const panel = page.getByRole('complementary', { name: '正在播放与歌词' });
+  await expect(panel).toContainText('内嵌歌词 · 纯文本');
+  await expect(panel).toContainText('纯文本没有虚构时间轴');
+  await expect(panel.locator('[aria-current="true"]')).toHaveCount(0);
+  await page.unroute('**/tracks/*/lyrics');
+  await page.route('**/tracks/*/lyrics', (route) =>
+    route.fulfill({
+      contentType: 'application/json',
+      body: '{"kind":"none","source":null,"lines":[]}',
+    }),
+  );
+  await panel.getByRole('button', { name: '重新读取歌词' }).click();
+  await expect(panel).toContainText('暂无本地歌词');
+  expect((await audio(page)).paused).toBe(false);
+});

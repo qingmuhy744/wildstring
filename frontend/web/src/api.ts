@@ -1,5 +1,6 @@
 export interface Track {
   id: string;
+  album_id: string;
   title: string;
   artists: string[];
   album: string | null;
@@ -60,3 +61,23 @@ export const time = (seconds: number) => {
     .toString()
     .padStart(2, '0')}`;
 };
+
+export interface Album {
+  id: string;
+  title: string;
+  artists: string[];
+  track_count: number;
+  duration_ms: number;
+  cover_track_id: string;
+}
+export interface AlbumPage {
+  items: Album[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+export interface Lyrics {
+  kind: 'none' | 'plain' | 'synced';
+  source: 'sidecar_lrc' | 'embedded' | 'sidecar_text' | null;
+  lines: { time_ms: number | null; text: string }[];
+}

@@ -11,7 +11,7 @@ from wildstring.main import create_app
 
 
 def test_startup_and_readiness_do_not_modify_music(settings: Settings):
-    original = settings.music_dir / "track.txt"
+    original = settings.library_dir / "track.txt"
     original.write_bytes(b"fixture, not an audio file")
     with TestClient(create_app(settings)) as client:
         assert client.get("/health").json()["status"] == "ok"
@@ -25,18 +25,18 @@ def test_startup_and_readiness_do_not_modify_music(settings: Settings):
         assert (settings.data_dir / "wildstring.sqlite3").is_file()
         assert not list(settings.data_dir.glob("tmp*"))
     assert original.read_bytes() == b"fixture, not an audio file"
-    assert list(settings.music_dir.iterdir()) == [original]
+    assert list(settings.library_dir.iterdir()) == [original]
 
 
 def test_missing_music_is_unready_but_process_is_alive(settings: Settings):
-    settings.music_dir.rmdir()
     with TestClient(create_app(settings)) as client:
+        settings.library_dir.rmdir()
         assert client.get("/health").status_code == 200
         response = client.get("/health/ready")
         assert response.status_code == 503
         assert response.json()["checks"]["music_directory"] == "unavailable"
-        assert not settings.music_dir.exists()
-        assert str(settings.music_dir) not in response.text
+        assert not settings.library_dir.exists()
+        assert str(settings.library_dir) not in response.text
 
 
 def test_lost_data_mount_is_reported(settings: Settings):

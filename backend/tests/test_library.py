@@ -23,14 +23,14 @@ FIXTURES = Path(__file__).resolve().parents[2] / "tests/fixtures/audio"
 
 
 def audio(settings: Settings, suffix: str = "mp3", name: str | None = None) -> Path:
-    target = settings.music_dir / (name or f"繁體測試曲.{suffix}")
+    target = settings.library_dir / (name or f"繁體測試曲.{suffix}")
     target.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(FIXTURES / f"silence.{suffix}", target)
     return target
 
 
 def repository(settings: Settings) -> LibraryRepository:
-    return LibraryRepository(Database(settings.data_dir), settings.music_dir)
+    return LibraryRepository(Database(settings.data_dir), settings.library_dir)
 
 
 @pytest.mark.parametrize("suffix", ["mp3", "flac", "m4a"])
@@ -96,7 +96,7 @@ def test_missing_and_restored_files_keep_metadata_and_id(settings: Settings):
 
 def test_bad_file_is_isolated_and_can_recover(settings: Settings):
     audio(settings)
-    broken = settings.music_dir / "损坏.flac"
+    broken = settings.library_dir / "损坏.flac"
     broken.write_bytes(b"not audio")
     report = scan_library(settings)
     assert report["status"] == "completed_with_errors"
@@ -124,7 +124,7 @@ def test_corrupted_existing_track_is_not_returned_as_playable(settings: Settings
 def test_unavailable_root_does_not_mark_tracks_missing(settings: Settings):
     audio(settings)
     scan_library(settings)
-    settings.music_dir.rename(settings.music_dir.with_name("offline-music"))
+    settings.library_dir.rename(settings.library_dir.with_name("offline-music"))
     report = scan_library(settings)
     assert report["status"] == "failed"
     assert report["counts"]["missing"] == 0
@@ -152,8 +152,8 @@ def test_symlinked_files_and_folders_are_not_followed(settings: Settings, tmp_pa
     outside = tmp_path / "outside"
     outside.mkdir()
     shutil.copyfile(FIXTURES / "silence.mp3", outside / "outside.mp3")
-    (settings.music_dir / "linked.mp3").symlink_to(outside / "outside.mp3")
-    (settings.music_dir / "linked-folder").symlink_to(outside, target_is_directory=True)
+    (settings.library_dir / "linked.mp3").symlink_to(outside / "outside.mp3")
+    (settings.library_dir / "linked-folder").symlink_to(outside, target_is_directory=True)
     report = scan_library(settings)
     assert report["counts"]["skipped"] == 2
     assert repository(settings).tracks()["total"] == 0
@@ -208,7 +208,7 @@ def test_interrupted_scan_can_be_restarted_incrementally(settings: Settings, mon
 def test_crashed_running_record_becomes_interrupted_after_lock_acquisition(settings: Settings):
     database = Database(settings.data_dir)
     database.initialize()
-    store = LibraryRepository(database, settings.music_dir)
+    store = LibraryRepository(database, settings.library_dir)
     old_run = store.begin_scan()
     scan_library(settings)
     assert store.scan(old_run)["status"] == "interrupted"
@@ -273,7 +273,7 @@ def test_api_pagination_search_and_error_isolation(settings: Settings, authentic
         assert client.get("/api/v1/tracks/missing").status_code == 404
         response = client.get(f"/api/v1/tracks/{page['items'][0]['id']}")
         assert response.status_code == 200
-        assert str(settings.music_dir) not in response.text
+        assert str(settings.library_dir) not in response.text
         assert client.get(f"/api/v1/scans/{report['id']}").json()["status"] == "completed"
         assert client.get("/api/v1/scans").json()[0]["id"] == report["id"]
 
@@ -286,7 +286,7 @@ def test_empty_library_and_separate_roots(settings: Settings, tmp_path: Path, au
     scan_library(settings)
     other = tmp_path / "other-root"
     other.mkdir()
-    settings.music_dir = other
+    settings.library_dir = other
     assert repository(settings).tracks()["total"] == 0
     scan_library(settings)
     assert repository(settings).tracks()["total"] == 0

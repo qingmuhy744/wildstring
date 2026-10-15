@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { artist, streamUrl, time, type Track } from './api';
+import { Cover } from './cover';
 
 export function usePlayer() {
   const audio = useRef<HTMLAudioElement>(null);
@@ -213,19 +214,34 @@ export function PlayerBar({
   player,
   onQueue,
   queueOpen,
+  onLyrics,
+  lyricsOpen,
 }: {
   player: Player;
   onQueue: () => void;
   queueOpen: boolean;
+  onLyrics: () => void;
+  lyricsOpen: boolean;
 }) {
   const { current, playing, index, queue, duration, position } = player;
   return (
     <section className="player" aria-label="音乐播放器">
       <audio ref={player.audio} preload="metadata" {...player.audioEvents} />
       <div className="now-playing">
-        <span className={`record ${playing ? 'spinning' : ''}`} aria-hidden="true">
-          ≋
-        </span>
+        <button
+          className="playing-art"
+          onClick={onLyrics}
+          disabled={!current}
+          aria-label="查看封面与歌词"
+        >
+          {current ? (
+            <Cover trackId={current.id} title={current.album || current.title} />
+          ) : (
+            <span className="record" aria-hidden="true">
+              ≋
+            </span>
+          )}
+        </button>
         <div>
           <strong>{current?.title || '等一首，喜欢的歌'}</strong>
           <small>{current ? artist(current) : '从你的曲库开始播放'}</small>
@@ -278,6 +294,15 @@ export function PlayerBar({
         </div>
       </div>
       <div className="player-options">
+        <button
+          className={`lyrics-toggle icon-button ${lyricsOpen ? 'active' : ''}`}
+          onClick={onLyrics}
+          aria-expanded={lyricsOpen}
+          disabled={!current}
+          aria-label="显示歌词"
+        >
+          词
+        </button>
         <label className="volume">
           音量
           <input

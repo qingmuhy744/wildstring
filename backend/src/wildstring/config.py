@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     port: int = Field(default=18780, ge=1, le=65535)
     data_dir: Path = Path("runtime")
     music_dir: Path = Path("music")
+    library_dir: Path | None = None
     web_dir: Path | None = None
     admin_password: SecretStr | None = None
     cookie_secure: bool = False
@@ -30,4 +31,9 @@ class Settings(BaseSettings):
     def keep_runtime_outside_music(self):
         if self.data_dir.is_relative_to(self.music_dir):
             raise ValueError("Runtime data directory must be outside the read-only music directory")
+        self.library_dir = (self.library_dir or self.data_dir / "library").expanduser().resolve()
+        if self.library_dir.is_relative_to(self.music_dir) or self.music_dir.is_relative_to(
+            self.library_dir
+        ):
+            raise ValueError("Managed library and import source must be separate directories")
         return self

@@ -1,11 +1,38 @@
 """SQLite storage shared by the API and one-shot scanner."""
 
+import json
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
-SCHEMA_VERSION = 2
+from wildstring.library.albums import album_key
+
+SCHEMA_VERSION = 4
+IMPORT_SCHEMA = """
+BEGIN IMMEDIATE;
+CREATE TABLE IF NOT EXISTS import_runs (
+    id TEXT PRIMARY KEY,
+    status TEXT NOT NULL,
+    started_at TEXT NOT NULL,
+    finished_at TEXT,
+    counts TEXT NOT NULL,
+    errors TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS imported_files (
+    source_root TEXT NOT NULL,
+    source_path TEXT NOT NULL,
+    target_root TEXT NOT NULL,
+    target_path TEXT NOT NULL,
+    source_size INTEGER NOT NULL,
+    source_mtime INTEGER NOT NULL,
+    sha256 TEXT NOT NULL,
+    PRIMARY KEY(source_root, source_path, target_root)
+);
+CREATE INDEX IF NOT EXISTS imports_by_hash ON imported_files(target_root, sha256);
+PRAGMA user_version = 4;
+COMMIT;
+"""
 AUTH_SCHEMA = """
 BEGIN IMMEDIATE;
 CREATE TABLE IF NOT EXISTS admin (
@@ -110,6 +137,37 @@ class Database:
                 connection.executescript(SCHEMA)
             if current < 2:
                 connection.executescript(AUTH_SCHEMA)
+            if current < 3:
+                connection.execute("BEGIN IMMEDIATE")
+                if connection.execute("PRAGMA user_version").fetchone()[0] < 3:
+                    connection.execute(
+                        "ALTER TABLE tracks ADD COLUMN album_id TEXT NOT NULL DEFAULT ''"
+                    )
+                    rows = connection.execute(
+                        "SELECT id, library_id, path, album, album_artists FROM tracks"
+                    ).fetchall()
+                    connection.executemany(
+                        "UPDATE tracks SET album_id = ? WHERE id = ?",
+                        [
+                            (
+                                album_key(
+                                    row["library_id"],
+                                    row["path"],
+                                    row["album"],
+                                    json.loads(row["album_artists"]),
+                                ),
+                                row["id"],
+                            )
+                            for row in rows
+                        ],
+                    )
+                    connection.execute(
+                        "CREATE INDEX tracks_album ON tracks(library_id, album_id, status)"
+                    )
+                    connection.execute("PRAGMA user_version = 3")
+                connection.commit()
+            if current < 4:
+                connection.executescript(IMPORT_SCHEMA)
             connection.execute("PRAGMA journal_mode = WAL")
 
     def check_ready(self) -> bool:

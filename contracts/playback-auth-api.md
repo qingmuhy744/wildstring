@@ -18,7 +18,7 @@
 
 ## 原文件串流
 
-`GET /api/v1/tracks/{id}/stream` 与 `HEAD /api/v1/tracks/{id}/stream` 按数据库中的真实曲目 ID 读取当前曲库，只读，不触发扫描或转码。
+`GET /api/v1/tracks/{id}/stream` 与 `HEAD /api/v1/tracks/{id}/stream` 按数据库中的真实曲目 ID 读取当前托管曲库，只读，不触发导入、扫描或转码。
 
 - MP3 / FLAC / M4A 对应 `audio/mpeg` / `audio/flac` / `audio/mp4`。
 - GET 支持单段 `Range: bytes=start-end`、开放末尾和后缀范围，返回 206、Content-Range 与准确的 Content-Length；无效或越界范围返回 416 与 `bytes */size`。
@@ -35,8 +35,8 @@ HTTP 行为参考 [MDN Range requests](https://developer.mozilla.org/en-US/docs/
 - 登录后分页浏览与中文关键词搜索；按钮播放当前结果页，超过 50 首时明确显示“播放本页”。播放队列从该页建立，之后搜索不会替换队列。
 - 播放/暂停、上一首/下一首、拖动进度、桌面音量、加入队列与删除非当前曲目；播放结束自动前进，队尾停止，不自动循环。
 - 队列只在当前页面内存中保存，刷新后重建；浏览器支持时接入 Media Session 元数据与系统控制。
-- 手机布局优先使用设备音量，页面不显示音量滑条。未接入封面读取，列表使用专辑首字占位。
-- 文件变化、解码失败、连接中断与认证失效会反馈；重试重新请求原文件。没有后台重扫按钮，使用 Make 扫描后刷新列表。
+- 手机布局优先使用设备音量，页面不显示音量滑条。封面、专辑视图和滚动歌词见 [本地资源](local-library-assets.md)。
+- 文件变化、解码失败、连接中断与认证失效会反馈；重试重新请求原文件。没有后台重扫按钮，使用 Make 导入或重扫后刷新列表。
 
 ## 验证
 

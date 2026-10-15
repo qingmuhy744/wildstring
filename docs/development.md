@@ -15,15 +15,19 @@ make dev-web
 
 ## 只读曲库扫描
 
-在 `.env` 将 `WILDSTRING_MUSIC_DIR` 指向音乐目录。仓库根目录 `data/` 用于本地测试音乐，已从 Git 和 Docker 构建上下文排除；它与存放 SQLite 的 `WILDSTRING_DATA_DIR` 是两个目录。
+在 `.env` 将 `WILDSTRING_MUSIC_DIR` 指向音乐目录。仓库根目录 `data/` 用于本地测试音乐，已从 Git 和 Docker 构建上下文排除；它与存放 SQLite 和托管副本的 `WILDSTRING_DATA_DIR` 是两个目录。
 
 ```sh
-make scan
+make import-music
+make docker-import
+make scan            # 只重扫托管副本
 make scan SCAN_ARGS=--full
 make docker-scan
 ```
 
-默认依据文件大小与纳秒修改时间做增量扫描；`--full` 强制重新读取标签。缺失记录保留，坏文件单独记录错误；根目录不可读、扫描中根目录身份变化或目录遍历不完整时，不批量标记文件缺失。外部重命名目前不自动识别为同一曲目。
+源目录只读，导入先复制到托管库并按标签整理目录，默认本地 `runtime/library/`、容器 `/data/library/`。见 [托管规则](../contracts/managed-library.md)。
+
+扫描托管副本时，默认依据文件大小与纳秒修改时间做增量扫描；`--full` 强制重新读取标签。缺失记录保留，坏文件单独记录错误；根目录不可读、扫描中根目录身份变化或目录遍历不完整时，不批量标记文件缺失。外部重命名目前不自动识别为同一曲目。
 
 扫描进程使用跨进程文件锁，只有一个扫描可运行。运行记录与已导入文件逐步持久化；中断后重扫可跳过已导入且未变化的文件，旧运行标为 interrupted。当前不是通用后台任务队列，也没有网页扫描按钮。
 
@@ -58,17 +62,17 @@ make docker-logs
 make docker-down
 ```
 
-多阶段镜像包含已编译 Web、Python 运行依赖和 FFmpeg，使用非 root 用户。Compose 根文件系统只读，仅 `/data` 持久卷和 `/tmp` 临时目录可写，音乐目录只读挂载。
+多阶段镜像包含已编译 Web、Python 运行依赖和 FFmpeg，使用非 root 用户。Compose 根文件系统只读，仅 `/data` 持久卷和 `/tmp` 临时目录可写，导入源只读挂载；托管副本位于持久卷 `/data/library`，后续修改仅针对副本。
 
 默认项目名 `wildstring`，数据卷 `wildstring_data`。停止不会删除数据卷。音乐目录需预先存在并允许 UID 10001 读取，错误挂载会使就绪检查失败。
 
 如果宿主机需要代理联网，在本地 `.env` 设置 `DOCKER_HTTP_PROXY` 与 `DOCKER_HTTPS_PROXY`，地址使用 Docker 可访问的宿主机网关，例如 `http://host.docker.internal:7890`。它们仅作为构建参数传入，不配置为运行容器环境变量。不要在容器内使用宿主机的 `127.0.0.1` 代理地址。
 
-运行目录保存 `wildstring.sqlite3` 和扫描锁，SQLite 使用 WAL。数据库启动时从 v1 事务迁移到 v2（新增管理员、会话和登录限流表），保留原曲库与曲目 ID；不支持更高版本数据库自动降级。备份应使用 SQLite backup API 获取一致快照，不在运行时仅复制主文件并遗漏 WAL。
+运行目录保存 `wildstring.sqlite3` 和扫描锁，SQLite 使用 WAL。数据库启动时逐步迁移到 v4（v2 认证、v3 专辑索引、v4 导入记录和映射），保留原曲库与曲目 ID；不支持更高版本数据库自动降级。备份应使用 SQLite backup API 获取一致快照，不在运行时仅复制主文件并遗漏 WAL。
 
 首次启动后执行 `make docker-admin`，或仅首次通过 `.env` 中 `WILDSTRING_ADMIN_PASSWORD` 初始化管理员。现有管理员不会被启动配置覆盖；重置密码会撤销全部会话。Cookie 默认为本机 HTTP 配置，通过 HTTPS 访问时设置 `WILDSTRING_COOKIE_SECURE=true`。
 
-网页已提供登录、曲库搜索与原文件播放；详见 [接口与播放边界](../contracts/playback-auth-api.md)。元数据修复写回、歌词、转码与 AI 尚未实现，健康检查不代表完整 MVP 完成。写回方案见 [服务端修复](architecture/metadata-repair.md)。
+网页已提供登录、曲库搜索与原文件播放；详见 [接口与播放边界](../contracts/playback-auth-api.md)。封面、歌曲/专辑视图和本地歌词已接入，见 [本地资源规则](../contracts/local-library-assets.md)。元数据修复写回、转码与 AI 尚未实现，健康检查不代表完整 MVP 完成。写回方案见 [服务端修复](architecture/metadata-repair.md)。
 
 ## 发布镜像
 

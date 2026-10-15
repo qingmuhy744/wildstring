@@ -22,10 +22,10 @@ FIXTURES = Path(__file__).resolve().parents[2] / "tests/fixtures/audio"
 
 
 def prepare(settings, suffix="mp3"):
-    path = settings.music_dir / f"測試.{suffix}"
+    path = settings.library_dir / f"測試.{suffix}"
     shutil.copyfile(FIXTURES / f"silence.{suffix}", path)
     scan_library(settings)
-    store = LibraryRepository(Database(settings.data_dir), settings.music_dir)
+    store = LibraryRepository(Database(settings.data_dir), settings.library_dir)
     track = store.tracks()["items"][0]
     return path, f"/api/v1/tracks/{track['id']}/stream", track["id"]
 
@@ -87,7 +87,7 @@ def test_full_head_ranges_and_readonly(settings, authenticated_client, suffix, m
 
 def test_disconnected_client_closes_the_open_audio_descriptor(settings, monkeypatch):
     _, url, track_id = prepare(settings)
-    record = LibraryRepository(Database(settings.data_dir), settings.music_dir).source(track_id)
+    record = LibraryRepository(Database(settings.data_dir), settings.library_dir).source(track_id)
     opened = []
     original = streaming.open_source
 
@@ -115,7 +115,7 @@ def test_disconnected_client_closes_the_open_audio_descriptor(settings, monkeypa
         async def receive():
             return {"type": "http.disconnect"}
 
-        response = streaming.AudioResponse(settings.music_dir, record, Request(scope))
+        response = streaming.AudioResponse(settings.library_dir, record, Request(scope))
         with pytest.raises(ClientDisconnect):
             await response(scope, receive, send)
 
