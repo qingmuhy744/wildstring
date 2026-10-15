@@ -1,24 +1,22 @@
 # Android 第一版
 
-日期：2026-10-15。状态：已从设计推进到原生测试版；本地编译、单元测试、Lint 与 ARM64 模拟器登录/播放/手机及平板歌词测试已通过，GitHub 上的 APK 可下载状态以对应 Android APK 工作流结果为准。
+日期：2026-10-15。状态：原生首版工程与 0.1.0 固定签名发布流程已实现；本地编译、单元测试、Lint、ARM64 模拟器登录/播放/手机及平板歌词测试，以及 R8 正式包签名、安装和连接页检查已通过。GitHub 正式 APK 的可下载状态以对应 Release 工作流结果为准。
 
 技术方向已由用户指定为 Kotlin、Jetpack Compose、Media3、Room、Retrofit/OkHttp 与 Hilt。本文中的首版边界是本轮提出的方案，可继续调整。技术约束见 [Android 技术决策](../decisions/0003-native-android.md)，交互草图见 [Android 原型](../design/android-v1.html)。
 
-## 首个原生测试版的实现状态
+## 0.1.0 的实现状态
 
 `frontend/android` 已加入真实服务连接/登录、Keystore 加密 Cookie、分页歌曲/专辑/艺人和关键词搜索、Media3 后台服务与原音播放、系统控制、队列增删/移动、循环/随机、逐行/纯文本/无歌词、手机全屏歌词与平板双栏、收藏、歌单浏览/创建/加入，以及 Room 队列 ID/位置恢复。没有演示字段、内置歌曲或模拟歌词；下面的 HTML 草图仅作为设计资料。
 
-普通歌单完整编辑/排序、AI、离线下载、正式发布签名仍待开发；不能把工程接入等同于本页全部 P0 完成。当前 HTTPS 用于实际服务器，debug HTTP 仅在显式启用后支持 localhost/127.0.0.1/10.0.2.2，任意局域网 HTTP 暂未开放。构建与安装说明见 [Android 工程](../../frontend/android/README.md)。
+普通歌单完整编辑/排序、AI 与离线下载仍待开发；正式签名已接入版本发布流程；不能把工程接入等同于本页全部 P0 完成。当前 HTTPS 用于实际服务器，debug HTTP 仅在显式启用后支持 localhost/127.0.0.1/10.0.2.2，任意局域网 HTTP 暂未开放。构建与安装说明见 [Android 工程](../../frontend/android/README.md)。
 
-同步曲库管理主线后，已通过完整后端 89 项回归（包括 7 项认证测试）、React 桌面/手机 38 项浏览器回归、原生 6 项单元测试与 Android Lint，并生成独立的 debug 应用和设备测试 APK。模拟器登录/音频/歌词与手机、平板布局由设备测试检查，报告和截图由对应 Actions 运行保存；国产真机后台、锁屏/耳机、不同编码兼容与功耗尚未验证。
+0.1.0 已在 PR 检查通过容器内完整后端 109 项回归（含 FFmpeg）、React 桌面/手机 40 项浏览器回归、原生 6 项单元测试与 debug/release Lint，并实际生成固定签名的 `com.wildstring.app` 正式 APK（versionName 0.1.0，versionCode 2）。模拟器登录/音频/歌词与手机、平板布局由设备测试检查，报告和截图由对应 Actions 运行保存；国产真机后台、锁屏/耳机、不同编码兼容与功耗尚未验证。
 
 ## 定位与代码基线
 
 Android 是同一个野弦自托管服务的原生听歌客户端，共用服务端真实曲目、收藏、歌单和收听统计。手机连接一个已有实例；首次管理员初始化、曲库导入、CUE 分轨、元数据整理与 AI 模型配置继续由服务端/Web 承担。
 
-本分支 `qingmuhy/android-v1` 从 `origin/feat/library-admin` 的 `51d7d1428397ca0186b92b5da030c68bf8f3c66b` 创建。它是创建时远程最新的导入/管理提交，也与随后创建的本地 `feat/automated-import` 的当前已提交基线一致；另一个聊天正在进行的自动发现、导入预检、待整理区和 WAV/CUE 分轨没有包含在该提交中。后续以其已提交结果为准集成，不依赖未完成的接口。
-
-设计通过独立 PR 合入 main，只带产品文档、交互草图与预览命令。实际 APK 实现在 `qingmuhy/android-apk`，从设计合并后的 main `1c67e4f` 创建。本文接口核对基于上述导入/管理代码；管理功能的 [PR #3](https://github.com/qingmuhy744/wildstring/pull/3) 与自动导入仍按各自流程验收，不因设计合并就视为已经进入 main。Android 联调时重新核对目标实例实际部署版本。
+最初交互设计从导入/管理提交 `51d7d14` 创建，仅作为设计时的基线记录。0.1.0 已集成曲库管理 [PR #3](https://github.com/qingmuhy744/wildstring/pull/3)、自动导入及 WAV/CUE 转换 [PR #5](https://github.com/qingmuhy744/wildstring/pull/5)、原生客户端 [PR #6](https://github.com/qingmuhy744/wildstring/pull/6) 与正式包名/签名发布流程 [PR #7](https://github.com/qingmuhy744/wildstring/pull/7)。设计草图保留为交互资料，实际应用和服务端功能按源码、契约与各自测试验收。Android 联调时仍需核对目标实例实际部署版本。
 
 ## 首版使用闭环
 
