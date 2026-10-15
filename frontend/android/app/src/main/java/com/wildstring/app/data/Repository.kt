@@ -1,4 +1,4 @@
-package dev.wildstring.app.data
+package com.wildstring.app.data
 
 import java.io.IOException
 import javax.inject.Inject

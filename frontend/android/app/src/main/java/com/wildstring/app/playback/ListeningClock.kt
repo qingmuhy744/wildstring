@@ -1,4 +1,4 @@
-package dev.wildstring.app.playback
+package com.wildstring.app.playback
 
 /** Counts actual media advancement, bounded by monotonic elapsed time. */
 class ListeningClock {

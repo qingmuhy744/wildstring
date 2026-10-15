@@ -1,4 +1,4 @@
-package dev.wildstring.app.data
+package com.wildstring.app.data
 
 import com.google.gson.annotations.SerializedName
 

@@ -1,4 +1,4 @@
-package dev.wildstring.app
+package com.wildstring.app
 
 import android.app.Application
 import android.content.Context
@@ -10,7 +10,7 @@ import dagger.hilt.InstallIn
 import dagger.hilt.android.HiltAndroidApp
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
-import dev.wildstring.app.data.*
+import com.wildstring.app.data.*
 import java.util.concurrent.TimeUnit
 import javax.inject.Singleton
 import okhttp3.OkHttpClient

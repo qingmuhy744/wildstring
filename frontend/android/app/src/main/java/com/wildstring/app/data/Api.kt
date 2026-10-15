@@ -1,4 +1,4 @@
-package dev.wildstring.app.data
+package com.wildstring.app.data
 
 import okhttp3.ResponseBody
 import retrofit2.http.*

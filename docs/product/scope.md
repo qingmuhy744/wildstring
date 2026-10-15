@@ -8,7 +8,7 @@
 
 完整流程：挂载只读导入源 → 复制并整理到托管曲库 → 浏览曲库 → 网页播放与查看本地歌词 → 用自然语言找到真实曲目 → 预览并保存歌单 → 播放。
 
-首版面向单个自托管实例、一个管理员与一个本地曲库目录。手机可通过网页访问；Android 已增加 Kotlin/Compose/Media3 原生测试版与独立 APK 流水线，功能及构建/设备验证状态见 [Android 第一版](android-v1.md) 和 [构建与安装](../../frontend/android/README.md)。
+首版面向单个自托管实例、一个管理员与一个本地曲库目录。手机可通过网页访问；Android 已增加 Kotlin/Compose/Media3 原生首版客户端、独立 APK 检查与版本发布流水线，功能及构建/设备验证状态见 [Android 第一版](android-v1.md) 和 [构建与安装](../../frontend/android/README.md)。
 
 ## 首版范围与验收
 

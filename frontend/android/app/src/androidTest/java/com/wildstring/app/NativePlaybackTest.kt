@@ -1,4 +1,4 @@
-package dev.wildstring.app
+package com.wildstring.app
 
 import android.content.ComponentName
 import android.graphics.Bitmap
@@ -12,7 +12,7 @@ import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import androidx.test.platform.app.InstrumentationRegistry
-import dev.wildstring.app.playback.PlaybackService
+import com.wildstring.app.playback.PlaybackService
 import java.io.File
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.ConcurrentLinkedQueue

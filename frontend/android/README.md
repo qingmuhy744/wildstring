@@ -4,7 +4,7 @@ Kotlin / Compose / Media3 原生客户端，Android 8.0（API 26）起可安装�
 
 当前功能：服务器连接/登录与加密会话保存；歌曲、专辑、艺人、关键词搜索与分页；原音串流、后台媒体服务、系统控制、队列增删/移动、循环/随机；手机全屏歌词、平板双栏与窄分屏布局；收藏、歌单浏览/创建/加入和在线收听上报；按曲目 ID 保存队列及暂停恢复。
 
-完整歌单编辑/排序、离线下载、AI 业务、Android Auto 与正式发布签名单独交付。支持的容器以服务端曲库协议为准，实际编码仍需设备解码验证。无歌词、无封面和网络错误使用真实空态或反馈，不填充虚构内容。
+完整歌单编辑/排序、离线下载、AI 业务、Android Auto 单独交付。支持的容器以服务端曲库协议为准，实际编码仍需设备解码验证。无歌词、无封面和网络错误使用真实空态或反馈，不填充虚构内容。
 
 ## 构建
 
@@ -18,11 +18,19 @@ make android-locks              # 修改依赖后刷新锁与 SHA-256 校验元�
 
 `ANDROID_HOME` 指向本机 SDK，`JAVA_HOME` 指向 JDK；`local.properties` 只用于本机且不跟踪。Gradle Wrapper、版本目录与依赖校验资料入库，构建缓存、APK 和签名私钥不提交。
 
-`make android-ci` 的安装包位于 `artifacts/android/`，包含 `wildstring-0.1.0-dev.1-debug.apk` 与 `SHA256SUMS`。GitHub 的 **Android APK** 工作流通过后，在该次运行的 **Artifacts → wildstring-android-debug** 下载并解压 ZIP 后安装 APK。原有 Python/Web/Docker CI 继续独立运行。
+`make android-ci` 的安装包位于 `artifacts/android/`，包含 `wildstring-0.1.0-debug.apk` 与 `SHA256SUMS`。GitHub 的 **Android APK** 工作流通过后，在该次运行的 **Artifacts → wildstring-android-debug** 下载并解压 ZIP 后安装 APK。原有 Python/Web/Docker CI 继续独立运行。
 
 设备测试用 `UiAutomation.takeScreenshot()` 生成手机和平板 PNG，写入 AGP 传入的 `additionalTestOutputDir`，在测试卸载应用前自动取回到 `frontend/android/app/build/outputs/connected_android_test_additional_output/`。Actions 的 `android-test-reports` 同时保存这些截图及失败截图。手工查看本地已连接设备时，也可用 `adb exec-out screencap -p > screenshot.png` 保存当前屏幕。
 
-debug 包 ID 为 `dev.wildstring.app.debug`，与未来 release 包隔离。CI 使用一次性 debug 签名，不上传私钥；不同运行的签名可能不同，安装更新提示签名不匹配时需卸载旧测试包。卸载会清空本机连接/队列，服务端曲库、收藏和歌单保留。
+debug 包 ID 为 `com.wildstring.app.debug`，与正式包 `com.wildstring.app` 隔离。CI 使用一次性 debug 签名，不上传私钥；不同运行的签名可能不同，安装更新提示签名不匹配时需卸载旧测试包。卸载会清空本机连接/队列，服务端曲库、收藏和歌单保留。
+
+## 正式发布
+
+显示名称为「野弦」，英文名称 WildString。0.1.0 的正式包 ID 为 `com.wildstring.app`，versionCode 为 2。旧的 `dev.wildstring.app.debug` 测试包属于另一应用，无法直接覆盖；首次安装正式版需要重新连接服务端。服务端曲库不受影响。
+
+GitHub [Releases](https://github.com/qingmuhy744/wildstring/releases) 提供 `wildstring-0.1.0-release.apk` 与校验和。正式包启用 R8 优化，使用固定发布签名；后续保留同一包名和密钥，以递增 versionCode 更新。私钥不进入源码、Actions 缓存或发布附件。公开证书指纹在 Release 的 `android-signing-certificate.sha256` 中。
+
+本地签名构建需要从未跟踪的 `.env.android-release` 导出 `ANDROID_KEYSTORE_PATH`、`ANDROID_KEYSTORE_PASSWORD`、`ANDROID_KEY_ALIAS`、`ANDROID_KEY_PASSWORD`，再执行 `make android-release`。`make android-release-smoke` 会在一次性模拟器安装正式包并检查连接页；不要对正在使用的正式客户端运行这个安装检查。工作流与密钥备份约定见 [发布说明](../../docs/releasing.md)。
 
 ## 连接与数据
 

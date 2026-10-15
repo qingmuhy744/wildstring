@@ -1,4 +1,4 @@
-package dev.wildstring.app
+package com.wildstring.app
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -7,8 +7,8 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import dagger.hilt.android.AndroidEntryPoint
-import dev.wildstring.app.ui.MusicViewModel
-import dev.wildstring.app.ui.WildStringApp
+import com.wildstring.app.ui.MusicViewModel
+import com.wildstring.app.ui.WildStringApp
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {

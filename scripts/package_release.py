@@ -15,6 +15,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--tag", required=True)
     parser.add_argument("--output-dir", type=Path, default=ROOT / "artifacts")
+    parser.add_argument("--check-only", action="store_true")
     arguments = parser.parse_args()
     match = re.fullmatch(r"v(\d+\.\d+\.\d+)(?:-(dev|alpha|beta|rc)\.(\d+))?", arguments.tag)
     if match is None:
@@ -28,6 +29,13 @@ def main() -> None:
     web_version = json.loads((ROOT / "frontend/web/package.json").read_text())["version"]
     if python_version != expected_python or web_version != expected_web:
         parser.error("Release tag must match backend and Web package versions; update both first")
+    android_config = (ROOT / "frontend/android/app/build.gradle.kts").read_text()
+    android_version = re.search(r'versionName = "([^"]+)"', android_config)
+    if android_version is None or android_version[1] != expected_web:
+        parser.error("Release tag must also match the Android versionName")
+    if arguments.check_only:
+        print(f"Backend, Web and Android versions match {arguments.tag}")
+        return
     dist = ROOT / "frontend/web/dist"
     if not (dist / "index.html").is_file():
         parser.error("Web build is missing; run make build-web")

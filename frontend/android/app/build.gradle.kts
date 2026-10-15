@@ -6,20 +6,32 @@ plugins {
     alias(libs.plugins.ksp)
 }
 android {
-    namespace = "dev.wildstring.app"
+    namespace = "com.wildstring.app"
     compileSdk { version = release(36) { minorApiLevel = 1 } }
     buildToolsVersion = "36.1.0"
     defaultConfig {
-        applicationId = "dev.wildstring.app"
+        applicationId = "com.wildstring.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0-dev.1"
+        versionCode = 2
+        versionName = "0.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+    val signingValues = listOf("ANDROID_KEYSTORE_PATH", "ANDROID_KEYSTORE_PASSWORD", "ANDROID_KEY_ALIAS", "ANDROID_KEY_PASSWORD")
+        .map { providers.environmentVariable(it).orNull }
+    require(signingValues.all { it == null } || signingValues.all { !it.isNullOrBlank() }) {
+        "Set all four ANDROID signing environment variables, or none"
+    }
+    if (signingValues.all { it != null }) signingConfigs.create("release") {
+        storeFile = file(signingValues[0]!!)
+        storePassword = signingValues[1]
+        keyAlias = signingValues[2]
+        keyPassword = signingValues[3]
     }
     buildTypes {
         debug { applicationIdSuffix = ".debug" }
         release {
+            signingConfig = signingConfigs.findByName("release")
             isMinifyEnabled = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }

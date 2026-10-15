@@ -1,4 +1,4 @@
-package dev.wildstring.app.playback
+package com.wildstring.app.playback
 
 import android.app.PendingIntent
 import android.content.Intent
@@ -25,8 +25,8 @@ import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.ListeningExecutorService
 import com.google.common.util.concurrent.MoreExecutors
 import dagger.hilt.android.AndroidEntryPoint
-import dev.wildstring.app.MainActivity
-import dev.wildstring.app.data.*
+import com.wildstring.app.MainActivity
+import com.wildstring.app.data.*
 import java.io.IOException
 import java.util.UUID
 import java.util.concurrent.Executors

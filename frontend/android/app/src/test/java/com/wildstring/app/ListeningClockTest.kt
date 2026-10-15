@@ -1,6 +1,6 @@
-package dev.wildstring.app
+package com.wildstring.app
 
-import dev.wildstring.app.playback.ListeningClock
+import com.wildstring.app.playback.ListeningClock
 import org.junit.Assert.assertEquals
 import org.junit.Test
 

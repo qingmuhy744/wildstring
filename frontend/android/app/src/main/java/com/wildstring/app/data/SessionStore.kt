@@ -1,11 +1,11 @@
-package dev.wildstring.app.data
+package com.wildstring.app.data
 
 import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
 import dagger.hilt.android.qualifiers.ApplicationContext
-import dev.wildstring.app.BuildConfig
+import com.wildstring.app.BuildConfig
 import java.security.KeyStore
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
