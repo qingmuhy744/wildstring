@@ -1,11 +1,98 @@
 """SQLite storage shared by the API and one-shot scanner."""
 
+import json
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
-SCHEMA_VERSION = 1
+from wildstring.library.albums import album_key
+
+SCHEMA_VERSION = 5
+PERSONAL_SCHEMA = """
+BEGIN IMMEDIATE;
+ALTER TABLE tracks ADD COLUMN loved INTEGER NOT NULL DEFAULT 0 CHECK(loved IN (0, 1));
+ALTER TABLE tracks ADD COLUMN loved_at TEXT;
+ALTER TABLE tracks ADD COLUMN play_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE tracks ADD COLUMN listened_ms INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE tracks ADD COLUMN last_played_at TEXT;
+ALTER TABLE tracks ADD COLUMN added_at TEXT NOT NULL DEFAULT '';
+UPDATE tracks SET added_at = COALESCE(
+    (SELECT started_at FROM scan_runs WHERE id = tracks.seen_run), strftime('%Y-%m-%dT%H:%M:%f+00:00', 'now')
+);
+CREATE TABLE playlists (
+    id TEXT PRIMARY KEY,
+    library_id TEXT NOT NULL REFERENCES libraries(id),
+    name TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK(kind IN ('manual', 'smart', 'favorites')),
+    definition TEXT,
+    version INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX playlists_library ON playlists(library_id);
+CREATE UNIQUE INDEX one_favorites_playlist ON playlists(library_id) WHERE kind = 'favorites';
+CREATE TABLE playlist_tracks (
+    playlist_id TEXT NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,
+    track_id TEXT NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
+    position INTEGER NOT NULL CHECK(position >= 0),
+    PRIMARY KEY(playlist_id, track_id),
+    UNIQUE(playlist_id, position)
+);
+CREATE TABLE listening_sessions (
+    id TEXT PRIMARY KEY,
+    track_id TEXT NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
+    started_at REAL NOT NULL,
+    reported_ms INTEGER NOT NULL DEFAULT 0,
+    counted INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX listening_track ON listening_sessions(track_id);
+PRAGMA user_version = 5;
+COMMIT;
+"""
+IMPORT_SCHEMA = """
+BEGIN IMMEDIATE;
+CREATE TABLE IF NOT EXISTS import_runs (
+    id TEXT PRIMARY KEY,
+    status TEXT NOT NULL,
+    started_at TEXT NOT NULL,
+    finished_at TEXT,
+    counts TEXT NOT NULL,
+    errors TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS imported_files (
+    source_root TEXT NOT NULL,
+    source_path TEXT NOT NULL,
+    target_root TEXT NOT NULL,
+    target_path TEXT NOT NULL,
+    source_size INTEGER NOT NULL,
+    source_mtime INTEGER NOT NULL,
+    sha256 TEXT NOT NULL,
+    PRIMARY KEY(source_root, source_path, target_root)
+);
+CREATE INDEX IF NOT EXISTS imports_by_hash ON imported_files(target_root, sha256);
+PRAGMA user_version = 4;
+COMMIT;
+"""
+AUTH_SCHEMA = """
+BEGIN IMMEDIATE;
+CREATE TABLE IF NOT EXISTS admin (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    password_hash TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS sessions (
+    token_hash TEXT PRIMARY KEY,
+    expires_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS login_guard (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    failures INTEGER NOT NULL,
+    blocked_until INTEGER NOT NULL
+);
+INSERT OR IGNORE INTO login_guard VALUES (1, 0, 0);
+PRAGMA user_version = 2;
+COMMIT;
+"""
 SCHEMA = """
 BEGIN IMMEDIATE;
 CREATE TABLE IF NOT EXISTS libraries (
@@ -89,6 +176,41 @@ class Database:
                 raise RuntimeError("Database schema is newer than this application")
             if current == 0:
                 connection.executescript(SCHEMA)
+            if current < 2:
+                connection.executescript(AUTH_SCHEMA)
+            if current < 3:
+                connection.execute("BEGIN IMMEDIATE")
+                if connection.execute("PRAGMA user_version").fetchone()[0] < 3:
+                    connection.execute(
+                        "ALTER TABLE tracks ADD COLUMN album_id TEXT NOT NULL DEFAULT ''"
+                    )
+                    rows = connection.execute(
+                        "SELECT id, library_id, path, album, album_artists FROM tracks"
+                    ).fetchall()
+                    connection.executemany(
+                        "UPDATE tracks SET album_id = ? WHERE id = ?",
+                        [
+                            (
+                                album_key(
+                                    row["library_id"],
+                                    row["path"],
+                                    row["album"],
+                                    json.loads(row["album_artists"]),
+                                ),
+                                row["id"],
+                            )
+                            for row in rows
+                        ],
+                    )
+                    connection.execute(
+                        "CREATE INDEX tracks_album ON tracks(library_id, album_id, status)"
+                    )
+                    connection.execute("PRAGMA user_version = 3")
+                connection.commit()
+            if current < 4:
+                connection.executescript(IMPORT_SCHEMA)
+            if current < 5:
+                connection.executescript(PERSONAL_SCHEMA)
             connection.execute("PRAGMA journal_mode = WAL")
 
     def check_ready(self) -> bool:

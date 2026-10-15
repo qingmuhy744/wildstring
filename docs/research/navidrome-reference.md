@@ -20,3 +20,9 @@
 标签解析采用 [Mutagen](https://mutagen.readthedocs.io/en/latest/index.html)，当前锁定版本见 `backend/uv.lock`。MP3、FLAC 与 M4A 分别处理 ID3、Vorbis Comment 和 MP4 atoms，不盲目切分艺人字符串。
 
 本项目沿用原仓库的 GPLv3 许可证。后续实际引入第三方代码时，另外记录来源与适用许可；设计参考不等于已实现其全部行为。
+
+## 艺人与规则歌单
+
+- 在上述同一提交核对 [ArtistList.jsx](https://github.com/navidrome/navidrome/blob/be201a2d7972d9580bef5533bfcb8bc49a2675d2/ui/src/artist/ArtistList.jsx) 的艺人角色筛选与默认 albumartist，以及 [ArtistShow.jsx](https://github.com/navidrome/navidrome/blob/be201a2d7972d9580bef5533bfcb8bc49a2675d2/ui/src/artist/ArtistShow.jsx) 的艺人详情和按 artist_id 查询专辑。野弦先合并浏览歌曲艺人、专辑艺人，详情中切换歌曲与专辑，并保持合辑内的艺人交集。
+- [标签说明](https://navidrome.org/docs/usage/library/tagging/) 区分歌曲艺人与专辑艺人、多值身份与展示文本。野弦沿用现有完整标签数组，不增加基于分隔符的猜测或远程身份匹配。
+- [Smart Playlists 官方文档](https://www.navidrome.org/docs/usage/features/smart-playlists/) 使用嵌套 all/any、字段条件、排序与限制，访问时刷新；野弦实现受限规则子集、数据库保存与可视化编辑，未实现 .nsp 文件导入、完整字段集或定时刷新。收听、收藏与支持的规则边界见 [功能契约](../../contracts/personal-library.md)。

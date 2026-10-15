@@ -16,6 +16,8 @@ services:
       WILDSTRING_DATA_DIR: /data
       WILDSTRING_MUSIC_DIR: /music
       WILDSTRING_WEB_DIR: /app/web
+      WILDSTRING_ADMIN_PASSWORD: ${WILDSTRING_ADMIN_PASSWORD:-}
+      WILDSTRING_COOKIE_SECURE: ${WILDSTRING_COOKIE_SECURE:-false}
     volumes:
       - data:/data
       - type: bind

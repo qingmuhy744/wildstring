@@ -25,6 +25,12 @@ class SourceChangedError(Exception):
 @contextmanager
 def open_source(root: Path, relative: Path):
     """Open only regular files, without following symlinks on POSIX hosts."""
+    if (
+        relative.is_absolute()
+        or not relative.parts
+        or any(part in {".", ".."} for part in relative.parts)
+    ):
+        raise OSError("Invalid library path")
     if os.open in os.supports_dir_fd:
         with ExitStack() as stack:
             directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
@@ -54,17 +60,18 @@ def fingerprint(value: os.stat_result) -> tuple[int, int, int, int]:
     return value.st_dev, value.st_ino, value.st_size, value.st_mtime_ns
 
 
-def scan_library(settings: Settings, *, full: bool = False) -> dict:
+def scan_library(settings: Settings, *, full: bool = False, _lock_owned: bool = False) -> dict:
     settings.data_dir.mkdir(parents=True, exist_ok=True)
     lock = FileLock(settings.data_dir / "library-scan.lock", timeout=0)
-    try:
-        lock.acquire()
-    except Timeout as error:
-        raise ScanBusyError from error
+    if not _lock_owned:
+        try:
+            lock.acquire()
+        except Timeout as error:
+            raise ScanBusyError from error
     try:
         database = Database(settings.data_dir)
         database.initialize()
-        repository = LibraryRepository(database, settings.music_dir)
+        repository = LibraryRepository(database, settings.library_dir)
         run_id = repository.begin_scan()
         counts = dict.fromkeys(COUNTERS, 0)
         complete = True
@@ -78,20 +85,20 @@ def scan_library(settings: Settings, *, full: bool = False) -> dict:
             nonlocal complete
             complete = False
             try:
-                path = str(Path(error.filename).relative_to(settings.music_dir))
+                path = str(Path(error.filename).relative_to(settings.library_dir))
             except (TypeError, ValueError):
                 path = "."
             record_error(path, "directory_unreadable")
 
         try:
-            root_stat = settings.music_dir.stat()
+            root_stat = settings.library_dir.stat()
             if not stat.S_ISDIR(root_stat.st_mode):
                 raise OSError("Music root is not a directory")
             # Checking scandir explicitly distinguishes an unavailable root from an empty library.
-            with os.scandir(settings.music_dir) as entries:
+            with os.scandir(settings.library_dir) as entries:
                 next(entries, None)
             for directory, folders, files in os.walk(
-                settings.music_dir, followlinks=False, onerror=directory_error
+                settings.library_dir, followlinks=False, onerror=directory_error
             ):
                 normal_folders = [
                     name for name in folders if not (Path(directory) / name).is_symlink()
@@ -103,7 +110,7 @@ def scan_library(settings: Settings, *, full: bool = False) -> dict:
                     if path.suffix.lower() not in SUPPORTED_SUFFIXES or path.is_symlink():
                         counts["skipped"] += 1
                         continue
-                    relative = path.relative_to(settings.music_dir)
+                    relative = path.relative_to(settings.library_dir)
                     key = relative.as_posix()
                     counts["visited"] += 1
                     try:
@@ -121,7 +128,7 @@ def scan_library(settings: Settings, *, full: bool = False) -> dict:
                             repository.touch(existing["id"], run_id)
                             counts["unchanged"] += 1
                         else:
-                            with open_source(settings.music_dir, relative) as source:
+                            with open_source(settings.library_dir, relative) as source:
                                 if fingerprint(os.fstat(source.fileno())) != fingerprint(before):
                                     raise SourceChangedError
                                 metadata = read_metadata(source, path)
@@ -140,7 +147,7 @@ def scan_library(settings: Settings, *, full: bool = False) -> dict:
                     except (MutagenError, ValueError, TypeError, IndexError, OverflowError):
                         record_error(key, "metadata_invalid")
                     repository.progress(run_id, counts)
-            final_root = settings.music_dir.stat()
+            final_root = settings.library_dir.stat()
             if (root_stat.st_dev, root_stat.st_ino) != (final_root.st_dev, final_root.st_ino):
                 raise OSError("Music root changed during scanning")
             if complete:
@@ -155,4 +162,5 @@ def scan_library(settings: Settings, *, full: bool = False) -> dict:
         repository.progress(run_id, counts, status)
         return repository.scan(run_id)
     finally:
-        lock.release()
+        if not _lock_owned:
+            lock.release()

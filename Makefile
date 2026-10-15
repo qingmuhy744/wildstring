@@ -12,7 +12,7 @@ export PRE_COMMIT_HOME ?= $(CURDIR)/.cache/pre-commit
 RUN = $(UV) run --frozen --project backend
 DOCKER = $(COMPOSE) --project-directory "$(CURDIR)" --env-file .env -p "$(PROJECT)" -f deploy/compose.yaml
 
-.PHONY: help env setup sync dev dev-web scan check hooks-check lint format format-check security test build-web ci health docker-config docker-build docker-up docker-pull docker-down docker-status docker-logs docker-smoke docker-scan
+.PHONY: help env setup sync dev dev-web scan import-music admin check hooks-check lint format format-check security test build-web browser-install test-web web-test-server ci health docker-config docker-build docker-up docker-pull docker-down docker-status docker-logs docker-smoke docker-scan docker-import docker-admin
 
 help: ## Show available commands
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "  make %-17s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -33,8 +33,14 @@ dev: env ## Run the Python API at 127.0.0.1:18780 with reload
 dev-web: ## Run React at 127.0.0.1:18781 with an API proxy
 	npm --prefix frontend/web run dev
 
-scan: env ## Scan the configured music directory; use SCAN_ARGS=--full to refresh all tags
+scan: env ## Rescan the managed library; use SCAN_ARGS=--full to refresh all tags
 	$(RUN) python -m wildstring.scan $(SCAN_ARGS)
+
+import-music: env ## Copy and organize source music into the managed library, then scan
+	$(RUN) python -m wildstring.import_music $(SCAN_ARGS)
+
+admin: env ## Set/reset admin password interactively; revoke existing sessions
+	$(RUN) python -m wildstring.admin
 
 hooks-check: ## Check tracked and new project files
 	$(RUN) python scripts/run_pre_commit.py
@@ -61,7 +67,16 @@ test: ## Run backend tests without external services
 build-web: ## Build the versioned Web release input
 	npm --prefix frontend/web run build
 
-ci: check test build-web ## Run the same checks as GitHub Actions
+browser-install: ## Install Chromium for the Web integration tests
+	npm --prefix frontend/web exec -- playwright install chromium
+
+test-web: build-web ## Test login, search, playback and mobile UI with an isolated fixture library
+	npm --prefix frontend/web run test
+
+web-test-server: ## Internal: serve a disposable library for browser tests
+	$(RUN) python scripts/serve_web_tests.py
+
+ci: check test test-web ## Run checks, backend tests, Web build and browser tests (install Chromium first)
 	$(UV) lock --check --project backend
 
 health: ## Check the locally configured API readiness
@@ -92,5 +107,11 @@ docker-logs: env ## Follow application logs
 docker-smoke: env ## Verify HTTP, packaged Web, FFmpeg, UID and music mount
 	$(DOCKER) exec -T api python -m wildstring.smokecheck
 
-docker-scan: env ## Scan through the running container with its read-only music mount
+docker-scan: env ## Rescan the persistent managed library
 	$(DOCKER) exec -T api python -m wildstring.scan $(SCAN_ARGS)
+
+docker-import: env ## Import from the read-only source into the persistent managed library
+	$(DOCKER) exec -T api python -m wildstring.import_music $(SCAN_ARGS)
+
+docker-admin: env ## Set/reset the container administrator password interactively
+	$(DOCKER) exec api python -m wildstring.admin

@@ -19,6 +19,8 @@ runtime/
 music/*
 !music/.gitkeep
 artifacts/
+playwright-report/
+test-results/
 *.log
 *.tsbuildinfo
 .idea/
