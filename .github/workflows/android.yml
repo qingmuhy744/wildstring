@@ -74,6 +74,7 @@ jobs:
         with:
           name: android-test-reports
           path: |
+            frontend/android/build/reports/
             frontend/android/app/build/reports/
             frontend/android/app/build/outputs/androidTest-results/
           if-no-files-found: ignore
