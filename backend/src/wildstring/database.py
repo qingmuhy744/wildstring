@@ -184,10 +184,11 @@ class Database:
         self.path = data_dir / "wildstring.sqlite3"
 
     @contextmanager
-    def connect(self, *, write: bool = False) -> Iterator[sqlite3.Connection]:
+    def connect(self, *, write: bool = False, create: bool = False) -> Iterator[sqlite3.Connection]:
+        mode = "rwc" if create else "rw" if write else "ro"
         connection = sqlite3.connect(
-            str(self.path) if write else f"{self.path.as_uri()}?mode=ro",
-            uri=not write,
+            f"{self.path.as_uri()}?mode={mode}",
+            uri=True,
             timeout=10,
         )
         connection.row_factory = sqlite3.Row
@@ -206,7 +207,7 @@ class Database:
 
     def initialize(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        with self.connect(write=True) as connection:
+        with self.connect(write=True, create=True) as connection:
             current = connection.execute("PRAGMA user_version").fetchone()[0]
             if current > SCHEMA_VERSION:
                 raise RuntimeError("Database schema is newer than this application")

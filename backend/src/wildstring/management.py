@@ -41,9 +41,20 @@ class Management:
         self.database = repository.database
         self.stopping = Event()
         self.thread = None
+        self.worker_lock = FileLock(
+            settings.data_dir / "admin-worker.lock", timeout=0, thread_local=False
+        )
+        self.storage_identity = None
 
     def start(self):
         self.repository.library_id(create=True)
+        info = self.settings.data_dir.stat()
+        self.storage_identity = (info.st_dev, info.st_ino)
+        # Acquire before exposing the API: FileLock otherwise may recreate a lost parent.
+        try:
+            self.worker_lock.acquire()
+        except Timeout:
+            pass
         self.thread = Thread(target=self.work, name="wildstring-library-worker", daemon=True)
         self.thread.start()
 
@@ -199,10 +210,12 @@ class Management:
                 )
 
     def work(self):
-        lock = FileLock(self.settings.data_dir / "admin-worker.lock", timeout=0)
         while not self.stopping.is_set():
             try:
-                with lock:
+                self.check_storage()
+                if not self.worker_lock.is_locked:
+                    self.worker_lock.acquire()
+                try:
                     # This process owns the worker lock: previous running jobs lost their owner.
                     with self.database.connect(write=True) as connection:
                         connection.execute("BEGIN IMMEDIATE")
@@ -223,15 +236,24 @@ class Management:
                             (now(), self.repository.library_id()),
                         )
                     while not self.stopping.is_set():
+                        self.check_storage()
                         job = self.claim()
                         if job:
                             self.execute(job)
                         self.stopping.wait(0.5)
+                finally:
+                    self.worker_lock.release(force=True)
             except Timeout:
                 self.stopping.wait(0.5)
             except (OSError, sqlite3.Error):
                 logger.exception("Library worker temporarily unavailable")
                 self.stopping.wait(1)
+        self.worker_lock.release(force=True)
+
+    def check_storage(self):
+        info = self.settings.data_dir.stat()
+        if (info.st_dev, info.st_ino) != self.storage_identity:
+            raise OSError("Runtime directory changed; restore it or restart the service")
 
     def overview(self):
         def directory(path):
