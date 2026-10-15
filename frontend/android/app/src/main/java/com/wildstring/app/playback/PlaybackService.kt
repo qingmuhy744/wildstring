@@ -18,6 +18,7 @@ import androidx.media3.common.util.BitmapLoader
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
@@ -32,6 +33,7 @@ import java.util.UUID
 import java.util.concurrent.Executors
 import javax.inject.Inject
 import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import okhttp3.OkHttpClient
@@ -41,13 +43,18 @@ fun Track.mediaItem(repository: Repository, entryId: String = UUID.randomUUID().
     MediaItem.Builder().setMediaId(entryId).setUri(repository.stream(id))
         .setMediaMetadata(MediaMetadata.Builder().setTitle(title).setArtist(artist).setAlbumTitle(album)
             .setArtworkUri(if (hasCover) Uri.parse(repository.cover(id)) else null)
-            .setExtras(Bundle().apply { putString("track_id", id) }).build()).build()
+            .setExtras(Bundle().apply { putString("track_id", id); putLong("duration_ms", durationMs); putString("format", format); putString("original_stream", repository.originalStream(id)) }).build()).build()
 
 @OptIn(UnstableApi::class)
 @AndroidEntryPoint
 class PlaybackService : MediaSessionService() {
     @Inject lateinit var repository: Repository
-    private lateinit var player: ExoPlayer
+    @Inject lateinit var audioCache: AudioCache
+    @Inject lateinit var health: PlaybackHealth
+    @Inject lateinit var resolver: PlaybackResolver
+    @Inject lateinit var settings: AppSettings
+    private lateinit var player: AbsolutePlayer
+    private lateinit var engine: ExoPlayer
     private var session: MediaSession? = null
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val saveMutex = Mutex()
@@ -55,16 +62,22 @@ class PlaybackService : MediaSessionService() {
     private var clock = ListeningClock()
     private var listeningId = UUID.randomUUID().toString()
     private var listeningTrack: String? = null
+    private var listeningEntry: String? = null
     private var sentMs = 0L
     private var restoring = true
     private var lastSavedQueue: List<QueueEntry>? = null
+    private var queueEntries: List<QueueEntry> = emptyList()
 
     override fun onCreate() {
         super.onCreate()
-        player = ExoPlayer.Builder(this)
-            .setMediaSourceFactory(DefaultMediaSourceFactory(OkHttpDataSource.Factory(repository.client)))
+        engine = ExoPlayer.Builder(this)
+            .setMediaSourceFactory(DefaultMediaSourceFactory(resolver.factory(audioCache.factory(repository.client))))
             .setAudioAttributes(AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MUSIC).build(), true)
             .setHandleAudioBecomingNoisy(true).setWakeMode(C.WAKE_MODE_NETWORK).build()
+        player = AbsolutePlayer(engine, resolver)
+        engine.addAnalyticsListener(object : AnalyticsListener {
+            override fun onAudioUnderrun(eventTime: AnalyticsListener.EventTime, bufferSize: Int, bufferSizeMs: Long, elapsedSinceLastFeedMs: Long) { health.audioUnderruns.incrementAndGet() }
+        })
         val activity = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         session = MediaSession.Builder(this, player).setSessionActivity(activity)
             .setBitmapLoader(AuthenticatedBitmapLoader(repository.client, executor))
@@ -79,6 +92,8 @@ class PlaybackService : MediaSessionService() {
             }).build()
         player.addListener(object : Player.Listener {
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                if (mediaItem?.mediaId == listeningEntry && reason == Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED) return
+                listeningEntry = mediaItem?.mediaId
                 report()
                 clock = ListeningClock(); sentMs = 0; listeningId = UUID.randomUUID().toString()
                 listeningTrack = mediaItem?.mediaMetadata?.extras?.getString("track_id")
@@ -97,11 +112,19 @@ class PlaybackService : MediaSessionService() {
                 clock.reset(SystemClock.elapsedRealtime(), player.currentPosition, player.isPlaying)
                 persist()
             }
-            override fun onTimelineChanged(timeline: androidx.media3.common.Timeline, reason: Int) { persist() }
+            override fun onTimelineChanged(timeline: androidx.media3.common.Timeline, reason: Int) {
+                queueEntries = (0 until player.mediaItemCount).map { index ->
+                    val item = player.getMediaItemAt(index)
+                    QueueEntry(item.mediaId, item.mediaMetadata.extras?.getString("track_id") ?: "", index)
+                }.filter { it.trackId.isNotBlank() }
+                persist()
+            }
         })
+        scope.launch { resolver.changes.collect { player.refreshResolution() } }
+        scope.launch { settings.state.map { it.aacBitrate }.distinctUntilChanged().drop(1).collect { player.quality(it) } }
         scope.launch { repository.session.invalidations.collect {
             player.stop(); player.clearMediaItems()
-            withContext(Dispatchers.IO) { repository.database.queue().clear() }
+            saveMutex.withLock { withContext(Dispatchers.IO) { repository.database.queue().clear() }; lastSavedQueue = null }
         } }
         scope.launch {
             while (isActive) {
@@ -129,12 +152,11 @@ class PlaybackService : MediaSessionService() {
     private fun persist() {
         if (restoring) return
         val endpoint = repository.session.endpoint?.toString() ?: return
-        val entries = (0 until player.mediaItemCount).map { index ->
-            val item = player.getMediaItemAt(index)
-            QueueEntry(item.mediaId, item.mediaMetadata.extras?.getString("track_id") ?: "", index)
-        }.filter { it.trackId.isNotBlank() }
+        val profile = repository.session.cacheScope() ?: return
+        val entries = queueEntries
         val position = SavedPosition(endpoint = endpoint, entryId = player.currentMediaItem?.mediaId, positionMs = player.currentPosition.coerceAtLeast(0))
         scope.launch { saveMutex.withLock {
+            if (profile != repository.session.cacheScope() || endpoint != repository.session.endpoint?.toString()) return@withLock
             withContext(Dispatchers.IO) {
                 if (lastSavedQueue == entries) repository.database.queue().insertPosition(position)
                 else repository.database.queue().save(entries, position)
@@ -145,21 +167,23 @@ class PlaybackService : MediaSessionService() {
 
     private suspend fun restore() {
         try {
+            val profile = repository.session.cacheScope() ?: return
             val dao = repository.database.queue()
             val (saved, entries) = withContext(Dispatchers.IO) { dao.position() to dao.entries() }
             if (saved == null || saved.endpoint != repository.session.endpoint?.toString() || entries.isEmpty()) return
-            if (!repository.api().status().authenticated) return
+            val offline = try { if (!repository.api().status().authenticated) return; false }
+            catch (error: IOException) { if (error is javax.net.ssl.SSLException || repository.session.cacheScope() != profile) return; true }
             val items = mutableListOf<MediaItem>()
             for (entry in entries.take(5000)) {
                 if (player.mediaItemCount != 0) return
                 try {
-                    val track = repository.track(entry.trackId)
+                    val track = (if (offline) repository.cachedTrack(entry.trackId) else repository.track(entry.trackId)) ?: continue
                     if (track.status == "available") items += track.mediaItem(repository, entry.entryId)
                 } catch (error: retrofit2.HttpException) {
                     if (error.code() != 404 && error.code() != 409) throw error
                 }
             }
-            if (items.isEmpty() || player.mediaItemCount != 0 || saved.endpoint != repository.session.endpoint?.toString()) return
+            if (items.isEmpty() || player.mediaItemCount != 0 || saved.endpoint != repository.session.endpoint?.toString() || repository.session.cacheScope() != profile) return
             val index = items.indexOfFirst { it.mediaId == saved.entryId }.coerceAtLeast(0)
             player.setMediaItems(items, index, saved.positionMs)
             player.prepare()

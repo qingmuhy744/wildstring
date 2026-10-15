@@ -23,11 +23,12 @@ object ServerAddress {
             target.encodedPath.startsWith(base.encodedPath)
 }
 
-class OriginGuard(private val endpoint: () -> HttpUrl?, private val unauthorized: () -> Unit = {}) : Interceptor {
+class OriginGuard(private val endpoint: () -> HttpUrl?, private val profile: () -> String? = { null }, private val unauthorized: () -> Unit = {}) : Interceptor {
     @Volatile private var legacyOrigin: String? = null
     override fun intercept(chain: Interceptor.Chain): Response {
         val base = endpoint() ?: throw IOException("尚未配置服务器。")
         if (!ServerAddress.contains(base, chain.request().url)) throw IOException("拒绝请求其他服务器或路径。")
+        val requestProfile = profile()
         val client = if (legacyOrigin == base.toString()) "web" else "android"
         var response = chain.proceed(chain.request().newBuilder().header("X-Wildstring-Client", client).build())
         // Compatibility with existing Web-only servers, on the same validated origin.
@@ -36,7 +37,7 @@ class OriginGuard(private val endpoint: () -> HttpUrl?, private val unauthorized
             legacyOrigin = base.toString()
             response = chain.proceed(chain.request().newBuilder().header("X-Wildstring-Client", "web").build())
         }
-        if (response.code == 401 && !response.request.url.encodedPath.endsWith("/auth/login")) unauthorized()
+        if (response.code == 401 && !response.request.url.encodedPath.endsWith("/auth/login") && !response.request.url.encodedPath.endsWith("/auth/logout") && endpoint() == base && profile() == requestProfile) unauthorized()
         return response
     }
 }

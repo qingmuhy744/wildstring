@@ -3,7 +3,9 @@ package com.wildstring.app.data
 import com.google.gson.annotations.SerializedName
 
 data class Page<T>(val items: List<T>, val total: Int, val limit: Int, val offset: Int)
-data class AuthStatus(val configured: Boolean, val authenticated: Boolean)
+data class Account(val id: String, val username: String, val role: String, val enabled: Boolean = true, val version: Int = 1)
+data class AuthStatus(val configured: Boolean, val authenticated: Boolean, val user: Account? = null)
+data class PasswordChange(@SerializedName("current_password") val currentPassword: String, @SerializedName("new_password") val newPassword: String)
 data class LoginRequest(val username: String, val password: String)
 data class Track(
     val id: String, val title: String, val artists: List<String>, val album: String?,
@@ -20,7 +22,7 @@ data class Playlist(val id: String, val name: String, val kind: String, val vers
     @SerializedName("track_count") val trackCount: Int,
     @SerializedName("cover_track_id") val coverTrackId: String?)
 data class LyricLine(@SerializedName("time_ms") val timeMs: Long?, val text: String)
-data class Lyrics(val kind: String = "none", val lines: List<LyricLine> = emptyList())
+data class Lyrics(val kind: String = "none", val lines: List<LyricLine> = emptyList(), val source: String? = null)
 data class FavoriteRequest(val loved: Boolean)
 data class PlaylistRequest(val name: String, val kind: String = "manual")
 data class RenamePlaylist(val name: String, val version: Int)
@@ -31,3 +33,8 @@ fun formatTime(ms: Long): String {
     val seconds = ms.coerceAtLeast(0) / 1000
     return "%d:%02d".format(seconds / 60, seconds % 60)
 }
+
+internal data class AudioOutput(val codec: String, @SerializedName("bitrate_kbps") val bitrateKbps: Int? = null)
+internal data class PlaybackPlan(val mode: String, val reason: String?, val output: AudioOutput,
+    @SerializedName("duration_ms") val durationMs: Long, @SerializedName("start_ms") val startMs: Long,
+    @SerializedName("stream_url") val streamUrl: String)

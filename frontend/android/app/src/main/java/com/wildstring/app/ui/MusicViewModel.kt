@@ -19,10 +19,12 @@ import javax.inject.Inject
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import retrofit2.HttpException
+import java.io.IOException
+import com.wildstring.app.playback.AudioCache
 
 data class QueueRow(val entryId: String, val trackId: String, val title: String, val artist: String, val index: Int)
 data class MusicState(
-    val connected: Boolean = false, val connecting: Boolean = false, val loading: Boolean = false,
+    val account: Account? = null, val playbackQuality: String = "", val connected: Boolean = false, val connecting: Boolean = false, val loading: Boolean = false,
     val server: String = "", val localHttp: Boolean = false, val error: String? = null,
     val tab: String = "library", val kind: String = "albums", val title: String = "曲库",
     val query: String = "", val offset: Int = 0, val total: Int = 0,
@@ -33,15 +35,19 @@ data class MusicState(
     val position: Long = 0, val duration: Long = 0, val queue: List<QueueRow> = emptyList(),
     val entryId: String? = null, val repeatMode: Int = Player.REPEAT_MODE_OFF, val shuffle: Boolean = false,
     val playbackError: String? = null, val lyrics: Lyrics = Lyrics(), val lyricsLoading: Boolean = false,
-    val lyricsError: String? = null,
+    val lyricsError: String? = null, val offline: Boolean = false, val hasContent: Boolean = false,
+    val contentKey: String = "", val canGoBack: Boolean = false,
 )
 
 @HiltViewModel
 class MusicViewModel @Inject constructor(
-    val repository: Repository, val imageLoader: ImageLoader, @ApplicationContext context: Context,
+    val repository: Repository, val imageLoader: ImageLoader, val settings: AppSettings,
+    val audioCache: AudioCache, val playbackHealth: com.wildstring.app.playback.PlaybackHealth, @ApplicationContext context: Context,
 ) : ViewModel() {
-    private val mutable = MutableStateFlow(MusicState(server = repository.session.endpoint?.toString().orEmpty(), localHttp = repository.session.localHttp))
+    private val mutable = MutableStateFlow(MusicState(account = repository.session.account, server = repository.session.endpoint?.toString().orEmpty(), localHttp = repository.session.localHttp))
     val state = mutable.asStateFlow()
+    private val mutablePosition = MutableStateFlow(0L)
+    val position = mutablePosition.asStateFlow()
     var controller: MediaController? = null
         private set
     private val controllerFuture = MediaController.Builder(context, SessionToken(context, ComponentName(context, PlaybackService::class.java))).buildAsync()
@@ -49,28 +55,66 @@ class MusicViewModel @Inject constructor(
     private var lyricJob: Job? = null
     private var progressJob: Job? = null
     private var lyricTrack: String? = null
+    private var invalidationMessage: String? = null
+    private var authGeneration = 0
+    private var loadGeneration = 0L
+    private val tabs = mutableMapOf<String, CatalogQuery>()
+    private val history = mutableMapOf<String, ArrayDeque<CatalogQuery>>()
+    private val favoriteJobs = mutableSetOf<String>()
+    private var queueSnapshot: List<QueueRow> = emptyList()
+    private val pages = object : LinkedHashMap<String, CatalogPage>(24, .75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, CatalogPage>?) = size > 24
+    }
+    private fun query() = mutable.value.let { CatalogQuery(it.tab, it.kind, it.title, it.query, it.offset, it.collection, it.collectionId, it.activePlaylist) }
+    private fun MusicState.withPage(page: CatalogPage) = copy(tracks = page.tracks, albums = page.albums, artists = page.artists,
+        playlists = page.playlists, total = page.total, hasContent = true)
+    suspend fun cacheUsage(): Triple<Long, Long, Long> = withContext(Dispatchers.IO) { val (metadata, art) = repository.cache.usage(); Triple(metadata, art, audioCache.bytes()) }
+    fun clearCache() = viewModelScope.launch {
+        withContext(Dispatchers.IO) { repository.cache.clear(); audioCache.clear() }
+        pages.clear(); imageLoader.memoryCache?.clear()
+    }
+    private suspend fun invalidateCatalog() { pages.clear(); withContext(Dispatchers.IO) { repository.cache.invalidateCatalog() } }
+
     private val playerListener = object : Player.Listener {
-        override fun onEvents(player: Player, events: Player.Events) { refreshPlayer() }
+        override fun onEvents(player: Player, events: Player.Events) {
+            if (events.contains(Player.EVENT_TIMELINE_CHANGED) || events.contains(Player.EVENT_MEDIA_ITEM_TRANSITION) || events.contains(Player.EVENT_MEDIA_METADATA_CHANGED)) {
+                rebuildQueue()
+            }
+            refreshPlayer()
+        }
     }
 
     init {
         controllerFuture.addListener({
-            runCatching { controllerFuture.get() }.onSuccess { c -> controller = c; c.addListener(playerListener); refreshPlayer() }
+            runCatching { controllerFuture.get() }.onSuccess { c -> controller = c; c.addListener(playerListener); rebuildQueue(); refreshPlayer() }
                 .onFailure { mutable.update { it.copy(error = "播放器连接失败，请重新打开应用。") } }
         }, ContextCompat.getMainExecutor(context))
         viewModelScope.launch { repository.session.invalidations.collect {
-            loadJob?.cancel(); lyricJob?.cancel(); controller?.stop(); controller?.clearMediaItems()
-            mutable.update { MusicState(server = it.server, localHttp = it.localHttp, error = "登录已失效，请重新登录。") }
+            loadGeneration++; loadJob?.cancel(); lyricJob?.cancel(); lyricTrack = null; pages.clear(); tabs.clear(); history.clear(); repository.knownTracks.clear(); controller?.stop(); controller?.clearMediaItems()
+            val message = invalidationMessage ?: "登录已失效，请重新登录。"
+            invalidationMessage = null
+            mutable.update { MusicState(server = it.server, localHttp = it.localHttp, error = message) }
             imageLoader.memoryCache?.clear()
         } }
         if (repository.session.endpoint != null) viewModelScope.launch {
-            mutable.update { it.copy(connecting = true) }
+            val generation = authGeneration
+            val saved = repository.cachedCatalog(CatalogQuery())
+            if (saved != null && repository.session.cacheScope() != null) {
+                mutable.update { it.withPage(saved).copy(connected = true, offline = true, contentKey = query().key) }
+                pages[query().key] = saved
+            } else mutable.update { it.copy(connecting = true) }
             try {
-                if (repository.api().status().authenticated) { mutable.update { it.copy(connected = true) }; load() }
-                else repository.session.invalidate()
+                val status = repository.status()
+                if (status.authenticated) {
+                    if (repository.acceptAccount(status.user)) {
+                        pages.clear(); controller?.stop(); controller?.clearMediaItems()
+                        mutable.update { MusicState(account = status.user, connected = true, server = it.server, localHttp = it.localHttp) }
+                    }
+                    mutable.update { it.copy(connected = true, offline = false, account = status.user) }; load()
+                } else repository.session.invalidate()
             } catch (e: CancellationException) { throw e }
-            catch (e: Exception) { mutable.update { it.copy(error = friendlyError(e)) } }
-            finally { mutable.update { it.copy(connecting = false) } }
+            catch (e: Exception) { if (generation == authGeneration) mutable.update { it.copy(error = if (it.connected && e is IOException) null else friendlyError(e), offline = it.connected) } }
+            finally { if (generation == authGeneration) mutable.update { it.copy(connecting = false) } }
         }
     }
 
@@ -80,58 +124,104 @@ class MusicViewModel @Inject constructor(
     }
     fun connect(server: String, username: String, password: String, localHttp: Boolean) = viewModelScope.launch {
         if (mutable.value.connecting) return@launch
+        authGeneration++
         mutable.update { it.copy(connecting = true, error = null) }
         try {
             repository.client.dispatcher.cancelAll()
+            controller?.stop(); controller?.clearMediaItems()
+            repository.session.write(null)
+            withContext(Dispatchers.IO) { repository.database.queue().clear() }
+            pages.clear(); tabs.clear(); history.clear(); repository.knownTracks.clear()
             repository.session.configure(server, localHttp)
-            val status = repository.api().status()
+            val status = repository.status()
             check(status.configured) { "请先在服务端初始化管理员。" }
-            if (!status.authenticated) repository.api().login(LoginRequest(username.trim(), password)).close()
-            mutable.update { MusicState(connected = true, server = repository.session.endpoint.toString(), localHttp = localHttp) }
+            repository.api().login(LoginRequest(username.trim(), password)).close()
+            val authenticated = repository.status()
+            check(authenticated.authenticated) { "登录未成功，请重试。" }
+            repository.acceptAccount(authenticated.user)
+            mutable.update { MusicState(account = authenticated.user, connected = true, server = repository.session.endpoint.toString(), localHttp = localHttp) }
             load()
         } catch (e: CancellationException) { throw e }
         catch (e: Exception) { mutable.update { it.copy(error = if (e is HttpException && e.code() == 401) "账号或密码不正确。" else if (e is IllegalStateException) e.message else friendlyError(e)) } }
         finally { mutable.update { it.copy(connecting = false) } }
     }
     fun logout() = viewModelScope.launch {
-        loadJob?.cancel(); lyricJob?.cancel(); controller?.stop(); controller?.clearMediaItems()
+        loadGeneration++; loadJob?.cancel(); lyricJob?.cancel(); lyricTrack = null; pages.clear(); tabs.clear(); history.clear(); repository.knownTracks.clear(); controller?.stop(); controller?.clearMediaItems()
         runCatching { repository.logout() }
         imageLoader.memoryCache?.clear()
         mutable.update { MusicState(server = it.server, localHttp = it.localHttp) }
     }
 
-    fun navigate(tab: String) {
-        loadJob?.cancel()
-        mutable.update { it.copy(tab = tab, kind = if (tab == "mine") "playlists" else if (tab == "search") "tracks" else "albums",
-            title = when (tab) { "mine" -> "我的"; "search" -> "找歌"; else -> "曲库" },
-            collection = null, collectionId = null, activePlaylist = null, offset = 0, query = "", error = null) }
-        load()
+    suspend fun changePassword(current: String, next: String) {
+        repository.changePassword(current, next)
+        invalidationMessage = "密码已修改，请重新登录。"
+        repository.session.invalidate()
     }
-    fun kind(kind: String) { mutable.update { it.copy(kind = kind, collection = null, collectionId = null, activePlaylist = null, offset = 0) }; load() }
-    fun search(query: String) { mutable.update { it.copy(query = query, offset = 0) }; load(delayMs = 300) }
-    fun page(direction: Int) { mutable.update { it.copy(offset = (it.offset + direction * 50).coerceAtLeast(0)) }; load() }
-    fun openAlbum(album: Album) { mutable.update { it.copy(kind = "tracks", collection = "albums", collectionId = album.id, title = album.title, query = "", offset = 0, activePlaylist = null) }; load() }
-    fun openArtist(artist: Artist) { mutable.update { it.copy(kind = "tracks", collection = "artists", collectionId = artist.id, title = artist.name, query = "", offset = 0, activePlaylist = null) }; load() }
-    fun openPlaylist(playlist: Playlist) { mutable.update { it.copy(kind = "tracks", collection = "playlists", collectionId = playlist.id, activePlaylist = playlist, title = playlist.name, query = "", offset = 0) }; load() }
-    fun recent() { mutable.update { it.copy(kind = "recent", title = "最近听过", collection = null, collectionId = null, offset = 0, query = "") }; load() }
+    fun refreshLyrics() {
+        val id = mutable.value.current?.id ?: return
+        lyricJob?.cancel()
+        lyricJob = viewModelScope.launch {
+            mutable.update { it.copy(lyricsLoading = true, lyricsError = null) }
+            try { val lyrics = repository.lyrics(id); if (lyricTrack == id) mutable.update { it.copy(lyrics = lyrics) } }
+            catch (e: CancellationException) { throw e }
+            catch (e: Exception) { if (lyricTrack == id) mutable.update { it.copy(lyricsError = friendlyError(e)) } }
+            finally { if (lyricTrack == id) mutable.update { it.copy(lyricsLoading = false) } }
+        }
+    }
+
+    fun navigate(tab: String) {
+        if (tab == mutable.value.tab) return
+        tabs[mutable.value.tab] = query()
+        val target = tabs[tab] ?: CatalogQuery(tab = tab, kind = if (tab == "mine") "playlists" else if (tab == "search") "tracks" else "albums",
+            title = when (tab) { "mine" -> "我的"; "search" -> "找歌"; else -> "曲库" })
+        show(target)
+    }
+    private fun show(target: CatalogQuery, delayMs: Long = 0) {
+        val saved = pages[target.key]
+        mutable.update { current ->
+            val next = current.copy(tab = target.tab, kind = target.kind, title = target.title, query = target.query, offset = target.offset,
+                collection = target.collection, collectionId = target.collectionId, activePlaylist = target.playlist,
+                contentKey = target.key, canGoBack = history[target.tab]?.isNotEmpty() == true, error = null,
+                tracks = emptyList(), albums = emptyList(), artists = emptyList(), playlists = emptyList(), total = 0, hasContent = false, loading = true)
+            if (saved == null) next else next.withPage(saved)
+        }
+        load(delayMs)
+    }
+    fun back() { history[mutable.value.tab]?.removeLastOrNull()?.let { show(it) } }
+    private fun open(target: CatalogQuery) {
+        history.getOrPut(mutable.value.tab) { ArrayDeque() }.apply { if (size >= 20) removeFirst(); addLast(query()) }
+        show(target)
+    }
+    fun kind(kind: String) { if (kind != mutable.value.kind) show(query().copy(kind = kind, offset = 0)) }
+    fun search(query: String) { show(this.query().copy(query = query.take(256), offset = 0), 300) }
+    fun page(direction: Int) { show(query().copy(offset = (mutable.value.offset + direction * 50).coerceAtLeast(0))) }
+    fun openAlbum(album: Album) = open(query().copy(kind = "tracks", collection = "albums", collectionId = album.id, title = album.title, query = "", offset = 0, playlist = null))
+    fun openArtist(artist: Artist) = open(query().copy(kind = "tracks", collection = "artists", collectionId = artist.id, title = artist.name, query = "", offset = 0, playlist = null))
+    fun openPlaylist(playlist: Playlist) = open(query().copy(kind = "tracks", collection = "playlists", collectionId = playlist.id, playlist = playlist, title = playlist.name, query = "", offset = 0))
+    fun recent() = open(query().copy(kind = "recent", title = "最近听过", collection = null, collectionId = null, offset = 0, query = ""))
 
     fun load(delayMs: Long = 0) {
         loadJob?.cancel()
+        val generation = ++loadGeneration
+        val request = query()
         loadJob = viewModelScope.launch {
-            delay(delayMs)
-            val request = mutable.value
-            if (!request.connected) return@launch
-            mutable.update { it.copy(loading = true, error = null) }
+            if (!mutable.value.connected) return@launch
+            mutable.update { it.copy(loading = true, error = null, contentKey = request.key) }
             try {
-                when (request.kind) {
-                    "albums" -> { val p = repository.api().albums(request.query, offset = request.offset); mutable.update { it.copy(albums = p.items, total = p.total, tracks = emptyList()) } }
-                    "artists" -> { val p = repository.api().artists(request.query, offset = request.offset); mutable.update { it.copy(artists = p.items, total = p.total, tracks = emptyList()) } }
-                    "playlists" -> { val p = repository.api().playlists(limit = 50, offset = request.offset); mutable.update { it.copy(playlists = p.items, total = p.total, tracks = emptyList()) } }
-                    else -> { val p = repository.tracks(request.query, request.offset, request.collection, request.collectionId, request.kind == "recent"); mutable.update { it.copy(tracks = p.items, total = p.total) } }
+                if (!mutable.value.hasContent) repository.cachedCatalog(request)?.let { cached ->
+                    if (generation == loadGeneration) { pages[request.key] = cached; mutable.update { it.withPage(cached) } }
+                }
+                delay(delayMs)
+                val result = repository.catalog(request)
+                if (generation == loadGeneration) {
+                    pages[request.key] = result
+                    mutable.update { it.withPage(result).copy(offline = false) }
                 }
             } catch (e: CancellationException) { throw e }
-            catch (e: Exception) { mutable.update { it.copy(error = friendlyError(e)) } }
-            finally { mutable.update { it.copy(loading = false) } }
+            catch (e: Exception) {
+                if (generation == loadGeneration) mutable.update { it.copy(offline = e is IOException,
+                    error = if (e is IOException && e !is javax.net.ssl.SSLException && it.hasContent) null else friendlyError(e)) }
+            } finally { if (generation == loadGeneration) mutable.update { it.copy(loading = false) } }
         }
     }
 
@@ -160,46 +250,63 @@ class MusicViewModel @Inject constructor(
     }
     fun playQueue(index: Int) { controller?.let { it.seekToDefaultPosition(index); it.prepare(); it.play() } }
     fun removeQueue(index: Int) { controller?.removeMediaItem(index) }
-    fun moveQueue(index: Int, direction: Int) { controller?.let { val to = index + direction; if (to in 0 until it.mediaItemCount) it.moveMediaItem(index, to) } }
+    fun moveQueue(entryId: String, toIndex: Int) {
+        controller?.let { c ->
+            val from = (0 until c.mediaItemCount).firstOrNull { c.getMediaItemAt(it).mediaId == entryId } ?: return
+            if (toIndex in 0 until c.mediaItemCount && from != toIndex) c.moveMediaItem(from, toIndex)
+        }
+    }
     fun favorite(track: Track) = viewModelScope.launch {
-        try { val updated = repository.favorite(track); mutable.update { s -> s.copy(current = if (s.current?.id == track.id) updated else s.current, tracks = s.tracks.map { if (it.id == track.id) updated else it }) } }
+        if (!favoriteJobs.add(track.id)) return@launch
+        try { val updated = repository.favorite(track); invalidateCatalog(); mutable.update { s -> s.copy(current = if (s.current?.id == track.id) updated else s.current, tracks = s.tracks.map { if (it.id == track.id) updated else it }) } }
         catch (e: CancellationException) { throw e }
         catch (e: Exception) { mutable.update { it.copy(error = friendlyError(e)) } }
+        finally { favoriteJobs.remove(track.id) }
     }
     fun createPlaylist(name: String) = viewModelScope.launch {
-        try { repository.api().createPlaylist(PlaylistRequest(name.trim())); navigate("mine") }
+        try { repository.api().createPlaylist(PlaylistRequest(name.trim())); invalidateCatalog(); tabs.remove("mine"); if (mutable.value.tab == "mine") load() else navigate("mine") }
         catch (e: CancellationException) { throw e }
         catch (e: Exception) { mutable.update { it.copy(error = friendlyError(e)) } }
     }
     fun renamePlaylist(playlist: Playlist, name: String) = viewModelScope.launch {
-        try { val updated = repository.api().renamePlaylist(repository.url("api", "v1", "playlists", playlist.id), RenamePlaylist(name.trim(), playlist.version)); openPlaylist(updated) }
+        try { val updated = repository.api().renamePlaylist(repository.url("api", "v1", "playlists", playlist.id), RenamePlaylist(name.trim(), playlist.version)); invalidateCatalog(); show(query().copy(playlist = updated, title = updated.name)) }
         catch (e: CancellationException) { throw e }
         catch (e: Exception) { mutable.update { it.copy(error = friendlyError(e)) }; load() }
     }
     suspend fun playlistsForAdd(): List<Playlist> = repository.api().playlists().items.filter { it.kind == "manual" }
     fun addToPlaylist(track: Track, playlist: Playlist) = viewModelScope.launch {
-        try { repository.api().addTracks(repository.url("api", "v1", "playlists", playlist.id, "tracks"), AddTracks(playlist.version, listOf(track.id))); load() }
+        try { repository.api().addTracks(repository.url("api", "v1", "playlists", playlist.id, "tracks"), AddTracks(playlist.version, listOf(track.id))); invalidateCatalog(); if (mutable.value.tab == "mine") load() }
         catch (e: CancellationException) { throw e }
         catch (e: Exception) { mutable.update { it.copy(error = friendlyError(e)) } }
+    }
+    private fun rebuildQueue() {
+        val c = controller
+        queueSnapshot = if (c == null) emptyList() else (0 until c.mediaItemCount).map { i -> val m = c.getMediaItemAt(i); QueueRow(m.mediaId, m.mediaMetadata.extras?.getString("track_id").orEmpty(), m.mediaMetadata.title?.toString().orEmpty(), m.mediaMetadata.artist?.toString().orEmpty(), i) }
     }
     private fun refreshPlayer() {
         val c = controller ?: return
         val item = c.currentMediaItem
         val id = item?.mediaMetadata?.extras?.getString("track_id")
         val track = id?.let { repository.knownTracks[it] }
-        val queue = (0 until c.mediaItemCount).map { i -> val m = c.getMediaItemAt(i); QueueRow(m.mediaId, m.mediaMetadata.extras?.getString("track_id").orEmpty(), m.mediaMetadata.title?.toString().orEmpty(), m.mediaMetadata.artist?.toString().orEmpty(), i) }
+        val queue = queueSnapshot
+        mutablePosition.value = c.currentPosition.coerceAtLeast(0)
         mutable.update { it.copy(current = track, playing = c.isPlaying, buffering = c.playbackState == Player.STATE_BUFFERING,
-            position = c.currentPosition.coerceAtLeast(0), duration = c.duration.takeIf { d -> d > 0 } ?: track?.durationMs ?: 0,
-            queue = queue, entryId = item?.mediaId, repeatMode = c.repeatMode, shuffle = c.shuffleModeEnabled,
-            playbackError = c.playerError?.let { "无法播放这首歌，请检查连接或音频编码后重试。" }) }
+            duration = c.duration.takeIf { d -> d > 0 } ?: track?.durationMs ?: 0,
+            queue = queue, playbackQuality = c.mediaMetadata.description?.toString().orEmpty(), entryId = item?.mediaId, repeatMode = c.repeatMode, shuffle = c.shuffleModeEnabled,
+            playbackError = c.playerError?.let { error -> generateSequence<Throwable>(error) { it.cause }.filterIsInstance<com.wildstring.app.playback.PlaybackResolutionException>().firstOrNull()?.message
+                ?: "无法播放这首歌，请检查连接或音频编码后重试。" }) }
         if (id != lyricTrack) {
             lyricTrack = id; lyricJob?.cancel()
             mutable.update { it.copy(lyrics = Lyrics(), lyricsLoading = id != null, lyricsError = null) }
             if (id != null) lyricJob = viewModelScope.launch {
-                try { val lyrics = repository.lyrics(id); mutable.update { it.copy(lyrics = lyrics) } }
+                try {
+                    repository.cachedLyrics(id)?.let { cached -> if (lyricTrack == id) mutable.update { it.copy(lyrics = cached, lyricsLoading = false) } }
+                    val lyrics = repository.lyrics(id)
+                    if (lyricTrack == id) mutable.update { it.copy(lyrics = lyrics) }
+                }
                 catch (e: CancellationException) { throw e }
-                catch (e: Exception) { mutable.update { it.copy(lyricsError = friendlyError(e)) } }
-                finally { mutable.update { it.copy(lyricsLoading = false) } }
+                catch (e: Exception) { if (lyricTrack == id) mutable.update { it.copy(lyricsError = if (it.lyrics.lines.isNotEmpty() && e is IOException) null else friendlyError(e)) } }
+                finally { if (lyricTrack == id) mutable.update { it.copy(lyricsLoading = false) } }
             }
         }
     }

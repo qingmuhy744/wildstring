@@ -2,9 +2,13 @@
 
 Kotlin / Compose / Media3 原生客户端，Android 8.0（API 26）起可安装。所有曲库、封面、歌词、收藏与歌单来自用户配置的野弦实例；生产 APK 没有内置演示曲库或测试音频。测试夹具只打包到独立的 androidTest APK。
 
-当前功能：服务器连接/登录与加密会话保存；歌曲、专辑、艺人、关键词搜索与分页；原音串流、后台媒体服务、系统控制、队列增删/移动、循环/随机；手机全屏歌词、平板双栏与窄分屏布局；收藏、歌单浏览/创建/加入和在线收听上报；按曲目 ID 保存队列及暂停恢复。
+当前版本：0.2.0（versionCode 3）。
+
+当前功能：服务器连接/登录与加密会话保存；歌曲、专辑、艺人、关键词搜索与分页；原音串流、后台媒体服务、系统控制、队列增删/三横杠拖动排序、循环/随机；手机全屏歌词、平板双栏与窄分屏布局；收藏、歌单浏览/创建/加入和在线收听上报；按曲目 ID 保存队列及暂停恢复。
 
 完整歌单编辑/排序、离线下载、AI 业务、Android Auto 单独交付。支持的容器以服务端曲库协议为准，实际编码仍需设备解码验证。无歌词、无封面和网络错误使用真实空态或反馈，不填充虚构内容。
+
+0.2.0 增加可调缓存、封面取色毛玻璃、自然过渡、轻触反馈，以及独立红布彩蛋。经典深色主题保留原暖橙 / 深绿，支持浅色及跟随系统自动切换；红布固定正红，不随日夜变化。变化与验证状态见 [CHANGELOG](../../CHANGELOG.md)。
 
 ## 构建
 
@@ -18,7 +22,7 @@ make android-locks              # 修改依赖后刷新锁与 SHA-256 校验元�
 
 `ANDROID_HOME` 指向本机 SDK，`JAVA_HOME` 指向 JDK；`local.properties` 只用于本机且不跟踪。Gradle Wrapper、版本目录与依赖校验资料入库，构建缓存、APK 和签名私钥不提交。
 
-`make android-ci` 的安装包位于 `artifacts/android/`，包含 `wildstring-0.1.0-debug.apk` 与 `SHA256SUMS`。GitHub 的 **Android APK** 工作流通过后，在该次运行的 **Artifacts → wildstring-android-debug** 下载并解压 ZIP 后安装 APK。原有 Python/Web/Docker CI 继续独立运行。
+`make android-ci` 的安装包位于 `artifacts/android/`，包含 `wildstring-<version>-debug.apk`（当前为 `wildstring-0.2.0-debug.apk`）与 `SHA256SUMS`。GitHub 的 **Android APK** 工作流通过后，在该次运行的 **Artifacts → wildstring-android-debug** 下载并解压 ZIP 后安装 APK。原有 Python/Web/Docker CI 继续独立运行。
 
 设备测试用 `UiAutomation.takeScreenshot()` 生成手机和平板 PNG，写入 AGP 传入的 `additionalTestOutputDir`，在测试卸载应用前自动取回到 `frontend/android/app/build/outputs/connected_android_test_additional_output/`。Actions 的 `android-test-reports` 同时保存这些截图及失败截图。手工查看本地已连接设备时，也可用 `adb exec-out screencap -p > screenshot.png` 保存当前屏幕。
 
@@ -28,7 +32,7 @@ debug 包 ID 为 `com.wildstring.app.debug`，与正式包 `com.wildstring.app` 
 
 显示名称为「野弦」，英文名称 WildString。0.1.0 的正式包 ID 为 `com.wildstring.app`，versionCode 为 2。旧的 `dev.wildstring.app.debug` 测试包属于另一应用，无法直接覆盖；首次安装正式版需要重新连接服务端。服务端曲库不受影响。
 
-GitHub [Releases](https://github.com/qingmuhy744/wildstring/releases) 提供 `wildstring-0.1.0-release.apk` 与校验和。正式包启用 R8 优化，使用固定发布签名；后续保留同一包名和密钥，以递增 versionCode 更新。私钥不进入源码、Actions 缓存或发布附件。公开证书指纹在 Release 的 `android-signing-certificate.sha256` 中。
+GitHub [Releases](https://github.com/qingmuhy744/wildstring/releases) 提供 `wildstring-0.2.0-release.apk` 与校验和。正式包启用 R8 优化，使用固定发布签名；后续保留同一包名和密钥，以递增 versionCode 更新。私钥不进入源码、Actions 缓存或发布附件。公开证书指纹在 Release 的 `android-signing-certificate.sha256` 中。
 
 本地签名构建需要从未跟踪的 `.env.android-release` 导出 `ANDROID_KEYSTORE_PATH`、`ANDROID_KEYSTORE_PASSWORD`、`ANDROID_KEY_ALIAS`、`ANDROID_KEY_PASSWORD`，再执行 `make android-release`。`make android-release-smoke` 会在一次性模拟器安装正式包并检查连接页；不要对正在使用的正式客户端运行这个安装检查。工作流与密钥备份约定见 [发布说明](../../docs/releasing.md)。
 
@@ -38,5 +42,15 @@ GitHub [Releases](https://github.com/qingmuhy744/wildstring/releases) 提供 `wi
 - 服务端默认回环监听，手机不能用自己的 `127.0.0.1` 访问另一台服务器。使用可达的 HTTPS 反向代理，客户端不会修改服务器监听或防火墙。
 - 普通接口、封面与媒体 Range 请求共用 CookieJar 和同源/路径校验；拒绝重定向。当前服务支持 `X-Wildstring-Client: android`；旧服务仅返回明确的 `client_header_required` 时，在同一地址使用已有 Web 标识重试，认证仍需有效 Cookie。
 - 密码只用于本次登录，不落盘。Cookie 由 Android Keystore 管理的 AES-GCM 密钥加密，应用禁止系统备份。401 清理会话并停止受保护播放。
-- Room 仅保存连接地址、队列条目 ID/曲目 ID、顺序和位置，展示元数据恢复时在线校验。封面不启用磁盘缓存，音频没有离线下载。退出清理本机状态。
+- Room 保存队列条目 ID/曲目 ID、顺序和位置。0.2.0 新增应用级曲库 / 歌词 / 封面 / 最近播放片段缓存，容量可在设置中调整或关闭，退出或切换服务器清理。短时断网仅能播放已缓存片段，不包含完整离线下载。策略与边界见 [Android 缓存](../../docs/architecture/android-cache.md)。
 - 进程重建后恢复到暂停状态；后台服务仍在时重新连接同一播放器。强制停止、厂商省电策略和断网尾段统计另按真机结果验收，不能以可构建 APK 代替这些验证。
+
+## main 新功能适配（0.2.0）
+
+- 默认原音，设置可选 AAC 128/192/256/320 kbps；FLAC/ALAC 由服务端按实际编码决策，有损源直放，页面显示实际输出。
+- Media3 加载线程读取播放决策，保留认证和同源路径约束；转码尾段按 `start_ms` 重新请求，整曲位置用于歌词、系统媒体控件、收听与 Room 恢复点。音质切换保留位置与暂停状态。
+- 登录账号可自由输入；设置显示账号和角色、支持改密。退出、改密与登录失效停止播放，换账号隔离私密缓存与队列。
+- 播放页可刷新 Web 管理员保存的人工歌词，刷新不重新设置音频源；歌词打点、账号管理及 Host 白名单设置继续使用 Web。
+- 旧服务仍可使用默认原音；AAC 与改密需要目标服务实际部署对应新接口。转码繁忙/失败可重试或切换原音。
+
+合成 FLAC、fragmented AAC 及偏移尾段只在测试 APK；生产 APK 不包含样本。适配验证见 CHANGELOG 和 PR 的实际结果；不以模拟器替代真机后台与全部格式验收。

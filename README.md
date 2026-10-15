@@ -90,7 +90,7 @@ make docker-down     # 停止服务，保留数据卷
 - 正式 Release 更新 `latest`；预发布保留独立版本标签。
 - Android [Kotlin/Compose/Media3 原生客户端](frontend/android/README.md) 已接入真实曲库、后台播放与手机/平板歌词布局。显示名称「野弦」，正式包名 `com.wildstring.app`；签名 APK 从 [Releases](https://github.com/qingmuhy744/wildstring/releases) 直接下载。`make android-ci` 和独立 **Android APK** 工作流继续提供开发用 debug 包。IPA 和桌面安装包后续交付。
 
-见 [开发与部署](docs/development.md)、[发布流程](docs/releasing.md)。
+见 [开发与部署](docs/development.md)、[发布流程](docs/releasing.md) 和 [更新记录](CHANGELOG.md)。功能批次先写入「未发布」，核对后由用户确定版本号再更新 App。
 
 ## 目录
 

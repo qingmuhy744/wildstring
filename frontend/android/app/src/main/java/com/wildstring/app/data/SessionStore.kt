@@ -13,6 +13,9 @@ import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import java.util.UUID
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import okhttp3.Cookie
@@ -26,6 +29,35 @@ class SessionStore @Inject constructor(@ApplicationContext context: Context) : C
     private val prefs = context.getSharedPreferences("connection", Context.MODE_PRIVATE)
     private val invalid = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     val invalidations = invalid.asSharedFlow()
+    private val profile = MutableStateFlow(prefs.getString("cache_profile", null))
+    val profiles = profile.asStateFlow()
+    @Volatile private var validUntil = 0L
+    @Synchronized fun cacheScope(): String? {
+        if (validUntil <= System.currentTimeMillis()) {
+            val base = endpoint ?: return null
+            val cookie = read()?.let { Cookie.parse(base, it) } ?: return null
+            if (cookie.expiresAt <= System.currentTimeMillis()) { invalidate(); return null }
+            validUntil = cookie.expiresAt
+        }
+        if (profile.value == null) {
+            val owner = UUID.randomUUID().toString()
+            check(prefs.edit().putString("cache_profile", owner).commit())
+            profile.value = owner
+        }
+        return profile.value
+    }
+    val account: Account? get() = prefs.getString("account", null)?.let { runCatching { com.google.gson.Gson().fromJson(it, Account::class.java) }.getOrNull() }
+    @Synchronized fun bindAccount(account: Account?): Boolean {
+        val changed = this.account?.id?.let { it != account?.id } == true
+        val edit = prefs.edit()
+        if (changed) {
+            val owner = UUID.randomUUID().toString()
+            edit.putString("cache_profile", owner); profile.value = owner
+        }
+        if (account == null) edit.remove("account") else edit.putString("account", com.google.gson.Gson().toJson(account))
+        check(edit.commit())
+        return changed
+    }
     val localHttp: Boolean get() = BuildConfig.DEBUG && prefs.getBoolean("local_http", false)
     val endpoint: HttpUrl? get() = prefs.getString("server", null)?.let { runCatching { ServerAddress.normalize(it, localHttp) }.getOrNull() }
     @Synchronized fun configure(raw: String, allowLocalHttp: Boolean) {
@@ -52,7 +84,16 @@ class SessionStore @Inject constructor(@ApplicationContext context: Context) : C
     }
     @Synchronized override fun write(value: String?) {
         val edit = prefs.edit()
-        if (value == null) edit.remove("session_ciphertext") else {
+        if (value == null) {
+            edit.remove("session_ciphertext").remove("cache_profile").remove("account")
+            validUntil = 0
+            profile.value = null
+        } else {
+            val owner = profile.value ?: UUID.randomUUID().toString()
+            edit.putString("cache_profile", owner)
+            profile.value = owner
+            validUntil = endpoint?.let { Cookie.parse(it, value)?.expiresAt } ?: 0
+
             val cipher = Cipher.getInstance("AES/GCM/NoPadding")
             cipher.init(Cipher.ENCRYPT_MODE, key())
             val iv = Base64.encodeToString(cipher.iv, Base64.NO_WRAP)

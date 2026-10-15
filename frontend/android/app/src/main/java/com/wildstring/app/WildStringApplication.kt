@@ -19,9 +19,10 @@ import okhttp3.OkHttpClient
 class WildStringApplication : Application()
 @Module @InstallIn(SingletonComponent::class)
 object ApplicationModule {
-    @Provides @Singleton fun client(session: SessionStore): OkHttpClient = OkHttpClient.Builder()
+    @Provides @Singleton fun client(session: SessionStore, cache: ClientCache): OkHttpClient = OkHttpClient.Builder()
         .cookieJar(SessionCookieJar(session) { session.endpoint })
-        .addInterceptor(OriginGuard({ session.endpoint }, session::invalidate))
+        .addInterceptor(OriginGuard({ session.endpoint }, profile = session::cacheScope, unauthorized = session::invalidate))
+        .addInterceptor(CoverCacheInterceptor(cache, session))
         .connectTimeout(15, TimeUnit.SECONDS).readTimeout(30, TimeUnit.SECONDS)
         .followRedirects(false).followSslRedirects(false).cache(null).build()
     @Provides @Singleton fun database(@ApplicationContext context: Context): QueueDatabase =
