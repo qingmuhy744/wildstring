@@ -3,6 +3,7 @@ import { api, artist, time, type Lyrics } from './api';
 import { Cover, coverUrl } from './cover';
 import { FavoriteButton, type Favorites } from './favorites';
 import { PlaybackControls, PlaybackError, VolumeControl, type Player } from './player';
+import { QueuePanel } from './queue-panel';
 
 export function NowPlaying({
   player,
@@ -15,7 +16,14 @@ export function NowPlaying({
 }) {
   const dialog = useRef<HTMLElement>(null);
   const close = useRef<HTMLButtonElement>(null);
+  const queueToggle = useRef<HTMLButtonElement>(null);
+  const [panel, setPanel] = useState<'lyrics' | 'queue' | null>('lyrics');
+  const [notice, setNotice] = useState('');
   const current = player.current;
+  useEffect(() => {
+    const timer = setTimeout(() => setNotice(''), 2500);
+    return () => clearTimeout(timer);
+  }, [notice]);
 
   useEffect(() => {
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -92,7 +100,7 @@ export function NowPlaying({
         <span className="fullscreen-mode">NOW PLAYING</span>
       </header>
       {current ? (
-        <div className="fullscreen-content">
+        <div className={`fullscreen-content ${panel ? '' : 'is-cover-only'}`}>
           <div className="fullscreen-record">
             <Cover
               trackId={current.id}
@@ -107,7 +115,18 @@ export function NowPlaying({
               <span>{current.album || '未知专辑'}</span>
             </div>
           </div>
-          <LyricsPanel key={current.id} player={player} />
+          {panel === 'lyrics' && <LyricsPanel key={current.id} player={player} />}
+          {panel === 'queue' && (
+            <QueuePanel
+              player={player}
+              embedded
+              onNotice={setNotice}
+              onClose={() => {
+                setPanel(null);
+                queueToggle.current?.focus({ preventScroll: true });
+              }}
+            />
+          )}
         </div>
       ) : (
         <p className="lyric-empty">先播放一首喜欢的歌。</p>
@@ -123,9 +142,44 @@ export function NowPlaying({
           </span>
         </div>
         <PlaybackControls player={player} />
-        <VolumeControl player={player} />
+        <div className="fullscreen-options">
+          <VolumeControl player={player} />
+          <div className="fullscreen-panel-switches" role="group" aria-label="全屏显示内容">
+            <button
+              aria-label="显示歌词"
+              aria-pressed={panel === 'lyrics'}
+              title="歌词"
+              onClick={() => setPanel((current) => (current === 'lyrics' ? null : 'lyrics'))}
+            >
+              词
+            </button>
+            <button
+              ref={queueToggle}
+              aria-label="显示播放队列"
+              aria-pressed={panel === 'queue'}
+              title="播放队列"
+              onClick={() => setPanel((current) => (current === 'queue' ? null : 'queue'))}
+            >
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.6"
+                aria-hidden="true"
+              >
+                <path d="M8 6h12M8 12h12M8 18h12M3 6h1M3 12h1M3 18h1" strokeLinecap="round" />
+              </svg>
+              <span>{player.queue.length}</span>
+            </button>
+          </div>
+        </div>
         <PlaybackError player={player} />
       </footer>
+      {notice && (
+        <p className="fullscreen-notice" role="status">
+          {notice}
+        </p>
+      )}
     </section>
   );
 }

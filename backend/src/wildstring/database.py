@@ -8,7 +8,43 @@ from pathlib import Path
 
 from wildstring.library.albums import album_key
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
+MANAGEMENT_SCHEMA = """
+BEGIN IMMEDIATE;
+CREATE TABLE track_metadata (
+    track_id TEXT PRIMARY KEY REFERENCES tracks(id) ON DELETE CASCADE,
+    observed TEXT NOT NULL,
+    overrides TEXT NOT NULL DEFAULT '{}',
+    version INTEGER NOT NULL DEFAULT 1
+);
+INSERT INTO track_metadata(track_id, observed)
+SELECT id, json_object('title', title, 'title_source', title_source,
+    'artists', json(artists), 'album', album, 'album_artists', json(album_artists),
+    'track_number', track_number, 'disc_number', disc_number) FROM tracks;
+CREATE TABLE admin_jobs (
+    id TEXT PRIMARY KEY,
+    library_id TEXT NOT NULL REFERENCES libraries(id),
+    kind TEXT NOT NULL CHECK(kind IN ('import', 'scan')),
+    full INTEGER NOT NULL,
+    status TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    started_at TEXT,
+    finished_at TEXT,
+    import_id TEXT,
+    scan_id TEXT,
+    result TEXT,
+    error TEXT
+);
+CREATE UNIQUE INDEX one_active_library_job ON admin_jobs(library_id)
+    WHERE status IN ('queued', 'running');
+CREATE TABLE library_preferences (
+    library_id TEXT PRIMARY KEY REFERENCES libraries(id),
+    name TEXT NOT NULL DEFAULT '我的曲库',
+    version INTEGER NOT NULL DEFAULT 1
+);
+PRAGMA user_version = 6;
+COMMIT;
+"""
 PERSONAL_SCHEMA = """
 BEGIN IMMEDIATE;
 ALTER TABLE tracks ADD COLUMN loved INTEGER NOT NULL DEFAULT 0 CHECK(loved IN (0, 1));
@@ -148,10 +184,11 @@ class Database:
         self.path = data_dir / "wildstring.sqlite3"
 
     @contextmanager
-    def connect(self, *, write: bool = False) -> Iterator[sqlite3.Connection]:
+    def connect(self, *, write: bool = False, create: bool = False) -> Iterator[sqlite3.Connection]:
+        mode = "rwc" if create else "rw" if write else "ro"
         connection = sqlite3.connect(
-            str(self.path) if write else f"{self.path.as_uri()}?mode=ro",
-            uri=not write,
+            f"{self.path.as_uri()}?mode={mode}",
+            uri=True,
             timeout=10,
         )
         connection.row_factory = sqlite3.Row
@@ -170,7 +207,7 @@ class Database:
 
     def initialize(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        with self.connect(write=True) as connection:
+        with self.connect(write=True, create=True) as connection:
             current = connection.execute("PRAGMA user_version").fetchone()[0]
             if current > SCHEMA_VERSION:
                 raise RuntimeError("Database schema is newer than this application")
@@ -211,6 +248,8 @@ class Database:
                 connection.executescript(IMPORT_SCHEMA)
             if current < 5:
                 connection.executescript(PERSONAL_SCHEMA)
+            if current < 6:
+                connection.executescript(MANAGEMENT_SCHEMA)
             connection.execute("PRAGMA journal_mode = WAL")
 
     def check_ready(self) -> bool:

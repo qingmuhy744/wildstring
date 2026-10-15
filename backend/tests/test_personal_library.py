@@ -413,7 +413,7 @@ def test_listening_deduplicates_retries_counts_once_and_caps_wall_time(
 def test_v4_upgrade_preserves_track_identity_and_seeds_one_default(settings, authenticated_client):
     database = Database(settings.data_dir)
     settings.data_dir.mkdir()
-    with database.connect(write=True) as connection:
+    with database.connect(write=True, create=True) as connection:
         connection.executescript(SCHEMA)
         connection.executescript(AUTH_SCHEMA)
         connection.execute("ALTER TABLE tracks ADD COLUMN album_id TEXT NOT NULL DEFAULT ''")

@@ -72,10 +72,14 @@ make docker-down
 
 首次启动后执行 `make docker-admin`，或仅首次通过 `.env` 中 `WILDSTRING_ADMIN_PASSWORD` 初始化管理员。现有管理员不会被启动配置覆盖；重置密码会撤销全部会话。Cookie 默认为本机 HTTP 配置，通过 HTTPS 访问时设置 `WILDSTRING_COOKIE_SECURE=true`。
 
-网页已提供登录、曲库搜索与原文件播放；详见 [接口与播放边界](../contracts/playback-auth-api.md)。艺人浏览、普通/规则歌单、收藏和收听统计见 [个人曲库](../contracts/personal-library.md)。封面、歌曲/专辑视图和本地歌词已接入，见 [本地资源规则](../contracts/local-library-assets.md)。元数据修复写回、转码与 AI 尚未实现，健康检查不代表完整 MVP 完成。写回方案见 [服务端修复](architecture/metadata-repair.md)。
+网页已提供登录、曲库搜索与原文件播放；详见 [接口与播放边界](../contracts/playback-auth-api.md)。艺人浏览、普通/规则歌单、收藏和收听统计见 [个人曲库](../contracts/personal-library.md)。封面、歌曲/专辑视图和本地歌词已接入，见 [本地资源规则](../contracts/local-library-assets.md)。管理页与 AI API 连接配置见 [管理接口](../contracts/library-management.md)。批量整理、标签写回、转码与 Agent 尚未实现，健康检查不代表完整 MVP 完成。写回方案见 [服务端修复](architecture/metadata-repair.md)。
 
 ## 发布镜像
 
 在 `.env` 设置实际已发布的 `WILDSTRING_IMAGE=ghcr.io/qingmuhy744/wildstring:v0.1.0` 后执行 `make docker-pull`，会拉取并启动，不从本地源码构建。私有 GHCR 包需要先完成 Docker 登录。
 
 目前仅配置本机部署，未接入远程服务器自动更新。
+
+## 图标
+
+网页品牌和 SVG favicon 共用 `frontend/web/public/favicon.svg` 的橙色三道波纹；`favicon.ico` 包含 16、24、32、48、64、128、256 像素的透明帧。修改 SVG 后执行 `make icons` 重新生成 ICO，需要先安装项目依赖和 Chromium（`make browser-install`）；生成脚本会核验透明像素。Web 构建会把两个图标打包到静态根目录。

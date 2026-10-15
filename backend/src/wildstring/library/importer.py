@@ -329,7 +329,7 @@ class MusicImporter:
                     "UPDATE scan_runs SET library_id=? WHERE library_id=?", (new, old[0])
                 )
 
-    def run(self, *, full=False):
+    def run(self, *, full=False, on_import=None, on_scan=None):
         with self.database.connect(write=True) as connection:
             connection.execute(
                 "UPDATE import_runs SET status='interrupted', finished_at=? WHERE status='running'",
@@ -339,6 +339,8 @@ class MusicImporter:
                 "INSERT INTO import_runs VALUES (?,?,?,?,?,?)",
                 (self.run_id, "running", now(), None, json.dumps(self.counts), "[]"),
             )
+        if on_import is not None:
+            on_import(self.run_id)
         try:
             with os.scandir(self.settings.music_dir) as entries:
                 next(entries, None)
@@ -373,7 +375,7 @@ class MusicImporter:
                         self.error(relative, "import_file_unavailable")
                     self.progress()
             self.migrate_legacy()
-            scan = scan_library(self.settings, full=full, _lock_owned=True)
+            scan = scan_library(self.settings, full=full, _lock_owned=True, on_start=on_scan)
             status = (
                 "completed_with_errors"
                 if self.counts["errors"]
@@ -397,13 +399,15 @@ class MusicImporter:
         }
 
 
-def import_music(settings: Settings, *, full=False):
+def import_music(settings: Settings, *, full=False, on_import=None, on_scan=None):
     settings.data_dir.mkdir(parents=True, exist_ok=True)
     settings.library_dir.mkdir(parents=True, exist_ok=True)
     try:
         with FileLock(settings.data_dir / "library-scan.lock", timeout=0):
             database = Database(settings.data_dir)
             database.initialize()
-            return MusicImporter(settings, database).run(full=full)
+            return MusicImporter(settings, database).run(
+                full=full, on_import=on_import, on_scan=on_scan
+            )
     except Timeout as error:
         raise ScanBusyError from error

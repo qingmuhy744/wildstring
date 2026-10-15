@@ -18,10 +18,12 @@ export function QueuePanel({
   player,
   onClose,
   onNotice,
+  embedded = false,
 }: {
   player: Player;
   onClose: () => void;
   onNotice: (message: string) => void;
+  embedded?: boolean;
 }) {
   const panel = useRef<HTMLElement>(null);
   const dragging = useRef<Drag | null>(null);
@@ -100,7 +102,11 @@ export function QueuePanel({
     onNotice('已调整播放顺序');
   }
   return (
-    <aside className="queue-panel" aria-label="播放队列" ref={panel}>
+    <aside
+      className={`queue-panel ${embedded ? 'embedded-queue' : ''}`}
+      aria-label="播放队列"
+      ref={panel}
+    >
       <div className="queue-heading">
         <div>
           <span className="eyebrow">UP NEXT</span>
@@ -178,7 +184,12 @@ export function QueuePanel({
                 onPointerCancel={clearDrag}
                 onLostPointerCapture={clearDrag}
                 onKeyDown={(event) => {
-                  if (event.key === 'Escape') clearDrag();
+                  if (event.key === 'Escape' && dragging.current) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    clearDrag();
+                    return;
+                  }
                   if (dragging.current) return;
                   const to = i + (event.key === 'ArrowUp' ? -1 : event.key === 'ArrowDown' ? 1 : 0);
                   if (to === i) return;

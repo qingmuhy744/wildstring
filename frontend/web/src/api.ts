@@ -3,6 +3,9 @@ export interface Track {
   album_id: string;
   title: string;
   artists: string[];
+  album_artists: string[];
+  track_number: number | null;
+  disc_number: number | null;
   album: string | null;
   duration_ms: number;
   format: 'mp3' | 'flac' | 'm4a';
@@ -32,6 +35,15 @@ export class ApiError extends Error {
 }
 
 const messages: Record<string, string> = {
+  ai_settings_version_conflict: 'AI 配置已变化，请重新读取后修改。',
+  invalid_ai_settings: '请检查 API 地址、模型名称、密钥和超时设置。',
+  ai_not_configured: '请先保存 API 地址和模型。',
+  ai_connection_failed: '模型连接失败，请检查地址、密钥、模型名称或服务端网络。',
+  ai_invalid_response: '服务未返回兼容的模型响应，请检查 API 地址。',
+  ai_settings_unavailable: 'AI 配置无法读取，请检查服务端配置文件。',
+  metadata_version_conflict: '这首歌的信息已变化，请重新读取后再编辑。',
+  settings_version_conflict: '设置已被更新，请刷新后重试。',
+  library_task_busy: '曲库已有任务在排队或执行，请等待完成。',
   playlist_version_conflict: '歌单已在其他页面修改，请刷新后重试。',
   playlist_order_conflict: '歌单内容已变化，请刷新后重新排序。',
   favorites_playlist_readonly: '我喜欢歌单由收藏自动管理。',

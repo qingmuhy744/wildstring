@@ -9,6 +9,7 @@ from uuid import uuid4
 from wildstring.database import Database
 from wildstring.library.albums import album_key
 from wildstring.library.artists import ARTIST_CREDITS, ARTIST_SUMMARY, configure_artist_queries
+from wildstring.library.edits import observe
 from wildstring.library.metadata import Metadata, normalize
 
 COUNTERS = ("visited", "added", "updated", "unchanged", "errors", "missing", "skipped")
@@ -132,6 +133,11 @@ class LibraryRepository:
                     search_text=excluded.search_text, album_id=excluded.album_id""",
                 fields,
             )
+            track_id = connection.execute(
+                "SELECT id FROM tracks WHERE library_id=? AND path=?",
+                (self.library_id(), path),
+            ).fetchone()[0]
+            observe(connection, track_id, asdict(metadata))
 
     def mark_missing(self, run_id: str) -> int:
         with self.database.connect(write=True) as connection:

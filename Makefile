@@ -12,7 +12,7 @@ export PRE_COMMIT_HOME ?= $(CURDIR)/.cache/pre-commit
 RUN = $(UV) run --frozen --project backend
 DOCKER = $(COMPOSE) --project-directory "$(CURDIR)" --env-file .env -p "$(PROJECT)" -f deploy/compose.yaml
 
-.PHONY: help env setup sync dev dev-web android-design scan import-music admin check hooks-check lint format format-check security test build-web browser-install test-web web-test-server ci health docker-config docker-build docker-up docker-pull docker-down docker-status docker-logs docker-smoke docker-scan docker-import docker-admin
+.PHONY: help env setup sync dev dev-web android-design scan import-music admin check hooks-check lint format format-check security test build-web icons browser-install test-web web-test-server ci health docker-config docker-build docker-up docker-pull docker-down docker-status docker-logs docker-smoke docker-scan docker-import docker-admin
 
 help: ## Show available commands
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "  make %-17s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -69,6 +69,9 @@ test: ## Run backend tests without external services
 
 build-web: ## Build the versioned Web release input
 	npm --prefix frontend/web run build
+
+icons: ## Regenerate the transparent favicon from its SVG source (requires Chromium)
+	npm --prefix frontend/web run icons
 
 browser-install: ## Install Chromium for the Web integration tests
 	npm --prefix frontend/web exec -- playwright install chromium
