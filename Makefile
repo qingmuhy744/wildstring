@@ -37,7 +37,7 @@ dev-web: ## Run React at 127.0.0.1:18781 with an API proxy
 android-design: ## Preview the Android design at http://127.0.0.1:18782/android-v1.html
 	$(RUN) python -m http.server 18782 --bind 127.0.0.1 --directory docs/design
 
-.PHONY: android-check android-test android-assemble android-package android-ci android-connected-test android-locks
+.PHONY: android-check android-test android-assemble android-package android-ci android-connected-test android-locks android-release android-release-smoke
 android-check: ## Run Android Lint (requires JDK 21 and Android SDK 36.1)
 	$(ANDROID) :app:lintDebug
 
@@ -51,14 +51,23 @@ android-package: android-assemble ## Copy APK and SHA256SUMS into artifacts/andr
 	$(PYTHON) scripts/package_android.py
 
 android-ci: ## Check, test and package the native Android application
-	$(ANDROID) :app:lintDebug :app:testDebugUnitTest :app:assembleDebug
+	$(ANDROID) :app:lintDebug :app:lintRelease :app:testDebugUnitTest :app:assembleDebug :app:assembleRelease
 	$(PYTHON) scripts/package_android.py
+
+android-release: ## Build and verify a signed release APK (requires ANDROID signing environment)
+	@test -n "$$ANDROID_KEYSTORE_PATH" -a -n "$$ANDROID_KEYSTORE_PASSWORD" -a -n "$$ANDROID_KEY_ALIAS" -a -n "$$ANDROID_KEY_PASSWORD" || (echo "Missing Android release signing configuration" >&2; exit 1)
+	$(ANDROID) :app:assembleRelease :app:lintRelease
+	"$(ANDROID_HOME)/build-tools/36.1.0/apksigner" verify --verbose --print-certs frontend/android/app/build/outputs/apk/release/app-release.apk
+	$(PYTHON) scripts/package_android.py --variant release
+
+android-release-smoke: ## Install and smoke-test the signed release APK on a disposable device
+	$(PYTHON) scripts/smoke_android_release.py
 
 android-connected-test: ## Run native UI/playback tests on a connected emulator/device
 	$(ANDROID) :app:connectedDebugAndroidTest
 
 android-locks: ## Refresh Android dependency locks and SHA-256 verification metadata
-	$(ANDROID) :app:assembleDebug :app:testDebugUnitTest :app:lintDebug :app:assembleDebugAndroidTest --write-locks --write-verification-metadata sha256
+	$(ANDROID) :app:assembleDebug :app:testDebugUnitTest :app:lintDebug :app:assembleDebugAndroidTest :app:assembleRelease :app:lintRelease --write-locks --write-verification-metadata sha256
 
 scan: env ## Rescan the managed library; use SCAN_ARGS=--full to refresh all tags
 	$(RUN) python -m wildstring.scan $(SCAN_ARGS)

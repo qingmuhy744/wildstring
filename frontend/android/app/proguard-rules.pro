@@ -1,2 +1,2 @@
 -keepattributes Signature,RuntimeVisibleAnnotations,AnnotationDefault
--keep class dev.wildstring.app.data.** { *; }
+-keep class com.wildstring.app.data.** { *; }

@@ -1,6 +1,6 @@
 @file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 
-package dev.wildstring.app.ui
+package com.wildstring.app.ui
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
@@ -42,9 +42,9 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.common.Player
 import coil.compose.AsyncImage
-import dev.wildstring.app.BuildConfig
-import dev.wildstring.app.R
-import dev.wildstring.app.data.*
+import com.wildstring.app.BuildConfig
+import com.wildstring.app.R
+import com.wildstring.app.data.*
 import kotlinx.coroutines.launch
 
 private val Accent = Color(0xFFE98A6D)

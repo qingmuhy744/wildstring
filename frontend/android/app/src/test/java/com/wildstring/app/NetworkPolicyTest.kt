@@ -1,6 +1,6 @@
-package dev.wildstring.app
+package com.wildstring.app
 
-import dev.wildstring.app.data.*
+import com.wildstring.app.data.*
 import java.io.IOException
 import okhttp3.Cookie
 import okhttp3.OkHttpClient

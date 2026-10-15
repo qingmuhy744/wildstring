@@ -2,53 +2,54 @@
 
 ## CI
 
-`.github/workflows/ci.yml` 在 main 提交、PR、手动触发和 Release 复用调用时执行：安装锁定依赖 → hooks 与测试 → Web 构建 → 锁文件核验。独立任务构建并启动容器，实测 API、Web、FFmpeg、非 root 和只读音乐，结束时清理容器。
+`.github/workflows/ci.yml` 在 main 提交、PR、手动触发和 Release 复用调用时执行：锁定依赖、hooks、Python/Web 测试、Web 构建与锁文件检查。容器任务执行 `make docker-up docker-smoke docker-test`，检查 API、Web、FFmpeg、非 root、只读音乐及后端测试，最后停止容器并保留数据卷。
 
-PR 工作流只具有仓库读取权限。
+`.github/workflows/android.yml` 检查 Android Lint、JVM 测试、debug 构建和 R8 release 构建，再通过模拟器检查登录、认证音频串流、播放/暂停、手机全屏歌词和平板双栏。上传 `wildstring-android-debug` 与报告/截图。debug 使用临时签名，供开发验证；正式安装包从 Releases 下载。
 
-## GitHub Release
+PR 工作流只有仓库读取权限，不读取发布私钥。
 
-`.github/workflows/release.yml` 仅在 **GitHub Release 发布** 时执行；只推标签或保存草稿不会发布镜像。
+## 版本和签名
 
-先在同一提交更新后端 `pyproject.toml`、前端 `package.json` 及对应锁文件。
+显示名称「野弦 / WildString」。正式 Android applicationId 为 `com.wildstring.app`，debug 为 `com.wildstring.app.debug`。0.1.0 的 Android versionCode 为 2；后续发布必须递增。旧的 `dev.wildstring.app.debug` 属于独立应用，安装新版后重新连接即可，服务端数据保留。
 
-| Release 标签 | Python 版本 | Web 版本 |
+同时更新 Python、Web、Android 版本及对应锁文件：
+
+| 标签 | Python | Web / Android versionName |
 | --- | --- | --- |
 | `v0.1.0` | `0.1.0` | `0.1.0` |
 | `v0.1.0-rc.1` | `0.1.0rc1` | `0.1.0-rc.1` |
-| `v0.1.0-dev.0` | `0.1.0.dev0` | `0.1.0-dev.0` |
+| `v0.1.0-dev.1` | `0.1.0.dev1` | `0.1.0-dev.1` |
 
-版本不一致时发布失败。通过完整 CI 后执行：
+`python3 scripts/package_release.py --tag v0.1.0 --check-only` 检查三个端版本一致。
 
-- 构建 Web ZIP，包含 LICENSE 和使用说明，生成 SHA256SUMS。
-- 构建 linux/amd64 与 linux/arm64 镜像，推送到 `ghcr.io/qingmuhy744/wildstring`。
-- 镜像内置 Web，记录源码与版本信息，生成 Release 和提交标签。
-- 正式 Release 更新 latest；勾选预发布的 Release 不更新 latest。
-- 将 Web ZIP 和校验和附到对应 GitHub Release。
+正式签名使用仓库 Actions secrets：`ANDROID_KEYSTORE_BASE64`、`ANDROID_KEYSTORE_PASSWORD`、`ANDROID_KEY_ALIAS`、`ANDROID_KEY_PASSWORD`、`ANDROID_SIGNING_CERT_SHA256`。密钥仅在签名步骤写入 runner 临时目录，权限 0600，步骤退出立即删除；校验证书指纹后才上传 APK。Gradle 的常规依赖缓存不包含私钥。
 
-使用 GitHub 内置 GITHUB_TOKEN，不将个人令牌放入仓库。首次发布后核对 GHCR 包可见性符合预期。
+本地密钥与密码分别保存在主工作区未跟踪的 `.env.android-release.jks` 与 `.env.android-release`，权限 0600。仓库 `.gitignore` 排除这些文件；不要提交、打包、上传 Release 或在终端打印其内容。请将两个文件一起备份到安全位置；丢失密钥后无法以同一身份更新已安装应用。具体文件是否已经配置，以本地和仓库 secrets 的实际状态为准。
 
-当前不会自动创建 Release、发布测试版本或更新远程服务器。原生安装包待客户端工程和签名方案确定后接入。
+## 发布顺序
 
-## Android 当前状态
+1. 准备 `docs/releases/vX.Y.Z.md`，说明已实现能力、验证及限制。
+2. 通过 PR 合并进入 main，确认主线 CI 与 Android APK 工作流成功。
+3. 在这个已合并提交创建并推送 `vX.Y.Z` 标签。
+4. **Release** 工作流核对标签、三个端版本及 main 祖先关系，重新执行完整 CI、Android 功能测试，构建固定签名 APK，并在模拟器实际安装 R8 正式包、检查连接页。
+5. 全部通过后构建 Web ZIP 和 linux/amd64、linux/arm64 镜像，推送 GHCR，最后自动创建带全部附件的 GitHub Release。
 
-Android 已增加 [`frontend/android`](../frontend/android/README.md) 原生工程和独立的 **Android APK** 工作流。PR、main 和手动触发会按路径执行 Android Lint、单元测试、APK 构建及模拟器验证；全部成功后上传 `wildstring-android-debug` 产物。实际可下载状态以对应 Actions 运行结果为准。[首版设计](product/android-v1.md) 与 [可点击草图](design/android-v1.html) 继续作为交互资料。
+工作流也支持手动重试：选择对应标签作为运行 ref，并填入同一 tag。工作流提交必须与标签一致，避免用另一提交的检查代替发布验证。只保存 Release 草稿或直接在网页发布 Release 不会触发构建。发布步骤失败时应先检查日志，再重跑同一标签；不移动已有发布标签。
 
-| 流程 | 当前产物 |
-| --- | --- |
-| PR / main 的 `CI` | 检查和测试结果，不生成 Android 安装包 |
-| 发布 GitHub Release 的 `Release` | 容器镜像、Web ZIP 与校验和 |
-| `Android APK` | 执行 Android 检查、测试与 `assembleDebug`，模拟器验证通过后上传 debug APK 与 SHA256SUMS，保留 30 天 |
+发布产物：
 
-打开工作流运行页的 **Artifacts → wildstring-android-debug**，下载并解压 ZIP 后安装其中的 APK；`SHA256SUMS` 用于核对文件完整性。安装包也可通过 `make android-ci` 生成到本地 `artifacts/android/`。生产 APK 不含测试曲库、示例歌词或夹具音频。
+- `wildstring-X.Y.Z-release.apk`：固定签名、R8 优化、无内置测试曲库的 Android 安装包。
+- `wildstring-web-vX.Y.Z.zip`：Web 静态文件、LICENSE 与使用说明；运行时需要后端。
+- `SHA256SUMS`：APK、Web ZIP、公开签名指纹文件的 SHA-256。
+- `android-signing-certificate.sha256`：Android 发布签名的公开证书指纹。
+- `ghcr.io/qingmuhy744/wildstring:vX.Y.Z`：同时包含后端、Web 与 FFmpeg 的双架构镜像；同时发布版本标签和提交标签。正式版更新 `latest`，预发布不更新。
 
-这仍是 debug 测试包，CI 使用临时 debug 签名；跨运行更新可能需要卸载旧测试包。正式 release 包需要独立的版本与签名配置，私钥仅放在未跟踪的本地文件或 CI secrets 中。现有 Web Release 流程不会自动发布 Android 正式版。
+Release 正文记录容器 manifest 摘要。首次推送后需要核对 GHCR 包可见性和匿名拉取；GitHub Release 可下载不代表镜像一定公开。不自动更新远程服务器。
 
-## 本地 Web 打包验证
+## 下载与验证
 
-本地验证当前开发版打包，不触发外部发布：
+用户从 [GitHub Releases](https://github.com/qingmuhy744/wildstring/releases) 直接下载 APK，无需解压 Actions artifact。Android 8.0 起可安装；真实服务器需要系统信任的 HTTPS。后续同一包名、同一发布密钥并递增 versionCode 后可覆盖升级。
 
-```sh
-make build-web
-python3 scripts/package_release.py --tag v0.1.0-dev.0
-```
+开发测试包仍从 **Actions → Android APK → Artifacts → wildstring-android-debug** 下载并解压。它的临时签名可能随运行变化，不能代替正式发布签名。
+
+手机和平板截图由 `UiAutomation.takeScreenshot()` 写入 AGP `additionalTestOutputDir`，测试卸载前取回；对应报告保留 14 天。发布 APK 的安装检查另外上传真实连接页截图。夹具只存在于独立测试 APK 中。模拟器通过不代表真机省电、后台兼容和全部音频编码均已验收。

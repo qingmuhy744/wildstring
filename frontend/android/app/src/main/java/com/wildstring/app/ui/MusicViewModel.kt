@@ -1,4 +1,4 @@
-package dev.wildstring.app.ui
+package com.wildstring.app.ui
 
 import android.content.ComponentName
 import android.content.Context
@@ -12,9 +12,9 @@ import androidx.media3.session.SessionToken
 import coil.ImageLoader
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
-import dev.wildstring.app.data.*
-import dev.wildstring.app.playback.PlaybackService
-import dev.wildstring.app.playback.mediaItem
+import com.wildstring.app.data.*
+import com.wildstring.app.playback.PlaybackService
+import com.wildstring.app.playback.mediaItem
 import javax.inject.Inject
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*

@@ -1,32 +1,133 @@
 name: Release
 
 on:
-  release:
-    types: [published]
+  push:
+    tags: ["v[0-9]*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag (for example v0.1.0)
+        required: true
+        type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: release-${{ github.event.release.tag_name }}
+  group: release-${{ inputs.tag || github.ref_name }}
   cancel-in-progress: false
 
+env:
+  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+
 jobs:
+  source:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.tag || github.ref_name }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify versions and main ancestry
+        run: |
+          python3 scripts/package_release.py --tag "$RELEASE_TAG" --check-only
+          test "$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")" = "$(git rev-parse HEAD)"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -f "docs/releases/$RELEASE_TAG.md"
+          git merge-base --is-ancestor HEAD origin/main
+
   verify:
     uses: ./.github/workflows/ci.yml
 
+  verify_android:
+    uses: ./.github/workflows/android.yml
+
+  android:
+    needs: source
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.tag || github.ref_name }}
+          persist-credentials: false
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@48b5f213c81028ace310571dc5ec0fbbca0b2947 # v4
+        with:
+          build-root-directory: frontend/android
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+        with:
+          cmdline-tools-version: "15859902"
+          packages: "platform-tools platforms;android-36.1 build-tools;36.1.0"
+          log-accepted-android-sdk-licenses: false
+      - name: Build with the release signing identity
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ANDROID_SIGNING_CERT_SHA256: ${{ secrets.ANDROID_SIGNING_CERT_SHA256 }}
+        run: |
+          export ANDROID_KEYSTORE_PATH="$RUNNER_TEMP/wildstring-release.jks"
+          trap 'rm -f "$ANDROID_KEYSTORE_PATH"' EXIT
+          python3 - <<'PY'
+          import base64, os
+          from pathlib import Path
+          for name in ("ANDROID_KEYSTORE_BASE64", "ANDROID_KEYSTORE_PASSWORD", "ANDROID_KEY_ALIAS", "ANDROID_KEY_PASSWORD", "ANDROID_SIGNING_CERT_SHA256"):
+              if not os.environ.get(name):
+                  raise SystemExit(f"Missing release signing secret: {name}")
+          path = Path(os.environ["ANDROID_KEYSTORE_PATH"])
+          path.touch(mode=0o600, exist_ok=False)
+          path.write_bytes(base64.b64decode(os.environ["ANDROID_KEYSTORE_BASE64"], validate=True))
+          PY
+          make android-release
+          ACTUAL=$("$ANDROID_HOME/build-tools/36.1.0/apksigner" verify --print-certs artifacts/android-release/*.apk | sed -n 's/^Signer #1 certificate SHA-256 digest: //p')
+          test "$ACTUAL" = "$ANDROID_SIGNING_CERT_SHA256"
+          printf '%s\n' "$ACTUAL" > artifacts/android-release/android-signing-certificate.sha256
+      - name: Enable emulator acceleration
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Install and open the signed, optimized APK
+        uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_2
+          ram-size: 2048M
+          disable-animations: true
+          script: make android-release-smoke
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: wildstring-android-release
+          path: artifacts/android-release/*
+          if-no-files-found: error
+          retention-days: 30
+      - name: Upload release device evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: android-release-smoke
+          path: artifacts/android-release-smoke/
+          if-no-files-found: ignore
+          retention-days: 14
+
   publish:
-    needs: verify
+    needs: [source, verify, verify_android, android]
     runs-on: ubuntu-latest
     permissions:
       contents: write
       packages: write
-    env:
-      RELEASE_TAG: ${{ github.event.release.tag_name }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          ref: ${{ github.event.release.tag_name }}
+          ref: ${{ inputs.tag || github.ref_name }}
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
@@ -37,7 +138,16 @@ jobs:
         run: |
           npm --prefix frontend/web ci
           make build-web
-          python3 scripts/package_release.py --tag "$RELEASE_TAG"
+          python3 scripts/package_release.py --tag "$RELEASE_TAG" --output-dir artifacts/release
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: wildstring-android-release
+          path: artifacts/release
+      - name: Verify APK and combine asset checksums
+        working-directory: artifacts/release
+        run: |
+          sha256sum --check SHA256SUMS
+          sha256sum -- *.apk *.zip android-signing-certificate.sha256 > SHA256SUMS
       - name: Image identity
         id: image
         run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
@@ -54,11 +164,12 @@ jobs:
           images: ${{ steps.image.outputs.name }}
           flavor: latest=false
           tags: |
-            type=raw,value=${{ github.event.release.tag_name }}
-            type=semver,pattern={{version}},value=${{ github.event.release.tag_name }}
-            type=raw,value=latest,enable=${{ !github.event.release.prerelease }}
+            type=raw,value=${{ env.RELEASE_TAG }}
+            type=semver,pattern={{version}},value=${{ env.RELEASE_TAG }}
+            type=raw,value=latest,enable=${{ !contains(env.RELEASE_TAG, '-') }}
             type=sha
       - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        id: container
         with:
           context: .
           file: deploy/Dockerfile
@@ -68,7 +179,20 @@ jobs:
           labels: ${{ steps.metadata.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-      - name: Upload Web release assets
+      - name: Publish the complete release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "$RELEASE_TAG" artifacts/* --repo "$GITHUB_REPOSITORY" --clobber
+          IMAGE: ${{ steps.image.outputs.name }}
+          IMAGE_DIGEST: ${{ steps.container.outputs.digest }}
+        run: |
+          cp "docs/releases/$RELEASE_TAG.md" "$RUNNER_TEMP/release-notes.md"
+          # shellcheck disable=SC2016
+          printf '\n容器镜像：`%s:%s`\n\n镜像摘要：`%s`\n' "$IMAGE" "$RELEASE_TAG" "$IMAGE_DIGEST" >> "$RUNNER_TEMP/release-notes.md"
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" artifacts/release/* --repo "$GITHUB_REPOSITORY" --clobber
+            gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --notes-file "$RUNNER_TEMP/release-notes.md"
+          else
+            PRERELEASE=()
+            if [[ "$RELEASE_TAG" == *-* ]]; then PRERELEASE+=(--prerelease); fi
+            gh release create "$RELEASE_TAG" artifacts/release/* --repo "$GITHUB_REPOSITORY" --verify-tag --title "WildString / 野弦 ${RELEASE_TAG#v}" --notes-file "$RUNNER_TEMP/release-notes.md" "${PRERELEASE[@]}"
+          fi
