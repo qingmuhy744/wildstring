@@ -1,5 +1,6 @@
 import { defineConfig, devices } from '@playwright/test';
 import { fileURLToPath } from 'node:url';
+const baseURL = `http://127.0.0.1:${process.env.WILDSTRING_WEB_TEST_PORT || '18782'}`;
 
 export default defineConfig({
   testDir: './tests',
@@ -10,7 +11,7 @@ export default defineConfig({
   retries: 0,
   reporter: 'list',
   use: {
-    baseURL: 'http://127.0.0.1:18782',
+    baseURL,
     screenshot: 'only-on-failure',
     trace: 'off',
   },
@@ -24,7 +25,7 @@ export default defineConfig({
   webServer: {
     command: 'make web-test-server',
     cwd: fileURLToPath(new URL('../..', import.meta.url)),
-    url: 'http://127.0.0.1:18782/health/ready',
+    url: `${baseURL}/health/ready`,
     reuseExistingServer: false,
     gracefulShutdown: { signal: 'SIGTERM', timeout: 2000 },
   },

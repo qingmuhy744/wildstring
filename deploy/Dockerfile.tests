@@ -1,0 +1,13 @@
+FROM wildstring:dev
+USER root
+COPY --from=wildstring-builder:dev /usr/local/bin/uv /usr/local/bin/uv
+ARG HTTP_PROXY
+ARG HTTPS_PROXY
+WORKDIR /workspace/backend
+COPY backend/pyproject.toml backend/uv.lock ./
+COPY backend/src/ ./src/
+RUN uv sync --locked
+COPY backend/tests/ ./tests/
+COPY tests/fixtures/audio/ /workspace/tests/fixtures/audio/
+USER 10001:10001
+CMD ["/workspace/backend/.venv/bin/python", "-m", "pytest", "-p", "no:cacheprovider", "-c", "pyproject.toml", "tests"]

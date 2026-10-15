@@ -29,7 +29,7 @@ make docker-scan
 
 扫描托管副本时，默认依据文件大小与纳秒修改时间做增量扫描；`--full` 强制重新读取标签。缺失记录保留，坏文件单独记录错误；根目录不可读、扫描中根目录身份变化或目录遍历不完整时，不批量标记文件缺失。外部重命名目前不自动识别为同一曲目。
 
-扫描进程使用跨进程文件锁，只有一个扫描可运行。运行记录与已导入文件逐步持久化；中断后重扫可跳过已导入且未变化的文件，旧运行标为 interrupted。当前不是通用后台任务队列，也没有网页扫描按钮。
+扫描进程使用跨进程文件锁，只有一个扫描可运行。运行记录与已导入文件逐步持久化；中断后重扫可跳过已导入且未变化的文件，旧运行标为 interrupted。网页任务与 CLI 复用同一文件锁，自动发现与待整理见 [自动导入](../contracts/automatic-import.md)。
 
 CLI 输出 JSON。模块退出码：0 完成、1 根目录失败、2 完成但存在文件/遍历错误、3 已有扫描运行；Make 会将非零结果报告为失败。扫描报告和计数可以通过 [曲库 API](../contracts/library-api.md) 查询。
 
@@ -47,7 +47,7 @@ API 默认 `127.0.0.1:18780`，React 默认 `127.0.0.1:18781`。开发配置开�
 - `make ci`：提交检查、后端测试、Web 构建、桌面/手机 Chromium 集成测试和 Python 锁文件核验。首次先 `make browser-install`。
 - `make format`：主动格式化 Python 与前端源码。
 
-`make test-web` 可单独运行浏览器集成测试：使用 18782 端口，临时创建独立数据库与合成音频；不读取 `.env` 的个人曲库。失败截图与播放预览输出到已忽略的 `artifacts/`。GitHub Actions 安装 Chromium 系统依赖后执行同一组 `make ci`。
+`make test-web` 可单独运行浏览器集成测试：默认使用 18782 端口（可用 `WILDSTRING_WEB_TEST_PORT=18783 make test-web` 避开其他测试服务），临时创建独立数据库与合成音频；不读取 `.env` 的个人曲库。失败截图与播放预览输出到已忽略的 `artifacts/`。GitHub Actions 安装 Chromium 系统依赖后执行同一组 `make ci`。
 
 更新 Python 依赖后运行 `uv lock --project backend`。npm 依赖在 `frontend/web` 更新并提交锁文件。历史原始讨论与已有 LICENSE 不参与空白自动改写。
 
@@ -68,11 +68,11 @@ make docker-down
 
 如果宿主机需要代理联网，在本地 `.env` 设置 `DOCKER_HTTP_PROXY` 与 `DOCKER_HTTPS_PROXY`，地址使用 Docker 可访问的宿主机网关，例如 `http://host.docker.internal:7890`。它们仅作为构建参数传入，不配置为运行容器环境变量。不要在容器内使用宿主机的 `127.0.0.1` 代理地址。
 
-运行目录保存 `wildstring.sqlite3` 和扫描锁，SQLite 使用 WAL。数据库启动时逐步迁移到 v4（v2 认证、v3 专辑索引、v4 导入记录和映射），保留原曲库与曲目 ID；不支持更高版本数据库自动降级。备份应使用 SQLite backup API 获取一致快照，不在运行时仅复制主文件并遗漏 WAL。
+运行目录保存 `wildstring.sqlite3` 和扫描锁，SQLite 使用 WAL。数据库启动时逐步迁移到 v7（认证、专辑、导入映射、个人曲库、管理任务及自动导入），保留原曲库与曲目 ID；不支持更高版本数据库自动降级。备份应使用 SQLite backup API 获取一致快照，不在运行时仅复制主文件并遗漏 WAL。
 
 首次启动后执行 `make docker-admin`，或仅首次通过 `.env` 中 `WILDSTRING_ADMIN_PASSWORD` 初始化管理员。现有管理员不会被启动配置覆盖；重置密码会撤销全部会话。Cookie 默认为本机 HTTP 配置，通过 HTTPS 访问时设置 `WILDSTRING_COOKIE_SECURE=true`。
 
-网页已提供登录、曲库搜索与原文件播放；详见 [接口与播放边界](../contracts/playback-auth-api.md)。艺人浏览、普通/规则歌单、收藏和收听统计见 [个人曲库](../contracts/personal-library.md)。封面、歌曲/专辑视图和本地歌词已接入，见 [本地资源规则](../contracts/local-library-assets.md)。管理页与 AI API 连接配置见 [管理接口](../contracts/library-management.md)。批量整理、标签写回、转码与 Agent 尚未实现，健康检查不代表完整 MVP 完成。写回方案见 [服务端修复](architecture/metadata-repair.md)。
+网页已提供登录、曲库搜索与原文件播放；详见 [接口与播放边界](../contracts/playback-auth-api.md)。艺人浏览、普通/规则歌单、收藏和收听统计见 [个人曲库](../contracts/personal-library.md)。封面、歌曲/专辑视图和本地歌词已接入，见 [本地资源规则](../contracts/local-library-assets.md)。管理页与 AI API 连接配置见 [管理接口](../contracts/library-management.md)。已提供 WAV/CUE 到 FLAC 的导入转换；批量整理、已有文件标签写回、播放转码与 Agent 尚未实现，健康检查不代表完整 MVP 完成。写回方案见 [服务端修复](architecture/metadata-repair.md)。
 
 ## 发布镜像
 
@@ -83,3 +83,7 @@ make docker-down
 ## 图标
 
 网页品牌和 SVG favicon 共用 `frontend/web/public/favicon.svg` 的橙色三道波纹；`favicon.ico` 包含 16、24、32、48、64、128、256 像素的透明帧。修改 SVG 后执行 `make icons` 重新生成 ICO，需要先安装项目依赖和 Chromium（`make browser-install`）；生成脚本会核验透明像素。Web 构建会把两个图标打包到静态根目录。
+
+### 转换测试
+
+主机没有 FFmpeg 时，`make test` 会明确跳过转换用例；使用 `make docker-test` 完整运行。测试镜像复用生产 FFmpeg 和固定版本 uv，再按同一 `backend/uv.lock` 安装开发依赖，网络关闭、根目录只读、非 root 运行，不挂载用户曲库。设置构建代理仍使用 `.env` 的 `DOCKER_HTTP_PROXY` / `DOCKER_HTTPS_PROXY`。源 WAV 与 CUE 均由测试动态生成，不使用私人音乐。
