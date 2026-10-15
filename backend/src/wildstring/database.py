@@ -8,7 +8,94 @@ from pathlib import Path
 
 from wildstring.library.albums import album_key
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 11
+TRANSCODING_SCHEMA = """
+BEGIN IMMEDIATE;
+CREATE TABLE transcoding_settings (
+    id INTEGER PRIMARY KEY CHECK(id=1),
+    retention_days INTEGER NOT NULL DEFAULT 7,
+    max_size_mb INTEGER NOT NULL DEFAULT 10240,
+    max_concurrent INTEGER NOT NULL DEFAULT 2,
+    version INTEGER NOT NULL DEFAULT 1,
+    generation INTEGER NOT NULL DEFAULT 0
+);
+INSERT INTO transcoding_settings(id) VALUES (1);
+CREATE TABLE transcoding_cache (
+    key TEXT PRIMARY KEY,
+    filename TEXT NOT NULL,
+    track_id TEXT NOT NULL,
+    size_bytes INTEGER NOT NULL,
+    accessed_at REAL NOT NULL
+);
+PRAGMA user_version = 11;
+COMMIT;
+"""
+ACCESS_SCHEMA = """
+BEGIN IMMEDIATE;
+CREATE TABLE site_access (
+    id INTEGER PRIMARY KEY CHECK(id=1),
+    enabled INTEGER NOT NULL DEFAULT 0 CHECK(enabled IN (0,1)),
+    hosts TEXT NOT NULL DEFAULT '[]',
+    version INTEGER NOT NULL DEFAULT 1
+);
+INSERT INTO site_access(id) VALUES (1);
+PRAGMA user_version = 10;
+COMMIT;
+"""
+LYRICS_SCHEMA = """
+BEGIN IMMEDIATE;
+CREATE TABLE IF NOT EXISTS track_lyrics (
+    track_id TEXT PRIMARY KEY REFERENCES tracks(id) ON DELETE CASCADE,
+    text TEXT,
+    version INTEGER NOT NULL DEFAULT 1
+);
+PRAGMA user_version = 8;
+COMMIT;
+"""
+USERS_SCHEMA = """
+BEGIN IMMEDIATE;
+CREATE TABLE users (
+    id TEXT PRIMARY KEY,
+    username TEXT NOT NULL COLLATE NOCASE UNIQUE,
+    password_hash TEXT,
+    role TEXT NOT NULL CHECK(role IN ('admin', 'user')),
+    enabled INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0, 1)),
+    version INTEGER NOT NULL DEFAULT 1
+);
+INSERT INTO users(id, username, password_hash, role)
+VALUES ('admin', 'admin', (SELECT password_hash FROM admin WHERE id=1), 'admin');
+DROP TABLE admin;
+ALTER TABLE sessions ADD COLUMN user_id TEXT NOT NULL DEFAULT 'admin';
+CREATE INDEX sessions_user_id ON sessions(user_id);
+ALTER TABLE playlists ADD COLUMN user_id TEXT NOT NULL DEFAULT 'admin';
+DROP INDEX one_favorites_playlist;
+CREATE UNIQUE INDEX one_favorites_playlist ON playlists(library_id, user_id) WHERE kind='favorites';
+CREATE INDEX playlists_owner ON playlists(user_id, library_id);
+ALTER TABLE listening_sessions ADD COLUMN user_id TEXT NOT NULL DEFAULT 'admin';
+CREATE TABLE user_track_state (
+    user_id TEXT NOT NULL REFERENCES users(id),
+    track_id TEXT NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
+    loved INTEGER NOT NULL DEFAULT 0 CHECK(loved IN (0, 1)),
+    loved_at TEXT,
+    play_count INTEGER NOT NULL DEFAULT 0,
+    listened_ms INTEGER NOT NULL DEFAULT 0,
+    last_played_at TEXT,
+    PRIMARY KEY(user_id, track_id)
+);
+INSERT INTO user_track_state
+SELECT 'admin', id, loved, loved_at, play_count, listened_ms, last_played_at FROM tracks
+WHERE loved OR play_count OR listened_ms OR last_played_at IS NOT NULL;
+CREATE VIEW personal_tracks AS
+SELECT t.id, t.library_id, t.path, t.title, t.title_source, t.artists, t.album, t.album_artists,
+    t.track_number, t.disc_number, t.duration_ms, t.format, t.sample_rate, t.channels,
+    t.has_cover, t.size_bytes, t.mtime_ns, t.status, t.seen_run, t.search_text, t.album_id,
+    t.added_at, COALESCE(s.loved,0) AS loved, s.loved_at,
+    COALESCE(s.play_count,0) AS play_count, COALESCE(s.listened_ms,0) AS listened_ms,
+    s.last_played_at
+FROM tracks t LEFT JOIN user_track_state s ON s.track_id=t.id AND s.user_id=active_user();
+PRAGMA user_version = 9;
+COMMIT;
+"""
 INTAKE_SCHEMA = """
 BEGIN IMMEDIATE;
 ALTER TABLE admin_jobs ADD COLUMN automatic INTEGER NOT NULL DEFAULT 0;
@@ -212,8 +299,9 @@ COMMIT;
 
 
 class Database:
-    def __init__(self, data_dir: Path):
+    def __init__(self, data_dir: Path, user_id: str = "admin"):
         self.path = data_dir / "wildstring.sqlite3"
+        self.user_id = user_id
 
     @contextmanager
     def connect(self, *, write: bool = False, create: bool = False) -> Iterator[sqlite3.Connection]:
@@ -224,6 +312,7 @@ class Database:
             timeout=10,
         )
         connection.row_factory = sqlite3.Row
+        connection.create_function("active_user", 0, lambda: self.user_id)
         try:
             connection.execute("PRAGMA foreign_keys = ON")
             if not write:
@@ -284,6 +373,14 @@ class Database:
                 connection.executescript(MANAGEMENT_SCHEMA)
             if current < 7:
                 connection.executescript(INTAKE_SCHEMA)
+            if current < 8:
+                connection.executescript(LYRICS_SCHEMA)
+            if current < 9:
+                connection.executescript(USERS_SCHEMA)
+            if current < 10:
+                connection.executescript(ACCESS_SCHEMA)
+            if current < 11:
+                connection.executescript(TRANSCODING_SCHEMA)
             connection.execute("PRAGMA journal_mode = WAL")
 
     def check_ready(self) -> bool:

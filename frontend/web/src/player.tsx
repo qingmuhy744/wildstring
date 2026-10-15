@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { artist, streamUrl, time, type Track } from './api';
+import { api, artist, streamUrl, time, type PlaybackPlan, type Track } from './api';
 import { Cover } from './cover';
 import { FavoriteButton, type Favorites } from './favorites';
 import { ListeningTracker } from './listening';
@@ -16,6 +16,15 @@ export function usePlayer() {
   const [error, setError] = useState('');
   const [buffering, setBuffering] = useState(false);
   const generation = useRef(0);
+  const [quality, setQuality] = useState('original');
+  const qualityRef = useRef('original');
+  const [plan, setPlan] = useState<PlaybackPlan | null>(null);
+  const planRef = useRef<PlaybackPlan | null>(null);
+  const offset = useRef(0);
+  const loading = useRef(false);
+  const desiredPlay = useRef(false);
+  const sourceRequest = useRef<AbortController | null>(null);
+  const pendingSeek = useRef<number | null>(null);
   const current = queue[index];
 
   useEffect(() => {
@@ -38,6 +47,7 @@ export function usePlayer() {
     };
     document.addEventListener('visibilitychange', visibility);
     return () => {
+      sourceRequest.current?.abort();
       clearInterval(timer);
       window.removeEventListener('pagehide', flush);
       document.removeEventListener('visibilitychange', visibility);
@@ -59,6 +69,10 @@ export function usePlayer() {
   }, [buffering, current]);
 
   function play() {
+    if (loading.current) {
+      desiredPlay.current = true;
+      return;
+    }
     const element = audio.current;
     if (!element) return;
     if (element.ended && queue[index]) {
@@ -75,22 +89,74 @@ export function usePlayer() {
     });
   }
 
+  async function loadSource(track: Track, seconds: number, autoplay: boolean, delay = 0) {
+    const element = audio.current;
+    if (!element) return;
+    const attempt = ++generation.current;
+    sourceRequest.current?.abort();
+    const controller = new AbortController();
+    sourceRequest.current = controller;
+    tracker.current.beforeSeek(element);
+    desiredPlay.current = autoplay;
+    loading.current = true;
+    element.pause();
+    setError('');
+    setPlaying(false);
+    setBuffering(true);
+    setPosition(seconds);
+    try {
+      if (delay) await new Promise((resolve) => setTimeout(resolve, delay));
+      if (controller.signal.aborted || attempt !== generation.current) return;
+      let next: PlaybackPlan | null = null;
+      if (qualityRef.current !== 'original') {
+        const query = new URLSearchParams({
+          format: 'aac',
+          bitrate_kbps: qualityRef.current,
+          start_ms: String(Math.round(seconds * 1000)),
+        });
+        next = await api<PlaybackPlan>(
+          `/tracks/${encodeURIComponent(track.id)}/playback?${query}`,
+          { signal: controller.signal },
+        );
+      }
+      if (controller.signal.aborted || attempt !== generation.current) return;
+      planRef.current = next;
+      setPlan(next);
+      offset.current = next?.mode === 'transcode' ? next.start_ms / 1000 : 0;
+      setDuration(next ? next.duration_ms / 1000 : track.duration_ms / 1000);
+      const url = next?.stream_url || streamUrl(track);
+      // Switching AAC preferences on a lossy source should keep the same audio element loaded.
+      if (element.getAttribute('src') === url && next?.mode === 'original' && !element.error) {
+        loading.current = false;
+        setBuffering(false);
+        if (desiredPlay.current) play();
+        return;
+      }
+      pendingSeek.current = next?.mode !== 'transcode' && seconds > 0 ? seconds : null;
+      element.src = url;
+      element.load();
+      loading.current = false;
+      if (desiredPlay.current) play();
+      else setBuffering(false);
+    } catch (reason) {
+      if (controller.signal.aborted || attempt !== generation.current) return;
+      loading.current = false;
+      // Never leave the previous song resumable after a failed source change.
+      element.removeAttribute('src');
+      element.load();
+      setBuffering(false);
+      setError(reason instanceof Error ? reason.message : '无法加载音频，请重试。');
+    }
+  }
+
   function start(tracks: Track[], target: number) {
     const element = audio.current;
     const track = tracks[target];
     if (!element || !track) return;
     tracker.current.start(track, element);
-    generation.current += 1;
     setQueue(tracks);
     setIndex(target);
-    setError('');
-    setPosition(0);
-    setDuration(0);
-    setPlaying(false);
-    setBuffering(true);
-    element.src = streamUrl(track);
-    element.load();
-    play();
+    void loadSource(track, 0, true);
   }
 
   function step(direction: number) {
@@ -99,20 +165,52 @@ export function usePlayer() {
   }
 
   function seek(value: number) {
-    if (audio.current && duration > 0) {
+    if (!audio.current || !current || !duration) return;
+    const target = Math.max(0, Math.min(value, duration - 0.05));
+    if (
+      planRef.current?.mode === 'transcode' ||
+      (loading.current && qualityRef.current !== 'original')
+    ) {
+      void loadSource(
+        current,
+        target,
+        loading.current ? desiredPlay.current : !audio.current.paused,
+        150,
+      );
+    } else {
       tracker.current.beforeSeek(audio.current);
-      audio.current.currentTime = value;
-      setPosition(value);
+      audio.current.currentTime = target;
+      setPosition(target);
     }
   }
 
   function toggle() {
     if (!current || !audio.current) return;
+    if (loading.current) {
+      desiredPlay.current = !desiredPlay.current;
+      return;
+    }
     if (!audio.current.paused) audio.current.pause();
     else {
       setError('');
-      if (audio.current.error) start(queue, index);
+      if (audio.current.error || !audio.current.getAttribute('src')) start(queue, index);
       else play();
+    }
+  }
+
+  function changeQuality(value: string) {
+    qualityRef.current = value;
+    setQuality(value);
+    if (current && audio.current) {
+      const seconds =
+        planRef.current?.mode === 'transcode'
+          ? offset.current + audio.current.currentTime
+          : audio.current.currentTime;
+      void loadSource(
+        current,
+        loading.current ? position : seconds,
+        loading.current ? desiredPlay.current : !audio.current.paused,
+      );
     }
   }
 
@@ -121,10 +219,10 @@ export function usePlayer() {
     const code = audio.current?.error?.code;
     setBuffering(false);
     setPlaying(false);
-    if (!current) return;
+    if (!current || loading.current || !audio.current?.getAttribute('src')) return;
     try {
       // HEAD diagnoses expired sessions, missing files and changed sources without downloading audio.
-      const response = await fetch(streamUrl(current), { method: 'HEAD' });
+      const response = await fetch(audio.current.currentSrc, { method: 'HEAD' });
       if (attempt !== generation.current) return;
       if (response.status === 401) {
         window.dispatchEvent(new Event('wildstring:unauthorized'));
@@ -132,6 +230,10 @@ export function usePlayer() {
       }
       if (response.status === 404 || response.status === 409) {
         setError('音频文件已变化或不可读，请在服务端重新扫描曲库。');
+        return;
+      }
+      if (planRef.current?.mode === 'transcode') {
+        setError('AAC 转码失败或服务繁忙，请重试或切换原音。');
         return;
       }
       setError(
@@ -153,7 +255,13 @@ export function usePlayer() {
     });
     const actions: [MediaSessionAction, MediaSessionActionHandler][] = [
       ['play', play],
-      ['pause', () => audio.current?.pause()],
+      [
+        'pause',
+        () => {
+          desiredPlay.current = false;
+          audio.current?.pause();
+        },
+      ],
       ['previoustrack', () => step(-1)],
       ['nexttrack', () => step(1)],
       [
@@ -198,6 +306,10 @@ export function usePlayer() {
     volume,
     error,
     buffering,
+    quality,
+    changeQuality,
+    playbackTime: () => offset.current + (audio.current?.currentTime || 0),
+    playbackLabel: plan?.mode === 'transcode' ? `AAC ${plan.output.bitrate_kbps} kbps` : '原音直放',
     start,
     step,
     seek,
@@ -231,6 +343,12 @@ export function usePlayer() {
       if (target < index) setIndex(index - 1);
     },
     audioEvents: {
+      onLoadedMetadata: () => {
+        if (audio.current && pendingSeek.current !== null) {
+          audio.current.currentTime = pendingSeek.current;
+          pendingSeek.current = null;
+        }
+      },
       onPlay: () => setPlaying(true),
       onPause: () => {
         if (audio.current) tracker.current.playing(audio.current, false);
@@ -252,14 +370,17 @@ export function usePlayer() {
         setBuffering(true);
       },
       onTimeUpdate: () => {
+        if (loading.current) return;
         if (audio.current) tracker.current.sample(audio.current);
-        setPosition(audio.current?.currentTime || 0);
+        setPosition(offset.current + (audio.current?.currentTime || 0));
       },
       onDurationChange: () => {
+        if (loading.current || planRef.current?.mode === 'transcode') return;
         const value = audio.current?.duration;
         setDuration(value && Number.isFinite(value) ? value : 0);
       },
       onEnded: () => {
+        if (loading.current) return;
         if (audio.current) tracker.current.finish(audio.current);
         setPlaying(false);
         setBuffering(false);
@@ -321,6 +442,7 @@ export function PlayerBar({
       </div>
       <PlaybackControls player={player} />
       <div className="player-options">
+        <QualityControl player={player} />
         {current && <FavoriteButton track={current} favorites={favorites} />}
         <button
           className={`lyrics-toggle icon-button ${lyricsOpen ? 'active' : ''}`}
@@ -382,7 +504,7 @@ export function PlaybackControls({ player }: { player: Player }) {
           </svg>
         </button>
         <span className="play-state" role="status">
-          {player.buffering ? '缓冲中…' : playing ? '原音直放' : current ? '已暂停' : ''}
+          {player.buffering ? '缓冲中…' : playing ? player.playbackLabel : current ? '已暂停' : ''}
         </span>
       </div>
       <div className="timeline">
@@ -427,4 +549,24 @@ export function PlaybackError({ player }: { player: Player }) {
       <button onClick={() => player.start(player.queue, player.index)}>重试</button>
     </div>
   ) : null;
+}
+
+export function QualityControl({ player }: { player: Player }) {
+  return (
+    <label className="quality-control">
+      <span>音质</span>
+      <select
+        aria-label="播放音质"
+        value={player.quality}
+        onChange={(event) => player.changeQuality(event.target.value)}
+      >
+        <option value="original">原音</option>
+        {[128, 192, 256, 320].map((rate) => (
+          <option key={rate} value={rate}>
+            AAC {rate}k
+          </option>
+        ))}
+      </select>
+    </label>
+  );
 }

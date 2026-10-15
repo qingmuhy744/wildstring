@@ -6,6 +6,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
+from conftest import restore_v7_account_layout
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from filelock import FileLock
@@ -161,6 +162,7 @@ def test_v5_migration_preserves_identity_and_personal_data(settings, authenticat
     db = Database(settings.data_dir)
     with db.connect(write=True) as connection:
         track = dict(connection.execute("SELECT * FROM tracks").fetchone())
+        restore_v7_account_layout(connection)
         connection.execute("UPDATE tracks SET loved=1, play_count=7, listened_ms=1234")
         connection.execute("DROP TABLE track_metadata")
         connection.execute("DROP TABLE admin_jobs")
@@ -177,7 +179,7 @@ def test_v5_migration_preserves_identity_and_personal_data(settings, authenticat
         assert record["version"] == 1
         scan_library(settings, full=True)
         assert client.get(metadata_url(track)).json()["version"] == 1
-        assert client.get("/api/v1/manage/overview").json()["schema_version"] == 7
+        assert client.get("/api/v1/manage/overview").json()["schema_version"] == 11
 
 
 def test_real_import_scan_progress_and_bytes_unchanged(settings, authenticated_client):

@@ -1,12 +1,13 @@
-"""Idempotent listening reports and single-administrator favorites."""
+"""Idempotent listening reports and per-user favorites."""
 
 import time
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
-from wildstring.library.repository import now
+from wildstring.library.repository import LibraryRepository, now
 
 
 class FavoriteUpdate(BaseModel):
@@ -24,26 +25,38 @@ class ListeningReport(BaseModel):
 def listening_router(repository, auth):
     router = APIRouter(prefix="/api/v1", dependencies=[Depends(auth.require_session)])
 
+    def scoped(user: Annotated[dict, Depends(auth.require_session)]):
+        return repository.for_user(user["id"])
+
     @router.put("/tracks/{track_id}/favorite", dependencies=[Depends(auth.require_client)])
-    def favorite(track_id: str, body: FavoriteUpdate):
-        with repository.database.connect(write=True) as connection:
-            result = connection.execute(
-                """UPDATE tracks SET loved = ?, loved_at = CASE
-                WHEN ? THEN COALESCE(loved_at, ?) ELSE NULL END
-                WHERE id = ? AND library_id = ?""",
-                (body.loved, body.loved, now(), track_id, repository.library_id()),
-            )
-            if result.rowcount != 1:
+    def favorite(
+        track_id: str, body: FavoriteUpdate, current: Annotated[LibraryRepository, Depends(scoped)]
+    ):
+        with current.database.connect(write=True) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            if (
+                connection.execute(
+                    "SELECT 1 FROM tracks WHERE id=? AND library_id=?",
+                    (track_id, current.library_id()),
+                ).fetchone()
+                is None
+            ):
                 raise HTTPException(404, "track_not_found")
+            connection.execute(
+                """INSERT INTO user_track_state(user_id,track_id,loved,loved_at) VALUES (?,?,?,?)
+                ON CONFLICT(user_id,track_id) DO UPDATE SET loved=excluded.loved,
+                loved_at=CASE WHEN excluded.loved THEN COALESCE(user_track_state.loved_at,excluded.loved_at) ELSE NULL END""",
+                (current.database.user_id, track_id, body.loved, now() if body.loved else None),
+            )
         return {"track_id": track_id, "loved": body.loved}
 
     @router.post("/listening", dependencies=[Depends(auth.require_client)])
-    def report(body: ListeningReport):
-        with repository.database.connect(write=True) as connection:
+    def report(body: ListeningReport, current: Annotated[LibraryRepository, Depends(scoped)]):
+        with current.database.connect(write=True) as connection:
             connection.execute("BEGIN IMMEDIATE")
             track = connection.execute(
-                "SELECT * FROM tracks WHERE id = ? AND library_id = ?",
-                (body.track_id, repository.library_id()),
+                "SELECT * FROM personal_tracks WHERE id = ? AND library_id = ?",
+                (body.track_id, current.library_id()),
             ).fetchone()
             if track is None:
                 raise HTTPException(404, "track_not_found")
@@ -54,13 +67,21 @@ def listening_router(repository, auth):
             if session is None:
                 # Allow one heartbeat of initial buffering/network latency, not an offline bulk upload.
                 connection.execute(
-                    "INSERT INTO listening_sessions(id, track_id, started_at) VALUES (?, ?, ?)",
-                    (session_id, body.track_id, clock - min(body.listened_ms, 10_000) / 1000),
+                    "INSERT INTO listening_sessions(id, track_id, started_at, user_id) VALUES (?, ?, ?, ?)",
+                    (
+                        session_id,
+                        body.track_id,
+                        clock - min(body.listened_ms, 10_000) / 1000,
+                        current.database.user_id,
+                    ),
                 )
                 session = connection.execute(
                     "SELECT * FROM listening_sessions WHERE id = ?", (session_id,)
                 ).fetchone()
-            if session["track_id"] != body.track_id:
+            if (
+                session["track_id"] != body.track_id
+                or session["user_id"] != current.database.user_id
+            ):
                 raise HTTPException(409, "listening_session_conflict")
             elapsed = max(0, int((clock - session["started_at"]) * 1000)) + 1000
             accepted = max(session["reported_ms"], min(body.listened_ms, elapsed, 21_600_000))
@@ -73,8 +94,11 @@ def listening_router(repository, auth):
             )
             if delta:
                 connection.execute(
-                    "UPDATE tracks SET listened_ms = listened_ms + ?, play_count = play_count + ?, last_played_at = ? WHERE id = ?",
-                    (delta, increment, now(), body.track_id),
+                    """INSERT INTO user_track_state(user_id,track_id,listened_ms,play_count,last_played_at)
+                    VALUES (?,?,?,?,?) ON CONFLICT(user_id,track_id) DO UPDATE SET
+                    listened_ms=user_track_state.listened_ms+excluded.listened_ms,
+                    play_count=user_track_state.play_count+excluded.play_count,last_played_at=excluded.last_played_at""",
+                    (current.database.user_id, body.track_id, delta, increment, now()),
                 )
             return {
                 "play_count": track["play_count"] + increment,
@@ -83,15 +107,15 @@ def listening_router(repository, auth):
             }
 
     @router.get("/listening/summary")
-    def summary():
-        with repository.database.connect() as connection:
+    def summary(current: Annotated[LibraryRepository, Depends(scoped)]):
+        with current.database.connect() as connection:
             row = connection.execute(
                 """SELECT COALESCE(sum(play_count), 0) AS play_count,
                 COALESCE(sum(listened_ms), 0) AS listened_ms,
                 sum(CASE WHEN last_played_at IS NOT NULL THEN 1 ELSE 0 END) AS tracks_played,
                 sum(CASE WHEN loved AND status = 'available' THEN 1 ELSE 0 END) AS favorites,
-                max(last_played_at) AS last_played_at FROM tracks WHERE library_id = ?""",
-                (repository.library_id(),),
+                max(last_played_at) AS last_played_at FROM personal_tracks WHERE library_id = ?""",
+                (current.library_id(),),
             ).fetchone()
         return {
             key: value if value is not None or key == "last_played_at" else 0
@@ -99,11 +123,11 @@ def listening_router(repository, auth):
         }
 
     @router.get("/favorites/ids")
-    def favorite_ids():
-        with repository.database.connect() as connection:
+    def favorite_ids(current: Annotated[LibraryRepository, Depends(scoped)]):
+        with current.database.connect() as connection:
             rows = connection.execute(
-                "SELECT id FROM tracks WHERE library_id = ? AND loved = 1",
-                (repository.library_id(),),
+                "SELECT id FROM personal_tracks WHERE library_id = ? AND loved = 1",
+                (current.library_id(),),
             ).fetchall()
         return {"ids": [row["id"] for row in rows]}
 

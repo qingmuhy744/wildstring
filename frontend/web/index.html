@@ -7,6 +7,18 @@
     <meta name="description" content="野弦 WildString，AI native 的私人音乐播放器。" />
     <link rel="icon" href="/favicon.ico" sizes="16x16 24x24 32x32 48x48 64x64 128x128 256x256" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" sizes="any" />
+    <script>
+      (() => {
+        let mode = 'system';
+        try {
+          mode = localStorage.getItem('wildstring-theme') || 'system';
+        } catch {}
+        const dark =
+          mode === 'dark' ||
+          (mode !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches);
+        document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+      })();
+    </script>
     <title>野弦 WildString</title>
   </head>
   <body>

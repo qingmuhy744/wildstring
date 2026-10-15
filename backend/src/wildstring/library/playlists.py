@@ -1,7 +1,7 @@
 """Persistent manual, smart and built-in favorites playlists."""
 
 import json
-from typing import Literal
+from typing import Annotated, Literal
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -40,20 +40,29 @@ class PlaylistStore:
     def __init__(self, library: LibraryRepository):
         self.library = library
         self.database = library.database
+        self.user_id = library.database.user_id
 
     def ensure_default(self):
         library_id = self.library.library_id(create=True)
         with self.database.connect(write=True) as connection:
             connection.execute(
                 """INSERT OR IGNORE INTO playlists
-                (id, library_id, name, kind, created_at, updated_at) VALUES (?, ?, '♥ 我喜欢', 'favorites', ?, ?)""",
-                ("favorites-" + library_id, library_id, now(), now()),
+                (id, library_id, name, kind, created_at, updated_at, user_id) VALUES (?, ?, '♥ 我喜欢', 'favorites', ?, ?, ?)""",
+                (
+                    "favorites-"
+                    + library_id
+                    + ("" if self.user_id == "admin" else "-" + self.user_id),
+                    library_id,
+                    now(),
+                    now(),
+                    self.user_id,
+                ),
             )
 
     def _record(self, connection, playlist_id, version=None, editable=False):
         row = connection.execute(
-            "SELECT * FROM playlists WHERE id = ? AND library_id = ?",
-            (playlist_id, self.library.library_id()),
+            "SELECT * FROM playlists WHERE id = ? AND library_id = ? AND user_id = ?",
+            (playlist_id, self.library.library_id(), self.user_id),
         ).fetchone()
         if row is None:
             raise HTTPException(404, "playlist_not_found")
@@ -90,7 +99,7 @@ class PlaylistStore:
         parameters.update(cap=cap, query=query, pattern=f"%{query}%")
         # Both fragments are generated above from fixed literals or validated rule whitelists.
         selection = "".join(
-            ("SELECT t.* FROM tracks t WHERE ", where, " ORDER BY ", order, " LIMIT :cap")
+            ("SELECT t.* FROM personal_tracks t WHERE ", where, " ORDER BY ", order, " LIMIT :cap")
         )
         return selection, parameters
 
@@ -108,7 +117,9 @@ class PlaylistStore:
             ),
             parameters,
         ).fetchone()
-        result = {key: value for key, value in record.items() if key != "library_id"}
+        result = {
+            key: value for key, value in record.items() if key not in {"library_id", "user_id"}
+        }
         result.update(dict(summary))
         result["definition"] = json.loads(record["definition"]) if record["definition"] else None
         return result
@@ -120,15 +131,15 @@ class PlaylistStore:
 
     def listing(self, q="", limit=50, offset=0):
         query = normalize(q).replace("\\", "\\\\").replace("%", r"\%").replace("_", r"\_")
-        parameters = (self.library.library_id(), query, f"%{query}%")
+        parameters = (self.library.library_id(), self.user_id, query, f"%{query}%")
         with self.database.connect() as connection:
             configure_artist_queries(connection)
             total = connection.execute(
-                "SELECT count(*) FROM playlists WHERE library_id = ? AND (? = '' OR normalized(name) LIKE ? ESCAPE '\\')",
+                "SELECT count(*) FROM playlists WHERE library_id = ? AND user_id = ? AND (? = '' OR normalized(name) LIKE ? ESCAPE '\\')",
                 parameters,
             ).fetchone()[0]
             rows = connection.execute(
-                "SELECT * FROM playlists WHERE library_id = ? AND (? = '' OR normalized(name) LIKE ? ESCAPE '\\') ORDER BY kind = 'favorites' DESC, updated_at DESC, id LIMIT ? OFFSET ?",
+                "SELECT * FROM playlists WHERE library_id = ? AND user_id = ? AND (? = '' OR normalized(name) LIKE ? ESCAPE '\\') ORDER BY kind = 'favorites' DESC, updated_at DESC, id LIMIT ? OFFSET ?",
                 (*parameters, limit, offset),
             ).fetchall()
             items = [self._public(connection, dict(row)) for row in rows]
@@ -164,8 +175,8 @@ class PlaylistStore:
         playlist_id = uuid4().hex
         with self.database.connect(write=True) as connection:
             connection.execute(
-                """INSERT INTO playlists(id, library_id, name, kind, definition, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                """INSERT INTO playlists(id, library_id, name, kind, definition, created_at, updated_at, user_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     playlist_id,
                     self.library.library_id(),
@@ -174,6 +185,7 @@ class PlaylistStore:
                     body.definition.model_dump_json(exclude_none=True) if body.definition else None,
                     now(),
                     now(),
+                    self.user_id,
                 ),
             )
         return self.get(playlist_id)
@@ -268,53 +280,77 @@ class PlaylistMove(BaseModel):
 def playlist_router(store: PlaylistStore, auth):
     router = APIRouter(prefix="/api/v1/playlists", dependencies=[Depends(auth.require_session)])
 
+    def scoped(user: Annotated[dict, Depends(auth.require_session)]):
+        current = PlaylistStore(store.library.for_user(user["id"]))
+        current.ensure_default()
+        return current
+
     @router.get("")
     def listing(
+        current: Annotated[PlaylistStore, Depends(scoped)],
         q: str = Query(default="", max_length=256),
         limit: int = Query(default=50, ge=1, le=100),
         offset: int = Query(default=0, ge=0),
     ):
-        return store.listing(q, limit, offset)
+        return current.listing(q, limit, offset)
 
     @router.post("", dependencies=[Depends(auth.require_client)], status_code=201)
-    def create(body: PlaylistCreate):
-        return store.create(body)
+    def create(body: PlaylistCreate, current: Annotated[PlaylistStore, Depends(scoped)]):
+        return current.create(body)
 
     @router.get("/{playlist_id}")
-    def detail(playlist_id: str):
-        return store.get(playlist_id)
+    def detail(playlist_id: str, current: Annotated[PlaylistStore, Depends(scoped)]):
+        return current.get(playlist_id)
 
     @router.put("/{playlist_id}", dependencies=[Depends(auth.require_client)])
-    def update(playlist_id: str, body: PlaylistUpdate):
-        return store.update(playlist_id, body)
+    def update(
+        playlist_id: str, body: PlaylistUpdate, current: Annotated[PlaylistStore, Depends(scoped)]
+    ):
+        return current.update(playlist_id, body)
 
     @router.delete("/{playlist_id}", dependencies=[Depends(auth.require_client)], status_code=204)
-    def delete(playlist_id: str, version: int = Query(ge=1)):
-        store.delete(playlist_id, version)
+    def delete(
+        playlist_id: str,
+        current: Annotated[PlaylistStore, Depends(scoped)],
+        version: int = Query(ge=1),
+    ):
+        current.delete(playlist_id, version)
 
     @router.get("/{playlist_id}/tracks")
     def tracks(
         playlist_id: str,
+        current: Annotated[PlaylistStore, Depends(scoped)],
         q: str = Query(default="", max_length=256),
         limit: int = Query(default=50, ge=1, le=200),
         offset: int = Query(default=0, ge=0),
     ):
-        return store.tracks(playlist_id, q, limit, offset)
+        return current.tracks(playlist_id, q, limit, offset)
 
     @router.post("/{playlist_id}/tracks", dependencies=[Depends(auth.require_client)])
-    def append(playlist_id: str, body: PlaylistTracks):
-        return store.edit_tracks(playlist_id, body.version, append=body.track_ids)
+    def append(
+        playlist_id: str, body: PlaylistTracks, current: Annotated[PlaylistStore, Depends(scoped)]
+    ):
+        return current.edit_tracks(playlist_id, body.version, append=body.track_ids)
 
     @router.delete("/{playlist_id}/tracks/{track_id}", dependencies=[Depends(auth.require_client)])
-    def remove(playlist_id: str, track_id: str, version: int = Query(ge=1)):
-        return store.edit_tracks(playlist_id, version, remove=track_id)
+    def remove(
+        playlist_id: str,
+        track_id: str,
+        current: Annotated[PlaylistStore, Depends(scoped)],
+        version: int = Query(ge=1),
+    ):
+        return current.edit_tracks(playlist_id, version, remove=track_id)
 
     @router.put("/{playlist_id}/order", dependencies=[Depends(auth.require_client)])
-    def reorder(playlist_id: str, body: PlaylistTracks):
-        return store.edit_tracks(playlist_id, body.version, reorder=body.track_ids)
+    def reorder(
+        playlist_id: str, body: PlaylistTracks, current: Annotated[PlaylistStore, Depends(scoped)]
+    ):
+        return current.edit_tracks(playlist_id, body.version, reorder=body.track_ids)
 
     @router.post("/{playlist_id}/move", dependencies=[Depends(auth.require_client)])
-    def move(playlist_id: str, body: PlaylistMove):
-        return store.edit_tracks(playlist_id, body.version, move=(body.track_id, body.direction))
+    def move(
+        playlist_id: str, body: PlaylistMove, current: Annotated[PlaylistStore, Depends(scoped)]
+    ):
+        return current.edit_tracks(playlist_id, body.version, move=(body.track_id, body.direction))
 
     return router

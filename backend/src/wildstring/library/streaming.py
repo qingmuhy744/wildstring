@@ -39,11 +39,12 @@ def byte_range(value: str | None, size: int) -> tuple[int, int] | None:
 
 
 class AudioResponse(Response):
-    def __init__(self, root: Path, record: dict, request: Request):
+    def __init__(self, root: Path, record: dict, request: Request, headers: dict | None = None):
         super().__init__()
         self.root = root
         self.record = record
         self.request = request
+        self.output_headers = headers or {}
 
     async def __call__(self, scope, receive, send):
         try:
@@ -73,6 +74,7 @@ class AudioResponse(Response):
             "Last-Modified": modified,
             "Cache-Control": "private, no-store",
             "X-Content-Type-Options": "nosniff",
+            **self.output_headers,
         }
         requested = self.request.headers.get("range") if self.request.method == "GET" else None
         if self.request.headers.get("if-range", etag) not in {etag, modified}:

@@ -55,7 +55,10 @@ def test_persistent_sessions_logout_and_csrf_header(settings):
                 0
             ] == token_hash(token)
             assert (
-                PASSWORD not in connection.execute("SELECT password_hash FROM admin").fetchone()[0]
+                PASSWORD
+                not in connection.execute(
+                    "SELECT password_hash FROM users WHERE id='admin'"
+                ).fetchone()[0]
             )
         assert client.get("/api/v1/tracks").status_code == 200
         assert client.post("/api/v1/auth/logout").status_code == 403

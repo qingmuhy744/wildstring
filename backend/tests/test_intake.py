@@ -9,6 +9,7 @@ import wave
 from pathlib import Path
 
 import pytest
+from conftest import restore_v7_account_layout
 from mutagen.flac import FLAC
 
 from wildstring.database import Database
@@ -323,6 +324,7 @@ def test_v6_upgrade_preserves_existing_jobs_tracks_and_settings(settings):
     import_music(settings)
     ids = [r["id"] for r in intake.repository.tracks()["items"]]
     with intake.database.connect(write=True) as con:
+        restore_v7_account_layout(con)
         con.execute("DROP TABLE intake_items")
         con.execute("DROP TABLE intake_settings")
         con.execute("ALTER TABLE admin_jobs DROP COLUMN automatic")

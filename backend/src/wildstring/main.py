@@ -19,7 +19,9 @@ from wildstring.library.api import library_router
 from wildstring.library.listening import listening_router
 from wildstring.library.playlists import PlaylistStore, playlist_router
 from wildstring.library.repository import LibraryRepository
+from wildstring.library.transcoding import Transcoding
 from wildstring.management import Management, management_router
+from wildstring.site_access import HostAllowlist, SiteAccess
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +33,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     repository = LibraryRepository(database, current.library_dir)
     playlists = PlaylistStore(repository)
     management = Management(current, repository)
+    access = SiteAccess(database)
+    transcoding = Transcoding(repository)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -45,10 +49,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         ):
             auth.set_password(current.admin_password.get_secret_value(), only_if_empty=True)
         management.start()
+        transcoding.start()
         try:
             yield
         finally:
             await asyncio.to_thread(management.stop)
+            await asyncio.to_thread(transcoding.stop)
 
     development = current.environment != "production"
     app = FastAPI(
@@ -93,12 +99,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
 
     app.include_router(auth.router())
-    app.include_router(library_router(repository, auth))
+    app.include_router(auth.users_router())
+    app.include_router(access.router(auth))
+    app.state.transcoding = transcoding
+    app.include_router(library_router(repository, auth, transcoding))
+    app.include_router(transcoding.router(auth))
     app.include_router(listening_router(repository, auth))
     app.include_router(playlist_router(playlists, auth))
     app.include_router(management_router(management, auth))
 
     if current.web_dir is not None:
         app.mount("/", StaticFiles(directory=current.web_dir, html=True), name="web")
+
+    app.add_middleware(HostAllowlist, access=access)
 
     return app

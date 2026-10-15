@@ -1,4 +1,4 @@
-"""Set/reset the one administrator from a trusted server terminal."""
+"""Recover the built-in administrator from a trusted server terminal."""
 
 from getpass import getpass
 
@@ -18,7 +18,7 @@ def main() -> None:
         Auth(database, settings).set_password(password)
     except ValueError as error:
         raise SystemExit(str(error)) from error
-    print("Admin password saved. All existing sessions have been revoked.")
+    print("Admin password saved. This account's existing sessions have been revoked.")
 
 
 if __name__ == "__main__":
