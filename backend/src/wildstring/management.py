@@ -19,6 +19,7 @@ from wildstring.ai_config import AIService, AIUpdate
 from wildstring.library.edits import MetadataEditor, MetadataUpdate
 from wildstring.library.importer import import_music
 from wildstring.library.intake import Intake, IntakeApproval, IntakeSettings
+from wildstring.library.lyric_edits import LyricsEditor, LyricsText, LyricsUpdate
 from wildstring.library.repository import now
 from wildstring.library.scanner import ScanBusyError, scan_library
 
@@ -326,8 +327,9 @@ class Management:
 
 
 def management_router(service, auth):
-    router = APIRouter(prefix="/api/v1/manage", dependencies=[Depends(auth.require_session)])
+    router = APIRouter(prefix="/api/v1/manage", dependencies=[Depends(auth.require_admin)])
     editor = MetadataEditor(service.repository)
+    lyrics = LyricsEditor(service.repository)
     ai = AIService(service.settings.data_dir)
 
     @router.get("/intake/settings")
@@ -432,5 +434,17 @@ def management_router(service, auth):
     @router.put("/tracks/{track_id}/metadata", dependencies=[Depends(auth.require_client)])
     def update_metadata(track_id: str, body: MetadataUpdate):
         return editor.save(track_id, body)
+
+    @router.get("/tracks/{track_id}/lyrics")
+    def read_lyrics(track_id: str):
+        return lyrics.read(track_id)
+
+    @router.post("/tracks/{track_id}/lyrics/preview", dependencies=[Depends(auth.require_client)])
+    def preview_lyrics(track_id: str, body: LyricsText):
+        return lyrics.preview(track_id, body)
+
+    @router.put("/tracks/{track_id}/lyrics", dependencies=[Depends(auth.require_client)])
+    def update_lyrics(track_id: str, body: LyricsUpdate):
+        return lyrics.save(track_id, body)
 
     return router

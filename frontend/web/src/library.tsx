@@ -13,6 +13,7 @@ import {
   type PlaylistPage,
   type Track,
   type TrackPage,
+  type User,
 } from './api';
 import { Brand } from './brand';
 import { Cover } from './cover';
@@ -24,6 +25,8 @@ import { PlaylistEditor } from './playlist-editor';
 import { QueuePanel } from './queue-panel';
 import { Management } from './management';
 import { MetadataEditor } from './metadata-editor';
+import { AccountDialog } from './accounts';
+import { ThemeControl } from './theme';
 import { Pagination, TrackList } from './track-list';
 import type { TrackOperations } from './track-actions';
 
@@ -50,7 +53,9 @@ const icons: Record<View, string> = {
   listening: '◷',
 };
 
-export function Library({ onLogout }: { onLogout: () => Promise<void> }) {
+export function Library({ onLogout, user }: { onLogout: () => Promise<void>; user: User }) {
+  const isAdmin = user.role === 'admin';
+  const [accountOpen, setAccountOpen] = useState(false);
   const [view, setView] = useState<View>('tracks');
   const [manageOpen, setManageOpen] = useState(false);
   const [editingTrack, setEditingTrack] = useState<Track | null>(null);
@@ -324,7 +329,7 @@ export function Library({ onLogout }: { onLogout: () => Promise<void> }) {
     playlists: catalog.filter((item) => item.kind === 'manual'),
     onAdd: addToPlaylist,
     onCreate: (track) => setEditor({ initial: null, track }),
-    onEdit: setEditingTrack,
+    onEdit: isAdmin ? setEditingTrack : undefined,
     ...(activePlaylist?.kind === 'manual'
       ? {
           onRemove: (track: Track) => void editPlaylistTrack(track),
@@ -447,15 +452,21 @@ export function Library({ onLogout }: { onLogout: () => Promise<void> }) {
             <span>☷</span>播放队列 <small>{player.queue.length}</small>
           </button>
           <div className="sidebar-bottom">
-            <button
-              className={`nav-button manage-entry ${manageOpen ? 'nav-current' : ''}`}
-              onClick={() => {
-                setManageOpen(true);
-                setQueueOpen(false);
-              }}
-            >
-              <span aria-hidden="true">⚙</span>管理
+            {isAdmin && (
+              <button
+                className={`nav-button manage-entry ${manageOpen ? 'nav-current' : ''}`}
+                onClick={() => {
+                  setManageOpen(true);
+                  setQueueOpen(false);
+                }}
+              >
+                <span aria-hidden="true">⚙</span>管理
+              </button>
+            )}
+            <button className="nav-button account-entry" onClick={() => setAccountOpen(true)}>
+              <span aria-hidden="true">◉</span>账号设置
             </button>
+            <ThemeControl />
             <span className="local-dot" /> 私人曲库 · 原音直放
             <p>
               音乐不设限，
@@ -491,7 +502,9 @@ export function Library({ onLogout }: { onLogout: () => Promise<void> }) {
               onChange={(event) =>
                 event.target.value === 'manage'
                   ? setManageOpen(true)
-                  : switchView(event.target.value as View)
+                  : event.target.value === 'account'
+                    ? setAccountOpen(true)
+                    : switchView(event.target.value as View)
               }
             >
               {(Object.keys(labels) as View[]).map((target) => (
@@ -499,7 +512,8 @@ export function Library({ onLogout }: { onLogout: () => Promise<void> }) {
                   {labels[target]}
                 </option>
               ))}
-              <option value="manage">管理</option>
+              {isAdmin && <option value="manage">管理</option>}
+              <option value="account">账号设置</option>
             </select>
             <form className="search" onSubmit={search} role="search" autoComplete="off">
               <label className="sr-only" htmlFor="search">
@@ -898,9 +912,11 @@ export function Library({ onLogout }: { onLogout: () => Promise<void> }) {
           onSaved={saveEditor}
         />
       )}
+      {accountOpen && <AccountDialog user={user} onClose={() => setAccountOpen(false)} />}
       {editingTrack && (
         <MetadataEditor
           track={editingTrack}
+          player={player}
           onClose={() => setEditingTrack(null)}
           onSaved={async (id) => {
             const updated = await api<Track>(`/tracks/${id}`);

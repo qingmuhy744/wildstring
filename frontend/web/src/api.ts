@@ -41,6 +41,20 @@ const messages: Record<string, string> = {
   ai_connection_failed: '模型连接失败，请检查地址、密钥、模型名称或服务端网络。',
   ai_invalid_response: '服务未返回兼容的模型响应，请检查 API 地址。',
   ai_settings_unavailable: 'AI 配置无法读取，请检查服务端配置文件。',
+  ffmpeg_unavailable: '服务端未安装 FFmpeg，请切换原音或联系管理员。',
+  transcoding_busy: '转码任务繁忙，请稍后重试或选择原音。',
+  transcoding_failed: 'AAC 转码未完成，请重试或选择原音。',
+  playback_position_out_of_range: '播放位置超出歌曲时长，请从头播放。',
+  admin_required: '此操作需要管理员权限。',
+  host_not_allowed: '当前访问域名不在白名单中，需要在服务端数据库中关闭白名单或修正配置。',
+  invalid_account_input: '请检查账号格式及密码长度（12–128 个字符）。',
+  current_password_incorrect: '当前密码不正确。',
+  username_taken: '这个用户名已被使用。',
+  user_not_found: '账号不存在，请刷新列表。',
+  user_version_conflict: '账号已变化，请重新读取后操作。',
+  cannot_change_self_role: '不能停用或修改当前账号的角色。',
+  use_self_password_change: '请到账号设置修改自己的密码。',
+  lyrics_version_conflict: '歌词或文件已经变化，请重新读取后再保存。',
   metadata_version_conflict: '这首歌的信息已变化，请重新读取后再编辑。',
   settings_version_conflict: '设置已被更新，请刷新后重试。',
   library_task_busy: '曲库已有任务在排队或执行，请等待完成。',
@@ -100,7 +114,7 @@ export interface AlbumPage {
 }
 export interface Lyrics {
   kind: 'none' | 'plain' | 'synced';
-  source: 'sidecar_lrc' | 'embedded' | 'sidecar_text' | null;
+  source: 'sidecar_lrc' | 'embedded' | 'sidecar_text' | 'user' | null;
   lines: { time_ms: number | null; text: string }[];
 }
 
@@ -155,3 +169,22 @@ export const listeningTime = (milliseconds: number) => {
     ? `${Math.floor(minutes / 60)} 小时 ${minutes % 60} 分钟`
     : `${minutes} 分钟`;
 };
+
+export interface User {
+  id: string;
+  username: string;
+  role: 'admin' | 'user';
+  enabled: boolean;
+  version: number;
+}
+
+export interface PlaybackPlan {
+  mode: 'original' | 'transcode';
+  reason: string;
+  duration_ms: number;
+  start_ms: number;
+  stream_url: string;
+  cache_state: 'none' | 'miss' | 'encoding' | 'hit';
+  source: { codec: string; lossless: boolean; bitrate_kbps: number | null };
+  output: { codec: string; bitrate_kbps: number | null };
+}

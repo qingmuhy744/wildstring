@@ -1,24 +1,26 @@
-# 管理员与原音播放 API
+# 登录与播放 API
 
-当前为单管理员、单曲库。网页、API 和音频使用同一个 HttpOnly / SameSite=Strict 会话 Cookie，不在音频 URL 放令牌。所有曲库、扫描记录和音频请求均需登录；健康检查、静态网页和认证状态可匿名访问。
+当前为管理员/普通用户、单个共享曲库，个人数据按用户隔离。网页、API 和音频使用同一个 HttpOnly / SameSite=Strict 会话 Cookie，不在音频 URL 放令牌。曲库和音频请求均需登录，扫描记录还需管理员；健康检查、静态网页和认证状态可匿名访问。
 
 ## 管理员
 
-- 账号固定为 `admin`。首次在可信服务端终端执行 `make admin`（Docker 使用 `make docker-admin`），交互输入 12–128 字符密码。没有默认密码，也没有匿名网页注册接口。
+- 内置恢复账号为 `admin`；其他账号由管理员创建。首次在可信服务端终端执行 `make admin`（Docker 使用 `make docker-admin`），交互输入 12–128 字符密码。没有默认密码，也没有匿名网页注册接口。
 - 可通过未跟踪的 `.env` 中 `WILDSTRING_ADMIN_PASSWORD` 在首次启动时初始化；已有管理员时忽略该值。密码使用随机盐与 scrypt 存储，服务端不保存明文。
-- 修改密码撤销全部会话；退出撤销当前会话；会话有效期 7 天，重启后保留。SQLite 只保存令牌哈希，原令牌仅发到 Cookie。
+- 修改密码撤销该用户全部会话；退出撤销当前会话；会话有效期 7 天，重启后保留。SQLite 只保存令牌哈希，原令牌仅发到 Cookie。
 - 连续 5 次失败会暂停登录 60 秒；这是单实例的基础限流，不是公网接入方案。
 - 登录、退出及其他写接口需 `X-Wildstring-Client: web` 或 `android` 请求头，二者仍共用有效 Cookie 认证，不开放跨域 CORS。Android 普通请求、封面与媒体 Range 共用认证客户端，不在 URL 中携带令牌；旧服务的标头兼容策略见 [Android 客户端](../frontend/android/README.md)。HTTPS 部署设置 `WILDSTRING_COOKIE_SECURE=true`；本机 HTTP 默认 false。
 
 | 方法 | 路径 | 行为 |
 | --- | --- | --- |
-| GET | `/api/v1/auth/status` | 返回 `configured`、`authenticated` 布尔值，响应不缓存 |
+| GET | `/api/v1/auth/status` | 返回 `configured`、`authenticated`，已登录时增加 `user`，响应不缓存 |
 | POST | `/api/v1/auth/login` | JSON `{username, password}`；成功 200 并设置 Cookie；错误密码 401，限流 429，未初始化 503 |
 | POST | `/api/v1/auth/logout` | 撤销当前会话、清 Cookie，返回 204；可重复调用 |
 
+账号创建、角色、密码与域名限制见 [账号与访问](users-and-access.md)。
+
 ## 原文件串流
 
-`GET /api/v1/tracks/{id}/stream` 与 `HEAD /api/v1/tracks/{id}/stream` 按数据库中的真实曲目 ID 读取当前托管曲库，只读，不触发导入、扫描或转码。
+`GET /api/v1/tracks/{id}/stream` 与 `HEAD /api/v1/tracks/{id}/stream` 不传参数时按数据库中的真实曲目 ID 只读串流当前托管曲库。显式 AAC 参数的行为另见 [转码契约](playback-transcoding.md)。
 
 - MP3 / FLAC / M4A 对应 `audio/mpeg` / `audio/flac` / `audio/mp4`。
 - GET 支持单段 `Range: bytes=start-end`、开放末尾和后缀范围，返回 206、Content-Range 与准确的 Content-Length；无效或越界范围返回 416 与 `bytes */size`。
@@ -28,7 +30,7 @@
 - 曲目不存在或文件已消失返回 404；已扫描为不可用、源文件发生变化或无法安全打开返回 409；未登录返回 401。路径不来自请求参数，拒绝绝对路径、父目录及 POSIX 符号链接替换。
 - 响应使用 `Cache-Control: private, no-store`，减少共享浏览器退出后复用缓存。已加载进客户端的音频字节不可能通过服务端撤回；网页退出会停止并卸载播放器。
 
-HTTP 行为参考 [MDN Range requests](https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/Range_requests)。当前没有转码、音频归一化、音效、跨设备队列或离线缓存。可扫描不等于浏览器可解码，无法解码时网页提示并允许换歌/重试。
+HTTP 行为参考 [MDN Range requests](https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/Range_requests)。已增加显式请求的 AAC 转码；当前没有音频归一化、音效、跨设备队列或客户端离线缓存。可扫描不等于浏览器可解码，无法解码时网页提示并允许换歌/重试。
 
 ## 网页播放
 
@@ -36,7 +38,9 @@ HTTP 行为参考 [MDN Range requests](https://developer.mozilla.org/en-US/docs/
 - 播放/暂停、上一首/下一首、拖动进度、桌面音量、加入队列与删除非当前曲目；播放结束自动前进，队尾停止，不自动循环。
 - 队列只在当前页面内存中保存，刷新后重建；浏览器支持时接入 Media Session 元数据与系统控制。
 - 手机布局优先使用设备音量，页面不显示音量滑条。封面、专辑视图和滚动歌词见 [本地资源](local-library-assets.md)。
-- 文件变化、解码失败、连接中断与认证失效会反馈；重试重新请求原文件。没有后台重扫按钮，使用 Make 导入或重扫后刷新列表。
+- 文件变化、解码失败、连接中断与认证失效会反馈；重试重新请求当前音质；管理员也可通过管理页导入/重扫后刷新列表。
+
+音质默认原音，可选择 AAC 128/192/256/320k；仅无损源转换，有损源原音。移动端在全屏播放器中选择音质。
 
 ## 验证
 

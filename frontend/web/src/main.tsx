@@ -1,13 +1,23 @@
 import { StrictMode, useEffect, useState, type FormEvent } from 'react';
 import { createRoot } from 'react-dom/client';
-import { api } from './api';
+import { api, type User } from './api';
 import { Brand } from './brand';
 import { Library } from './library';
+import { ThemeControl } from './theme';
 import './style.css';
 
-type AuthStatus = { configured: boolean; authenticated: boolean };
+type AuthStatus = { configured: boolean; authenticated: boolean; user?: User };
 
-function Login({ configured, onLogin }: { configured: boolean; onLogin: () => void }) {
+function Login({
+  configured,
+  onLogin,
+  notice,
+}: {
+  configured: boolean;
+  onLogin: (user: User) => void;
+  notice: string;
+}) {
+  const [username, setUsername] = useState('admin');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -16,12 +26,12 @@ function Login({ configured, onLogin }: { configured: boolean; onLogin: () => vo
     setBusy(true);
     setError('');
     try {
-      await api('/auth/login', {
+      const user = await api<User>('/auth/login', {
         method: 'POST',
-        body: JSON.stringify({ username: 'admin', password }),
+        body: JSON.stringify({ username, password }),
       });
       setPassword('');
-      onLogin();
+      onLogin(user);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '登录失败，请重试。');
     } finally {
@@ -30,7 +40,10 @@ function Login({ configured, onLogin }: { configured: boolean; onLogin: () => vo
   }
   return (
     <main className="login-page">
-      <Brand />
+      <div className="login-topbar">
+        <Brand />
+        <ThemeControl />
+      </div>
       <div className="login-layout">
         <section className="login-intro">
           <p className="eyebrow">YOUR MUSIC. YOUR SPACE.</p>
@@ -58,9 +71,17 @@ function Login({ configured, onLogin }: { configured: boolean; onLogin: () => vo
           {configured ? (
             <form onSubmit={submit}>
               <p className="muted">登录你的私人音乐空间。</p>
+              {notice && <p role="status">{notice}</p>}
               <label>
                 账号
-                <input name="username" value="admin" readOnly autoComplete="username" />
+                <input
+                  name="username"
+                  value={username}
+                  onChange={(event) => setUsername(event.target.value)}
+                  required
+                  maxLength={32}
+                  autoComplete="username"
+                />
               </label>
               <label>
                 密码
@@ -70,7 +91,7 @@ function Login({ configured, onLogin }: { configured: boolean; onLogin: () => vo
                   required
                   maxLength={128}
                   autoComplete="current-password"
-                  placeholder="输入管理员密码"
+                  placeholder="输入密码"
                   value={password}
                   onChange={(event) => setPassword(event.target.value)}
                 />
@@ -103,6 +124,7 @@ function Login({ configured, onLogin }: { configured: boolean; onLogin: () => vo
 }
 
 function App() {
+  const [notice, setNotice] = useState('');
   const [auth, setAuth] = useState<AuthStatus | null>(null);
   const [error, setError] = useState('');
   const [revision, setRevision] = useState(0);
@@ -127,7 +149,14 @@ function App() {
     };
   }, [revision]);
   useEffect(() => {
-    const expired = () => setAuth((value) => value && { ...value, authenticated: false });
+    const expired = (event: Event) => {
+      setNotice(
+        event instanceof CustomEvent && typeof event.detail === 'string'
+          ? event.detail
+          : '登录已过期，请重新登录。',
+      );
+      setAuth((value) => value && { ...value, authenticated: false });
+    };
     window.addEventListener('wildstring:unauthorized', expired);
     return () => window.removeEventListener('wildstring:unauthorized', expired);
   }, []);
@@ -151,13 +180,19 @@ function App() {
     return (
       <Login
         configured={auth.configured}
-        onLogin={() => setAuth({ configured: true, authenticated: true })}
+        notice={notice}
+        onLogin={(user) => {
+          setNotice('');
+          setAuth({ configured: true, authenticated: true, user });
+        }}
       />
     );
   return (
     <Library
+      user={auth.user!}
       onLogout={async () => {
         await api('/auth/logout', { method: 'POST' });
+        setNotice('');
         setAuth({ ...auth, authenticated: false });
       }}
     />

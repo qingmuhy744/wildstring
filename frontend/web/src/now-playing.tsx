@@ -1,9 +1,55 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { api, artist, time, type Lyrics } from './api';
 import { Cover, coverUrl } from './cover';
 import { FavoriteButton, type Favorites } from './favorites';
-import { PlaybackControls, PlaybackError, VolumeControl, type Player } from './player';
+import {
+  PlaybackControls,
+  PlaybackError,
+  QualityControl,
+  VolumeControl,
+  type Player,
+} from './player';
 import { QueuePanel } from './queue-panel';
+
+function coverPalette(image: HTMLImageElement): string[] | null {
+  try {
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = 32;
+    const context = canvas.getContext('2d', { willReadFrequently: true });
+    if (!context) return null;
+    context.drawImage(image, 0, 0, 32, 32);
+    const pixels = context.getImageData(0, 0, 32, 32).data;
+    const buckets = new Map<string, { color: number[]; weight: number }>();
+    for (let index = 0; index < pixels.length; index += 4) {
+      const color = [pixels[index], pixels[index + 1], pixels[index + 2]];
+      const high = Math.max(...color),
+        low = Math.min(...color);
+      if (pixels[index + 3] < 128 || high < 25 || low > 235) continue;
+      const key = color.map((value) => Math.floor(value / 32)).join(',');
+      const bucket = buckets.get(key) || { color: [0, 0, 0], weight: 0 };
+      const weight = 1 + (high - low) / 128;
+      bucket.weight += weight;
+      color.forEach((value, channel) => {
+        bucket.color[channel] += value * weight;
+      });
+      buckets.set(key, bucket);
+    }
+    const ranked = [...buckets.values()]
+      .sort((a, b) => b.weight - a.weight)
+      .map((bucket) => bucket.color.map((value) => Math.round(value / bucket.weight)));
+    if (!ranked.length) return null;
+    const main = ranked[0];
+    const accent =
+      ranked.find(
+        (color) =>
+          color.reduce((distance, value, channel) => distance + (value - main[channel]) ** 2, 0) >
+          12000,
+      ) || main;
+    return [main, accent].map((color) => `rgb(${color.join(' ')})`);
+  } catch {
+    return null;
+  }
+}
 
 export function NowPlaying({
   player,
@@ -20,6 +66,8 @@ export function NowPlaying({
   const [panel, setPanel] = useState<'lyrics' | 'queue' | null>('lyrics');
   const [notice, setNotice] = useState('');
   const current = player.current;
+  const [palette, setPalette] = useState<{ track: string; colors: string[] } | null>(null);
+  const colors = palette?.track === current?.id ? palette?.colors : null;
   useEffect(() => {
     const timer = setTimeout(() => setNotice(''), 2500);
     return () => clearTimeout(timer);
@@ -79,6 +127,12 @@ export function NowPlaying({
       role="dialog"
       aria-modal="true"
       aria-label="全屏播放"
+      style={
+        {
+          '--cover-primary': colors?.[0] || '#35373f',
+          '--cover-accent': colors?.[1] || '#262a31',
+        } as CSSProperties
+      }
     >
       {current && (
         <div
@@ -107,6 +161,12 @@ export function NowPlaying({
               title={current.album || current.title}
               size={768}
               className="fullscreen-cover"
+              onImage={(image) => {
+                if (image.currentSrc !== new URL(coverUrl(current.id, 768), location.href).href)
+                  return;
+                const colors = coverPalette(image);
+                if (colors) setPalette({ track: current.id, colors });
+              }}
             />
             <div className="fullscreen-metadata">
               <FavoriteButton track={current} favorites={favorites} />
@@ -135,7 +195,7 @@ export function NowPlaying({
         <div className="fullscreen-quality">
           {current && <span className="format">{current.format.toUpperCase()}</span>}
           <span>
-            原音直放
+            {player.playbackLabel}
             <small>
               第 {player.index + 1} 首 / 共 {player.queue.length} 首
             </small>
@@ -143,6 +203,7 @@ export function NowPlaying({
         </div>
         <PlaybackControls player={player} />
         <div className="fullscreen-options">
+          <QualityControl player={player} />
           <VolumeControl player={player} />
           <div className="fullscreen-panel-switches" role="group" aria-label="全屏显示内容">
             <button
@@ -193,6 +254,14 @@ function LyricsPanel({ player }: { player: Player }) {
   const scroll = useRef<HTMLDivElement>(null);
   const lines = useRef<(HTMLButtonElement | null)[]>([]);
   useEffect(() => {
+    const changed = (event: Event) => {
+      if (event instanceof CustomEvent && event.detail === current?.id)
+        setRevision((value) => value + 1);
+    };
+    window.addEventListener('wildstring:lyrics-updated', changed);
+    return () => window.removeEventListener('wildstring:lyrics-updated', changed);
+  }, [current?.id]);
+  useEffect(() => {
     if (!current) return;
     const controller = new AbortController();
     setLyrics(null);
@@ -242,7 +311,9 @@ function LyricsPanel({ player }: { player: Player }) {
       ? '同名 LRC'
       : lyrics?.source === 'sidecar_text'
         ? '同名文本'
-        : '内嵌歌词';
+        : lyrics?.source === 'user'
+          ? '自定义歌词'
+          : '内嵌歌词';
   return (
     <div className="fullscreen-lyrics">
       <div className="lyrics-toolbar">
