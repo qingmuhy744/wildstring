@@ -1,4 +1,5 @@
-import { artist, time, type TrackPage } from './api';
+import { artist, listeningTime, time, type TrackPage } from './api';
+import { TrackActions, type TrackOperations } from './track-actions';
 import { Cover } from './cover';
 import type { Player } from './player';
 
@@ -7,11 +8,15 @@ export function TrackList({
   player,
   onNotice,
   revision,
+  operations,
+  showStats = false,
 }: {
   page: TrackPage;
   player: Player;
   onNotice: (notice: string) => void;
   revision: number;
+  operations: TrackOperations;
+  showStats?: boolean;
 }) {
   return (
     <div className="track-list" role="table" aria-label="歌曲列表">
@@ -53,6 +58,14 @@ export function TrackList({
             >
               <strong>{track.title}</strong>
               <small>{artist(track)}</small>
+              {showStats && (
+                <small className="track-stat">
+                  {track.play_count} 次播放 · 已听 {listeningTime(track.listened_ms)}
+                  {track.last_played_at
+                    ? ` · ${new Date(track.last_played_at).toLocaleDateString()} 听过`
+                    : ''}
+                </small>
+              )}
             </button>
           </div>
           <span className="album-column ellipsis" role="cell" title={track.album || ''}>
@@ -63,16 +76,12 @@ export function TrackList({
           </span>
           <time role="cell">{time(track.duration_ms / 1000)}</time>
           <span role="cell">
-            <button
-              className="add-button"
-              aria-label={`将 ${track.title} 加入队列`}
-              onClick={() => {
-                player.enqueue(track);
-                onNotice(`已加入队列：${track.title}`);
-              }}
-            >
-              ＋
-            </button>
+            <TrackActions
+              track={track}
+              player={player}
+              operations={operations}
+              onNotice={onNotice}
+            />
           </span>
         </div>
       ))}

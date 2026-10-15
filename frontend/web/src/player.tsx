@@ -1,9 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { artist, streamUrl, time, type Track } from './api';
 import { Cover } from './cover';
+import { FavoriteButton, type Favorites } from './favorites';
+import { ListeningTracker } from './listening';
 
 export function usePlayer() {
   const audio = useRef<HTMLAudioElement>(null);
+  const tracker = useRef(new ListeningTracker());
   const [queue, setQueue] = useState<Track[]>([]);
   const [index, setIndex] = useState(-1);
   const [playing, setPlaying] = useState(false);
@@ -21,7 +24,24 @@ export function usePlayer() {
 
   useEffect(() => {
     const element = audio.current;
+    const currentTracker = tracker.current;
+    const flush = () => {
+      if (element) {
+        currentTracker.sample(element);
+        currentTracker.report();
+      }
+    };
+    const timer = setInterval(flush, 5000);
+    window.addEventListener('pagehide', flush);
+    const visibility = () => {
+      if (document.visibilityState === 'hidden') flush();
+    };
+    document.addEventListener('visibilitychange', visibility);
     return () => {
+      clearInterval(timer);
+      window.removeEventListener('pagehide', flush);
+      document.removeEventListener('visibilitychange', visibility);
+      if (element) currentTracker.finish(element);
       element?.pause();
       element?.removeAttribute('src');
       element?.load();
@@ -41,6 +61,10 @@ export function usePlayer() {
   function play() {
     const element = audio.current;
     if (!element) return;
+    if (element.ended && queue[index]) {
+      start(queue, index);
+      return;
+    }
     const attempt = generation.current;
     element.play().catch((reason: DOMException) => {
       if (attempt !== generation.current || reason.name === 'AbortError') return;
@@ -55,6 +79,7 @@ export function usePlayer() {
     const element = audio.current;
     const track = tracks[target];
     if (!element || !track) return;
+    tracker.current.start(track, element);
     generation.current += 1;
     setQueue(tracks);
     setIndex(target);
@@ -75,6 +100,7 @@ export function usePlayer() {
 
   function seek(value: number) {
     if (audio.current && duration > 0) {
+      tracker.current.beforeSeek(audio.current);
       audio.current.currentTime = value;
       setPosition(value);
     }
@@ -177,6 +203,22 @@ export function usePlayer() {
     seek,
     toggle,
     setVolume,
+    playNext: (track: Track) => {
+      if (index < 0) {
+        start([track], 0);
+        return;
+      }
+      setQueue((items) => [...items.slice(0, index + 1), track, ...items.slice(index + 1)]);
+    },
+    move: (from: number, to: number) => {
+      if (from < 0 || to < 0 || from >= queue.length || to >= queue.length || from === to) return;
+      const next = [...queue];
+      next.splice(to, 0, next.splice(from, 1)[0]);
+      setQueue(next);
+      if (from === index) setIndex(to);
+      else if (from < index && to >= index) setIndex(index - 1);
+      else if (from > index && to <= index) setIndex(index + 1);
+    },
     enqueue: (track: Track) => {
       setQueue((items) => [...items, track]);
     },
@@ -187,18 +229,35 @@ export function usePlayer() {
     },
     audioEvents: {
       onPlay: () => setPlaying(true),
-      onPause: () => setPlaying(false),
+      onPause: () => {
+        if (audio.current) tracker.current.playing(audio.current, false);
+        setPlaying(false);
+      },
+      onSeeking: () => {
+        if (audio.current) tracker.current.beforeSeek(audio.current);
+      },
+      onSeeked: () => {
+        if (audio.current) tracker.current.afterSeek(audio.current);
+      },
       onPlaying: () => {
+        if (audio.current) tracker.current.playing(audio.current, true);
         setBuffering(false);
         setError('');
       },
-      onWaiting: () => setBuffering(true),
-      onTimeUpdate: () => setPosition(audio.current?.currentTime || 0),
+      onWaiting: () => {
+        if (audio.current) tracker.current.playing(audio.current, false);
+        setBuffering(true);
+      },
+      onTimeUpdate: () => {
+        if (audio.current) tracker.current.sample(audio.current);
+        setPosition(audio.current?.currentTime || 0);
+      },
       onDurationChange: () => {
         const value = audio.current?.duration;
         setDuration(value && Number.isFinite(value) ? value : 0);
       },
       onEnded: () => {
+        if (audio.current) tracker.current.finish(audio.current);
         setPlaying(false);
         setBuffering(false);
         step(1);
@@ -216,12 +275,14 @@ export function PlayerBar({
   queueOpen,
   onLyrics,
   lyricsOpen,
+  favorites,
 }: {
   player: Player;
   onQueue: () => void;
   queueOpen: boolean;
   onLyrics: () => void;
   lyricsOpen: boolean;
+  favorites: Favorites;
 }) {
   const { current, queue } = player;
   return (
@@ -257,6 +318,7 @@ export function PlayerBar({
       </div>
       <PlaybackControls player={player} />
       <div className="player-options">
+        {current && <FavoriteButton track={current} favorites={favorites} />}
         <button
           className={`lyrics-toggle icon-button ${lyricsOpen ? 'active' : ''}`}
           onClick={onLyrics}

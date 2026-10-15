@@ -15,6 +15,8 @@ from wildstring.auth import Auth
 from wildstring.config import Settings
 from wildstring.database import Database
 from wildstring.library.api import library_router
+from wildstring.library.listening import listening_router
+from wildstring.library.playlists import PlaylistStore, playlist_router
 from wildstring.library.repository import LibraryRepository
 
 logger = logging.getLogger(__name__)
@@ -24,12 +26,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     current = settings if settings is not None else Settings()
     database = Database(current.data_dir)
     auth = Auth(database, current)
+    repository = LibraryRepository(database, current.library_dir)
+    playlists = PlaylistStore(repository)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         current.data_dir.mkdir(parents=True, exist_ok=True)
         current.library_dir.mkdir(parents=True, exist_ok=True)
         database.initialize()
+        playlists.ensure_default()
         if (
             current.admin_password is not None
             and current.admin_password.get_secret_value()
@@ -81,7 +86,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
 
     app.include_router(auth.router())
-    app.include_router(library_router(LibraryRepository(database, current.library_dir), auth))
+    app.include_router(library_router(repository, auth))
+    app.include_router(listening_router(repository, auth))
+    app.include_router(playlist_router(playlists, auth))
 
     if current.web_dir is not None:
         app.mount("/", StaticFiles(directory=current.web_dir, html=True), name="web")

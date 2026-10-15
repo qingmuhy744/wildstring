@@ -6,7 +6,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 import uvicorn
-from mutagen.id3 import APIC, TALB, TIT2, TPE2, TRCK, USLT
+from mutagen.id3 import APIC, TALB, TIT2, TPE1, TPE2, TRCK, USLT
 from mutagen.mp3 import MP3
 from PIL import Image
 from pydantic import SecretStr
@@ -32,6 +32,9 @@ def main() -> None:
             tags = MP3(path)
             tags["TIT2"] = TIT2(encoding=3, text=[title])
             tags["TALB"] = TALB(encoding=3, text=["合成测试专辑"])
+            tags["TPE1"] = TPE1(
+                encoding=3, text=["野弦测试", "客席测试"] if index == 0 else ["野弦测试"]
+            )
             tags["TPE2"] = TPE2(encoding=3, text=["野弦测试"])
             tags["TRCK"] = TRCK(encoding=3, text=[str(index + 1)])
             tags["USLT::zho"] = USLT(

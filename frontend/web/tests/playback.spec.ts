@@ -1,22 +1,5 @@
-import { expect, test, type Page } from '@playwright/test';
-
-async function login(page: Page) {
-  await page.goto('/');
-  await page.getByLabel('密码', { exact: true }).fill('disposable-browser-test-password');
-  await page.getByRole('button', { name: '进入曲库' }).click();
-  await expect(page.getByRole('table', { name: '歌曲列表' }).getByRole('row')).toHaveCount(3);
-}
-
-async function audio(page: Page) {
-  return page.locator('audio').evaluate((element: HTMLAudioElement) => ({
-    paused: element.paused,
-    time: element.currentTime,
-    duration: element.duration,
-    volume: element.volume,
-    source: element.currentSrc,
-    ended: element.ended,
-  }));
-}
+import { expect, test } from '@playwright/test';
+import { audio, login } from './helpers';
 
 test('登录、中文搜索、空结果与退出', async ({ page }) => {
   await login(page);
@@ -62,6 +45,7 @@ test('真实播放、暂停、Range 跳转、切歌与队列', async ({ page }, 
   await expect.poll(async () => (await audio(page)).source).not.toBe(previous);
   await page.getByRole('button', { name: '上一首', exact: true }).click();
   await expect.poll(async () => (await audio(page)).source).toBe(previous);
+  await page.getByRole('button', { name: '歌曲操作 晴天测试曲', exact: true }).click();
   await page.getByRole('button', { name: '将 晴天测试曲 加入队列', exact: true }).click();
   await page.getByRole('button', { name: '播放队列', exact: true }).last().click();
   await expect(
@@ -150,7 +134,7 @@ test('同名 LRC、歌词点击跳转、跟随高亮与切歌后的内嵌歌词'
   await page.getByRole('button', { name: '播放 晴天测试曲', exact: true }).click();
   await page.getByRole('button', { name: '显示歌词', exact: true }).click();
   const panel = page.getByRole('dialog', { name: '全屏播放', exact: true });
-  await expect(panel).toContainText('同名 LRC · 逐行同步');
+  await expect(panel.locator('.lyrics-toolbar > span')).toHaveText('同名 LRC');
   await expect(panel.locator('[aria-current="true"]')).toHaveText('侧车第一行');
   await panel.getByRole('button', { name: '跳转到 0:06：侧车第三行', exact: true }).click();
   await expect.poll(async () => (await audio(page)).time).toBeGreaterThanOrEqual(5.9);
@@ -165,7 +149,7 @@ test('同名 LRC、歌词点击跳转、跟随高亮与切歌后的内嵌歌词'
   await panel.getByRole('button', { name: '收起全屏播放' }).click();
   await page.getByRole('button', { name: '播放 夜晚测试曲', exact: true }).click();
   await page.getByRole('button', { name: '全屏播放', exact: true }).click();
-  await expect(panel).toContainText('内嵌歌词 · 逐行同步');
+  await expect(panel.locator('.lyrics-toolbar > span')).toHaveText('内嵌歌词');
   await expect(panel.locator('[aria-current="true"]')).toHaveText('内嵌第一行');
   await expect(panel).not.toContainText('侧车第一行');
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
@@ -186,7 +170,7 @@ test('纯文本和缺失歌词不阻断播放', async ({ page }) => {
   await page.getByRole('button', { name: '播放全部', exact: true }).click();
   await page.getByRole('button', { name: '显示歌词', exact: true }).click();
   const panel = page.getByRole('dialog', { name: '全屏播放', exact: true });
-  await expect(panel).toContainText('内嵌歌词 · 纯文本');
+  await expect(panel.locator('.lyrics-toolbar > span')).toHaveText('内嵌歌词');
   await expect(panel).toContainText('纯文本没有虚构时间轴');
   await expect(panel.locator('[aria-current="true"]')).toHaveCount(0);
   await page.unroute('**/tracks/*/lyrics');
@@ -231,6 +215,12 @@ test('全屏展开收起连续播放、切歌、焦点边界与 Esc 返回', asy
   expect((await audio(page)).paused).toBe(false);
   await dialog.getByRole('button', { name: '暂停', exact: true }).click();
   const paused = await audio(page);
+  const viewport = page.viewportSize()!;
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(dialog.getByRole('button', { name: '收起全屏播放' })).toBeInViewport();
+  await expect(dialog.locator('.fullscreen-cover')).toBeInViewport({ ratio: 1 });
+  expect(await dialog.evaluate((node) => node.scrollLeft === 0 && node.scrollTop === 0)).toBe(true);
+  await page.setViewportSize(viewport);
   await dialog.getByRole('button', { name: '收起全屏播放' }).click();
   await expect(dialog).toHaveCount(0);
   await expect(entry).toBeFocused();
@@ -248,7 +238,7 @@ test('全屏展开收起连续播放、切歌、焦点边界与 Esc 返回', asy
   expect(await page.evaluate(() => !!document.activeElement?.closest('[role="dialog"]'))).toBe(
     true,
   );
-  await expect(dialog).toContainText('同名 LRC · 逐行同步');
+  await expect(dialog.locator('.lyrics-toolbar > span')).toHaveText('同名 LRC');
   await dialog.getByRole('button', { name: '暂停', exact: true }).click();
   await dialog.getByLabel('播放进度').focus();
   await dialog.getByLabel('播放进度').press('Home');

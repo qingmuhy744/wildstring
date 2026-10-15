@@ -8,6 +8,7 @@ from uuid import uuid4
 
 from wildstring.database import Database
 from wildstring.library.albums import album_key
+from wildstring.library.artists import ARTIST_CREDITS, ARTIST_SUMMARY, configure_artist_queries
 from wildstring.library.metadata import Metadata, normalize
 
 COUNTERS = ("visited", "added", "updated", "unchanged", "errors", "missing", "skipped")
@@ -92,6 +93,7 @@ class LibraryRepository:
             path=path,
             size_bytes=size,
             mtime_ns=mtime,
+            added_at=now(),
             seen_run=run_id,
             search_text=normalize(
                 " ".join(
@@ -114,11 +116,11 @@ class LibraryRepository:
                 """INSERT INTO tracks (
                     id, library_id, path, title, title_source, artists, album, album_artists,
                     track_number, disc_number, duration_ms, format, sample_rate, channels,
-                    has_cover, size_bytes, mtime_ns, status, seen_run, search_text, album_id
+                    has_cover, size_bytes, mtime_ns, status, seen_run, search_text, album_id, added_at
                 ) VALUES (
                     :id, :library_id, :path, :title, :title_source, :artists, :album, :album_artists,
                     :track_number, :disc_number, :duration_ms, :format, :sample_rate, :channels,
-                    :has_cover, :size_bytes, :mtime_ns, 'available', :seen_run, :search_text, :album_id
+                    :has_cover, :size_bytes, :mtime_ns, 'available', :seen_run, :search_text, :album_id, :added_at
                 ) ON CONFLICT(library_id, path) DO UPDATE SET
                     title=excluded.title, title_source=excluded.title_source, artists=excluded.artists,
                     album=excluded.album, album_artists=excluded.album_artists,
@@ -146,25 +148,70 @@ class LibraryRepository:
         for key in ("artists", "album_artists"):
             result[key] = json.loads(result[key])
         result["has_cover"] = bool(result["has_cover"])
+        result["loved"] = bool(result["loved"])
+        result.pop("loved_at", None)
         return result
 
     def tracks(
-        self, q: str = "", limit: int = 50, offset: int = 0, *, album_id: str | None = None
+        self,
+        q: str = "",
+        limit: int = 50,
+        offset: int = 0,
+        *,
+        album_id: str | None = None,
+        artist_id: str | None = None,
+        played_only: bool = False,
+        sort: str = "title",
     ) -> dict:
         query = normalize(q).replace("\\", "\\\\").replace("%", r"\%").replace("_", r"\_")
-        parameters = (self.library_id(), query, f"%{query}%", album_id, album_id)
+        parameters = {
+            "library_id": self.library_id(),
+            "query": query,
+            "pattern": f"%{query}%",
+            "album_id": album_id,
+            "artist_id": artist_id,
+            "limit": limit,
+            "offset": offset,
+            "played_only": played_only,
+            "sort": sort,
+        }
         with self.database.connect() as connection:
+            configure_artist_queries(connection)
             total = connection.execute(
-                """SELECT count(*) FROM tracks WHERE library_id = ? AND status = 'available'
-                AND (? = '' OR search_text LIKE ? ESCAPE '\\') AND (? IS NULL OR album_id = ?)""",
+                "".join(
+                    (
+                        ARTIST_CREDITS,
+                        """SELECT count(*) FROM tracks
+                WHERE library_id = :library_id AND status = 'available'
+                AND (:query = '' OR search_text LIKE :pattern ESCAPE '\\')
+                AND (:album_id IS NULL OR album_id = :album_id)
+                AND (:played_only = 0 OR last_played_at IS NOT NULL)
+                AND (:artist_id IS NULL OR id IN
+                    (SELECT track_id FROM artist_credits WHERE artist_id = :artist_id))""",
+                    )
+                ),
                 parameters,
             ).fetchone()[0]
             rows = connection.execute(
-                """SELECT * FROM tracks WHERE library_id = ? AND status = 'available'
-                AND (? = '' OR search_text LIKE ? ESCAPE '\\') AND (? IS NULL OR album_id = ?)
-                ORDER BY CASE WHEN ? THEN COALESCE(disc_number, 1) END,
-                CASE WHEN ? THEN COALESCE(track_number, 2147483647) END, title, id LIMIT ? OFFSET ?""",
-                (*parameters, bool(album_id), bool(album_id), limit, offset),
+                "".join(
+                    (
+                        ARTIST_CREDITS,
+                        """SELECT * FROM tracks
+                WHERE library_id = :library_id AND status = 'available'
+                AND (:query = '' OR search_text LIKE :pattern ESCAPE '\\')
+                AND (:album_id IS NULL OR album_id = :album_id)
+                AND (:played_only = 0 OR last_played_at IS NOT NULL)
+                AND (:artist_id IS NULL OR id IN
+                    (SELECT track_id FROM artist_credits WHERE artist_id = :artist_id))
+                ORDER BY CASE WHEN :sort = 'play_count' THEN play_count END DESC,
+                CASE WHEN :sort = 'listened_ms' THEN listened_ms END DESC,
+                CASE WHEN :sort = 'last_played_at' THEN last_played_at END DESC,
+                CASE WHEN :album_id IS NOT NULL THEN COALESCE(disc_number, 1) END,
+                CASE WHEN :album_id IS NOT NULL THEN COALESCE(track_number, 2147483647) END,
+                title, id LIMIT :limit OFFSET :offset""",
+                    )
+                ),
+                parameters,
             ).fetchall()
         return {
             "items": [self.public_track(dict(row)) for row in rows],
@@ -211,26 +258,113 @@ class LibraryRepository:
         result["cover_track_id"] = members[0]["id"]
         return result
 
-    def albums(self, q: str = "", limit: int = 50, offset: int = 0) -> dict:
+    def albums(
+        self,
+        q: str = "",
+        limit: int = 50,
+        offset: int = 0,
+        *,
+        artist_id: str | None = None,
+    ) -> dict:
         query = normalize(q).replace("\\", "\\\\").replace("%", r"\%").replace("_", r"\_")
-        parameters = (self.library_id(), query, f"%{query}%")
+        parameters = {
+            "library_id": self.library_id(),
+            "query": query,
+            "pattern": f"%{query}%",
+            "artist_id": artist_id,
+            "limit": limit,
+            "offset": offset,
+        }
         with self.database.connect() as connection:
+            configure_artist_queries(connection)
             total = connection.execute(
-                """SELECT count(*) FROM (SELECT album_id FROM tracks
-                WHERE library_id = ? AND status = 'available' GROUP BY album_id
-                HAVING ? = '' OR max(search_text LIKE ? ESCAPE '\\'))""",
+                "".join(
+                    (
+                        ARTIST_CREDITS,
+                        """SELECT count(*) FROM (SELECT album_id FROM tracks
+                WHERE library_id = :library_id AND status = 'available'
+                AND (:artist_id IS NULL OR id IN
+                    (SELECT track_id FROM artist_credits WHERE artist_id = :artist_id))
+                GROUP BY album_id
+                HAVING :query = '' OR max(search_text LIKE :pattern ESCAPE '\\'))""",
+                    )
+                ),
                 parameters,
             ).fetchone()[0]
             rows = connection.execute(
-                """SELECT album_id AS id, min(COALESCE(NULLIF(album, ''), '未命名专辑')) AS title,
+                "".join(
+                    (
+                        ARTIST_CREDITS,
+                        """SELECT album_id AS id,
+                min(COALESCE(NULLIF(album, ''), '未命名专辑')) AS title,
                 count(*) AS track_count, sum(duration_ms) AS duration_ms FROM tracks
-                WHERE library_id = ? AND status = 'available' GROUP BY album_id
-                HAVING ? = '' OR max(search_text LIKE ? ESCAPE '\\')
-                ORDER BY title, album_id LIMIT ? OFFSET ?""",
-                (*parameters, limit, offset),
+                WHERE library_id = :library_id AND status = 'available'
+                AND (:artist_id IS NULL OR id IN
+                    (SELECT track_id FROM artist_credits WHERE artist_id = :artist_id))
+                GROUP BY album_id
+                HAVING :query = '' OR max(search_text LIKE :pattern ESCAPE '\\')
+                ORDER BY title, album_id LIMIT :limit OFFSET :offset""",
+                    )
+                ),
+                parameters,
             ).fetchall()
             items = [self._album(connection, row) for row in rows]
         return {"items": items, "total": total, "limit": limit, "offset": offset}
+
+    def artists(self, q: str = "", limit: int = 50, offset: int = 0) -> dict:
+        query = normalize(q).replace("\\", "\\\\").replace("%", r"\%").replace("_", r"\_")
+        parameters = {
+            "library_id": self.library_id(),
+            "query": query,
+            "pattern": f"%{query}%",
+            "limit": limit,
+            "offset": offset,
+        }
+        with self.database.connect() as connection:
+            configure_artist_queries(connection)
+            total = connection.execute(
+                "".join(
+                    (
+                        ARTIST_CREDITS,
+                        """SELECT count(*) FROM (SELECT artist_id FROM artist_credits
+                GROUP BY artist_id HAVING :query = '' OR max(normalized(name) LIKE :pattern ESCAPE '\\'))""",
+                    )
+                ),
+                parameters,
+            ).fetchone()[0]
+            rows = connection.execute(
+                "".join(
+                    (
+                        ARTIST_CREDITS,
+                        ARTIST_SUMMARY,
+                        """GROUP BY c.artist_id
+                HAVING :query = '' OR max(normalized(c.name) LIKE :pattern ESCAPE '\\')
+                ORDER BY normalized(name), id LIMIT :limit OFFSET :offset""",
+                    )
+                ),
+                parameters,
+            ).fetchall()
+        return {
+            "items": [dict(row) for row in rows],
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+        }
+
+    def artist(self, artist_id: str) -> dict | None:
+        with self.database.connect() as connection:
+            configure_artist_queries(connection)
+            row = connection.execute(
+                "".join(
+                    (
+                        ARTIST_CREDITS,
+                        ARTIST_SUMMARY,
+                        """WHERE c.artist_id = :artist_id GROUP BY c.artist_id""",
+                    )
+                ),
+                {"library_id": self.library_id(), "artist_id": artist_id},
+            ).fetchone()
+        return dict(row) if row else None
 
     def album(self, album_id: str) -> dict | None:
         with self.database.connect() as connection:

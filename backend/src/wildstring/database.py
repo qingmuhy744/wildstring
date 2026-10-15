@@ -8,7 +8,48 @@ from pathlib import Path
 
 from wildstring.library.albums import album_key
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
+PERSONAL_SCHEMA = """
+BEGIN IMMEDIATE;
+ALTER TABLE tracks ADD COLUMN loved INTEGER NOT NULL DEFAULT 0 CHECK(loved IN (0, 1));
+ALTER TABLE tracks ADD COLUMN loved_at TEXT;
+ALTER TABLE tracks ADD COLUMN play_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE tracks ADD COLUMN listened_ms INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE tracks ADD COLUMN last_played_at TEXT;
+ALTER TABLE tracks ADD COLUMN added_at TEXT NOT NULL DEFAULT '';
+UPDATE tracks SET added_at = COALESCE(
+    (SELECT started_at FROM scan_runs WHERE id = tracks.seen_run), strftime('%Y-%m-%dT%H:%M:%f+00:00', 'now')
+);
+CREATE TABLE playlists (
+    id TEXT PRIMARY KEY,
+    library_id TEXT NOT NULL REFERENCES libraries(id),
+    name TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK(kind IN ('manual', 'smart', 'favorites')),
+    definition TEXT,
+    version INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX playlists_library ON playlists(library_id);
+CREATE UNIQUE INDEX one_favorites_playlist ON playlists(library_id) WHERE kind = 'favorites';
+CREATE TABLE playlist_tracks (
+    playlist_id TEXT NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,
+    track_id TEXT NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
+    position INTEGER NOT NULL CHECK(position >= 0),
+    PRIMARY KEY(playlist_id, track_id),
+    UNIQUE(playlist_id, position)
+);
+CREATE TABLE listening_sessions (
+    id TEXT PRIMARY KEY,
+    track_id TEXT NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
+    started_at REAL NOT NULL,
+    reported_ms INTEGER NOT NULL DEFAULT 0,
+    counted INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX listening_track ON listening_sessions(track_id);
+PRAGMA user_version = 5;
+COMMIT;
+"""
 IMPORT_SCHEMA = """
 BEGIN IMMEDIATE;
 CREATE TABLE IF NOT EXISTS import_runs (
@@ -168,6 +209,8 @@ class Database:
                 connection.commit()
             if current < 4:
                 connection.executescript(IMPORT_SCHEMA)
+            if current < 5:
+                connection.executescript(PERSONAL_SCHEMA)
             connection.execute("PRAGMA journal_mode = WAL")
 
     def check_ready(self) -> bool:

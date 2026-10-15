@@ -1,9 +1,18 @@
 import { useEffect, useRef, useState } from 'react';
 import { api, artist, time, type Lyrics } from './api';
 import { Cover, coverUrl } from './cover';
+import { FavoriteButton, type Favorites } from './favorites';
 import { PlaybackControls, PlaybackError, VolumeControl, type Player } from './player';
 
-export function NowPlaying({ player, onClose }: { player: Player; onClose: () => void }) {
+export function NowPlaying({
+  player,
+  onClose,
+  favorites,
+}: {
+  player: Player;
+  onClose: () => void;
+  favorites: Favorites;
+}) {
   const dialog = useRef<HTMLElement>(null);
   const close = useRef<HTMLButtonElement>(null);
   const current = player.current;
@@ -92,6 +101,7 @@ export function NowPlaying({ player, onClose }: { player: Player; onClose: () =>
               className="fullscreen-cover"
             />
             <div className="fullscreen-metadata">
+              <FavoriteButton track={current} favorites={favorites} />
               <h1>{current.title}</h1>
               <p>{artist(current)}</p>
               <span>{current.album || '未知专辑'}</span>
@@ -182,11 +192,7 @@ function LyricsPanel({ player }: { player: Player }) {
   return (
     <div className="fullscreen-lyrics">
       <div className="lyrics-toolbar">
-        <span>
-          {lyrics && lyrics.kind !== 'none'
-            ? `${source} · ${lyrics.kind === 'synced' ? '逐行同步' : '纯文本'}`
-            : '歌词'}
-        </span>
+        <span>{lyrics && lyrics.kind !== 'none' ? source : '歌词'}</span>
         <button
           className="text-button"
           onClick={() => setFollow(true)}
