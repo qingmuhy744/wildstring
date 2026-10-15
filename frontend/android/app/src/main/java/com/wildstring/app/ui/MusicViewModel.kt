@@ -214,7 +214,12 @@ class MusicViewModel @Inject constructor(
     }
     fun playQueue(index: Int) { controller?.let { it.seekToDefaultPosition(index); it.prepare(); it.play() } }
     fun removeQueue(index: Int) { controller?.removeMediaItem(index) }
-    fun moveQueue(index: Int, direction: Int) { controller?.let { val to = index + direction; if (to in 0 until it.mediaItemCount) it.moveMediaItem(index, to) } }
+    fun moveQueue(entryId: String, toIndex: Int) {
+        controller?.let { c ->
+            val from = (0 until c.mediaItemCount).firstOrNull { c.getMediaItemAt(it).mediaId == entryId } ?: return
+            if (toIndex in 0 until c.mediaItemCount && from != toIndex) c.moveMediaItem(from, toIndex)
+        }
+    }
     fun favorite(track: Track) = viewModelScope.launch {
         if (!favoriteJobs.add(track.id)) return@launch
         try { val updated = repository.favorite(track); invalidateCatalog(); mutable.update { s -> s.copy(current = if (s.current?.id == track.id) updated else s.current, tracks = s.tracks.map { if (it.id == track.id) updated else it }) } }

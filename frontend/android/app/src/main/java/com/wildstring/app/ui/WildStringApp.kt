@@ -396,23 +396,6 @@ private fun LyricsPanel(vm: MusicViewModel, state: MusicState, modifier: Modifie
 }
 
 @Composable
-private fun QueuePanel(vm: MusicViewModel, state: MusicState, modifier: Modifier) {
-    Column(modifier) {
-        Text("播放队列 · ${state.queue.size}", Modifier.padding(16.dp), style = MaterialTheme.typography.titleMedium)
-        LazyColumn(Modifier.weight(1f, fill = false)) {
-            items(state.queue, key = { it.entryId }) { row -> Row(Modifier.animateItem().fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f).clickable { vm.playQueue(row.index) }.padding(vertical = 12.dp, horizontal = 16.dp)) {
-                    Text(row.title, color = if (row.entryId == state.entryId) Accent else MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text(row.artist, color = Muted, fontSize = 11.sp, maxLines = 1)
-                }
-                IconButton(tactile(vm) { vm.moveQueue(row.index, -1) }, enabled = row.index > 0) { Icon(Icons.Default.KeyboardArrowUp, "向前移动") }
-                IconButton(tactile(vm) { vm.moveQueue(row.index, 1) }, enabled = row.index < state.queue.lastIndex) { Icon(Icons.Default.KeyboardArrowDown, "向后移动") }
-                IconButton(tactile(vm) { vm.removeQueue(row.index) }) { Icon(Icons.Default.Close, "移除${row.title}") }
-            } }
-        }
-    }
-}
-@Composable
 private fun ErrorMessage(message: String, retry: () -> Unit) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Text(message, Modifier.weight(1f), color = MaterialTheme.colorScheme.error, fontSize = 12.sp); TextButton(retry) { Text("重试") } }
 }

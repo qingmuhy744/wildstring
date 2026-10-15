@@ -189,6 +189,38 @@ class NativePlaybackTest {
             compose.runOnIdle { player.repeatMode = Player.REPEAT_MODE_ONE; player.play(); player.addListener(listener) }
             compose.waitUntil(10_000) { compose.runOnIdle { player.isPlaying && player.currentPosition > 1000 } }
             val underrunsBefore = vm.playbackHealth.audioUnderruns.get()
+            val playingEntry = compose.runOnIdle { player.currentMediaItem!!.mediaId }
+            compose.runOnIdle { repeat(2) { vm.addToQueue(vm.state.value.current!!) } }
+            compose.waitUntil(10_000) { vm.state.value.queue.size == 3 }
+            val originalOrder = vm.state.value.queue.map { it.entryId }
+            fun dragEntry(from: String, to: String) {
+                val queue = compose.onNodeWithTag("playback-queue")
+                val bounds = queue.fetchSemanticsNode().boundsInRoot
+                val start = compose.onNodeWithTag("queue-handle-$from").fetchSemanticsNode().boundsInRoot.center - bounds.topLeft
+                val end = compose.onNodeWithTag("queue-handle-$to").fetchSemanticsNode().boundsInRoot.center - bounds.topLeft
+                queue.performTouchInput { swipe(start, end, durationMillis = 600) }
+            }
+            compose.onNodeWithContentDescription("播放队列").performClick()
+            val queuePosition = compose.runOnIdle { player.currentPosition }
+            dragEntry(playingEntry, originalOrder.last())
+            compose.waitUntil(10_000) { vm.state.value.queue.last().entryId == playingEntry }
+            assertEquals(playingEntry, compose.runOnIdle { player.currentMediaItem!!.mediaId })
+            assertTrue(compose.runOnIdle { player.isPlaying })
+            assertTrue("Reordering must retain playback position", compose.runOnIdle { player.currentPosition } >= queuePosition)
+            compose.waitUntil(10_000) { runBlocking { vm.repository.database.queue().entries().map { it.entryId } } == vm.state.value.queue.map { it.entryId } }
+            capture("phone-queue.png")
+            compose.runOnIdle { compose.activity.onBackPressedDispatcher.onBackPressed() }
+            try {
+                shellForTest("wm size 1600x1000"); shellForTest("wm density 160")
+                compose.waitUntil(15_000) { compose.onAllNodesWithTag("player-tablet").fetchSemanticsNodes().isNotEmpty() }
+                compose.onNodeWithContentDescription("播放队列").performClick()
+                dragEntry(playingEntry, originalOrder[1])
+                compose.waitUntil(10_000) { vm.state.value.queue.first().entryId == playingEntry }
+                assertEquals(playingEntry, compose.runOnIdle { player.currentMediaItem!!.mediaId })
+                capture("tablet-queue.png", resized = true)
+                compose.onNodeWithContentDescription("播放队列").performClick()
+            } finally { shellForTest("wm size reset"); shellForTest("wm density reset") }
+            compose.runOnIdle { player.removeMediaItems(1, player.mediaItemCount) }
             // Exercise actual controls during playback and inspect both appearance options.
             compose.onNodeWithContentDescription("返回封面").performClick()
             compose.onNodeWithContentDescription("收起播放器").performClick()
