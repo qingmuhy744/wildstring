@@ -22,7 +22,7 @@
 
 第一阶段使用 **Python 3.12 / FastAPI + React / TypeScript**，提供自托管服务与网页端。MVP 主线：导入本地曲库 → 浏览与播放 → 查看本地歌词 → 自然语言找歌 → 预览、保存并播放 AI 歌单。
 
-当前已有工程基座、SQLite 托管曲库、只读源导入与目录整理、管理员登录、歌曲/专辑/艺人视图、封面与本地滚动歌词，以及原音串流和网页队列。支持全屏播放、下一首播放、队列排序、♥ 收藏、普通/规则歌单与收听次数/时长记录。已增加管理入口、网页导入/扫描、任务历史和单曲元数据覆盖编辑；AI API 配置与连接测试已接入设置。**批量整理、标签写回、转码和 Agent 业务仍待实现。** 详见 [MVP 范围](docs/product/scope.md)。
+当前已有工程基座、SQLite 托管曲库、只读源导入与目录整理、管理员登录、歌曲/专辑/艺人视图、封面与本地滚动歌词，以及原音串流和网页队列。支持全屏播放、下一首播放、队列排序、♥ 收藏、普通/规则歌单与收听次数/时长记录。已增加管理入口、网页导入/扫描、任务历史和单曲元数据覆盖编辑；AI API 配置与连接测试已接入设置。现已接入自动发现、导入预检、待整理，以及 WAV/CUE 到逐曲 FLAC 的校验转换，见 [自动导入](contracts/automatic-import.md)。**批量整理、已有文件标签写回、播放转码和 Agent 业务仍待实现。** 详见 [MVP 范围](docs/product/scope.md)。
 
 服务端元数据整理将支持手动/批量编辑、差异预览和显式写回，减少使用 mp3tag 前后下载与上传整首音频的重复传输，见 [整理设计](docs/architecture/metadata-repair.md)。
 
@@ -49,6 +49,7 @@ make ci            # 提交检查、后端测试、Web 构建、锁文件核验
 
 ```sh
 make docker-up       # 构建、启动并等待健康检查
+make docker-test     # 用容器内 FFmpeg 完整验证后端与无损分轨
 make docker-smoke    # 实测 API、Web、FFmpeg、非 root 与只读音乐目录
 make docker-import   # 从只读源导入到持久卷 /data/library
 make docker-scan     # 重扫托管副本

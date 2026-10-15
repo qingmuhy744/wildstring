@@ -30,6 +30,7 @@ jobs:
         with:
           version: "0.9.18"
       - run: make setup
+      - run: sudo apt-get update --error-on=any && sudo apt-get install -y --no-install-recommends ffmpeg
       - run: npm --prefix frontend/web exec -- playwright install --with-deps chromium
       - run: make ci
 
@@ -39,7 +40,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
-      - run: make docker-up docker-smoke
+      - run: make docker-up docker-smoke docker-test
       - if: failure()
         run: make docker-logs LOG_ARGS='--tail=200'
       - if: always()

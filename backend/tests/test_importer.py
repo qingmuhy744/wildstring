@@ -87,7 +87,7 @@ def test_repeat_import_preserves_managed_edits_and_source_change_is_reported(set
     assert target.read_bytes() == edited
 
 
-def test_collisions_get_fingerprint_suffixes_and_identical_sources_deduplicate(settings):
+def test_collisions_require_review_and_identical_sources_deduplicate(settings):
     first = source(settings, "a.flac")
     second = source(settings, "b.flac")
     tags = FLAC(second)
@@ -95,7 +95,14 @@ def test_collisions_get_fingerprint_suffixes_and_identical_sources_deduplicate(s
     tags.save()
     shutil.copyfile(first, settings.music_dir / "c.flac")
     report = import_music(settings)
-    assert report["counts"]["copied"] == 2 and report["counts"]["duplicates"] == 1
+    assert report["counts"]["copied"] == 1 and report["counts"]["duplicates"] == 1
+    from wildstring.library.intake import Intake, IntakeApproval
+
+    intake = Intake(settings, store(settings))
+    item = intake.items()["items"][0]
+    assert item["issues"] == ["release_collision"]
+    intake.approve(item["id"], IntakeApproval(version=item["version"], overrides={}))
+    assert import_music(settings)["counts"]["copied"] == 1
     tracks = store(settings).tracks()["items"]
     assert len(tracks) == 2
     assert len({t["path"] for t in tracks}) == 2

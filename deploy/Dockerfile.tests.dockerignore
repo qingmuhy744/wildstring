@@ -1,0 +1,14 @@
+**
+!backend/
+!backend/pyproject.toml
+!backend/uv.lock
+!backend/src/
+!backend/src/**
+!backend/tests/
+!backend/tests/**
+!tests/
+!tests/fixtures/
+!tests/fixtures/audio/
+!tests/fixtures/audio/**
+**/__pycache__
+**/.pytest_cache

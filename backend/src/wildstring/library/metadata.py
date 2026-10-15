@@ -11,6 +11,7 @@ from mutagen import File
 from mutagen.flac import FLAC
 from mutagen.mp3 import MP3
 from mutagen.mp4 import MP4
+from mutagen.wave import WAVE
 
 SUPPORTED_SUFFIXES = {".mp3", ".flac", ".m4a"}
 
@@ -42,12 +43,12 @@ def number(value: str | None) -> int | None:
 
 def read_metadata(source: BinaryIO, path: Path) -> Metadata:
     audio = File(source)
-    if not isinstance(audio, MP3 | FLAC | MP4):
+    if not isinstance(audio, MP3 | FLAC | MP4 | WAVE):
         raise ValueError("Unsupported or invalid audio")
     tags = audio.tags or {}
 
     def values(id3: str, vorbis: str, mp4: str) -> list[str]:
-        if isinstance(audio, MP3):
+        if isinstance(audio, MP3 | WAVE):
             frame = tags.get(id3)
             raw = frame.text if frame is not None else []
         else:
@@ -68,6 +69,8 @@ def read_metadata(source: BinaryIO, path: Path) -> Metadata:
         raise ValueError("Audio has no valid duration")
     if isinstance(audio, MP3):
         format_name, cover = "mp3", bool(audio.tags and audio.tags.getall("APIC"))
+    elif isinstance(audio, WAVE):
+        format_name, cover = "wav", bool(audio.tags and audio.tags.getall("APIC"))
     elif isinstance(audio, FLAC):
         format_name, cover = "flac", bool(audio.pictures)
     else:

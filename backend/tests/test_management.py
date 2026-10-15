@@ -165,6 +165,8 @@ def test_v5_migration_preserves_identity_and_personal_data(settings, authenticat
         connection.execute("DROP TABLE track_metadata")
         connection.execute("DROP TABLE admin_jobs")
         connection.execute("DROP TABLE library_preferences")
+        connection.execute("DROP TABLE intake_settings")
+        connection.execute("DROP TABLE intake_items")
         connection.execute("PRAGMA user_version=5")
     db.initialize()
     with authenticated_client(settings) as client:
@@ -175,7 +177,7 @@ def test_v5_migration_preserves_identity_and_personal_data(settings, authenticat
         assert record["version"] == 1
         scan_library(settings, full=True)
         assert client.get(metadata_url(track)).json()["version"] == 1
-        assert client.get("/api/v1/manage/overview").json()["schema_version"] == 6
+        assert client.get("/api/v1/manage/overview").json()["schema_version"] == 7
 
 
 def test_real_import_scan_progress_and_bytes_unchanged(settings, authenticated_client):

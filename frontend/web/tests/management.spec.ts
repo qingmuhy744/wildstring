@@ -145,6 +145,68 @@ test('导入任务关闭页面继续处理、持久历史与逐文件错误', as
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
 
+test('自动导入设置、待整理快照、冲突反馈与手机布局', async ({ page }, info) => {
+  await login(page);
+  const submitted = await (
+    await page.request.post('/api/v1/manage/jobs', { headers, data: { kind: 'import' } })
+  ).json();
+  await expect
+    .poll(
+      async () =>
+        (await (await page.request.get(`/api/v1/manage/jobs/${submitted.id}`)).json()).status,
+    )
+    .not.toMatch(/^(queued|running)$/);
+  await page.getByRole('button', { name: '播放全部', exact: true }).click();
+  await expect.poll(async () => (await audio(page)).time).toBeGreaterThan(0.2);
+  await page.getByRole('button', { name: '暂停', exact: true }).click();
+  const before = await audio(page);
+  await manage(page, info.project.name === 'mobile');
+  await page.getByRole('button', { name: '导入与整理', exact: true }).click();
+  const original = await (await page.request.get('/api/v1/manage/intake/settings')).json();
+  try {
+    await page.getByLabel('自动发现并导入新音乐', { exact: true }).check();
+    await page.getByLabel('检查间隔（秒）', { exact: true }).fill('15');
+    await page.getByLabel('等待文件稳定（秒）', { exact: true }).fill('5');
+    await page.getByRole('button', { name: '保存自动导入设置', exact: true }).click();
+    await expect(page.getByText('自动导入设置已保存。', { exact: true })).toBeVisible();
+    const response = await (await page.request.get('/api/v1/manage/intake/items?limit=100')).json();
+    const item = response.items.find(
+      (value: { source_path: string }) => value.source_path === `待整理-${info.project.name}.mp3`,
+    );
+    expect(item.can_approve).toBe(true);
+    const row = page.locator('.intake-list > li').filter({ hasText: item.source_path });
+    await row.getByRole('button', { name: '补充信息', exact: true }).click();
+    const form = row.getByRole('form', { name: '补充导入信息', exact: true });
+    await form.getByLabel('歌名', { exact: true }).fill('补充后的歌名');
+    await form.getByLabel('歌曲艺人（每行一位）', { exact: true }).fill('野弦测试');
+    await form.getByLabel('专辑', { exact: true }).fill('补充后的专辑');
+    await page.screenshot({ path: `../../artifacts/intake-review-${info.project.name}.png` });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+      true,
+    );
+    // Hold the old view while another session invalidates it; the real approval API must reject it.
+    await page.route('**/api/v1/manage/intake/items?*', (route) =>
+      route.fulfill({ json: { ...response, limit: 20, offset: 0 } }),
+    );
+    const ignored = await page.request.post(`/api/v1/manage/intake/items/${item.id}/ignore`, {
+      headers,
+      data: { version: item.version },
+    });
+    expect(ignored.ok()).toBe(true);
+    await form.getByRole('button', { name: '确认信息并继续导入', exact: true }).click();
+    await expect(page.getByRole('alert')).toBeVisible();
+    expect(await audio(page)).toEqual(before);
+    expect((await tracks(page)).length).toBe(2);
+    await page.unroute('**/api/v1/manage/intake/items?*');
+  } finally {
+    const current = await (await page.request.get('/api/v1/manage/intake/settings')).json();
+    await page.request.put('/api/v1/manage/intake/settings', {
+      headers,
+      data: { ...original, version: current.version },
+    });
+  }
+});
+
 test('AI 服务保存、密钥不回显、连接测试与清除密钥', async ({ page }, info) => {
   await login(page);
   await manage(page, info.project.name === 'mobile');

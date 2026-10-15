@@ -12,7 +12,7 @@ export PRE_COMMIT_HOME ?= $(CURDIR)/.cache/pre-commit
 RUN = $(UV) run --frozen --project backend
 DOCKER = $(COMPOSE) --project-directory "$(CURDIR)" --env-file .env -p "$(PROJECT)" -f deploy/compose.yaml
 
-.PHONY: help env setup sync dev dev-web scan import-music admin check hooks-check lint format format-check security test build-web icons browser-install test-web web-test-server ci health docker-config docker-build docker-up docker-pull docker-down docker-status docker-logs docker-smoke docker-scan docker-import docker-admin
+.PHONY: help env setup sync dev dev-web scan import-music admin check hooks-check lint format format-check security test build-web icons browser-install test-web web-test-server ci health docker-config docker-build docker-up docker-pull docker-down docker-status docker-logs docker-smoke docker-scan docker-import docker-admin docker-test
 
 help: ## Show available commands
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "  make %-17s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -93,6 +93,12 @@ docker-build: env ## Build backend image with the React Web UI
 
 docker-up: docker-build ## Build and start the local container; wait for health
 	$(DOCKER) up -d --no-build --wait --wait-timeout 60
+
+docker-test: env ## Run all backend tests with the container FFmpeg
+	WILDSTRING_IMAGE=wildstring:dev $(DOCKER) build
+	docker build --target builder -f deploy/Dockerfile -t wildstring-builder:dev .
+	$(DOCKER) -f deploy/compose.tests.yaml build tests
+	$(DOCKER) -f deploy/compose.tests.yaml run --rm --no-deps tests
 
 docker-pull: env ## Pull and run WILDSTRING_IMAGE configured in .env
 	$(DOCKER) pull

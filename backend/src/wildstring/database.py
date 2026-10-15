@@ -8,7 +8,39 @@ from pathlib import Path
 
 from wildstring.library.albums import album_key
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
+INTAKE_SCHEMA = """
+BEGIN IMMEDIATE;
+ALTER TABLE admin_jobs ADD COLUMN automatic INTEGER NOT NULL DEFAULT 0;
+CREATE TABLE intake_settings (
+    library_id TEXT PRIMARY KEY REFERENCES libraries(id),
+    enabled INTEGER NOT NULL DEFAULT 0,
+    interval_seconds INTEGER NOT NULL DEFAULT 60,
+    stable_seconds INTEGER NOT NULL DEFAULT 120,
+    version INTEGER NOT NULL DEFAULT 1
+);
+CREATE TABLE intake_items (
+    id TEXT PRIMARY KEY,
+    library_id TEXT NOT NULL REFERENCES libraries(id),
+    source_root TEXT NOT NULL,
+    source_path TEXT NOT NULL,
+    signature TEXT NOT NULL,
+    state TEXT NOT NULL,
+    metadata TEXT NOT NULL DEFAULT '{}',
+    issues TEXT NOT NULL DEFAULT '[]',
+    staged TEXT,
+    staged_sha256 TEXT,
+    overrides TEXT NOT NULL DEFAULT '{}',
+    outputs TEXT NOT NULL DEFAULT '[]',
+    version INTEGER NOT NULL DEFAULT 1,
+    changed_at REAL NOT NULL,
+    updated_at REAL NOT NULL,
+    UNIQUE(library_id, source_root, source_path)
+);
+CREATE INDEX intake_library_state ON intake_items(library_id, state, updated_at);
+PRAGMA user_version = 7;
+COMMIT;
+"""
 MANAGEMENT_SCHEMA = """
 BEGIN IMMEDIATE;
 CREATE TABLE track_metadata (
@@ -250,6 +282,8 @@ class Database:
                 connection.executescript(PERSONAL_SCHEMA)
             if current < 6:
                 connection.executescript(MANAGEMENT_SCHEMA)
+            if current < 7:
+                connection.executescript(INTAKE_SCHEMA)
             connection.execute("PRAGMA journal_mode = WAL")
 
     def check_ready(self) -> bool:

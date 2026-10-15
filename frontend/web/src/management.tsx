@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { api, type Track, type TrackPage } from './api';
 import { Pagination } from './track-list';
 import { AISettings } from './ai-settings';
+import { IntakePanel } from './intake-panel';
 
 type Directory = {
   path: string;
@@ -66,6 +67,9 @@ const counterLabels: Record<string, string> = {
   duplicates: '重复',
   assets_copied: '附属文件',
   conflicts: '冲突',
+  review: '待整理',
+  waiting: '等待稳定',
+  converted: '转换曲目',
 };
 const errorLabels: Record<string, string> = {
   metadata_invalid: '标签无法读取',
@@ -75,6 +79,7 @@ const errorLabels: Record<string, string> = {
   source_unavailable: '导入源不可用',
   source_directory_unreadable: '目录无法读取',
   import_file_unavailable: '文件导入失败',
+  intake_file_unavailable: '文件导入失败',
   source_changed_managed_copy_preserved: '导入源已变化，已保留库内副本',
   source_changed_during_import: '导入时文件发生变化',
   directory_unreadable: '目录无法读取',
@@ -128,7 +133,9 @@ export function Management({
   onEdit: (track: Track) => void;
   onChanged: () => void;
 }) {
-  const [tab, setTab] = useState<'overview' | 'tracks' | 'jobs' | 'settings'>('overview');
+  const [tab, setTab] = useState<'overview' | 'tracks' | 'jobs' | 'intake' | 'settings'>(
+    'overview',
+  );
   const finished = useRef<string | null>(null);
   const [overview, setOverview] = useState<Overview | null>(null),
     [jobs, setJobs] = useState<Jobs | null>(null),
@@ -249,6 +256,7 @@ export function Management({
             ['overview', '概览'],
             ['tracks', '歌曲信息'],
             ['jobs', '任务记录'],
+            ['intake', '导入与整理'],
             ['settings', '设置'],
           ] as const
         ).map(([key, label]) => (
@@ -270,6 +278,7 @@ export function Management({
       ) : (
         overview && (
           <>
+            {tab === 'intake' && <IntakePanel />}
             {tab === 'overview' && (
               <>
                 <section className="management-metrics" aria-label="曲库概览">

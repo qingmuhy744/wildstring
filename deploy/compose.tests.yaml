@@ -1,0 +1,13 @@
+services:
+  tests:
+    image: wildstring-tests:dev
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.tests
+      args:
+        HTTP_PROXY: ${DOCKER_HTTP_PROXY:-}
+        HTTPS_PROXY: ${DOCKER_HTTPS_PROXY:-}
+    network_mode: none
+    read_only: true
+    tmpfs:
+      - /tmp:size=512m,mode=1777

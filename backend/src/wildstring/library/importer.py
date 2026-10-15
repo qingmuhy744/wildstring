@@ -17,7 +17,7 @@ from wildstring.database import Database
 from wildstring.library.albums import album_key
 from wildstring.library.assets import IMAGE_SUFFIXES, MAX_COVER_BYTES, TrackAssets
 from wildstring.library.lyrics import MAX_TEXT_BYTES
-from wildstring.library.metadata import SUPPORTED_SUFFIXES, Metadata, read_metadata
+from wildstring.library.metadata import Metadata, read_metadata
 from wildstring.library.repository import LibraryRepository, now
 from wildstring.library.scanner import (
     ScanBusyError,
@@ -27,7 +27,18 @@ from wildstring.library.scanner import (
     scan_library,
 )
 
-COUNTERS = ("copied", "duplicates", "unchanged", "assets_copied", "conflicts", "errors", "skipped")
+COUNTERS = (
+    "copied",
+    "duplicates",
+    "unchanged",
+    "assets_copied",
+    "conflicts",
+    "errors",
+    "skipped",
+    "review",
+    "waiting",
+    "converted",
+)
 RESERVED = re.compile(r"^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)", re.IGNORECASE)
 
 
@@ -186,7 +197,7 @@ class MusicImporter:
                 ),
             )
 
-    def import_track(self, relative: Path):
+    def import_track(self, relative: Path, *, metadata=None):
         with open_source(self.settings.music_dir, relative) as source:
             before = os.fstat(source.fileno())
             previous = self.manifest(relative)
@@ -207,7 +218,11 @@ class MusicImporter:
                     self.save(relative, target, before, previous["sha256"])
                     self.counts["unchanged"] += 1
             else:
-                metadata = read_metadata(source, relative)
+                observed = read_metadata(source, relative)
+                allow_global_duplicate = metadata is None or organized_path(
+                    metadata
+                ) == organized_path(observed)
+                metadata = metadata or observed
                 if fingerprint(os.fstat(source.fileno())) != fingerprint(before):
                     raise SourceChangedError
                 sha256 = digest(source)
@@ -219,7 +234,7 @@ class MusicImporter:
                         "SELECT target_path FROM imported_files WHERE target_root=? AND sha256=? LIMIT 1",
                         (str(self.root), sha256),
                     ).fetchone()
-                if duplicate is not None:
+                if duplicate is not None and allow_global_duplicate:
                     target = Path(duplicate[0])
                     with open_source(self.root, target):
                         pass
@@ -249,6 +264,7 @@ class MusicImporter:
                         return
                 self.save(relative, target, before, sha256)
         self.import_sidecars(relative, target)
+        return target
 
     def import_sidecars(self, relative: Path, target: Path):
         # Reuse the same exact-name rules as playback. No fuzzy lyric matching.
@@ -329,7 +345,12 @@ class MusicImporter:
                     "UPDATE scan_runs SET library_id=? WHERE library_id=?", (new, old[0])
                 )
 
-    def run(self, *, full=False, on_import=None, on_scan=None):
+    def run(self, *, full=False, on_import=None, on_scan=None, automatic=False):
+        from wildstring.library.intake import INPUT_SUFFIXES, Intake
+
+        repository = LibraryRepository(self.database, self.root)
+        repository.library_id(create=True)
+        intake = Intake(self.settings, repository)
         with self.database.connect(write=True) as connection:
             connection.execute(
                 "UPDATE import_runs SET status='interrupted', finished_at=? WHERE status='running'",
@@ -352,16 +373,22 @@ class MusicImporter:
                 self.settings.music_dir, followlinks=False, onerror=walk_error
             ):
                 folders[:] = sorted(
-                    name for name in folders if not (Path(directory) / name).is_symlink()
+                    name
+                    for name in folders
+                    if not (Path(directory) / name).is_symlink() and not name.startswith(".")
                 )
                 for name in sorted(files):
                     path = Path(directory) / name
-                    if path.suffix.lower() not in SUPPORTED_SUFFIXES or path.is_symlink():
+                    if (
+                        path.suffix.lower() not in INPUT_SUFFIXES
+                        or path.is_symlink()
+                        or name.startswith(".")
+                    ):
                         self.counts["skipped"] += 1
                         continue
                     relative = path.relative_to(self.settings.music_dir)
                     try:
-                        self.import_track(relative)
+                        intake.process(self, relative, automatic)
                     except SourceChangedError:
                         self.error(relative, "source_changed_during_import")
                     except (
@@ -376,6 +403,7 @@ class MusicImporter:
                     self.progress()
             self.migrate_legacy()
             scan = scan_library(self.settings, full=full, _lock_owned=True, on_start=on_scan)
+            intake.apply_overrides()
             status = (
                 "completed_with_errors"
                 if self.counts["errors"]
@@ -399,7 +427,7 @@ class MusicImporter:
         }
 
 
-def import_music(settings: Settings, *, full=False, on_import=None, on_scan=None):
+def import_music(settings: Settings, *, full=False, on_import=None, on_scan=None, automatic=False):
     settings.data_dir.mkdir(parents=True, exist_ok=True)
     settings.library_dir.mkdir(parents=True, exist_ok=True)
     try:
@@ -407,7 +435,7 @@ def import_music(settings: Settings, *, full=False, on_import=None, on_scan=None
             database = Database(settings.data_dir)
             database.initialize()
             return MusicImporter(settings, database).run(
-                full=full, on_import=on_import, on_scan=on_scan
+                full=full, on_import=on_import, on_scan=on_scan, automatic=automatic
             )
     except Timeout as error:
         raise ScanBusyError from error

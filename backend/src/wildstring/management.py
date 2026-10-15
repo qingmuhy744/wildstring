@@ -5,6 +5,7 @@ import logging
 import os
 import shutil
 import sqlite3
+import time
 from importlib.metadata import version
 from threading import Event, Thread
 from typing import Annotated, Literal
@@ -17,6 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from wildstring.ai_config import AIService, AIUpdate
 from wildstring.library.edits import MetadataEditor, MetadataUpdate
 from wildstring.library.importer import import_music
+from wildstring.library.intake import Intake, IntakeApproval, IntakeSettings
 from wildstring.library.repository import now
 from wildstring.library.scanner import ScanBusyError, scan_library
 
@@ -45,6 +47,8 @@ class Management:
             settings.data_dir / "admin-worker.lock", timeout=0, thread_local=False
         )
         self.storage_identity = None
+        self.intake = Intake(settings, repository)
+        self.next_discovery = 0
 
     def start(self):
         self.repository.library_id(create=True)
@@ -87,7 +91,7 @@ class Management:
                 raise HTTPException(409, "settings_version_conflict")
         return self.preferences()
 
-    def submit(self, body):
+    def submit(self, body, *, automatic=False):
         library_id = self.repository.library_id(create=True)
         with self.database.connect(write=True) as connection:
             connection.execute("BEGIN IMMEDIATE")
@@ -101,8 +105,8 @@ class Management:
                 raise HTTPException(409, "library_task_busy")
             job_id = uuid4().hex
             connection.execute(
-                "INSERT INTO admin_jobs(id,library_id,kind,full,status,created_at) VALUES (?,?,?,?,'queued',?)",
-                (job_id, library_id, body.kind, body.full, now()),
+                "INSERT INTO admin_jobs(id,library_id,kind,full,status,created_at,automatic) VALUES (?,?,?,?,'queued',?,?)",
+                (job_id, library_id, body.kind, body.full, now(), automatic),
             )
         return self.job(job_id)
 
@@ -186,6 +190,7 @@ class Management:
                     full=bool(job["full"]),
                     on_import=lambda run_id: self.link(job["id"], import_id=run_id),
                     on_scan=on_scan,
+                    automatic=bool(job["automatic"]),
                 )
                 if job["kind"] == "import"
                 else scan_library(self.settings, full=bool(job["full"]), on_start=on_scan)
@@ -240,6 +245,19 @@ class Management:
                         job = self.claim()
                         if job:
                             self.execute(job)
+                        if time.monotonic() >= self.next_discovery:
+                            self.next_discovery = (
+                                time.monotonic() + self.intake.preferences()["interval_seconds"]
+                            )
+                            try:
+                                if self.intake.has_work():
+                                    self.submit(JobRequest(kind="import"), automatic=True)
+                            except HTTPException as error:
+                                if error.status_code != 409:
+                                    raise
+                                self.next_discovery = time.monotonic() + 1
+                            except OSError:
+                                logger.warning("Automatic import source is unavailable; will retry")
                         self.stopping.wait(0.5)
                 finally:
                     self.worker_lock.release(force=True)
@@ -311,6 +329,58 @@ def management_router(service, auth):
     router = APIRouter(prefix="/api/v1/manage", dependencies=[Depends(auth.require_session)])
     editor = MetadataEditor(service.repository)
     ai = AIService(service.settings.data_dir)
+
+    @router.get("/intake/settings")
+    def intake_settings():
+        return service.intake.preferences()
+
+    @router.put("/intake/settings", dependencies=[Depends(auth.require_client)])
+    def configure_intake(body: IntakeSettings):
+        result = service.intake.configure(body)
+        service.next_discovery = 0
+        return result
+
+    @router.get("/intake/items")
+    def intake_items(
+        limit: Annotated[int, Query(ge=1, le=100)] = 50, offset: Annotated[int, Query(ge=0)] = 0
+    ):
+        return service.intake.items(limit, offset)
+
+    @router.post("/intake/items/{item_id}/approve", dependencies=[Depends(auth.require_client)])
+    def approve_intake(item_id: str, body: IntakeApproval):
+        result = service.intake.approve(item_id, body)
+        service.next_discovery = 0
+        try:
+            service.submit(JobRequest(kind="import"), automatic=True)
+        except HTTPException as error:
+            if error.status_code != 409:
+                raise
+        return result
+
+    @router.post("/intake/items/{item_id}/ignore", dependencies=[Depends(auth.require_client)])
+    def ignore_intake(item_id: str, body: Annotated[dict, Body()]):
+        if set(body) != {"version"} or type(body["version"]) is not int or body["version"] < 1:
+            raise HTTPException(422, "invalid_version")
+        return service.intake.ignore(item_id, body["version"])
+
+    @router.post("/intake/items/{item_id}/retry", dependencies=[Depends(auth.require_client)])
+    def retry_intake(item_id: str, body: Annotated[dict, Body()]):
+        if set(body) != {"version"} or type(body["version"]) is not int or body["version"] < 1:
+            raise HTTPException(422, "invalid_version")
+        with service.database.connect(write=True) as connection:
+            result = connection.execute(
+                "UPDATE intake_items SET state='retry',version=version+1 WHERE id=? AND library_id=? AND state='failed' AND version=?",
+                (item_id, service.repository.library_id(), body["version"]),
+            )
+            if not result.rowcount:
+                raise HTTPException(409, "metadata_version_conflict")
+        service.next_discovery = 0
+        try:
+            service.submit(JobRequest(kind="import"), automatic=True)
+        except HTTPException as error:
+            if error.status_code != 409:
+                raise
+        return service.intake.public(service.intake.item(item_id))
 
     @router.get("/ai")
     def ai_settings():
