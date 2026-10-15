@@ -21,7 +21,7 @@ PR 工作流只有仓库读取权限，不读取发布私钥。
 | `v0.1.0-rc.1` | `0.1.0rc1` | `0.1.0-rc.1` |
 | `v0.1.0-dev.1` | `0.1.0.dev1` | `0.1.0-dev.1` |
 
-`python3 scripts/package_release.py --tag v0.1.0 --check-only` 检查三个端版本一致。
+`python3 scripts/package_release.py --tag v0.2.0 --check-only` 检查当前三个端版本一致；正式发布时将参数替换为实际标签。
 
 正式签名使用仓库 Actions secrets：`ANDROID_KEYSTORE_BASE64`、`ANDROID_KEYSTORE_PASSWORD`、`ANDROID_KEY_ALIAS`、`ANDROID_KEY_PASSWORD`、`ANDROID_SIGNING_CERT_SHA256`。密钥仅在签名步骤写入 runner 临时目录，权限 0600，步骤退出立即删除；校验证书指纹后才上传 APK。Gradle 的常规依赖缓存不包含私钥。
 

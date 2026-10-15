@@ -22,7 +22,7 @@ make android-locks              # 修改依赖后刷新锁与 SHA-256 校验元�
 
 `ANDROID_HOME` 指向本机 SDK，`JAVA_HOME` 指向 JDK；`local.properties` 只用于本机且不跟踪。Gradle Wrapper、版本目录与依赖校验资料入库，构建缓存、APK 和签名私钥不提交。
 
-`make android-ci` 的安装包位于 `artifacts/android/`，包含 `wildstring-0.1.0-debug.apk` 与 `SHA256SUMS`。GitHub 的 **Android APK** 工作流通过后，在该次运行的 **Artifacts → wildstring-android-debug** 下载并解压 ZIP 后安装 APK。原有 Python/Web/Docker CI 继续独立运行。
+`make android-ci` 的安装包位于 `artifacts/android/`，包含 `wildstring-<version>-debug.apk`（当前为 `wildstring-0.2.0-debug.apk`）与 `SHA256SUMS`。GitHub 的 **Android APK** 工作流通过后，在该次运行的 **Artifacts → wildstring-android-debug** 下载并解压 ZIP 后安装 APK。原有 Python/Web/Docker CI 继续独立运行。
 
 设备测试用 `UiAutomation.takeScreenshot()` 生成手机和平板 PNG，写入 AGP 传入的 `additionalTestOutputDir`，在测试卸载应用前自动取回到 `frontend/android/app/build/outputs/connected_android_test_additional_output/`。Actions 的 `android-test-reports` 同时保存这些截图及失败截图。手工查看本地已连接设备时，也可用 `adb exec-out screencap -p > screenshot.png` 保存当前屏幕。
 
