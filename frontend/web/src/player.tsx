@@ -223,7 +223,7 @@ export function PlayerBar({
   onLyrics: () => void;
   lyricsOpen: boolean;
 }) {
-  const { current, playing, index, queue, duration, position } = player;
+  const { current, queue } = player;
   return (
     <section className="player" aria-label="音乐播放器">
       <audio ref={player.audio} preload="metadata" {...player.audioEvents} />
@@ -232,13 +232,20 @@ export function PlayerBar({
           className="playing-art"
           onClick={onLyrics}
           disabled={!current}
-          aria-label="查看封面与歌词"
+          aria-label="全屏播放"
+          aria-haspopup="dialog"
+          aria-expanded={lyricsOpen}
         >
           {current ? (
             <Cover trackId={current.id} title={current.album || current.title} />
           ) : (
             <span className="record" aria-hidden="true">
               ≋
+            </span>
+          )}
+          {current && (
+            <span className="expand-art" aria-hidden="true">
+              ⌃
             </span>
           )}
         </button>
@@ -248,51 +255,7 @@ export function PlayerBar({
         </div>
         {current && <span className="format">{current.format.toUpperCase()}</span>}
       </div>
-      <div className="transport">
-        <div className="transport-buttons">
-          <button
-            className="icon-button"
-            onClick={() => player.step(-1)}
-            disabled={index <= 0}
-            aria-label="上一首"
-          >
-            Ⅰ◀
-          </button>
-          <button
-            className="play-button"
-            onClick={player.toggle}
-            disabled={!current}
-            aria-label={playing ? '暂停' : '播放'}
-          >
-            {playing ? 'Ⅱ' : '▶'}
-          </button>
-          <button
-            className="icon-button"
-            onClick={() => player.step(1)}
-            disabled={index < 0 || index >= queue.length - 1}
-            aria-label="下一首"
-          >
-            ▶Ⅰ
-          </button>
-          <span className="play-state" role="status">
-            {player.buffering ? '缓冲中…' : playing ? '原音直放' : current ? '已暂停' : ''}
-          </span>
-        </div>
-        <div className="timeline">
-          <time>{time(position)}</time>
-          <input
-            type="range"
-            aria-label="播放进度"
-            min="0"
-            max={duration || 1}
-            step="0.1"
-            value={Math.min(position, duration || 0)}
-            disabled={!duration}
-            onChange={(event) => player.seek(Number(event.target.value))}
-          />
-          <time>{time(duration)}</time>
-        </div>
-      </div>
+      <PlaybackControls player={player} />
       <div className="player-options">
         <button
           className={`lyrics-toggle icon-button ${lyricsOpen ? 'active' : ''}`}
@@ -303,18 +266,7 @@ export function PlayerBar({
         >
           词
         </button>
-        <label className="volume">
-          音量
-          <input
-            type="range"
-            min="0"
-            max="1"
-            step="0.01"
-            aria-label="音量"
-            value={player.volume}
-            onChange={(event) => player.setVolume(Number(event.target.value))}
-          />
-        </label>
+        <VolumeControl player={player} />
         <button
           className={`icon-button ${queueOpen ? 'active' : ''}`}
           onClick={onQueue}
@@ -324,12 +276,90 @@ export function PlayerBar({
           ☷ <small>{queue.length}</small>
         </button>
       </div>
-      {player.error && (
-        <div className="player-error" role="alert">
-          {player.error}
-          <button onClick={() => player.start(queue, index)}>重试</button>
-        </div>
-      )}
+      <PlaybackError player={player} />
     </section>
   );
+}
+
+export function PlaybackControls({ player }: { player: Player }) {
+  const { current, playing, index, queue, duration, position } = player;
+  return (
+    <div className="transport">
+      <div className="transport-buttons">
+        <button
+          className="icon-button"
+          onClick={() => player.step(-1)}
+          disabled={index <= 0}
+          aria-label="上一首"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M5 5h2v14H5zm14 0v14L8 12z" />
+          </svg>
+        </button>
+        <button
+          className="play-button"
+          onClick={player.toggle}
+          disabled={!current}
+          aria-label={playing ? '暂停' : '播放'}
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d={playing ? 'M7 5h4v14H7zm6 0h4v14h-4z' : 'M8 5l11 7-11 7z'} />
+          </svg>
+        </button>
+        <button
+          className="icon-button"
+          onClick={() => player.step(1)}
+          disabled={index < 0 || index >= queue.length - 1}
+          aria-label="下一首"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M17 5h2v14h-2zM5 5l11 7-11 7z" />
+          </svg>
+        </button>
+        <span className="play-state" role="status">
+          {player.buffering ? '缓冲中…' : playing ? '原音直放' : current ? '已暂停' : ''}
+        </span>
+      </div>
+      <div className="timeline">
+        <time>{time(position)}</time>
+        <input
+          type="range"
+          aria-label="播放进度"
+          min="0"
+          max={duration || 1}
+          step="0.1"
+          value={Math.min(position, duration || 0)}
+          disabled={!duration}
+          onChange={(event) => player.seek(Number(event.target.value))}
+        />
+        <time>{time(duration)}</time>
+      </div>
+    </div>
+  );
+}
+
+export function VolumeControl({ player }: { player: Player }) {
+  return (
+    <label className="volume">
+      音量
+      <input
+        type="range"
+        min="0"
+        max="1"
+        step="0.01"
+        aria-label="音量"
+        value={player.volume}
+        onChange={(event) => player.setVolume(Number(event.target.value))}
+      />
+    </label>
+  );
+}
+
+export function PlaybackError({ player }: { player: Player }) {
+  return player.error ? (
+    <div className="player-error" role="alert">
+      {player.error}
+      <button onClick={() => player.start(player.queue, player.index)}>重试</button>
+    </div>
+  ) : null;
 }

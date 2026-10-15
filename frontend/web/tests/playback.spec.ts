@@ -149,22 +149,22 @@ test('同名 LRC、歌词点击跳转、跟随高亮与切歌后的内嵌歌词'
   await login(page);
   await page.getByRole('button', { name: '播放 晴天测试曲', exact: true }).click();
   await page.getByRole('button', { name: '显示歌词', exact: true }).click();
-  const panel = page.getByRole('complementary', { name: '正在播放与歌词' });
+  const panel = page.getByRole('dialog', { name: '全屏播放', exact: true });
   await expect(panel).toContainText('同名 LRC · 逐行同步');
   await expect(panel.locator('[aria-current="true"]')).toHaveText('侧车第一行');
   await panel.getByRole('button', { name: '跳转到 0:06：侧车第三行', exact: true }).click();
   await expect.poll(async () => (await audio(page)).time).toBeGreaterThanOrEqual(5.9);
   await expect(panel.locator('[aria-current="true"]')).toHaveText('侧车第三行');
-  await page.getByRole('button', { name: '暂停', exact: true }).click();
+  await panel.getByRole('button', { name: '暂停', exact: true }).click();
   await panel.locator('.lyric-scroll').hover();
   await page.mouse.wheel(0, 120);
   await expect(panel.getByRole('button', { name: '跟随播放', exact: true })).toBeEnabled();
   await panel.getByRole('button', { name: '跟随播放', exact: true }).click();
   await expect(panel.getByRole('button', { name: '跟随播放', exact: true })).toBeDisabled();
   await page.screenshot({ path: `../../artifacts/lyrics-${testInfo.project.name}.png` });
-  await panel.getByRole('button', { name: '关闭播放详情' }).click();
+  await panel.getByRole('button', { name: '收起全屏播放' }).click();
   await page.getByRole('button', { name: '播放 夜晚测试曲', exact: true }).click();
-  await page.getByRole('button', { name: '查看封面与歌词', exact: true }).click();
+  await page.getByRole('button', { name: '全屏播放', exact: true }).click();
   await expect(panel).toContainText('内嵌歌词 · 逐行同步');
   await expect(panel.locator('[aria-current="true"]')).toHaveText('内嵌第一行');
   await expect(panel).not.toContainText('侧车第一行');
@@ -185,7 +185,7 @@ test('纯文本和缺失歌词不阻断播放', async ({ page }) => {
   );
   await page.getByRole('button', { name: '播放全部', exact: true }).click();
   await page.getByRole('button', { name: '显示歌词', exact: true }).click();
-  const panel = page.getByRole('complementary', { name: '正在播放与歌词' });
+  const panel = page.getByRole('dialog', { name: '全屏播放', exact: true });
   await expect(panel).toContainText('内嵌歌词 · 纯文本');
   await expect(panel).toContainText('纯文本没有虚构时间轴');
   await expect(panel.locator('[aria-current="true"]')).toHaveCount(0);
@@ -199,4 +199,75 @@ test('纯文本和缺失歌词不阻断播放', async ({ page }) => {
   await panel.getByRole('button', { name: '重新读取歌词' }).click();
   await expect(panel).toContainText('暂无本地歌词');
   expect((await audio(page)).paused).toBe(false);
+});
+
+test('全屏展开收起连续播放、切歌、焦点边界与 Esc 返回', async ({ page }, testInfo) => {
+  await login(page);
+  await page.getByRole('button', { name: '播放全部', exact: true }).click();
+  await expect.poll(async () => (await audio(page)).time).toBeGreaterThan(0.3);
+  const before = await audio(page);
+  const element = await page.locator('audio').elementHandle();
+  const entry = page.getByRole('button', { name: '全屏播放', exact: true });
+  await entry.click();
+  const dialog = page.getByRole('dialog', { name: '全屏播放', exact: true });
+  await expect(dialog).toBeVisible();
+  await expect
+    .poll(async () => {
+      const box = await dialog.boundingBox();
+      const viewport = page.viewportSize()!;
+      return (
+        !!box &&
+        Math.abs(box.x) < 1 &&
+        Math.abs(box.y) < 1 &&
+        Math.abs(box.width - viewport.width) < 1 &&
+        Math.abs(box.height - viewport.height) < 1
+      );
+    })
+    .toBe(true);
+  await expect(dialog.getByRole('button', { name: '收起全屏播放' })).toBeFocused();
+  expect(await element!.evaluate((node) => node === document.querySelector('audio'))).toBe(true);
+  expect((await audio(page)).source).toBe(before.source);
+  expect((await audio(page)).time).toBeGreaterThanOrEqual(before.time);
+  expect((await audio(page)).paused).toBe(false);
+  await dialog.getByRole('button', { name: '暂停', exact: true }).click();
+  const paused = await audio(page);
+  await dialog.getByRole('button', { name: '收起全屏播放' }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(entry).toBeFocused();
+  expect((await audio(page)).time).toBeCloseTo(paused.time, 1);
+  expect((await audio(page)).paused).toBe(true);
+  await entry.click();
+  await page.keyboard.press('Shift+Tab');
+  expect(await page.evaluate(() => !!document.activeElement?.closest('[role="dialog"]'))).toBe(
+    true,
+  );
+  await page.keyboard.press('Tab');
+  await expect(dialog.getByRole('button', { name: '收起全屏播放' })).toBeFocused();
+  await dialog.getByRole('button', { name: '下一首', exact: true }).click();
+  await expect.poll(async () => (await audio(page)).source).not.toBe(before.source);
+  expect(await page.evaluate(() => !!document.activeElement?.closest('[role="dialog"]'))).toBe(
+    true,
+  );
+  await expect(dialog).toContainText('同名 LRC · 逐行同步');
+  await dialog.getByRole('button', { name: '暂停', exact: true }).click();
+  await dialog.getByLabel('播放进度').focus();
+  await dialog.getByLabel('播放进度').press('Home');
+  for (let step = 0; step < 20; step += 1) await dialog.getByLabel('播放进度').press('ArrowRight');
+  await expect.poll(async () => (await audio(page)).time).toBeGreaterThanOrEqual(1.9);
+  const changed = await audio(page);
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+  expect((await audio(page)).source).toBe(changed.source);
+  expect((await audio(page)).time).toBeCloseTo(changed.time, 1);
+  await expect(entry).toBeFocused();
+  expect(await page.evaluate(() => document.body.style.overflow)).toBe('');
+  if (testInfo.project.name === 'mobile') {
+    await entry.click();
+    await page.setViewportSize({ width: 667, height: 375 });
+    await expect(dialog.getByRole('button', { name: '收起全屏播放' })).toBeInViewport();
+    await expect(dialog.getByRole('button', { name: '播放', exact: true })).toBeInViewport();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+      true,
+    );
+  }
 });

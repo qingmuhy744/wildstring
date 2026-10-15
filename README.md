@@ -6,6 +6,10 @@
 
 > 音乐不设限，自由有回响。
 
+![野弦主页预览](assets/主页.jpg)
+
+![野弦全屏播放与滚动歌词](assets/全屏播放.png)
+
 ## 名字的来处
 
 「野弦」带着一点对中国摇滚的偏爱。
@@ -55,7 +59,7 @@ make docker-down     # 停止服务，保留数据卷
 
 容器内包含 Web，访问 [本地野弦](http://127.0.0.1:18780)。默认仅绑定回环地址，导入源只读挂载，托管曲库和运行数据放在持久卷。首次设置管理员后登录；可选在未跟踪的 `.env` 提供 `WILDSTRING_ADMIN_PASSWORD` 仅初始化首次密码，重置使用 Make 命令。HTTPS 部署设置 `WILDSTRING_COOKIE_SECURE=true`。
 
-原音播放遵循浏览器的编码支持；不能解码时有错误提示，暂不自动转码。封面优先内嵌正面图片，再读同名图片或目录 cover/folder/front；同名 LRC 优先于内嵌歌词，支持逐行滚动与点击跳转。见 [封面、专辑和歌词](contracts/local-library-assets.md)。队列仅保存在当前页面。见 [播放与认证接口](contracts/playback-auth-api.md)。
+原音播放遵循浏览器的编码支持；不能解码时有错误提示，暂不自动转码。封面优先内嵌正面图片，再读同名图片或目录 cover/folder/front；同名 LRC 优先于内嵌歌词，点击底栏封面可展开全屏播放，支持逐行滚动与点击跳转；点击收起或按 Esc 返回，播放继续。见 [封面、专辑和歌词](contracts/local-library-assets.md)。队列仅保存在当前页面。见 [播放与认证接口](contracts/playback-auth-api.md)。
 
 ## 分支与提交规范
 
