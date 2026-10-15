@@ -5,6 +5,8 @@ import android.graphics.Bitmap
 import android.os.ParcelFileDescriptor
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
@@ -26,7 +28,27 @@ import org.junit.Test
 class NativePlaybackTest {
     @get:Rule val compose = createAndroidComposeRule<MainActivity>()
 
+    private fun capture(name: String) {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val directory = InstrumentationRegistry.getArguments().getString("additionalTestOutputDir")?.let(::File)
+            ?: checkNotNull(context.getExternalFilesDir(null))
+        directory.mkdirs()
+        val file = File(directory, name)
+        InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot().let { image ->
+            file.outputStream().use { image.compress(Bitmap.CompressFormat.PNG, 100, it) }
+            image.recycle()
+        }
+    }
+
     @Test fun loginCookieStreamingAndFullscreenLyrics() {
+        try { exercisePlayback() } catch (failure: Throwable) {
+            runCatching { capture("failure.png") }
+            runCatching { compose.onRoot(useUnmergedTree = true).printToLog("NativeTestUI") }
+            throw failure
+        }
+    }
+
+    private fun exercisePlayback() {
         val requests = ConcurrentLinkedQueue<RecordedRequest>()
         val audio = InstrumentationRegistry.getInstrumentation().context.assets.open("playback.mp3").use { it.readBytes() }
         val track = """{"id":"fixture-track","title":"接口测试歌曲","artists":["接口测试艺人"],"album":"接口测试专辑","duration_ms":12000,"has_cover":false,"loved":false,"format":"mp3","status":"available"}"""
@@ -34,6 +56,7 @@ class NativePlaybackTest {
             server.dispatcher = object : Dispatcher() {
                 override fun dispatch(request: RecordedRequest): MockResponse {
                     requests += request
+                    android.util.Log.i("NativeFixture", "${request.method} ${request.requestUrl!!.encodedPath}")
                     val path = request.requestUrl!!.encodedPath
                     val authenticated = request.getHeader("Cookie")?.contains("wildstring_session=instrumentation") == true
                     fun json(body: String) = MockResponse().setHeader("Content-Type", "application/json").setBody(body)
@@ -60,8 +83,11 @@ class NativePlaybackTest {
             compose.onNodeWithText("服务器地址").performTextInput(server.url("/").toString())
             compose.onNodeWithText("密码", useUnmergedTree = true).assertExists()
             compose.onAllNodes(hasSetTextAction())[2].performTextInput("test-only-password")
-            compose.onNode(isToggleable()).performClick()
-            compose.onNodeWithText("连接并登录").performClick()
+            compose.activityRule.scenario.onActivity { activity ->
+                WindowCompat.getInsetsController(activity.window, activity.window.decorView).hide(WindowInsetsCompat.Type.ime())
+            }
+            compose.onNode(isToggleable()).performScrollTo().performClick()
+            compose.onNodeWithText("连接并登录").performScrollTo().performClick()
             compose.waitUntil(30_000) { compose.onAllNodesWithText("接口测试专辑").fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithText("接口测试专辑").performClick()
             compose.waitUntil(15_000) { compose.onAllNodesWithText("接口测试歌曲").fetchSemanticsNodes().isNotEmpty() }
@@ -78,13 +104,6 @@ class NativePlaybackTest {
             compose.onNodeWithTag("player-phone").assertExists()
             compose.onAllNodesWithText("示例曲库").assertCountEquals(0)
             compose.onAllNodesWithText("原创示例歌词").assertCountEquals(0)
-            fun capture(name: String) {
-                val file = File(context.getExternalFilesDir(null), name)
-                InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot().let { image ->
-                    file.outputStream().use { image.compress(Bitmap.CompressFormat.PNG, 100, it) }
-                    image.recycle()
-                }
-            }
             capture("phone-lyrics.png")
             val before = compose.runOnIdle { player.currentPosition }
             val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
@@ -101,7 +120,7 @@ class NativePlaybackTest {
             } finally {
                 shell("wm size reset")
                 shell("wm density reset")
-                MediaController.releaseFuture(future)
+                InstrumentationRegistry.getInstrumentation().runOnMainSync { MediaController.releaseFuture(future) }
             }
             assertTrue(requests.filter { it.path?.contains("/stream") == true }.all { it.getHeader("Cookie")?.contains("wildstring_session=instrumentation") == true })
             assertTrue(requests.filter { it.path?.contains("/auth/login") == true }.all { it.getHeader("X-Wildstring-Client") == "android" })

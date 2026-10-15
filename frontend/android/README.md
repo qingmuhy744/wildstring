@@ -20,6 +20,8 @@ make android-locks              # 修改依赖后刷新锁与 SHA-256 校验元�
 
 `make android-ci` 的安装包位于 `artifacts/android/`，包含 `wildstring-0.1.0-dev.1-debug.apk` 与 `SHA256SUMS`。GitHub 的 **Android APK** 工作流通过后，在该次运行的 **Artifacts → wildstring-android-debug** 下载并解压 ZIP 后安装 APK。原有 Python/Web/Docker CI 继续独立运行。
 
+设备测试用 `UiAutomation.takeScreenshot()` 生成手机和平板 PNG，写入 AGP 传入的 `additionalTestOutputDir`，在测试卸载应用前自动取回到 `frontend/android/app/build/outputs/connected_android_test_additional_output/`。Actions 的 `android-test-reports` 同时保存这些截图及失败截图。手工查看本地已连接设备时，也可用 `adb exec-out screencap -p > screenshot.png` 保存当前屏幕。
+
 debug 包 ID 为 `dev.wildstring.app.debug`，与未来 release 包隔离。CI 使用一次性 debug 签名，不上传私钥；不同运行的签名可能不同，安装更新提示签名不匹配时需卸载旧测试包。卸载会清空本机连接/队列，服务端曲库、收藏和歌单保留。
 
 ## 连接与数据

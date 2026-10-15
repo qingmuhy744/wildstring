@@ -60,7 +60,7 @@ jobs:
           profile: pixel_2
           ram-size: 2048M
           disable-animations: true
-          script: make android-connected-test && adb pull /sdcard/Android/data/dev.wildstring.app.debug/files/ frontend/android/app/build/reports/device-screenshots
+          script: make android-connected-test
       - name: Upload installable debug APK
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -77,5 +77,6 @@ jobs:
             frontend/android/build/reports/
             frontend/android/app/build/reports/
             frontend/android/app/build/outputs/androidTest-results/
+            frontend/android/app/build/outputs/connected_android_test_additional_output/
           if-no-files-found: ignore
           retention-days: 14
