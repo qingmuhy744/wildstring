@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     data_dir: Path = Path("runtime")
     music_dir: Path = Path("music")
     web_dir: Path | None = None
+    admin_password: SecretStr | None = None
+    cookie_secure: bool = False
 
     @field_validator("data_dir", "music_dir")
     @classmethod

@@ -5,7 +5,26 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+AUTH_SCHEMA = """
+BEGIN IMMEDIATE;
+CREATE TABLE IF NOT EXISTS admin (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    password_hash TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS sessions (
+    token_hash TEXT PRIMARY KEY,
+    expires_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS login_guard (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    failures INTEGER NOT NULL,
+    blocked_until INTEGER NOT NULL
+);
+INSERT OR IGNORE INTO login_guard VALUES (1, 0, 0);
+PRAGMA user_version = 2;
+COMMIT;
+"""
 SCHEMA = """
 BEGIN IMMEDIATE;
 CREATE TABLE IF NOT EXISTS libraries (
@@ -89,6 +108,8 @@ class Database:
                 raise RuntimeError("Database schema is newer than this application")
             if current == 0:
                 connection.executescript(SCHEMA)
+            if current < 2:
+                connection.executescript(AUTH_SCHEMA)
             connection.execute("PRAGMA journal_mode = WAL")
 
     def check_ready(self) -> bool:

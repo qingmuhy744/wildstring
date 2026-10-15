@@ -2,10 +2,12 @@
 
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 
+from wildstring.auth import Auth
 from wildstring.library.repository import LibraryRepository
+from wildstring.library.streaming import AudioResponse
 
 
 class Track(BaseModel):
@@ -48,8 +50,19 @@ class ScanReport(BaseModel):
     errors: list[ScanError]
 
 
-def library_router(repository: LibraryRepository) -> APIRouter:
-    router = APIRouter(prefix="/api/v1", tags=["library"])
+def library_router(repository: LibraryRepository, auth: Auth) -> APIRouter:
+    router = APIRouter(
+        prefix="/api/v1", tags=["library"], dependencies=[Depends(auth.require_session)]
+    )
+
+    @router.api_route("/tracks/{track_id}/stream", methods=["GET", "HEAD"])
+    def stream(track_id: str, request: Request):
+        source = repository.source(track_id)
+        if source is None:
+            raise HTTPException(404, "track_not_found")
+        if source["status"] != "available":
+            raise HTTPException(409, "track_unavailable")
+        return AudioResponse(repository.root, source, request)
 
     @router.get("/tracks", response_model=TrackPage)
     def tracks(

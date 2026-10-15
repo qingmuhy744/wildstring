@@ -30,6 +30,7 @@ jobs:
         with:
           version: "0.9.18"
       - run: make setup
+      - run: npm --prefix frontend/web exec -- playwright install --with-deps chromium
       - run: make ci
 
   container:

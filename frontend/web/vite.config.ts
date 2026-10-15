@@ -10,6 +10,7 @@ export default defineConfig(({ mode }) => {
       strictPort: true,
       proxy: {
         '/health': `http://127.0.0.1:${env.WILDSTRING_PORT || '18780'}`,
+        '/api': `http://127.0.0.1:${env.WILDSTRING_PORT || '18780'}`,
       },
     },
   };

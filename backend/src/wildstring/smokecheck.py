@@ -5,6 +5,7 @@ import json
 import os
 import subprocess
 from tempfile import TemporaryFile
+from urllib.error import HTTPError
 from urllib.request import urlopen
 
 from wildstring.config import Settings
@@ -19,10 +20,19 @@ def main() -> None:
     with urlopen("http://127.0.0.1:8000/", timeout=5) as response:  # nosec B310
         if b"<html" not in response.read():
             raise SystemExit("Packaged Web UI is missing")
-    with urlopen("http://127.0.0.1:8000/api/v1/tracks?limit=1", timeout=5) as response:  # nosec B310
-        page = json.load(response)
-        if not isinstance(page.get("items"), list) or not isinstance(page.get("total"), int):
-            raise SystemExit("Library API is unavailable")
+    try:
+        with urlopen("http://127.0.0.1:8000/api/v1/tracks?limit=1", timeout=5):  # nosec B310
+            raise SystemExit("Library API must require authentication")
+    except HTTPError as error:
+        if error.code != 401:
+            raise SystemExit("Library API did not return an authentication challenge") from error
+    with urlopen("http://127.0.0.1:8000/api/v1/auth/status", timeout=5) as response:  # nosec B310
+        status = json.load(response)
+        if (
+            not isinstance(status.get("configured"), bool)
+            or status.get("authenticated") is not False
+        ):
+            raise SystemExit("Authentication API is unavailable")
     subprocess.run(["/usr/bin/ffmpeg", "-version"], check=True, capture_output=True)
     settings = Settings()
     try:
@@ -33,7 +43,9 @@ def main() -> None:
             raise
     else:
         raise SystemExit("Music directory must be read-only")
-    print("Container smoke passed: ready, library API, Web UI, FFmpeg, non-root, read-only music")
+    print(
+        "Container smoke passed: ready, protected library API, Web UI, FFmpeg, non-root, read-only music"
+    )
 
 
 if __name__ == "__main__":

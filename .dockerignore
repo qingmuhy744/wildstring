@@ -13,6 +13,8 @@ runtime
 /data
 music
 artifacts
+**/playwright-report
+**/test-results
 docs
 tests
 **/tests

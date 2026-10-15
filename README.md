@@ -18,7 +18,7 @@
 
 第一阶段使用 **Python 3.12 / FastAPI + React / TypeScript**，提供自托管服务与网页端。MVP 主线：导入本地曲库 → 浏览与播放 → 查看本地歌词 → 自然语言找歌 → 预览、保存并播放 AI 歌单。
 
-当前已有工程基座、SQLite 曲库、只读增量扫描，以及分页查询与关键词搜索 API。网页仍是服务连接页；**网页曲库浏览、元数据修复、播放、歌词和 AI 业务尚未实现。** 详见 [MVP 范围](docs/product/scope.md)。
+当前已有工程基座、SQLite 只读增量扫描、管理员登录、网页曲库浏览与搜索，以及原文件串流和网页播放队列。支持播放/暂停、上一首/下一首、进度跳转和桌面音量。**元数据修复、歌词、转码和 AI 业务仍待实现。** 详见 [MVP 范围](docs/product/scope.md)。
 
 服务端元数据整理将支持手动/批量编辑、差异预览和显式写回，减少使用 mp3tag 前后下载与上传整首音频的重复传输，见 [整理设计](docs/architecture/metadata-repair.md)。
 
@@ -31,6 +31,8 @@ make setup         # 安装锁定依赖、创建 .env、安装 Git hook
 make dev           # 终端一：API http://127.0.0.1:18780
 make dev-web       # 终端二：React http://127.0.0.1:18781
 make scan          # 只读扫描 .env 中配置的音乐目录
+make admin         # 首次交互设置 admin 密码；修改密码会撤销会话
+make browser-install # 首次安装浏览器测试使用的 Chromium
 make ci            # 提交检查、后端测试、Web 构建、锁文件核验
 ```
 
@@ -44,11 +46,14 @@ make ci            # 提交检查、后端测试、Web 构建、锁文件核验
 make docker-up       # 构建、启动并等待健康检查
 make docker-smoke    # 实测 API、Web、FFmpeg、非 root 与只读音乐目录
 make docker-scan     # 在运行容器内扫描只读挂载的曲库
+make docker-admin    # 首次设置容器的 admin 密码
 make docker-status
 make docker-down     # 停止服务，保留数据卷
 ```
 
-容器内包含 Web，访问 [本地野弦](http://127.0.0.1:18780)。默认仅绑定回环地址，音乐目录只读挂载，运行数据放在持久卷。当前基座尚无账号认证，不应直接开放到公网。
+容器内包含 Web，访问 [本地野弦](http://127.0.0.1:18780)。默认仅绑定回环地址，音乐目录只读挂载，运行数据放在持久卷。首次设置管理员后登录；可选在未跟踪的 `.env` 提供 `WILDSTRING_ADMIN_PASSWORD` 仅初始化首次密码，重置使用 Make 命令。HTTPS 部署设置 `WILDSTRING_COOKIE_SECURE=true`。
+
+原音播放遵循浏览器的编码支持；不能解码时有错误提示，暂不自动转码。队列仅保存在当前页面。见 [播放与认证接口](contracts/playback-auth-api.md)。
 
 ## 分支与提交规范
 

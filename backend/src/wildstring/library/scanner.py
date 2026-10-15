@@ -25,6 +25,12 @@ class SourceChangedError(Exception):
 @contextmanager
 def open_source(root: Path, relative: Path):
     """Open only regular files, without following symlinks on POSIX hosts."""
+    if (
+        relative.is_absolute()
+        or not relative.parts
+        or any(part in {".", ".."} for part in relative.parts)
+    ):
+        raise OSError("Invalid library path")
     if os.open in os.supports_dir_fd:
         with ExitStack() as stack:
             directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW

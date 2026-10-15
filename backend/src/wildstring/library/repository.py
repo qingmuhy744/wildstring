@@ -173,6 +173,14 @@ class LibraryRepository:
             ).fetchone()
         return self.public_track(dict(row)) if row else None
 
+    def source(self, track_id: str) -> dict | None:
+        with self.database.connect() as connection:
+            row = connection.execute(
+                "SELECT path, format, size_bytes, mtime_ns, status FROM tracks WHERE library_id = ? AND id = ?",
+                (self.library_id(), track_id),
+            ).fetchone()
+        return dict(row) if row else None
+
     def scan(self, run_id: str) -> dict | None:
         with self.database.connect() as connection:
             row = connection.execute(

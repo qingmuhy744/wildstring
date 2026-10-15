@@ -8,18 +8,16 @@ import shutil
 from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
 from filelock import FileLock
 from mutagen.flac import FLAC, Picture
 from mutagen.id3 import TIT2, TPE1
 from mutagen.mp3 import MP3
 
 from wildstring.config import Settings
-from wildstring.database import Database
+from wildstring.database import SCHEMA_VERSION, Database
 from wildstring.library import scanner
 from wildstring.library.repository import LibraryRepository
 from wildstring.library.scanner import ScanBusyError, scan_library
-from wildstring.main import create_app
 
 FIXTURES = Path(__file__).resolve().parents[2] / "tests/fixtures/audio"
 
@@ -253,14 +251,14 @@ def test_multiple_artists_and_cover_are_preserved(settings: Settings):
     assert next(track for track in tracks if track["format"] == "flac")["has_cover"]
 
 
-def test_api_pagination_search_and_error_isolation(settings: Settings):
+def test_api_pagination_search_and_error_isolation(settings: Settings, authenticated_client):
     path = audio(settings)
     mp3 = MP3(path)
     mp3["TIT2"] = TIT2(encoding=3, text=["ＬＩＶＥ 100%_测試"])
     mp3.save()
     audio(settings, "flac")
     report = scan_library(settings)
-    with TestClient(create_app(settings)) as client:
+    with authenticated_client(settings) as client:
         page = client.get("/api/v1/tracks", params={"limit": 1}).json()
         assert page["total"] == 2
         assert len(page["items"]) == 1
@@ -280,8 +278,8 @@ def test_api_pagination_search_and_error_isolation(settings: Settings):
         assert client.get("/api/v1/scans").json()[0]["id"] == report["id"]
 
 
-def test_empty_library_and_separate_roots(settings: Settings, tmp_path: Path):
-    with TestClient(create_app(settings)) as client:
+def test_empty_library_and_separate_roots(settings: Settings, tmp_path: Path, authenticated_client):
+    with authenticated_client(settings) as client:
         assert client.get("/api/v1/tracks").json()["total"] == 0
         assert client.get("/api/v1/scans").json() == []
     audio(settings)
@@ -298,8 +296,8 @@ def test_database_rejects_newer_schema_without_resetting(settings: Settings):
     database = Database(settings.data_dir)
     database.initialize()
     with database.connect(write=True) as connection:
-        connection.execute("PRAGMA user_version = 2")
+        connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION + 1}")
     with pytest.raises(RuntimeError, match="newer"):
         database.initialize()
     with database.connect() as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION + 1
