@@ -24,7 +24,7 @@ data class CatalogPage(val tracks: List<Track> = emptyList(), val albums: List<A
     val artists: List<Artist> = emptyList(), val playlists: List<Playlist> = emptyList(), val total: Int = 0)
 
 @Singleton
-class Repository @Inject constructor(val session: SessionStore, val client: OkHttpClient, val database: QueueDatabase, val cache: ClientCache) {
+class Repository @Inject constructor(val session: SessionStore, val client: OkHttpClient, val database: QueueDatabase, val cache: ClientCache, val settings: AppSettings) {
     private val gson = Gson()
     private var cachedUrl: String? = null
     private var cachedApi: Api? = null
@@ -43,7 +43,34 @@ class Repository @Inject constructor(val session: SessionStore, val client: OkHt
         return builder.build().toString()
     }
     fun cover(id: String): String = url("api", "v1", "tracks", id, "cover") + "?size=768"
-    fun stream(id: String): String = url("api", "v1", "tracks", id, "stream")
+    fun originalStream(id: String): String = url("api", "v1", "tracks", id, "stream")
+    fun stream(id: String): String = PlaybackRequest.url(originalStream(id), settings.state.value.aacBitrate)
+    suspend fun status(): AuthStatus {
+        val owner = session.cacheScope()
+        val endpoint = session.endpoint
+        return api().status().also {
+            if (owner != session.cacheScope() || endpoint != session.endpoint) throw CancellationException("会话已变化。")
+        }
+    }
+    suspend fun acceptAccount(account: Account?): Boolean {
+        val changed = session.bindAccount(account)
+        if (changed) {
+            knownTracks.clear()
+            withContext(Dispatchers.IO) { database.queue().clear(); cache.clear() }
+        }
+        return changed
+    }
+    suspend fun changePassword(current: String, next: String) {
+        val owner = session.cacheScope() ?: throw IOException("登录已失效。")
+        val base = session.endpoint ?: throw IOException("尚未连接服务器。")
+        val cookie = session.read()?.substringBefore(';') ?: throw IOException("登录已失效。")
+        // A late password response must never clear cookies belonging to a newer login.
+        val isolated = Retrofit.Builder().baseUrl(base).client(client.newBuilder().cookieJar(CookieJar.NO_COOKIES).build())
+            .addConverterFactory(GsonConverterFactory.create()).build().create(Api::class.java)
+        val response = isolated.changePassword(cookie, PasswordChange(current, next))
+        if (owner != session.cacheScope() || base != session.endpoint) throw CancellationException("会话已变化。")
+        if (!response.isSuccessful) throw HttpException(response)
+    }
     suspend fun tracks(query: String = "", offset: Int = 0, collection: String? = null, collectionId: String? = null, recent: Boolean = false): Page<Track> {
         val profile = session.cacheScope()
         val resource = if (collection != null && collectionId != null) url("api", "v1", collection, collectionId, "tracks") else url("api", "v1", "tracks")
@@ -110,6 +137,11 @@ class Repository @Inject constructor(val session: SessionStore, val client: OkHt
 }
 fun friendlyError(error: Throwable): String = when (error) {
     is HttpException -> when (error.code()) {
+        400 -> when {
+            error.response()?.errorBody()?.string()?.contains("current_password_incorrect") == true -> "当前密码不正确。"
+            else -> "服务器拒绝此访问地址，请检查域名白名单或输入内容。"
+        }
+        422 -> "输入不符合服务器要求，请检查后重试。"
         401 -> "登录已失效，请重新登录。"
         403 -> "服务器拒绝请求，请检查服务版本与权限。"
         404 -> "内容不存在或已经移除。"

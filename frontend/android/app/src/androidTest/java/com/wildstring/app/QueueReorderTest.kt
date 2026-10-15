@@ -1,6 +1,5 @@
 package com.wildstring.app
 
-import android.os.SystemClock
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
@@ -71,8 +70,9 @@ class QueueReorderTest {
         val start = point("queue-handle-entry-0")
         val bounds = queue.fetchSemanticsNode().boundsInRoot
         queue.performTouchInput { down(start); moveTo(Offset(start.x, bounds.height - 4f), delayMillis = 400) }
-        compose.waitUntil(8_000) { compose.onAllNodesWithTag("queue-handle-entry-9").fetchSemanticsNodes().isNotEmpty() }
-        SystemClock.sleep(150)
+        compose.waitUntil(8_000) {
+            runCatching { compose.onNodeWithTag("queue-handle-entry-9").assertIsDisplayed() }.isSuccess
+        }
         queue.performTouchInput { up() }
         compose.runOnIdle {
             assertEquals(1, moves.size)
@@ -80,8 +80,9 @@ class QueueReorderTest {
             assertEquals(16, rows.value.map { it.entryId }.toSet().size)
             assertEquals(0, plays)
         }
-        val visible = compose.onAllNodes(hasTestTag("queue-handle-entry-9")).onFirst()
-        visible.assertIsDisplayed()
+        // Auto-scroll can continue between the visibility check and release. Bring the
+        // next handle into view explicitly before testing an external queue change.
+        compose.onNodeWithTag("queue-handle-entry-9").performScrollTo().assertIsDisplayed()
         val next = point("queue-handle-entry-9")
         queue.performTouchInput { down(next); moveBy(Offset(0f, -40f), delayMillis = 100) }
         compose.runOnIdle { rows.value = rows.value.dropLast(1) }

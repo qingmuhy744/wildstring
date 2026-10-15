@@ -46,6 +46,18 @@ class SessionStore @Inject constructor(@ApplicationContext context: Context) : C
         }
         return profile.value
     }
+    val account: Account? get() = prefs.getString("account", null)?.let { runCatching { com.google.gson.Gson().fromJson(it, Account::class.java) }.getOrNull() }
+    @Synchronized fun bindAccount(account: Account?): Boolean {
+        val changed = this.account?.id?.let { it != account?.id } == true
+        val edit = prefs.edit()
+        if (changed) {
+            val owner = UUID.randomUUID().toString()
+            edit.putString("cache_profile", owner); profile.value = owner
+        }
+        if (account == null) edit.remove("account") else edit.putString("account", com.google.gson.Gson().toJson(account))
+        check(edit.commit())
+        return changed
+    }
     val localHttp: Boolean get() = BuildConfig.DEBUG && prefs.getBoolean("local_http", false)
     val endpoint: HttpUrl? get() = prefs.getString("server", null)?.let { runCatching { ServerAddress.normalize(it, localHttp) }.getOrNull() }
     @Synchronized fun configure(raw: String, allowLocalHttp: Boolean) {
@@ -73,7 +85,7 @@ class SessionStore @Inject constructor(@ApplicationContext context: Context) : C
     @Synchronized override fun write(value: String?) {
         val edit = prefs.edit()
         if (value == null) {
-            edit.remove("session_ciphertext").remove("cache_profile")
+            edit.remove("session_ciphertext").remove("cache_profile").remove("account")
             validUntil = 0
             profile.value = null
         } else {

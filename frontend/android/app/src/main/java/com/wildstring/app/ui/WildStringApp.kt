@@ -97,7 +97,7 @@ fun WildStringApp(model: MusicViewModel) {
 @Composable
 fun ConnectionScreen(state: MusicState, connect: (String, String, String, Boolean) -> Unit) {
     var server by rememberSaveable { mutableStateOf(state.server) }
-    var username by rememberSaveable { mutableStateOf("admin") }
+    var username by rememberSaveable { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var localHttp by rememberSaveable { mutableStateOf(state.localHttp) }
     Box(Modifier.fillMaxSize().safeDrawingPadding(), contentAlignment = Alignment.Center) {
@@ -281,7 +281,7 @@ private fun MiniPlayer(vm: MusicViewModel, state: MusicState, expand: () -> Unit
     val track = state.current ?: return
     Surface(Modifier.padding(horizontal = 12.dp, vertical = 7.dp).fillMaxWidth(), shape = RoundedCornerShape(13.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Row(Modifier.weight(1f).clickable(onClick = expand).padding(9.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(Modifier.weight(1f).testTag("mini-player-open").clickable(onClick = expand).padding(9.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Cover(vm, track.id.takeIf { track.hasCover }, track.title, Modifier.size(42.dp))
                 Column(Modifier.weight(1f)) { Text(track.title, maxLines = 1, overflow = TextOverflow.Ellipsis); Text(track.artist, color = Muted, fontSize = 11.sp, maxLines = 1) }
             }
@@ -304,6 +304,7 @@ private fun PlayerScreen(vm: MusicViewModel, input: MusicState, wide: Boolean, l
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
             IconButton(onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, if (lyrics && !wide) "返回封面" else "收起播放器") }
             Text(track.album ?: "正在播放", color = Muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).padding(horizontal = 16.dp))
+            IconButton(vm::refreshLyrics) { Icon(Icons.Default.Refresh, "刷新歌词") }
             IconButton(onAdd) { Icon(Icons.Default.MoreVert, "当前歌曲操作") }
         }
         if (wide) Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(48.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -349,6 +350,7 @@ private fun PlaybackControls(vm: MusicViewModel, state: MusicState, onQueue: () 
             }
             IconButton(tactile(vm) { vm.favorite(track) }) { Icon(if (track.loved) Icons.Default.Favorite else Icons.Default.FavoriteBorder, if (track.loved) "取消收藏" else "收藏", tint = if (track.loved) Accent else MaterialTheme.colorScheme.onSurface) }
         }
+        if (state.playbackQuality.isNotBlank()) Text(state.playbackQuality, color = Muted, fontSize = 11.sp, modifier = Modifier.padding(top = 6.dp).testTag("playback-quality"))
         Slider(value = scrub ?: state.position.coerceAtMost(state.duration).toFloat(), onValueChange = { scrub = it },
             onValueChangeFinished = { scrub?.let { vm.seek(it.toLong()) }; scrub = null }, valueRange = 0f..state.duration.coerceAtLeast(1).toFloat(), enabled = state.duration > 0)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text(formatTime(scrub?.toLong() ?: state.position), color = Muted, fontSize = 11.sp); Text(formatTime(state.duration), color = Muted, fontSize = 11.sp) }

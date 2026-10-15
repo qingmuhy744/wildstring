@@ -10,14 +10,18 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 data class Preferences(val redCloth: Boolean = false, val redIcon: Boolean = false,
-    val metadataMb: Int = 32, val artworkMb: Int = 64, val audioMb: Int = 256, val haptics: Boolean = true, val appearance: String = "system")
+    val metadataMb: Int = 32, val artworkMb: Int = 64, val audioMb: Int = 256, val haptics: Boolean = true, val appearance: String = "system", val aacBitrate: Int = 0)
 
 @Singleton
 class AppSettings @Inject constructor(@param:ApplicationContext private val context: Context) {
     private val prefs = context.getSharedPreferences("appearance_cache", Context.MODE_PRIVATE)
     private val mutable = MutableStateFlow(Preferences(prefs.getBoolean("red_cloth", false), prefs.getBoolean("red_icon", false),
-        prefs.getInt("metadata_mb", 32), prefs.getInt("artwork_mb", 64), prefs.getInt("audio_mb", 256), prefs.getBoolean("haptics", true), prefs.getString("appearance", "system") ?: "system"))
+        prefs.getInt("metadata_mb", 32), prefs.getInt("artwork_mb", 64), prefs.getInt("audio_mb", 256), prefs.getBoolean("haptics", true), prefs.getString("appearance", "system") ?: "system", prefs.getInt("aac_bitrate", 0).takeIf { it in listOf(0, 128, 192, 256, 320) } ?: 0))
     val state = mutable.asStateFlow()
+    fun quality(bitrate: Int) {
+        require(bitrate in listOf(0, 128, 192, 256, 320))
+        prefs.edit().putInt("aac_bitrate", bitrate).apply(); mutable.value = mutable.value.copy(aacBitrate = bitrate)
+    }
     fun appearance(mode: String) {
         require(mode in listOf("system", "light", "dark"))
         prefs.edit().putString("appearance", mode).apply(); mutable.value = mutable.value.copy(appearance = mode)

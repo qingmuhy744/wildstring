@@ -33,6 +33,7 @@ import java.util.UUID
 import java.util.concurrent.Executors
 import javax.inject.Inject
 import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import okhttp3.OkHttpClient
@@ -42,7 +43,7 @@ fun Track.mediaItem(repository: Repository, entryId: String = UUID.randomUUID().
     MediaItem.Builder().setMediaId(entryId).setUri(repository.stream(id))
         .setMediaMetadata(MediaMetadata.Builder().setTitle(title).setArtist(artist).setAlbumTitle(album)
             .setArtworkUri(if (hasCover) Uri.parse(repository.cover(id)) else null)
-            .setExtras(Bundle().apply { putString("track_id", id) }).build()).build()
+            .setExtras(Bundle().apply { putString("track_id", id); putLong("duration_ms", durationMs); putString("format", format); putString("original_stream", repository.originalStream(id)) }).build()).build()
 
 @OptIn(UnstableApi::class)
 @AndroidEntryPoint
@@ -50,7 +51,10 @@ class PlaybackService : MediaSessionService() {
     @Inject lateinit var repository: Repository
     @Inject lateinit var audioCache: AudioCache
     @Inject lateinit var health: PlaybackHealth
-    private lateinit var player: ExoPlayer
+    @Inject lateinit var resolver: PlaybackResolver
+    @Inject lateinit var settings: AppSettings
+    private lateinit var player: AbsolutePlayer
+    private lateinit var engine: ExoPlayer
     private var session: MediaSession? = null
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val saveMutex = Mutex()
@@ -58,6 +62,7 @@ class PlaybackService : MediaSessionService() {
     private var clock = ListeningClock()
     private var listeningId = UUID.randomUUID().toString()
     private var listeningTrack: String? = null
+    private var listeningEntry: String? = null
     private var sentMs = 0L
     private var restoring = true
     private var lastSavedQueue: List<QueueEntry>? = null
@@ -65,11 +70,12 @@ class PlaybackService : MediaSessionService() {
 
     override fun onCreate() {
         super.onCreate()
-        player = ExoPlayer.Builder(this)
-            .setMediaSourceFactory(DefaultMediaSourceFactory(audioCache.factory(repository.client)))
+        engine = ExoPlayer.Builder(this)
+            .setMediaSourceFactory(DefaultMediaSourceFactory(resolver.factory(audioCache.factory(repository.client))))
             .setAudioAttributes(AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MUSIC).build(), true)
             .setHandleAudioBecomingNoisy(true).setWakeMode(C.WAKE_MODE_NETWORK).build()
-        player.addAnalyticsListener(object : AnalyticsListener {
+        player = AbsolutePlayer(engine, resolver)
+        engine.addAnalyticsListener(object : AnalyticsListener {
             override fun onAudioUnderrun(eventTime: AnalyticsListener.EventTime, bufferSize: Int, bufferSizeMs: Long, elapsedSinceLastFeedMs: Long) { health.audioUnderruns.incrementAndGet() }
         })
         val activity = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
@@ -86,6 +92,8 @@ class PlaybackService : MediaSessionService() {
             }).build()
         player.addListener(object : Player.Listener {
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                if (mediaItem?.mediaId == listeningEntry && reason == Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED) return
+                listeningEntry = mediaItem?.mediaId
                 report()
                 clock = ListeningClock(); sentMs = 0; listeningId = UUID.randomUUID().toString()
                 listeningTrack = mediaItem?.mediaMetadata?.extras?.getString("track_id")
@@ -112,6 +120,8 @@ class PlaybackService : MediaSessionService() {
                 persist()
             }
         })
+        scope.launch { resolver.changes.collect { player.refreshResolution() } }
+        scope.launch { settings.state.map { it.aacBitrate }.distinctUntilChanged().drop(1).collect { player.quality(it) } }
         scope.launch { repository.session.invalidations.collect {
             player.stop(); player.clearMediaItems()
             saveMutex.withLock { withContext(Dispatchers.IO) { repository.database.queue().clear() }; lastSavedQueue = null }

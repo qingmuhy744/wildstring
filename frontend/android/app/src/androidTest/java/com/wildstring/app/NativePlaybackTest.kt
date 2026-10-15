@@ -124,13 +124,16 @@ class NativePlaybackTest {
                 }
             }
             server.start()
-            compose.onNodeWithText("服务器地址").performTextInput(server.url("/").toString())
+            compose.onNodeWithText("服务器地址").performTextReplacement(server.url("/").toString())
+            compose.onAllNodes(hasSetTextAction())[1].performTextReplacement("admin")
             compose.onNodeWithText("密码", useUnmergedTree = true).assertExists()
             compose.onAllNodes(hasSetTextAction())[2].performTextInput("test-only-password")
             compose.activityRule.scenario.onActivity { activity ->
                 WindowCompat.getInsetsController(activity.window, activity.window.decorView).hide(WindowInsetsCompat.Type.ime())
             }
-            compose.onNode(isToggleable()).performScrollTo().performClick()
+            compose.onNode(isToggleable()).performScrollTo().apply {
+                if (fetchSemanticsNode().config[androidx.compose.ui.semantics.SemanticsProperties.ToggleableState] != androidx.compose.ui.state.ToggleableState.On) performClick()
+            }
             compose.onNodeWithText("连接并登录").performScrollTo().performClick()
             compose.waitUntil(30_000) { compose.onAllNodesWithText("接口测试专辑").fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithText("接口测试专辑").performClick()
@@ -225,12 +228,12 @@ class NativePlaybackTest {
             compose.onNodeWithContentDescription("返回封面").performClick()
             compose.onNodeWithContentDescription("收起播放器").performClick()
             compose.onNodeWithContentDescription("设置").performClick()
-            compose.onNodeWithText("深色", substring = false).performClick()
+            compose.onNodeWithText("深色", substring = false).performScrollTo().performClick()
             compose.onNodeWithTag("appearance-dark").assertExists()
-            compose.onNodeWithText("浅色", substring = false).performClick()
+            compose.onNodeWithText("浅色", substring = false).performScrollTo().performClick()
             compose.onNodeWithTag("appearance-light").assertExists()
             compose.onNodeWithText("跟随系统").performClick()
-            compose.onNodeWithText("一块红布").performClick()
+            compose.onNodeWithText("一块红布").performScrollTo().performClick()
             compose.onNodeWithTag("appearance-red-cloth").assertExists()
             compose.onAllNodesWithText("日夜模式").assertCountEquals(0)
             compose.onNodeWithText("红布", substring = false).performClick()

@@ -19,6 +19,9 @@ class CachePrivacyTest {
         }
         val session = SessionStore(context)
         val settings = AppSettings(context)
+        settings.quality(192)
+        assertEquals(192, AppSettings(context).state.value.aacBitrate)
+        settings.quality(0)
         assertTrue(settings.state.value.haptics)
         settings.appearance("dark")
         assertEquals("dark", AppSettings(context).state.value.appearance)

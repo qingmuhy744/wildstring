@@ -37,6 +37,7 @@ import kotlinx.coroutines.launch
     var usage by remember { mutableStateOf(Triple(0L, 0L, 0L)) }
     var message by remember { mutableStateOf<String?>(null) }
     var clearing by remember { mutableStateOf(false) }
+    var password by remember { mutableStateOf(false) }
     LaunchedEffect(preferences, clearing) { while (true) { usage = vm.cacheUsage(); delay(2_000) } }
     fun mb(bytes: Long) = "%.1f MB".format(bytes / 1048576.0)
     ModalBottomSheet(onDismissRequest = dismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = MaterialTheme.colorScheme.surface) {
@@ -45,6 +46,16 @@ import kotlinx.coroutines.launch
                 Text("设置", style = MaterialTheme.typography.headlineSmall)
                 TextButton(dismiss) { Text("完成") }
             }
+            Text("账号", style = MaterialTheme.typography.titleMedium)
+            state.account?.let { account ->
+                Text("${account.username} · ${if (account.role == "admin") "管理员" else "普通用户"}")
+                TextButton({ password = true }) { Text("修改密码") }
+            } ?: Text("当前服务未提供账号详情。", fontSize = 12.sp)
+            HorizontalDivider()
+            Text("播放音质", style = MaterialTheme.typography.titleMedium)
+            QualitySelector(preferences.aacBitrate) { vm.settings.quality(it) }
+            Text("默认原音。选择 AAC 后，无损音源按目标码率转码，有损音源仍直放。当前歌曲会保留播放位置和暂停状态。", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            HorizontalDivider()
             Text("外观", style = MaterialTheme.typography.titleMedium)
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 FilterChip(!preferences.redCloth, tactile(vm) { vm.settings.theme(false) }, label = { Text("经典野弦") })
@@ -90,6 +101,49 @@ import kotlinx.coroutines.launch
             Spacer(Modifier.height(24.dp))
         }
     }
+    if (password) PasswordDialog(vm) { password = false }
+}
+
+@Composable private fun QualitySelector(bitrate: Int, change: (Int) -> Unit) {
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        OutlinedButton({ expanded = true }) { Text(if (bitrate == 0) "原音" else "AAC · $bitrate kbps") }
+        DropdownMenu(expanded, { expanded = false }) {
+            com.wildstring.app.data.PlaybackRequest.bitrates.forEach { value ->
+                DropdownMenuItem(text = { Text(if (value == 0) "原音" else "AAC · $value kbps") }, onClick = { change(value); expanded = false })
+            }
+        }
+    }
+}
+
+@Composable private fun PasswordDialog(vm: MusicViewModel, dismiss: () -> Unit) {
+    var current by remember { mutableStateOf("") }
+    var next by remember { mutableStateOf("") }
+    var confirm by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
+    val count = next.codePointCount(0, next.length)
+    AlertDialog(onDismissRequest = { if (!busy) dismiss() }, title = { Text("修改密码") },
+        text = { Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("修改后，所有设备都需要重新登录。新密码为 12–128 个字符。", fontSize = 12.sp)
+            listOf("当前密码" to current, "新密码" to next, "确认新密码" to confirm).forEachIndexed { index, (label, value) ->
+                OutlinedTextField(value, { text -> when (index) { 0 -> current = text.take(256); 1 -> next = text.take(256); else -> confirm = text.take(256) } }, label = { Text(label) },
+                    singleLine = true, enabled = !busy, visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Password))
+            }
+            error?.let { Text(it, color = MaterialTheme.colorScheme.error, fontSize = 12.sp) }
+        } },
+        confirmButton = { TextButton({
+            busy = true; error = null
+            scope.launch {
+                try { vm.changePassword(current, next); dismiss() }
+                catch (e: kotlinx.coroutines.CancellationException) { throw e }
+                catch (e: Exception) { error = com.wildstring.app.data.friendlyError(e) }
+                finally { busy = false }
+            }
+        }, enabled = !busy && current.isNotEmpty() && count in 12..128 && confirm == next) { Text(if (busy) "正在修改…" else "保存新密码") } },
+        dismissButton = { TextButton(dismiss, enabled = !busy) { Text("取消") } })
 }
 
 @Composable private fun CacheLimit(label: String, value: Int, options: List<Int>, change: (Int) -> Unit) {

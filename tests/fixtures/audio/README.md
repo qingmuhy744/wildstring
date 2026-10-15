@@ -9,3 +9,7 @@
 ## 播放样本
 
 `playback.mp3` 是本项目用 FFmpeg `anullsrc` 生成的 12 秒单声道静音，使用 libmp3lame 编码，含自编测试标签。仅用于浏览器播放、进度与队列验证，不含商业音乐。
+
+## Android AAC 回归
+
+`lossless.flac`、`aac-full.m4a`、`aac-tail-6000.m4a` 是为客户端兼容测试生成的 440 Hz 合成正弦波：48 kHz、双声道，全曲 12 秒，尾段为从第 6 秒开始的 6 秒。AAC 使用 FFmpeg AAC-LC、目标 192 kbps，fragmented MP4（`empty_moov+default_base_moof+frag_keyframe`）。仅进入独立测试 APK；用于整曲时间轴、偏移跳转和音质切换回归，不包含真实音乐。

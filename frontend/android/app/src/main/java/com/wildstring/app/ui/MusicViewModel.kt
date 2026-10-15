@@ -24,7 +24,7 @@ import com.wildstring.app.playback.AudioCache
 
 data class QueueRow(val entryId: String, val trackId: String, val title: String, val artist: String, val index: Int)
 data class MusicState(
-    val connected: Boolean = false, val connecting: Boolean = false, val loading: Boolean = false,
+    val account: Account? = null, val playbackQuality: String = "", val connected: Boolean = false, val connecting: Boolean = false, val loading: Boolean = false,
     val server: String = "", val localHttp: Boolean = false, val error: String? = null,
     val tab: String = "library", val kind: String = "albums", val title: String = "曲库",
     val query: String = "", val offset: Int = 0, val total: Int = 0,
@@ -44,7 +44,7 @@ class MusicViewModel @Inject constructor(
     val repository: Repository, val imageLoader: ImageLoader, val settings: AppSettings,
     val audioCache: AudioCache, val playbackHealth: com.wildstring.app.playback.PlaybackHealth, @ApplicationContext context: Context,
 ) : ViewModel() {
-    private val mutable = MutableStateFlow(MusicState(server = repository.session.endpoint?.toString().orEmpty(), localHttp = repository.session.localHttp))
+    private val mutable = MutableStateFlow(MusicState(account = repository.session.account, server = repository.session.endpoint?.toString().orEmpty(), localHttp = repository.session.localHttp))
     val state = mutable.asStateFlow()
     private val mutablePosition = MutableStateFlow(0L)
     val position = mutablePosition.asStateFlow()
@@ -55,6 +55,8 @@ class MusicViewModel @Inject constructor(
     private var lyricJob: Job? = null
     private var progressJob: Job? = null
     private var lyricTrack: String? = null
+    private var invalidationMessage: String? = null
+    private var authGeneration = 0
     private var loadGeneration = 0L
     private val tabs = mutableMapOf<String, CatalogQuery>()
     private val history = mutableMapOf<String, ArrayDeque<CatalogQuery>>()
@@ -89,21 +91,30 @@ class MusicViewModel @Inject constructor(
         }, ContextCompat.getMainExecutor(context))
         viewModelScope.launch { repository.session.invalidations.collect {
             loadGeneration++; loadJob?.cancel(); lyricJob?.cancel(); lyricTrack = null; pages.clear(); tabs.clear(); history.clear(); repository.knownTracks.clear(); controller?.stop(); controller?.clearMediaItems()
-            mutable.update { MusicState(server = it.server, localHttp = it.localHttp, error = "登录已失效，请重新登录。") }
+            val message = invalidationMessage ?: "登录已失效，请重新登录。"
+            invalidationMessage = null
+            mutable.update { MusicState(server = it.server, localHttp = it.localHttp, error = message) }
             imageLoader.memoryCache?.clear()
         } }
         if (repository.session.endpoint != null) viewModelScope.launch {
+            val generation = authGeneration
             val saved = repository.cachedCatalog(CatalogQuery())
             if (saved != null && repository.session.cacheScope() != null) {
                 mutable.update { it.withPage(saved).copy(connected = true, offline = true, contentKey = query().key) }
                 pages[query().key] = saved
             } else mutable.update { it.copy(connecting = true) }
             try {
-                if (repository.api().status().authenticated) { mutable.update { it.copy(connected = true, offline = false) }; load() }
-                else repository.session.invalidate()
+                val status = repository.status()
+                if (status.authenticated) {
+                    if (repository.acceptAccount(status.user)) {
+                        pages.clear(); controller?.stop(); controller?.clearMediaItems()
+                        mutable.update { MusicState(account = status.user, connected = true, server = it.server, localHttp = it.localHttp) }
+                    }
+                    mutable.update { it.copy(connected = true, offline = false, account = status.user) }; load()
+                } else repository.session.invalidate()
             } catch (e: CancellationException) { throw e }
-            catch (e: Exception) { mutable.update { it.copy(error = if (it.connected && e is IOException) null else friendlyError(e), offline = it.connected) } }
-            finally { mutable.update { it.copy(connecting = false) } }
+            catch (e: Exception) { if (generation == authGeneration) mutable.update { it.copy(error = if (it.connected && e is IOException) null else friendlyError(e), offline = it.connected) } }
+            finally { if (generation == authGeneration) mutable.update { it.copy(connecting = false) } }
         }
     }
 
@@ -113,14 +124,22 @@ class MusicViewModel @Inject constructor(
     }
     fun connect(server: String, username: String, password: String, localHttp: Boolean) = viewModelScope.launch {
         if (mutable.value.connecting) return@launch
+        authGeneration++
         mutable.update { it.copy(connecting = true, error = null) }
         try {
             repository.client.dispatcher.cancelAll()
+            controller?.stop(); controller?.clearMediaItems()
+            repository.session.write(null)
+            withContext(Dispatchers.IO) { repository.database.queue().clear() }
+            pages.clear(); tabs.clear(); history.clear(); repository.knownTracks.clear()
             repository.session.configure(server, localHttp)
-            val status = repository.api().status()
+            val status = repository.status()
             check(status.configured) { "请先在服务端初始化管理员。" }
-            if (!status.authenticated) repository.api().login(LoginRequest(username.trim(), password)).close()
-            mutable.update { MusicState(connected = true, server = repository.session.endpoint.toString(), localHttp = localHttp) }
+            repository.api().login(LoginRequest(username.trim(), password)).close()
+            val authenticated = repository.status()
+            check(authenticated.authenticated) { "登录未成功，请重试。" }
+            repository.acceptAccount(authenticated.user)
+            mutable.update { MusicState(account = authenticated.user, connected = true, server = repository.session.endpoint.toString(), localHttp = localHttp) }
             load()
         } catch (e: CancellationException) { throw e }
         catch (e: Exception) { mutable.update { it.copy(error = if (e is HttpException && e.code() == 401) "账号或密码不正确。" else if (e is IllegalStateException) e.message else friendlyError(e)) } }
@@ -131,6 +150,23 @@ class MusicViewModel @Inject constructor(
         runCatching { repository.logout() }
         imageLoader.memoryCache?.clear()
         mutable.update { MusicState(server = it.server, localHttp = it.localHttp) }
+    }
+
+    suspend fun changePassword(current: String, next: String) {
+        repository.changePassword(current, next)
+        invalidationMessage = "密码已修改，请重新登录。"
+        repository.session.invalidate()
+    }
+    fun refreshLyrics() {
+        val id = mutable.value.current?.id ?: return
+        lyricJob?.cancel()
+        lyricJob = viewModelScope.launch {
+            mutable.update { it.copy(lyricsLoading = true, lyricsError = null) }
+            try { val lyrics = repository.lyrics(id); if (lyricTrack == id) mutable.update { it.copy(lyrics = lyrics) } }
+            catch (e: CancellationException) { throw e }
+            catch (e: Exception) { if (lyricTrack == id) mutable.update { it.copy(lyricsError = friendlyError(e)) } }
+            finally { if (lyricTrack == id) mutable.update { it.copy(lyricsLoading = false) } }
+        }
     }
 
     fun navigate(tab: String) {
@@ -256,8 +292,9 @@ class MusicViewModel @Inject constructor(
         mutablePosition.value = c.currentPosition.coerceAtLeast(0)
         mutable.update { it.copy(current = track, playing = c.isPlaying, buffering = c.playbackState == Player.STATE_BUFFERING,
             duration = c.duration.takeIf { d -> d > 0 } ?: track?.durationMs ?: 0,
-            queue = queue, entryId = item?.mediaId, repeatMode = c.repeatMode, shuffle = c.shuffleModeEnabled,
-            playbackError = c.playerError?.let { "无法播放这首歌，请检查连接或音频编码后重试。" }) }
+            queue = queue, playbackQuality = c.mediaMetadata.description?.toString().orEmpty(), entryId = item?.mediaId, repeatMode = c.repeatMode, shuffle = c.shuffleModeEnabled,
+            playbackError = c.playerError?.let { error -> generateSequence<Throwable>(error) { it.cause }.filterIsInstance<com.wildstring.app.playback.PlaybackResolutionException>().firstOrNull()?.message
+                ?: "无法播放这首歌，请检查连接或音频编码后重试。" }) }
         if (id != lyricTrack) {
             lyricTrack = id; lyricJob?.cancel()
             mutable.update { it.copy(lyrics = Lyrics(), lyricsLoading = id != null, lyricsError = null) }
