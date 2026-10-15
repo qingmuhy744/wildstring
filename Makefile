@@ -51,7 +51,8 @@ android-package: android-assemble ## Copy APK and SHA256SUMS into artifacts/andr
 	$(PYTHON) scripts/package_android.py
 
 android-ci: ## Check, test and package the native Android application
-	$(ANDROID) :app:lintDebug :app:lintRelease :app:testDebugUnitTest :app:assembleDebug :app:assembleRelease
+	$(ANDROID) :app:assembleDebug :app:testDebugUnitTest :app:lintDebug
+	$(ANDROID) :app:assembleRelease :app:lintRelease
 	$(PYTHON) scripts/package_android.py
 
 android-release: ## Build and verify a signed release APK (requires ANDROID signing environment)

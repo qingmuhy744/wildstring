@@ -2,6 +2,7 @@ package com.wildstring.app
 
 import android.content.ComponentName
 import android.graphics.Bitmap
+import java.io.ByteArrayOutputStream
 import android.os.ParcelFileDescriptor
 import android.os.SystemClock
 import androidx.compose.ui.test.*
@@ -9,6 +10,13 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.media3.common.Player
+import androidx.lifecycle.ViewModelProvider
+import com.wildstring.app.ui.MusicViewModel
+import com.wildstring.app.data.CatalogQuery
+import kotlinx.coroutines.runBlocking
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
+import okhttp3.mockwebserver.SocketPolicy
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import androidx.test.platform.app.InstrumentationRegistry
@@ -56,23 +64,43 @@ class NativePlaybackTest {
     }
 
     @Test fun loginCookieStreamingAndFullscreenLyrics() {
+        val previousNight = shellForTest("cmd uimode night").substringAfter("Night mode: ", "auto").trim().substringBefore('\n').let { if (it in listOf("yes", "no", "auto")) it else "auto" }
         try { exercisePlayback() } catch (failure: Throwable) {
             runCatching { capture("failure.png") }
             runCatching { compose.onRoot(useUnmergedTree = true).printToLog("NativeTestUI") }
             throw failure
-        }
+        } finally { shellForTest("cmd uimode night $previousNight") }
+    }
+
+    private fun shellForTest(command: String): String {
+        val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
+        return ParcelFileDescriptor.AutoCloseInputStream(automation.executeShellCommand(command)).use { String(it.readBytes()) }
     }
 
     private fun exercisePlayback() {
         val requests = ConcurrentLinkedQueue<RecordedRequest>()
+        val offline = AtomicBoolean(false)
+        val unauthorized = AtomicBoolean(false)
         val audio = InstrumentationRegistry.getInstrumentation().context.assets.open("playback.mp3").use { it.readBytes() }
-        val track = """{"id":"fixture-track","title":"接口测试歌曲","artists":["接口测试艺人"],"album":"接口测试专辑","duration_ms":12000,"has_cover":false,"loved":false,"format":"mp3","status":"available"}"""
+        val coverBitmap = Bitmap.createBitmap(64, 64, Bitmap.Config.ARGB_8888).apply {
+            eraseColor(android.graphics.Color.rgb(20, 80, 210))
+            val canvas = android.graphics.Canvas(this)
+            val paint = android.graphics.Paint().apply { isAntiAlias = true; color = android.graphics.Color.rgb(245, 220, 160) }
+            canvas.drawCircle(39f, 25f, 14f, paint)
+            paint.color = android.graphics.Color.rgb(220, 95, 40)
+            canvas.drawRect(0f, 46f, 64f, 64f, paint)
+        }
+        val cover = ByteArrayOutputStream().also { coverBitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }.toByteArray()
+        coverBitmap.recycle()
+        val track = """{"id":"fixture-track","title":"接口测试歌曲","artists":["接口测试艺人"],"album":"接口测试专辑","duration_ms":12000,"has_cover":true,"loved":false,"format":"mp3","status":"available"}"""
         MockWebServer().use { server ->
             server.dispatcher = object : Dispatcher() {
                 override fun dispatch(request: RecordedRequest): MockResponse {
                     requests += request
                     android.util.Log.i("NativeFixture", "${request.method} ${request.requestUrl!!.encodedPath}")
                     val path = request.requestUrl!!.encodedPath
+                    if (offline.get()) return MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AT_START)
+                    if (unauthorized.get()) return MockResponse().setResponseCode(401)
                     val authenticated = request.getHeader("Cookie")?.contains("wildstring_session=instrumentation") == true
                     fun json(body: String) = MockResponse().setHeader("Content-Type", "application/json").setBody(body)
                     if (path.endsWith("/auth/status")) return json("""{"configured":true,"authenticated":$authenticated}""")
@@ -82,10 +110,11 @@ class NativePlaybackTest {
                     if (path.endsWith("/stream")) {
                         val start = request.getHeader("Range")?.substringAfter("bytes=")?.substringBefore('-')?.toIntOrNull() ?: 0
                         if (start >= audio.size) return MockResponse().setResponseCode(416)
-                        val response = MockResponse().setHeader("Content-Type", "audio/mpeg").setHeader("Accept-Ranges", "bytes").setBody(Buffer().write(audio, start, audio.size - start))
+                        val response = MockResponse().setHeader("Content-Type", "audio/mpeg").setHeader("Accept-Ranges", "bytes").setHeader("ETag", "\"fixture-v1\"").setBody(Buffer().write(audio, start, audio.size - start))
                         if (request.getHeader("Range") != null) response.setResponseCode(206).setHeader("Content-Range", "bytes $start-${audio.lastIndex}/${audio.size}")
                         return response
                     }
+                    if (path.endsWith("/cover")) return MockResponse().setHeader("Content-Type", "image/png").setBody(Buffer().write(cover))
                     if (path.endsWith("/lyrics")) return json("""{"kind":"synced","source":"sidecar_lrc","lines":[{"time_ms":0,"text":"来自测试接口的歌词"},{"time_ms":5000,"text":"下一行测试歌词"}]}""")
                     if (path.endsWith("/listening")) return json("""{"accepted_ms":5000}""")
                     if (path.endsWith("/albums")) return json("""{"items":[{"id":"fixture-album","title":"接口测试专辑","artists":["接口测试艺人"],"track_count":1,"cover_track_id":null}],"total":1,"limit":50,"offset":0}""")
@@ -135,10 +164,83 @@ class NativePlaybackTest {
             } finally {
                 shell("wm size reset")
                 shell("wm density reset")
-                InstrumentationRegistry.getInstrumentation().runOnMainSync { MediaController.releaseFuture(future) }
+
             }
+            val vm = compose.runOnIdle { ViewModelProvider(compose.activity)[MusicViewModel::class.java] }
+            compose.waitUntil(10_000) { vm.audioCache.bytes() >= audio.size }
+            compose.waitUntil(10_000) { compose.onAllNodesWithTag("artwork-atmosphere").fetchSemanticsNodes().isNotEmpty() }
+            val nightPosition = compose.runOnIdle { player.currentPosition }
+            compose.runOnIdle { vm.settings.appearance("system") }
+            shellForTest("cmd uimode night yes")
+            compose.waitUntil(15_000) { compose.onAllNodesWithTag("appearance-dark").fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithTag("player-phone").assertExists()
+            capture("classic-dark-phone.png")
+            shellForTest("cmd uimode night no")
+            compose.waitUntil(15_000) { compose.onAllNodesWithTag("appearance-light").fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithTag("player-phone").assertExists()
+            assertTrue(kotlin.math.abs(compose.runOnIdle { player.currentPosition } - nightPosition) < 500)
+            capture("classic-light-phone.png")
+            assertNotNull(runBlocking { vm.repository.cachedCatalog(CatalogQuery()) })
+            assertNotNull(runBlocking { vm.repository.cachedLyrics("fixture-track") })
+            val buffers = AtomicInteger(0)
+            val listener = object : Player.Listener {
+                override fun onPlaybackStateChanged(playbackState: Int) { if (playbackState == Player.STATE_BUFFERING) buffers.incrementAndGet() }
+            }
+            compose.runOnIdle { player.repeatMode = Player.REPEAT_MODE_ONE; player.play(); player.addListener(listener) }
+            compose.waitUntil(10_000) { compose.runOnIdle { player.isPlaying && player.currentPosition > 1000 } }
+            val underrunsBefore = vm.playbackHealth.audioUnderruns.get()
+            // Exercise actual controls during playback and inspect both appearance options.
+            compose.onNodeWithContentDescription("返回封面").performClick()
+            compose.onNodeWithContentDescription("收起播放器").performClick()
+            compose.onNodeWithContentDescription("设置").performClick()
+            compose.onNodeWithText("深色", substring = false).performClick()
+            compose.onNodeWithTag("appearance-dark").assertExists()
+            compose.onNodeWithText("浅色", substring = false).performClick()
+            compose.onNodeWithTag("appearance-light").assertExists()
+            compose.onNodeWithText("跟随系统").performClick()
+            compose.onNodeWithText("一块红布").performClick()
+            compose.onNodeWithTag("appearance-red-cloth").assertExists()
+            compose.onAllNodesWithText("日夜模式").assertCountEquals(0)
+            compose.onNodeWithText("红布", substring = false).performClick()
+            compose.onNodeWithText("256 MB").performScrollTo().performClick()
+            compose.onNodeWithText("128 MB").performClick()
+            compose.waitUntil { vm.settings.state.value.audioMb == 128 && vm.settings.state.value.redCloth && vm.settings.state.value.redIcon }
+            capture("red-cloth-settings.png")
+            compose.onNodeWithText("完成").performScrollTo().performClick()
+            compose.waitUntil(10_000) { compose.onAllNodesWithText("一块红布").fetchSemanticsNodes().isEmpty() }
+            compose.onAllNodesWithText("接口测试歌曲").onLast().performClick()
+            compose.onNodeWithText("歌词", useUnmergedTree = true).performClick()
+            capture("red-cloth-phone.png")
+            for (iteration in 0..2) {
+                compose.onNodeWithText("返回封面", useUnmergedTree = true).performClick()
+                compose.onNodeWithText("歌词", useUnmergedTree = true).performClick()
+            }
+            compose.waitUntil(5_000) { compose.runOnIdle { player.isPlaying && player.playbackState == Player.STATE_READY } }
+            assertEquals("UI actions should not trigger audio rebuffering", 0, buffers.get())
+            assertEquals("UI actions should not cause AudioTrack underruns", underrunsBefore, vm.playbackHealth.audioUnderruns.get())
+            compose.runOnIdle { player.removeListener(listener); player.pause() }
+            try {
+                shellForTest("wm size 1600x1000"); shellForTest("wm density 160")
+                compose.waitUntil(15_000) { compose.onAllNodesWithTag("player-tablet").fetchSemanticsNodes().isNotEmpty() }
+                capture("red-cloth-tablet.png", resized = true)
+            } finally { shellForTest("wm size reset"); shellForTest("wm density reset") }
+            val streamCount = requests.count { it.path?.contains("/stream") == true }
+            offline.set(true)
+            compose.runOnIdle { player.stop(); player.seekTo(0); player.prepare(); player.play() }
+            compose.waitUntil(20_000) { compose.runOnIdle { player.playbackState == Player.STATE_READY && player.currentPosition > 250 } }
+            assertEquals("Replaying cached audio must not require a stream request", streamCount, requests.count { it.path?.contains("/stream") == true })
+            compose.runOnIdle { player.pause(); vm.back(); vm.load() }
+            compose.waitUntil(30_000) { vm.state.value.offline && !vm.state.value.loading }
+            assertTrue(vm.state.value.hasContent)
+            assertEquals("接口测试专辑", vm.state.value.albums.single().title)
+            offline.set(false); unauthorized.set(true)
+            compose.runOnIdle { vm.load() }
+            compose.waitUntil(15_000) { !vm.state.value.connected }
+            assertNull(runBlocking { vm.repository.cachedCatalog(CatalogQuery()) })
+            compose.waitUntil(10_000) { vm.audioCache.bytes() == 0L && runBlocking { vm.repository.database.queue().entries().isEmpty() } }
             assertTrue(requests.filter { it.path?.contains("/stream") == true }.all { it.getHeader("Cookie")?.contains("wildstring_session=instrumentation") == true })
             assertTrue(requests.filter { it.path?.contains("/auth/login") == true }.all { it.getHeader("X-Wildstring-Client") == "android" })
+            compose.runOnIdle { MediaController.releaseFuture(future) }
         }
     }
 }

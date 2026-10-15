@@ -55,11 +55,24 @@ class NetworkPolicyTest {
         MockWebServer().use { server ->
             server.start(); var invalidations = 0
             val client = OkHttpClient.Builder().addInterceptor(OriginGuard({ server.url("/") }) { invalidations++ }).build()
-            listOf("api/v1/auth/login", "api/v1/tracks").forEach { path ->
+            listOf("api/v1/auth/login", "api/v1/auth/logout", "api/v1/tracks").forEach { path ->
                 server.enqueue(MockResponse().setResponseCode(401))
                 client.newCall(Request.Builder().url(server.url(path)).build()).execute().close()
             }
             assertEquals(1, invalidations)
         }
     }
+    @Test fun delayedUnauthorizedResponseCannotInvalidateNewLogin() {
+        MockWebServer().use { server ->
+            server.start()
+            var owner = "first"; var invalidations = 0
+            val client = OkHttpClient.Builder()
+                .addInterceptor(OriginGuard({ server.url("/") }, profile = { owner }, unauthorized = { invalidations++ }))
+                .addInterceptor { chain -> owner = "second"; chain.proceed(chain.request()) }.build()
+            server.enqueue(MockResponse().setResponseCode(401))
+            client.newCall(Request.Builder().url(server.url("api/v1/tracks")).build()).execute().close()
+            assertEquals(0, invalidations)
+        }
+    }
+
 }
