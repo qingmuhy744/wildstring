@@ -203,6 +203,9 @@ export function usePlayer() {
     seek,
     toggle,
     setVolume,
+    refreshTrack: (track: Track) => {
+      setQueue((items) => items.map((item) => (item.id === track.id ? track : item)));
+    },
     playNext: (track: Track) => {
       if (index < 0) {
         start([track], 0);

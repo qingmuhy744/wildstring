@@ -215,6 +215,33 @@ test('全屏展开收起连续播放、切歌、焦点边界与 Esc 返回', asy
   expect((await audio(page)).paused).toBe(false);
   await dialog.getByRole('button', { name: '暂停', exact: true }).click();
   const paused = await audio(page);
+  const queueToggle = dialog.getByRole('button', { name: '显示播放队列', exact: true });
+  const lyricsToggle = dialog.getByRole('button', { name: '显示歌词', exact: true });
+  await expect(lyricsToggle).toHaveAttribute('aria-pressed', 'true');
+  await queueToggle.click();
+  await expect(queueToggle).toHaveAttribute('aria-pressed', 'true');
+  await expect(lyricsToggle).toHaveAttribute('aria-pressed', 'false');
+  await expect(dialog.getByRole('list', { name: '歌词', exact: true })).toHaveCount(0);
+  const fullQueue = dialog.getByRole('complementary', { name: '播放队列', exact: true });
+  await expect(fullQueue.getByRole('listitem')).toHaveCount(2);
+  await fullQueue
+    .getByRole('button', { name: '拖动队列第 1 首排序', exact: true })
+    .press('ArrowDown');
+  await expect(fullQueue.getByRole('listitem').last()).toHaveClass(/selected/);
+  await fullQueue
+    .getByRole('button', { name: '拖动队列第 2 首排序', exact: true })
+    .press('ArrowUp');
+  await expect(fullQueue.getByRole('listitem').first()).toHaveClass(/selected/);
+  await page.screenshot({ path: `../../artifacts/fullscreen-queue-${testInfo.project.name}.png` });
+  expect(await audio(page)).toEqual(paused);
+  await fullQueue.getByRole('button', { name: '关闭队列', exact: true }).click();
+  await expect(queueToggle).toHaveAttribute('aria-pressed', 'false');
+  await expect(queueToggle).toBeFocused();
+  await expect(dialog.locator('.fullscreen-content')).toHaveClass(/is-cover-only/);
+  await page.screenshot({ path: `../../artifacts/fullscreen-cover-${testInfo.project.name}.png` });
+  await lyricsToggle.click();
+  await expect(lyricsToggle).toHaveAttribute('aria-pressed', 'true');
+  expect(await audio(page)).toEqual(paused);
   const viewport = page.viewportSize()!;
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(dialog.getByRole('button', { name: '收起全屏播放' })).toBeInViewport();

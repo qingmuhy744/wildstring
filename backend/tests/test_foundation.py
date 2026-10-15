@@ -1,5 +1,6 @@
 """Check deployment behavior without external services or music files."""
 
+import time
 from pathlib import Path
 
 import pytest
@@ -45,6 +46,17 @@ def test_lost_data_mount_is_reported(settings: Settings):
         response = client.get("/health/ready")
         assert response.status_code == 503
         assert response.json()["checks"]["data_directory"] == "unavailable"
+        time.sleep(1.1)
+        assert not settings.data_dir.exists()
+
+
+def test_worker_does_not_recreate_missing_database(settings: Settings):
+    with TestClient(create_app(settings)) as client:
+        database = settings.data_dir / "wildstring.sqlite3"
+        database.rename(database.with_suffix(".unmounted"))
+        time.sleep(1.1)
+        assert client.get("/health/ready").status_code == 503
+        assert not database.exists()
 
 
 def test_production_does_not_expose_development_docs(settings: Settings):

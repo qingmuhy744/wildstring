@@ -51,6 +51,9 @@ def main() -> None:
                     "[00:00]侧车第一行\n[00:03]侧车第二行\n[00:06]侧车第三行\n[00:09]侧车第四行"
                 )
             tags.save()
+        source = root / "source"
+        source.mkdir()
+        (source / "broken.flac").write_bytes(b"Not a valid music file")
         settings = Settings(
             _env_file=None,
             environment="test",

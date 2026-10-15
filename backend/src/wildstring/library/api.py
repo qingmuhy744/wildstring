@@ -17,7 +17,7 @@ class Track(BaseModel):
     album_id: str
     path: str
     title: str
-    title_source: Literal["tag", "filename"]
+    title_source: Literal["tag", "filename", "user"]
     artists: list[str]
     album: str | None
     album_artists: list[str]
