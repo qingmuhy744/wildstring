@@ -3,6 +3,7 @@ package dev.wildstring.app
 import android.content.ComponentName
 import android.graphics.Bitmap
 import android.os.ParcelFileDescriptor
+import android.os.SystemClock
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.core.view.WindowCompat
@@ -28,15 +29,29 @@ import org.junit.Test
 class NativePlaybackTest {
     @get:Rule val compose = createAndroidComposeRule<MainActivity>()
 
-    private fun capture(name: String) {
+    private fun capture(name: String, resized: Boolean = false) {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val directory = InstrumentationRegistry.getArguments().getString("additionalTestOutputDir")?.let(::File)
             ?: checkNotNull(context.getExternalFilesDir(null))
         directory.mkdirs()
         val file = File(directory, name)
-        InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot().let { image ->
-            file.outputStream().use { image.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
+        compose.waitForIdle()
+        automation.waitForIdle(500, 5_000)
+        val deadline = SystemClock.elapsedRealtime() + 15_000
+        while (true) {
+            val image = checkNotNull(automation.takeScreenshot())
+            // SurfaceFlinger can still expose the old portrait buffer after layout has resized.
+            val fresh = !resized || (image.width == 1600 && image.height == 1000 &&
+                android.graphics.Color.red(image.getPixel(image.width - 20, image.height / 2)) > 8)
+            if (fresh) {
+                file.outputStream().use { image.compress(Bitmap.CompressFormat.PNG, 100, it) }
+                image.recycle()
+                return
+            }
             image.recycle()
+            check(SystemClock.elapsedRealtime() < deadline) { "Resized display has not rendered a complete frame" }
+            SystemClock.sleep(200)
         }
     }
 
@@ -116,7 +131,7 @@ class NativePlaybackTest {
                 compose.waitUntil(15_000) { compose.onAllNodesWithTag("player-tablet").fetchSemanticsNodes().isNotEmpty() }
                 compose.onNodeWithText("来自测试接口的歌词").assertIsDisplayed()
                 assertTrue(kotlin.math.abs(compose.runOnIdle { player.currentPosition } - before) < 500)
-                capture("tablet-lyrics.png")
+                capture("tablet-lyrics.png", resized = true)
             } finally {
                 shell("wm size reset")
                 shell("wm density reset")
