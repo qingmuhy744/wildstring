@@ -1,3 +1,6 @@
+import { UsersPanel } from './accounts';
+import { TranscodingSettings } from './transcoding-settings';
+import { HostSettings } from './host-settings';
 import { useEffect, useRef, useState } from 'react';
 import { api, type Track, type TrackPage } from './api';
 import { Pagination } from './track-list';
@@ -133,7 +136,7 @@ export function Management({
   onEdit: (track: Track) => void;
   onChanged: () => void;
 }) {
-  const [tab, setTab] = useState<'overview' | 'tracks' | 'jobs' | 'intake' | 'settings'>(
+  const [tab, setTab] = useState<'overview' | 'tracks' | 'jobs' | 'intake' | 'settings' | 'users'>(
     'overview',
   );
   const finished = useRef<string | null>(null);
@@ -258,6 +261,7 @@ export function Management({
             ['jobs', '任务记录'],
             ['intake', '导入与整理'],
             ['settings', '设置'],
+            ['users', '用户'],
           ] as const
         ).map(([key, label]) => (
           <button key={key} aria-pressed={tab === key} onClick={() => setTab(key)}>
@@ -279,6 +283,7 @@ export function Management({
         overview && (
           <>
             {tab === 'intake' && <IntakePanel />}
+            {tab === 'users' && <UsersPanel />}
             {tab === 'overview' && (
               <>
                 <section className="management-metrics" aria-label="曲库概览">
@@ -470,6 +475,8 @@ export function Management({
             {tab === 'settings' && (
               <>
                 <AISettings />
+                <TranscodingSettings />
+                <HostSettings />
                 <section className="management-card">
                   <h2>曲库设置</h2>
                   <form

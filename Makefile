@@ -13,7 +13,7 @@ RUN = $(UV) run --frozen --project backend
 ANDROID = ./frontend/android/gradlew -p frontend/android --console=plain
 DOCKER = $(COMPOSE) --project-directory "$(CURDIR)" --env-file .env -p "$(PROJECT)" -f deploy/compose.yaml
 
-.PHONY: help env setup sync dev dev-web android-design scan import-music admin check hooks-check lint format format-check security test build-web icons browser-install test-web web-test-server ci health docker-config docker-build docker-up docker-pull docker-down docker-status docker-logs docker-smoke docker-scan docker-import docker-admin docker-test
+.PHONY: help env setup sync dev dev-web android-design scan import-music admin check hooks-check lint format format-check security test build-web icons browser-install test-web test-transcoding-web web-test-server ci health docker-config docker-build docker-up docker-pull docker-down docker-status docker-logs docker-smoke docker-scan docker-import docker-admin docker-test
 
 help: ## Show available commands
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "  make %-17s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -113,10 +113,13 @@ browser-install: ## Install Chromium for the Web integration tests
 test-web: build-web ## Test login, search, playback and mobile UI with an isolated fixture library
 	npm --prefix frontend/web run test
 
+test-transcoding-web: build-web ## Verify real AAC playback and seeking (requires FFmpeg)
+	@if command -v ffmpeg >/dev/null && command -v ffprobe >/dev/null; then WILDSTRING_TEST_TRANSCODING=1 npm --prefix frontend/web run test -- transcoding.spec.ts; else echo "AAC browser tests skipped: install FFmpeg or run on CI."; fi
+
 web-test-server: ## Internal: serve a disposable library for browser tests
 	$(RUN) python scripts/serve_web_tests.py
 
-ci: check test test-web ## Run checks, backend tests, Web build and browser tests (install Chromium first)
+ci: check test test-web test-transcoding-web ## Run checks, backend tests, Web build and browser tests (install Chromium first)
 	$(UV) lock --check --project backend
 
 health: ## Check the locally configured API readiness

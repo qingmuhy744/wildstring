@@ -25,6 +25,9 @@ class LibraryRepository:
         self.root = root
         self._library_id: str | None = None
 
+    def for_user(self, user_id: str):
+        return LibraryRepository(Database(self.database.path.parent, user_id), self.root)
+
     def library_id(self, *, create: bool = False) -> str | None:
         if self._library_id is not None:
             return self._library_id
@@ -187,7 +190,7 @@ class LibraryRepository:
                 "".join(
                     (
                         ARTIST_CREDITS,
-                        """SELECT count(*) FROM tracks
+                        """SELECT count(*) FROM personal_tracks
                 WHERE library_id = :library_id AND status = 'available'
                 AND (:query = '' OR search_text LIKE :pattern ESCAPE '\\')
                 AND (:album_id IS NULL OR album_id = :album_id)
@@ -202,7 +205,7 @@ class LibraryRepository:
                 "".join(
                     (
                         ARTIST_CREDITS,
-                        """SELECT * FROM tracks
+                        """SELECT * FROM personal_tracks
                 WHERE library_id = :library_id AND status = 'available'
                 AND (:query = '' OR search_text LIKE :pattern ESCAPE '\\')
                 AND (:album_id IS NULL OR album_id = :album_id)
@@ -229,7 +232,7 @@ class LibraryRepository:
     def track(self, track_id: str) -> dict | None:
         with self.database.connect() as connection:
             row = connection.execute(
-                "SELECT * FROM tracks WHERE library_id = ? AND id = ?",
+                "SELECT * FROM personal_tracks WHERE library_id = ? AND id = ?",
                 (self.library_id(), track_id),
             ).fetchone()
         return self.public_track(dict(row)) if row else None

@@ -133,7 +133,8 @@ def test_v2_migration_keeps_track_ids_and_auth_data(settings):
         row = connection.execute("SELECT id, album_id FROM tracks").fetchone()
         assert row["id"] == "track" and len(row["album_id"]) == 64
         assert (
-            connection.execute("SELECT password_hash FROM admin").fetchone()[0] == "existing-hash"
+            connection.execute("SELECT password_hash FROM users WHERE id='admin'").fetchone()[0]
+            == "existing-hash"
         )
         assert (
             connection.execute("SELECT token_hash FROM sessions").fetchone()[0]

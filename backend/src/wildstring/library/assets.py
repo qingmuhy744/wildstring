@@ -145,8 +145,15 @@ class TrackAssets:
                 return result, "directory"
         return None
 
-    def lyrics(self, track_id: str) -> dict:
+    def lyrics(self, track_id: str, *, include_override: bool = True) -> dict:
         relative, audio = self.source(track_id)
+        if include_override:
+            with self.repository.database.connect() as connection:
+                row = connection.execute(
+                    "SELECT text FROM track_lyrics WHERE track_id=?", (track_id,)
+                ).fetchone()
+            if row is not None and row["text"] is not None:
+                return parse_lyrics(row["text"], "user")
         for path in self.candidates(relative, [relative.stem], (".lrc", ".lryc")):
             data = self.read_sidecar(path, MAX_TEXT_BYTES)
             text = decode_text(data) if data is not None else None

@@ -23,7 +23,7 @@ export default defineConfig({
     { name: 'mobile', use: { ...devices['Pixel 7'] } },
   ],
   webServer: {
-    command: 'make web-test-server',
+    command: process.env.WILDSTRING_WEB_TEST_SERVER || 'make web-test-server',
     cwd: fileURLToPath(new URL('../..', import.meta.url)),
     url: `${baseURL}/health/ready`,
     reuseExistingServer: false,

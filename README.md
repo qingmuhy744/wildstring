@@ -22,7 +22,7 @@
 
 第一阶段使用 **Python 3.12 / FastAPI + React / TypeScript**，提供自托管服务与网页端。MVP 主线：导入本地曲库 → 浏览与播放 → 查看本地歌词 → 自然语言找歌 → 预览、保存并播放 AI 歌单。
 
-当前已有工程基座、SQLite 托管曲库、只读源导入与目录整理、管理员登录、歌曲/专辑/艺人视图、封面与本地滚动歌词，以及原音串流和网页队列。支持全屏播放、下一首播放、队列排序、♥ 收藏、普通/规则歌单与收听次数/时长记录。已增加管理入口、网页导入/扫描、任务历史和单曲元数据覆盖编辑；AI API 配置与连接测试已接入设置。现已接入自动发现、导入预检、待整理，以及 WAV/CUE 到逐曲 FLAC 的校验转换，见 [自动导入](contracts/automatic-import.md)。**批量整理、已有文件标签写回、播放转码和 Agent 业务仍待实现。** 详见 [MVP 范围](docs/product/scope.md)。
+当前已有工程基座、SQLite 托管曲库、只读源导入与目录整理、本地用户登录、管理员/普通用户、歌曲/专辑/艺人视图、封面与本地滚动歌词，以及原音串流和网页队列。支持全屏播放、下一首播放、队列排序、♥ 收藏、普通/规则歌单与收听次数/时长记录。已增加管理入口、网页导入/扫描、任务历史和单曲元数据覆盖编辑；AI API 配置与连接测试已接入设置。现已接入自动发现、导入预检、待整理，以及 WAV/CUE 到逐曲 FLAC 的校验转换，见 [自动导入](contracts/automatic-import.md)。**批量整理、已有文件标签写回和 Agent 业务仍待实现。** 详见 [MVP 范围](docs/product/scope.md)。
 
 服务端元数据整理将支持手动/批量编辑、差异预览和显式写回，减少使用 mp3tag 前后下载与上传整首音频的重复传输，见 [整理设计](docs/architecture/metadata-repair.md)。
 
@@ -60,7 +60,9 @@ make docker-down     # 停止服务，保留数据卷
 
 容器内包含 Web，访问 [本地野弦](http://127.0.0.1:18780)。默认仅绑定回环地址，导入源只读挂载，托管曲库和运行数据放在持久卷。首次设置管理员后登录；可选在未跟踪的 `.env` 提供 `WILDSTRING_ADMIN_PASSWORD` 仅初始化首次密码，重置使用 Make 命令。HTTPS 部署设置 `WILDSTRING_COOKIE_SECURE=true`。
 
-原音播放遵循浏览器的编码支持；不能解码时有错误提示，暂不自动转码。封面优先内嵌正面图片，再读同名图片或目录 cover/folder/front；同名 LRC 优先于内嵌歌词，点击底栏封面可展开全屏播放，支持逐行滚动与点击跳转；点击收起或按 Esc 返回，播放继续。见 [封面、专辑和歌词](contracts/local-library-assets.md)。收藏与歌单会持久保存，规则歌单支持按艺人、收藏、播放次数和累计收听等条件自动筛选；见 [个人曲库功能](contracts/personal-library.md)。队列仅保存在当前页面。见 [播放与认证接口](contracts/playback-auth-api.md)。管理功能与 AI 连接设置见 [曲库管理](contracts/library-management.md)。
+原音播放遵循浏览器的编码支持；不能解码时有错误提示，可明确选择 AAC 对无损音源转码，MP3/AAC 等有损音源保持直放，见 [AAC 播放](contracts/playback-transcoding.md)。封面优先内嵌正面图片，再读同名图片或目录 cover/folder/front；人工编辑优先于文件歌词，同名 LRC 优先于内嵌歌词，点击底栏封面可展开全屏播放，支持逐行滚动与点击跳转；点击收起或按 Esc 返回，播放继续。见 [封面、专辑和歌词](contracts/local-library-assets.md)。收藏与歌单会持久保存，规则歌单支持按艺人、收藏、播放次数和累计收听等条件自动筛选；见 [个人曲库功能](contracts/personal-library.md)。队列仅保存在当前页面。见 [播放与认证接口](contracts/playback-auth-api.md)。管理功能与 AI 连接设置见 [曲库管理](contracts/library-management.md)。
+
+网页支持浅色、深色和跟随系统；全屏背景按专辑封面取色。管理员可编辑歌词、跟随播放逐行打点并导出 LRC，见 [歌词制作](contracts/lyrics-editing.md)。管理员创建/停用用户、重置密码，所有用户可改自己的密码，收藏与歌单按用户隔离。Host 白名单默认关闭，启用前请核对访问主机；误配置后只能直接修改数据库关闭，见 [账号、权限与恢复](contracts/users-and-access.md)。
 
 ## 分支与提交规范
 

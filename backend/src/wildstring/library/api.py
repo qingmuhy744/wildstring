@@ -83,7 +83,7 @@ class LyricLine(BaseModel):
 
 class Lyrics(BaseModel):
     kind: Literal["none", "plain", "synced"]
-    source: Literal["sidecar_lrc", "embedded", "sidecar_text"] | None
+    source: Literal["sidecar_lrc", "embedded", "sidecar_text", "user"] | None
     lines: list[LyricLine]
 
 
@@ -101,11 +101,14 @@ class ScanReport(BaseModel):
     errors: list[ScanError]
 
 
-def library_router(repository: LibraryRepository, auth: Auth) -> APIRouter:
+def library_router(repository: LibraryRepository, auth: Auth, transcoding) -> APIRouter:
     router = APIRouter(
         prefix="/api/v1", tags=["library"], dependencies=[Depends(auth.require_session)]
     )
     assets = TrackAssets(repository)
+
+    def scoped(user: Annotated[dict, Depends(auth.require_session)]):
+        return repository.for_user(user["id"])
 
     def require_artist(artist_id: str) -> dict:
         result = repository.artist(artist_id)
@@ -128,13 +131,14 @@ def library_router(repository: LibraryRepository, auth: Auth) -> APIRouter:
     @router.get("/artists/{artist_id}/tracks", response_model=TrackPage)
     def artist_tracks(
         artist_id: str,
+        current: Annotated[LibraryRepository, Depends(scoped)],
         q: Annotated[str, Query(max_length=256)] = "",
         album_id: str | None = None,
         limit: Annotated[int, Query(ge=1, le=200)] = 50,
         offset: Annotated[int, Query(ge=0)] = 0,
     ):
         require_artist(artist_id)
-        return repository.tracks(q, limit, offset, album_id=album_id, artist_id=artist_id)
+        return current.tracks(q, limit, offset, album_id=album_id, artist_id=artist_id)
 
     @router.get("/artists/{artist_id}/albums", response_model=AlbumPage)
     def artist_albums(
@@ -146,7 +150,7 @@ def library_router(repository: LibraryRepository, auth: Auth) -> APIRouter:
         require_artist(artist_id)
         return repository.albums(q, limit, offset, artist_id=artist_id)
 
-    @router.get("/imports")
+    @router.get("/imports", dependencies=[Depends(auth.require_admin)])
     def imports(limit: Annotated[int, Query(ge=1, le=100)] = 20):
         return repository.imports(limit)
 
@@ -189,15 +193,25 @@ def library_router(repository: LibraryRepository, auth: Auth) -> APIRouter:
     @router.get("/albums/{album_id}/tracks", response_model=TrackPage)
     def album_tracks(
         album_id: str,
+        current: Annotated[LibraryRepository, Depends(scoped)],
         limit: Annotated[int, Query(ge=1, le=200)] = 50,
         offset: Annotated[int, Query(ge=0)] = 0,
     ):
         if repository.album(album_id) is None:
             raise HTTPException(404, "album_not_found")
-        return repository.tracks(limit=limit, offset=offset, album_id=album_id)
+        return current.tracks(limit=limit, offset=offset, album_id=album_id)
 
     @router.api_route("/tracks/{track_id}/stream", methods=["GET", "HEAD"])
-    def stream(track_id: str, request: Request):
+    def stream(
+        track_id: str,
+        request: Request,
+        format: Literal["aac"] | None = None,
+        bitrate_kbps: int | None = None,
+        start_ms: Annotated[int, Query(ge=0, le=86_400_000)] = 0,
+    ):
+        if format is not None or bitrate_kbps is not None or start_ms:
+            plan = transcoding.plan(track_id, format, bitrate_kbps, start_ms)
+            return transcoding.response(plan, request)
         source = repository.source(track_id)
         if source is None:
             raise HTTPException(404, "track_not_found")
@@ -205,28 +219,43 @@ def library_router(repository: LibraryRepository, auth: Auth) -> APIRouter:
             raise HTTPException(409, "track_unavailable")
         return AudioResponse(repository.root, source, request)
 
+    @router.get("/tracks/{track_id}/playback")
+    def playback(
+        track_id: str,
+        format: Literal["aac"] | None = None,
+        bitrate_kbps: int | None = None,
+        start_ms: Annotated[int, Query(ge=0, le=86_400_000)] = 0,
+    ):
+        plan = transcoding.plan(track_id, format, bitrate_kbps, start_ms)
+        return plan.public(transcoding.cache_state(plan))
+
     @router.get("/tracks", response_model=TrackPage)
     def tracks(
+        current: Annotated[LibraryRepository, Depends(scoped)],
         q: Annotated[str, Query(max_length=256)] = "",
         limit: Annotated[int, Query(ge=1, le=200)] = 50,
         offset: Annotated[int, Query(ge=0)] = 0,
         played_only: bool = False,
         sort: Literal["title", "play_count", "listened_ms", "last_played_at"] = "title",
     ):
-        return repository.tracks(q, limit, offset, played_only=played_only, sort=sort)
+        return current.tracks(q, limit, offset, played_only=played_only, sort=sort)
 
     @router.get("/tracks/{track_id}", response_model=Track)
-    def track(track_id: str):
-        result = repository.track(track_id)
+    def track(track_id: str, current: Annotated[LibraryRepository, Depends(scoped)]):
+        result = current.track(track_id)
         if result is None:
             raise HTTPException(status_code=404, detail="track_not_found")
         return result
 
-    @router.get("/scans", response_model=list[ScanReport])
+    @router.get(
+        "/scans", response_model=list[ScanReport], dependencies=[Depends(auth.require_admin)]
+    )
     def scans(limit: Annotated[int, Query(ge=1, le=100)] = 20):
         return repository.scans(limit)
 
-    @router.get("/scans/{run_id}", response_model=ScanReport)
+    @router.get(
+        "/scans/{run_id}", response_model=ScanReport, dependencies=[Depends(auth.require_admin)]
+    )
     def scan(run_id: str):
         result = repository.scan(run_id)
         if result is None:

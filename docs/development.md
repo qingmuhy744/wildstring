@@ -68,11 +68,11 @@ make docker-down
 
 如果宿主机需要代理联网，在本地 `.env` 设置 `DOCKER_HTTP_PROXY` 与 `DOCKER_HTTPS_PROXY`，地址使用 Docker 可访问的宿主机网关，例如 `http://host.docker.internal:7890`。它们仅作为构建参数传入，不配置为运行容器环境变量。不要在容器内使用宿主机的 `127.0.0.1` 代理地址。
 
-运行目录保存 `wildstring.sqlite3` 和扫描锁，SQLite 使用 WAL。数据库启动时逐步迁移到 v7（认证、专辑、导入映射、个人曲库、管理任务及自动导入），保留原曲库与曲目 ID；不支持更高版本数据库自动降级。备份应使用 SQLite backup API 获取一致快照，不在运行时仅复制主文件并遗漏 WAL。
+运行目录保存 `wildstring.sqlite3` 和扫描锁，SQLite 使用 WAL。数据库启动时逐步迁移到 v11（含歌词覆盖、本地用户、Host 白名单与转码缓存设置），保留原曲库与曲目 ID；不支持更高版本数据库自动降级。备份应使用 SQLite backup API 获取一致快照，不在运行时仅复制主文件并遗漏 WAL。
 
-首次启动后执行 `make docker-admin`，或仅首次通过 `.env` 中 `WILDSTRING_ADMIN_PASSWORD` 初始化管理员。现有管理员不会被启动配置覆盖；重置密码会撤销全部会话。Cookie 默认为本机 HTTP 配置，通过 HTTPS 访问时设置 `WILDSTRING_COOKIE_SECURE=true`。
+首次启动后执行 `make docker-admin`，或仅首次通过 `.env` 中 `WILDSTRING_ADMIN_PASSWORD` 初始化管理员。现有管理员不会被启动配置覆盖；重置密码会撤销目标用户全部会话。Cookie 默认为本机 HTTP 配置，通过 HTTPS 访问时设置 `WILDSTRING_COOKIE_SECURE=true`。
 
-网页已提供登录、曲库搜索与原文件播放；详见 [接口与播放边界](../contracts/playback-auth-api.md)。艺人浏览、普通/规则歌单、收藏和收听统计见 [个人曲库](../contracts/personal-library.md)。封面、歌曲/专辑视图和本地歌词已接入，见 [本地资源规则](../contracts/local-library-assets.md)。管理页与 AI API 连接配置见 [管理接口](../contracts/library-management.md)。已提供 WAV/CUE 到 FLAC 的导入转换；批量整理、已有文件标签写回、播放转码与 Agent 尚未实现，健康检查不代表完整 MVP 完成。写回方案见 [服务端修复](architecture/metadata-repair.md)。
+网页已提供登录、曲库搜索与原文件播放；详见 [接口与播放边界](../contracts/playback-auth-api.md)。艺人浏览、普通/规则歌单、收藏和收听统计见 [个人曲库](../contracts/personal-library.md)。封面、歌曲/专辑视图和本地歌词已接入，见 [本地资源规则](../contracts/local-library-assets.md)。管理页与 AI API 连接配置见 [管理接口](../contracts/library-management.md)。已提供 WAV/CUE 到 FLAC 的导入转换；批量整理、已有文件标签写回与 Agent 尚未实现，健康检查不代表完整 MVP 完成。写回方案见 [服务端修复](architecture/metadata-repair.md)。
 
 ## 发布镜像
 
@@ -87,3 +87,7 @@ make docker-down
 ### 转换测试
 
 主机没有 FFmpeg 时，`make test` 会明确跳过转换用例；使用 `make docker-test` 完整运行。测试镜像复用生产 FFmpeg 和固定版本 uv，再按同一 `backend/uv.lock` 安装开发依赖，网络关闭、根目录只读、非 root 运行，不挂载用户曲库。设置构建代理仍使用 `.env` 的 `DOCKER_HTTP_PROXY` / `DOCKER_HTTPS_PROXY`。源 WAV 与 CUE 均由测试动态生成，不使用私人音乐。
+
+账号与域名恢复见 [账号与访问](../contracts/users-and-access.md)，歌词编辑与打点见 [歌词接口](../contracts/lyrics-editing.md)。Host 白名单只校验实际请求 Host，代理部署请保留该标头，并在启用前记录数据库恢复命令。用户数据通过请求对应的 Database 实例绑定 active_user，不在共享仓库对象上改写当前用户；后台扫描使用共享曲库，不覆盖个人统计。
+
+AAC 使用现有服务内的 FFmpeg；无需新容器。缓存位于持久运行目录 `cache/transcoding/`，可在管理设置清理。安装 FFmpeg 后 `make test-transcoding-web` 用合成 FLAC 验证真实浏览器转码与跳转；CI 已安装 FFmpeg。接口见 [播放转码](../contracts/playback-transcoding.md)。

@@ -3,10 +3,12 @@
 import io
 import os
 import shutil
+import subprocess
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
 import uvicorn
+from mutagen.flac import FLAC
 from mutagen.id3 import APIC, TALB, TIT2, TPE1, TPE2, TRCK, USLT
 from mutagen.mp3 import MP3
 from PIL import Image
@@ -57,6 +59,35 @@ def main() -> None:
                     "[00:00]侧车第一行\n[00:03]侧车第二行\n[00:06]侧车第三行\n[00:09]侧车第四行"
                 )
             tags.save()
+            if index == 1 and os.environ.get("WILDSTRING_TEST_TRANSCODING") == "1":
+                lossless = path.with_suffix(".flac")
+                subprocess.run(
+                    [
+                        shutil.which("ffmpeg"),
+                        "-nostdin",
+                        "-v",
+                        "error",
+                        "-f",
+                        "lavfi",
+                        "-i",
+                        "sine=frequency=440:duration=25:sample_rate=96000",
+                        "-ac",
+                        "2",
+                        "-c:a",
+                        "flac",
+                        str(lossless),
+                    ],
+                    check=True,
+                    capture_output=True,
+                    timeout=15,
+                )
+                audio = FLAC(lossless)
+                audio["title"] = title
+                audio["artist"] = "野弦测试"
+                audio["album"] = "合成测试专辑"
+                audio["lyrics"] = "[00:00]内嵌第一行\n[00:04]内嵌第二行\n[00:08]内嵌第三行"
+                audio.save()
+                path.unlink()
         source = root / "source"
         source.mkdir()
         (source / "broken.flac").write_bytes(b"Not a valid music file")
@@ -78,7 +109,7 @@ def main() -> None:
         scan_library(settings)
         uvicorn.run(
             create_app(settings),
-            host="127.0.0.1",
+            host=os.environ.get("WILDSTRING_WEB_TEST_BIND", "127.0.0.1"),
             port=int(os.environ.get("WILDSTRING_WEB_TEST_PORT", "18782")),
             access_log=False,
         )

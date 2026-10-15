@@ -8,11 +8,13 @@ export function Cover({
   title = '',
   size = 96,
   className = '',
+  onImage,
 }: {
   trackId: string;
   title?: string;
   size?: number;
   className?: string;
+  onImage?: (image: HTMLImageElement) => void;
 }) {
   const src = coverUrl(trackId, size);
   const [failed, setFailed] = useState('');
@@ -25,6 +27,7 @@ export function Cover({
           alt=""
           loading={size >= 768 ? 'eager' : 'lazy'}
           decoding="async"
+          onLoad={(event) => onImage?.(event.currentTarget)}
           onError={() => setFailed(src)}
         />
       )}
