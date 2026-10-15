@@ -25,3 +25,10 @@ test-results/
 *.tsbuildinfo
 .idea/
 .vscode/
+.gradle/
+.kotlin/
+local.properties
+*.jks
+*.keystore
+*.apk
+*.aab

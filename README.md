@@ -86,7 +86,7 @@ make docker-down     # 停止服务，保留数据卷
 - `main` 提交和 PR：检查、测试、Web 构建与容器实测。
 - 发布 GitHub Release：先通过完整检查，再发布 amd64/arm64 镜像到 `ghcr.io/qingmuhy744/wildstring`，附加 Web ZIP 与 `SHA256SUMS`。
 - 正式 Release 更新 `latest`；预发布保留独立版本标签。
-- Android 已有 [首版设计](docs/product/android-v1.md) 与手机/平板 [交互草图](docs/design/android-v1.html)，可用 `make android-design` 预览；原生工程尚未实现，Actions 暂不生成 APK、IPA 或桌面安装包。
+- Android 已有 [Kotlin/Compose/Media3 原生测试版](frontend/android/README.md)，接入真实曲库、后台播放与手机/平板歌词布局；`make android-ci` 构建 APK，独立 **Android APK** 工作流成功后可从 Artifacts 下载 `wildstring-android-debug`。正式签名发布、IPA 和桌面安装包后续交付。
 
 见 [开发与部署](docs/development.md)、[发布流程](docs/releasing.md)。
 

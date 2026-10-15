@@ -1,8 +1,16 @@
 # Android 第一版
 
-日期：2026-10-15。状态：设计稿；Android 工程、APK 与真机验证尚未实现。
+日期：2026-10-15。状态：已从设计推进到原生测试版；本地编译、单元测试、Lint 与 ARM64 模拟器登录/播放/手机及平板歌词测试已通过，GitHub 上的 APK 可下载状态以对应 Android APK 工作流结果为准。
 
 技术方向已由用户指定为 Kotlin、Jetpack Compose、Media3、Room、Retrofit/OkHttp 与 Hilt。本文中的首版边界是本轮提出的方案，可继续调整。技术约束见 [Android 技术决策](../decisions/0003-native-android.md)，交互草图见 [Android 原型](../design/android-v1.html)。
+
+## 首个原生测试版的实现状态
+
+`frontend/android` 已加入真实服务连接/登录、Keystore 加密 Cookie、分页歌曲/专辑/艺人和关键词搜索、Media3 后台服务与原音播放、系统控制、队列增删/移动、循环/随机、逐行/纯文本/无歌词、手机全屏歌词与平板双栏、收藏、歌单浏览/创建/加入，以及 Room 队列 ID/位置恢复。没有演示字段、内置歌曲或模拟歌词；下面的 HTML 草图仅作为设计资料。
+
+普通歌单完整编辑/排序、AI、离线下载、正式发布签名仍待开发；不能把工程接入等同于本页全部 P0 完成。当前 HTTPS 用于实际服务器，debug HTTP 仅在显式启用后支持 localhost/127.0.0.1/10.0.2.2，任意局域网 HTTP 暂未开放。构建与安装说明见 [Android 工程](../../frontend/android/README.md)。
+
+同步曲库管理主线后，已通过完整后端 89 项回归（包括 7 项认证测试）、React 桌面/手机 38 项浏览器回归、原生 6 项单元测试与 Android Lint，并生成独立的 debug 应用和设备测试 APK。模拟器登录/音频/歌词与手机、平板布局由设备测试检查，报告和截图由对应 Actions 运行保存；国产真机后台、锁屏/耳机、不同编码兼容与功耗尚未验证。
 
 ## 定位与代码基线
 
@@ -10,7 +18,7 @@ Android 是同一个野弦自托管服务的原生听歌客户端，共用服务
 
 本分支 `qingmuhy/android-v1` 从 `origin/feat/library-admin` 的 `51d7d1428397ca0186b92b5da030c68bf8f3c66b` 创建。它是创建时远程最新的导入/管理提交，也与随后创建的本地 `feat/automated-import` 的当前已提交基线一致；另一个聊天正在进行的自动发现、导入预检、待整理区和 WAV/CUE 分轨没有包含在该提交中。后续以其已提交结果为准集成，不依赖未完成的接口。
 
-设计通过独立 PR 合入 main，只带产品文档、交互草图与预览命令。本文接口核对基于上述导入/管理代码；管理功能的 [PR #3](https://github.com/qingmuhy744/wildstring/pull/3) 与自动导入仍按各自流程验收，不因设计合并就视为已经进入 main。Android 联调时重新核对目标实例实际部署版本。
+设计通过独立 PR 合入 main，只带产品文档、交互草图与预览命令。实际 APK 实现在 `qingmuhy/android-apk`，从设计合并后的 main `1c67e4f` 创建。本文接口核对基于上述导入/管理代码；管理功能的 [PR #3](https://github.com/qingmuhy744/wildstring/pull/3) 与自动导入仍按各自流程验收，不因设计合并就视为已经进入 main。Android 联调时重新核对目标实例实际部署版本。
 
 ## 首版使用闭环
 
@@ -107,6 +115,6 @@ Android 工程初始化时将开发入口加入 Makefile，例如 `android-check
 
 Android 功能测试须覆盖最低支持版本与当前稳定 Android 的设备/模拟器，至少一台常用国产真机验证后台限制。minSdk 暂定 26（Android 8.0），以依赖与实际设备需求复核；target/compile SDK 与 JDK 在 A1 查官方兼容表及本地 SDK 后固定，不把 IDE 版本号当 API 级别。
 
-本轮只交付 A0。已完成文档相对链接、文件大小、JavaScript 语法与 `git diff --check`；通过 `make android-design` 启动 Python 3.12 预览，浏览器检查关键词搜索、展开/收起、暂停、收藏、队列、歌词跳转、手动滚动/恢复跟随，以及 320px 窄窗、390px 手机、768px 平板竖屏、1024px 平板横屏和低高度横窗。检查时横向无溢出，布局切换保留当前曲目、暂停状态与播放位置，浏览器无警告/错误日志。
+设计阶段 A0 已完成文档相对链接、文件大小、JavaScript 语法与 `git diff --check`；通过 `make android-design` 启动 Python 3.12 预览，浏览器检查关键词搜索、展开/收起、暂停、收藏、队列、歌词跳转、手动滚动/恢复跟随，以及 320px 窄窗、390px 手机、768px 平板竖屏、1024px 平板横屏和低高度横窗。检查时横向无溢出，布局切换保留当前曲目、暂停状态与播放位置，浏览器无警告/错误日志。
 
-本地未运行完整 `make ci` 或 Docker 验收；Python/Web 与容器检查由现有 GitHub Actions 按提交执行，以对应 PR/main 运行结果为准。此次没有修改后端/Web 产品逻辑或依赖，Android 工程尚未初始化，现有 CI/CD 不生成 APK，见 [发布流程](../releasing.md)。文档与草图检查不代表 APK 编译、媒体解码、耗电、系统后台行为或真实服务连接已经验证。
+Python/Web 与容器继续由现有 GitHub Actions 按提交执行；原生客户端新增独立 Android APK 工作流，以对应运行结果为准，见 [发布流程](../releasing.md)。文档与草图检查不能代替 APK 编译、媒体解码、耗电、系统后台行为或真实服务连接验证。

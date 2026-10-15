@@ -83,6 +83,33 @@ def test_expiration_reset_and_bootstrap_does_not_overwrite(settings):
         assert login(client, "a-new-admin-password").status_code == 200
 
 
+def test_android_session_keeps_normal_authentication_and_client_validation(settings):
+    settings.admin_password = SecretStr(PASSWORD)
+    android = {"X-Wildstring-Client": "android"}
+    with TestClient(create_app(settings)) as client:
+        assert client.get("/api/v1/tracks").status_code == 401
+        assert (
+            client.post(
+                "/api/v1/auth/login",
+                json={"username": "admin", "password": PASSWORD},
+                headers={"X-Wildstring-Client": "unknown"},
+            ).status_code
+            == 403
+        )
+        assert (
+            client.post(
+                "/api/v1/auth/login",
+                json={"username": "admin", "password": PASSWORD},
+                headers=android,
+            ).status_code
+            == 200
+        )
+        assert client.get("/api/v1/tracks").status_code == 200
+        assert client.post("/api/v1/auth/logout").status_code == 403
+        assert client.post("/api/v1/auth/logout", headers=android).status_code == 204
+        assert client.get("/api/v1/tracks").status_code == 401
+
+
 def test_wrong_password_throttling(settings):
     settings.admin_password = SecretStr(PASSWORD)
     with TestClient(create_app(settings)) as client:
