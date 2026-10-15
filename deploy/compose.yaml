@@ -1,0 +1,41 @@
+services:
+  api:
+    image: ${WILDSTRING_IMAGE:-wildstring:dev}
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile
+      args:
+        HTTP_PROXY: ${DOCKER_HTTP_PROXY:-}
+        HTTPS_PROXY: ${DOCKER_HTTPS_PROXY:-}
+    init: true
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${WILDSTRING_PORT:-18780}:8000"
+    environment:
+      WILDSTRING_ENVIRONMENT: production
+      WILDSTRING_DATA_DIR: /data
+      WILDSTRING_MUSIC_DIR: /music
+      WILDSTRING_WEB_DIR: /app/web
+    volumes:
+      - data:/data
+      - type: bind
+        source: ${WILDSTRING_MUSIC_DIR:-./music}
+        target: /music
+        read_only: true
+        bind:
+          create_host_path: false
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  data:

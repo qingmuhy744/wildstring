@@ -1,0 +1,78 @@
+"""Check deployment behavior without external services or music files."""
+
+from pathlib import Path
+
+import pytest
+from fastapi.testclient import TestClient
+from pydantic import ValidationError
+
+from wildstring.config import Settings
+from wildstring.main import create_app
+
+
+@pytest.fixture
+def settings(tmp_path: Path) -> Settings:
+    music = tmp_path / "music"
+    music.mkdir()
+    return Settings(
+        _env_file=None,
+        environment="test",
+        data_dir=tmp_path / "data",
+        music_dir=music,
+    )
+
+
+def test_startup_and_readiness_do_not_modify_music(settings: Settings):
+    original = settings.music_dir / "track.txt"
+    original.write_bytes(b"fixture, not an audio file")
+    with TestClient(create_app(settings)) as client:
+        assert client.get("/health").json()["status"] == "ok"
+        response = client.get("/health/ready")
+        assert response.status_code == 200
+        assert response.json()["checks"] == {"data_directory": "ok", "music_directory": "ok"}
+        assert list(settings.data_dir.iterdir()) == []
+    assert original.read_bytes() == b"fixture, not an audio file"
+    assert list(settings.music_dir.iterdir()) == [original]
+
+
+def test_missing_music_is_unready_but_process_is_alive(settings: Settings):
+    settings.music_dir.rmdir()
+    with TestClient(create_app(settings)) as client:
+        assert client.get("/health").status_code == 200
+        response = client.get("/health/ready")
+        assert response.status_code == 503
+        assert response.json()["checks"]["music_directory"] == "unavailable"
+        assert not settings.music_dir.exists()
+        assert str(settings.music_dir) not in response.text
+
+
+def test_lost_data_mount_is_reported(settings: Settings):
+    with TestClient(create_app(settings)) as client:
+        settings.data_dir.rmdir()
+        response = client.get("/health/ready")
+        assert response.status_code == 503
+        assert response.json()["checks"]["data_directory"] == "unavailable"
+
+
+def test_production_does_not_expose_development_docs(settings: Settings):
+    settings.environment = "production"
+    with TestClient(create_app(settings)) as client:
+        assert client.get("/docs").status_code == 404
+        assert client.get("/openapi.json").status_code == 404
+        assert client.get("/health/ready").status_code == 200
+
+
+def test_packaged_web_does_not_shadow_health_endpoints(settings: Settings, tmp_path: Path):
+    web = tmp_path / "web"
+    web.mkdir()
+    (web / "index.html").write_text("<html><body>WildString</body></html>")
+    settings.web_dir = web
+    with TestClient(create_app(settings)) as client:
+        assert "WildString" in client.get("/").text
+        assert client.get("/health/ready").json()["status"] == "ok"
+
+
+@pytest.mark.parametrize("port", [0, 65536])
+def test_invalid_port_is_rejected(port: int):
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, port=port)

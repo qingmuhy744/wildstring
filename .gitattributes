@@ -1,0 +1,7 @@
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.flac binary
+*.mp3 binary
+# Preserve the original pasted conversation verbatim, including its final blank lines.
+docs/research/*-original-discussion.txt -whitespace

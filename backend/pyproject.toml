@@ -1,0 +1,46 @@
+[build-system]
+requires = ["hatchling>=1.26,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "wildstring-backend"
+version = "0.1.0.dev0"
+description = "WildString AI-native self-hosted music backend"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "fastapi>=0.115,<1",
+  "pydantic-settings>=2.7,<3",
+  "uvicorn>=0.34,<1",
+]
+
+[dependency-groups]
+dev = [
+  "bandit>=1.8,<2",
+  "httpx2>=2,<3",
+  "pre-commit>=4,<5",
+  "pre-commit-hooks>=5,<7",
+  "pytest>=8,<10",
+  "ruff>=0.16.8,<1",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/wildstring"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+extend-exclude = [".cache", "runtime", "music"]
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "UP", "B", "C4", "G"]
+ignore = ["E501"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["wildstring"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-config --strict-markers"
+
+[tool.bandit]
+exclude_dirs = ["backend/tests", ".cache", ".venv"]
