@@ -37,7 +37,7 @@ import org.junit.Test
 class NativePlaybackTest {
     @get:Rule val compose = createAndroidComposeRule<MainActivity>()
 
-    private fun capture(name: String, resized: Boolean = false) {
+    private fun capture(name: String, resized: Boolean = false, style: String? = null) {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val directory = InstrumentationRegistry.getArguments().getString("additionalTestOutputDir")?.let(::File)
             ?: checkNotNull(context.getExternalFilesDir(null))
@@ -48,17 +48,38 @@ class NativePlaybackTest {
         automation.waitForIdle(500, 5_000)
         val deadline = SystemClock.elapsedRealtime() + 15_000
         while (true) {
+            if (style != null) {
+                compose.mainClock.advanceTimeBy(50)
+                compose.waitForIdle()
+            }
             val image = checkNotNull(automation.takeScreenshot())
             // SurfaceFlinger can still expose the old portrait buffer after layout has resized.
-            val fresh = !resized || (image.width == 1600 && image.height == 1000 &&
+            val resizedFrame = !resized || (image.width == 1600 && image.height == 1000 &&
                 android.graphics.Color.red(image.getPixel(image.width - 20, image.height / 2)) > 8)
+            // Semantics can update before the emulator compositor presents the new visual.
+            // Check a blank part of the cassette label / record surface in the real screenshot.
+            val styleFrame = if (style == null) true else {
+                val bounds = compose.onNodeWithTag("playback-visual-$style").fetchSemanticsNode().boundsInRoot
+                val side = minOf(bounds.width, bounds.height)
+                val x = (bounds.left + side * if (style == "cassette") .85f else .5f).toInt()
+                val y = (bounds.top + side * if (style == "cassette") .44f else .18f).toInt()
+                if (x !in 0 until image.width || y !in 0 until image.height) false else {
+                    val pixel = image.getPixel(x, y)
+                    val red = android.graphics.Color.red(pixel)
+                    val green = android.graphics.Color.green(pixel)
+                    val blue = android.graphics.Color.blue(pixel)
+                    if (style == "cassette") kotlin.math.abs(red - 233) < 12 && kotlin.math.abs(green - 221) < 12 && kotlin.math.abs(blue - 196) < 12
+                    else red in 15..65 && green in 20..75 && blue in 10..60
+                }
+            }
+            val fresh = resizedFrame && styleFrame
             if (fresh) {
                 file.outputStream().use { image.compress(Bitmap.CompressFormat.PNG, 100, it) }
                 image.recycle()
                 return
             }
             image.recycle()
-            check(SystemClock.elapsedRealtime() < deadline) { "Resized display has not rendered a complete frame" }
+            check(SystemClock.elapsedRealtime() < deadline) { "Display has not rendered a complete ${style ?: "resized"} frame" }
             SystemClock.sleep(200)
         }
     }
@@ -216,7 +237,7 @@ class NativePlaybackTest {
                 assertEquals(styleEntry, compose.runOnIdle { player.currentMediaItem!!.mediaId })
                 assertFalse(compose.runOnIdle { player.playWhenReady })
                 assertTrue(kotlin.math.abs(compose.runOnIdle { player.currentPosition } - stylePosition) < 250)
-                if (key != "cover") capture("player-$key-phone.png")
+                if (key != "cover") capture("player-$key-phone.png", style = key)
             }
             assertEquals("Changing style must not reopen audio", styleStreams, requests.count { it.path?.contains("/stream") == true })
             compose.onNodeWithText("歌词", useUnmergedTree = true).performClick()
@@ -328,7 +349,7 @@ class NativePlaybackTest {
                     compose.waitUntil(5_000) { compose.onAllNodesWithTag("playback-visual-$style").fetchSemanticsNodes().isNotEmpty() }
                     compose.mainClock.advanceTimeBy(450)
                     compose.waitForIdle()
-                    capture("player-$style-tablet.png", resized = true)
+                    capture("player-$style-tablet.png", resized = true, style = style)
                 }
                 compose.runOnIdle { vm.settings.playbackStyle("cover") }
             } finally { shellForTest("wm size reset"); shellForTest("wm density reset") }
