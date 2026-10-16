@@ -1,5 +1,6 @@
 package com.wildstring.app
 
+import android.content.ComponentName
 import android.graphics.Bitmap
 import android.os.ParcelFileDescriptor
 import androidx.compose.ui.test.*
@@ -14,6 +15,10 @@ import java.io.File
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicBoolean
 import androidx.media3.common.Player
+import androidx.media3.session.MediaController
+import androidx.media3.session.SessionToken
+import com.wildstring.app.playback.PlaybackService
+import java.util.concurrent.TimeUnit
 import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
@@ -97,6 +102,7 @@ class NativeNavigationTest {
                 }
             }
             server.start()
+            var pauseObserver: MediaController? = null
             try {
                 compose.onAllNodes(hasSetTextAction())[0].performTextReplacement(server.url("/").toString())
                 compose.onAllNodes(hasSetTextAction())[1].performTextReplacement("ui-test")
@@ -178,7 +184,22 @@ class NativeNavigationTest {
                 compose.onNodeWithContentDescription("播放布局测试歌曲").performClick()
                 compose.waitUntil(15_000) { compose.runOnIdle { vm.controller!!.playbackState == Player.STATE_READY && vm.controller!!.currentPosition > 250 } }
                 compose.waitUntil(15_000) { vm.audioCache.bytes() >= audio.size }
+                val context = InstrumentationRegistry.getInstrumentation().targetContext
+                val observerFuture = compose.runOnIdle {
+                    MediaController.Builder(context, SessionToken(context, ComponentName(context, PlaybackService::class.java))).buildAsync()
+                }
+                val observer = try { observerFuture.get(15, TimeUnit.SECONDS) } catch (failure: Throwable) {
+                    MediaController.releaseFuture(observerFuture); throw failure
+                }
+                pauseObserver = observer
+                compose.waitUntil(15_000) { compose.runOnIdle { observer.playWhenReady } }
                 compose.runOnIdle { vm.controller!!.pause() }
+                // pause() updates its controller optimistically. A second controller observes
+                // the service acknowledgement before we sample an exact paused position.
+                compose.waitUntil(15_000) { compose.runOnIdle {
+                    !observer.playWhenReady && !observer.isPlaying && !vm.controller!!.isPlaying &&
+                        observer.currentPosition == vm.controller!!.currentPosition
+                } }
                 compose.onNodeWithContentDescription("收起播放器").performClick()
                 compose.onNodeWithTag("mini-player").assertIsDisplayed()
                 val entry = vm.state.value.entryId
@@ -217,6 +238,7 @@ class NativeNavigationTest {
                 runCatching { capture("native-navigation-failure.png") }
                 throw failure
             } finally {
+                compose.runOnIdle { pauseObserver?.release() }
                 shell("wm size reset"); shell("wm density reset")
                 compose.runOnIdle { vm.settings.theme(false); vm.settings.appearance("system"); vm.logout() }
                 compose.waitUntil(10_000) { !vm.state.value.connected }
