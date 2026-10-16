@@ -194,12 +194,23 @@ class NativeNavigationTest {
                 pauseObserver = observer
                 compose.waitUntil(15_000) { compose.runOnIdle { observer.playWhenReady } }
                 compose.runOnIdle { vm.controller!!.pause() }
-                // pause() updates its controller optimistically. A second controller observes
-                // the service acknowledgement before we sample an exact paused position.
-                compose.waitUntil(15_000) { compose.runOnIdle {
-                    !observer.playWhenReady && !observer.isPlaying && !vm.controller!!.isPlaying &&
-                        observer.currentPosition == vm.controller!!.currentPosition
-                } }
+                // Media3 1.9.3 estimates controller positions and can correct them after pause
+                // in later PlayerInfo/loading or periodic updates (default interval: 3 seconds).
+                // Establish a settled baseline, then keep the exact position assertion below.
+                var lastPausedPositions: Pair<Long, Long>? = null
+                var unchangedSince = android.os.SystemClock.elapsedRealtime()
+                compose.waitUntil(15_000) {
+                    val positions = compose.runOnIdle {
+                        val controller = vm.controller!!
+                        if (!observer.playWhenReady && !observer.isPlaying && !observer.isLoading &&
+                            !controller.playWhenReady && !controller.isPlaying && !controller.isLoading)
+                            controller.currentPosition to observer.currentPosition else null
+                    }
+                    val now = android.os.SystemClock.elapsedRealtime()
+                    if (positions == null || positions != lastPausedPositions) {
+                        lastPausedPositions = positions; unchangedSince = now; false
+                    } else now - unchangedSince >= 3_500
+                }
                 compose.onNodeWithContentDescription("收起播放器").performClick()
                 compose.onNodeWithTag("mini-player").assertIsDisplayed()
                 val entry = vm.state.value.entryId
