@@ -63,8 +63,8 @@ export function ProviderSettings() {
     }
   }
   return (
-    <section className="settings-section">
-      <h3>联网资料</h3>
+    <section className="management-card settings-section account-form">
+      <h2>联网资料</h2>
       <p className="muted">
         MusicBrainz 与 Last.fm 提供资料建议；Cover Art Archive 提供封面候选，确认后才应用。
       </p>

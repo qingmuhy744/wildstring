@@ -3547,7 +3547,7 @@ select {
 .suggestion-card {
   margin-block: 1rem;
   padding: 1rem;
-  border: 1px solid var(--line);
+  border: 1px solid var(--border);
   border-radius: 12px;
   overflow-wrap: anywhere;
 }
@@ -3568,4 +3568,21 @@ select {
   border: 0;
   padding: 0;
   min-width: 0;
+}
+
+.settings-section fieldset > label:not(.check-label) {
+  display: grid;
+  gap: 8px;
+}
+.settings-section input:not([type='checkbox']),
+.settings-section select {
+  width: 100%;
+}
+.settings-section input[type='checkbox'] {
+  accent-color: var(--accent);
+}
+.account-dialog > .settings-section {
+  margin-block: 1.25rem;
+  padding-block: 1rem;
+  border-block: 1px solid var(--border);
 }
