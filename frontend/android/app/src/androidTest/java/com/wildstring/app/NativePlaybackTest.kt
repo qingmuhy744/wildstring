@@ -77,6 +77,16 @@ class NativePlaybackTest {
         return ParcelFileDescriptor.AutoCloseInputStream(automation.executeShellCommand(command)).use { String(it.readBytes()) }
     }
 
+    private fun changeSystemNightMode(mode: String) {
+        shellForTest("cmd uimode night $mode")
+        // uiMode recreates the activity asynchronously. Querying Compose roots while
+        // their window detaches can wait forever for a frame on the disposed decor.
+        // Let Android finish the window transition before checking the new semantics.
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        instrumentation.waitForIdleSync()
+        instrumentation.uiAutomation.waitForIdle(500, 5_000)
+    }
+
     private fun exercisePlayback() {
         val requests = ConcurrentLinkedQueue<RecordedRequest>()
         val offline = AtomicBoolean(false)
@@ -174,11 +184,11 @@ class NativePlaybackTest {
             compose.waitUntil(10_000) { compose.onAllNodesWithTag("artwork-atmosphere").fetchSemanticsNodes().isNotEmpty() }
             val nightPosition = compose.runOnIdle { player.currentPosition }
             compose.runOnIdle { vm.settings.appearance("system") }
-            shellForTest("cmd uimode night yes")
+            changeSystemNightMode("yes")
             compose.waitUntil(15_000) { compose.onAllNodesWithTag("appearance-dark").fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithTag("player-phone").assertExists()
             capture("classic-dark-phone.png")
-            shellForTest("cmd uimode night no")
+            changeSystemNightMode("no")
             compose.waitUntil(15_000) { compose.onAllNodesWithTag("appearance-light").fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithTag("player-phone").assertExists()
             assertTrue(kotlin.math.abs(compose.runOnIdle { player.currentPosition } - nightPosition) < 500)
