@@ -201,7 +201,13 @@ class NativePlaybackTest {
                 val bounds = queue.fetchSemanticsNode().boundsInRoot
                 val start = compose.onNodeWithTag("queue-handle-$from").fetchSemanticsNode().boundsInRoot.center - bounds.topLeft
                 val end = compose.onNodeWithTag("queue-handle-$to").fetchSemanticsNode().boundsInRoot.center - bounds.topLeft
-                queue.performTouchInput { swipe(start, end, durationMillis = 600) }
+                // Let the real layout consume pickup and movement before releasing. A single
+                // injected batch can be coalesced on a busy emulator after a density change.
+                queue.performTouchInput { down(start); moveTo(start + (end - start) * .2f, delayMillis = 150) }
+                queue.performTouchInput {
+                    moveTo(end + androidx.compose.ui.geometry.Offset(0f, if (end.y > start.y) 8f else -8f), delayMillis = 450)
+                }
+                queue.performTouchInput { up() }
             }
             compose.onNodeWithContentDescription("播放队列").performClick()
             val queuePosition = compose.runOnIdle { player.currentPosition }
@@ -217,11 +223,17 @@ class NativePlaybackTest {
                 shellForTest("wm size 1600x1000"); shellForTest("wm density 160")
                 compose.waitUntil(15_000) { compose.onAllNodesWithTag("player-tablet").fetchSemanticsNodes().isNotEmpty() }
                 compose.onNodeWithContentDescription("播放队列").performClick()
+                // wm size and wm density recreate the activity separately. Wait for the new
+                // SurfaceFlinger buffer as well as semantics before injecting coordinates.
+                capture("tablet-queue-before-drag.png", resized = true)
                 dragEntry(playingEntry, originalOrder[1])
                 compose.waitUntil(10_000) { vm.state.value.queue.first().entryId == playingEntry }
                 assertEquals(playingEntry, compose.runOnIdle { player.currentMediaItem!!.mediaId })
                 capture("tablet-queue.png", resized = true)
                 compose.onNodeWithContentDescription("播放队列").performClick()
+            } catch (failure: Throwable) {
+                runCatching { capture("tablet-queue-failure.png", resized = true) }
+                throw failure
             } finally { shellForTest("wm size reset"); shellForTest("wm density reset") }
             compose.runOnIdle { player.removeMediaItems(1, player.mediaItemCount) }
             // Exercise actual controls during playback and inspect both appearance options.
