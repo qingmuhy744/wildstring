@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { api, artist, time, type Lyrics } from './api';
-import { Cover, coverUrl } from './cover';
+import { coverUrl } from './cover';
+import { PlaybackStyleControl, PlaybackVisual, usePlaybackStyle } from './playback-style';
 import { FavoriteButton, type Favorites } from './favorites';
 import {
   PlaybackControls,
@@ -66,6 +67,7 @@ export function NowPlaying({
   const [panel, setPanel] = useState<'lyrics' | 'queue' | null>('lyrics');
   const [notice, setNotice] = useState('');
   const current = player.current;
+  const style = usePlaybackStyle();
   const [palette, setPalette] = useState<{ track: string; colors: string[] } | null>(null);
   const colors = palette?.track === current?.id ? palette?.colors : null;
   useEffect(() => {
@@ -85,7 +87,7 @@ export function NowPlaying({
       } else if (event.key === 'Tab') {
         const controls = Array.from(
           dialog.current?.querySelectorAll<HTMLElement>(
-            'button:not(:disabled), input:not(:disabled)',
+            'button:not(:disabled), input:not(:disabled), select:not(:disabled)',
           ) || [],
         ).filter((node) => node.getClientRects().length > 0);
         const first = controls[0],
@@ -151,16 +153,19 @@ export function NowPlaying({
         <span className="eyebrow">
           野弦 <span aria-hidden="true">/</span> WILDSTRING
         </span>
-        <span className="fullscreen-mode">NOW PLAYING</span>
+        <PlaybackStyleControl />
       </header>
       {current ? (
         <div className={`fullscreen-content ${panel ? '' : 'is-cover-only'}`}>
           <div className="fullscreen-record">
-            <Cover
-              trackId={current.id}
-              title={current.album || current.title}
-              size={768}
-              className="fullscreen-cover"
+            <PlaybackVisual
+              track={current}
+              style={style}
+              playing={player.playing && !player.buffering && !player.error}
+              position={player.position}
+              duration={player.duration}
+              phase={player.visualPhase}
+              onLyrics={() => setPanel((value) => (value === 'lyrics' ? null : 'lyrics'))}
               onImage={(image) => {
                 if (image.currentSrc !== new URL(coverUrl(current.id, 768), location.href).href)
                   return;

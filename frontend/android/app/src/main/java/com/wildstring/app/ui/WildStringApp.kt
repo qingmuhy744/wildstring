@@ -125,6 +125,7 @@ fun ConnectionScreen(state: MusicState, connect: (String, String, String, Boolea
 
 @Composable
 private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
+    val rotation = rememberSaveable(saver = PlaybackRotation.Saver) { PlaybackRotation() }
     var expanded by rememberSaveable { mutableStateOf(false) }
     var playerFromSettings by rememberSaveable { mutableStateOf(false) }
     var lyrics by rememberSaveable { mutableStateOf(false) }
@@ -148,6 +149,12 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
         savedKeys.remove(state.contentKey); savedKeys.addLast(state.contentKey)
         if (savedKeys.size > 32) savedPages.removeState(savedKeys.removeFirst())
     }
+    val destination = when { settings -> "settings"; expanded && state.current != null -> "player"; else -> "catalog" }
+    // Draw the atmosphere behind system bars; only interactive content consumes the safe area.
+    Crossfade(destination, animationSpec = tween(220), label = "destination-background") { screen ->
+        if (screen == "player") state.current?.let { ArtworkBackdrop(vm, it, LocalRedCloth.current) }
+        else Box(Modifier.fillMaxSize().background(if (screen == "settings") MaterialTheme.colorScheme.surfaceContainerLow else Background))
+    }
     BoxWithConstraints(Modifier.fillMaxSize().safeDrawingPadding()) {
         val wide = maxWidth >= 840.dp && maxHeight >= 480.dp
         val rail = maxWidth >= 600.dp && maxHeight >= 480.dp
@@ -157,7 +164,7 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
         BackHandler(enabled = !settings && (expanded || queue || state.canGoBack || state.tab != "search")) {
             when { queue -> queue = false; lyrics && !wide -> lyrics = false; expanded -> collapsePlayer(); state.canGoBack -> vm.back(); else -> vm.navigate("search") }
         }
-        AnimatedContent(when { settings -> "settings"; expanded && state.current != null -> "player"; else -> "catalog" }, transitionSpec = {
+        AnimatedContent(destination, transitionSpec = {
             if (targetState == "settings" || initialState == "settings") {
                 (fadeIn(tween(180)) + slideInHorizontally(tween(240)) { if (targetState == "settings") it / 6 else -it / 12 }) togetherWith fadeOut(tween(120))
             } else (fadeIn(tween(220)) + slideInVertically(tween(280, easing = FastOutSlowInEasing)) { it / 12 }) togetherWith fadeOut(tween(140))
@@ -166,7 +173,7 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
             MiniPlayer(vm, state, onQueue = { queue = true }) { playerFromSettings = true; settings = false; expanded = true; lyrics = false; queue = false }
         }) { settings = false } }
         else if (destination == "player") {
-            PlayerScreen(vm, state, wide, lyrics, queue,
+            PlayerScreen(vm, state, wide, lyrics, queue, rotation,
                 onBack = { if (lyrics && !wide) lyrics = false else collapsePlayer() },
                 onLyrics = { lyrics = !lyrics; queue = false }, onQueue = { queue = !queue },
                 onAdd = { actions = state.current })
@@ -294,25 +301,31 @@ private fun TrackRow(vm: MusicViewModel, track: Track, play: () -> Unit, actions
         trailingContent = { IconButton(actions) { Icon(Icons.Default.MoreVert, "${track.title}的操作") } }, modifier = Modifier.clickable(onClick = tactile(play)))
 }
 @Composable
-private fun PlayerScreen(vm: MusicViewModel, input: MusicState, wide: Boolean, lyrics: Boolean, queue: Boolean,
+private fun PlayerScreen(vm: MusicViewModel, input: MusicState, wide: Boolean, lyrics: Boolean, queue: Boolean, rotation: PlaybackRotation,
     onBack: () -> Unit, onLyrics: () -> Unit, onQueue: () -> Unit, onAdd: () -> Unit) {
     val position by vm.position.collectAsStateWithLifecycle()
     val state = input.copy(position = position)
     val preferences by vm.settings.state.collectAsStateWithLifecycle()
+    var styleDialog by rememberSaveable { mutableStateOf(false) }
     val track = state.current ?: return
-    val red = preferences.redCloth
+    val progress = if (state.duration > 0) state.position.toFloat() / state.duration else 0f
+    val spinning = state.playing && !state.buffering && state.playbackError == null
     Box(Modifier.fillMaxSize()) {
-    ArtworkBackdrop(vm, track, red)
     Column(Modifier.testTag(if (wide) "player-tablet" else "player-phone").fillMaxSize().padding(horizontal = if (wide) 34.dp else 20.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
             IconButton(onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, if (lyrics && !wide) "返回封面" else "收起播放器") }
             Text(track.album ?: "正在播放", color = Muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).padding(horizontal = 16.dp))
+            IconButton({ styleDialog = true }) { Icon(Icons.Default.Style, "播放样式") }
             IconButton(vm::refreshLyrics) { Icon(Icons.Default.Refresh, "刷新歌词") }
             IconButton(onAdd) { Icon(Icons.Default.MoreVert, "当前歌曲操作") }
         }
         if (wide) Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(48.dp), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(.9f).widthIn(max = 380.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                Cover(vm, track.id.takeIf { track.hasCover }, track.title, Modifier.widthIn(max = 300.dp).fillMaxWidth().aspectRatio(1f).clickable { if (queue) onQueue() })
+            Column(Modifier.weight(.9f).fillMaxHeight().widthIn(max = 380.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                BoxWithConstraints(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    val visualSize = minOf(300.dp, maxWidth, maxHeight)
+                    PlaybackVisual(vm, track, preferences.playbackStyle, spinning, true, progress, rotation,
+                        Modifier.size(visualSize)) { if (queue) onQueue() }
+                }
                 Spacer(Modifier.height(20.dp)); PlaybackControls(vm, state, onQueue)
             }
             Column(Modifier.weight(1.1f).fillMaxHeight().padding(top = 24.dp, bottom = 16.dp)) {
@@ -323,11 +336,13 @@ private fun PlayerScreen(vm: MusicViewModel, input: MusicState, wide: Boolean, l
                 if (queue) QueuePanel(vm, state, Modifier.weight(1f)) else LyricsPanel(vm, state, Modifier.weight(1f))
             }
         } else {
-            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                Crossfade(lyrics, animationSpec = tween(240), label = "lyrics-cover") { showingLyrics ->
+            BoxWithConstraints(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                val visualSize = minOf(370.dp, maxWidth, maxHeight)
+                Crossfade(lyrics, Modifier.fillMaxSize(), animationSpec = tween(240), label = "lyrics-cover") { showingLyrics ->
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         if (showingLyrics) LyricsPanel(vm, state, Modifier.fillMaxSize())
-                        else Cover(vm, track.id.takeIf { track.hasCover }, track.title, Modifier.widthIn(max = 370.dp).fillMaxWidth().aspectRatio(1f).clickable(onClick = onLyrics))
+                        else PlaybackVisual(vm, track, preferences.playbackStyle, spinning, !lyrics, progress, rotation,
+                            Modifier.size(visualSize), onLyrics)
                     }
                 }
             }
@@ -339,6 +354,7 @@ private fun PlayerScreen(vm: MusicViewModel, input: MusicState, wide: Boolean, l
         }
     }
     }
+    if (styleDialog) PlaybackStyleDialog(preferences.playbackStyle, vm.settings::playbackStyle) { styleDialog = false }
 }
 
 @Composable
@@ -356,7 +372,10 @@ private fun PlaybackControls(vm: MusicViewModel, state: MusicState, onQueue: () 
         }
         if (state.playbackQuality.isNotBlank()) Text(state.playbackQuality, color = Muted, fontSize = 11.sp, modifier = Modifier.padding(top = 6.dp).testTag("playback-quality"))
         Slider(value = scrub ?: state.position.coerceAtMost(state.duration).toFloat(), onValueChange = { scrub = it },
-            onValueChangeFinished = { scrub?.let { feedback(TactileKind.Tap); vm.seek(it.toLong()) }; scrub = null }, valueRange = 0f..state.duration.coerceAtLeast(1).toFloat(), enabled = state.duration > 0)
+            onValueChangeFinished = { scrub?.let { feedback(TactileKind.Tap); vm.seek(it.toLong()) }; scrub = null }, valueRange = 0f..state.duration.coerceAtLeast(1).toFloat(), enabled = state.duration > 0,
+            colors = SliderDefaults.colors(thumbColor = Accent, activeTrackColor = Accent,
+                inactiveTrackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = .14f),
+                activeTickColor = Color.Transparent, inactiveTickColor = Color.Transparent))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text(formatTime(scrub?.toLong() ?: state.position), color = Muted, fontSize = 11.sp); Text(formatTime(state.duration), color = Muted, fontSize = 11.sp) }
         Row(Modifier.fillMaxWidth().padding(vertical = 12.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             val modeIcon = if (state.shuffle) Icons.Default.Shuffle else if (state.repeatMode == Player.REPEAT_MODE_ONE) Icons.Default.RepeatOne else Icons.Default.Repeat

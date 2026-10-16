@@ -26,6 +26,8 @@
 
 0.2.2 增加多创作人编辑与角色筛选、MusicBrainz / Last.fm 资料建议、CAA 封面候选和按用户授权的 Last.fm 收听同步；Web 与 Android 收藏先反馈、失败恢复。管理员在网页设置联网来源和代理，代理可跟随 Docker 的 `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` / `NO_PROXY`。功能入口、真实账号验证边界见 [联网资料与 Last.fm](contracts/metadata-providers.md)。
 
+0.2.3 开发版增加 Android / Web 封面、黑胶和磁带播放样式，默认封面并记住本机选择；同步改善 Android 系统栏衔接与播放进度条配色。切换样式复用当前音频，拟物动画随播放、可见性和系统减少动态效果设置启停。范围与验证状态见 [播放页样式](docs/product/player-styles-0.2.3.md)，正式可下载版本以 Releases 为准。
+
 服务端元数据整理将支持手动/批量编辑、差异预览和显式写回，减少使用 mp3tag 前后下载与上传整首音频的重复传输，见 [整理设计](docs/architecture/metadata-repair.md)。
 
 ## 本地开发

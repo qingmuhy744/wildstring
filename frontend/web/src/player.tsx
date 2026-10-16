@@ -6,6 +6,7 @@ import { ListeningTracker } from './listening';
 
 export function usePlayer() {
   const audio = useRef<HTMLAudioElement>(null);
+  const visualPhase = useRef(0);
   const tracker = useRef(new ListeningTracker());
   const [queue, setQueue] = useState<Track[]>([]);
   const [index, setIndex] = useState(-1);
@@ -297,6 +298,7 @@ export function usePlayer() {
 
   return {
     audio,
+    visualPhase,
     queue,
     index,
     current,

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { api, type User } from './api';
 import { LastfmAccount } from './providers';
 import { ThemeControl } from './theme';
+import { PlaybackStyleControl } from './playback-style';
 
 export function AccountDialog({ user, onClose }: { user: User; onClose: () => void }) {
   const dialog = useRef<HTMLDialogElement>(null);
@@ -63,6 +64,7 @@ export function AccountDialog({ user, onClose }: { user: User; onClose: () => vo
         </button>
       </div>
       <ThemeControl />
+      <PlaybackStyleControl />
       <LastfmAccount />
       <form className="account-form" onSubmit={submit}>
         <label>

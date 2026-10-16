@@ -69,7 +69,10 @@ class NativePlaybackTest {
             runCatching { capture("failure.png") }
             runCatching { compose.onRoot(useUnmergedTree = true).printToLog("NativeTestUI") }
             throw failure
-        } finally { shellForTest("cmd uimode night $previousNight") }
+        } finally {
+            runCatching { compose.runOnIdle { ViewModelProvider(compose.activity)[MusicViewModel::class.java].settings.playbackStyle("cover") } }
+            shellForTest("cmd uimode night $previousNight")
+        }
     }
 
     private fun shellForTest(command: String): String {
@@ -88,6 +91,8 @@ class NativePlaybackTest {
     }
 
     private fun exercisePlayback() {
+        val vm = compose.runOnIdle { ViewModelProvider(compose.activity)[MusicViewModel::class.java] }
+        compose.runOnIdle { vm.settings.playbackStyle("cover") }
         val requests = ConcurrentLinkedQueue<RecordedRequest>()
         val offline = AtomicBoolean(false)
         val unauthorized = AtomicBoolean(false)
@@ -179,7 +184,6 @@ class NativePlaybackTest {
                 shell("wm density reset")
 
             }
-            val vm = compose.runOnIdle { ViewModelProvider(compose.activity)[MusicViewModel::class.java] }
             compose.waitUntil(10_000) { vm.audioCache.bytes() >= audio.size }
             compose.waitUntil(10_000) { compose.onAllNodesWithTag("artwork-atmosphere").fetchSemanticsNodes().isNotEmpty() }
             val nightPosition = compose.runOnIdle { player.currentPosition }
@@ -193,6 +197,29 @@ class NativePlaybackTest {
             compose.onNodeWithTag("player-phone").assertExists()
             assertTrue(kotlin.math.abs(compose.runOnIdle { player.currentPosition } - nightPosition) < 500)
             capture("classic-light-phone.png")
+            // Styles share the same Media3 entry and fully cached audio while paused.
+            compose.onNodeWithText("返回封面", useUnmergedTree = true).performClick()
+            val styleEntry = compose.runOnIdle { player.currentMediaItem!!.mediaId }
+            val stylePosition = compose.runOnIdle { player.currentPosition }
+            val styleStreams = requests.count { it.path?.contains("/stream") == true }
+            for ((key, label) in listOf("vinyl" to "黑胶", "cassette" to "磁带", "cover" to "封面")) {
+                compose.onNodeWithContentDescription("播放样式").performClick()
+                compose.onNodeWithText(label, useUnmergedTree = true).performClick()
+                compose.mainClock.advanceTimeBy(250)
+                compose.waitForIdle()
+                // The platform dialog exits on Android's clock, independently of Compose's clock.
+                compose.waitUntil(5_000) {
+                    runCatching { compose.onNodeWithTag("playback-visual-$key").assertIsDisplayed() }.isSuccess
+                }
+                compose.onNodeWithTag("playback-visual-$key").assertIsDisplayed()
+                assertEquals(key, vm.settings.state.value.playbackStyle)
+                assertEquals(styleEntry, compose.runOnIdle { player.currentMediaItem!!.mediaId })
+                assertFalse(compose.runOnIdle { player.playWhenReady })
+                assertTrue(kotlin.math.abs(compose.runOnIdle { player.currentPosition } - stylePosition) < 250)
+                if (key != "cover") capture("player-$key-phone.png")
+            }
+            assertEquals("Changing style must not reopen audio", styleStreams, requests.count { it.path?.contains("/stream") == true })
+            compose.onNodeWithText("歌词", useUnmergedTree = true).performClick()
             assertNotNull(runBlocking { vm.repository.cachedCatalog(CatalogQuery()) })
             assertNotNull(runBlocking { vm.repository.cachedLyrics("fixture-track") })
             val buffers = AtomicInteger(0)
@@ -285,6 +312,14 @@ class NativePlaybackTest {
                 shellForTest("wm size 1600x1000"); shellForTest("wm density 160")
                 compose.waitUntil(15_000) { compose.onAllNodesWithTag("player-tablet").fetchSemanticsNodes().isNotEmpty() }
                 capture("red-cloth-tablet.png", resized = true)
+                for (style in listOf("vinyl", "cassette")) {
+                    compose.runOnIdle { vm.settings.playbackStyle(style) }
+                    compose.waitUntil(5_000) { compose.onAllNodesWithTag("playback-visual-$style").fetchSemanticsNodes().isNotEmpty() }
+                    compose.mainClock.advanceTimeBy(450)
+                    compose.waitForIdle()
+                    capture("player-$style-tablet.png", resized = true)
+                }
+                compose.runOnIdle { vm.settings.playbackStyle("cover") }
             } finally { shellForTest("wm size reset"); shellForTest("wm density reset") }
             val streamCount = requests.count { it.path?.contains("/stream") == true }
             offline.set(true)

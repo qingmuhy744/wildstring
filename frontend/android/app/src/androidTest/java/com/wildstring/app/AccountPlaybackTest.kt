@@ -128,8 +128,9 @@ class AccountPlaybackTest {
                     return MockResponse().setResponseCode(404)
                 }
             }
-            server.start()
-            login(server.url("/").toString(), "alice")
+            server.start(java.net.InetAddress.getByName("127.0.0.1"), 0)
+            val address = server.url("/").newBuilder().host("127.0.0.1").build().toString()
+            login(address, "alice")
             assertEquals("alice", vm.state.value.account!!.username)
             val firstProfile = vm.repository.session.cacheScope()
             compose.onNodeWithText("同步测试专辑").performClick()
@@ -188,7 +189,11 @@ class AccountPlaybackTest {
             val streamsBeforeRefresh = requests.count { it.contains("/stream") }
             lyric.set("网页修改后的人工歌词")
             compose.onNodeWithContentDescription("刷新歌词").performClick()
-            compose.waitUntil(10_000) { vm.state.value.lyrics.lines.first().text == "网页修改后的人工歌词" }
+            try {
+                compose.waitUntil(10_000) { vm.state.value.lyrics.lines.first().text == "网页修改后的人工歌词" }
+            } catch (failure: Throwable) {
+                throw AssertionError("Lyric refresh failed: ${vm.state.value.lyricsError}; requests=${requests.toList()}", failure)
+            }
             assertFalse(compose.runOnIdle { vm.controller!!.playWhenReady })
             assertEquals(entryBeforeRefresh, vm.state.value.entryId)
             assertEquals(positionBeforeRefresh, compose.runOnIdle { vm.controller!!.currentPosition })
@@ -201,7 +206,7 @@ class AccountPlaybackTest {
             assertTrue(requests.any { it == "/api/v1/tracks/lossy/stream" })
             compose.runOnIdle { vm.logout() }
             compose.waitUntil(10_000) { !vm.state.value.connected && compose.onAllNodes(hasSetTextAction()).fetchSemanticsNodes().size == 3 }
-            login(server.url("/").toString(), "bob")
+            login(address, "bob")
             assertEquals("bob", vm.state.value.account!!.username)
             assertNotEquals(firstProfile, vm.repository.session.cacheScope())
             assertTrue(vm.state.value.queue.isEmpty())
