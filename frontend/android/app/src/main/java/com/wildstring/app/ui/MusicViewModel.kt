@@ -26,7 +26,7 @@ data class QueueRow(val entryId: String, val trackId: String, val title: String,
 data class MusicState(
     val account: Account? = null, val playbackQuality: String = "", val connected: Boolean = false, val connecting: Boolean = false, val loading: Boolean = false,
     val server: String = "", val localHttp: Boolean = false, val error: String? = null,
-    val tab: String = "library", val kind: String = "albums", val title: String = "曲库",
+    val tab: String = "search", val kind: String = "discover", val title: String = "发现",
     val query: String = "", val offset: Int = 0, val total: Int = 0,
     val collection: String? = null, val collectionId: String? = null, val activePlaylist: Playlist? = null,
     val tracks: List<Track> = emptyList(), val albums: List<Album> = emptyList(),
@@ -99,6 +99,7 @@ class MusicViewModel @Inject constructor(
         if (repository.session.endpoint != null) viewModelScope.launch {
             val generation = authGeneration
             val saved = repository.cachedCatalog(CatalogQuery())
+                ?: repository.cachedCatalog(CatalogQuery(tab = "library", kind = "albums", title = "曲库"))
             if (saved != null && repository.session.cacheScope() != null) {
                 mutable.update { it.withPage(saved).copy(connected = true, offline = true, contentKey = query().key) }
                 pages[query().key] = saved
@@ -172,9 +173,14 @@ class MusicViewModel @Inject constructor(
     fun navigate(tab: String) {
         if (tab == mutable.value.tab) return
         tabs[mutable.value.tab] = query()
-        val target = tabs[tab] ?: CatalogQuery(tab = tab, kind = if (tab == "mine") "playlists" else if (tab == "search") "tracks" else "albums",
-            title = when (tab) { "mine" -> "我的"; "search" -> "找歌"; else -> "曲库" })
+        val target = tabs[tab] ?: CatalogQuery(tab = tab, kind = if (tab == "mine") "playlists" else if (tab == "search") "discover" else "albums",
+            title = when (tab) { "mine" -> "我的"; "search" -> "发现"; else -> "曲库" })
         show(target)
+    }
+    fun browseAlbums() {
+        if (mutable.value.tab != "library") tabs[mutable.value.tab] = query()
+        history.remove("library")
+        show(CatalogQuery(tab = "library", kind = "albums", title = "曲库"))
     }
     private fun show(target: CatalogQuery, delayMs: Long = 0) {
         val saved = pages[target.key]
@@ -193,7 +199,10 @@ class MusicViewModel @Inject constructor(
         show(target)
     }
     fun kind(kind: String) { if (kind != mutable.value.kind) show(query().copy(kind = kind, offset = 0)) }
-    fun search(query: String) { show(this.query().copy(query = query.take(256), offset = 0), 300) }
+    fun search(query: String) {
+        show(this.query().copy(kind = if (query.isBlank()) "discover" else "tracks", query = query.take(256), offset = 0,
+            title = "发现", collection = null, collectionId = null, playlist = null), 300)
+    }
     fun page(direction: Int) { show(query().copy(offset = (mutable.value.offset + direction * 50).coerceAtLeast(0))) }
     fun openAlbum(album: Album) = open(query().copy(kind = "tracks", collection = "albums", collectionId = album.id, title = album.title, query = "", offset = 0, playlist = null))
     fun openArtist(artist: Artist) = open(query().copy(kind = "tracks", collection = "artists", collectionId = artist.id, title = artist.name, query = "", offset = 0, playlist = null))

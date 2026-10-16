@@ -11,11 +11,13 @@ import okhttp3.CookieJar
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import retrofit2.HttpException
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 
-data class CatalogQuery(val tab: String = "library", val kind: String = "albums", val title: String = "曲库",
+data class CatalogQuery(val tab: String = "search", val kind: String = "discover", val title: String = "发现",
     val query: String = "", val offset: Int = 0, val collection: String? = null, val collectionId: String? = null,
     val playlist: Playlist? = null) {
     val key: String get() = Gson().toJson(listOf(tab, kind, query, offset, collection, collectionId))
@@ -90,6 +92,12 @@ class Repository @Inject constructor(val session: SessionStore, val client: OkHt
         val profile = session.cacheScope()
         val revision = cache.catalogRevision
         val page = when (query.kind) {
+            "discover" -> coroutineScope {
+                val albums = async { api().albums("", limit = 12) }
+                val recent = async { tracks(recent = true) }
+                val albumPage = albums.await()
+                CatalogPage(albums = albumPage.items, tracks = recent.await().items, total = albumPage.total)
+            }
             "albums" -> api().albums(query.query, offset = query.offset).let { CatalogPage(albums = it.items, total = it.total) }
             "artists" -> api().artists(query.query, offset = query.offset).let { CatalogPage(artists = it.items, total = it.total) }
             "playlists" -> api().playlists(limit = 50, offset = query.offset).let { CatalogPage(playlists = it.items, total = it.total) }

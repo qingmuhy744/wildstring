@@ -77,6 +77,16 @@ class NativePlaybackTest {
         return ParcelFileDescriptor.AutoCloseInputStream(automation.executeShellCommand(command)).use { String(it.readBytes()) }
     }
 
+    private fun changeSystemNightMode(mode: String) {
+        shellForTest("cmd uimode night $mode")
+        // uiMode recreates the activity asynchronously. Querying Compose roots while
+        // their window detaches can wait forever for a frame on the disposed decor.
+        // Let Android finish the window transition before checking the new semantics.
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        instrumentation.waitForIdleSync()
+        instrumentation.uiAutomation.waitForIdle(500, 5_000)
+    }
+
     private fun exercisePlayback() {
         val requests = ConcurrentLinkedQueue<RecordedRequest>()
         val offline = AtomicBoolean(false)
@@ -174,11 +184,11 @@ class NativePlaybackTest {
             compose.waitUntil(10_000) { compose.onAllNodesWithTag("artwork-atmosphere").fetchSemanticsNodes().isNotEmpty() }
             val nightPosition = compose.runOnIdle { player.currentPosition }
             compose.runOnIdle { vm.settings.appearance("system") }
-            shellForTest("cmd uimode night yes")
+            changeSystemNightMode("yes")
             compose.waitUntil(15_000) { compose.onAllNodesWithTag("appearance-dark").fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithTag("player-phone").assertExists()
             capture("classic-dark-phone.png")
-            shellForTest("cmd uimode night no")
+            changeSystemNightMode("no")
             compose.waitUntil(15_000) { compose.onAllNodesWithTag("appearance-light").fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithTag("player-phone").assertExists()
             assertTrue(kotlin.math.abs(compose.runOnIdle { player.currentPosition } - nightPosition) < 500)
@@ -201,7 +211,13 @@ class NativePlaybackTest {
                 val bounds = queue.fetchSemanticsNode().boundsInRoot
                 val start = compose.onNodeWithTag("queue-handle-$from").fetchSemanticsNode().boundsInRoot.center - bounds.topLeft
                 val end = compose.onNodeWithTag("queue-handle-$to").fetchSemanticsNode().boundsInRoot.center - bounds.topLeft
-                queue.performTouchInput { swipe(start, end, durationMillis = 600) }
+                // Let the real layout consume pickup and movement before releasing. A single
+                // injected batch can be coalesced on a busy emulator after a density change.
+                queue.performTouchInput { down(start); moveTo(start + (end - start) * .2f, delayMillis = 150) }
+                queue.performTouchInput {
+                    moveTo(end + androidx.compose.ui.geometry.Offset(0f, if (end.y > start.y) 8f else -8f), delayMillis = 450)
+                }
+                queue.performTouchInput { up() }
             }
             compose.onNodeWithContentDescription("播放队列").performClick()
             val queuePosition = compose.runOnIdle { player.currentPosition }
@@ -217,31 +233,42 @@ class NativePlaybackTest {
                 shellForTest("wm size 1600x1000"); shellForTest("wm density 160")
                 compose.waitUntil(15_000) { compose.onAllNodesWithTag("player-tablet").fetchSemanticsNodes().isNotEmpty() }
                 compose.onNodeWithContentDescription("播放队列").performClick()
+                // wm size and wm density recreate the activity separately. Wait for the new
+                // SurfaceFlinger buffer as well as semantics before injecting coordinates.
+                capture("tablet-queue-before-drag.png", resized = true)
                 dragEntry(playingEntry, originalOrder[1])
                 compose.waitUntil(10_000) { vm.state.value.queue.first().entryId == playingEntry }
                 assertEquals(playingEntry, compose.runOnIdle { player.currentMediaItem!!.mediaId })
                 capture("tablet-queue.png", resized = true)
                 compose.onNodeWithContentDescription("播放队列").performClick()
+            } catch (failure: Throwable) {
+                runCatching { capture("tablet-queue-failure.png", resized = true) }
+                throw failure
             } finally { shellForTest("wm size reset"); shellForTest("wm density reset") }
             compose.runOnIdle { player.removeMediaItems(1, player.mediaItemCount) }
             // Exercise actual controls during playback and inspect both appearance options.
             compose.onNodeWithContentDescription("返回封面").performClick()
             compose.onNodeWithContentDescription("收起播放器").performClick()
             compose.onNodeWithContentDescription("设置").performClick()
-            compose.onNodeWithText("深色", substring = false).performScrollTo().performClick()
+            compose.onNodeWithTag("setting-日夜模式").performScrollTo().performClick()
+            compose.onNodeWithText("深色", substring = false).performClick()
             compose.onNodeWithTag("appearance-dark").assertExists()
-            compose.onNodeWithText("浅色", substring = false).performScrollTo().performClick()
+            compose.onNodeWithTag("setting-日夜模式").performScrollTo().performClick()
+            compose.onNodeWithText("浅色", substring = false).performClick()
             compose.onNodeWithTag("appearance-light").assertExists()
+            compose.onNodeWithTag("setting-日夜模式").performScrollTo().performClick()
             compose.onNodeWithText("跟随系统").performClick()
-            compose.onNodeWithText("一块红布").performScrollTo().performClick()
+            compose.onNodeWithTag("setting-主题").performScrollTo().performClick()
+            compose.onNodeWithText("一块红布").performClick()
             compose.onNodeWithTag("appearance-red-cloth").assertExists()
             compose.onAllNodesWithText("日夜模式").assertCountEquals(0)
+            compose.onNodeWithTag("setting-桌面图标").performScrollTo().performClick()
             compose.onNodeWithText("红布", substring = false).performClick()
-            compose.onNodeWithText("256 MB").performScrollTo().performClick()
+            compose.onNodeWithTag("setting-最近播放音频").performScrollTo().performClick()
             compose.onNodeWithText("128 MB").performClick()
             compose.waitUntil { vm.settings.state.value.audioMb == 128 && vm.settings.state.value.redCloth && vm.settings.state.value.redIcon }
             capture("red-cloth-settings.png")
-            compose.onNodeWithText("完成").performScrollTo().performClick()
+            compose.onNodeWithTag("settings-back").performClick()
             compose.waitUntil(10_000) { compose.onAllNodesWithText("一块红布").fetchSemanticsNodes().isEmpty() }
             compose.onAllNodesWithText("接口测试歌曲").onLast().performClick()
             compose.onNodeWithText("歌词", useUnmergedTree = true).performClick()

@@ -83,7 +83,8 @@ fun WildStringApp(model: MusicViewModel) {
         isAppearanceLightStatusBars = !dark && !preferences.redCloth
         isAppearanceLightNavigationBars = !dark && !preferences.redCloth
     } } }
-    CompositionLocalProvider(LocalDarkAppearance provides dark, LocalRedCloth provides preferences.redCloth) {
+    CompositionLocalProvider(LocalDarkAppearance provides dark, LocalRedCloth provides preferences.redCloth,
+        LocalTactileFeedback provides rememberTactileFeedback { model.settings.state.value.haptics }) {
         MaterialTheme(colorScheme = if (preferences.redCloth) redColors else if (dark) classicDarkColors else classicLightColors) {
             Surface(Modifier.fillMaxSize().testTag(if (preferences.redCloth) "appearance-red-cloth" else if (dark) "appearance-dark" else "appearance-light")) {
                 Crossfade(state.connected, animationSpec = tween(220), label = "connection") { connected ->
@@ -125,14 +126,19 @@ fun ConnectionScreen(state: MusicState, connect: (String, String, String, Boolea
 @Composable
 private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
     var expanded by rememberSaveable { mutableStateOf(false) }
+    var playerFromSettings by rememberSaveable { mutableStateOf(false) }
     var lyrics by rememberSaveable { mutableStateOf(false) }
     var queue by rememberSaveable { mutableStateOf(false) }
-    var settings by remember { mutableStateOf(false) }
+    var settings by rememberSaveable { mutableStateOf(false) }
     var createPlaylist by remember { mutableStateOf(false) }
     var actions by remember { mutableStateOf<Track?>(null) }
     var playlistChoices by remember { mutableStateOf<List<Playlist>?>(null) }
     var chooseTrack by remember { mutableStateOf<Track?>(null) }
     var localError by remember { mutableStateOf<String?>(null) }
+    fun collapsePlayer() {
+        expanded = false
+        if (playerFromSettings) { settings = true; playerFromSettings = false }
+    }
     val scope = rememberCoroutineScope()
     val savedPages = rememberSaveableStateHolder()
     val savedKeys = remember { ArrayDeque<String>() }
@@ -143,45 +149,48 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
     BoxWithConstraints(Modifier.fillMaxSize().safeDrawingPadding()) {
         val wide = maxWidth >= 840.dp && maxHeight >= 480.dp
         val rail = maxWidth >= 600.dp && maxHeight >= 480.dp
+        val compact = maxHeight < 600.dp
         var wasWide by remember { mutableStateOf(wide) }
         LaunchedEffect(wide) { if (wasWide && !wide && expanded && !queue) lyrics = true; wasWide = wide }
-        BackHandler(enabled = expanded || state.canGoBack) {
-            when { queue -> queue = false; lyrics && !wide -> lyrics = false; expanded -> expanded = false; else -> vm.back() }
+        BackHandler(enabled = !settings && (expanded || queue || state.canGoBack || state.tab != "search")) {
+            when { queue -> queue = false; lyrics && !wide -> lyrics = false; expanded -> collapsePlayer(); state.canGoBack -> vm.back(); else -> vm.navigate("search") }
         }
-        AnimatedContent(expanded && state.current != null, transitionSpec = {
-            (fadeIn(tween(220)) + slideInVertically(tween(280, easing = FastOutSlowInEasing)) { it / 12 }) togetherWith fadeOut(tween(140))
-        }, label = "player-expansion") { playerExpanded ->
-        if (playerExpanded) {
+        AnimatedContent(when { settings -> "settings"; expanded && state.current != null -> "player"; else -> "catalog" }, transitionSpec = {
+            if (targetState == "settings" || initialState == "settings") {
+                (fadeIn(tween(180)) + slideInHorizontally(tween(240)) { if (targetState == "settings") it / 6 else -it / 12 }) togetherWith fadeOut(tween(120))
+            } else (fadeIn(tween(220)) + slideInVertically(tween(280, easing = FastOutSlowInEasing)) { it / 12 }) togetherWith fadeOut(tween(140))
+        }, label = "app-destination") { destination ->
+        if (destination == "settings") savedPages.SaveableStateProvider("settings") { SettingsScreen(vm, bottomBar = {
+            MiniPlayer(vm, state, onQueue = { queue = true }) { playerFromSettings = true; settings = false; expanded = true; lyrics = false; queue = false }
+        }) { settings = false } }
+        else if (destination == "player") {
             PlayerScreen(vm, state, wide, lyrics, queue,
-                onBack = { if (lyrics && !wide) lyrics = false else expanded = false },
+                onBack = { if (lyrics && !wide) lyrics = false else collapsePlayer() },
                 onLyrics = { lyrics = !lyrics; queue = false }, onQueue = { queue = !queue },
                 onAdd = { actions = state.current })
         } else {
             Row(Modifier.fillMaxSize()) {
-                if (rail) NavigationRail { Spacer(Modifier.height(40.dp)); RailItems(state, vm) }
+                if (rail) NavigationRail(windowInsets = WindowInsets(0, 0, 0, 0), modifier = Modifier.testTag("navigation-rail")) {
+                    Icon(painterResource(R.drawable.ic_wildstring), null, Modifier.padding(vertical = 24.dp).size(36.dp), tint = Color.Unspecified)
+                    RailItems(state, vm)
+                }
                 Scaffold(
-                    topBar = { TopAppBar(title = { Column {
-                        Text(if (state.tab == "library" && state.collection == null) "野弦" else state.title)
-                        if (state.tab == "library" && state.collection == null) Text("WILDSTRING", fontSize = 10.sp, color = Muted, letterSpacing = 2.sp)
-                    } }, navigationIcon = { if (state.collection != null || state.kind == "recent") IconButton(vm::back) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回曲库") } }, actions = {
-                        IconButton({ vm.load() }) { Icon(Icons.Default.Refresh, "刷新曲库") }
-                        IconButton({ settings = true }) { Icon(Icons.Default.Settings, "设置") }
-                    }) },
+                    contentWindowInsets = WindowInsets(0, 0, 0, 0),
+                    topBar = { CatalogTopBar(state, vm::back, { vm.load() }, { settings = true }, compact = compact || state.tab == "search") },
                     bottomBar = { Column {
-                        if (state.current != null) MiniPlayer(vm, state) { expanded = true; lyrics = false; queue = false }
-                        if (!rail) NavigationBar { BottomItems(state, vm) }
+                        if (state.current != null) MiniPlayer(vm, state, onQueue = { queue = true }) { playerFromSettings = false; expanded = true; lyrics = false; queue = false }
+                        if (!rail) NavigationBar(windowInsets = WindowInsets(0, 0, 0, 0), modifier = Modifier.testTag("bottom-navigation")) { BottomItems(state, vm) }
                     } },
                 ) { padding ->
-                    Column(Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp)) {
-                        if (state.tab == "library" && state.collection == null) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            listOf("albums" to "专辑", "tracks" to "歌曲", "artists" to "艺人").forEach { (kind, label) ->
-                                FilterChip(state.kind == kind, { vm.kind(kind) }, label = { Text(label) })
+                    Column(Modifier.fillMaxSize().padding(padding)) {
+                        if (state.tab == "library" && state.collection == null) LibraryTabs(state.kind, vm::kind)
+                        if (state.tab == "search" && state.collection == null && state.kind != "recent") CatalogSearch(state.query, vm::search)
+                        if (state.tab == "mine" && state.collection == null && state.kind != "recent") {
+                            PersonalHeader(state, { vm.recent() }, compact = compact)
+                            Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                Text("我的歌单", style = MaterialTheme.typography.titleMedium)
+                                IconButton({ createPlaylist = true }) { Icon(Icons.Default.Add, "新建歌单") }
                             }
-                        }
-                        if (state.tab == "search") OutlinedTextField(state.query, vm::search, Modifier.fillMaxWidth().padding(bottom = 12.dp), placeholder = { Text("搜索歌曲、艺人或专辑") }, singleLine = true, leadingIcon = { Icon(Icons.Default.Search, null) })
-                        if (state.tab == "mine" && state.collection == null && state.kind != "recent") Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            TextButton({ vm.recent() }) { Text("最近听过") }
-                            TextButton({ createPlaylist = true }) { Icon(Icons.Default.Add, null); Text("新建歌单") }
                         }
                         state.error?.let { ErrorMessage(it, vm::load) }
                         if (state.offline) Text("网络暂不可用 · 显示本机缓存", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(vertical = 6.dp))
@@ -189,14 +198,17 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
                         Box(Modifier.fillMaxWidth().height(4.dp)) {
                             if (delayed(state.loading, 350)) LinearProgressIndicator(Modifier.fillMaxWidth().testTag("catalog-loading"))
                         }
-                        if (state.tracks.isNotEmpty()) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-                            TextButton({ vm.play(state.tracks); expanded = true; lyrics = false; queue = false }) { Icon(Icons.Default.PlayArrow, null); Text(if (state.total > state.tracks.size) "播放本页" else "播放全部") }
-                            Text("${state.total} 首", color = Muted, fontSize = 12.sp)
+                        if (state.tracks.isNotEmpty() && state.kind != "discover") Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                            FilledTonalButton(tactile { vm.play(state.tracks); expanded = true; lyrics = false; queue = false }, Modifier.padding(start = 16.dp, top = 8.dp, bottom = 8.dp)) {
+                                Icon(Icons.Default.PlayArrow, null, Modifier.size(20.dp)); Spacer(Modifier.width(6.dp)); Text(if (state.total > state.tracks.size) "播放本页" else "播放全部")
+                            }
+                            Text("${state.total} 首", Modifier.padding(end = 20.dp), color = Muted, fontSize = 12.sp)
                         }
-                        Box(Modifier.weight(1f)) {
+                        Box(Modifier.weight(1f).padding(horizontal = if (state.kind == "discover") 0.dp else 16.dp)) {
                             savedPages.SaveableStateProvider(state.contentKey.ifBlank { "initial" }) {
                             when (state.kind) {
-                                "albums" -> LazyVerticalGrid(GridCells.Adaptive(140.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalArrangement = Arrangement.spacedBy(18.dp), contentPadding = PaddingValues(vertical = 12.dp)) {
+                                "discover" -> DiscoveryPage(vm, state, play = { index -> vm.play(state.tracks, index); expanded = true; lyrics = false; queue = false }, recent = vm::recent)
+                                "albums" -> LazyVerticalGrid(GridCells.Adaptive(140.dp), modifier = Modifier.testTag("album-grid"), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalArrangement = Arrangement.spacedBy(18.dp), contentPadding = PaddingValues(vertical = 12.dp)) {
                                     items(state.albums, key = { it.id }) { album -> Column(Modifier.animateItem().clickable { vm.openAlbum(album) }) {
                                         Cover(vm, album.coverTrackId, album.title, Modifier.fillMaxWidth().aspectRatio(1f))
                                         Text(album.title, Modifier.padding(top = 9.dp), maxLines = 2, overflow = TextOverflow.Ellipsis)
@@ -212,14 +224,14 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
                                 else -> LazyColumn { items(state.tracks, key = { it.id }) { track -> TrackRow(vm, track, { vm.play(state.tracks, state.tracks.indexOf(track)); expanded = true }, { actions = track }) } }
                             }
                             }
-                            if (!state.loading && state.total == 0 && state.error == null) Text(
+                            if (state.kind != "discover" && !state.loading && state.total == 0 && state.error == null) Text(
                                 if (state.query.isNotBlank()) "没有找到匹配的音乐" else if (state.kind == "playlists") "还没有歌单" else "这里还没有音乐，请先在网页端导入曲库。",
                                 Modifier.align(Alignment.Center).padding(24.dp), color = Muted)
                         }
-                        if (state.total > 50) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                            TextButton({ vm.page(-1) }, enabled = state.offset > 0 && !state.loading) { Text("上一页") }
+                        if (state.kind != "discover" && state.total > 50) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                            IconButton({ vm.page(-1) }, enabled = state.offset > 0 && !state.loading) { Icon(Icons.Default.ChevronLeft, "上一页") }
                             Text("${state.offset + 1}–${minOf(state.offset + 50, state.total)} / ${state.total}", fontSize = 12.sp, color = Muted)
-                            TextButton({ vm.page(1) }, enabled = state.offset + 50 < state.total && !state.loading) { Text("下一页") }
+                            IconButton({ vm.page(1) }, enabled = state.offset + 50 < state.total && !state.loading) { Icon(Icons.Default.ChevronRight, "下一页") }
                         }
                     }
                 }
@@ -228,13 +240,12 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
         }
         if (queue && (!wide || !expanded)) ModalBottomSheet(onDismissRequest = { queue = false }) { QueuePanel(vm, state, Modifier.fillMaxWidth().heightIn(max = 560.dp)) }
     }
-    if (settings) SettingsDialog(vm) { settings = false }
     if (createPlaylist) NameDialog("新建歌单", "", { createPlaylist = false }) { vm.createPlaylist(it); createPlaylist = false }
     actions?.let { track -> ModalBottomSheet(onDismissRequest = { actions = null }) {
         Text(track.title, Modifier.padding(24.dp), style = MaterialTheme.typography.titleLarge)
-        TextButton({ vm.addToQueue(track, true); actions = null }, Modifier.fillMaxWidth()) { Text("下一首播放") }
-        TextButton({ vm.addToQueue(track); actions = null }, Modifier.fillMaxWidth()) { Text("加入播放队列") }
-        TextButton({ vm.favorite(track); actions = null }, Modifier.fillMaxWidth()) { Text(if (track.loved) "取消收藏" else "收藏") }
+        TextButton(tactile { vm.addToQueue(track, true); actions = null }, Modifier.fillMaxWidth()) { Text("下一首播放") }
+        TextButton(tactile { vm.addToQueue(track); actions = null }, Modifier.fillMaxWidth()) { Text("加入播放队列") }
+        TextButton(tactile { vm.favorite(track); actions = null }, Modifier.fillMaxWidth()) { Text(if (track.loved) "取消收藏" else "收藏") }
         TextButton({
             chooseTrack = track; actions = null
             scope.launch { try { playlistChoices = vm.playlistsForAdd() } catch (e: Exception) { localError = friendlyError(e) } }
@@ -243,7 +254,7 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
     } }
     playlistChoices?.let { choices -> AlertDialog(onDismissRequest = { playlistChoices = null }, title = { Text("加入歌单") }, text = {
         if (choices.isEmpty()) Text("请先创建普通歌单。") else Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {
-            choices.forEach { p -> TextButton({ chooseTrack?.let { vm.addToPlaylist(it, p) }; playlistChoices = null }) { Text(p.name) } }
+            choices.forEach { p -> TextButton(tactile { chooseTrack?.let { vm.addToPlaylist(it, p) }; playlistChoices = null }) { Text(p.name) } }
         }
     }, confirmButton = { TextButton({ playlistChoices = null }) { Text("关闭") } }) }
     localError?.let { text -> AlertDialog(onDismissRequest = { localError = null }, text = { Text(text) }, confirmButton = { TextButton({ localError = null }) { Text("关闭") } }) }
@@ -251,19 +262,21 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
 
 @Composable
 private fun RailItems(state: MusicState, vm: MusicViewModel) {
-    listOf(Triple("library", "曲库", Icons.Default.LibraryMusic), Triple("search", "找歌", Icons.Default.Search), Triple("mine", "我的", Icons.Default.Person)).forEach { (id, label, icon) ->
-        NavigationRailItem(state.tab == id, { vm.navigate(id) }, icon = { Icon(icon, label) }, label = { Text(label) })
+    val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+    listOf(Triple("search", "发现", Icons.Default.Search), Triple("library", "音乐", Icons.Default.LibraryMusic), Triple("mine", "我的", Icons.Default.Person)).forEach { (id, label, icon) ->
+        NavigationRailItem(state.tab == id, { keyboard?.hide(); vm.navigate(id) }, modifier = Modifier.testTag("nav-$id"), icon = { Icon(icon, label) }, label = { Text(label) })
     }
 }
 @Composable
 private fun RowScope.BottomItems(state: MusicState, vm: MusicViewModel) {
-    listOf(Triple("library", "曲库", Icons.Default.LibraryMusic), Triple("search", "找歌", Icons.Default.Search), Triple("mine", "我的", Icons.Default.Person)).forEach { (id, label, icon) ->
-        NavigationBarItem(state.tab == id, { vm.navigate(id) }, icon = { Icon(icon, label) }, label = { Text(label) })
+    val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+    listOf(Triple("search", "发现", Icons.Default.Search), Triple("library", "音乐", Icons.Default.LibraryMusic), Triple("mine", "我的", Icons.Default.Person)).forEach { (id, label, icon) ->
+        NavigationBarItem(state.tab == id, { keyboard?.hide(); vm.navigate(id) }, modifier = Modifier.testTag("nav-$id"), icon = { Icon(icon, label) }, label = { Text(label) })
     }
 }
 
 @Composable
-private fun Cover(vm: MusicViewModel, id: String?, title: String, modifier: Modifier) {
+internal fun Cover(vm: MusicViewModel, id: String?, title: String, modifier: Modifier) {
     val profile by vm.repository.session.profiles.collectAsStateWithLifecycle()
     val fallback = painterResource(if (LocalRedCloth.current) R.drawable.ic_red_cloth else R.drawable.ic_wildstring)
     AsyncImage(model = id?.let { ImageRequest.Builder(LocalContext.current).data(vm.repository.cover(it)).memoryCacheKey("${profile}:${it}").crossfade(180).build() }, imageLoader = vm.imageLoader, contentDescription = title,
@@ -274,22 +287,8 @@ private fun Cover(vm: MusicViewModel, id: String?, title: String, modifier: Modi
 private fun TrackRow(vm: MusicViewModel, track: Track, play: () -> Unit, actions: () -> Unit) {
     ListItem(headlineContent = { Text(track.title, maxLines = 1, overflow = TextOverflow.Ellipsis) }, supportingContent = { Text(track.artist, maxLines = 1, overflow = TextOverflow.Ellipsis) },
         leadingContent = { Cover(vm, track.id.takeIf { track.hasCover }, track.title, Modifier.size(48.dp)) },
-        trailingContent = { IconButton(actions) { Icon(Icons.Default.MoreVert, "${track.title}的操作") } }, modifier = Modifier.clickable(onClick = play))
+        trailingContent = { IconButton(actions) { Icon(Icons.Default.MoreVert, "${track.title}的操作") } }, modifier = Modifier.clickable(onClick = tactile(play)))
 }
-@Composable
-private fun MiniPlayer(vm: MusicViewModel, state: MusicState, expand: () -> Unit) {
-    val track = state.current ?: return
-    Surface(Modifier.padding(horizontal = 12.dp, vertical = 7.dp).fillMaxWidth(), shape = RoundedCornerShape(13.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Row(Modifier.weight(1f).testTag("mini-player-open").clickable(onClick = expand).padding(9.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Cover(vm, track.id.takeIf { track.hasCover }, track.title, Modifier.size(42.dp))
-                Column(Modifier.weight(1f)) { Text(track.title, maxLines = 1, overflow = TextOverflow.Ellipsis); Text(track.artist, color = Muted, fontSize = 11.sp, maxLines = 1) }
-            }
-            IconButton(tactile(vm, vm::toggle)) { Icon(if (state.playing) Icons.Default.Pause else Icons.Default.PlayArrow, if (state.playing) "暂停" else "播放") }
-        }
-    }
-}
-
 @Composable
 private fun PlayerScreen(vm: MusicViewModel, input: MusicState, wide: Boolean, lyrics: Boolean, queue: Boolean,
     onBack: () -> Unit, onLyrics: () -> Unit, onQueue: () -> Unit, onAdd: () -> Unit) {
@@ -331,7 +330,7 @@ private fun PlayerScreen(vm: MusicViewModel, input: MusicState, wide: Boolean, l
             PlaybackControls(vm, state, onQueue)
             Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), horizontalArrangement = Arrangement.Center) {
                 TextButton(onLyrics) { Text(if (lyrics) "返回封面" else "歌词") }
-                TextButton(onQueue) { Text("队列 · ${state.queue.size}") }
+                TextButton(tactile(onQueue)) { Text("队列 · ${state.queue.size}") }
             }
         }
     }
@@ -341,6 +340,7 @@ private fun PlayerScreen(vm: MusicViewModel, input: MusicState, wide: Boolean, l
 @Composable
 private fun PlaybackControls(vm: MusicViewModel, state: MusicState, onQueue: () -> Unit) {
     var scrub by remember { mutableStateOf<Float?>(null) }
+    val feedback = LocalTactileFeedback.current
     val track = state.current ?: return
     Column(Modifier.fillMaxWidth()) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -348,22 +348,22 @@ private fun PlaybackControls(vm: MusicViewModel, state: MusicState, onQueue: () 
                 Text(track.title, fontSize = 23.sp, fontWeight = FontWeight.Medium, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 Text(track.artist, color = Muted, fontSize = 13.sp, maxLines = 2)
             }
-            IconButton(tactile(vm) { vm.favorite(track) }) { Icon(if (track.loved) Icons.Default.Favorite else Icons.Default.FavoriteBorder, if (track.loved) "取消收藏" else "收藏", tint = if (track.loved) Accent else MaterialTheme.colorScheme.onSurface) }
+            IconButton(tactile { vm.favorite(track) }) { Icon(if (track.loved) Icons.Default.Favorite else Icons.Default.FavoriteBorder, if (track.loved) "取消收藏" else "收藏", tint = if (track.loved) Accent else MaterialTheme.colorScheme.onSurface) }
         }
         if (state.playbackQuality.isNotBlank()) Text(state.playbackQuality, color = Muted, fontSize = 11.sp, modifier = Modifier.padding(top = 6.dp).testTag("playback-quality"))
         Slider(value = scrub ?: state.position.coerceAtMost(state.duration).toFloat(), onValueChange = { scrub = it },
-            onValueChangeFinished = { scrub?.let { vm.seek(it.toLong()) }; scrub = null }, valueRange = 0f..state.duration.coerceAtLeast(1).toFloat(), enabled = state.duration > 0)
+            onValueChangeFinished = { scrub?.let { feedback(TactileKind.Tap); vm.seek(it.toLong()) }; scrub = null }, valueRange = 0f..state.duration.coerceAtLeast(1).toFloat(), enabled = state.duration > 0)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text(formatTime(scrub?.toLong() ?: state.position), color = Muted, fontSize = 11.sp); Text(formatTime(state.duration), color = Muted, fontSize = 11.sp) }
         Row(Modifier.fillMaxWidth().padding(vertical = 12.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             val modeIcon = if (state.shuffle) Icons.Default.Shuffle else if (state.repeatMode == Player.REPEAT_MODE_ONE) Icons.Default.RepeatOne else Icons.Default.Repeat
-            IconButton(tactile(vm, vm::cycleMode)) { Icon(modeIcon, "切换播放模式", tint = if (state.shuffle || state.repeatMode != Player.REPEAT_MODE_OFF) Accent else Muted) }
-            IconButton(tactile(vm, vm::previous)) { Icon(Icons.Default.SkipPrevious, "上一首", Modifier.size(30.dp)) }
-            FilledIconButton(tactile(vm, vm::toggle), Modifier.size(64.dp)) {
+            IconButton(tactile(vm::cycleMode)) { Icon(modeIcon, "切换播放模式", tint = if (state.shuffle || state.repeatMode != Player.REPEAT_MODE_OFF) Accent else Muted) }
+            IconButton(tactile(vm::previous)) { Icon(Icons.Default.SkipPrevious, "上一首", Modifier.size(30.dp)) }
+            FilledIconButton(tactile(vm::toggle), Modifier.size(64.dp)) {
                 if (delayed(state.buffering, 500)) CircularProgressIndicator(Modifier.size(25.dp), strokeWidth = 2.dp)
                 else Crossfade(state.playing, animationSpec = tween(130), label = "play-pause") { playing -> Icon(if (playing) Icons.Default.Pause else Icons.Default.PlayArrow, if (playing) "暂停" else "播放", Modifier.size(34.dp)) }
             }
-            IconButton(tactile(vm, vm::next)) { Icon(Icons.Default.SkipNext, "下一首", Modifier.size(30.dp)) }
-            IconButton(onQueue) { Icon(Icons.AutoMirrored.Filled.QueueMusic, "播放队列") }
+            IconButton(tactile(vm::next)) { Icon(Icons.Default.SkipNext, "下一首", Modifier.size(30.dp)) }
+            IconButton(tactile(onQueue)) { Icon(Icons.AutoMirrored.Filled.QueueMusic, "播放队列") }
         }
         state.playbackError?.let { ErrorMessage(it) { vm.toggle() } }
     }
@@ -372,6 +372,7 @@ private fun PlaybackControls(vm: MusicViewModel, state: MusicState, onQueue: () 
 @Composable
 private fun LyricsPanel(vm: MusicViewModel, state: MusicState, modifier: Modifier) {
     val list = rememberLazyListState()
+    val feedback = LocalTactileFeedback.current
     var follow by remember(state.current?.id) { mutableStateOf(true) }
     val lines = state.lyrics.lines
     val active = if (state.lyrics.kind == "synced") lines.indexOfLast { (it.timeMs ?: Long.MAX_VALUE) <= state.position } else -1
@@ -386,7 +387,7 @@ private fun LyricsPanel(vm: MusicViewModel, state: MusicState, modifier: Modifie
                 else -> LazyColumn(state = list, contentPadding = PaddingValues(vertical = 100.dp), modifier = Modifier.fillMaxSize()) {
                     items(lines.size) { index -> val line = lines[index]
                         val lineColor by animateColorAsState(if (state.lyrics.kind == "plain" || active == index) MaterialTheme.colorScheme.onSurface else Muted.copy(alpha = .65f), tween(260), label = "lyric-highlight")
-                        Text(line.text, Modifier.fillMaxWidth().clickable(enabled = line.timeMs != null) { vm.seek(line.timeMs ?: 0); follow = true }.padding(vertical = 16.dp, horizontal = 4.dp),
+                        Text(line.text, Modifier.fillMaxWidth().clickable(enabled = line.timeMs != null) { feedback(TactileKind.Tap); vm.seek(line.timeMs ?: 0); follow = true }.padding(vertical = 16.dp, horizontal = 4.dp),
                             fontSize = 25.sp, lineHeight = 36.sp, fontWeight = if (active == index) FontWeight.Medium else FontWeight.Normal,
                             color = lineColor)
                     }

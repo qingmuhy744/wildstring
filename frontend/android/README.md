@@ -2,13 +2,23 @@
 
 Kotlin / Compose / Media3 原生客户端，Android 8.0（API 26）起可安装。所有曲库、封面、歌词、收藏与歌单来自用户配置的野弦实例；生产 APK 没有内置演示曲库或测试音频。测试夹具只打包到独立的 androidTest APK。
 
-当前版本：0.2.0（versionCode 3）。
+当前版本：0.2.1（versionCode 4）。
 
 当前功能：服务器连接/登录与加密会话保存；歌曲、专辑、艺人、关键词搜索与分页；原音串流、后台媒体服务、系统控制、队列增删/三横杠拖动排序、循环/随机；手机全屏歌词、平板双栏与窄分屏布局；收藏、歌单浏览/创建/加入和在线收听上报；按曲目 ID 保存队列及暂停恢复。
 
 完整歌单编辑/排序、离线下载、AI 业务、Android Auto 单独交付。支持的容器以服务端曲库协议为准，实际编码仍需设备解码验证。无歌词、无封面和网络错误使用真实空态或反馈，不填充虚构内容。
 
 0.2.0 增加可调缓存、封面取色毛玻璃、自然过渡、轻触反馈，以及独立红布彩蛋。经典深色主题保留原暖橙 / 深绿，支持浅色及跟随系统自动切换；红布固定正红，不随日夜变化。变化与验证状态见 [CHANGELOG](../../CHANGELOG.md)。
+
+## 0.2.1：原生页面布局
+
+手机以「发现 / 音乐 / 我的」底部导航切换，平板保留侧边导航；曲库使用专辑 / 歌曲 / 艺人标签，个人页集中展示账号、最近听过和歌单。启动页提供搜索、横向专辑预览和真实最近收听。设置是独立页面，返回栏固定，选项按组排列并使用单选弹窗；封面取色的悬浮播放条在曲库和设置中都可控制播放或打开队列，展开后返回保留页面位置与播放状态。
+
+触感仅用于播放与关键操作：点播、收藏、队列增删、悬浮条展开、进度松手和歌词定位轻反馈；拖动队列区分开始与有效落位，取消不触发落位反馈。共用反馈节流，普通浏览、列表滚动和自动歌词跟随保持安静。设置中的「轻触反馈」即时生效，使用系统原生反馈并遵循系统开关；实际强弱取决于手机，模拟器不能验收马达手感。
+
+交互设计稿也已同步为这套结构，执行 `make android-design` 后访问 `http://127.0.0.1:18782/android-v1.html`；可切换手机 / 平板、主题和设置选项，并预览播放器返回与队列拖动。HTML 仅使用示例资料，不连接实例、不播放音频、不保存真实设置，不能代替 APK 验收。设计稿已完成 JavaScript / HTML / CSS 语法及静态检查，浏览器视觉验收待补；下述设备回归针对原生 APK。
+
+本批 UI 与交互改进归入 0.2.1（versionCode 4）。本地 `make android-ci android-connected-test` 已通过：20 项单元测试、Debug / Release Lint、R8 构建及 9 项 Android 15 ARM64 模拟器回归；含触感开关与节流、反馈异常不阻断操作、队列拖动反馈类型、发现页数据与查看全部、悬浮播放条 / 队列、设置轻下拉防抖、返回与列表位置恢复、手机 / 平板导航、主题 / 缓存设置，以及真实音频播放与缓冲 / underrun 指标检查。截图使用 androidTest 接口夹具；国产真机手势、后台限制和功耗仍待验证。
 
 ## 构建
 
@@ -22,7 +32,7 @@ make android-locks              # 修改依赖后刷新锁与 SHA-256 校验元�
 
 `ANDROID_HOME` 指向本机 SDK，`JAVA_HOME` 指向 JDK；`local.properties` 只用于本机且不跟踪。Gradle Wrapper、版本目录与依赖校验资料入库，构建缓存、APK 和签名私钥不提交。
 
-`make android-ci` 的安装包位于 `artifacts/android/`，包含 `wildstring-<version>-debug.apk`（当前为 `wildstring-0.2.0-debug.apk`）与 `SHA256SUMS`。GitHub 的 **Android APK** 工作流通过后，在该次运行的 **Artifacts → wildstring-android-debug** 下载并解压 ZIP 后安装 APK。原有 Python/Web/Docker CI 继续独立运行。
+`make android-ci` 的安装包位于 `artifacts/android/`，包含 `wildstring-<version>-debug.apk`（当前为 `wildstring-0.2.1-debug.apk`）与 `SHA256SUMS`。GitHub 的 **Android APK** 工作流通过后，在该次运行的 **Artifacts → wildstring-android-debug** 下载并解压 ZIP 后安装 APK。原有 Python/Web/Docker CI 继续独立运行。
 
 设备测试用 `UiAutomation.takeScreenshot()` 生成手机和平板 PNG，写入 AGP 传入的 `additionalTestOutputDir`，在测试卸载应用前自动取回到 `frontend/android/app/build/outputs/connected_android_test_additional_output/`。Actions 的 `android-test-reports` 同时保存这些截图及失败截图。手工查看本地已连接设备时，也可用 `adb exec-out screencap -p > screenshot.png` 保存当前屏幕。
 
@@ -32,7 +42,7 @@ debug 包 ID 为 `com.wildstring.app.debug`，与正式包 `com.wildstring.app` 
 
 显示名称为「野弦」，英文名称 WildString。0.1.0 的正式包 ID 为 `com.wildstring.app`，versionCode 为 2。旧的 `dev.wildstring.app.debug` 测试包属于另一应用，无法直接覆盖；首次安装正式版需要重新连接服务端。服务端曲库不受影响。
 
-GitHub [Releases](https://github.com/qingmuhy744/wildstring/releases) 提供 `wildstring-0.2.0-release.apk` 与校验和。正式包启用 R8 优化，使用固定发布签名；后续保留同一包名和密钥，以递增 versionCode 更新。私钥不进入源码、Actions 缓存或发布附件。公开证书指纹在 Release 的 `android-signing-certificate.sha256` 中。
+GitHub [Releases](https://github.com/qingmuhy744/wildstring/releases) 提供 `wildstring-0.2.1-release.apk` 与校验和。正式包启用 R8 优化，使用固定发布签名；后续保留同一包名和密钥，以递增 versionCode 更新。私钥不进入源码、Actions 缓存或发布附件。公开证书指纹在 Release 的 `android-signing-certificate.sha256` 中。
 
 本地签名构建需要从未跟踪的 `.env.android-release` 导出 `ANDROID_KEYSTORE_PATH`、`ANDROID_KEYSTORE_PASSWORD`、`ANDROID_KEY_ALIAS`、`ANDROID_KEY_PASSWORD`，再执行 `make android-release`。`make android-release-smoke` 会在一次性模拟器安装正式包并检查连接页；不要对正在使用的正式客户端运行这个安装检查。工作流与密钥备份约定见 [发布说明](../../docs/releasing.md)。
 

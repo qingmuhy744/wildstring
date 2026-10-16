@@ -45,11 +45,11 @@ import kotlinx.coroutines.delay
 
 @Composable
 internal fun QueuePanel(vm: MusicViewModel, state: MusicState, modifier: Modifier) {
-    val tick = tactile(vm) {}
+    val feedback = LocalTactileFeedback.current
     QueueList(state.queue, state.entryId, modifier,
-        onPlay = { vm.playQueue(it.index) },
-        onRemove = { tick(); vm.removeQueue(it.index) },
-        onMove = vm::moveQueue, onHaptic = tick)
+        onPlay = { feedback(TactileKind.Tap); vm.playQueue(it.index) },
+        onRemove = { feedback(TactileKind.Tap); vm.removeQueue(it.index) },
+        onMove = vm::moveQueue, onHaptic = feedback)
 }
 
 /** Only the handle starts a reorder; the rest of the row keeps ordinary tap/scroll behavior. */
@@ -57,7 +57,7 @@ internal fun QueuePanel(vm: MusicViewModel, state: MusicState, modifier: Modifie
 internal fun QueueList(
     rows: List<QueueRow>, currentEntry: String?, modifier: Modifier = Modifier,
     onPlay: (QueueRow) -> Unit, onRemove: (QueueRow) -> Unit,
-    onMove: (String, Int) -> Unit, onHaptic: () -> Unit,
+    onMove: (String, Int) -> Unit, onHaptic: (TactileKind) -> Unit,
 ) {
     val list = rememberLazyListState()
     val drag = remember(list) { QueueDragState(list) }
@@ -118,7 +118,7 @@ internal fun QueueList(
                         }
                         change.consume()
                         if (!drag.start(id, currentRows, down.position.y)) return@awaitEachGesture
-                        haptic()
+                        haptic(TactileKind.DragStart)
                         drag.move(change.position.y)
                         awaitPointerEvent(PointerEventPass.Final)
                         var dropped = false
@@ -128,7 +128,7 @@ internal fun QueueList(
                             val destination = drag.order?.indexOfFirst { it.entryId == id } ?: -1
                             if (dropped && currentRows.map { it.entryId } == startIds && destination >= 0 && destination != startIds.indexOf(id)) {
                                 move(id, destination)
-                                haptic()
+                                haptic(TactileKind.DragEnd)
                             }
                             drag.cancel()
                         }
@@ -162,8 +162,8 @@ internal fun QueueList(
                             contentDescription = "拖动排序：${row.title}"
                             stateDescription = "第 ${index + 1} 首，共 ${rows.size} 首"
                             customActions = buildList {
-                                if (index > 0) add(CustomAccessibilityAction("向前移动") { haptic(); move(row.entryId, index - 1); true })
-                                if (index < rows.lastIndex) add(CustomAccessibilityAction("向后移动") { haptic(); move(row.entryId, index + 1); true })
+                                if (index > 0) add(CustomAccessibilityAction("向前移动") { haptic(TactileKind.Tap); move(row.entryId, index - 1); true })
+                                if (index < rows.lastIndex) add(CustomAccessibilityAction("向后移动") { haptic(TactileKind.Tap); move(row.entryId, index + 1); true })
                             }
                         }, contentAlignment = Alignment.Center) {
                         Icon(Icons.Default.Menu, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)

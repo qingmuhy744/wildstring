@@ -155,7 +155,7 @@ class AccountPlaybackTest {
             }
             assertFalse(compose.runOnIdle { vm.controller!!.playWhenReady })
             assertTrue(kotlin.math.abs(compose.runOnIdle { vm.controller!!.currentPosition } - originalPosition) < 200)
-            compose.onNodeWithText("完成").performScrollTo().performClick()
+            compose.onNodeWithTag("settings-back").performClick()
             compose.onNodeWithTag("mini-player-open").performClick()
             compose.runOnIdle { vm.seek(6000) }
             compose.waitUntil(15_000) { requests.any { it.contains("/lossless/stream?format=aac") && it.contains("start_ms=6000") } && compose.runOnIdle { vm.controller!!.playbackState == Player.STATE_READY } }
