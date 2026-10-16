@@ -125,6 +125,7 @@ fun ConnectionScreen(state: MusicState, connect: (String, String, String, Boolea
 @Composable
 private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
     var expanded by rememberSaveable { mutableStateOf(false) }
+    var playerFromSettings by rememberSaveable { mutableStateOf(false) }
     var lyrics by rememberSaveable { mutableStateOf(false) }
     var queue by rememberSaveable { mutableStateOf(false) }
     var settings by rememberSaveable { mutableStateOf(false) }
@@ -133,6 +134,10 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
     var playlistChoices by remember { mutableStateOf<List<Playlist>?>(null) }
     var chooseTrack by remember { mutableStateOf<Track?>(null) }
     var localError by remember { mutableStateOf<String?>(null) }
+    fun collapsePlayer() {
+        expanded = false
+        if (playerFromSettings) { settings = true; playerFromSettings = false }
+    }
     val scope = rememberCoroutineScope()
     val savedPages = rememberSaveableStateHolder()
     val savedKeys = remember { ArrayDeque<String>() }
@@ -146,18 +151,20 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
         val compact = maxHeight < 600.dp
         var wasWide by remember { mutableStateOf(wide) }
         LaunchedEffect(wide) { if (wasWide && !wide && expanded && !queue) lyrics = true; wasWide = wide }
-        BackHandler(enabled = !settings && (expanded || queue || state.canGoBack)) {
-            when { queue -> queue = false; lyrics && !wide -> lyrics = false; expanded -> expanded = false; else -> vm.back() }
+        BackHandler(enabled = !settings && (expanded || queue || state.canGoBack || state.tab != "search")) {
+            when { queue -> queue = false; lyrics && !wide -> lyrics = false; expanded -> collapsePlayer(); state.canGoBack -> vm.back(); else -> vm.navigate("search") }
         }
         AnimatedContent(when { settings -> "settings"; expanded && state.current != null -> "player"; else -> "catalog" }, transitionSpec = {
             if (targetState == "settings" || initialState == "settings") {
                 (fadeIn(tween(180)) + slideInHorizontally(tween(240)) { if (targetState == "settings") it / 6 else -it / 12 }) togetherWith fadeOut(tween(120))
             } else (fadeIn(tween(220)) + slideInVertically(tween(280, easing = FastOutSlowInEasing)) { it / 12 }) togetherWith fadeOut(tween(140))
         }, label = "app-destination") { destination ->
-        if (destination == "settings") SettingsScreen(vm) { settings = false }
+        if (destination == "settings") savedPages.SaveableStateProvider("settings") { SettingsScreen(vm, bottomBar = {
+            MiniPlayer(vm, state, onQueue = { queue = true }) { playerFromSettings = true; settings = false; expanded = true; lyrics = false; queue = false }
+        }) { settings = false } }
         else if (destination == "player") {
             PlayerScreen(vm, state, wide, lyrics, queue,
-                onBack = { if (lyrics && !wide) lyrics = false else expanded = false },
+                onBack = { if (lyrics && !wide) lyrics = false else collapsePlayer() },
                 onLyrics = { lyrics = !lyrics; queue = false }, onQueue = { queue = !queue },
                 onAdd = { actions = state.current })
         } else {
@@ -168,15 +175,15 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
                 }
                 Scaffold(
                     contentWindowInsets = WindowInsets(0, 0, 0, 0),
-                    topBar = { CatalogTopBar(state, vm::back, { vm.load() }, { settings = true }, compact = compact) },
+                    topBar = { CatalogTopBar(state, vm::back, { vm.load() }, { settings = true }, compact = compact || state.tab == "search") },
                     bottomBar = { Column {
-                        if (state.current != null) MiniPlayer(vm, state) { expanded = true; lyrics = false; queue = false }
+                        if (state.current != null) MiniPlayer(vm, state, onQueue = { queue = true }) { playerFromSettings = false; expanded = true; lyrics = false; queue = false }
                         if (!rail) NavigationBar(windowInsets = WindowInsets(0, 0, 0, 0), modifier = Modifier.testTag("bottom-navigation")) { BottomItems(state, vm) }
                     } },
                 ) { padding ->
                     Column(Modifier.fillMaxSize().padding(padding)) {
                         if (state.tab == "library" && state.collection == null) LibraryTabs(state.kind, vm::kind)
-                        if (state.tab == "search") CatalogSearch(state.query, vm::search)
+                        if (state.tab == "search" && state.collection == null && state.kind != "recent") CatalogSearch(state.query, vm::search)
                         if (state.tab == "mine" && state.collection == null && state.kind != "recent") {
                             PersonalHeader(state, { vm.recent() }, compact = compact)
                             Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
@@ -190,15 +197,16 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
                         Box(Modifier.fillMaxWidth().height(4.dp)) {
                             if (delayed(state.loading, 350)) LinearProgressIndicator(Modifier.fillMaxWidth().testTag("catalog-loading"))
                         }
-                        if (state.tracks.isNotEmpty()) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                        if (state.tracks.isNotEmpty() && state.kind != "discover") Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
                             FilledTonalButton(tactile(vm) { vm.play(state.tracks); expanded = true; lyrics = false; queue = false }, Modifier.padding(start = 16.dp, top = 8.dp, bottom = 8.dp)) {
                                 Icon(Icons.Default.PlayArrow, null, Modifier.size(20.dp)); Spacer(Modifier.width(6.dp)); Text(if (state.total > state.tracks.size) "播放本页" else "播放全部")
                             }
                             Text("${state.total} 首", Modifier.padding(end = 20.dp), color = Muted, fontSize = 12.sp)
                         }
-                        Box(Modifier.weight(1f).padding(horizontal = 16.dp)) {
+                        Box(Modifier.weight(1f).padding(horizontal = if (state.kind == "discover") 0.dp else 16.dp)) {
                             savedPages.SaveableStateProvider(state.contentKey.ifBlank { "initial" }) {
                             when (state.kind) {
+                                "discover" -> DiscoveryPage(vm, state, play = { index -> vm.play(state.tracks, index); expanded = true; lyrics = false; queue = false }, recent = vm::recent)
                                 "albums" -> LazyVerticalGrid(GridCells.Adaptive(140.dp), modifier = Modifier.testTag("album-grid"), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalArrangement = Arrangement.spacedBy(18.dp), contentPadding = PaddingValues(vertical = 12.dp)) {
                                     items(state.albums, key = { it.id }) { album -> Column(Modifier.animateItem().clickable { vm.openAlbum(album) }) {
                                         Cover(vm, album.coverTrackId, album.title, Modifier.fillMaxWidth().aspectRatio(1f))
@@ -215,11 +223,11 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
                                 else -> LazyColumn { items(state.tracks, key = { it.id }) { track -> TrackRow(vm, track, { vm.play(state.tracks, state.tracks.indexOf(track)); expanded = true }, { actions = track }) } }
                             }
                             }
-                            if (!state.loading && state.total == 0 && state.error == null) Text(
+                            if (state.kind != "discover" && !state.loading && state.total == 0 && state.error == null) Text(
                                 if (state.query.isNotBlank()) "没有找到匹配的音乐" else if (state.kind == "playlists") "还没有歌单" else "这里还没有音乐，请先在网页端导入曲库。",
                                 Modifier.align(Alignment.Center).padding(24.dp), color = Muted)
                         }
-                        if (state.total > 50) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                        if (state.kind != "discover" && state.total > 50) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                             IconButton({ vm.page(-1) }, enabled = state.offset > 0 && !state.loading) { Icon(Icons.Default.ChevronLeft, "上一页") }
                             Text("${state.offset + 1}–${minOf(state.offset + 50, state.total)} / ${state.total}", fontSize = 12.sp, color = Muted)
                             IconButton({ vm.page(1) }, enabled = state.offset + 50 < state.total && !state.loading) { Icon(Icons.Default.ChevronRight, "下一页") }
@@ -253,19 +261,21 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
 
 @Composable
 private fun RailItems(state: MusicState, vm: MusicViewModel) {
-    listOf(Triple("library", "曲库", Icons.Default.LibraryMusic), Triple("search", "找歌", Icons.Default.Search), Triple("mine", "我的", Icons.Default.Person)).forEach { (id, label, icon) ->
-        NavigationRailItem(state.tab == id, tactile(vm) { vm.navigate(id) }, modifier = Modifier.testTag("nav-$id"), icon = { Icon(icon, label) }, label = { Text(label) })
+    val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+    listOf(Triple("search", "发现", Icons.Default.Search), Triple("library", "音乐", Icons.Default.LibraryMusic), Triple("mine", "我的", Icons.Default.Person)).forEach { (id, label, icon) ->
+        NavigationRailItem(state.tab == id, tactile(vm) { keyboard?.hide(); vm.navigate(id) }, modifier = Modifier.testTag("nav-$id"), icon = { Icon(icon, label) }, label = { Text(label) })
     }
 }
 @Composable
 private fun RowScope.BottomItems(state: MusicState, vm: MusicViewModel) {
-    listOf(Triple("library", "曲库", Icons.Default.LibraryMusic), Triple("search", "找歌", Icons.Default.Search), Triple("mine", "我的", Icons.Default.Person)).forEach { (id, label, icon) ->
-        NavigationBarItem(state.tab == id, tactile(vm) { vm.navigate(id) }, modifier = Modifier.testTag("nav-$id"), icon = { Icon(icon, label) }, label = { Text(label) })
+    val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+    listOf(Triple("search", "发现", Icons.Default.Search), Triple("library", "音乐", Icons.Default.LibraryMusic), Triple("mine", "我的", Icons.Default.Person)).forEach { (id, label, icon) ->
+        NavigationBarItem(state.tab == id, tactile(vm) { keyboard?.hide(); vm.navigate(id) }, modifier = Modifier.testTag("nav-$id"), icon = { Icon(icon, label) }, label = { Text(label) })
     }
 }
 
 @Composable
-private fun Cover(vm: MusicViewModel, id: String?, title: String, modifier: Modifier) {
+internal fun Cover(vm: MusicViewModel, id: String?, title: String, modifier: Modifier) {
     val profile by vm.repository.session.profiles.collectAsStateWithLifecycle()
     val fallback = painterResource(if (LocalRedCloth.current) R.drawable.ic_red_cloth else R.drawable.ic_wildstring)
     AsyncImage(model = id?.let { ImageRequest.Builder(LocalContext.current).data(vm.repository.cover(it)).memoryCacheKey("${profile}:${it}").crossfade(180).build() }, imageLoader = vm.imageLoader, contentDescription = title,
@@ -278,20 +288,6 @@ private fun TrackRow(vm: MusicViewModel, track: Track, play: () -> Unit, actions
         leadingContent = { Cover(vm, track.id.takeIf { track.hasCover }, track.title, Modifier.size(48.dp)) },
         trailingContent = { IconButton(actions) { Icon(Icons.Default.MoreVert, "${track.title}的操作") } }, modifier = Modifier.clickable(onClick = play))
 }
-@Composable
-private fun MiniPlayer(vm: MusicViewModel, state: MusicState, expand: () -> Unit) {
-    val track = state.current ?: return
-    Surface(Modifier.padding(horizontal = 12.dp, vertical = 7.dp).fillMaxWidth(), shape = RoundedCornerShape(13.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Row(Modifier.weight(1f).testTag("mini-player-open").clickable(onClick = expand).padding(9.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Cover(vm, track.id.takeIf { track.hasCover }, track.title, Modifier.size(42.dp))
-                Column(Modifier.weight(1f)) { Text(track.title, maxLines = 1, overflow = TextOverflow.Ellipsis); Text(track.artist, color = Muted, fontSize = 11.sp, maxLines = 1) }
-            }
-            IconButton(tactile(vm, vm::toggle)) { Icon(if (state.playing) Icons.Default.Pause else Icons.Default.PlayArrow, if (state.playing) "暂停" else "播放") }
-        }
-    }
-}
-
 @Composable
 private fun PlayerScreen(vm: MusicViewModel, input: MusicState, wide: Boolean, lyrics: Boolean, queue: Boolean,
     onBack: () -> Unit, onLyrics: () -> Unit, onQueue: () -> Unit, onAdd: () -> Unit) {

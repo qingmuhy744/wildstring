@@ -29,7 +29,7 @@ import androidx.compose.ui.unit.dp
         }
     }
     if (state.canGoBack || compact) TopAppBar(title, navigationIcon = {
-        if (state.canGoBack) IconButton(back) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回曲库") }
+        if (state.canGoBack) IconButton(back) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回上一页") }
     }, actions = actions, windowInsets = WindowInsets(0, 0, 0, 0))
     else MediumTopAppBar(title, actions = actions, windowInsets = WindowInsets(0, 0, 0, 0))
 }
@@ -47,7 +47,8 @@ import androidx.compose.ui.unit.dp
         placeholder = { Text("搜索歌曲、艺人或专辑") }, singleLine = true, shape = RoundedCornerShape(28.dp),
         leadingIcon = { Icon(Icons.Default.Search, null) }, trailingIcon = {
             if (query.isNotEmpty()) IconButton({ search("") }) { Icon(Icons.Default.Close, "清空搜索") }
-        }, colors = TextFieldDefaults.colors(unfocusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+        }, colors = TextFieldDefaults.colors(unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
+            focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLowest, unfocusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
             focusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent),
         keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Search),
         keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSearch = { keyboard?.hide() }))

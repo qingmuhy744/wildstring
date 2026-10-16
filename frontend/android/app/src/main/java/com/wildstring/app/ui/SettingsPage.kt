@@ -15,11 +15,12 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 
 /** A destination with one scroll owner. The toolbar never participates in content dragging. */
-@Composable internal fun SettingsPage(back: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
+@Composable internal fun SettingsPage(back: () -> Unit, bottomBar: @Composable () -> Unit = {}, content: @Composable ColumnScope.() -> Unit) {
     BackHandler(onBack = back)
     Scaffold(modifier = Modifier.fillMaxSize().testTag("settings-page"),
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        bottomBar = bottomBar,
         topBar = {
             TopAppBar(title = { Text("设置") }, navigationIcon = {
                 IconButton(back, Modifier.testTag("settings-back")) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回") }

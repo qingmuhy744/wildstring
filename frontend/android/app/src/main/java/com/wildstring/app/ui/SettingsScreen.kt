@@ -41,7 +41,7 @@ import kotlinx.coroutines.launch
 
 private val LocalSettingsFeedback = staticCompositionLocalOf<() -> Unit> { {} }
 
-@Composable internal fun SettingsScreen(vm: MusicViewModel, back: () -> Unit) {
+@Composable internal fun SettingsScreen(vm: MusicViewModel, bottomBar: @Composable () -> Unit = {}, back: () -> Unit) {
     val preferences by vm.settings.state.collectAsStateWithLifecycle()
     val state by vm.state.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
@@ -52,7 +52,7 @@ private val LocalSettingsFeedback = staticCompositionLocalOf<() -> Unit> { {} }
     LaunchedEffect(preferences, clearing) { while (true) { usage = vm.cacheUsage(); delay(2_000) } }
     fun mb(bytes: Long) = "%.1f MB".format(bytes / 1048576.0)
     CompositionLocalProvider(LocalSettingsFeedback provides tactile(vm) {}) {
-        SettingsPage(back) {
+        SettingsPage(back, bottomBar) {
             SettingsGroup("账号") {
                 ListItem(headlineContent = { Text(state.account?.let { "${it.username} · ${if (it.role == "admin") "管理员" else "普通用户"}" } ?: "已连接") },
                     supportingContent = { Text(state.server) }, leadingContent = { Icon(Icons.Default.AccountCircle, null) })

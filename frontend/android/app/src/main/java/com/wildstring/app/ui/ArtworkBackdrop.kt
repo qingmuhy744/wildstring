@@ -22,13 +22,11 @@ import com.wildstring.app.data.ArtworkPixels
 import com.wildstring.app.data.Track
 import kotlinx.coroutines.*
 
-private data class Atmosphere(val image: ImageBitmap, val tint: Color)
+internal data class Atmosphere(val image: ImageBitmap, val tint: Color)
 
-@Composable internal fun ArtworkBackdrop(vm: MusicViewModel, track: Track, red: Boolean) {
+@Composable internal fun artworkAtmosphere(vm: MusicViewModel, track: Track): Atmosphere? {
     val context = LocalContext.current
     val profile by vm.repository.session.profiles.collectAsStateWithLifecycle()
-    val dark = LocalDarkAppearance.current
-    val surface = MaterialTheme.colorScheme.background
     val atmosphere by produceState<Atmosphere?>(null, track.id, track.hasCover, profile) {
         value = null
         if (!track.hasCover || profile == null) return@produceState
@@ -47,6 +45,13 @@ private data class Atmosphere(val image: ImageBitmap, val tint: Color)
         } catch (error: CancellationException) { throw error }
         catch (_: Exception) { /* A missing cover never blocks playback or lyrics. */ }
     }
+    return atmosphere
+}
+
+@Composable internal fun ArtworkBackdrop(vm: MusicViewModel, track: Track, red: Boolean) {
+    val dark = LocalDarkAppearance.current
+    val surface = MaterialTheme.colorScheme.background
+    val atmosphere = artworkAtmosphere(vm, track)
     Box(Modifier.fillMaxSize()) {
         if (red) RedClothBackdrop()
         else Box(Modifier.fillMaxSize().background(Brush.radialGradient(listOf(if (dark) Color(0xFF343F31) else Color(0xFFE7EBDD), surface))))
