@@ -168,14 +168,31 @@ class AccountPlaybackTest {
             assertFalse(compose.runOnIdle { vm.controller!!.playWhenReady })
             compose.onNodeWithText("歌词", useUnmergedTree = true).performClick()
             compose.onNodeWithText("六秒后的人工歌词").assertIsDisplayed()
-            // Wait for the selected AAC source to finish loading before checking that lyrics do not reopen it.
-            compose.waitUntil(15_000) { compose.runOnIdle { vm.controller!!.bufferedPosition >= vm.controller!!.duration - 100 } }
+            // READY/bufferedPosition may still describe the previous quality while Media3 drains its loader.
+            // Establish a paused, non-loading, stable baseline before attributing new reads to lyric refresh.
+            var lastSnapshot: Pair<Int, Long>? = null
+            var stableSince = android.os.SystemClock.elapsedRealtime()
+            compose.waitUntil(20_000) {
+                val snapshot = compose.runOnIdle {
+                    val c = vm.controller!!
+                    if (!c.playWhenReady && !c.isPlaying && !c.isLoading && c.playbackState == Player.STATE_READY)
+                        requests.count { it.contains("/stream") } to c.currentPosition else null
+                }
+                val now = android.os.SystemClock.elapsedRealtime()
+                if (snapshot == null || snapshot != lastSnapshot) {
+                    lastSnapshot = snapshot; stableSince = now; false
+                } else now - stableSince >= 3_500
+            }
+            val entryBeforeRefresh = vm.state.value.entryId
+            val positionBeforeRefresh = compose.runOnIdle { vm.controller!!.currentPosition }
             val streamsBeforeRefresh = requests.count { it.contains("/stream") }
             lyric.set("网页修改后的人工歌词")
             compose.onNodeWithContentDescription("刷新歌词").performClick()
             compose.waitUntil(10_000) { vm.state.value.lyrics.lines.first().text == "网页修改后的人工歌词" }
             assertFalse(compose.runOnIdle { vm.controller!!.playWhenReady })
-            assertEquals(streamsBeforeRefresh, requests.count { it.contains("/stream") })
+            assertEquals(entryBeforeRefresh, vm.state.value.entryId)
+            assertEquals(positionBeforeRefresh, compose.runOnIdle { vm.controller!!.currentPosition })
+            assertEquals("Lyric refresh must not reopen a settled audio source: ${requests.toList()}", streamsBeforeRefresh, requests.count { it.contains("/stream") })
             capture("aac-lyrics-phone.png")
             // The backend's lossy passthrough must keep original audio and show the actual codec.
             val lossyTrack = gson.fromJson(lossy, Track::class.java)
