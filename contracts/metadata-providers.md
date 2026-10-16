@@ -18,6 +18,6 @@
 
 代理模式 `environment` 默认、`custom` 或 `direct`。手动地址支持 `http://[user:password@]host:port`；留空字段不变，改为直连可停止使用。环境支持大小写 HTTP_PROXY / HTTPS_PROXY、ALL_PROXY 回退及 NO_PROXY。仅 HTTP 代理端点；HTTPS 目标通过 CONNECT。代理错误只回传固定错误码。
 
-`POST /listening` 新增可选 `started_at`（Unix 秒）和 `state`（playing/paused/ended）；旧客户端省略 state 时仍累计本地记录，不推送正在播放。服务端核对开始时间、会话归属和实际累计，Last.fm 还要求曲长大于 30 秒且实际收听达到半曲/240 秒较短值。现有心跳间隔 5 秒。离线重启跨设备恢复不在本版范围。
+`POST /listening` 新增可选 `started_at`（Unix 秒）和 `state`（playing/paused/ended）；旧客户端省略 state 时仍累计本地记录，不推送正在播放。服务端核对开始时间、会话归属和实际累计，Last.fm 还要求曲长大于 30 秒且实际收听达到半曲/240 秒较短值。现有心跳间隔 5 秒。新客户端对 0.2.1 后端的收听请求会因额外字段返回 422，请同步升级服务端到 0.2.2；基础播放接口未改变。离线重启跨设备恢复不在本版范围。
 
 元数据响应新增 composers/lyricists/arrangers/vocalists 等数组，external_ids 的 recording/release_track/release/release_group 是不同标识；artists/album_artists/works 标识为数组。`GET /artists`、`/artists/{id}/tracks` 和 `/artists/{id}/albums` 可传 role=artist/album_artist/vocalist/lyricist/composer/arranger，按歌曲去重统计。
