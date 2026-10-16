@@ -7,6 +7,7 @@ import java.io.ByteArrayOutputStream
 import android.os.ParcelFileDescriptor
 import android.os.SystemClock
 import androidx.compose.ui.test.*
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -176,10 +177,13 @@ class NativePlaybackTest {
             compose.activityRule.scenario.onActivity { activity ->
                 WindowCompat.getInsetsController(activity.window, activity.window.decorView).hide(WindowInsetsCompat.Type.ime())
             }
-            compose.onNode(isToggleable()).performScrollTo().apply {
-                if (fetchSemanticsNode().config[androidx.compose.ui.semantics.SemanticsProperties.ToggleableState] != androidx.compose.ui.state.ToggleableState.On) performClick()
+            // Use the actual control action without racing IME/window movement during setup.
+            compose.onNode(isToggleable()).apply {
+                if (fetchSemanticsNode().config[androidx.compose.ui.semantics.SemanticsProperties.ToggleableState] != androidx.compose.ui.state.ToggleableState.On)
+                    performSemanticsAction(SemanticsActions.OnClick) { it() }
+                assertIsOn()
             }
-            compose.onNodeWithText("连接并登录").performScrollTo().performClick()
+            compose.onNodeWithText("连接并登录").performSemanticsAction(SemanticsActions.OnClick) { it() }
             compose.waitUntil(30_000) { compose.onAllNodesWithText("接口测试专辑").fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithText("接口测试专辑").performClick()
             compose.waitUntil(15_000) { compose.onAllNodesWithText("接口测试歌曲").fetchSemanticsNodes().isNotEmpty() }

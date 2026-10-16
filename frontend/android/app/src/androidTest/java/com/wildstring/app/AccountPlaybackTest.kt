@@ -3,6 +3,7 @@ package com.wildstring.app
 import android.graphics.Bitmap
 import android.os.ParcelFileDescriptor
 import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
@@ -48,8 +49,13 @@ class AccountPlaybackTest {
         compose.onAllNodes(hasSetTextAction())[1].performTextReplacement(username)
         compose.onAllNodes(hasSetTextAction())[2].performTextReplacement("test-password-original")
         compose.activityRule.scenario.onActivity { activity -> WindowCompat.getInsetsController(activity.window, activity.window.decorView).hide(WindowInsetsCompat.Type.ime()) }
-        compose.onNode(isToggleable()).performScrollTo().apply { if (fetchSemanticsNode().config[SemanticsProperties.ToggleableState] != ToggleableState.On) performClick() }
-        compose.onNodeWithText("连接并登录").performScrollTo().performClick()
+        // IME resizing can move physical tap targets during fixture setup on a fresh emulator.
+        compose.onNode(isToggleable()).apply {
+            if (fetchSemanticsNode().config[SemanticsProperties.ToggleableState] != ToggleableState.On)
+                performSemanticsAction(SemanticsActions.OnClick) { it() }
+            assertIsOn()
+        }
+        compose.onNodeWithText("连接并登录").performSemanticsAction(SemanticsActions.OnClick) { it() }
         compose.waitUntil(15_000) { compose.onAllNodesWithText("同步测试专辑").fetchSemanticsNodes().isNotEmpty() }
     }
     @Test fun aacAbsoluteTimelineEditedLyricsAndAccountIsolation() {
