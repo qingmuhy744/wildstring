@@ -83,7 +83,8 @@ fun WildStringApp(model: MusicViewModel) {
         isAppearanceLightStatusBars = !dark && !preferences.redCloth
         isAppearanceLightNavigationBars = !dark && !preferences.redCloth
     } } }
-    CompositionLocalProvider(LocalDarkAppearance provides dark, LocalRedCloth provides preferences.redCloth) {
+    CompositionLocalProvider(LocalDarkAppearance provides dark, LocalRedCloth provides preferences.redCloth,
+        LocalTactileFeedback provides rememberTactileFeedback { model.settings.state.value.haptics }) {
         MaterialTheme(colorScheme = if (preferences.redCloth) redColors else if (dark) classicDarkColors else classicLightColors) {
             Surface(Modifier.fillMaxSize().testTag(if (preferences.redCloth) "appearance-red-cloth" else if (dark) "appearance-dark" else "appearance-light")) {
                 Crossfade(state.connected, animationSpec = tween(220), label = "connection") { connected ->
@@ -198,7 +199,7 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
                             if (delayed(state.loading, 350)) LinearProgressIndicator(Modifier.fillMaxWidth().testTag("catalog-loading"))
                         }
                         if (state.tracks.isNotEmpty() && state.kind != "discover") Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-                            FilledTonalButton(tactile(vm) { vm.play(state.tracks); expanded = true; lyrics = false; queue = false }, Modifier.padding(start = 16.dp, top = 8.dp, bottom = 8.dp)) {
+                            FilledTonalButton(tactile { vm.play(state.tracks); expanded = true; lyrics = false; queue = false }, Modifier.padding(start = 16.dp, top = 8.dp, bottom = 8.dp)) {
                                 Icon(Icons.Default.PlayArrow, null, Modifier.size(20.dp)); Spacer(Modifier.width(6.dp)); Text(if (state.total > state.tracks.size) "播放本页" else "播放全部")
                             }
                             Text("${state.total} 首", Modifier.padding(end = 20.dp), color = Muted, fontSize = 12.sp)
@@ -242,9 +243,9 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
     if (createPlaylist) NameDialog("新建歌单", "", { createPlaylist = false }) { vm.createPlaylist(it); createPlaylist = false }
     actions?.let { track -> ModalBottomSheet(onDismissRequest = { actions = null }) {
         Text(track.title, Modifier.padding(24.dp), style = MaterialTheme.typography.titleLarge)
-        TextButton({ vm.addToQueue(track, true); actions = null }, Modifier.fillMaxWidth()) { Text("下一首播放") }
-        TextButton({ vm.addToQueue(track); actions = null }, Modifier.fillMaxWidth()) { Text("加入播放队列") }
-        TextButton({ vm.favorite(track); actions = null }, Modifier.fillMaxWidth()) { Text(if (track.loved) "取消收藏" else "收藏") }
+        TextButton(tactile { vm.addToQueue(track, true); actions = null }, Modifier.fillMaxWidth()) { Text("下一首播放") }
+        TextButton(tactile { vm.addToQueue(track); actions = null }, Modifier.fillMaxWidth()) { Text("加入播放队列") }
+        TextButton(tactile { vm.favorite(track); actions = null }, Modifier.fillMaxWidth()) { Text(if (track.loved) "取消收藏" else "收藏") }
         TextButton({
             chooseTrack = track; actions = null
             scope.launch { try { playlistChoices = vm.playlistsForAdd() } catch (e: Exception) { localError = friendlyError(e) } }
@@ -253,7 +254,7 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
     } }
     playlistChoices?.let { choices -> AlertDialog(onDismissRequest = { playlistChoices = null }, title = { Text("加入歌单") }, text = {
         if (choices.isEmpty()) Text("请先创建普通歌单。") else Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {
-            choices.forEach { p -> TextButton({ chooseTrack?.let { vm.addToPlaylist(it, p) }; playlistChoices = null }) { Text(p.name) } }
+            choices.forEach { p -> TextButton(tactile { chooseTrack?.let { vm.addToPlaylist(it, p) }; playlistChoices = null }) { Text(p.name) } }
         }
     }, confirmButton = { TextButton({ playlistChoices = null }) { Text("关闭") } }) }
     localError?.let { text -> AlertDialog(onDismissRequest = { localError = null }, text = { Text(text) }, confirmButton = { TextButton({ localError = null }) { Text("关闭") } }) }
@@ -263,14 +264,14 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
 private fun RailItems(state: MusicState, vm: MusicViewModel) {
     val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
     listOf(Triple("search", "发现", Icons.Default.Search), Triple("library", "音乐", Icons.Default.LibraryMusic), Triple("mine", "我的", Icons.Default.Person)).forEach { (id, label, icon) ->
-        NavigationRailItem(state.tab == id, tactile(vm) { keyboard?.hide(); vm.navigate(id) }, modifier = Modifier.testTag("nav-$id"), icon = { Icon(icon, label) }, label = { Text(label) })
+        NavigationRailItem(state.tab == id, { keyboard?.hide(); vm.navigate(id) }, modifier = Modifier.testTag("nav-$id"), icon = { Icon(icon, label) }, label = { Text(label) })
     }
 }
 @Composable
 private fun RowScope.BottomItems(state: MusicState, vm: MusicViewModel) {
     val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
     listOf(Triple("search", "发现", Icons.Default.Search), Triple("library", "音乐", Icons.Default.LibraryMusic), Triple("mine", "我的", Icons.Default.Person)).forEach { (id, label, icon) ->
-        NavigationBarItem(state.tab == id, tactile(vm) { keyboard?.hide(); vm.navigate(id) }, modifier = Modifier.testTag("nav-$id"), icon = { Icon(icon, label) }, label = { Text(label) })
+        NavigationBarItem(state.tab == id, { keyboard?.hide(); vm.navigate(id) }, modifier = Modifier.testTag("nav-$id"), icon = { Icon(icon, label) }, label = { Text(label) })
     }
 }
 
@@ -286,7 +287,7 @@ internal fun Cover(vm: MusicViewModel, id: String?, title: String, modifier: Mod
 private fun TrackRow(vm: MusicViewModel, track: Track, play: () -> Unit, actions: () -> Unit) {
     ListItem(headlineContent = { Text(track.title, maxLines = 1, overflow = TextOverflow.Ellipsis) }, supportingContent = { Text(track.artist, maxLines = 1, overflow = TextOverflow.Ellipsis) },
         leadingContent = { Cover(vm, track.id.takeIf { track.hasCover }, track.title, Modifier.size(48.dp)) },
-        trailingContent = { IconButton(actions) { Icon(Icons.Default.MoreVert, "${track.title}的操作") } }, modifier = Modifier.clickable(onClick = play))
+        trailingContent = { IconButton(actions) { Icon(Icons.Default.MoreVert, "${track.title}的操作") } }, modifier = Modifier.clickable(onClick = tactile(play)))
 }
 @Composable
 private fun PlayerScreen(vm: MusicViewModel, input: MusicState, wide: Boolean, lyrics: Boolean, queue: Boolean,
@@ -329,7 +330,7 @@ private fun PlayerScreen(vm: MusicViewModel, input: MusicState, wide: Boolean, l
             PlaybackControls(vm, state, onQueue)
             Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), horizontalArrangement = Arrangement.Center) {
                 TextButton(onLyrics) { Text(if (lyrics) "返回封面" else "歌词") }
-                TextButton(onQueue) { Text("队列 · ${state.queue.size}") }
+                TextButton(tactile(onQueue)) { Text("队列 · ${state.queue.size}") }
             }
         }
     }
@@ -339,6 +340,7 @@ private fun PlayerScreen(vm: MusicViewModel, input: MusicState, wide: Boolean, l
 @Composable
 private fun PlaybackControls(vm: MusicViewModel, state: MusicState, onQueue: () -> Unit) {
     var scrub by remember { mutableStateOf<Float?>(null) }
+    val feedback = LocalTactileFeedback.current
     val track = state.current ?: return
     Column(Modifier.fillMaxWidth()) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -346,22 +348,22 @@ private fun PlaybackControls(vm: MusicViewModel, state: MusicState, onQueue: () 
                 Text(track.title, fontSize = 23.sp, fontWeight = FontWeight.Medium, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 Text(track.artist, color = Muted, fontSize = 13.sp, maxLines = 2)
             }
-            IconButton(tactile(vm) { vm.favorite(track) }) { Icon(if (track.loved) Icons.Default.Favorite else Icons.Default.FavoriteBorder, if (track.loved) "取消收藏" else "收藏", tint = if (track.loved) Accent else MaterialTheme.colorScheme.onSurface) }
+            IconButton(tactile { vm.favorite(track) }) { Icon(if (track.loved) Icons.Default.Favorite else Icons.Default.FavoriteBorder, if (track.loved) "取消收藏" else "收藏", tint = if (track.loved) Accent else MaterialTheme.colorScheme.onSurface) }
         }
         if (state.playbackQuality.isNotBlank()) Text(state.playbackQuality, color = Muted, fontSize = 11.sp, modifier = Modifier.padding(top = 6.dp).testTag("playback-quality"))
         Slider(value = scrub ?: state.position.coerceAtMost(state.duration).toFloat(), onValueChange = { scrub = it },
-            onValueChangeFinished = { scrub?.let { vm.seek(it.toLong()) }; scrub = null }, valueRange = 0f..state.duration.coerceAtLeast(1).toFloat(), enabled = state.duration > 0)
+            onValueChangeFinished = { scrub?.let { feedback(TactileKind.Tap); vm.seek(it.toLong()) }; scrub = null }, valueRange = 0f..state.duration.coerceAtLeast(1).toFloat(), enabled = state.duration > 0)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text(formatTime(scrub?.toLong() ?: state.position), color = Muted, fontSize = 11.sp); Text(formatTime(state.duration), color = Muted, fontSize = 11.sp) }
         Row(Modifier.fillMaxWidth().padding(vertical = 12.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             val modeIcon = if (state.shuffle) Icons.Default.Shuffle else if (state.repeatMode == Player.REPEAT_MODE_ONE) Icons.Default.RepeatOne else Icons.Default.Repeat
-            IconButton(tactile(vm, vm::cycleMode)) { Icon(modeIcon, "切换播放模式", tint = if (state.shuffle || state.repeatMode != Player.REPEAT_MODE_OFF) Accent else Muted) }
-            IconButton(tactile(vm, vm::previous)) { Icon(Icons.Default.SkipPrevious, "上一首", Modifier.size(30.dp)) }
-            FilledIconButton(tactile(vm, vm::toggle), Modifier.size(64.dp)) {
+            IconButton(tactile(vm::cycleMode)) { Icon(modeIcon, "切换播放模式", tint = if (state.shuffle || state.repeatMode != Player.REPEAT_MODE_OFF) Accent else Muted) }
+            IconButton(tactile(vm::previous)) { Icon(Icons.Default.SkipPrevious, "上一首", Modifier.size(30.dp)) }
+            FilledIconButton(tactile(vm::toggle), Modifier.size(64.dp)) {
                 if (delayed(state.buffering, 500)) CircularProgressIndicator(Modifier.size(25.dp), strokeWidth = 2.dp)
                 else Crossfade(state.playing, animationSpec = tween(130), label = "play-pause") { playing -> Icon(if (playing) Icons.Default.Pause else Icons.Default.PlayArrow, if (playing) "暂停" else "播放", Modifier.size(34.dp)) }
             }
-            IconButton(tactile(vm, vm::next)) { Icon(Icons.Default.SkipNext, "下一首", Modifier.size(30.dp)) }
-            IconButton(onQueue) { Icon(Icons.AutoMirrored.Filled.QueueMusic, "播放队列") }
+            IconButton(tactile(vm::next)) { Icon(Icons.Default.SkipNext, "下一首", Modifier.size(30.dp)) }
+            IconButton(tactile(onQueue)) { Icon(Icons.AutoMirrored.Filled.QueueMusic, "播放队列") }
         }
         state.playbackError?.let { ErrorMessage(it) { vm.toggle() } }
     }
@@ -370,6 +372,7 @@ private fun PlaybackControls(vm: MusicViewModel, state: MusicState, onQueue: () 
 @Composable
 private fun LyricsPanel(vm: MusicViewModel, state: MusicState, modifier: Modifier) {
     val list = rememberLazyListState()
+    val feedback = LocalTactileFeedback.current
     var follow by remember(state.current?.id) { mutableStateOf(true) }
     val lines = state.lyrics.lines
     val active = if (state.lyrics.kind == "synced") lines.indexOfLast { (it.timeMs ?: Long.MAX_VALUE) <= state.position } else -1
@@ -384,7 +387,7 @@ private fun LyricsPanel(vm: MusicViewModel, state: MusicState, modifier: Modifie
                 else -> LazyColumn(state = list, contentPadding = PaddingValues(vertical = 100.dp), modifier = Modifier.fillMaxSize()) {
                     items(lines.size) { index -> val line = lines[index]
                         val lineColor by animateColorAsState(if (state.lyrics.kind == "plain" || active == index) MaterialTheme.colorScheme.onSurface else Muted.copy(alpha = .65f), tween(260), label = "lyric-highlight")
-                        Text(line.text, Modifier.fillMaxWidth().clickable(enabled = line.timeMs != null) { vm.seek(line.timeMs ?: 0); follow = true }.padding(vertical = 16.dp, horizontal = 4.dp),
+                        Text(line.text, Modifier.fillMaxWidth().clickable(enabled = line.timeMs != null) { feedback(TactileKind.Tap); vm.seek(line.timeMs ?: 0); follow = true }.padding(vertical = 16.dp, horizontal = 4.dp),
                             fontSize = 25.sp, lineHeight = 36.sp, fontWeight = if (active == index) FontWeight.Medium else FontWeight.Normal,
                             color = lineColor)
                     }

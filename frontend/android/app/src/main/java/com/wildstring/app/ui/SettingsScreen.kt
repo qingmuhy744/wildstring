@@ -45,13 +45,14 @@ private val LocalSettingsFeedback = staticCompositionLocalOf<() -> Unit> { {} }
     val preferences by vm.settings.state.collectAsStateWithLifecycle()
     val state by vm.state.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
+    val feedback = LocalTactileFeedback.current
     var usage by remember { mutableStateOf(Triple(0L, 0L, 0L)) }
     var message by remember { mutableStateOf<String?>(null) }
     var clearing by remember { mutableStateOf(false) }
     var password by remember { mutableStateOf(false) }
     LaunchedEffect(preferences, clearing) { while (true) { usage = vm.cacheUsage(); delay(2_000) } }
     fun mb(bytes: Long) = "%.1f MB".format(bytes / 1048576.0)
-    CompositionLocalProvider(LocalSettingsFeedback provides tactile(vm) {}) {
+    CompositionLocalProvider(LocalSettingsFeedback provides tactile {}) {
         SettingsPage(back, bottomBar) {
             SettingsGroup("账号") {
                 ListItem(headlineContent = { Text(state.account?.let { "${it.username} · ${if (it.role == "admin") "管理员" else "普通用户"}" } ?: "已连接") },
@@ -72,9 +73,9 @@ private val LocalSettingsFeedback = staticCompositionLocalOf<() -> Unit> { {} }
                     listOf(false to "经典", true to "红布"), preferences.redIcon, "桌面可能需要片刻更新图标。", change = {
                         runCatching { vm.settings.icon(it) }.onFailure { message = "图标切换失败，请重试。" }
                     })
-                ListItem(headlineContent = { Text("轻触反馈") }, supportingContent = { Text("遵循系统触感设置") },
+                ListItem(headlineContent = { Text("轻触反馈") }, supportingContent = { Text("播放与关键操作轻反馈，遵循系统设置") },
                     leadingContent = { Icon(Icons.Default.Vibration, null) },
-                    trailingContent = { Switch(preferences.haptics, vm.settings::haptics) })
+                    trailingContent = { Switch(preferences.haptics, { enabled -> vm.settings.haptics(enabled); if (enabled) feedback(TactileKind.Tap) }) })
             }
             SettingsGroup("本机缓存") {
                 CacheLimit("曲库与歌词", usage.first, preferences.metadataMb, listOf(0, 8, 32, 64)) { vm.settings.limits(it, preferences.artworkMb, preferences.audioMb) }

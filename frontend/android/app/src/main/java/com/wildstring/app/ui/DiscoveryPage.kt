@@ -40,11 +40,11 @@ import androidx.compose.ui.unit.dp
                 Text(if (state.offline) "当前离线，本机暂无最近收听记录。" else "听过的歌曲会出现在这里。", Modifier.padding(horizontal = 20.dp, vertical = 16.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             items(state.tracks.take(6), key = { it.id }) { track ->
-                val playTrack = { play(state.tracks.indexOf(track)) }
+                val playTrack = tactile { play(state.tracks.indexOf(track)) }
                 ListItem(headlineContent = { Text(track.title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                     supportingContent = { Text(listOfNotNull(track.artist, track.album).joinToString(" · "), maxLines = 1, overflow = TextOverflow.Ellipsis) },
                     leadingContent = { Cover(vm, track.id.takeIf { track.hasCover }, track.title, Modifier.size(54.dp)) },
-                    trailingContent = { IconButton(tactile(vm, playTrack)) { Icon(Icons.Default.PlayCircleOutline, "播放${track.title}") } },
+                    trailingContent = { IconButton(playTrack) { Icon(Icons.Default.PlayCircleOutline, "播放${track.title}") } },
                     modifier = Modifier.fillMaxWidth().clickable(onClick = playTrack).padding(horizontal = 4.dp, vertical = 4.dp))
             }
         }

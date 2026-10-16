@@ -12,6 +12,7 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.unit.dp
 import com.wildstring.app.ui.QueueList
 import com.wildstring.app.ui.QueueRow
+import com.wildstring.app.ui.TactileKind
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
@@ -22,13 +23,13 @@ class QueueReorderTest {
     private val rows = mutableStateOf(initial)
     private val moves = mutableListOf<Pair<String, Int>>()
     private var plays = 0
-    private var haptics = 0
+    private val haptics = mutableListOf<TactileKind>()
 
     private fun show() {
         compose.setContent {
             MaterialTheme {
                 QueueList(rows.value, "entry-0", Modifier.width(360.dp).height(360.dp),
-                    onPlay = { plays++ }, onRemove = {}, onHaptic = { haptics++ },
+                    onPlay = { plays++ }, onRemove = {}, onHaptic = { haptics += it },
                     onMove = { id, to ->
                         moves += id to to
                         rows.value = rows.value.toMutableList().apply { add(to, removeAt(indexOfFirst { it.entryId == id })) }
@@ -52,14 +53,15 @@ class QueueReorderTest {
         compose.runOnIdle {
             assertEquals(listOf("entry-1", "entry-2", "entry-0"), rows.value.take(3).map { it.entryId })
             assertEquals(listOf("entry-0" to 2), moves)
-            assertEquals(2, haptics)
+            assertEquals(listOf(TactileKind.DragStart, TactileKind.DragEnd), haptics)
             assertEquals(0, plays)
         }
         val again = point("queue-handle-entry-0")
         val top = point("queue-handle-entry-1")
         queue.performTouchInput { down(again); moveTo(top, delayMillis = 200) }
         queue.performTouchInput { cancel() }
-        compose.runOnIdle { assertEquals(1, moves.size); assertEquals("entry-0", rows.value[2].entryId) }
+        compose.runOnIdle { assertEquals(1, moves.size); assertEquals("entry-0", rows.value[2].entryId)
+            assertEquals(listOf(TactileKind.DragStart, TactileKind.DragEnd, TactileKind.DragStart), haptics) }
         val actions = compose.onNodeWithTag("queue-handle-entry-0").fetchSemanticsNode().config[SemanticsActions.CustomActions]
         compose.runOnIdle { assertTrue(actions.first { it.label == "向前移动" }.action()) }
         compose.runOnIdle { assertEquals("entry-0", rows.value[1].entryId) }

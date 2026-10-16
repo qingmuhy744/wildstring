@@ -38,7 +38,7 @@ import androidx.compose.ui.unit.dp
                     alpha = if (LocalRedCloth.current) .10f else if (dark) .18f else .20f, filterQuality = FilterQuality.Medium) }
             Row(Modifier.background(Brush.horizontalGradient(listOf(tint.copy(alpha = if (dark) .28f else .15f), Color.Transparent)))
                 .padding(start = 8.dp, end = 8.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                Row(Modifier.weight(1f).testTag("mini-player-open").clip(RoundedCornerShape(28.dp)).clickable(onClick = expand),
+                Row(Modifier.weight(1f).testTag("mini-player-open").clip(RoundedCornerShape(28.dp)).clickable(onClick = tactile(expand)),
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     Box(Modifier.clip(CircleShape)) { Cover(vm, track.id.takeIf { track.hasCover }, track.title, Modifier.size(54.dp)) }
                     Column(Modifier.weight(1f).padding(vertical = 8.dp)) {
@@ -46,8 +46,8 @@ import androidx.compose.ui.unit.dp
                         Text(track.artist, style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                 }
-                IconButton(tactile(vm, vm::toggle)) { Icon(if (state.playing) Icons.Default.Pause else Icons.Default.PlayArrow, if (state.playing) "暂停" else "播放") }
-                IconButton(tactile(vm, onQueue), Modifier.testTag("mini-player-queue")) { Icon(Icons.AutoMirrored.Filled.QueueMusic, "播放队列") }
+                IconButton(tactile(vm::toggle)) { Icon(if (state.playing) Icons.Default.Pause else Icons.Default.PlayArrow, if (state.playing) "暂停" else "播放") }
+                IconButton(tactile(onQueue), Modifier.testTag("mini-player-queue")) { Icon(Icons.AutoMirrored.Filled.QueueMusic, "播放队列") }
             }
             }
         }
