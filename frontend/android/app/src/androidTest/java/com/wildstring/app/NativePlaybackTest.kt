@@ -223,12 +223,23 @@ class NativePlaybackTest {
             assertNotNull(runBlocking { vm.repository.cachedCatalog(CatalogQuery()) })
             assertNotNull(runBlocking { vm.repository.cachedLyrics("fixture-track") })
             val buffers = AtomicInteger(0)
+            val playbackEvents = ConcurrentLinkedQueue<String>()
             val listener = object : Player.Listener {
-                override fun onPlaybackStateChanged(playbackState: Int) { if (playbackState == Player.STATE_BUFFERING) buffers.incrementAndGet() }
+                override fun onPlaybackStateChanged(playbackState: Int) {
+                    playbackEvents += "state=$playbackState position=${player.currentPosition}/${player.duration} loading=${player.isLoading}"
+                    if (playbackState == Player.STATE_BUFFERING) buffers.incrementAndGet()
+                }
+                override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
+                    playbackEvents += "discontinuity=$reason ${oldPosition.positionMs}->${newPosition.positionMs}"
+                }
             }
-            compose.runOnIdle { player.repeatMode = Player.REPEAT_MODE_ONE; player.play(); player.addListener(listener) }
-            compose.waitUntil(10_000) { compose.runOnIdle { player.isPlaying && player.currentPosition > 1000 } }
-            val underrunsBefore = vm.playbackHealth.audioUnderruns.get()
+            compose.runOnIdle { player.repeatMode = Player.REPEAT_MODE_ONE; player.play() }
+            // Measure UI work after resume and prebuffering have completed, not startup loading.
+            compose.waitUntil(10_000) { compose.runOnIdle {
+                player.isPlaying && player.playbackState == Player.STATE_READY && !player.isLoading &&
+                    player.currentPosition > 1000 && player.bufferedPosition >= player.duration - 100
+            } }
+            val underrunsBefore = compose.runOnIdle { player.addListener(listener); vm.playbackHealth.audioUnderruns.get() }
             val playingEntry = compose.runOnIdle { player.currentMediaItem!!.mediaId }
             compose.runOnIdle { repeat(2) { vm.addToQueue(vm.state.value.current!!) } }
             compose.waitUntil(10_000) { vm.state.value.queue.size == 3 }
@@ -305,7 +316,7 @@ class NativePlaybackTest {
                 compose.onNodeWithText("歌词", useUnmergedTree = true).performClick()
             }
             compose.waitUntil(5_000) { compose.runOnIdle { player.isPlaying && player.playbackState == Player.STATE_READY } }
-            assertEquals("UI actions should not trigger audio rebuffering", 0, buffers.get())
+            assertEquals("UI actions should not trigger audio rebuffering: ${playbackEvents.toList()}", 0, buffers.get())
             assertEquals("UI actions should not cause AudioTrack underruns", underrunsBefore, vm.playbackHealth.audioUnderruns.get())
             compose.runOnIdle { player.removeListener(listener); player.pause() }
             try {
