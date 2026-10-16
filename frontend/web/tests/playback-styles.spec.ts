@@ -1,5 +1,18 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import { audio, login } from './helpers';
+
+async function chooseStyle(page: Page, value: string) {
+  const player = page.getByRole('dialog', { name: '全屏播放', exact: true });
+  if (await player.isVisible()) await player.getByRole('button', { name: '收起全屏播放' }).click();
+  const navigation = page.getByLabel('浏览方式', { exact: true });
+  if (await navigation.isVisible()) await navigation.selectOption('account');
+  else await page.getByRole('button', { name: '账号设置', exact: true }).click();
+  const settings = page.getByRole('dialog', { name: '账号设置', exact: true });
+  await settings.getByLabel('播放样式', { exact: true }).selectOption(value);
+  await settings.getByRole('button', { name: '关闭账号设置' }).click();
+  await page.getByRole('button', { name: '全屏播放', exact: true }).click();
+  await expect(player.getByLabel('播放样式', { exact: true })).toHaveCount(0);
+}
 
 test('三种样式共用音频，暂停保留进度，开关歌词不重开串流', async ({ page }, info) => {
   let streams = 0;
@@ -13,14 +26,14 @@ test('三种样式共用音频，暂停保留进度，开关歌词不重开串�
   const element = await page.locator('audio').elementHandle();
   await page.getByRole('button', { name: '全屏播放', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: '全屏播放', exact: true });
-  const style = dialog.getByLabel('播放样式', { exact: true });
   const visual = dialog.locator('.playback-visual');
-  await expect(style).toHaveValue('cover');
+  await expect(visual).toHaveAttribute('data-style', 'cover');
+  await expect(dialog.getByLabel('播放样式')).toHaveCount(0);
   await dialog.getByRole('button', { name: '暂停', exact: true }).click();
   const paused = await audio(page);
   const reads = streams;
   for (const value of ['vinyl', 'cassette', 'cover', 'vinyl']) {
-    await style.selectOption(value);
+    await chooseStyle(page, value);
     await expect(visual).toHaveAttribute('data-style', value);
     await expect(visual).toHaveAttribute('data-moving', 'false');
     expect(await audio(page)).toEqual(paused);
@@ -38,7 +51,7 @@ test('三种样式共用音频，暂停保留进度，开关歌词不重开串�
   const phase = () => visual.evaluate((node) => node.style.getPropertyValue('--spin'));
   const initial = await phase();
   await expect.poll(phase).not.toBe(initial);
-  await style.selectOption('cassette');
+  await chooseStyle(page, 'cassette');
   await expect(visual).toHaveAttribute('data-moving', 'true');
   await page.screenshot({ path: `../../artifacts/player-cassette-${info.project.name}.png` });
   await dialog.getByRole('button', { name: '暂停', exact: true }).click();
@@ -48,7 +61,7 @@ test('三种样式共用音频，暂停保留进度，开关歌词不重开串�
   expect(await phase()).toBe(stopped);
   await dialog.getByRole('button', { name: '收起全屏播放' }).click();
   await page.getByRole('button', { name: '全屏播放', exact: true }).click();
-  await expect(style).toHaveValue('cassette');
+  await expect(visual).toHaveAttribute('data-style', 'cassette');
   await expect.poll(phase).toBe(stopped);
   expect(streams).toBe(reads);
 
@@ -69,8 +82,8 @@ test('减少动态、页面隐藏与缓冲会停止拟物动画，恢复后继�
   await page.getByRole('button', { name: '播放全部', exact: true }).click();
   await page.getByRole('button', { name: '全屏播放', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: '全屏播放', exact: true });
-  await expect(dialog.getByLabel('播放样式')).toHaveValue('cover');
-  await dialog.getByLabel('播放样式').selectOption('vinyl');
+  await expect(dialog.locator('.playback-visual')).toHaveAttribute('data-style', 'cover');
+  await chooseStyle(page, 'vinyl');
   const visual = dialog.locator('.playback-visual');
   await expect(visual).toHaveAttribute('data-moving', 'true');
   await page.emulateMedia({ reducedMotion: 'reduce' });
@@ -98,19 +111,26 @@ test('减少动态、页面隐藏与缓冲会停止拟物动画，恢复后继�
 });
 
 test('拟物样式在手机、桌面和窄横屏保持视觉与控制可达', async ({ page }, info) => {
+  test.setTimeout(60_000);
   await login(page);
   await page.getByRole('button', { name: '播放全部', exact: true }).click();
   await page.getByRole('button', { name: '全屏播放', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: '全屏播放', exact: true });
   await dialog.getByRole('button', { name: '暂停', exact: true }).click();
   await dialog.getByRole('button', { name: '显示歌词', exact: true }).click();
-  const style = dialog.getByLabel('播放样式', { exact: true });
   for (const value of ['vinyl', 'cassette']) {
-    await style.selectOption(value);
+    await chooseStyle(page, value);
     await expect(dialog.locator('.playback-visual')).toBeVisible();
+    if (
+      (await dialog
+        .getByRole('button', { name: '显示歌词', exact: true })
+        .getAttribute('aria-pressed')) === 'true'
+    )
+      await dialog.getByRole('button', { name: '显示歌词', exact: true }).click();
     const stage = (await dialog.locator('.playback-visual').boundingBox())!;
     const cover = (await dialog.locator('.fullscreen-cover').boundingBox())!;
-    expect(cover.width).toBeLessThanOrEqual(stage.width * (value === 'cassette' ? 0.16 : 0.5));
+    expect(cover.width).toBeLessThanOrEqual(stage.width * (value === 'cassette' ? 0.16 : 0.55));
+    if (value === 'vinyl') expect(cover.width).toBeGreaterThan(stage.width * 0.45);
     expect(cover.x).toBeGreaterThanOrEqual(stage.x);
     expect(cover.y).toBeGreaterThanOrEqual(stage.y);
     expect(cover.x + cover.width).toBeLessThanOrEqual(stage.x + stage.width + 1);
@@ -119,20 +139,41 @@ test('拟物样式在手机、桌面和窄横屏保持视觉与控制可达', as
   for (const viewport of [
     { width: 320, height: 640 },
     { width: 740, height: 390 },
+    { width: 900, height: 410 },
   ]) {
     await page.setViewportSize(viewport);
     const controls = [
-      style,
       dialog.getByRole('button', { name: '播放', exact: true }),
       dialog.getByLabel('播放进度'),
     ];
-    for (const control of controls) {
-      await expect(control).toBeVisible();
-      const bounds = await control.boundingBox();
-      expect(bounds!.x).toBeGreaterThanOrEqual(0);
-      expect(bounds!.y).toBeGreaterThanOrEqual(0);
-      expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(viewport.width + 1);
-      expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(viewport.height + 1);
+    for (const value of ['vinyl', 'cassette']) {
+      await chooseStyle(page, value);
+      if (
+        (await dialog
+          .getByRole('button', { name: '显示歌词', exact: true })
+          .getAttribute('aria-pressed')) === 'true'
+      )
+        await dialog.getByRole('button', { name: '显示歌词', exact: true }).click();
+      for (const control of controls) {
+        await expect(control).toBeVisible();
+        const bounds = await control.boundingBox();
+        expect(bounds!.x).toBeGreaterThanOrEqual(0);
+        expect(bounds!.y).toBeGreaterThanOrEqual(0);
+        expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(viewport.width + 1);
+        expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(viewport.height + 1);
+      }
+      if (viewport.width > viewport.height) {
+        const visual = (await dialog.locator('.playback-visual').boundingBox())!;
+        const transport = (await dialog.locator('.transport').boundingBox())!;
+        expect(visual.width).toBeGreaterThan(viewport.height * 0.55);
+        expect(visual.x + visual.width).toBeLessThan(transport.x);
+        await page.screenshot({
+          path: `../../artifacts/player-${value}-landscape-${info.project.name}-${viewport.width}.png`,
+        });
+        await dialog.getByRole('button', { name: '显示歌词', exact: true }).click();
+        await expect(dialog.getByRole('list', { name: '歌词', exact: true })).toBeVisible();
+        await expect(dialog.getByRole('button', { name: '播放', exact: true })).toBeVisible();
+      }
     }
   }
 });

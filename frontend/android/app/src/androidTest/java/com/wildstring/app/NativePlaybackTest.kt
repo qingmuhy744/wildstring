@@ -1,6 +1,7 @@
 package com.wildstring.app
 
 import android.content.ComponentName
+import android.content.pm.ActivityInfo
 import android.graphics.Bitmap
 import java.io.ByteArrayOutputStream
 import android.os.ParcelFileDescriptor
@@ -111,6 +112,14 @@ class NativePlaybackTest {
         instrumentation.uiAutomation.waitForIdle(500, 5_000)
     }
 
+    private fun rotate(orientation: Int) {
+        compose.runOnIdle { compose.activity.requestedOrientation = orientation }
+        // Wait for Android's window recreation before querying the replacement Compose root.
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        instrumentation.waitForIdleSync()
+        instrumentation.uiAutomation.waitForIdle(500, 5_000)
+    }
+
     private fun exercisePlayback() {
         val vm = compose.runOnIdle { ViewModelProvider(compose.activity)[MusicViewModel::class.java] }
         compose.runOnIdle { vm.settings.playbackStyle("cover") }
@@ -181,7 +190,7 @@ class NativePlaybackTest {
             val player = future.get(15, TimeUnit.SECONDS)
             compose.waitUntil(20_000) { compose.runOnIdle { player.playbackState == Player.STATE_READY && player.currentPosition > 250 } }
             compose.runOnIdle { player.pause() }
-            compose.onNodeWithText("歌词", useUnmergedTree = true).performClick()
+            compose.onNodeWithTag("player-visual-stage").performTouchInput { click(androidx.compose.ui.geometry.Offset(4f, 4f)) }
             compose.waitUntil(15_000) { compose.onAllNodesWithText("来自测试接口的歌词").fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithText("来自测试接口的歌词").assertIsDisplayed()
             compose.onNodeWithTag("player-phone").assertExists()
@@ -219,13 +228,17 @@ class NativePlaybackTest {
             assertTrue(kotlin.math.abs(compose.runOnIdle { player.currentPosition } - nightPosition) < 500)
             capture("classic-light-phone.png")
             // Styles share the same Media3 entry and fully cached audio while paused.
-            compose.onNodeWithText("返回封面", useUnmergedTree = true).performClick()
+            compose.onNodeWithTag("player-visual-stage").performTouchInput { click(androidx.compose.ui.geometry.Offset(4f, 4f)) }
             val styleEntry = compose.runOnIdle { player.currentMediaItem!!.mediaId }
             val stylePosition = compose.runOnIdle { player.currentPosition }
             val styleStreams = requests.count { it.path?.contains("/stream") == true }
             for ((key, label) in listOf("vinyl" to "黑胶", "cassette" to "磁带", "cover" to "封面")) {
-                compose.onNodeWithContentDescription("播放样式").performClick()
-                compose.onNodeWithText(label, useUnmergedTree = true).performClick()
+                compose.onNodeWithContentDescription("收起播放器").performClick()
+                compose.onNodeWithContentDescription("设置").performClick()
+                compose.onNodeWithTag("setting-播放样式").performScrollTo().performClick()
+                compose.onNode(hasText(label) and hasAnyAncestor(isDialog()), useUnmergedTree = true).performClick()
+                compose.onNodeWithTag("settings-back").performClick()
+                compose.onNodeWithTag("mini-player-open").performClick()
                 compose.mainClock.advanceTimeBy(250)
                 compose.waitForIdle()
                 // The platform dialog exits on Android's clock, independently of Compose's clock.
@@ -233,14 +246,34 @@ class NativePlaybackTest {
                     runCatching { compose.onNodeWithTag("playback-visual-$key").assertIsDisplayed() }.isSuccess
                 }
                 compose.onNodeWithTag("playback-visual-$key").assertIsDisplayed()
+                compose.onNodeWithContentDescription("播放样式").assertDoesNotExist()
                 assertEquals(key, vm.settings.state.value.playbackStyle)
                 assertEquals(styleEntry, compose.runOnIdle { player.currentMediaItem!!.mediaId })
                 assertFalse(compose.runOnIdle { player.playWhenReady })
                 assertTrue(kotlin.math.abs(compose.runOnIdle { player.currentPosition } - stylePosition) < 250)
-                if (key != "cover") capture("player-$key-phone.png", style = key)
+                if (key != "cover") {
+                    capture("player-$key-phone.png", style = key)
+                    val orientation = compose.runOnIdle { compose.activity.requestedOrientation }
+                    try {
+                        rotate(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE)
+                        compose.waitUntil(15_000) { compose.onAllNodesWithTag("player-landscape").fetchSemanticsNodes().isNotEmpty() }
+                        capture("player-$key-landscape.png", style = key)
+                        compose.onNodeWithContentDescription("播放").assertIsDisplayed()
+                        compose.onNodeWithContentDescription("上一首").assertIsDisplayed()
+                        compose.onNodeWithContentDescription("下一首").assertIsDisplayed()
+                        val visualBounds = compose.onNodeWithTag("playback-visual-$key").fetchSemanticsNode().boundsInRoot
+                        val controlsBounds = compose.onNodeWithContentDescription("播放").fetchSemanticsNode().boundsInRoot
+                        val playerBounds = compose.onNodeWithTag("player-landscape").fetchSemanticsNode().boundsInRoot
+                        assertTrue("Landscape must retain a large visual", visualBounds.width > playerBounds.height * .45f)
+                        assertTrue("Landscape controls belong beside the visual", visualBounds.right < controlsBounds.left)
+                        assertEquals(styleEntry, compose.runOnIdle { player.currentMediaItem!!.mediaId })
+                        assertTrue(kotlin.math.abs(compose.runOnIdle { player.currentPosition } - stylePosition) < 250)
+                    } finally { rotate(orientation) }
+                    compose.waitUntil(15_000) { compose.onAllNodesWithTag("player-phone").fetchSemanticsNodes().isNotEmpty() }
+                }
             }
             assertEquals("Changing style must not reopen audio", styleStreams, requests.count { it.path?.contains("/stream") == true })
-            compose.onNodeWithText("歌词", useUnmergedTree = true).performClick()
+            compose.onNodeWithTag("player-visual-stage").performTouchInput { click(androidx.compose.ui.geometry.Offset(4f, 4f)) }
             assertNotNull(runBlocking { vm.repository.cachedCatalog(CatalogQuery()) })
             assertNotNull(runBlocking { vm.repository.cachedLyrics("fixture-track") })
             val buffers = AtomicInteger(0)
@@ -330,11 +363,11 @@ class NativePlaybackTest {
             compose.onNodeWithTag("settings-back").performClick()
             compose.waitUntil(10_000) { compose.onAllNodesWithText("一块红布").fetchSemanticsNodes().isEmpty() }
             compose.onAllNodesWithText("接口测试歌曲").onLast().performClick()
-            compose.onNodeWithText("歌词", useUnmergedTree = true).performClick()
+            compose.onNodeWithTag("player-visual-stage").performTouchInput { click(androidx.compose.ui.geometry.Offset(4f, 4f)) }
             capture("red-cloth-phone.png")
             for (iteration in 0..2) {
-                compose.onNodeWithText("返回封面", useUnmergedTree = true).performClick()
-                compose.onNodeWithText("歌词", useUnmergedTree = true).performClick()
+                compose.onNodeWithTag("player-visual-stage").performTouchInput { click(androidx.compose.ui.geometry.Offset(4f, 4f)) }
+                compose.onNodeWithTag("player-visual-stage").performTouchInput { click(androidx.compose.ui.geometry.Offset(4f, 4f)) }
             }
             compose.waitUntil(5_000) { compose.runOnIdle { player.isPlaying && player.playbackState == Player.STATE_READY } }
             assertEquals("UI actions should not trigger audio rebuffering: ${playbackEvents.toList()}", 0, buffers.get())

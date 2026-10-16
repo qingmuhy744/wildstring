@@ -136,7 +136,14 @@ test('同名 LRC、歌词点击跳转、跟随高亮与切歌后的内嵌歌词'
   const panel = page.getByRole('dialog', { name: '全屏播放', exact: true });
   await expect(panel.locator('.lyrics-toolbar > span')).toHaveText('同名 LRC');
   await expect(panel.locator('[aria-current="true"]')).toHaveText('侧车第一行');
-  await panel.getByRole('button', { name: '跳转到 0:06：侧车第三行', exact: true }).click();
+  await panel
+    .getByRole('button', {
+      name: `${testInfo.project.name === 'mobile' ? '选择' : '跳转到'} 0:06：侧车第三行`,
+      exact: true,
+    })
+    .click();
+  if (testInfo.project.name === 'mobile')
+    await panel.getByRole('button', { name: '确认跳转到 0:06', exact: true }).click();
   await expect.poll(async () => (await audio(page)).time).toBeGreaterThanOrEqual(5.9);
   await expect(panel.locator('[aria-current="true"]')).toHaveText('侧车第三行');
   await panel.getByRole('button', { name: '暂停', exact: true }).click();

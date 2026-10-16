@@ -13,14 +13,8 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.selection.selectable
-import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Album
-import androidx.compose.material.icons.filled.CropSquare
-import androidx.compose.material.icons.filled.ViewCompact
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.Saver
@@ -35,7 +29,6 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
@@ -105,7 +98,7 @@ internal val playbackStyles = listOf("cover" to "封面", "vinyl" to "黑胶", "
                             drawCircle(Color(0xFF69715E), radius - 1.dp.toPx(), style = Stroke(1.dp.toPx()))
                         }
                         Cover(vm, track.id.takeIf { track.hasCover }, track.title,
-                            Modifier.align(Alignment.Center).fillMaxSize(.41f).clip(CircleShape))
+                            Modifier.align(Alignment.Center).fillMaxSize(.56f).clip(CircleShape))
                         Box(Modifier.align(Alignment.Center).size(side * .023f).clip(CircleShape).background(Color(0xFF191C15)))
                     }
                     Canvas(Modifier.offset(side * .07f, side * .10f).size(side * .86f)) {
@@ -183,17 +176,4 @@ internal val playbackStyles = listOf("cover" to "封面", "vinyl" to "黑胶", "
         }
         drawLine(Color(0xFF756044), Offset(w * .22f, h * .91f), Offset(w * .78f, h * .91f), 1.dp.toPx())
     }
-}
-
-@Composable internal fun PlaybackStyleDialog(selected: String, choose: (String) -> Unit, dismiss: () -> Unit) {
-    AlertDialog(onDismissRequest = dismiss, title = { Text("播放样式") }, text = {
-        Column(Modifier.selectableGroup()) {
-            playbackStyles.forEach { (key, label) ->
-                ListItem(headlineContent = { Text(label) },
-                    leadingContent = { Icon(when (key) { "vinyl" -> Icons.Default.Album; "cassette" -> Icons.Default.ViewCompact; else -> Icons.Default.CropSquare }, null) },
-                    trailingContent = { RadioButton(key == selected, null) },
-                    modifier = Modifier.selectable(key == selected, role = Role.RadioButton) { choose(key); dismiss() })
-            }
-        }
-    }, confirmButton = { TextButton(dismiss) { Text("关闭") } })
 }

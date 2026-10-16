@@ -167,7 +167,7 @@ class AccountPlaybackTest {
             compose.waitUntil(15_000) { vm.state.value.playbackQuality == "AAC · 320 kbps" && compose.runOnIdle { vm.controller!!.playbackState == Player.STATE_READY } }
             assertTrue(kotlin.math.abs(compose.runOnIdle { vm.controller!!.currentPosition } - 6000) < 200)
             assertFalse(compose.runOnIdle { vm.controller!!.playWhenReady })
-            compose.onNodeWithText("歌词", useUnmergedTree = true).performClick()
+            compose.onNodeWithTag("player-visual-stage").performTouchInput { click(androidx.compose.ui.geometry.Offset(4f, 4f)) }
             compose.onNodeWithText("六秒后的人工歌词").assertIsDisplayed()
             // READY/bufferedPosition may still describe the previous quality while Media3 drains its loader.
             // Establish a paused, non-loading, stable baseline before attributing new reads to lyric refresh.

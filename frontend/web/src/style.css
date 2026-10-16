@@ -1334,14 +1334,15 @@ a {
     linear-gradient(0deg, #171716aa, transparent 45%);
 }
 .fullscreen-header {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
-  justify-content: space-between;
   padding: 24px 40px;
   gap: 20px;
   color: #f0e6d69c;
 }
 .collapse-player {
+  justify-self: start;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -1452,6 +1453,45 @@ a {
   padding: 0 6px;
   mask-image: linear-gradient(transparent, #000 16%, #000 84%, transparent);
 }
+.lyric-viewport {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+.lyric-seek-preview {
+  position: absolute;
+  inset: 50% 0 auto;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: inherit;
+  font-size: 11px;
+  pointer-events: none;
+}
+.lyric-seek-preview hr {
+  flex: 1;
+  margin: 0;
+  border: 0;
+  border-top: 1px solid currentColor;
+  opacity: 0.18;
+}
+.lyric-seek-preview button {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 10px;
+  border: 0;
+  color: inherit;
+  pointer-events: auto;
+}
+.lyric-seek-preview svg {
+  width: 24px;
+  height: 24px;
+  fill: currentColor;
+}
 .lyric-scroll::-webkit-scrollbar {
   display: none;
 }
@@ -1464,8 +1504,9 @@ a {
   gap: 30px;
 }
 .lyric-line {
-  display: block;
-  width: 100%;
+  display: inline-block;
+  width: fit-content;
+  max-width: 100%;
   text-align: left;
   border: 0;
   border-radius: 4px;
@@ -1632,7 +1673,7 @@ a {
   .fullscreen-content {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: auto minmax(0, 1fr);
-    gap: 12px;
+    gap: 24px;
     padding: 18px 30px 0;
   }
   .fullscreen-record {
@@ -1673,6 +1714,9 @@ a {
     font-size: 23px;
     text-align: center;
     line-height: 1.7;
+  }
+  .lyric-scroll li {
+    text-align: center;
   }
   .lyric-scroll ol {
     gap: 22px;
@@ -3585,4 +3629,92 @@ select {
   margin-block: 1.25rem;
   padding-block: 1rem;
   border-block: 1px solid var(--border);
+}
+
+@media (orientation: landscape) and (max-height: 540px) {
+  .fullscreen-player {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    column-gap: 28px;
+    padding: max(6px, env(safe-area-inset-top)) max(20px, env(safe-area-inset-right))
+      max(12px, env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left));
+  }
+  .fullscreen-header {
+    grid-column: 1 / -1;
+    padding: 0 0 4px;
+  }
+  .fullscreen-player .fullscreen-content,
+  .fullscreen-player .fullscreen-record {
+    display: contents;
+  }
+  .fullscreen-player .fullscreen-content .playback-visual {
+    grid-column: 1;
+    grid-row: 2 / 4;
+    width: min(100%, calc(100dvh - 80px));
+    margin: auto;
+    align-self: center;
+    justify-self: center;
+  }
+  .fullscreen-player:not([data-panel='cover']) .playback-visual {
+    display: none;
+  }
+  .fullscreen-player .fullscreen-metadata {
+    grid-column: 2;
+    grid-row: 2;
+    width: 100%;
+    align-self: end;
+    text-align: left;
+  }
+  .fullscreen-metadata h1 {
+    font-size: 23px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    margin-bottom: 4px;
+  }
+  .fullscreen-metadata > span {
+    display: none;
+  }
+  .fullscreen-controls {
+    grid-column: 2;
+    grid-row: 3;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 0;
+    padding: 12px 0 0;
+  }
+  .fullscreen-controls .transport {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .fullscreen-controls .timeline {
+    order: 0;
+    margin: 0;
+  }
+  .fullscreen-controls .transport-buttons {
+    order: 1;
+    gap: 24px;
+  }
+  .fullscreen-quality,
+  .fullscreen-controls .volume {
+    display: none;
+  }
+  .fullscreen-controls .fullscreen-options {
+    margin: 0;
+    justify-content: flex-end;
+  }
+  .fullscreen-player .fullscreen-lyrics,
+  .fullscreen-player .embedded-queue {
+    grid-column: 1;
+    grid-row: 2 / 4;
+    min-height: 0;
+    padding: 0 8px 0 0;
+    overflow: hidden;
+  }
+  .fullscreen-notice {
+    bottom: 18px;
+  }
 }

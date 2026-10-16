@@ -14,11 +14,10 @@ import androidx.activity.compose.LocalActivity
 import androidx.core.view.WindowCompat
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.DragInteraction
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -40,6 +39,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -157,6 +157,7 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
     }
     BoxWithConstraints(Modifier.fillMaxSize().safeDrawingPadding()) {
         val wide = maxWidth >= 840.dp && maxHeight >= 480.dp
+        val landscape = maxWidth > maxHeight && !wide
         val rail = maxWidth >= 600.dp && maxHeight >= 480.dp
         val compact = maxHeight < 600.dp
         var wasWide by remember { mutableStateOf(wide) }
@@ -173,7 +174,7 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
             MiniPlayer(vm, state, onQueue = { queue = true }) { playerFromSettings = true; settings = false; expanded = true; lyrics = false; queue = false }
         }) { settings = false } }
         else if (destination == "player") {
-            PlayerScreen(vm, state, wide, lyrics, queue, rotation,
+            PlayerScreen(vm, state, wide, landscape, lyrics, queue, rotation,
                 onBack = { if (lyrics && !wide) lyrics = false else collapsePlayer() },
                 onLyrics = { lyrics = !lyrics; queue = false }, onQueue = { queue = !queue },
                 onAdd = { actions = state.current })
@@ -248,7 +249,7 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
             }
         }
         }
-        if (queue && (!wide || !expanded)) ModalBottomSheet(onDismissRequest = { queue = false }) { QueuePanel(vm, state, Modifier.fillMaxWidth().heightIn(max = 560.dp)) }
+        if (queue && ((!wide && !landscape) || !expanded)) ModalBottomSheet(onDismissRequest = { queue = false }) { QueuePanel(vm, state, Modifier.fillMaxWidth().heightIn(max = 560.dp)) }
     }
     Box(Modifier.fillMaxSize().safeDrawingPadding(), contentAlignment = Alignment.BottomCenter) { SnackbarHost(mutationSnackbar, Modifier.padding(16.dp)) }
     if (createPlaylist) NameDialog("新建歌单", "", { createPlaylist = false }) { vm.createPlaylist(it); createPlaylist = false }
@@ -301,25 +302,37 @@ private fun TrackRow(vm: MusicViewModel, track: Track, play: () -> Unit, actions
         trailingContent = { IconButton(actions) { Icon(Icons.Default.MoreVert, "${track.title}的操作") } }, modifier = Modifier.clickable(onClick = tactile(play)))
 }
 @Composable
-private fun PlayerScreen(vm: MusicViewModel, input: MusicState, wide: Boolean, lyrics: Boolean, queue: Boolean, rotation: PlaybackRotation,
+private fun PlayerScreen(vm: MusicViewModel, input: MusicState, wide: Boolean, landscape: Boolean, lyrics: Boolean, queue: Boolean, rotation: PlaybackRotation,
     onBack: () -> Unit, onLyrics: () -> Unit, onQueue: () -> Unit, onAdd: () -> Unit) {
     val position by vm.position.collectAsStateWithLifecycle()
     val state = input.copy(position = position)
     val preferences by vm.settings.state.collectAsStateWithLifecycle()
-    var styleDialog by rememberSaveable { mutableStateOf(false) }
     val track = state.current ?: return
     val progress = if (state.duration > 0) state.position.toFloat() / state.duration else 0f
     val spinning = state.playing && !state.buffering && state.playbackError == null
     Box(Modifier.fillMaxSize()) {
-    Column(Modifier.testTag(if (wide) "player-tablet" else "player-phone").fillMaxSize().padding(horizontal = if (wide) 34.dp else 20.dp)) {
+    Column(Modifier.testTag(if (wide) "player-tablet" else if (landscape) "player-landscape" else "player-phone").fillMaxSize().padding(horizontal = if (wide) 34.dp else 20.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
             IconButton(onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, if (lyrics && !wide) "返回封面" else "收起播放器") }
             Text(track.album ?: "正在播放", color = Muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).padding(horizontal = 16.dp))
-            IconButton({ styleDialog = true }) { Icon(Icons.Default.Style, "播放样式") }
             IconButton(vm::refreshLyrics) { Icon(Icons.Default.Refresh, "刷新歌词") }
             IconButton(onAdd) { Icon(Icons.Default.MoreVert, "当前歌曲操作") }
         }
-        if (wide) Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(48.dp), verticalAlignment = Alignment.CenterVertically) {
+        if (landscape) Row(Modifier.weight(1f).fillMaxWidth().padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
+            BoxWithConstraints(Modifier.weight(1f).fillMaxHeight().testTag("player-visual-stage").pointerInput(onLyrics) {
+                detectTapGestures { onLyrics() }
+            }, contentAlignment = Alignment.Center) {
+                when {
+                    queue -> QueuePanel(vm, state, Modifier.fillMaxSize())
+                    lyrics -> LyricsPanel(vm, state, Modifier.fillMaxSize(), onLyrics)
+                    else -> PlaybackVisual(vm, track, preferences.playbackStyle, spinning, true, progress, rotation,
+                        Modifier.size(minOf(maxWidth, maxHeight)), onLyrics)
+                }
+            }
+            Column(Modifier.weight(1.15f).fillMaxHeight().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.Center) {
+                PlaybackControls(vm, state, onQueue, compact = true)
+            }
+        } else if (wide) Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(48.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(.9f).fillMaxHeight().widthIn(max = 380.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 BoxWithConstraints(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                     val visualSize = minOf(300.dp, maxWidth, maxHeight)
@@ -336,37 +349,34 @@ private fun PlayerScreen(vm: MusicViewModel, input: MusicState, wide: Boolean, l
                 if (queue) QueuePanel(vm, state, Modifier.weight(1f)) else LyricsPanel(vm, state, Modifier.weight(1f))
             }
         } else {
-            BoxWithConstraints(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+            BoxWithConstraints(Modifier.weight(1f).fillMaxWidth().testTag("player-visual-stage").pointerInput(onLyrics) {
+                detectTapGestures { onLyrics() }
+            }, contentAlignment = Alignment.Center) {
                 val visualSize = minOf(370.dp, maxWidth, maxHeight)
                 Crossfade(lyrics, Modifier.fillMaxSize(), animationSpec = tween(240), label = "lyrics-cover") { showingLyrics ->
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        if (showingLyrics) LyricsPanel(vm, state, Modifier.fillMaxSize())
+                        if (showingLyrics) LyricsPanel(vm, state, Modifier.fillMaxSize().padding(top = 8.dp, bottom = 32.dp), onLyrics)
                         else PlaybackVisual(vm, track, preferences.playbackStyle, spinning, !lyrics, progress, rotation,
                             Modifier.size(visualSize), onLyrics)
                     }
                 }
             }
             PlaybackControls(vm, state, onQueue)
-            Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), horizontalArrangement = Arrangement.Center) {
-                TextButton(onLyrics) { Text(if (lyrics) "返回封面" else "歌词") }
-                TextButton(tactile(onQueue)) { Text("队列 · ${state.queue.size}") }
-            }
         }
     }
     }
-    if (styleDialog) PlaybackStyleDialog(preferences.playbackStyle, vm.settings::playbackStyle) { styleDialog = false }
 }
 
 @Composable
-private fun PlaybackControls(vm: MusicViewModel, state: MusicState, onQueue: () -> Unit) {
+private fun PlaybackControls(vm: MusicViewModel, state: MusicState, onQueue: () -> Unit, compact: Boolean = false) {
     var scrub by remember { mutableStateOf<Float?>(null) }
     val feedback = LocalTactileFeedback.current
     val track = state.current ?: return
     Column(Modifier.fillMaxWidth()) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text(track.title, fontSize = 23.sp, fontWeight = FontWeight.Medium, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                Text(track.artist, color = Muted, fontSize = 13.sp, maxLines = 2)
+                Text(track.title, fontSize = if (compact) 20.sp else 23.sp, fontWeight = FontWeight.Medium, maxLines = if (compact) 1 else 2, overflow = TextOverflow.Ellipsis)
+                Text(track.artist, color = Muted, fontSize = 13.sp, maxLines = if (compact) 1 else 2, overflow = TextOverflow.Ellipsis)
             }
             FavoriteControl(track.loved, track.id in state.pendingFavorites, tactile { vm.favorite(track) })
         }
@@ -377,11 +387,11 @@ private fun PlaybackControls(vm: MusicViewModel, state: MusicState, onQueue: () 
                 inactiveTrackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = .14f),
                 activeTickColor = Color.Transparent, inactiveTickColor = Color.Transparent))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text(formatTime(scrub?.toLong() ?: state.position), color = Muted, fontSize = 11.sp); Text(formatTime(state.duration), color = Muted, fontSize = 11.sp) }
-        Row(Modifier.fillMaxWidth().padding(vertical = 12.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth().padding(vertical = if (compact) 4.dp else 12.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             val modeIcon = if (state.shuffle) Icons.Default.Shuffle else if (state.repeatMode == Player.REPEAT_MODE_ONE) Icons.Default.RepeatOne else Icons.Default.Repeat
             IconButton(tactile(vm::cycleMode)) { Icon(modeIcon, "切换播放模式", tint = if (state.shuffle || state.repeatMode != Player.REPEAT_MODE_OFF) Accent else Muted) }
             IconButton(tactile(vm::previous)) { Icon(Icons.Default.SkipPrevious, "上一首", Modifier.size(30.dp)) }
-            FilledIconButton(tactile(vm::toggle), Modifier.size(64.dp)) {
+            FilledIconButton(tactile(vm::toggle), Modifier.size(if (compact) 56.dp else 64.dp)) {
                 if (delayed(state.buffering, 500)) CircularProgressIndicator(Modifier.size(25.dp), strokeWidth = 2.dp)
                 else Crossfade(state.playing, animationSpec = tween(130), label = "play-pause") { playing -> Icon(if (playing) Icons.Default.Pause else Icons.Default.PlayArrow, if (playing) "暂停" else "播放", Modifier.size(34.dp)) }
             }
@@ -393,31 +403,14 @@ private fun PlaybackControls(vm: MusicViewModel, state: MusicState, onQueue: () 
 }
 
 @Composable
-private fun LyricsPanel(vm: MusicViewModel, state: MusicState, modifier: Modifier) {
-    val list = rememberLazyListState()
-    val feedback = LocalTactileFeedback.current
-    var follow by remember(state.current?.id) { mutableStateOf(true) }
-    val lines = state.lyrics.lines
-    val active = if (state.lyrics.kind == "synced") lines.indexOfLast { (it.timeMs ?: Long.MAX_VALUE) <= state.position } else -1
-    LaunchedEffect(list) { list.interactionSource.interactions.collect { if (it is DragInteraction.Start) follow = false } }
-    LaunchedEffect(active, follow) { if (follow && active >= 0 && lines.isNotEmpty()) list.animateScrollToItem(active) }
-    Column(modifier) {
-        Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-            when {
-                state.lyricsLoading -> if (delayed(state.lyricsLoading, 350)) CircularProgressIndicator()
-                state.lyricsError != null -> Text(state.lyricsError, color = Muted)
-                lines.isEmpty() -> Text("暂无歌词", color = Muted)
-                else -> LazyColumn(state = list, contentPadding = PaddingValues(vertical = 100.dp), modifier = Modifier.fillMaxSize()) {
-                    items(lines.size) { index -> val line = lines[index]
-                        val lineColor by animateColorAsState(if (state.lyrics.kind == "plain" || active == index) MaterialTheme.colorScheme.onSurface else Muted.copy(alpha = .65f), tween(260), label = "lyric-highlight")
-                        Text(line.text, Modifier.fillMaxWidth().clickable(enabled = line.timeMs != null) { feedback(TactileKind.Tap); vm.seek(line.timeMs ?: 0); follow = true }.padding(vertical = 16.dp, horizontal = 4.dp),
-                            fontSize = 25.sp, lineHeight = 36.sp, fontWeight = if (active == index) FontWeight.Medium else FontWeight.Normal,
-                            color = lineColor)
-                    }
-                }
-            }
+private fun LyricsPanel(vm: MusicViewModel, state: MusicState, modifier: Modifier, onBlank: () -> Unit = {}) {
+    Box(modifier, contentAlignment = Alignment.Center) {
+        when {
+            state.lyricsLoading -> if (delayed(state.lyricsLoading, 350)) CircularProgressIndicator()
+            state.lyricsError != null -> Text(state.lyricsError, color = Muted)
+            state.lyrics.lines.isEmpty() -> Text("暂无歌词", color = Muted)
+            else -> LyricViewport(state.lyrics, state.position, vm::seek, onBlank, Modifier.fillMaxSize())
         }
-        if (!follow && state.lyrics.kind == "synced") TextButton({ follow = true }, Modifier.align(Alignment.CenterHorizontally)) { Text("回到当前歌词") }
     }
 }
 
