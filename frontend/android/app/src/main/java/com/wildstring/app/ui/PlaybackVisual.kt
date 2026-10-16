@@ -127,10 +127,13 @@ internal val playbackStyles = listOf("cover" to "封面", "vinyl" to "黑胶", "
                         .clip(RoundedCornerShape(3.dp)).background(Color(0xFFE9DDC4))) {
                         Box(Modifier.fillMaxWidth().height(side * .012f).background(Color(0xFFE98A6D)))
                         Column(Modifier.padding(start = side * .18f, end = side * .025f, top = side * .018f)) {
-                            Text("野弦 / WILDSTRING", fontSize = (side.value * .023f).coerceIn(6f, 9f).sp, color = Color(0xFF77705C), maxLines = 1)
-                            Text(track.title, fontSize = (side.value * .043f).coerceIn(9f, 17f).sp, color = Color(0xFF34372C),
+                            val brandSize = (side.value * .023f).coerceIn(6f, 9f).sp
+                            val titleSize = (side.value * .043f).coerceIn(9f, 17f).sp
+                            val artistSize = (side.value * .028f).coerceIn(7f, 11f).sp
+                            if (side >= 180.dp) Text("野弦 / WILDSTRING", fontSize = brandSize, lineHeight = brandSize * 1.3f, color = Color(0xFF77705C), maxLines = 1)
+                            Text(track.title, fontSize = titleSize, lineHeight = titleSize * 1.25f, color = Color(0xFF34372C),
                                 fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            Text(track.artist, fontSize = (side.value * .028f).coerceIn(7f, 11f).sp, color = Color(0xFF605C4C), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            if (side >= 130.dp) Text(track.artist, fontSize = artistSize, lineHeight = artistSize * 1.3f, color = Color(0xFF605C4C), maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                     }
                     Cover(vm, track.id.takeIf { track.hasCover }, track.title, Modifier.offset(side * .09f, side * .28f).size(side * .13f))
