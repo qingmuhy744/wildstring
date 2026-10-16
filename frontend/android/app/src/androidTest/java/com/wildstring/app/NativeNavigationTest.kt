@@ -91,6 +91,7 @@ class NativeNavigationTest {
                     if (path.endsWith("/navigation-track")) return json(track)
                     if (path.endsWith("/lyrics")) return json("""{"kind":"none","lines":[]}""")
                     if (path.endsWith("/listening")) return json("""{"accepted_ms":1000}""")
+                    if (path.endsWith("/lastfm")) return json("""{"configured":false,"connected":false,"scrobble":false,"now_playing":false,"version":0}""")
                     requests.incrementAndGet()
                     return when {
                         path.endsWith("/albums") -> json("""{"items":[$albums],"total":20,"limit":50,"offset":0}""")

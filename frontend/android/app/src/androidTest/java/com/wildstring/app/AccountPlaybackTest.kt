@@ -119,6 +119,7 @@ class AccountPlaybackTest {
                             }
                     }
                     if (path.endsWith("/lyrics")) return json("""{"kind":"synced","source":"user","lines":[{"time_ms":0,"text":"${lyric.get()}"},{"time_ms":6000,"text":"六秒后的人工歌词"}]}""")
+                    if (path.endsWith("/lastfm")) return json("""{"configured":false,"connected":false,"scrobble":false,"now_playing":false,"version":0}""")
                     if (path.endsWith("/listening")) return json("""{"accepted_ms":1000}""")
                     if (path.endsWith("/albums")) return json("""{"items":[{"id":"test-album","title":"同步测试专辑","artists":["合成音频"],"track_count":2,"cover_track_id":null}],"total":1,"limit":50,"offset":0}""")
                     if (path.endsWith("/tracks")) return json("""{"items":[${if (owner == "alice") lossless else lossless.replace("true", "false")},$lossy],"total":2,"limit":50,"offset":0}""")
@@ -167,6 +168,8 @@ class AccountPlaybackTest {
             assertFalse(compose.runOnIdle { vm.controller!!.playWhenReady })
             compose.onNodeWithText("歌词", useUnmergedTree = true).performClick()
             compose.onNodeWithText("六秒后的人工歌词").assertIsDisplayed()
+            // Wait for the selected AAC source to finish loading before checking that lyrics do not reopen it.
+            compose.waitUntil(15_000) { compose.runOnIdle { vm.controller!!.bufferedPosition >= vm.controller!!.duration - 100 } }
             val streamsBeforeRefresh = requests.count { it.contains("/stream") }
             lyric.set("网页修改后的人工歌词")
             compose.onNodeWithContentDescription("刷新歌词").performClick()

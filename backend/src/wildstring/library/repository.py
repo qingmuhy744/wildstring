@@ -152,6 +152,9 @@ class LibraryRepository:
     @staticmethod
     def public_track(row: dict) -> dict:
         result = dict(row)
+        from wildstring.library.tag_fields import DETAIL_DEFAULTS
+
+        result.update(DETAIL_DEFAULTS | json.loads(result.pop("extra", "{}")))
         for key in ("library_id", "seen_run", "search_text", "mtime_ns"):
             result.pop(key)
         for key in ("artists", "album_artists"):
@@ -171,6 +174,7 @@ class LibraryRepository:
         artist_id: str | None = None,
         played_only: bool = False,
         sort: str = "title",
+        role: str | None = None,
     ) -> dict:
         query = normalize(q).replace("\\", "\\\\").replace("%", r"\%").replace("_", r"\_")
         parameters = {
@@ -185,7 +189,7 @@ class LibraryRepository:
             "sort": sort,
         }
         with self.database.connect() as connection:
-            configure_artist_queries(connection)
+            configure_artist_queries(connection, role)
             total = connection.execute(
                 "".join(
                     (
@@ -274,6 +278,7 @@ class LibraryRepository:
         offset: int = 0,
         *,
         artist_id: str | None = None,
+        role: str | None = None,
     ) -> dict:
         query = normalize(q).replace("\\", "\\\\").replace("%", r"\%").replace("_", r"\_")
         parameters = {
@@ -285,7 +290,7 @@ class LibraryRepository:
             "offset": offset,
         }
         with self.database.connect() as connection:
-            configure_artist_queries(connection)
+            configure_artist_queries(connection, role)
             total = connection.execute(
                 "".join(
                     (
@@ -320,7 +325,9 @@ class LibraryRepository:
             items = [self._album(connection, row) for row in rows]
         return {"items": items, "total": total, "limit": limit, "offset": offset}
 
-    def artists(self, q: str = "", limit: int = 50, offset: int = 0) -> dict:
+    def artists(
+        self, q: str = "", limit: int = 50, offset: int = 0, *, role: str | None = None
+    ) -> dict:
         query = normalize(q).replace("\\", "\\\\").replace("%", r"\%").replace("_", r"\_")
         parameters = {
             "library_id": self.library_id(),
@@ -330,7 +337,7 @@ class LibraryRepository:
             "offset": offset,
         }
         with self.database.connect() as connection:
-            configure_artist_queries(connection)
+            configure_artist_queries(connection, role)
             total = connection.execute(
                 "".join(
                     (

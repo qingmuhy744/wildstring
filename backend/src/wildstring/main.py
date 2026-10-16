@@ -21,6 +21,7 @@ from wildstring.library.playlists import PlaylistStore, playlist_router
 from wildstring.library.repository import LibraryRepository
 from wildstring.library.transcoding import Transcoding
 from wildstring.management import Management, management_router
+from wildstring.providers import Providers
 from wildstring.site_access import HostAllowlist, SiteAccess
 
 logger = logging.getLogger(__name__)
@@ -35,6 +36,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     management = Management(current, repository)
     access = SiteAccess(database)
     transcoding = Transcoding(repository)
+    providers = Providers(repository)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -50,9 +52,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             auth.set_password(current.admin_password.get_secret_value(), only_if_empty=True)
         management.start()
         transcoding.start()
+        providers.start()
         try:
             yield
         finally:
+            await asyncio.to_thread(providers.stop)
             await asyncio.to_thread(management.stop)
             await asyncio.to_thread(transcoding.stop)
 
@@ -102,9 +106,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(auth.users_router())
     app.include_router(access.router(auth))
     app.state.transcoding = transcoding
+    app.state.providers = providers
+    app.include_router(providers.router(auth))
     app.include_router(library_router(repository, auth, transcoding))
     app.include_router(transcoding.router(auth))
-    app.include_router(listening_router(repository, auth))
+    app.include_router(listening_router(repository, auth, providers))
     app.include_router(playlist_router(playlists, auth))
     app.include_router(management_router(management, auth))
 

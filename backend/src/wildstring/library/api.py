@@ -4,7 +4,7 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from wildstring.auth import Auth
 from wildstring.library.assets import TrackAssets
@@ -35,6 +35,20 @@ class Track(BaseModel):
     listened_ms: int
     last_played_at: str | None
     added_at: str
+    artist_credit: str = ""
+    album_artist_credit: str = ""
+    composers: list[str] = Field(default_factory=list)
+    lyricists: list[str] = Field(default_factory=list)
+    arrangers: list[str] = Field(default_factory=list)
+    vocalists: list[str] = Field(default_factory=list)
+    genres: list[str] = Field(default_factory=list)
+    track_total: int | None = None
+    disc_total: int | None = None
+    release_date: str | None = None
+    original_date: str | None = None
+    external_ids: dict = Field(default_factory=dict)
+    description: str = ""
+    tags: list[str] = Field(default_factory=list)
 
 
 class TrackPage(BaseModel):
@@ -121,8 +135,10 @@ def library_router(repository: LibraryRepository, auth: Auth, transcoding) -> AP
         q: Annotated[str, Query(max_length=256)] = "",
         limit: Annotated[int, Query(ge=1, le=100)] = 50,
         offset: Annotated[int, Query(ge=0)] = 0,
+        role: Literal["artist", "album_artist", "vocalist", "lyricist", "composer", "arranger"]
+        | None = None,
     ):
-        return repository.artists(q, limit, offset)
+        return repository.artists(q, limit, offset, role=role)
 
     @router.get("/artists/{artist_id}", response_model=Artist)
     def artist(artist_id: str):
@@ -136,9 +152,11 @@ def library_router(repository: LibraryRepository, auth: Auth, transcoding) -> AP
         album_id: str | None = None,
         limit: Annotated[int, Query(ge=1, le=200)] = 50,
         offset: Annotated[int, Query(ge=0)] = 0,
+        role: Literal["artist", "album_artist", "vocalist", "lyricist", "composer", "arranger"]
+        | None = None,
     ):
         require_artist(artist_id)
-        return current.tracks(q, limit, offset, album_id=album_id, artist_id=artist_id)
+        return current.tracks(q, limit, offset, album_id=album_id, artist_id=artist_id, role=role)
 
     @router.get("/artists/{artist_id}/albums", response_model=AlbumPage)
     def artist_albums(
@@ -146,9 +164,11 @@ def library_router(repository: LibraryRepository, auth: Auth, transcoding) -> AP
         q: Annotated[str, Query(max_length=256)] = "",
         limit: Annotated[int, Query(ge=1, le=100)] = 50,
         offset: Annotated[int, Query(ge=0)] = 0,
+        role: Literal["artist", "album_artist", "vocalist", "lyricist", "composer", "arranger"]
+        | None = None,
     ):
         require_artist(artist_id)
-        return repository.albums(q, limit, offset, artist_id=artist_id)
+        return repository.albums(q, limit, offset, artist_id=artist_id, role=role)
 
     @router.get("/imports", dependencies=[Depends(auth.require_admin)])
     def imports(limit: Annotated[int, Query(ge=1, le=100)] = 20):

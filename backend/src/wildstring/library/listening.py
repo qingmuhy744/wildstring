@@ -1,7 +1,7 @@
 """Idempotent listening reports and per-user favorites."""
 
 import time
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -20,9 +20,11 @@ class ListeningReport(BaseModel):
     session_id: UUID
     track_id: str = Field(min_length=1, max_length=128)
     listened_ms: int = Field(ge=0, le=86_400_000, strict=True)
+    started_at: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    state: Literal["playing", "paused", "ended"] = "paused"
 
 
-def listening_router(repository, auth):
+def listening_router(repository, auth, providers=None):
     router = APIRouter(prefix="/api/v1", dependencies=[Depends(auth.require_session)])
 
     def scoped(user: Annotated[dict, Depends(auth.require_session)]):
@@ -83,6 +85,19 @@ def listening_router(repository, auth):
                 or session["user_id"] != current.database.user_id
             ):
                 raise HTTPException(409, "listening_session_conflict")
+            if body.started_at is not None and session["client_started_at"] is None:
+                if abs(body.started_at - session["started_at"]) <= 60:
+                    connection.execute(
+                        "UPDATE listening_sessions SET client_started_at=? WHERE id=?",
+                        (body.started_at, session_id),
+                    )
+                    session = connection.execute(
+                        "SELECT * FROM listening_sessions WHERE id=?", (session_id,)
+                    ).fetchone()
+            connection.execute(
+                "UPDATE listening_sessions SET playback_state=? WHERE id=?",
+                (body.state, session_id),
+            )
             elapsed = max(0, int((clock - session["started_at"]) * 1000)) + 1000
             accepted = max(session["reported_ms"], min(body.listened_ms, elapsed, 21_600_000))
             delta = accepted - session["reported_ms"]
@@ -99,6 +114,15 @@ def listening_router(repository, auth):
                     listened_ms=user_track_state.listened_ms+excluded.listened_ms,
                     play_count=user_track_state.play_count+excluded.play_count,last_played_at=excluded.last_played_at""",
                     (current.database.user_id, body.track_id, delta, increment, now()),
+                )
+            if providers:
+                providers.enqueue_listening(
+                    connection,
+                    current.database.user_id,
+                    session,
+                    track,
+                    accepted,
+                    body.state == "playing" and delta > 0,
                 )
             return {
                 "play_count": track["play_count"] + increment,

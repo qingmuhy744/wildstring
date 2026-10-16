@@ -7,8 +7,9 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from wildstring.library.albums import album_key
+from wildstring.provider_schema import SCHEMA as PROVIDER_SCHEMA
 
-SCHEMA_VERSION = 11
+SCHEMA_VERSION = 12
 TRANSCODING_SCHEMA = """
 BEGIN IMMEDIATE;
 CREATE TABLE transcoding_settings (
@@ -381,6 +382,14 @@ class Database:
                 connection.executescript(ACCESS_SCHEMA)
             if current < 11:
                 connection.executescript(TRANSCODING_SCHEMA)
+            if current < 12:
+                connection.executescript(PROVIDER_SCHEMA)
+                from wildstring.library.edits import apply_effective
+
+                for row in connection.execute("SELECT id FROM tracks").fetchall():
+                    apply_effective(connection, row["id"])
+                connection.execute("PRAGMA user_version = 12")
+                connection.commit()
             connection.execute("PRAGMA journal_mode = WAL")
 
     def check_ready(self) -> bool:

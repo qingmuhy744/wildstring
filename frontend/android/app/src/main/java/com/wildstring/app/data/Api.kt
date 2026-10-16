@@ -4,6 +4,10 @@ import okhttp3.ResponseBody
 import retrofit2.http.*
 
 interface Api {
+    @GET("api/v1/lastfm") suspend fun lastfm(): LastfmStatus
+    @POST("api/v1/lastfm/authorize") suspend fun authorizeLastfm(): AuthorizationUrl
+    @PUT("api/v1/lastfm") suspend fun updateLastfm(@Body body: LastfmPreferences): LastfmStatus
+    @DELETE("api/v1/lastfm") suspend fun disconnectLastfm(): ResponseBody
     @GET("api/v1/auth/status") suspend fun status(): AuthStatus
     @POST("api/v1/auth/login") suspend fun login(@Body body: LoginRequest): ResponseBody
     @POST("api/v1/auth/logout") suspend fun logout(): retrofit2.Response<Unit>

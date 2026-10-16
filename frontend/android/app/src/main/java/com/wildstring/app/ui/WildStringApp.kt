@@ -140,6 +140,8 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
         if (playerFromSettings) { settings = true; playerFromSettings = false }
     }
     val scope = rememberCoroutineScope()
+    val mutationSnackbar = remember { SnackbarHostState() }
+    LaunchedEffect(state.error, state.mutationMessage) { (state.error ?: state.mutationMessage)?.let { mutationSnackbar.showSnackbar(it) } }
     val savedPages = rememberSaveableStateHolder()
     val savedKeys = remember { ArrayDeque<String>() }
     LaunchedEffect(state.contentKey) {
@@ -193,6 +195,7 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
                             }
                         }
                         state.error?.let { ErrorMessage(it, vm::load) }
+                        state.mutationMessage?.let { Text(it, Modifier.padding(12.dp), style = MaterialTheme.typography.bodySmall) }
                         if (state.offline) Text("网络暂不可用 · 显示本机缓存", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(vertical = 6.dp))
                         // Fixed height avoids moving the entire list when a slow request becomes visible.
                         Box(Modifier.fillMaxWidth().height(4.dp)) {
@@ -240,6 +243,7 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
         }
         if (queue && (!wide || !expanded)) ModalBottomSheet(onDismissRequest = { queue = false }) { QueuePanel(vm, state, Modifier.fillMaxWidth().heightIn(max = 560.dp)) }
     }
+    Box(Modifier.fillMaxSize().safeDrawingPadding(), contentAlignment = Alignment.BottomCenter) { SnackbarHost(mutationSnackbar, Modifier.padding(16.dp)) }
     if (createPlaylist) NameDialog("新建歌单", "", { createPlaylist = false }) { vm.createPlaylist(it); createPlaylist = false }
     actions?.let { track -> ModalBottomSheet(onDismissRequest = { actions = null }) {
         Text(track.title, Modifier.padding(24.dp), style = MaterialTheme.typography.titleLarge)
@@ -348,7 +352,7 @@ private fun PlaybackControls(vm: MusicViewModel, state: MusicState, onQueue: () 
                 Text(track.title, fontSize = 23.sp, fontWeight = FontWeight.Medium, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 Text(track.artist, color = Muted, fontSize = 13.sp, maxLines = 2)
             }
-            IconButton(tactile { vm.favorite(track) }) { Icon(if (track.loved) Icons.Default.Favorite else Icons.Default.FavoriteBorder, if (track.loved) "取消收藏" else "收藏", tint = if (track.loved) Accent else MaterialTheme.colorScheme.onSurface) }
+            FavoriteControl(track.loved, track.id in state.pendingFavorites, tactile { vm.favorite(track) })
         }
         if (state.playbackQuality.isNotBlank()) Text(state.playbackQuality, color = Muted, fontSize = 11.sp, modifier = Modifier.padding(top = 6.dp).testTag("playback-quality"))
         Slider(value = scrub ?: state.position.coerceAtMost(state.duration).toFloat(), onValueChange = { scrub = it },

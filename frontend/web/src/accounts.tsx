@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { api, type User } from './api';
+import { LastfmAccount } from './providers';
 import { ThemeControl } from './theme';
 
 export function AccountDialog({ user, onClose }: { user: User; onClose: () => void }) {
@@ -62,6 +63,7 @@ export function AccountDialog({ user, onClose }: { user: User; onClose: () => vo
         </button>
       </div>
       <ThemeControl />
+      <LastfmAccount />
       <form className="account-form" onSubmit={submit}>
         <label>
           当前密码

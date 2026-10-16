@@ -432,8 +432,10 @@ def management_router(service, auth):
         return editor.read(track_id)
 
     @router.put("/tracks/{track_id}/metadata", dependencies=[Depends(auth.require_client)])
-    def update_metadata(track_id: str, body: MetadataUpdate):
-        return editor.save(track_id, body)
+    def update_metadata(
+        track_id: str, body: MetadataUpdate, user: Annotated[dict, Depends(auth.require_admin)]
+    ):
+        return editor.save(track_id, body, user_id=user["id"])
 
     @router.get("/tracks/{track_id}/lyrics")
     def read_lyrics(track_id: str):
