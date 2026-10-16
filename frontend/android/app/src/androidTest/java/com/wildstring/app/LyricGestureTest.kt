@@ -19,12 +19,13 @@ class LyricGestureTest {
     @get:Rule val compose = createComposeRule()
     private val seeks = mutableListOf<Long>()
     private var toggles = 0
+    private var previews = 0
     private fun show(synced: Boolean = true) {
         val lyrics = Lyrics(if (synced) "synced" else "plain", (0..19).map {
             LyricLine(if (synced) it * 1000L else null, "测试歌词第 $it 行")
         })
         compose.setContent { MaterialTheme {
-            LyricViewport(lyrics, 0, { seeks += it }, { toggles++ }, Modifier.width(360.dp).height(400.dp))
+            LyricViewport(lyrics, 0, { seeks += it }, { toggles++ }, Modifier.width(360.dp).height(400.dp), { previews++ })
         } }
     }
 
@@ -52,5 +53,25 @@ class LyricGestureTest {
         compose.onNodeWithTag("lyric-scroll").performTouchInput { swipeUp(durationMillis = 450) }
         compose.onNodeWithTag("lyric-seek-confirm").assertDoesNotExist()
         compose.runOnIdle { assertTrue(seeks.isEmpty()); assertEquals(0, toggles) }
+    }
+
+    @Test fun holdingLyricsOrBlankSpacePreviewsArtworkWithoutSelectingOrSeeking() {
+        show()
+        compose.onNodeWithTag("lyric-line-0").performTouchInput { longClick() }
+        compose.onNodeWithTag("lyric-seek-preview").assertDoesNotExist()
+        compose.runOnIdle { assertEquals(1, previews); assertTrue(seeks.isEmpty()); assertEquals(0, toggles) }
+        compose.onNodeWithTag("lyrics-viewport").performTouchInput { longClick(Offset(8f, 8f)) }
+        compose.runOnIdle { assertEquals(2, previews); assertTrue(seeks.isEmpty()); assertEquals(0, toggles) }
+    }
+
+    @Test fun movingBeforeAHoldCancelsArtworkPreview() {
+        show()
+        compose.onNodeWithTag("lyric-scroll").performTouchInput {
+            down(center)
+            moveBy(Offset(0f, -80f))
+            advanceEventTime(700)
+            up()
+        }
+        compose.runOnIdle { assertEquals(0, previews); assertTrue(seeks.isEmpty()); assertEquals(0, toggles) }
     }
 }

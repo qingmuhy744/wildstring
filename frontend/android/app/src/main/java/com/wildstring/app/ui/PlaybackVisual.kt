@@ -11,7 +11,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.withInfiniteAnimationFrameNanos
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -70,7 +70,7 @@ internal val playbackStyles = listOf("cover" to "封面", "vinyl" to "黑胶", "
 }
 
 @Composable internal fun PlaybackVisual(vm: MusicViewModel, track: Track, style: String, playing: Boolean,
-    visible: Boolean, progress: Float, phase: PlaybackRotation, modifier: Modifier, onLyrics: () -> Unit) {
+    visible: Boolean, progress: Float, phase: PlaybackRotation, modifier: Modifier, onArtwork: () -> Unit, onLyrics: () -> Unit) {
     val moving = playing && visible && style != "cover" && motionAllowed()
     LaunchedEffect(moving) {
         if (!moving) return@LaunchedEffect
@@ -85,7 +85,8 @@ internal val playbackStyles = listOf("cover" to "封面", "vinyl" to "黑胶", "
     val arm by animateFloatAsState(if (playing && settled) 24f else -12f, tween(350), label = "tonearm")
     Crossfade(style, modifier.testTag("playback-visual-$style").semantics {
         stateDescription = if (moving) "正在转动" else "静止"
-    }.clickable(onClickLabel = "查看歌词", onClick = onLyrics), tween(200), label = "playback-style") { selection ->
+    }.combinedClickable(onClickLabel = "查看歌词", onLongClickLabel = "查看大封面", onLongClick = onArtwork,
+        hapticFeedbackEnabled = false, onClick = onLyrics), tween(200), label = "playback-style") { selection ->
         BoxWithConstraints(Modifier.fillMaxSize()) {
             val side = minOf(maxWidth, maxHeight)
             when (selection) {

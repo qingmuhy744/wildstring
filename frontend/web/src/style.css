@@ -1068,6 +1068,58 @@ a {
     display: block;
   }
 }
+.artwork-preview {
+  position: fixed;
+  inset: 0;
+  box-sizing: border-box;
+  width: 100%;
+  height: 100dvh;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  padding: max(56px, env(safe-area-inset-top)) max(24px, env(safe-area-inset-right))
+    max(24px, env(safe-area-inset-bottom)) max(24px, env(safe-area-inset-left));
+  border: 0;
+  background: #10110f;
+  color: #eeeae2;
+}
+.artwork-preview[open] {
+  display: grid;
+  place-items: center;
+}
+.artwork-preview::backdrop {
+  background: #10110f;
+}
+.artwork-preview .cover {
+  width: min(900px, calc(100vw - 48px), calc(100dvh - 80px));
+  height: auto;
+  max-width: 100%;
+  max-height: 100%;
+  aspect-ratio: 1;
+  background: transparent;
+  border-radius: 0;
+}
+.artwork-preview .cover img {
+  object-fit: contain;
+}
+.artwork-preview-close {
+  position: absolute;
+  top: max(8px, env(safe-area-inset-top));
+  right: max(8px, env(safe-area-inset-right));
+  width: 44px;
+  height: 44px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-size: 32px;
+}
+.playback-visual,
+.lyric-scroll {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
 .cover {
   position: relative;
   display: grid;

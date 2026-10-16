@@ -251,6 +251,17 @@ class NativePlaybackTest {
                 assertEquals(styleEntry, compose.runOnIdle { player.currentMediaItem!!.mediaId })
                 assertFalse(compose.runOnIdle { player.playWhenReady })
                 assertTrue(kotlin.math.abs(compose.runOnIdle { player.currentPosition } - stylePosition) < 250)
+                compose.onNodeWithTag("playback-visual-$key").performTouchInput { longClick() }
+                compose.onNodeWithTag("artwork-preview").assertIsDisplayed()
+                if (key == "vinyl") capture("player-artwork-preview.png")
+                if (key == "cassette") InstrumentationRegistry.getInstrumentation().sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
+                else compose.onNodeWithContentDescription("关闭大封面").performClick()
+                compose.waitUntil(5_000) { compose.onAllNodesWithTag("artwork-preview").fetchSemanticsNodes().isEmpty() }
+                compose.onNodeWithTag("artwork-preview").assertDoesNotExist()
+                compose.onNodeWithTag("playback-visual-$key").assertIsDisplayed()
+                assertEquals(styleEntry, compose.runOnIdle { player.currentMediaItem!!.mediaId })
+                assertFalse(compose.runOnIdle { player.playWhenReady })
+                assertTrue(kotlin.math.abs(compose.runOnIdle { player.currentPosition } - stylePosition) < 250)
                 if (key != "cover") {
                     capture("player-$key-phone.png", style = key)
                     val orientation = compose.runOnIdle { compose.activity.requestedOrientation }

@@ -1,6 +1,6 @@
 package com.wildstring.app.ui
 
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.DragInteraction
@@ -30,7 +30,7 @@ import kotlin.math.abs
 
 /** Browsing only moves the viewport. The explicit preview button is the only seek action. */
 @Composable internal fun LyricViewport(lyrics: Lyrics, position: Long, onSeek: (Long) -> Unit,
-    onBlank: () -> Unit, modifier: Modifier = Modifier) {
+    onBlank: () -> Unit, modifier: Modifier = Modifier, onArtwork: () -> Unit = {}) {
     val list = rememberLazyListState()
     val scope = rememberCoroutineScope()
     val feedback = LocalTactileFeedback.current
@@ -53,10 +53,11 @@ import kotlin.math.abs
     }
     LaunchedEffect(list) { list.interactionSource.interactions.collect { if (it is DragInteraction.Start) follow = false } }
     LaunchedEffect(active, follow, lyrics) { if (follow && active >= 0) centerLine(active) }
-    BoxWithConstraints(modifier.testTag("lyrics-viewport").clipToBounds().pointerInput(onBlank) {
-        detectTapGestures { onBlank() }
+    BoxWithConstraints(modifier.testTag("lyrics-viewport").clipToBounds().pointerInput(onBlank, onArtwork) {
+        detectTapGestures(onLongPress = { onArtwork() }, onTap = { onBlank() })
     }.semantics {
-        customActions = listOf(CustomAccessibilityAction("切换歌词与播放动画") { onBlank(); true })
+        customActions = listOf(CustomAccessibilityAction("切换歌词与播放动画") { onBlank(); true },
+            CustomAccessibilityAction("查看大封面") { onArtwork(); true })
     }) {
         LazyColumn(state = list, contentPadding = PaddingValues(vertical = maxHeight / 2),
             modifier = Modifier.fillMaxSize().testTag("lyric-scroll")) {
@@ -65,10 +66,11 @@ import kotlin.math.abs
                 val highlighted = if (follow) active == index else candidate == index
                 Box(Modifier.fillMaxWidth().padding(horizontal = 40.dp, vertical = 14.dp), contentAlignment = Alignment.Center) {
                     Text(line.text.ifBlank { "♪" }, Modifier.testTag("lyric-line-$index").then(
-                        if (line.timeMs != null) Modifier.clickable(onClickLabel = "选择歌词时间") {
+                        if (line.timeMs != null) Modifier.combinedClickable(onClickLabel = "选择歌词时间",
+                            onLongClickLabel = "查看大封面", onLongClick = onArtwork, hapticFeedbackEnabled = false, onClick = {
                             follow = false
                             scope.launch { centerLine(index) }
-                        } else Modifier),
+                        }) else Modifier),
                         fontSize = 22.sp, lineHeight = 34.sp, textAlign = TextAlign.Center,
                         fontWeight = if (highlighted) FontWeight.Medium else FontWeight.Normal,
                         color = if (lyrics.kind == "plain" || highlighted) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .65f))

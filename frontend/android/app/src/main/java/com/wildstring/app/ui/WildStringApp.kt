@@ -288,12 +288,12 @@ private fun RowScope.BottomItems(state: MusicState, vm: MusicViewModel) {
 }
 
 @Composable
-internal fun Cover(vm: MusicViewModel, id: String?, title: String, modifier: Modifier) {
+internal fun Cover(vm: MusicViewModel, id: String?, title: String, modifier: Modifier, contentScale: ContentScale = ContentScale.Crop) {
     val profile by vm.repository.session.profiles.collectAsStateWithLifecycle()
     val fallback = painterResource(if (LocalRedCloth.current) R.drawable.ic_red_cloth else R.drawable.ic_wildstring)
     AsyncImage(model = id?.let { ImageRequest.Builder(LocalContext.current).data(vm.repository.cover(it)).memoryCacheKey("${profile}:${it}").crossfade(180).build() }, imageLoader = vm.imageLoader, contentDescription = title,
         placeholder = fallback, error = fallback, fallback = fallback,
-        contentScale = ContentScale.Crop, modifier = modifier.clip(RoundedCornerShape(10.dp)))
+        contentScale = contentScale, modifier = modifier.clip(RoundedCornerShape(10.dp)))
 }
 @Composable
 private fun TrackRow(vm: MusicViewModel, track: Track, play: () -> Unit, actions: () -> Unit) {
@@ -309,7 +309,10 @@ private fun PlayerScreen(vm: MusicViewModel, input: MusicState, wide: Boolean, l
     val preferences by vm.settings.state.collectAsStateWithLifecycle()
     val track = state.current ?: return
     val progress = if (state.duration > 0) state.position.toFloat() / state.duration else 0f
-    val spinning = state.playing && !state.buffering && state.playbackError == null
+    var artworkPreview by rememberSaveable { mutableStateOf(false) }
+    val showArtwork = remember { { artworkPreview = true } }
+    val dismissArtwork = remember { { artworkPreview = false } }
+    val spinning = state.playing && !state.buffering && state.playbackError == null && !artworkPreview
     Box(Modifier.fillMaxSize()) {
     Column(Modifier.testTag(if (wide) "player-tablet" else if (landscape) "player-landscape" else "player-phone").fillMaxSize().padding(horizontal = if (wide) 34.dp else 20.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
@@ -319,14 +322,14 @@ private fun PlayerScreen(vm: MusicViewModel, input: MusicState, wide: Boolean, l
             IconButton(onAdd) { Icon(Icons.Default.MoreVert, "当前歌曲操作") }
         }
         if (landscape) Row(Modifier.weight(1f).fillMaxWidth().padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
-            BoxWithConstraints(Modifier.weight(1f).fillMaxHeight().testTag("player-visual-stage").pointerInput(onLyrics) {
-                detectTapGestures { onLyrics() }
+            BoxWithConstraints(Modifier.weight(1f).fillMaxHeight().testTag("player-visual-stage").pointerInput(onLyrics, showArtwork) {
+                detectTapGestures(onLongPress = { if (!queue) showArtwork() }, onTap = { onLyrics() })
             }, contentAlignment = Alignment.Center) {
                 when {
                     queue -> QueuePanel(vm, state, Modifier.fillMaxSize())
-                    lyrics -> LyricsPanel(vm, state, Modifier.fillMaxSize(), onLyrics)
+                    lyrics -> LyricsPanel(vm, state, Modifier.fillMaxSize(), onLyrics, showArtwork)
                     else -> PlaybackVisual(vm, track, preferences.playbackStyle, spinning, true, progress, rotation,
-                        Modifier.size(minOf(maxWidth, maxHeight)), onLyrics)
+                        Modifier.size(minOf(maxWidth, maxHeight)), showArtwork, onLyrics)
                 }
             }
             Column(Modifier.weight(1.15f).fillMaxHeight().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.Center) {
@@ -337,7 +340,7 @@ private fun PlayerScreen(vm: MusicViewModel, input: MusicState, wide: Boolean, l
                 BoxWithConstraints(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                     val visualSize = minOf(300.dp, maxWidth, maxHeight)
                     PlaybackVisual(vm, track, preferences.playbackStyle, spinning, true, progress, rotation,
-                        Modifier.size(visualSize)) { if (queue) onQueue() }
+                        Modifier.size(visualSize), showArtwork) { if (queue) onQueue() }
                 }
                 Spacer(Modifier.height(20.dp)); PlaybackControls(vm, state, onQueue)
             }
@@ -346,18 +349,18 @@ private fun PlayerScreen(vm: MusicViewModel, input: MusicState, wide: Boolean, l
                     FilterChip(!queue, { if (queue) onQueue() }, label = { Text("歌词") })
                     FilterChip(queue, { if (!queue) onQueue() }, label = { Text("队列 · ${state.queue.size}") })
                 }
-                if (queue) QueuePanel(vm, state, Modifier.weight(1f)) else LyricsPanel(vm, state, Modifier.weight(1f))
+                if (queue) QueuePanel(vm, state, Modifier.weight(1f)) else LyricsPanel(vm, state, Modifier.weight(1f), onArtwork = showArtwork)
             }
         } else {
-            BoxWithConstraints(Modifier.weight(1f).fillMaxWidth().testTag("player-visual-stage").pointerInput(onLyrics) {
-                detectTapGestures { onLyrics() }
+            BoxWithConstraints(Modifier.weight(1f).fillMaxWidth().testTag("player-visual-stage").pointerInput(onLyrics, showArtwork) {
+                detectTapGestures(onLongPress = { showArtwork() }, onTap = { onLyrics() })
             }, contentAlignment = Alignment.Center) {
                 val visualSize = minOf(370.dp, maxWidth, maxHeight)
                 Crossfade(lyrics, Modifier.fillMaxSize(), animationSpec = tween(240), label = "lyrics-cover") { showingLyrics ->
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        if (showingLyrics) LyricsPanel(vm, state, Modifier.fillMaxSize().padding(top = 8.dp, bottom = 32.dp), onLyrics)
+                        if (showingLyrics) LyricsPanel(vm, state, Modifier.fillMaxSize().padding(top = 8.dp, bottom = 32.dp), onLyrics, showArtwork)
                         else PlaybackVisual(vm, track, preferences.playbackStyle, spinning, !lyrics, progress, rotation,
-                            Modifier.size(visualSize), onLyrics)
+                            Modifier.size(visualSize), showArtwork, onLyrics)
                     }
                 }
             }
@@ -365,6 +368,7 @@ private fun PlayerScreen(vm: MusicViewModel, input: MusicState, wide: Boolean, l
         }
     }
     }
+    if (artworkPreview) ArtworkPreview(vm, track, dismissArtwork)
 }
 
 @Composable
@@ -403,13 +407,13 @@ private fun PlaybackControls(vm: MusicViewModel, state: MusicState, onQueue: () 
 }
 
 @Composable
-private fun LyricsPanel(vm: MusicViewModel, state: MusicState, modifier: Modifier, onBlank: () -> Unit = {}) {
+private fun LyricsPanel(vm: MusicViewModel, state: MusicState, modifier: Modifier, onBlank: () -> Unit = {}, onArtwork: () -> Unit = {}) {
     Box(modifier, contentAlignment = Alignment.Center) {
         when {
             state.lyricsLoading -> if (delayed(state.lyricsLoading, 350)) CircularProgressIndicator()
             state.lyricsError != null -> Text(state.lyricsError, color = Muted)
             state.lyrics.lines.isEmpty() -> Text("暂无歌词", color = Muted)
-            else -> LyricViewport(state.lyrics, state.position, vm::seek, onBlank, Modifier.fillMaxSize())
+            else -> LyricViewport(state.lyrics, state.position, vm::seek, onBlank, Modifier.fillMaxSize(), onArtwork)
         }
     }
 }
