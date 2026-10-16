@@ -181,7 +181,7 @@
   </style>
 </head>
 <body>
-  <div class="intro"><div><h1>野弦 · Android 原生布局</h1><p>未发布设计预览 · 示例曲库 · 无音频、无服务连接</p></div><div class="preview-controls"><div class="device-switch" aria-label="预览设备"><button data-device="phone" aria-pressed="true">手机</button><button data-device="tablet" aria-pressed="false">平板</button></div><span class="draft">UI 优化 / 未发布</span></div></div>
+  <div class="intro"><div><h1>野弦 · Android 原生布局</h1><p>交互设计预览 · 示例曲库 · 无音频、无服务连接</p></div><div class="preview-controls"><div class="device-switch" aria-label="预览设备"><button data-device="phone" aria-pressed="true">手机</button><button data-device="tablet" aria-pressed="false">平板</button></div><span class="draft">UI 优化 / 0.2.1</span></div></div>
   <div class="stage" id="stage">
     <div class="phone" id="prototype" data-appearance="light">
       <div class="status" aria-hidden="true"><span>9:41</span><span>▰ ▰ ▱</span></div>
@@ -313,7 +313,7 @@
       };
       const group = (title, body) => `<section class="settings-group"><h3>${title}</h3><div class="card">${body}</div></section>`;
       function settingsMarkup() {
-        return `${backHeader('设置')}<div class="settings-content">${group('账号', `<div class="list-entry">${icon('mine')}<span class="row-text"><strong>预览账号</strong><small>未连接服务器</small></span></div>`)}${group('播放', settingRow('quality'))}${group('外观与触感', settingRow('theme') + (preferences.theme === 'red' ? '' : settingRow('appearance')) + settingRow('icon') + `<button class="list-entry" data-action="haptics" role="switch" aria-checked="${preferences.haptics}">${icon('vibration')}<span class="row-text"><strong>轻触反馈</strong><small>遵循系统触感设置</small></span><span class="switch" aria-hidden="true"></span></button>`)}${group('本机缓存', settingRow('metadata') + settingRow('artwork') + settingRow('audio') + '<p class="settings-description">这里仅预览设置选项，不保存真实数据。正式客户端优先显示缓存，短时断网可播放已缓存音频片段。</p>')}${group('关于', '<div class="list-entry"><span class="row-text"><strong>野弦</strong><small>WildString · 0.2.0 · 未发布 UI</small></span></div>')}</div>`;
+        return `${backHeader('设置')}<div class="settings-content">${group('账号', `<div class="list-entry">${icon('mine')}<span class="row-text"><strong>预览账号</strong><small>未连接服务器</small></span></div>`)}${group('播放', settingRow('quality'))}${group('外观与触感', settingRow('theme') + (preferences.theme === 'red' ? '' : settingRow('appearance')) + settingRow('icon') + `<button class="list-entry" data-action="haptics" role="switch" aria-checked="${preferences.haptics}">${icon('vibration')}<span class="row-text"><strong>轻触反馈</strong><small>遵循系统触感设置</small></span><span class="switch" aria-hidden="true"></span></button>`)}${group('本机缓存', settingRow('metadata') + settingRow('artwork') + settingRow('audio') + '<p class="settings-description">这里仅预览设置选项，不保存真实数据。正式客户端优先显示缓存，短时断网可播放已缓存音频片段。</p>')}${group('关于', '<div class="list-entry"><span class="row-text"><strong>野弦</strong><small>WildString · 0.2.1 · 设计预览</small></span></div>')}</div>`;
       }
       function render() {
         if (renderedKey) scrollPositions.set(renderedKey, content.scrollTop);
