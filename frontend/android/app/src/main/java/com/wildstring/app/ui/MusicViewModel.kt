@@ -271,8 +271,8 @@ class MusicViewModel @Inject constructor(
         }
     }
     private fun showFavorite(track: Track) {
-        repository.knownTracks[track.id] = track
-        mutable.update { s -> s.copy(current = if (s.current?.id == track.id) track else s.current,
+        val published = repository.publishFavorite(track)
+        mutable.update { s -> s.copy(current = if (s.current?.id == track.id) published else s.current,
             tracks = s.tracks.map { if (it.id == track.id) it.copy(loved = track.loved) else it }) }
     }
     fun favorite(track: Track) = viewModelScope.launch {

@@ -442,3 +442,46 @@ def test_metadata_migration_and_backfill_commit_together(settings, monkeypatch):
     monkeypatch.setattr(edits, "apply_effective", original)
     db.initialize()
     assert LibraryRepository(db, settings.library_dir).tracks()["items"][0]["id"] == identity
+
+
+def test_invalid_json_shape_and_nested_relations_are_failures_not_worker_crashes(
+    settings, authenticated_client, monkeypatch
+):
+    music(settings, "invalid.flac", ["A"], ["A"])
+    scan_library(settings)
+    with authenticated_client(settings) as client:
+        providers = client.app.state.providers
+        providers.stop()
+        providers.exit.clear()
+        assert enable(client, proxy_mode="direct").status_code == 200
+
+        class Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                pass
+
+            def read(self, _limit):
+                return b"null"
+
+        class Opener:
+            def open(self, *_args, **_kwargs):
+                return Response()
+
+        monkeypatch.setattr("wildstring.providers.build_opener", lambda *_args: Opener())
+        with pytest.raises(ProviderError, match="provider_invalid_response"):
+            providers.request("https://musicbrainz.org/ws/2/recording")
+
+        def malformed(_provider, _key, url, *_args):
+            return (
+                {"recordings": [{"id": RECORDING}]}
+                if url.endswith("recording")
+                else {"id": RECORDING, "title": "候选", "artist-credit": [], "relations": [None]}
+            )
+
+        providers.cached = malformed
+        track = client.get("/api/v1/tracks").json()["items"][0]
+        suggestions, warnings = providers.suggestions(track)
+        assert suggestions == [] and warnings == ["musicbrainz_invalid_response"]
+        assert enable(client, public_url="http://[").status_code == 422

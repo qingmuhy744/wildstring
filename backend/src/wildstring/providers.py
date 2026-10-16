@@ -182,6 +182,8 @@ class Providers:
                 if len(raw) > (8 * 1024 * 1024 if image else 2 * 1024 * 1024):
                     raise ProviderError("provider_response_too_large", False)
                 result = raw if image else json.loads(raw)
+                if not image and not isinstance(result, dict):
+                    raise ProviderError("provider_invalid_response")
                 if isinstance(result, dict) and "error" in result:
                     code = int(result["error"])
                     raise ProviderError(
@@ -350,7 +352,7 @@ class Providers:
                                 cover,
                             )
                         )
-            except (ProviderError, KeyError, TypeError, ValueError) as error:
+            except (ProviderError, KeyError, TypeError, ValueError, AttributeError) as error:
                 warnings.append(
                     error.code
                     if isinstance(error, ProviderError)
@@ -383,7 +385,7 @@ class Providers:
                         None,
                     )
                 )
-            except (ProviderError, KeyError, TypeError, ValueError) as error:
+            except (ProviderError, KeyError, TypeError, ValueError, AttributeError) as error:
                 warnings.append(
                     error.code if isinstance(error, ProviderError) else "lastfm_invalid_response"
                 )
@@ -507,7 +509,7 @@ class Providers:
         if job:
             try:
                 self.process_job(job)
-            except (ProviderError, ValueError, TypeError, KeyError):
+            except (ProviderError, ValueError, TypeError, KeyError, AttributeError):
                 with self.database.connect(write=True) as connection:
                     connection.execute(
                         "UPDATE provider_jobs SET status='failed',error='provider_unavailable',updated_at=? WHERE id=?",
@@ -626,10 +628,14 @@ class Providers:
             if isinstance(report, list):
                 report = report[0] if len(report) == 1 else {}
             ignored = report.get("ignoredMessage")
-            if not isinstance(ignored, dict) or str(ignored.get("code")) != "0":
+            if not isinstance(ignored, dict):
+                raise ProviderError("lastfm_invalid_response")
+            if str(ignored.get("code")) != "0":
                 raise ProviderError("lastfm_ignored", False)
             status, error = "sent", None
-        except ProviderError as failure:
+        except (ProviderError, AttributeError, TypeError, KeyError, ValueError) as failure:
+            if not isinstance(failure, ProviderError):
+                failure = ProviderError("lastfm_invalid_response")
             error = failure.code
             status = (
                 "queued"
@@ -721,7 +727,10 @@ class Providers:
                 credentials.get("proxy_url") or self.secrets().get("proxy_url")
             ):
                 raise HTTPException(422, "proxy_not_configured")
-            parsed = urlsplit(body.public_url)
+            try:
+                parsed = urlsplit(body.public_url)
+            except ValueError:
+                raise HTTPException(422, "invalid_public_url") from None
             if body.public_url and (
                 parsed.scheme not in {"http", "https"}
                 or not parsed.hostname
@@ -949,7 +958,7 @@ class Providers:
                     )
                 if previous:
                     self.secrets({previous[0]: None})
-            except (ProviderError, KeyError, TypeError):
+            except (ProviderError, KeyError, TypeError, AttributeError):
                 raise HTTPException(502, "lastfm_auth_failed") from None
             finally:
                 with self.database.connect(write=True) as connection:
