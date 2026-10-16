@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api, type Track } from './api';
 
 export function useFavorites(revision: number, onError: (message: string) => void) {
@@ -6,12 +6,29 @@ export function useFavorites(revision: number, onError: (message: string) => voi
   const [busy, setBusy] = useState<Set<string>>(new Set());
   const [change, setChange] = useState(0);
   const [ready, setReady] = useState(false);
+  const current = useRef(ids);
+  const pending = useRef(new Set<string>());
+  const changed = useRef(new Set<string>());
+  const mounted = useRef(true);
   useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+  useEffect(() => {
+    changed.current.clear();
     const controller = new AbortController();
     api<{ ids: string[] }>('/favorites/ids', { signal: controller.signal })
       .then((result) => {
         if (!controller.signal.aborted) {
-          setIds(new Set(result.ids));
+          const next = new Set(result.ids);
+          for (const id of new Set([...changed.current, ...pending.current])) {
+            if (current.current.has(id)) next.add(id);
+            else next.delete(id);
+          }
+          current.current = next;
+          setIds(next);
           setReady(true);
         }
       })
@@ -21,29 +38,38 @@ export function useFavorites(revision: number, onError: (message: string) => voi
     return () => controller.abort();
   }, [revision, onError]);
   async function toggle(track: Track) {
-    if (busy.has(track.id)) return;
-    const loved = !ids.has(track.id);
+    if (!ready || pending.current.has(track.id)) return;
+    pending.current.add(track.id);
+    changed.current.add(track.id);
+    const loved = !current.current.has(track.id);
+    function apply(value: boolean) {
+      const next = new Set(current.current);
+      if (value) next.add(track.id);
+      else next.delete(track.id);
+      current.current = next;
+      if (mounted.current) setIds(next);
+    }
+    apply(loved);
     setBusy((previous) => new Set(previous).add(track.id));
     try {
       await api(`/tracks/${encodeURIComponent(track.id)}/favorite`, {
         method: 'PUT',
         body: JSON.stringify({ loved }),
       });
-      setIds((previous) => {
-        const next = new Set(previous);
-        if (loved) next.add(track.id);
-        else next.delete(track.id);
-        return next;
-      });
+      if (!mounted.current) return;
       setChange((value) => value + 1);
     } catch {
+      if (!mounted.current) return;
+      apply(!loved);
       onError('收藏未保存，请重试。');
     } finally {
-      setBusy((previous) => {
-        const next = new Set(previous);
-        next.delete(track.id);
-        return next;
-      });
+      pending.current.delete(track.id);
+      if (mounted.current)
+        setBusy((previous) => {
+          const next = new Set(previous);
+          next.delete(track.id);
+          return next;
+        });
     }
   }
   return { ids, busy, toggle, change, ready };
@@ -56,6 +82,7 @@ export function FavoriteButton({ track, favorites }: { track: Track; favorites: 
       className={`favorite-button icon-button ${loved ? 'is-loved' : ''}`}
       aria-label={`${loved ? '取消喜欢' : '喜欢'} ${track.title}`}
       aria-pressed={loved}
+      aria-busy={favorites.busy.has(track.id)}
       disabled={!favorites.ready || favorites.busy.has(track.id)}
       onClick={() => void favorites.toggle(track)}
       title={loved ? '取消喜欢' : '喜欢'}

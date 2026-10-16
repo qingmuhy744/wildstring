@@ -3,7 +3,7 @@
 import math
 import re
 import unicodedata
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import BinaryIO
 
@@ -12,6 +12,8 @@ from mutagen.flac import FLAC
 from mutagen.mp3 import MP3
 from mutagen.mp4 import MP4
 from mutagen.wave import WAVE
+
+from wildstring.library.tag_fields import TagReader
 
 SUPPORTED_SUFFIXES = {".mp3", ".flac", ".m4a"}
 
@@ -30,6 +32,7 @@ class Metadata:
     sample_rate: int | None
     channels: int | None
     has_cover: bool
+    details: dict = field(default_factory=dict)
 
 
 def normalize(value: str) -> str:
@@ -46,6 +49,7 @@ def read_metadata(source: BinaryIO, path: Path) -> Metadata:
     if not isinstance(audio, MP3 | FLAC | MP4 | WAVE):
         raise ValueError("Unsupported or invalid audio")
     tags = audio.tags or {}
+    reader = TagReader(audio)
 
     def values(id3: str, vorbis: str, mp4: str) -> list[str]:
         if isinstance(audio, MP3 | WAVE):
@@ -79,9 +83,9 @@ def read_metadata(source: BinaryIO, path: Path) -> Metadata:
     return Metadata(
         title=title or path.stem,
         title_source="tag" if title else "filename",
-        artists=values("TPE1", "artist", "\xa9ART"),
+        artists=reader.artists(),
         album=first("TALB", "album", "\xa9alb"),
-        album_artists=values("TPE2", "albumartist", "aART"),
+        album_artists=reader.artists(album=True),
         track_number=sequence("TRCK", "tracknumber", "trkn"),
         disc_number=sequence("TPOS", "discnumber", "disk"),
         duration_ms=round(duration * 1000),
@@ -89,4 +93,5 @@ def read_metadata(source: BinaryIO, path: Path) -> Metadata:
         sample_rate=getattr(audio.info, "sample_rate", None),
         channels=getattr(audio.info, "channels", None),
         has_cover=cover,
+        details=reader.details(),
     )

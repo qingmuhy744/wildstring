@@ -119,6 +119,7 @@ class AccountPlaybackTest {
                             }
                     }
                     if (path.endsWith("/lyrics")) return json("""{"kind":"synced","source":"user","lines":[{"time_ms":0,"text":"${lyric.get()}"},{"time_ms":6000,"text":"六秒后的人工歌词"}]}""")
+                    if (path.endsWith("/lastfm")) return json("""{"configured":false,"connected":false,"scrobble":false,"now_playing":false,"version":0}""")
                     if (path.endsWith("/listening")) return json("""{"accepted_ms":1000}""")
                     if (path.endsWith("/albums")) return json("""{"items":[{"id":"test-album","title":"同步测试专辑","artists":["合成音频"],"track_count":2,"cover_track_id":null}],"total":1,"limit":50,"offset":0}""")
                     if (path.endsWith("/tracks")) return json("""{"items":[${if (owner == "alice") lossless else lossless.replace("true", "false")},$lossy],"total":2,"limit":50,"offset":0}""")
@@ -167,12 +168,31 @@ class AccountPlaybackTest {
             assertFalse(compose.runOnIdle { vm.controller!!.playWhenReady })
             compose.onNodeWithText("歌词", useUnmergedTree = true).performClick()
             compose.onNodeWithText("六秒后的人工歌词").assertIsDisplayed()
+            // READY/bufferedPosition may still describe the previous quality while Media3 drains its loader.
+            // Establish a paused, non-loading, stable baseline before attributing new reads to lyric refresh.
+            var lastSnapshot: Pair<Int, Long>? = null
+            var stableSince = android.os.SystemClock.elapsedRealtime()
+            compose.waitUntil(20_000) {
+                val snapshot = compose.runOnIdle {
+                    val c = vm.controller!!
+                    if (!c.playWhenReady && !c.isPlaying && !c.isLoading && c.playbackState == Player.STATE_READY)
+                        requests.count { it.contains("/stream") } to c.currentPosition else null
+                }
+                val now = android.os.SystemClock.elapsedRealtime()
+                if (snapshot == null || snapshot != lastSnapshot) {
+                    lastSnapshot = snapshot; stableSince = now; false
+                } else now - stableSince >= 3_500
+            }
+            val entryBeforeRefresh = vm.state.value.entryId
+            val positionBeforeRefresh = compose.runOnIdle { vm.controller!!.currentPosition }
             val streamsBeforeRefresh = requests.count { it.contains("/stream") }
             lyric.set("网页修改后的人工歌词")
             compose.onNodeWithContentDescription("刷新歌词").performClick()
             compose.waitUntil(10_000) { vm.state.value.lyrics.lines.first().text == "网页修改后的人工歌词" }
             assertFalse(compose.runOnIdle { vm.controller!!.playWhenReady })
-            assertEquals(streamsBeforeRefresh, requests.count { it.contains("/stream") })
+            assertEquals(entryBeforeRefresh, vm.state.value.entryId)
+            assertEquals(positionBeforeRefresh, compose.runOnIdle { vm.controller!!.currentPosition })
+            assertEquals("Lyric refresh must not reopen a settled audio source: ${requests.toList()}", streamsBeforeRefresh, requests.count { it.contains("/stream") })
             capture("aac-lyrics-phone.png")
             // The backend's lossy passthrough must keep original audio and show the actual codec.
             val lossyTrack = gson.fromJson(lossy, Track::class.java)

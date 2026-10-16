@@ -65,9 +65,12 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
   const refreshLibrary = useCallback(() => setRevision((value) => value + 1), []);
   const [album, setAlbum] = useState<Album | null>(null);
   const [selectedArtist, setSelectedArtist] = useState<Artist | null>(null);
+  const [artistRole, setArtistRole] = useState('');
   const [artistView, setArtistView] = useState<'tracks' | 'albums'>('tracks');
   const [playlist, setPlaylist] = useState<Playlist | null>(null);
   const [result, setResult] = useState<Result | null>(null);
+  const playlistPending = useRef(new Set<string>());
+  const mutationEpoch = useRef(0);
   const [catalog, setCatalog] = useState<Playlist[]>([]);
   const [collectionsLoading, setCollectionsLoading] = useState(true);
   const [collectionRevision, setCollectionRevision] = useState(0);
@@ -117,6 +120,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
   useEffect(() => {
     const controller = new AbortController();
     setCollectionsLoading(true);
+    const epoch = mutationEpoch.current;
     async function load() {
       const lists: Playlist[] = [];
       let cursor = 0;
@@ -128,7 +132,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
         cursor += response.items.length;
         if (cursor >= response.total || !response.items.length) break;
       }
-      if (!controller.signal.aborted) {
+      if (!controller.signal.aborted && epoch === mutationEpoch.current) {
         setCatalog(lists);
         setPlaylist((current) =>
           current ? lists.find((item) => item.id === current.id) || current : null,
@@ -175,6 +179,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
       limit: album ? '200' : '50',
       offset: String(offset),
     });
+    const epoch = mutationEpoch.current;
     let path = '/tracks';
     if (activePlaylist) path = `/playlists/${activePlaylist.id}/tracks`;
     else if (playlistGrid) path = '/playlists';
@@ -184,6 +189,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
       if (album) parameters.set('album_id', album.id);
     } else if (album) path = `/albums/${album.id}/tracks`;
     else if (albumGrid) path = '/albums';
+    if (view === 'artists' && artistRole) parameters.set('role', artistRole);
     if (view === 'listening') {
       parameters.set('played_only', 'true');
       parameters.set('sort', statsSort);
@@ -197,7 +203,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
       signal: controller.signal,
     })
       .then((response) => {
-        if (controller.signal.aborted) return;
+        if (controller.signal.aborted || epoch !== mutationEpoch.current) return;
         if (response.total > 0 && offset >= response.total) {
           setOffset(Math.floor((response.total - 1) / response.limit) * response.limit);
           return;
@@ -222,6 +228,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
     album?.id,
     selectedArtist?.id,
     artistView,
+    artistRole,
     activePlaylist?.id,
     activePlaylist?.version,
     view === 'favorites' && !activePlaylist ? collectionsLoading : false,
@@ -285,6 +292,10 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
     setCollectionRevision((value) => value + 1);
   }
   async function addToPlaylist(track: Track, list: Playlist) {
+    if (playlistPending.current.has(list.id)) return;
+    playlistPending.current.add(list.id);
+    mutationEpoch.current++;
+    setNotice(`正在加入：${list.name}`);
     try {
       const updated = await api<Playlist>(`/playlists/${list.id}/tracks`, {
         method: 'POST',
@@ -295,33 +306,53 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
     } catch (reason) {
       setNotice(reason instanceof ApiError ? reason.message : '歌曲未加入歌单，请重试。');
       setCollectionRevision((value) => value + 1);
+    } finally {
+      playlistPending.current.delete(list.id);
     }
   }
   async function editPlaylistTrack(track: Track, direction?: -1 | 1) {
-    if (!activePlaylist) return;
+    if (!activePlaylist || playlistPending.current.has(activePlaylist.id)) return;
+    const list = activePlaylist;
+    playlistPending.current.add(list.id);
+    mutationEpoch.current++;
+    const before = result;
+    let optimistic = before;
+    if (before?.kind === 'tracks') {
+      const items = [...before.page.items];
+      const from = items.findIndex((item) => item.id === track.id);
+      if (from >= 0) {
+        if (direction) {
+          const to = from + direction;
+          if (to >= 0 && to < items.length) [items[from], items[to]] = [items[to], items[from]];
+        } else items.splice(from, 1);
+        optimistic = {
+          kind: 'tracks',
+          page: { ...before.page, items, total: before.page.total - (direction ? 0 : 1) },
+        };
+        setResult(optimistic);
+      }
+    }
+    setNotice(direction ? '正在保存顺序…' : '正在移除…');
     try {
       const updated = await api<Playlist>(
         direction
-          ? `/playlists/${activePlaylist.id}/move`
-          : `/playlists/${activePlaylist.id}/tracks/${track.id}?version=${activePlaylist.version}`,
+          ? `/playlists/${list.id}/move`
+          : `/playlists/${list.id}/tracks/${track.id}?version=${list.version}`,
         {
           method: direction ? 'POST' : 'DELETE',
           ...(direction
-            ? {
-                body: JSON.stringify({
-                  version: activePlaylist.version,
-                  track_id: track.id,
-                  direction,
-                }),
-              }
+            ? { body: JSON.stringify({ version: list.version, track_id: track.id, direction }) }
             : {}),
         },
       );
       updateList(updated);
       setNotice(direction ? '已调整歌单顺序' : '已从歌单移除');
     } catch (reason) {
-      setNotice(reason instanceof ApiError ? reason.message : '歌单未修改，请重试。');
+      setResult((current) => (current === optimistic ? before : current));
+      setNotice(reason instanceof ApiError ? reason.message : '歌单未修改，已恢复，请重试。');
       setCollectionRevision((value) => value + 1);
+    } finally {
+      playlistPending.current.delete(list.id);
     }
   }
   const operations: TrackOperations = {
@@ -655,6 +686,29 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
                   歌单
                 </button>
               </div>
+              {view === 'artists' && (
+                <label className="artist-role">
+                  参与角色{' '}
+                  <select
+                    aria-label="艺人参与角色"
+                    value={artistRole}
+                    onChange={(e) => {
+                      setArtistRole(e.target.value);
+                      setSelectedArtist(null);
+                      setAlbum(null);
+                      setOffset(0);
+                    }}
+                  >
+                    <option value="">全部角色</option>
+                    <option value="artist">歌曲艺人</option>
+                    <option value="album_artist">专辑艺人</option>
+                    <option value="vocalist">演唱</option>
+                    <option value="lyricist">作词</option>
+                    <option value="composer">作曲</option>
+                    <option value="arranger">编曲</option>
+                  </select>
+                </label>
+              )}
               {kind === 'tracks' && (
                 <button
                   className="primary"

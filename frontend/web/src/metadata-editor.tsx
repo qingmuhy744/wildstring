@@ -1,11 +1,28 @@
 import { useEffect, useRef, useState } from 'react';
 import { api, type Track } from './api';
+import { MetadataSuggestions } from './providers';
 import { LyricsEditor } from './lyrics-editor';
 import type { Player } from './player';
 
 export type MetadataFields = Pick<
   Track,
-  'title' | 'artists' | 'album' | 'album_artists' | 'track_number' | 'disc_number'
+  | 'title'
+  | 'artists'
+  | 'album'
+  | 'album_artists'
+  | 'track_number'
+  | 'disc_number'
+  | 'composers'
+  | 'lyricists'
+  | 'arrangers'
+  | 'vocalists'
+  | 'genres'
+  | 'track_total'
+  | 'disc_total'
+  | 'release_date'
+  | 'original_date'
+  | 'artist_credit'
+  | 'album_artist_credit'
 >;
 interface MetadataRecord {
   track_id: string;
@@ -13,6 +30,7 @@ interface MetadataRecord {
   observed: MetadataFields;
   effective: MetadataFields;
   overrides: Partial<MetadataFields>;
+  origins?: Record<string, string>;
 }
 const labels: Record<keyof MetadataFields, string> = {
   title: '歌名',
@@ -21,10 +39,21 @@ const labels: Record<keyof MetadataFields, string> = {
   album_artists: '专辑艺人',
   track_number: '曲号',
   disc_number: '碟号',
+  composers: '作曲',
+  lyricists: '作词',
+  arrangers: '编曲',
+  vocalists: '演唱',
+  genres: '风格',
+  track_total: '总曲数',
+  disc_total: '总碟数',
+  release_date: '发行日期',
+  original_date: '首次发行日期',
+  artist_credit: '艺人署名',
+  album_artist_credit: '专辑艺人署名',
 };
 const fields = Object.keys(labels) as (keyof MetadataFields)[];
 function display(value: unknown): string {
-  return Array.isArray(value) ? value.join('\n') : value === null ? '' : String(value);
+  return Array.isArray(value) ? value.join('\n') : value == null ? '' : String(value);
 }
 export function MetadataEditor({
   track,
@@ -38,7 +67,7 @@ export function MetadataEditor({
   onSaved: (id: string) => Promise<void>;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
-  const [tab, setTab] = useState<'metadata' | 'lyrics'>('metadata');
+  const [tab, setTab] = useState<'metadata' | 'lyrics' | 'online'>('metadata');
   const request = useRef<AbortController | null>(null);
   const [record, setRecord] = useState<MetadataRecord | null>(null);
   const [values, setValues] = useState<Record<string, string>>({});
@@ -72,27 +101,38 @@ export function MetadataEditor({
       node?.close();
     };
   }, [track.id]);
-  const overrides: Record<string, unknown> = {};
-  for (const key of overridden) {
+  const overrides: Record<string, unknown> = Object.fromEntries(
+    Object.entries(record?.overrides || {}).filter(
+      ([key]) => !fields.includes(key as keyof MetadataFields),
+    ),
+  );
+  for (const key of overridden.filter((k) => fields.includes(k as keyof MetadataFields))) {
     const value = values[key];
-    overrides[key] =
-      key === 'artists' || key === 'album_artists'
-        ? value
-            .split('\n')
-            .map((v) => v.trim())
-            .filter(Boolean)
-        : key === 'track_number' || key === 'disc_number'
-          ? value.trim()
-            ? Number(value)
-            : null
-          : value.trim() || (key === 'album' ? null : '');
+    overrides[key] = [
+      'artists',
+      'album_artists',
+      'composers',
+      'lyricists',
+      'arrangers',
+      'vocalists',
+      'genres',
+    ].includes(key)
+      ? value
+          .split('\n')
+          .map((v) => v.trim())
+          .filter(Boolean)
+      : ['track_number', 'disc_number', 'track_total', 'disc_total'].includes(key)
+        ? value.trim()
+          ? Number(value)
+          : null
+        : value.trim() || (['album', 'release_date', 'original_date'].includes(key) ? null : '');
   }
   function validate() {
     if (overridden.includes('title') && !values.title.trim()) {
       setError('请填写歌名。');
       return;
     }
-    for (const key of ['track_number', 'disc_number'])
+    for (const key of ['track_number', 'disc_number', 'track_total', 'disc_total'])
       if (
         overridden.includes(key) &&
         values[key] &&
@@ -148,10 +188,23 @@ export function MetadataEditor({
         <button aria-pressed={tab === 'metadata'} onClick={() => setTab('metadata')}>
           歌曲信息
         </button>
+        <button aria-pressed={tab === 'online'} onClick={() => setTab('online')}>
+          联网建议
+        </button>
         <button aria-pressed={tab === 'lyrics'} onClick={() => setTab('lyrics')}>
           歌词
         </button>
       </nav>
+      {tab === 'online' && record && (
+        <MetadataSuggestions
+          id={track.id}
+          version={record.version}
+          onApplied={async () => {
+            await onSaved(track.id);
+            load();
+          }}
+        />
+      )}
       <div hidden={tab !== 'metadata'}>
         {record ? (
           <>
@@ -165,10 +218,24 @@ export function MetadataEditor({
                     <span className="metadata-field-label">
                       {labels[key]}
                       <span className="metadata-source">
-                        {overridden.includes(key) ? '人工编辑' : '文件标签'}
+                        {overridden.includes(key)
+                          ? record.origins?.[key]?.startsWith('musicbrainz:')
+                            ? 'MusicBrainz'
+                            : record.origins?.[key]?.startsWith('lastfm:')
+                              ? 'Last.fm'
+                              : '人工编辑'
+                          : '文件标签'}
                       </span>
                     </span>
-                    {key === 'artists' || key === 'album_artists' ? (
+                    {[
+                      'artists',
+                      'album_artists',
+                      'composers',
+                      'lyricists',
+                      'arrangers',
+                      'vocalists',
+                      'genres',
+                    ].includes(key) ? (
                       <textarea
                         aria-label={labels[key]}
                         value={values[key] || ''}
@@ -178,12 +245,12 @@ export function MetadataEditor({
                           setValues({ ...values, [key]: e.target.value });
                           setOverridden((keys) => [...new Set([...keys, key])]);
                         }}
-                        placeholder="每行一位艺人"
+                        placeholder="每行一项"
                       />
                     ) : (
                       <input
                         aria-label={labels[key]}
-                        type={key.endsWith('number') ? 'number' : 'text'}
+                        type={key.endsWith('number') || key.endsWith('total') ? 'number' : 'text'}
                         min={1}
                         max={99999}
                         maxLength={1000}

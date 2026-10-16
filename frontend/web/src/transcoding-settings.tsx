@@ -101,6 +101,7 @@ export function TranscodingSettings() {
         保留天数（自上次使用）
         <input
           type="number"
+          disabled={!record || busy}
           min={1}
           max={365}
           required
@@ -112,6 +113,7 @@ export function TranscodingSettings() {
         缓存上限（MiB）
         <input
           type="number"
+          disabled={!record || busy}
           min={16}
           max={1048576}
           required
@@ -123,6 +125,7 @@ export function TranscodingSettings() {
         同时转码任务数
         <input
           type="number"
+          disabled={!record || busy}
           min={1}
           max={8}
           required

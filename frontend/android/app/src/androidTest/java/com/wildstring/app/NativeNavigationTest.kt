@@ -49,6 +49,7 @@ class NativeNavigationTest {
         image.recycle()
     }
     @Test fun nativeDestinationsPreserveCatalogAndAdaptToTablet() {
+        val connectionRequests = java.util.concurrent.ConcurrentLinkedQueue<String>()
         val requests = AtomicInteger()
         val streamRequests = AtomicInteger()
         val history = AtomicBoolean(true)
@@ -72,6 +73,7 @@ class NativeNavigationTest {
                 override fun dispatch(request: RecordedRequest): MockResponse {
                     val url = request.requestUrl!!
                     val path = url.encodedPath
+                    connectionRequests += path
                     fun json(value: String) = MockResponse().setHeader("Content-Type", "application/json").setBody(value)
                     val authenticated = request.getHeader("Cookie")?.contains("wildstring_session=navigation") == true
                     if (path.endsWith("/auth/status")) return json("""{"configured":true,"authenticated":$authenticated,"user":${if (authenticated) user else "null"}}""")
@@ -91,6 +93,7 @@ class NativeNavigationTest {
                     if (path.endsWith("/navigation-track")) return json(track)
                     if (path.endsWith("/lyrics")) return json("""{"kind":"none","lines":[]}""")
                     if (path.endsWith("/listening")) return json("""{"accepted_ms":1000}""")
+                    if (path.endsWith("/lastfm")) return json("""{"configured":false,"connected":false,"scrobble":false,"now_playing":false,"version":0}""")
                     requests.incrementAndGet()
                     return when {
                         path.endsWith("/albums") -> json("""{"items":[$albums],"total":20,"limit":50,"offset":0}""")
@@ -102,10 +105,11 @@ class NativeNavigationTest {
                     }
                 }
             }
-            server.start()
+            server.start(java.net.InetAddress.getByName("127.0.0.1"), 0)
+            val address = server.url("/").newBuilder().host("127.0.0.1").build().toString()
             var pauseObserver: MediaController? = null
             try {
-                compose.onAllNodes(hasSetTextAction())[0].performTextReplacement(server.url("/").toString())
+                compose.onAllNodes(hasSetTextAction())[0].performTextReplacement(address)
                 compose.onAllNodes(hasSetTextAction())[1].performTextReplacement("ui-test")
                 compose.onAllNodes(hasSetTextAction())[2].performTextReplacement("test-password-original")
                 compose.activityRule.scenario.onActivity { activity -> WindowCompat.getInsetsController(activity.window, activity.window.decorView).hide(WindowInsetsCompat.Type.ime()) }
@@ -113,7 +117,11 @@ class NativeNavigationTest {
                     if (fetchSemanticsNode().config[androidx.compose.ui.semantics.SemanticsProperties.ToggleableState] != androidx.compose.ui.state.ToggleableState.On) performClick()
                 }
                 compose.onNodeWithText("连接并登录").performScrollTo().performClick()
-                compose.waitUntil(15_000) { vm.state.value.albums.size == 20 && !vm.state.value.loading }
+                try {
+                    compose.waitUntil(15_000) { vm.state.value.albums.size == 20 && !vm.state.value.loading }
+                } catch (error: Throwable) {
+                    throw AssertionError("Initial connection failed: ${vm.state.value.error}; connecting=${vm.state.value.connecting}; requests=${connectionRequests.toList()}", error)
+                }
                 compose.onNodeWithTag("bottom-navigation").assertIsDisplayed()
                 compose.onNodeWithTag("nav-search").assertIsSelected()
                 compose.onNodeWithTag("discovery-albums").assertIsDisplayed()

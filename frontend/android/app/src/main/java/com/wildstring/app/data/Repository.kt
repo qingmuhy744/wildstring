@@ -31,6 +31,20 @@ class Repository @Inject constructor(val session: SessionStore, val client: OkHt
     private var cachedUrl: String? = null
     private var cachedApi: Api? = null
     val knownTracks = java.util.concurrent.ConcurrentHashMap<String, Track>()
+    private val favoriteClock = java.util.concurrent.atomic.AtomicLong()
+    private val favoriteVersions = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    @Synchronized private fun rememberTrack(track: Track, snapshot: Long? = null): Track {
+        val previous = knownTracks[track.id]
+        val merged = if (previous != null && (snapshot == null || (favoriteVersions[track.id] ?: 0L) > snapshot))
+            track.copy(loved = previous.loved) else track
+        knownTracks[track.id] = merged
+        return merged
+    }
+    @Synchronized private fun favoriteChanged(id: String) { favoriteVersions[id] = favoriteClock.incrementAndGet() }
+    @Synchronized fun publishFavorite(track: Track): Track {
+        favoriteChanged(track.id)
+        return (knownTracks[track.id] ?: track).copy(loved = track.loved).also { knownTracks[track.id] = it }
+    }
     @Synchronized fun api(): Api {
         val base = session.endpoint ?: throw IOException("请先连接服务器。")
         if (cachedUrl != base.toString()) {
@@ -75,19 +89,17 @@ class Repository @Inject constructor(val session: SessionStore, val client: OkHt
     }
     suspend fun tracks(query: String = "", offset: Int = 0, collection: String? = null, collectionId: String? = null, recent: Boolean = false): Page<Track> {
         val profile = session.cacheScope()
+        val snapshot = favoriteClock.get()
         val resource = if (collection != null && collectionId != null) url("api", "v1", collection, collectionId, "tracks") else url("api", "v1", "tracks")
         val target = if (recent) "$resource?played_only=true&sort=last_played_at" else resource
-        return api().tracks(target, query, offset = offset).also { page -> requireProfile(profile); page.items.forEach { knownTracks[it.id] = it } }
+        return api().tracks(target, query, offset = offset).let { page -> requireProfile(profile); page.copy(items = page.items.map { rememberTrack(it, snapshot) }) }
     }
     private fun requireProfile(profile: String?) { if (profile == null || session.cacheScope() != profile) throw CancellationException("会话已变化。") }
     private suspend fun <T> saved(key: String, type: Class<T>): T? = withContext(Dispatchers.IO) {
         cache.read(key)?.let { runCatching { gson.fromJson(String(it.bytes, Charsets.UTF_8), type) }.getOrNull() }
     }
     private suspend fun save(key: String, value: Any, profile: String?, revision: Long? = null) = withContext(Dispatchers.IO) { cache.put(key, gson.toJson(value).toByteArray(), profile, revision = revision) }
-    suspend fun cachedCatalog(query: CatalogQuery): CatalogPage? = saved("catalog:${query.key}", CatalogPage::class.java)?.also { remember(it.tracks) }
-    private suspend fun remember(tracks: List<Track>) {
-        tracks.forEach { knownTracks[it.id] = it }
-    }
+    suspend fun cachedCatalog(query: CatalogQuery): CatalogPage? = saved("catalog:${query.key}", CatalogPage::class.java)?.let { it.copy(tracks = it.tracks.map { track -> rememberTrack(track) }) }
     suspend fun catalog(query: CatalogQuery): CatalogPage {
         val profile = session.cacheScope()
         val revision = cache.catalogRevision
@@ -110,13 +122,14 @@ class Repository @Inject constructor(val session: SessionStore, val client: OkHt
         if (revision != cache.catalogRevision) throw CancellationException("曲库已更新。")
         return page
     }
-    suspend fun cachedTrack(id: String): Track? = saved("track:$id", Track::class.java)?.also { knownTracks[it.id] = it }
+    suspend fun cachedTrack(id: String): Track? = saved("track:$id", Track::class.java)?.let { rememberTrack(it) }
     suspend fun track(id: String): Track {
         val profile = session.cacheScope()
-        return try { api().track(url("api", "v1", "tracks", id)).also { requireProfile(profile); save("track:$id", it, profile); requireProfile(profile); knownTracks[it.id] = it } }
+        val snapshot = favoriteClock.get()
+        return try { api().track(url("api", "v1", "tracks", id)).let { requireProfile(profile); val merged = rememberTrack(it, snapshot); save("track:$id", merged, profile); requireProfile(profile); rememberTrack(merged, snapshot) } }
         catch (error: IOException) {
             if (error is javax.net.ssl.SSLException || session.cacheScope() != profile) throw error
-            (saved("track:$id", Track::class.java) ?: throw error).also { requireProfile(profile); knownTracks[it.id] = it }
+            (saved("track:$id", Track::class.java) ?: throw error).let { requireProfile(profile); rememberTrack(it) }
         }
     }
     suspend fun cachedLyrics(id: String): Lyrics? = saved("lyrics:$id", Lyrics::class.java)
@@ -126,9 +139,13 @@ class Repository @Inject constructor(val session: SessionStore, val client: OkHt
     }
     suspend fun favorite(track: Track): Track {
         val profile = session.cacheScope()
+        favoriteChanged(track.id)
         api().favorite(url("api", "v1", "tracks", track.id, "favorite"), FavoriteRequest(!track.loved)).close()
         requireProfile(profile)
-        return track.copy(loved = !track.loved).also { save("track:${it.id}", it, profile); requireProfile(profile); knownTracks[it.id] = it }
+        val updated = publishFavorite(track.copy(loved = !track.loved))
+        save("track:${updated.id}", updated, profile)
+        requireProfile(profile)
+        return publishFavorite(updated)
     }
     suspend fun logout() {
         val target = url("api", "v1", "auth", "logout")

@@ -24,6 +24,8 @@
 
 当前已有工程基座、SQLite 托管曲库、只读源导入与目录整理、本地用户登录、管理员/普通用户、歌曲/专辑/艺人视图、封面与本地滚动歌词，以及原音串流和网页队列。支持全屏播放、下一首播放、队列排序、♥ 收藏、普通/规则歌单与收听次数/时长记录。已增加管理入口、网页导入/扫描、任务历史和单曲元数据覆盖编辑；AI API 配置与连接测试已接入设置。现已接入自动发现、导入预检、待整理，以及 WAV/CUE 到逐曲 FLAC 的校验转换，见 [自动导入](contracts/automatic-import.md)。**批量整理、已有文件标签写回和 Agent 业务仍待实现。** 详见 [MVP 范围](docs/product/scope.md)。
 
+0.2.2 增加多创作人编辑与角色筛选、MusicBrainz / Last.fm 资料建议、CAA 封面候选和按用户授权的 Last.fm 收听同步；Web 与 Android 收藏先反馈、失败恢复。管理员在网页设置联网来源和代理，代理可跟随 Docker 的 `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` / `NO_PROXY`。功能入口、真实账号验证边界见 [联网资料与 Last.fm](contracts/metadata-providers.md)。
+
 服务端元数据整理将支持手动/批量编辑、差异预览和显式写回，减少使用 mp3tag 前后下载与上传整首音频的重复传输，见 [整理设计](docs/architecture/metadata-repair.md)。
 
 ## 本地开发

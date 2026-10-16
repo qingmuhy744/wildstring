@@ -1,6 +1,12 @@
 import type { Track } from './api';
 
-type Report = { session_id: string; track_id: string; listened_ms: number };
+type Report = {
+  session_id: string;
+  track_id: string;
+  listened_ms: number;
+  started_at: number;
+  state: 'playing' | 'paused' | 'ended';
+};
 type Session = Report & { clock: number; position: number; playing: boolean; lastSent: number };
 
 export class ListeningTracker {
@@ -14,6 +20,8 @@ export class ListeningTracker {
       session_id: crypto.randomUUID(),
       track_id: track.id,
       listened_ms: 0,
+      started_at: Date.now() / 1000,
+      state: 'paused',
       clock: performance.now(),
       position: 0,
       playing: false,
@@ -61,6 +69,8 @@ export class ListeningTracker {
         session_id: session.session_id,
         track_id: session.track_id,
         listened_ms: Math.floor(session.listened_ms),
+        started_at: session.started_at,
+        state: session.playing ? ('playing' as const) : ('paused' as const),
       };
       this.pending.set(session.session_id, payload);
       session.lastSent = session.listened_ms;
@@ -81,7 +91,7 @@ export class ListeningTracker {
             body: JSON.stringify(payload),
           });
           if (response.ok) {
-            if (this.pending.get(payload.session_id)?.listened_ms === payload.listened_ms)
+            if (this.pending.get(payload.session_id) === payload)
               this.pending.delete(payload.session_id);
             if (payload.listened_ms > 0)
               window.dispatchEvent(new Event('wildstring:listening-updated'));

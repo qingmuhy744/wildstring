@@ -1,3 +1,4 @@
+import { ProviderSettings } from './providers';
 import { UsersPanel } from './accounts';
 import { TranscodingSettings } from './transcoding-settings';
 import { HostSettings } from './host-settings';
@@ -400,6 +401,24 @@ export function Management({
                 </div>
                 {tracks ? (
                   <>
+                    <button
+                      disabled={busy || !tracks.items.length}
+                      onClick={() => {
+                        setBusy(true);
+                        setError('正在提交查询…');
+                        void api('/manage/providers/query', {
+                          method: 'POST',
+                          body: JSON.stringify({ track_ids: tracks.items.map((t) => t.id) }),
+                        })
+                          .then(() =>
+                            setError('已提交本页资料查询，可在歌曲编辑的联网建议中查看。'),
+                          )
+                          .catch(() => setError('查询未提交，请先启用联网资料或稍后重试。'))
+                          .finally(() => setBusy(false));
+                      }}
+                    >
+                      查询本页资料
+                    </button>
                     <ul className="manage-track-list">
                       {tracks.items.map((track) => (
                         <li key={track.id}>
@@ -474,6 +493,7 @@ export function Management({
             )}
             {tab === 'settings' && (
               <>
+                <ProviderSettings />
                 <AISettings />
                 <TranscodingSettings />
                 <HostSettings />

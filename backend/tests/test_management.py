@@ -178,8 +178,9 @@ def test_v5_migration_preserves_identity_and_personal_data(settings, authenticat
         assert record["effective"]["title"] == track["title"] and record["overrides"] == {}
         assert record["version"] == 1
         scan_library(settings, full=True)
-        assert client.get(metadata_url(track)).json()["version"] == 1
-        assert client.get("/api/v1/manage/overview").json()["schema_version"] == 11
+        # The first full scan observes the newly supported tag fields.
+        assert client.get(metadata_url(track)).json()["version"] == 2
+        assert client.get("/api/v1/manage/overview").json()["schema_version"] == 12
 
 
 def test_real_import_scan_progress_and_bytes_unchanged(settings, authenticated_client):

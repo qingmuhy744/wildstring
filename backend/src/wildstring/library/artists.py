@@ -6,16 +6,11 @@ import sqlite3
 
 from wildstring.library.metadata import normalize
 
-# UNION deduplicates the same artist credited on both the song and its album.
 ARTIST_CREDITS = """WITH artist_credits AS (
-    SELECT t.id AS track_id, artist_key(t.library_id, credit.value) AS artist_id,
-           credit.value AS name
-    FROM tracks t, json_each(t.artists) credit
-    WHERE t.library_id = :library_id AND t.status = 'available' AND trim(credit.value) != ''
-    UNION
-    SELECT t.id, artist_key(t.library_id, credit.value), credit.value
-    FROM tracks t, json_each(t.album_artists) credit
-    WHERE t.library_id = :library_id AND t.status = 'available' AND trim(credit.value) != ''
+    SELECT DISTINCT t.id AS track_id, p.id AS artist_id, p.name
+    FROM track_credits c JOIN tracks t ON t.id=c.track_id JOIN people p ON p.id=c.person_id
+    WHERE t.library_id = :library_id AND t.status = 'available'
+    AND (credit_role() IS NULL OR c.role=credit_role())
 )
 """
 ARTIST_SUMMARY = """SELECT c.artist_id AS id, min(c.name) AS name,
@@ -32,6 +27,7 @@ def artist_key(library_id: str, name: str) -> str:
     return hashlib.sha256(value.encode()).hexdigest()
 
 
-def configure_artist_queries(connection: sqlite3.Connection) -> None:
+def configure_artist_queries(connection: sqlite3.Connection, role: str | None = None) -> None:
     connection.create_function("artist_key", 2, artist_key, deterministic=True)
     connection.create_function("normalized", 1, normalize, deterministic=True)
+    connection.create_function("credit_role", 0, lambda: role)

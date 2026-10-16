@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 export const coverUrl = (trackId: string, size = 320) =>
   `/api/v1/tracks/${encodeURIComponent(trackId)}/cover?size=${size}`;
@@ -16,7 +16,13 @@ export function Cover({
   className?: string;
   onImage?: (image: HTMLImageElement) => void;
 }) {
-  const src = coverUrl(trackId, size);
+  const [revision, setRevision] = useState(0);
+  useEffect(() => {
+    const changed = () => setRevision((v) => v + 1);
+    window.addEventListener('wildstring:artwork-updated', changed);
+    return () => window.removeEventListener('wildstring:artwork-updated', changed);
+  }, []);
+  const src = coverUrl(trackId, size) + (revision ? `&revision=${revision}` : '');
   const [failed, setFailed] = useState('');
   return (
     <span className={`cover ${className}`} aria-hidden="true">

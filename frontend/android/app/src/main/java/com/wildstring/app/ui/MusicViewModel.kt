@@ -37,6 +37,7 @@ data class MusicState(
     val playbackError: String? = null, val lyrics: Lyrics = Lyrics(), val lyricsLoading: Boolean = false,
     val lyricsError: String? = null, val offline: Boolean = false, val hasContent: Boolean = false,
     val contentKey: String = "", val canGoBack: Boolean = false,
+    val pendingFavorites: Set<String> = emptySet(), val mutationMessage: String? = null,
 )
 
 @HiltViewModel
@@ -61,12 +62,14 @@ class MusicViewModel @Inject constructor(
     private val tabs = mutableMapOf<String, CatalogQuery>()
     private val history = mutableMapOf<String, ArrayDeque<CatalogQuery>>()
     private val favoriteJobs = mutableSetOf<String>()
+    private val playlistJobs = mutableSetOf<String>()
+    private val optimisticFavorites = mutableMapOf<String, Boolean>()
     private var queueSnapshot: List<QueueRow> = emptyList()
     private val pages = object : LinkedHashMap<String, CatalogPage>(24, .75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, CatalogPage>?) = size > 24
     }
     private fun query() = mutable.value.let { CatalogQuery(it.tab, it.kind, it.title, it.query, it.offset, it.collection, it.collectionId, it.activePlaylist) }
-    private fun MusicState.withPage(page: CatalogPage) = copy(tracks = page.tracks, albums = page.albums, artists = page.artists,
+    private fun MusicState.withPage(page: CatalogPage) = copy(tracks = page.tracks.map { track -> optimisticFavorites[track.id]?.let { track.copy(loved = it) } ?: track }, albums = page.albums, artists = page.artists,
         playlists = page.playlists, total = page.total, hasContent = true)
     suspend fun cacheUsage(): Triple<Long, Long, Long> = withContext(Dispatchers.IO) { val (metadata, art) = repository.cache.usage(); Triple(metadata, art, audioCache.bytes()) }
     fun clearCache() = viewModelScope.launch {
@@ -90,6 +93,7 @@ class MusicViewModel @Inject constructor(
                 .onFailure { mutable.update { it.copy(error = "播放器连接失败，请重新打开应用。") } }
         }, ContextCompat.getMainExecutor(context))
         viewModelScope.launch { repository.session.invalidations.collect {
+            authGeneration++; optimisticFavorites.clear();
             loadGeneration++; loadJob?.cancel(); lyricJob?.cancel(); lyricTrack = null; pages.clear(); tabs.clear(); history.clear(); repository.knownTracks.clear(); controller?.stop(); controller?.clearMediaItems()
             val message = invalidationMessage ?: "登录已失效，请重新登录。"
             invalidationMessage = null
@@ -125,7 +129,7 @@ class MusicViewModel @Inject constructor(
     }
     fun connect(server: String, username: String, password: String, localHttp: Boolean) = viewModelScope.launch {
         if (mutable.value.connecting) return@launch
-        authGeneration++
+        authGeneration++; optimisticFavorites.clear()
         mutable.update { it.copy(connecting = true, error = null) }
         try {
             repository.client.dispatcher.cancelAll()
@@ -147,6 +151,7 @@ class MusicViewModel @Inject constructor(
         finally { mutable.update { it.copy(connecting = false) } }
     }
     fun logout() = viewModelScope.launch {
+        authGeneration++; optimisticFavorites.clear()
         loadGeneration++; loadJob?.cancel(); lyricJob?.cancel(); lyricTrack = null; pages.clear(); tabs.clear(); history.clear(); repository.knownTracks.clear(); controller?.stop(); controller?.clearMediaItems()
         runCatching { repository.logout() }
         imageLoader.memoryCache?.clear()
@@ -265,28 +270,91 @@ class MusicViewModel @Inject constructor(
             if (toIndex in 0 until c.mediaItemCount && from != toIndex) c.moveMediaItem(from, toIndex)
         }
     }
+    private fun showFavorite(track: Track) {
+        val published = repository.publishFavorite(track)
+        mutable.update { s -> s.copy(current = if (s.current?.id == track.id) published else s.current,
+            tracks = s.tracks.map { if (it.id == track.id) it.copy(loved = track.loved) else it }) }
+    }
     fun favorite(track: Track) = viewModelScope.launch {
-        if (!favoriteJobs.add(track.id)) return@launch
-        try { val updated = repository.favorite(track); invalidateCatalog(); mutable.update { s -> s.copy(current = if (s.current?.id == track.id) updated else s.current, tracks = s.tracks.map { if (it.id == track.id) updated else it }) } }
+        val profile = repository.session.cacheScope()
+        val key = "$profile:${track.id}"
+        if (!favoriteJobs.add(key)) return@launch
+        val generation = authGeneration
+        val previous = repository.knownTracks[track.id] ?: track
+        optimisticFavorites[track.id] = !previous.loved
+        showFavorite(previous.copy(loved = !previous.loved))
+        mutable.update { it.copy(pendingFavorites = it.pendingFavorites + track.id) }
+        try {
+            val updated = repository.favorite(previous)
+            if (generation != authGeneration || profile != repository.session.cacheScope()) return@launch
+            showFavorite(updated)
+            invalidateCatalog()
+        }
         catch (e: CancellationException) { throw e }
-        catch (e: Exception) { mutable.update { it.copy(error = friendlyError(e)) } }
-        finally { favoriteJobs.remove(track.id) }
+        catch (e: Exception) {
+            if (generation == authGeneration && profile == repository.session.cacheScope()) {
+                showFavorite(previous)
+                mutable.update { it.copy(error = "收藏未保存，已恢复。${friendlyError(e)}") }
+            }
+        }
+        finally {
+            favoriteJobs.remove(key)
+            if (generation == authGeneration && profile == repository.session.cacheScope()) {
+                optimisticFavorites.remove(track.id)
+                mutable.update { it.copy(pendingFavorites = it.pendingFavorites - track.id) }
+            }
+        }
     }
     fun createPlaylist(name: String) = viewModelScope.launch {
-        try { repository.api().createPlaylist(PlaylistRequest(name.trim())); invalidateCatalog(); tabs.remove("mine"); if (mutable.value.tab == "mine") load() else navigate("mine") }
+        val generation = authGeneration
+        val profile = repository.session.cacheScope()
+        if (!playlistJobs.add("create")) return@launch
+        mutable.update { it.copy(mutationMessage = "正在建立歌单…") }
+        try {
+            repository.api().createPlaylist(PlaylistRequest(name.trim()))
+            if (generation == authGeneration && profile == repository.session.cacheScope()) {
+                invalidateCatalog(); tabs.remove("mine")
+                mutable.update { it.copy(mutationMessage = "歌单已建立") }
+                if (mutable.value.tab == "mine") load() else navigate("mine")
+            }
+        }
         catch (e: CancellationException) { throw e }
-        catch (e: Exception) { mutable.update { it.copy(error = friendlyError(e)) } }
+        catch (e: Exception) { if (generation == authGeneration && profile == repository.session.cacheScope()) mutable.update { it.copy(mutationMessage = null, error = friendlyError(e)) } }
+        finally { playlistJobs.remove("create") }
     }
     fun renamePlaylist(playlist: Playlist, name: String) = viewModelScope.launch {
-        try { val updated = repository.api().renamePlaylist(repository.url("api", "v1", "playlists", playlist.id), RenamePlaylist(name.trim(), playlist.version)); invalidateCatalog(); show(query().copy(playlist = updated, title = updated.name)) }
+        if (!playlistJobs.add(playlist.id)) return@launch
+        val generation = authGeneration
+        val profile = repository.session.cacheScope()
+        fun apply(value: Playlist) { mutable.update { s -> s.copy(
+            activePlaylist = if (s.activePlaylist?.id == value.id) value else s.activePlaylist,
+            title = if (s.activePlaylist?.id == value.id) value.name else s.title,
+            playlists = s.playlists.map { if (it.id == value.id) value else it }) } }
+        apply(playlist.copy(name = name.trim()))
+        try {
+            val updated = repository.api().renamePlaylist(repository.url("api", "v1", "playlists", playlist.id), RenamePlaylist(name.trim(), playlist.version))
+            if (generation == authGeneration && profile == repository.session.cacheScope()) { apply(updated); invalidateCatalog() }
+        }
         catch (e: CancellationException) { throw e }
-        catch (e: Exception) { mutable.update { it.copy(error = friendlyError(e)) }; load() }
+        catch (e: Exception) { if (generation == authGeneration && profile == repository.session.cacheScope()) { apply(playlist); mutable.update { it.copy(error = "歌单未保存，已恢复。${friendlyError(e)}") } } }
+        finally { playlistJobs.remove(playlist.id) }
     }
     suspend fun playlistsForAdd(): List<Playlist> = repository.api().playlists().items.filter { it.kind == "manual" }
     fun addToPlaylist(track: Track, playlist: Playlist) = viewModelScope.launch {
-        try { repository.api().addTracks(repository.url("api", "v1", "playlists", playlist.id, "tracks"), AddTracks(playlist.version, listOf(track.id))); invalidateCatalog(); if (mutable.value.tab == "mine") load() }
+        if (!playlistJobs.add(playlist.id)) return@launch
+        val generation = authGeneration
+        val profile = repository.session.cacheScope()
+        mutable.update { it.copy(mutationMessage = "正在加入：${playlist.name}") }
+        try {
+            repository.api().addTracks(repository.url("api", "v1", "playlists", playlist.id, "tracks"), AddTracks(playlist.version, listOf(track.id)))
+            if (generation == authGeneration && profile == repository.session.cacheScope()) {
+                invalidateCatalog(); mutable.update { it.copy(mutationMessage = "已加入：${playlist.name}") }
+                if (mutable.value.tab == "mine") load()
+            }
+        }
         catch (e: CancellationException) { throw e }
-        catch (e: Exception) { mutable.update { it.copy(error = friendlyError(e)) } }
+        catch (e: Exception) { if (generation == authGeneration && profile == repository.session.cacheScope()) mutable.update { it.copy(mutationMessage = null, error = friendlyError(e)) } }
+        finally { playlistJobs.remove(playlist.id) }
     }
     private fun rebuildQueue() {
         val c = controller
@@ -296,7 +364,7 @@ class MusicViewModel @Inject constructor(
         val c = controller ?: return
         val item = c.currentMediaItem
         val id = item?.mediaMetadata?.extras?.getString("track_id")
-        val track = id?.let { repository.knownTracks[it] }
+        val track = id?.let { repository.knownTracks[it] }?.let { t -> optimisticFavorites[t.id]?.let { t.copy(loved = it) } ?: t }
         val queue = queueSnapshot
         mutablePosition.value = c.currentPosition.coerceAtLeast(0)
         mutable.update { it.copy(current = track, playing = c.isPlaying, buffering = c.playbackState == Player.STATE_BUFFERING,

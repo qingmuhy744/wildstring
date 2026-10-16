@@ -28,7 +28,8 @@ data class PlaylistRequest(val name: String, val kind: String = "manual")
 data class RenamePlaylist(val name: String, val version: Int)
 data class AddTracks(val version: Int, @SerializedName("track_ids") val trackIds: List<String>)
 data class ListeningRequest(@SerializedName("session_id") val sessionId: String,
-    @SerializedName("track_id") val trackId: String, @SerializedName("listened_ms") val listenedMs: Long)
+    @SerializedName("track_id") val trackId: String, @SerializedName("listened_ms") val listenedMs: Long,
+    @SerializedName("started_at") val startedAt: Double? = null, val state: String = "paused")
 fun formatTime(ms: Long): String {
     val seconds = ms.coerceAtLeast(0) / 1000
     return "%d:%02d".format(seconds / 60, seconds % 60)
@@ -38,3 +39,10 @@ internal data class AudioOutput(val codec: String, @SerializedName("bitrate_kbps
 internal data class PlaybackPlan(val mode: String, val reason: String?, val output: AudioOutput,
     @SerializedName("duration_ms") val durationMs: Long, @SerializedName("start_ms") val startMs: Long,
     @SerializedName("stream_url") val streamUrl: String)
+
+
+data class LastfmStatus(val configured: Boolean, val connected: Boolean, val username: String?,
+    val scrobble: Boolean, @SerializedName("now_playing") val nowPlaying: Boolean,
+    @SerializedName("needs_auth") val needsAuth: Boolean = false, val version: Int)
+data class LastfmPreferences(val version: Int, val scrobble: Boolean, @SerializedName("now_playing") val nowPlaying: Boolean)
+data class AuthorizationUrl(val url: String)

@@ -3,6 +3,8 @@
 import hashlib
 import io
 import os
+import re
+from contextlib import suppress
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
@@ -123,7 +125,35 @@ class TrackAssets:
                 temporary.unlink(missing_ok=True)
         return result
 
-    def cover(self, track_id: str, size: int = 320) -> tuple[bytes, str] | None:
+    def cover(
+        self, track_id: str, size: int = 320, *, inherit: bool = True
+    ) -> tuple[bytes, str] | None:
+        with self.repository.database.connect() as connection:
+            choice = connection.execute(
+                "SELECT filename FROM artwork_choices WHERE track_id=?", (track_id,)
+            ).fetchone()
+        if choice and choice[0] and re.fullmatch("[a-f0-9]{64}", choice[0]):
+            with suppress(OSError):
+                data = (self.repository.database.path.parent / "artwork" / choice[0]).read_bytes()
+                if result := self.thumbnail(data, size):
+                    return result, "chosen"
+        result = self.local_cover(track_id, size)
+        if result or not inherit:
+            return result
+        with self.repository.database.connect() as connection:
+            siblings = connection.execute(
+                "SELECT id FROM tracks WHERE id<>? AND album_id=(SELECT album_id FROM tracks WHERE id=?) AND status='available' AND (has_cover=1 OR EXISTS(SELECT 1 FROM artwork_choices a WHERE a.track_id=tracks.id AND a.filename IS NOT NULL)) ORDER BY coalesce(disc_number,1),coalesce(track_number,99999),id LIMIT 20",
+                (track_id, track_id),
+            ).fetchall()
+        for sibling in siblings:
+            try:
+                if result := self.cover(sibling[0], size, inherit=False):
+                    return result[0], "album"
+            except HTTPException:
+                continue
+        return None
+
+    def local_cover(self, track_id: str, size: int = 320) -> tuple[bytes, str] | None:
         relative, audio = self.source(track_id)
         embedded = []
         if isinstance(audio, FLAC):

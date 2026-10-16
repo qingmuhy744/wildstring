@@ -59,6 +59,7 @@ private val LocalSettingsFeedback = staticCompositionLocalOf<() -> Unit> { {} }
                     supportingContent = { Text(state.server) }, leadingContent = { Icon(Icons.Default.AccountCircle, null) })
                 if (state.account != null) SettingsAction("修改密码", Icons.Default.Lock) { password = true }
             }
+            SettingsGroup("Last.fm") { LastfmSettings(vm) }
             SettingsGroup("播放") {
                 SettingsChoice("播放音质", if (preferences.aacBitrate == 0) "原音" else "AAC · ${preferences.aacBitrate} kbps", Icons.Default.GraphicEq,
                     com.wildstring.app.data.PlaybackRequest.bitrates.map { it to if (it == 0) "原音" else "AAC · $it kbps" }, preferences.aacBitrate,

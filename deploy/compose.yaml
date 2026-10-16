@@ -7,11 +7,17 @@ services:
       args:
         HTTP_PROXY: ${DOCKER_HTTP_PROXY:-}
         HTTPS_PROXY: ${DOCKER_HTTPS_PROXY:-}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     init: true
     restart: unless-stopped
     ports:
       - "127.0.0.1:${WILDSTRING_PORT:-18780}:8000"
     environment:
+      HTTP_PROXY: ${HTTP_PROXY:-}
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+      ALL_PROXY: ${ALL_PROXY:-}
+      NO_PROXY: ${NO_PROXY:-127.0.0.1,localhost}
       WILDSTRING_ENVIRONMENT: production
       WILDSTRING_DATA_DIR: /data
       WILDSTRING_MUSIC_DIR: /music

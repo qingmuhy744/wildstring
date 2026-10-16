@@ -60,6 +60,7 @@ class PlaybackService : MediaSessionService() {
     private val saveMutex = Mutex()
     private val executor = MoreExecutors.listeningDecorator(Executors.newFixedThreadPool(2))
     private var clock = ListeningClock()
+    private var listeningStarted = System.currentTimeMillis() / 1000.0
     private var listeningId = UUID.randomUUID().toString()
     private var listeningTrack: String? = null
     private var listeningEntry: String? = null
@@ -95,7 +96,7 @@ class PlaybackService : MediaSessionService() {
                 if (mediaItem?.mediaId == listeningEntry && reason == Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED) return
                 listeningEntry = mediaItem?.mediaId
                 report()
-                clock = ListeningClock(); sentMs = 0; listeningId = UUID.randomUUID().toString()
+                clock = ListeningClock(); sentMs = 0; listeningId = UUID.randomUUID().toString(); listeningStarted = System.currentTimeMillis() / 1000.0
                 listeningTrack = mediaItem?.mediaMetadata?.extras?.getString("track_id")
                 clock.reset(SystemClock.elapsedRealtime(), player.currentPosition, player.isPlaying)
                 persist()
@@ -140,7 +141,7 @@ class PlaybackService : MediaSessionService() {
         val id = listeningTrack ?: return
         val value = clock.totalMs
         if (value <= sentMs) return
-        val report = ListeningRequest(listeningId, id, value)
+        val report = ListeningRequest(listeningId, id, value, listeningStarted, if (player.isPlaying) "playing" else "paused")
         sentMs = value
         scope.launch {
             try { repository.api().listening(report).close() }

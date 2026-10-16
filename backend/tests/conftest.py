@@ -45,8 +45,28 @@ def authenticated_client():
 
 def restore_v7_account_layout(connection):
     """Reconstruct the actual historical layout before exercising an older migration."""
-    password = connection.execute("SELECT password_hash FROM users WHERE id='admin'").fetchone()[0]
     connection.execute("DROP VIEW personal_tracks")
+    for table in (
+        "metadata_suggestions",
+        "provider_jobs",
+        "provider_seen",
+        "provider_settings",
+        "provider_cache",
+        "provider_limits",
+        "lastfm_auth",
+        "lastfm_outbox",
+        "lastfm_users",
+        "metadata_origins",
+        "metadata_history",
+        "artwork_choices",
+        "track_credits",
+        "people",
+    ):
+        connection.execute(f"DROP TABLE {table}")
+    connection.execute("ALTER TABLE tracks DROP COLUMN extra")
+    connection.execute("ALTER TABLE listening_sessions DROP COLUMN client_started_at")
+    connection.execute("ALTER TABLE listening_sessions DROP COLUMN playback_state")
+    password = connection.execute("SELECT password_hash FROM users WHERE id='admin'").fetchone()[0]
     connection.execute("DROP TABLE user_track_state")
     connection.execute("DROP INDEX one_favorites_playlist")
     connection.execute("DROP INDEX playlists_owner")
