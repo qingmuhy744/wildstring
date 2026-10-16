@@ -7,6 +7,7 @@ import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.ViewCompat
 import androidx.lifecycle.ViewModelProvider
 import androidx.test.platform.app.InstrumentationRegistry
 import com.wildstring.app.ui.MusicViewModel
@@ -154,6 +155,7 @@ class NativeNavigationTest {
                 capture("native-tablet-library.png")
                 shell("wm size reset"); shell("wm density reset")
                 compose.waitUntil(15_000) { compose.onAllNodesWithTag("bottom-navigation").fetchSemanticsNodes().isNotEmpty() }
+                capture("native-phone-library-restored.png")
                 compose.onNodeWithTag("album-grid").performScrollToIndex(16)
                 compose.onNodeWithTag("nav-search").performClick()
                 compose.onNodeWithTag("catalog-search").performTextInput("测试")
@@ -161,7 +163,13 @@ class NativeNavigationTest {
                 compose.onNodeWithTag("catalog-search").assert(hasText("", substring = false))
                 assertEquals("", vm.state.value.query)
                 compose.onNodeWithTag("catalog-search").performImeAction()
+                // Hiding the IME moves the bottom bar. Do not inject a tap using its old bounds.
+                compose.waitUntil(15_000) { compose.runOnIdle {
+                    ViewCompat.getRootWindowInsets(compose.activity.window.decorView)?.isVisible(WindowInsetsCompat.Type.ime()) == false
+                } }
+                InstrumentationRegistry.getInstrumentation().uiAutomation.waitForIdle(300, 5_000)
                 compose.onNodeWithTag("nav-mine").performClick()
+                compose.onNodeWithTag("nav-mine").assertIsSelected()
                 compose.waitUntil(15_000) { vm.state.value.playlists.isNotEmpty() }
                 compose.onNodeWithText("布局测试歌单").assertIsDisplayed()
                 capture("native-phone-mine.png")
