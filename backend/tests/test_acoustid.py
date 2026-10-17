@@ -426,3 +426,45 @@ def test_fingerprint_timeout_kills_decoder_and_does_not_cache(settings, monkeypa
     assert process.killed
     with repo.database.connect() as connection:
         assert connection.execute("SELECT count(*) FROM provider_cache").fetchone()[0] == 0
+
+
+@pytest.mark.parametrize(
+    ("code", "diagnostic", "payload", "accepted"),
+    [
+        (3, b"ERROR: Error decoding audio frame (End of file)\n", True, True),
+        (3, b"ERROR: Error decoding audio frame (Invalid data)\n", True, False),
+        (3, b"ERROR: Error decoding audio frame (End of file)\n", False, False),
+        (2, b"ERROR: Error decoding audio frame (End of file)\n", True, False),
+    ],
+)
+def test_debian_short_audio_eof_requires_exact_diagnostic_and_valid_fingerprint(
+    settings, monkeypatch, code, diagnostic, payload, accepted
+):
+    path = settings.library_dir / "audio.flac"
+    shutil.copyfile(FIXTURES / "lossless.flac", path)
+    scan_library(settings)
+    repo = LibraryRepository(Database(settings.data_dir), settings.library_dir)
+    identity = repo.tracks()["items"][0]["id"]
+
+    class Process:
+        returncode = code
+
+        def poll(self):
+            return self.returncode
+
+    expected = {"duration": 12, "fingerprint": "fixture-fingerprint"}
+
+    def popen(*_args, **kwargs):
+        kwargs["stdout"].write(json.dumps(expected if payload else {}).encode())
+        kwargs["stderr"].write(diagnostic)
+        return Process()
+
+    monkeypatch.setattr("wildstring.fingerprints.shutil.which", lambda _: "/fixture/fpcalc")
+    monkeypatch.setattr("wildstring.fingerprints.subprocess.Popen", popen)
+    if accepted:
+        assert calculate(repo, identity, Event()) == expected
+    else:
+        with pytest.raises(FingerprintError, match="fingerprint_failed"):
+            calculate(repo, identity, Event())
+        with repo.database.connect() as connection:
+            assert connection.execute("SELECT count(*) FROM provider_cache").fetchone()[0] == 0

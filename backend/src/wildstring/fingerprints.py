@@ -63,11 +63,11 @@ def calculate(repository, track_id, stopping):
                 raise FingerprintError("fingerprint_platform_unsupported")
             # Passing a held file descriptor preserves seeking (notably MP4), while avoiding
             # shell interpolation, symlink races and re-opening an arbitrary pathname.
-            with TemporaryFile() as output:
+            with TemporaryFile() as output, TemporaryFile() as diagnostic:
                 process = subprocess.Popen(
                     [tool, "-json", "-length", "120", f"/dev/fd/{source.fileno()}"],
                     stdout=output,
-                    stderr=subprocess.DEVNULL,
+                    stderr=diagnostic,
                     pass_fds=(source.fileno(),),
                 )
                 deadline = time.monotonic() + 90
@@ -76,7 +76,14 @@ def calculate(repository, track_id, stopping):
                         raise FingerprintError("worker_stopped")
                     if time.monotonic() > deadline:
                         raise FingerprintError("fingerprint_timeout")
-                if process.returncode != 0:
+                diagnostic.seek(0)
+                # Debian's Chromaprint 1.5 / FFmpeg combination reports normal EOF as
+                # exit 3 despite producing a complete result for short audio. Accept
+                # only that exact diagnostic; other decode errors remain failures.
+                normal_eof = process.returncode == 3 and diagnostic.read(4097).strip() == (
+                    b"ERROR: Error decoding audio frame (End of file)"
+                )
+                if process.returncode != 0 and not normal_eof:
                     raise FingerprintError("fingerprint_failed")
                 if output.tell() > 65536:
                     raise FingerprintError("fingerprint_invalid_output")
