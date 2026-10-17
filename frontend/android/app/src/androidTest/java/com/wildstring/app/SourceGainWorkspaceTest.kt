@@ -39,7 +39,7 @@ class SourceGainWorkspaceTest {
                         if (request.method == "PUT") { if (body.text("scope") == "album") { assertEquals(albumVersion.toLong(), body.number("version")); album = body.get("gain_db").asDouble; albumVersion++ } else { assertEquals(trackVersion.toLong(), body.number("version")); track = body.get("gain_db").asDouble; trackVersion++ } }
                         json(gain())
                     }
-                    path == "/api/v1/manage/source-plugins/fixture-source" -> { assertEquals(pluginVersion.toLong(), body.number("version")); enabled = body.flag("enabled"); pluginVersion++; json("{}") }
+                    path == "/api/v1/manage/source-plugins/fixture-source" -> { assertEquals(pluginVersion.toLong(), body.number("version")); enabled = body.flag("enabled"); pluginVersion++; json("{}").setBodyDelay(350, java.util.concurrent.TimeUnit.MILLISECONDS) }
                     path == "/api/v1/manage/source-plugins" -> json("""{"items":[{"id":"fixture-source","name":"合成来源插件","plugin_version":"1.0.0","version":$pluginVersion,"license":"GPL-3.0-only","upstream":"https://example.com/plugin","available":true,"enabled":$enabled,"metadata_enabled":true,"lyrics_enabled":true,"priority":50,"config":{},"settings":[]}]}""")
                     path.endsWith("/albums") || path.endsWith("/tracks") -> json("""{"items":[],"total":0,"limit":50,"offset":0}""")
                     else -> json("{}").setResponseCode(404)
@@ -72,6 +72,7 @@ class SourceGainWorkspaceTest {
             compose.onAllNodes(isToggleable()).onFirst().performClick()
             compose.onNodeWithText("保存 合成来源插件").performScrollTo().performClick()
             compose.waitUntil(10_000) { fixture.enabled }
+            compose.waitUntil(20_000) { compose.onAllNodesWithText("插件设置已保存。").fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithText("插件设置已保存。").performScrollTo().assertExists()
             capture("source-plugins-native.png")
         }
@@ -85,6 +86,7 @@ class SourceGainWorkspaceTest {
             compose.onNodeWithText("整张专辑增减 dB").performScrollTo().performTextReplacement("-3")
             compose.onNodeWithText("保存专辑调整").performScrollTo().performClick()
             compose.waitUntil(10_000) { fixture.album == -3.0 }
+            compose.waitUntil(20_000) { compose.onAllNodesWithText("手动调整已保存。").fetchSemanticsNodes().isNotEmpty() }
             compose.waitForIdle()
             compose.onNodeWithText("本曲额外微调 dB").performScrollTo().performTextReplacement("-2")
             compose.onNodeWithText("保存单曲调整").performScrollTo().performClick()
