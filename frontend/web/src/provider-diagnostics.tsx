@@ -6,9 +6,17 @@ export const providerNames: Record<string, string> = {
   lastfm: 'Last.fm',
   caa: 'Cover Art Archive',
   acoustid: 'AcoustID',
+  ai: '当前 AI 连接',
+  telegram: 'Telegram',
+  fpcalc: '本机指纹工具',
 };
 const reasons: Record<string, string> = {
   reachable: '服务可连接。',
+  image_download_failed: '封面 API 可访问，但图片下载未完成。',
+  image_decode_failed: '图片已下载，但无法解码为有效封面。',
+  credentials_invalid: '远端已响应，但凭据未通过验证。',
+  rate_limited: '远端正在限流，请稍后重试。',
+  unverified: '本次未验证此能力。',
   tls_eof: 'TLS 连接提前断开，请检查代理出口或尝试直接连接。',
   tls_error: 'TLS 连接或证书校验失败，请检查代理与服务端证书环境。',
   timeout: '连接超时，请检查代理出口或网络后重试。',
@@ -117,6 +125,15 @@ interface NetworkResult {
     http_status?: number;
     code: string;
     via_proxy: boolean;
+    checks?: {
+      name: string;
+      status: 'ok' | 'error' | 'unverified';
+      code: string;
+      elapsed_ms: number;
+      http_status?: number;
+      domain: string;
+      scope: string;
+    }[];
   }[];
 }
 export function ProviderNetworkTest({
@@ -230,6 +247,37 @@ export function ProviderNetworkTest({
                   </span>
                 </div>
                 <p>{providerReason(item.code, item.http_status)}</p>
+                {item.checks && (
+                  <ul className="network-checks">
+                    {item.checks.map((check, index) => (
+                      <li key={index}>
+                        <strong>
+                          {(
+                            {
+                              api: 'API 响应',
+                              credentials: '凭据验证',
+                              image_download: '图片下载',
+                              image_decode: '图片解码',
+                              text: '文本响应',
+                              structured: '结构化选歌',
+                              tools: '工具调用',
+                            } as Record<string, string>
+                          )[check.name] || check.name}
+                        </strong>
+                        <span>
+                          {check.status === 'ok'
+                            ? '已验证'
+                            : check.status === 'unverified'
+                              ? '未验证'
+                              : '失败'}{' '}
+                          · {check.domain} · {Math.round(check.elapsed_ms)} ms
+                          {check.http_status ? ` · HTTP ${check.http_status}` : ''}
+                        </span>
+                        <small>{check.scope}</small>
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </li>
             ))}
           </ul>

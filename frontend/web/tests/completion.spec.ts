@@ -159,6 +159,7 @@ test('每日推荐、偏好、本地AI回退、预览确认才保存歌单', asy
   await panel.getByRole('button', { name: '保存推荐偏好', exact: true }).click();
   await expect(panel.getByRole('status').first()).toContainText('偏好已保存');
   const before = (await (await page.request.get('/api/v1/playlists')).json()).total;
+  await panel.locator('.ai-discover > summary').click();
   await panel.getByLabel('找歌或生成歌单', { exact: true }).fill('晴天测试曲');
   await panel.getByRole('button', { name: '生成候选', exact: true }).click();
   await expect(panel.getByRole('status').filter({ hasText: '当前使用本地检索回退' })).toBeVisible();

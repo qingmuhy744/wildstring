@@ -33,6 +33,8 @@ class Repository @Inject constructor(val session: SessionStore, val client: OkHt
     private val gson = Gson()
     private var cachedUrl: String? = null
     private var cachedApi: Api? = null
+    private var cachedAgentKey: String? = null
+    private var cachedAgentApi: Api? = null
     val knownTracks = java.util.concurrent.ConcurrentHashMap<String, Track>()
     private val favoriteClock = java.util.concurrent.atomic.AtomicLong()
     private val favoriteVersions = java.util.concurrent.ConcurrentHashMap<String, Long>()
@@ -60,6 +62,20 @@ class Repository @Inject constructor(val session: SessionStore, val client: OkHt
             cachedUrl = key
         }
         return checkNotNull(cachedApi)
+    }
+    /** A lost assistant response can already have consumed model budget; do not resend POSTs. */
+    @Synchronized fun agentApi(): Api {
+        val request = session.requestState() ?: throw IOException("请先连接服务器。")
+        val key = "${request.endpoint}|${request.selection}"
+        if (cachedAgentKey != key) {
+            val scoped = client.newBuilder().retryOnConnectionFailure(false).apply {
+                interceptors().add(0, SelectionRequestInterceptor(request.selection) { session.requestState()?.selection })
+            }.build()
+            cachedAgentApi = Retrofit.Builder().baseUrl(request.endpoint).client(scoped)
+                .addConverterFactory(GsonConverterFactory.create(networkGson())).build().create(Api::class.java)
+            cachedAgentKey = key
+        }
+        return checkNotNull(cachedAgentApi)
     }
     fun url(vararg segments: String): String {
         val builder = (session.endpoint ?: throw IOException("请先连接服务器。")).newBuilder()
@@ -218,7 +234,8 @@ class Repository @Inject constructor(val session: SessionStore, val client: OkHt
         }
     }
 }
-fun friendlyError(error: Throwable): String = when (error) {
+fun friendlyError(error: Throwable): String = (when (error) {
+    is AgentApiException -> error.message ?: "操作未完成，请重试。"
     is HttpException -> when (error.code()) {
         400 -> when {
             error.response()?.errorBody()?.string()?.contains("current_password_incorrect") == true -> "当前密码不正确。"
@@ -237,4 +254,4 @@ fun friendlyError(error: Throwable): String = when (error) {
     is IllegalArgumentException -> error.message ?: "输入无效。"
     is IOException -> "无法连接服务器，请检查地址和网络。"
     else -> "操作未完成，请重试。"
-}
+}) + (if (error is HttpException) diagnosticId(error.response()?.headers()?.get("X-Wildstring-Trace-Id"))?.let { "\n诊断编号：$it" }.orEmpty() else "")

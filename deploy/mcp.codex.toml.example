@@ -1,0 +1,8 @@
+# Merge this table into your own Codex config; replace the absolute path.
+# URL and token are inherited from the launching process, never stored here.
+[mcp_servers.wildstring]
+command = "uv"
+args = ["run", "--frozen", "--project", "/absolute/path/to/wildstring/backend", "python", "-m", "wildstring.mcp_bridge"]
+env_vars = ["WILDSTRING_MCP_URL", "WILDSTRING_MCP_TOKEN"]
+startup_timeout_sec = 30
+tool_timeout_sec = 60

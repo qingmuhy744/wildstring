@@ -11,6 +11,7 @@ async function savedQueue(page: Page) {
 }
 
 test('真实257首专辑：跨API分页收齐队列，从第201首连续播放到202首', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('wildstring:playback-sync:admin', 'off'));
   await page.goto('/');
   await page.getByLabel('密码', { exact: true }).fill('disposable-browser-test-password');
   await page.getByRole('button', { name: '进入曲库' }).click();

@@ -52,6 +52,9 @@ private val LocalSettingsFeedback = staticCompositionLocalOf<() -> Unit> { {} }
     var password by remember { mutableStateOf(false) }
     var servers by remember { mutableStateOf(false) }
     var logout by remember { mutableStateOf(false) }
+    var assistant by remember { mutableStateOf(false) }
+    var diagnostics by remember { mutableStateOf(false) }
+    val inbox by vm.agent.inbox.collectAsStateWithLifecycle()
     LaunchedEffect(preferences, clearing) { while (true) { usage = vm.cacheUsage(); delay(2_000) } }
     fun mb(bytes: Long) = "%.1f MB".format(bytes / 1048576.0)
     CompositionLocalProvider(LocalSettingsFeedback provides tactile {}) {
@@ -63,7 +66,17 @@ private val LocalSettingsFeedback = staticCompositionLocalOf<() -> Unit> { {} }
                 if (state.account != null) SettingsAction("修改密码", Icons.Default.Lock) { password = true }
             }
             SettingsGroup("Last.fm") { LastfmSettings(vm) }
+            SettingsGroup("助手与通知") {
+                SettingsAction("野弦助手 / 通知与草案", Icons.Default.AutoAwesome) { assistant = true }
+                Text(if (inbox.owner == vm.repository.session.cacheScope() && inbox.unread > 0) "${inbox.unread} 条未读通知" else "对话找歌、确认草案、曲库巡检与 AI 连接",
+                    Modifier.padding(start = 16.dp, end = 16.dp, bottom = 16.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
             SettingsGroup("播放") {
+                SettingsAction("播放诊断", Icons.Default.Troubleshoot) { diagnostics = true }
+                val syncMode by vm.sharing.mode.collectAsStateWithLifecycle()
+                SettingsChoice("跨设备接续", when(syncMode) { "off" -> "关闭"; "auto" -> "自动恢复"; else -> "弹窗询问" }, Icons.Default.Devices,
+                    listOf("off" to "关闭", "ask" to "弹窗询问（默认）", "auto" to "自动恢复"), syncMode,
+                    "暂停时自动保存进度。发现其他设备的新记录时询问或恢复，载入后保持暂停。", vm::syncMode)
                 SettingsChoice("播放音质", if (preferences.aacBitrate == 0) "原音" else "AAC · ${preferences.aacBitrate} kbps", Icons.Default.GraphicEq,
                     com.wildstring.app.data.PlaybackRequest.bitrates.map { it to if (it == 0) "原音" else "AAC · $it kbps" }, preferences.aacBitrate,
                     "默认原音。选择 AAC 后，无损音源转码，有损音源直放。切换保留播放位置和暂停状态。", vm.settings::quality)
@@ -108,6 +121,8 @@ private val LocalSettingsFeedback = staticCompositionLocalOf<() -> Unit> { {} }
         }
     }
     if (servers) ServersScreen(vm) { servers = false }
+    if (assistant) FeatureDialog(vm, "assistant") { assistant = false }
+    if (diagnostics) PlaybackDiagnosticsDialog(vm) { diagnostics = false }
     if (logout) AlertDialog(onDismissRequest = { logout = false }, title = { Text("退出当前服务器？") }, text = { Text("将清除当前服务器在本机的登录和私密缓存，其他服务器的登录保留。") }, confirmButton = { TextButton({ logout = false; back(); vm.logout() }) { Text("退出登录") } }, dismissButton = { TextButton({ logout = false }) { Text("取消") } })
     if (password) PasswordDialog(vm) { password = false }
 }

@@ -6,7 +6,7 @@ import stat
 import pytest
 from fastapi.testclient import TestClient
 
-from wildstring import ai_config
+from wildstring import outbound
 from wildstring.main import create_app
 
 HEADERS = {"X-Wildstring-Client": "web"}
@@ -80,24 +80,32 @@ def test_probe_only_sends_minimal_request_and_sanitizes_failures(
     class Response:
         status = 200
 
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            pass
+
         def read(self, amount):
             assert amount == 65537
             return b'{"choices":[{"message":{"content":"OK"}}]}'
 
-    class Connection:
-        def __init__(self, host, port, timeout):
-            assert host == "model.example" and timeout == 12
+    class Opener:
+        def open(self, request, timeout):
+            from urllib.parse import urlsplit
 
-        def request(self, method, path, body, headers):
-            calls.append((method, path, json.loads(body), headers))
-
-        def getresponse(self):
+            assert urlsplit(request.full_url).hostname == "model.example" and timeout == 12
+            calls.append(
+                (
+                    request.get_method(),
+                    urlsplit(request.full_url).path,
+                    json.loads(request.data),
+                    request.headers,
+                )
+            )
             return Response()
 
-        def close(self):
-            pass
-
-    monkeypatch.setattr(ai_config.http.client, "HTTPSConnection", Connection)
+    monkeypatch.setattr(outbound, "build_opener", lambda *_: Opener())
     with authenticated_client(settings) as client:
         assert client.put(BASE, headers=HEADERS, json=payload()).status_code == 200
         assert client.post(BASE + "/test").status_code == 403
@@ -116,8 +124,8 @@ def test_probe_only_sends_minimal_request_and_sanitizes_failures(
         monkeypatch.setattr(Response, "read", lambda *_: b"[]")
         assert client.post(BASE + "/test", headers=HEADERS).status_code == 502
 
-        def unavailable(*_):
+        def unavailable(*_, **__):
             raise OSError(KEY)
 
-        monkeypatch.setattr(Connection, "getresponse", unavailable)
+        monkeypatch.setattr(Opener, "open", unavailable)
         assert KEY not in client.post(BASE + "/test", headers=HEADERS).text

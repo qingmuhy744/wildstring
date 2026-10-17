@@ -328,6 +328,9 @@ def test_v6_upgrade_preserves_existing_jobs_tracks_and_settings(settings):
         con.execute("DROP TABLE intake_items")
         con.execute("DROP TABLE intake_settings")
         con.execute("ALTER TABLE admin_jobs DROP COLUMN automatic")
+        from migration_support import pre18
+
+        pre18(con)
         con.execute("PRAGMA user_version=6")
     intake.database.initialize()
     assert [r["id"] for r in intake.repository.tracks()["items"]] == ids

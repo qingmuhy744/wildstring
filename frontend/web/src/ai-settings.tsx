@@ -85,7 +85,7 @@ export function AISettings() {
     <section className="management-card ai-settings" aria-label="AI 服务配置">
       <div className="management-section-heading">
         <div>
-          <h2>AI 服务</h2>
+          <h2>原有实例连接</h2>
           <p className="muted">
             接入兼容 Chat Completions 的 API。密钥仅保存在服务端，保存后可测试模型连接。
           </p>
@@ -197,7 +197,7 @@ export function AISettings() {
         </fieldset>
       </form>
       <p className="muted">
-        当前提供连接配置；自然语言找歌、整理 Agent 与 MCP 接入仍在开发规划中。
+        本配置以 legacy 连接出现在统一列表中；保存不会自动用于找歌或推荐，请在对应功能中明确选择。
       </p>
     </section>
   );

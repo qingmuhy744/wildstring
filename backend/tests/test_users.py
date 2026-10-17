@@ -254,6 +254,9 @@ def test_v7_upgrade_preserves_password_cookie_ids_and_existing_personal_data(
         connection.execute(
             "UPDATE tracks SET loved=1,loved_at='2026-10-15',play_count=9,listened_ms=12345,last_played_at='2026-10-15'"
         )
+        from migration_support import pre18
+
+        pre18(connection)
         connection.execute("PRAGMA user_version=7")
     database.initialize()
     with TestClient(create_app(settings)) as client:

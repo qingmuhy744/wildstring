@@ -12,7 +12,7 @@ import shutil
 import sqlite3
 import threading
 import time
-from contextlib import suppress
+from contextlib import contextmanager, suppress
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Annotated, Literal
@@ -20,7 +20,6 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode, urlsplit
 from urllib.request import (
     HTTPRedirectHandler,
-    ProxyHandler,
     Request,
     build_opener,
     getproxies_environment,
@@ -32,21 +31,44 @@ from fastapi.responses import HTMLResponse, Response
 from filelock import FileLock, Timeout
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
+from wildstring.diagnostics import record_event, trace_context
 from wildstring.fingerprints import FingerprintError, calculate
 from wildstring.library.edits import MetadataEditor, MetadataUpdate, Overrides
+from wildstring.outbound import OutboundError, request_bytes
 from wildstring.provider_network import (
     NetworkTest,
     network_error,
-    outbound_proxies,
     test_network,
     validate_proxy,
 )
+from wildstring.provider_tasks import (
+    RETENTION_DAYS,
+    HistoryClear,
+    ReviewTasks,
+    View,
+    clear_history,
+    retry_task,
+    review_tasks,
+    task_page,
+)
+from wildstring.task_notifications import metadata_result
 
 MB = "https://musicbrainz.org/ws/2/"
 FM = "https://ws.audioscrobbler.com/2.0/"
 ACOUSTID = "https://api.acoustid.org/v2/lookup"
 UA = "WildString/0.3.3 (https://github.com/qingmuhy744/wildstring)"
 logger = logging.getLogger(__name__)
+
+
+@contextmanager
+def request_lock(path, timeout_limit):
+    """Interactive queries can shorten the entire provider wait, including its lock."""
+    started = time.monotonic()
+    try:
+        with FileLock(str(path), timeout=timeout_limit if timeout_limit is not None else -1):
+            yield started + timeout_limit if timeout_limit is not None else None
+    except Timeout:
+        raise ProviderError("provider_request_timeout") from None
 
 
 def missing_fields(track, manual, fields):
@@ -71,7 +93,8 @@ def missing_fields(track, manual, fields):
 
 
 class ProviderError(Exception):
-    def __init__(self, code="provider_unavailable", transient=True):
+    def __init__(self, code="provider_unavailable", transient=True, http_status=None):
+        self.http_status = http_status
         self.code, self.transient = code, transient
         super().__init__(code)
 
@@ -82,7 +105,13 @@ class SafeRedirect(HTTPRedirectHandler):
         allowed = parsed.hostname in {"coverartarchive.org", "archive.org"} or (
             parsed.hostname or ""
         ).endswith(".archive.org")
-        if parsed.scheme != "https" or not allowed or parsed.port not in (None, 443):
+        if (
+            parsed.scheme != "https"
+            or not allowed
+            or parsed.port not in (None, 443)
+            or parsed.username
+            or parsed.password
+        ):
             raise ProviderError("unsafe_cover_redirect", False)
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
@@ -118,6 +147,7 @@ class Providers:
         self.exit = threading.Event()
         self.thread = None
         self.storage_identity = None
+        self.history_cleaned_at = 0.0
         self.network_test_lock = threading.Lock()
         self.worker_lock = FileLock(
             str(self.directory / "worker.lock"), timeout=0, thread_local=False
@@ -172,7 +202,19 @@ class Providers:
         )
         return config
 
-    def request(self, url, parameters=None, *, signed=False, image=False):
+    def request(
+        self,
+        url,
+        parameters=None,
+        *,
+        signed=False,
+        image=False,
+        proxy_mode=None,
+        proxy_url=None,
+        diagnostic=False,
+        timeout_limit=None,
+    ):
+        timeout_limit = min(15, max(0.01, timeout_limit)) if timeout_limit is not None else None
         parameters = dict(parameters or {})
         if url == FM:
             credentials = self.secrets()
@@ -204,13 +246,17 @@ class Providers:
             data = gzip.compress(data)
         address = url + (("?" + urlencode(parameters)) if parameters and not post else "")
         # Shared across worker processes. Never hold a SQLite transaction while doing network I/O.
-        with FileLock(str(self.directory / f"{provider}.lock")):
+        with request_lock(self.directory / f"{provider}.lock", timeout_limit) as deadline:
             with self.database.connect() as connection:
                 previous = connection.execute(
                     "SELECT called_at FROM provider_limits WHERE provider=?", (provider,)
                 ).fetchone()
             delay = max(0, 1.05 - (time.time() - previous[0])) if previous else 0
-            if self.exit.wait(delay):
+            if deadline is not None and delay >= deadline - time.monotonic():
+                raise ProviderError("provider_request_timeout")
+            if diagnostic:
+                time.sleep(delay)
+            elif self.exit.wait(delay):
                 raise ProviderError("worker_stopped")
             with self.database.connect(write=True) as connection:
                 connection.execute(
@@ -233,17 +279,28 @@ class Providers:
                         ),
                     },
                 )
-                mode = self.settings()["proxy_mode"]
+                mode = proxy_mode if proxy_mode is not None else self.settings()["proxy_mode"]
+                proxy = proxy_url if proxy_mode is not None else self.secrets().get("proxy_url")
                 try:
-                    proxies = outbound_proxies(mode, self.secrets().get("proxy_url"))
-                except ValueError as error:
-                    raise ProviderError(str(error), False) from None
-                handler = ProxyHandler(proxies)
-                # Fixed official endpoints; redirect targets use an HTTPS allowlist.
-                with build_opener(handler, SafeRedirect()).open(req, timeout=15) as response:  # nosec B310
-                    raw = response.read((8 * 1024 * 1024 if image else 2 * 1024 * 1024) + 1)
-                if len(raw) > (8 * 1024 * 1024 if image else 2 * 1024 * 1024):
-                    raise ProviderError("provider_response_too_large", False)
+                    _, _, raw = request_bytes(
+                        req,
+                        proxy_mode=mode,
+                        proxy_url=proxy,
+                        timeout=max(0.01, deadline - time.monotonic())
+                        if deadline is not None
+                        else 15,
+                        limit=8 * 1024 * 1024 if image else 2 * 1024 * 1024,
+                        redirect=SafeRedirect() if provider == "caa" else None,
+                        opener_factory=build_opener,
+                        service=provider,
+                    )
+                except OutboundError as error:
+                    raise ProviderError(
+                        "provider_response_too_large"
+                        if error.code == "response_too_large"
+                        else error.code,
+                        http_status=error.http_status,
+                    ) from None
                 result = raw if image else json.loads(raw)
                 if not image and not isinstance(result, dict):
                     raise ProviderError("provider_invalid_response")
@@ -267,6 +324,7 @@ class Providers:
                 finally:
                     error.close()
                 if failure is not None:
+                    failure.http_status = error.code
                     raise failure from None
                 raise ProviderError(
                     "provider_not_found"
@@ -275,13 +333,14 @@ class Providers:
                     if error.code == 407
                     else "provider_http_error",
                     error.code in {429, 500, 502, 503, 504},
+                    http_status=error.code,
                 ) from None
             except (URLError, TimeoutError, OSError) as error:
                 raise ProviderError(network_error(error)) from None
             except ValueError:
                 raise ProviderError("provider_invalid_response") from None
 
-    def cover_data(self, url):
+    def cover_data(self, url, **network):
         """Use the configured server proxy and the same image guards for preview and apply."""
         from wildstring.library.assets import TrackAssets
 
@@ -304,7 +363,7 @@ class Providers:
         if not valid:
             raise HTTPException(422, "invalid_cover_url")
         try:
-            data = self.request("https://coverartarchive.org" + parsed.path, image=True)
+            data = self.request("https://coverartarchive.org" + parsed.path, image=True, **network)
             thumbnail = TrackAssets(self.repository).thumbnail(data, 768)
             if thumbnail is None:
                 raise ProviderError("invalid_cover", False)
@@ -399,6 +458,7 @@ class Providers:
         result = {"queued": added, "already_active": len(rows) - added, "total": len(rows)}
         if batch_id is not None:
             result["batch_id"] = batch_id
+        record_event("provider.tasks.queued", count=added, batch_id=batch_id)
         return result
 
     def identify(self, track, *, force=False):
@@ -658,6 +718,7 @@ class Providers:
                 "UPDATE provider_jobs SET status=?,warnings=?,updated_at=? WHERE id=?",
                 (status, json.dumps(warnings), time.time(), job["id"]),
             )
+            metadata_result(self, connection, job["id"])
 
     def start(self):
         info = self.database.path.parent.stat()
@@ -689,16 +750,39 @@ class Providers:
                 while not self.exit.wait(1):
                     try:
                         self.step()
-                    except (OSError, sqlite3.Error, ValueError, KeyError, TypeError, ProviderError):
-                        # No remote payloads, URLs with tokens or credentials in logs.
+                    except (
+                        OSError,
+                        sqlite3.Error,
+                        ValueError,
+                        KeyError,
+                        TypeError,
+                        ProviderError,
+                    ) as failure:
+                        record_event(
+                            "provider.worker.failed",
+                            level="WARNING",
+                            sink=getattr(self, "diagnostics", None),
+                            exception_type=type(failure).__name__,
+                            code=getattr(failure, "code", "provider_worker_failed"),
+                        )
                         continue
-        except (OSError, sqlite3.Error):
-            pass
+        except (OSError, sqlite3.Error) as failure:
+            record_event(
+                "provider.worker.stopped",
+                level="ERROR",
+                sink=getattr(self, "diagnostics", None),
+                exception_type=type(failure).__name__,
+                code="provider_storage_unavailable",
+            )
         finally:
             self.worker_lock.release()
 
     def step(self):
         self.check_storage()
+        clock = time.time()
+        if clock - self.history_cleaned_at >= 3600:
+            clear_history(self.repository, clock - RETENTION_DAYS * 86400)
+            self.history_cleaned_at = clock
         config = self.settings()
         if not config["enabled"]:
             return
@@ -729,13 +813,27 @@ class Providers:
                 )
         if job:
             try:
-                self.process_job(job)
+                with trace_context(
+                    job["id"].replace("-", ""),
+                    task_id=job["id"],
+                    sink=getattr(self, "diagnostics", None),
+                ):
+                    record_event("provider.task.started")
+                    self.process_job(job)
+                    with self.database.connect() as connection:
+                        finished = connection.execute(
+                            "SELECT status,error FROM provider_jobs WHERE id=?", (job["id"],)
+                        ).fetchone()
+                    record_event(
+                        "provider.task.finished", stage=finished["status"], code=finished["error"]
+                    )
             except (ProviderError, ValueError, TypeError, KeyError, AttributeError):
                 with self.database.connect(write=True) as connection:
                     connection.execute(
                         "UPDATE provider_jobs SET status='failed',error='provider_unavailable',updated_at=? WHERE id=?",
                         (time.time(), job["id"]),
                     )
+                    metadata_result(self, connection, job["id"])
         self.deliver()
 
     def enqueue_listening(self, connection, user_id, session, track, accepted, playing):
@@ -929,7 +1027,7 @@ class Providers:
                 credentials = self.secrets()
                 proxy = draft.proxy_url or credentials.get("proxy_url")
                 try:
-                    result = test_network(draft.proxy_mode, proxy, credentials)
+                    result = test_network(draft.proxy_mode, proxy, credentials, self)
                 except ValueError as error:
                     raise HTTPException(422, str(error)) from None
                 return Response(
@@ -1044,6 +1142,30 @@ class Providers:
             response.headers["Vary"] = "Cookie"
             return batch_progress(self.repository, batch_id)
 
+        @router.get("/manage/providers/tasks")
+        def tasks(
+            user: admin,
+            response: Response,
+            view: View = "active",
+            limit: int = Query(20, ge=1, le=50),
+            offset: int = Query(0, ge=0),
+        ):
+            response.headers["Cache-Control"] = "private, no-store"
+            response.headers["Vary"] = "Cookie"
+            return task_page(self.repository, view, limit, offset)
+
+        @router.post("/manage/providers/tasks/history/clear", dependencies=mutation)
+        def clear_tasks(body: HistoryClear, user: admin):
+            return clear_history(self.repository, body.through)
+
+        @router.post("/manage/providers/tasks/tracks/{track_id}/review", dependencies=mutation)
+        def review_track_tasks(track_id: str, body: ReviewTasks, user: admin):
+            return review_tasks(self.repository, track_id, body)
+
+        @router.post("/manage/providers/tasks/{job_id}/retry", dependencies=mutation)
+        def retry_provider_task(job_id: str, user: admin):
+            return retry_task(self, job_id)
+
         @router.get("/manage/providers/jobs")
         def provider_jobs(user: admin):
             with self.database.connect() as connection:
@@ -1148,7 +1270,7 @@ class Providers:
                 row = connection.execute(
                     "SELECT * FROM metadata_suggestions WHERE id=?", (identity,)
                 ).fetchone()
-            if row is None or not row["cover_url"]:
+            if row is None or not row["cover_url"] or row["status"] == "ignored":
                 raise HTTPException(404, "suggestion_not_found")
             if row["metadata_version"] != body.version:
                 raise HTTPException(409, "metadata_version_conflict")

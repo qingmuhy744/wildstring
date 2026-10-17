@@ -129,7 +129,7 @@ export function NowPlaying({
       } else if (event.key === 'Tab') {
         const controls = Array.from(
           dialog.current?.querySelectorAll<HTMLElement>(
-            'button:not(:disabled), input:not(:disabled), select:not(:disabled)',
+            'button:not(:disabled), input:not(:disabled), select:not(:disabled), [tabindex="0"]',
           ) || [],
         ).filter((node) => node.getClientRects().length > 0);
         const first = controls[0],
@@ -214,16 +214,6 @@ export function NowPlaying({
             event.stopPropagation();
           }
         }}
-        onClick={(event) => {
-          const target = event.target as HTMLElement;
-          if (
-            target.closest(
-              'button, a, input, select, label, .fullscreen-header, .fullscreen-controls, .fullscreen-metadata, .embedded-queue, .lyrics-toolbar',
-            )
-          )
-            return;
-          setPanel((value) => (value === 'lyrics' ? null : 'lyrics'));
-        }}
         style={
           {
             '--cover-primary': colors?.[0] || '#35373f',
@@ -272,7 +262,7 @@ export function NowPlaying({
                 position={player.position}
                 duration={player.duration}
                 phase={player.visualPhase}
-                onLyrics={() => setPanel((value) => (value === 'lyrics' ? null : 'lyrics'))}
+                onPreview={() => setArtwork(true)}
                 onImage={(image) => {
                   if (image.currentSrc !== new URL(coverUrl(current.id, 768), location.href).href)
                     return;

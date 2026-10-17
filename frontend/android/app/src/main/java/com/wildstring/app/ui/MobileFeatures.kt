@@ -29,9 +29,9 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
 @Composable
-internal fun MobileShortcuts(admin: Boolean, open: (String) -> Unit) {
+internal fun MobileShortcuts(admin: Boolean, unread: Int = 0, open: (String) -> Unit) {
     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        listOf("daily" to "每日推荐", "ai" to "AI 找歌", "offline" to "离线保存", "statistics" to "收听统计", "devices" to "其他设备继续").forEach { (route, title) ->
+        listOf("daily" to "每日推荐", "ai" to "AI 找歌", "offline" to "离线保存", "statistics" to "收听统计", "devices" to "其他设备继续", "assistant" to "野弦助手", "notifications" to if (unread > 0) "通知 · $unread" else "通知", "external" to "发现新音乐", "rankings" to "收听排行").forEach { (route, title) ->
             AssistChip({ open(route) }, label = { Text(title) })
         }
         if (admin) AssistChip({ open("management") }, label = { Text("曲库管理") })
@@ -42,14 +42,17 @@ internal fun MobileShortcuts(admin: Boolean, open: (String) -> Unit) {
 internal fun FeatureDialog(vm: MusicViewModel, route: String, track: Track? = null, playlist: Playlist? = null, dismiss: () -> Unit) {
     val account by vm.state.collectAsStateWithLifecycle()
     val title = when (route) {
-        "daily" -> "每日推荐"; "ai" -> "AI 找歌与歌单"; "offline" -> "离线保存"; "statistics" -> "收听统计"; "devices" -> "其他设备继续"
+        "assistant" -> "野弦助手"; "notifications" -> "通知与任务"
+        "external" -> "发现新音乐"; "rankings" -> "收听排行"; "daily" -> "每日推荐"; "ai" -> "AI 找歌与歌单"; "offline" -> "离线保存"; "statistics" -> "收听统计"; "devices" -> "其他设备继续"
         "playlist" -> if (playlist == null) "新建歌单" else "编辑歌单"; "order" -> "歌单排序"; "multi" -> "多选加入歌单"
         "metadata" -> "编辑歌曲信息"; "lyrics" -> "编辑歌词"; "suggestions" -> "更新元数据与建议"; else -> "曲库管理"
     }
     Dialog(onDismissRequest = dismiss, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         val view = androidx.compose.ui.platform.LocalView.current
         val darkBars = LocalDarkAppearance.current || LocalRedCloth.current
-        SideEffect {
+        // Dialog reapplies its platform window parameters in a SideEffect. Apply the
+        // user's app theme afterwards so a system-light dialog cannot reset dark icons.
+        LaunchedEffect(view, darkBars) {
             (view.parent as? androidx.compose.ui.window.DialogWindowProvider)?.window?.let { window ->
                 androidx.core.view.WindowCompat.setDecorFitsSystemWindows(window, false)
                 @Suppress("DEPRECATION")
@@ -67,7 +70,10 @@ internal fun FeatureDialog(vm: MusicViewModel, route: String, track: Track? = nu
                 TopAppBar(title = { Text(title) }, navigationIcon = { IconButton(dismiss) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回") } })
                 Box(Modifier.weight(1f).fillMaxWidth()) {
                     when (route) {
+                        "assistant", "notifications" -> AgentWorkspace(vm, if (route == "notifications") "notifications" else "chat")
                         "daily" -> DailyPanel(vm)
+                        "rankings" -> RankingsPanel(vm)
+                        "external" -> ExternalMusicPanel(vm)
                         "ai" -> AiPanel(vm)
                         "offline" -> OfflinePanel(vm)
                         "statistics" -> StatisticsPanel(vm)
@@ -121,7 +127,7 @@ internal class FeatureAction {
 }
 @Composable internal fun ActionStatus(action: FeatureAction) {
     if (action.busy) LinearProgressIndicator(Modifier.fillMaxWidth())
-    action.message?.let { Text(it, Modifier.padding(vertical = 8.dp), style = MaterialTheme.typography.bodySmall) }
+    action.message?.let { androidx.compose.foundation.text.selection.SelectionContainer { Text(it, Modifier.padding(vertical = 8.dp), style = MaterialTheme.typography.bodySmall) } }
 }
 
 @Composable
@@ -132,25 +138,27 @@ private fun OfflinePanel(vm: MusicViewModel) {
     val requestNotifications = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { notificationsGranted = it }
     val items by vm.repository.downloads.entries.collectAsStateWithLifecycle()
     var capacity by remember { mutableIntStateOf(vm.repository.downloads.capacityGb) }
-    var wifi by remember { mutableStateOf(vm.repository.downloads.wifiOnly) }
     var confirm by remember { mutableStateOf<OfflineEntry?>(null) }
+    var downloadOptions by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
         Text("${items.count { it.state == "complete" }} 首已完成 · ${items.sumOf { it.bytes } / 1024 / 1024} MiB", style = MaterialTheme.typography.titleMedium)
         Row {
             TextButton({ vm.repository.downloads.pauseAll() }, enabled = items.any { it.state in listOf("queued", "downloading") }) { Text("暂停全部") }
             TextButton({ vm.repository.downloads.resumeAll(); vm.startDownloads() }, enabled = items.any { it.state in listOf("paused", "failed") }) { Text("继续全部") }
         }
-        Row(verticalAlignment = Alignment.CenterVertically) { Switch(wifi, { wifi = it; vm.repository.downloads.wifiOnly = it }); Text("仅 Wi-Fi 下载", Modifier.padding(start = 12.dp)) }
+        TextButton({ downloadOptions = !downloadOptions }) { Text(if (downloadOptions) "收起下载设置" else "下载设置 · 音质、网络与歌单") }
+        if (downloadOptions) Column(Modifier.fillMaxWidth().heightIn(max = 300.dp).verticalScroll(rememberScrollState())) { OfflineSettings(vm) }
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("总容量限额 $capacity GiB", Modifier.weight(1f))
             TextButton({ capacity = (capacity / 2).coerceAtLeast(1); vm.repository.downloads.capacityGb = capacity }) { Text("减少") }
             TextButton({ capacity = (capacity * 2).coerceAtMost(64); vm.repository.downloads.capacityGb = capacity }) { Text("增加") }
         }
         if (android.os.Build.VERSION.SDK_INT >= 33 && !notificationsGranted) TextButton({ requestNotifications.launch(android.Manifest.permission.POST_NOTIFICATIONS) }) { Text("允许显示下载通知") }
-        Text("保存完整原音。已完成音乐断网可播放；退出或更换账号会移除本机副本。", style = MaterialTheme.typography.bodySmall)
+        Text("已完成音乐断网可播放；切换服务器保留各自副本，退出账号会清除该账号的离线音乐。", style = MaterialTheme.typography.bodySmall)
         LazyColumn(Modifier.weight(1f)) { items(items, key = { it.track.id }) { item ->
             Column(Modifier.fillMaxWidth().padding(vertical = 12.dp)) {
                 Text(item.track.title)
+                Text(if (item.audioFormat == "m4a" && item.bitrate > 0) downloadQualityLabel(item.bitrate) else "原音 · ${item.track.format.uppercase()}", style = MaterialTheme.typography.labelSmall)
                 Text(when(item.state) { "complete" -> "已完成"; "paused" -> "已暂停"; "failed" -> "下载失败"; "downloading" -> "正在保存"; else -> "等待下载" } + " · ${item.bytes / 1024 / 1024} MiB", style = MaterialTheme.typography.bodySmall)
                 item.error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
                 if (item.state == "downloading" && item.total > 0) LinearProgressIndicator(progress = { (item.bytes.toFloat() / item.total).coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
@@ -188,7 +196,7 @@ private fun DevicesPanel(vm: MusicViewModel) {
     LaunchedEffect(Unit) { action.run { remote = vm.repository.api().sharedPlayback() } }
     Column(Modifier.padding(24.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         ActionStatus(action)
-        Text("由你选择继续播放，不会自动接管另一台设备。")
+        Text("暂停时自动保存进度。跨设备接续方式可在设置中选择，默认弹窗询问；载入后保持暂停。")
         remote?.let { saved ->
             Text(if (saved.trackIds.isEmpty()) "还没有共享播放记录" else "${saved.trackIds.size} 首 · 第 ${saved.index + 1} 首 · ${formatTime(saved.positionMs)}")
             if (saved.deviceId == device && saved.trackIds.isNotEmpty()) Text("这是本机最近同步的记录", style = MaterialTheme.typography.bodySmall)
@@ -199,51 +207,7 @@ private fun DevicesPanel(vm: MusicViewModel) {
     }
 }
 
-@Composable
-private fun DailyPanel(vm: MusicViewModel) {
-    val current by vm.state.collectAsStateWithLifecycle()
-    val scope = rememberCoroutineScope(); val action = remember { FeatureAction() }
-    var daily by remember { mutableStateOf<DailyRecommendations?>(null) }
-    var preferences by remember { mutableStateOf<RecommendationPreferences?>(null) }
-    var rejected by remember { mutableStateOf(setOf<String>()) }
-    LaunchedEffect(Unit) { action.run { daily = vm.repository.api().daily(); preferences = vm.repository.api().recommendationPreferences() } }
-    Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
-        ActionStatus(action)
-        preferences?.let { p ->
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("每天 ${p.count} 首", Modifier.weight(1f))
-                TextButton({ preferences = p.copy(count = (p.count - 5).coerceAtLeast(1)) }) { Text("减少") }
-                TextButton({ preferences = p.copy(count = (p.count + 5).coerceAtMost(50)) }) { Text("增加") }
-            }
-            Row(verticalAlignment = Alignment.CenterVertically) { Checkbox(p.useAi, { preferences = p.copy(useAi = it) }); Text("AI 编排")
-                Checkbox(p.useLastfm, { preferences = p.copy(useLastfm = it) }); Text("Last.fm 增强") }
-            Row {
-                TextButton({ scope.launch { action.run { preferences = vm.repository.api().saveRecommendationPreferences(p); action.message = "偏好已保存，下次换一批生效" } } }, enabled = !action.busy) { Text("保存偏好") }
-                TextButton({ scope.launch { action.run { daily = vm.repository.api().refreshDaily(); rejected = emptySet() } } }, enabled = !action.busy) { Text("换一批") }
-            }
-        }
-        val items = daily?.items.orEmpty().filter { it.track.id !in rejected }
-        Row {
-            Button({ vm.play(items.map { it.track }); items.firstOrNull()?.let { first -> scope.launch { runCatching { vm.repository.feedback(RecommendationFeedback(trackId = first.track.id, action = "accept")).close() } } } }, enabled = items.isNotEmpty()) { Text("播放推荐") }
-            TextButton({ scope.launch { action.run { saveRecommendations(vm, "每日推荐 ${daily?.date.orEmpty()}", items); action.message = "已保存为歌单" } } }, enabled = !action.busy && items.isNotEmpty()) { Text("保存歌单") }
-        }
-        LazyColumn(Modifier.weight(1f)) { items(items, key = { it.track.id }) { item ->
-            Column(Modifier.fillMaxWidth().padding(vertical = 12.dp)) {
-                Text(item.track.title, Modifier.clickable { vm.play(items.map { it.track }, items.indexOf(item)) })
-                Text(item.track.artist + " · " + item.reason, style = MaterialTheme.typography.bodySmall)
-                Row {
-                    TextButton({ vm.favorite(item.track) }, enabled = item.track.id !in current.pendingFavorites) { Text(if (vm.repository.knownTracks[item.track.id]?.loved ?: item.track.loved) "已收藏" else "收藏") }
-                    listOf("dismiss_track" to "不感兴趣", "less_artist" to "少推荐此艺人").forEach { (key, name) ->
-                        TextButton({ scope.launch { action.run { vm.repository.feedback(RecommendationFeedback(trackId = item.track.id, action = key)).close(); rejected = rejected + item.track.id } } }, enabled = !action.busy) { Text(name) }
-                    }
-                }
-            }
-        } }
-        if (items.isEmpty() && !action.busy) Text("暂无推荐，可增加曲库或调整偏好后换一批。", Modifier.padding(16.dp))
-    }
-}
-
-private suspend fun saveRecommendations(vm: MusicViewModel, name: String, items: List<RecommendationItem>) {
+internal suspend fun saveRecommendations(vm: MusicViewModel, name: String, items: List<RecommendationItem>) {
     val owner = vm.repository.session.cacheScope() ?: throw CancellationException("登录已失效。")
     fun requireOwner() { if (owner != vm.repository.session.cacheScope()) throw CancellationException("服务器或账号已变化。") }
     val api = vm.repository.api()
@@ -257,27 +221,4 @@ private suspend fun saveRecommendations(vm: MusicViewModel, name: String, items:
         throw error
     }
     requireOwner(); vm.load()
-}
-
-@Composable
-private fun AiPanel(vm: MusicViewModel) {
-    val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
-    var excluded by remember { mutableStateOf(setOf<String>()) }; var draftName by remember { mutableStateOf("") }
-    var prompt by remember { mutableStateOf("") }; var result by remember { mutableStateOf<DiscoveryResult?>(null) }
-    val action = remember { FeatureAction() }; val scope = rememberCoroutineScope()
-    Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
-        OutlinedTextField(prompt, { prompt = it.take(2000) }, Modifier.fillMaxWidth(), label = { Text("想听什么？") }, placeholder = { Text("来半小时我很久没听过的摇滚") }, minLines = 2)
-        Button({ keyboard?.hide(); scope.launch { action.run { result = vm.repository.api().discover(DiscoveryRequest(prompt)); draftName = result!!.title; excluded = emptySet(); action.message = if (result?.mode == "local") "当前使用本地检索" else "已生成候选，请预览后保存" } } }, enabled = !action.busy && prompt.isNotBlank()) { Text(if (action.busy) "正在找歌…" else "生成候选") }
-        ActionStatus(action)
-        result?.let { draft ->
-            val selected = draft.items.filter { it.track.id !in excluded }
-            OutlinedTextField(draftName, { draftName = it.take(100) }, Modifier.fillMaxWidth(), label = { Text("歌单名称") }, singleLine = true)
-            draft.warning?.let { Text("AI 暂不可用，已返回本地候选。", style = MaterialTheme.typography.bodySmall) }
-            Row {
-                TextButton({ vm.play(selected.map { it.track }) }, enabled = selected.isNotEmpty()) { Text("试听候选") }
-                TextButton({ scope.launch { action.run { saveRecommendations(vm, draftName, selected); action.message = "歌单已保存" } } }, enabled = !action.busy && selected.isNotEmpty() && draftName.isNotBlank()) { Text("确认保存歌单") }
-            }
-            LazyColumn(Modifier.weight(1f)) { items(draft.items, key = { it.track.id }) { item -> ListItem(headlineContent = { Text(item.track.title) }, supportingContent = { Text(item.track.artist + " · " + item.reason) }, leadingContent = { Checkbox(item.track.id !in excluded, { checked -> excluded = if (checked) excluded - item.track.id else excluded + item.track.id }) }) } }
-        }
-    }
 }

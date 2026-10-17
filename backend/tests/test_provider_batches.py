@@ -238,12 +238,15 @@ def test_schema14_upgrade_preserves_existing_jobs_and_repeated_start_keeps_batch
     with database.connect(write=True) as connection:
         connection.execute("DROP TABLE provider_refresh_members")
         connection.execute("DROP TABLE provider_refresh_batches")
+        from migration_support import pre18
+
+        pre18(connection)
         connection.execute("PRAGMA user_version=14")
     database.initialize()
     database.initialize()
     assert database.check_ready()
     with database.connect() as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION == 15
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
         assert {row[0] for row in connection.execute("SELECT id FROM provider_jobs")} == {
             job["id"] for job in original_jobs
         }

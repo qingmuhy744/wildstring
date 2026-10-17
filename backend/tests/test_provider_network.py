@@ -49,7 +49,24 @@ def test_network_draft_uses_all_fixed_services_without_saving(
                     calls.append((request, timeout, handler.proxies))
                     host = urlsplit(request.full_url).hostname
                     if host == "coverartarchive.org":
-                        raise HTTPError(request.full_url, 404, "missing", {}, io.BytesIO(b""))
+                        if request.full_url.endswith(".jpg"):
+                            from PIL import Image
+
+                            stream = io.BytesIO()
+                            Image.new("RGB", (8, 8)).save(stream, format="JPEG")
+                            return Response(stream.getvalue())
+                        return Response(
+                            json.dumps(
+                                {
+                                    "images": [
+                                        {
+                                            "front": True,
+                                            "image": "https://coverartarchive.org/release/76df3287-6cda-33eb-8e9a-044b5e15ffdd/829521842.jpg",
+                                        }
+                                    ]
+                                }
+                            ).encode()
+                        )
                     if host == "api.acoustid.org":
                         return Response(b'{"status":"ok","results":[]}')
                     if host == "musicbrainz.org":
@@ -58,8 +75,8 @@ def test_network_draft_uses_all_fixed_services_without_saving(
 
             return Opener()
 
-        monkeypatch.setattr("wildstring.provider_network.build_opener", build)
-        monkeypatch.setattr("wildstring.provider_network.proxy_bypass", lambda _host: False)
+        monkeypatch.setattr("wildstring.providers.build_opener", build)
+        monkeypatch.setattr("wildstring.outbound.proxy_bypass", lambda _host: False)
         proxy = "http://private-user:private-password@127.0.0.1:7890"
         response = client.post(
             "/api/v1/manage/providers/network-test",
@@ -68,9 +85,9 @@ def test_network_draft_uses_all_fixed_services_without_saving(
         )
         assert response.status_code == 200, response.text
         assert "no-store" in response.headers["cache-control"]
-        assert len(calls) == 4
+        assert len(calls) == 5
         assert all(
-            timeout == 8 and proxies == {"http": proxy, "https": proxy}
+            timeout == 15 and proxies == {"http": proxy, "https": proxy}
             for _, timeout, proxies in calls
         )
         assert {item["provider"] for item in response.json()["items"]} == {
@@ -151,7 +168,7 @@ def test_network_errors_and_missing_credentials_are_independent(
 
         return Opener()
 
-    monkeypatch.setattr("wildstring.provider_network.build_opener", build)
+    monkeypatch.setattr("wildstring.providers.build_opener", build)
     with authenticated_client(settings) as client:
         providers = client.app.state.providers
         providers.stop()

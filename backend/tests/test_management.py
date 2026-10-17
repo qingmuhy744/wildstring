@@ -169,6 +169,9 @@ def test_v5_migration_preserves_identity_and_personal_data(settings, authenticat
         connection.execute("DROP TABLE library_preferences")
         connection.execute("DROP TABLE intake_settings")
         connection.execute("DROP TABLE intake_items")
+        from migration_support import pre18
+
+        pre18(connection)
         connection.execute("PRAGMA user_version=5")
     db.initialize()
     with authenticated_client(settings) as client:

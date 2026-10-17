@@ -184,6 +184,8 @@ def test_proxy_is_private_optional_and_shared_by_outgoing_requests(
         requests = []
 
         class Response:
+            status = 200
+
             def __enter__(self):
                 return self
 
@@ -435,6 +437,9 @@ def test_metadata_migration_and_backfill_commit_together(settings, monkeypatch):
     with db.connect(write=True) as connection:
         identity = connection.execute("SELECT id FROM tracks").fetchone()[0]
         restore_v7_account_layout(connection)
+        from migration_support import pre18
+
+        pre18(connection)
         connection.execute("PRAGMA user_version=7")
     original = edits.apply_effective
 
@@ -464,6 +469,8 @@ def test_invalid_json_shape_and_nested_relations_are_failures_not_worker_crashes
         assert enable(client, proxy_mode="direct").status_code == 200
 
         class Response:
+            status = 200
+
             def __enter__(self):
                 return self
 

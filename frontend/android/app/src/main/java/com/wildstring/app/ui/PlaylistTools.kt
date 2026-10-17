@@ -64,6 +64,7 @@ internal fun PlaylistEditor(vm: MusicViewModel, existing: Playlist?, dismiss: ()
 
 @Composable
 internal fun PlaylistOrder(vm: MusicViewModel, playlist: Playlist, dismiss: () -> Unit) {
+    var record by remember { mutableStateOf(playlist) }
     var tracks by remember { mutableStateOf<List<Track>>(emptyList()) }
     val action = remember { FeatureAction() }; val scope = rememberCoroutineScope()
     val feedback = LocalTactileFeedback.current
@@ -71,11 +72,17 @@ internal fun PlaylistOrder(vm: MusicViewModel, playlist: Playlist, dismiss: () -
     Column(Modifier.fillMaxSize().padding(16.dp)) {
         ActionStatus(action)
         QueueList(tracks.mapIndexed { index, t -> QueueRow(t.id, t.id, t.title, t.artist, index) }, null, Modifier.weight(1f),
-            onPlay = {}, onRemove = {}, onMove = { id, destination ->
+            onPlay = {}, onRemove = { row ->
+                if (!action.busy) tracks.firstOrNull { it.id == row.trackId }?.let { track -> scope.launch { action.run {
+                    vm.removePlaylistTrack(track, record)
+                    record = vm.repository.api().playlist(vm.repository.url("api", "v1", "playlists", playlist.id))
+                    tracks = tracks.filter { it.id != row.trackId }
+                } } }
+            }, onMove = { id, destination ->
                 val from = tracks.indexOfFirst { it.id == id }
-                if (from >= 0 && destination in tracks.indices) tracks = tracks.toMutableList().apply { add(destination, removeAt(from)) }
-            }, onHaptic = feedback, allowRemove = false, title = "拖动调整歌单顺序")
-        Button({ scope.launch { action.run { vm.reorderPlaylist(playlist, tracks.map { it.id }); dismiss() } } }, enabled = !action.busy && tracks.isNotEmpty(), modifier = Modifier.fillMaxWidth()) { Text("保存顺序") }
+                if (!action.busy && from >= 0 && destination in tracks.indices) tracks = tracks.toMutableList().apply { add(destination, removeAt(from)) }
+            }, onHaptic = feedback, allowRemove = !action.busy, title = "拖动排序，或移除曲目")
+        Button({ scope.launch { action.run { vm.reorderPlaylist(record, tracks.map { it.id }); dismiss() } } }, enabled = !action.busy && tracks.isNotEmpty(), modifier = Modifier.fillMaxWidth()) { Text("保存顺序") }
     }
 }
 

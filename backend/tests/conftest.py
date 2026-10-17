@@ -45,8 +45,12 @@ def authenticated_client():
 
 def restore_v7_account_layout(connection):
     """Reconstruct the actual historical layout before exercising an older migration."""
+    from migration_support import pre18
+
+    pre18(connection)
     connection.execute("DROP VIEW personal_tracks")
     for table in (
+        "provider_task_reviews",
         "provider_refresh_members",
         "provider_refresh_batches",
         "metadata_suggestions",

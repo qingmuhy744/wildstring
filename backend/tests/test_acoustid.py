@@ -38,6 +38,8 @@ def test_private_key_compressed_post_and_shared_proxy(settings, authenticated_cl
         seen = []
 
         class Response:
+            status = 200
+
             def __enter__(self):
                 return self
 
@@ -362,6 +364,9 @@ def test_v12_upgrade_keeps_provider_settings_and_music(settings):
             ("provider_jobs", "force"),
         ):
             connection.execute(f"ALTER TABLE {table} DROP COLUMN {column}")
+        from migration_support import pre18
+
+        pre18(connection)
         connection.execute("PRAGMA user_version=12")
     database.initialize()
     with database.connect() as connection:

@@ -211,6 +211,8 @@ test('AI 服务保存、密钥不回显、连接测试与清除密钥', async ({
   await login(page);
   await manage(page, info.project.name === 'mobile');
   await page.getByRole('button', { name: '设置', exact: true }).click();
+  await page.getByRole('button', { name: '管理统一模型连接', exact: true }).click();
+  await page.getByText('原有实例连接（兼容配置）', { exact: true }).click();
   const panel = page.getByLabel('AI 服务配置', { exact: true });
   await panel.getByLabel('AI API 地址', { exact: true }).fill('https://model.example.invalid/v1');
   await panel.getByLabel('AI 模型名称', { exact: true }).fill(`browser-model-${info.project.name}`);

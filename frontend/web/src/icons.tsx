@@ -1,6 +1,53 @@
 import type { CSSProperties } from 'react';
 
 const paths = {
+  bell: (
+    <>
+      <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4" />
+    </>
+  ),
+  assistant: (
+    <>
+      <path d="m12 3 2.6 6.4L21 12l-6.4 2.6L12 21l-2.6-6.4L3 12l6.4-2.6Z" />
+    </>
+  ),
+  draft: (
+    <>
+      <path d="M14 3H5v18h14V8Zm0 0v5h5M8 12h8M8 16h6" />
+    </>
+  ),
+  task: (
+    <>
+      <path d="M9 5h11M9 12h11M9 19h11M3 5l1 1 2-2M3 12l1 1 2-2M3 19l1 1 2-2" />
+    </>
+  ),
+  settings: (
+    <>
+      <path d="M4 7h16M4 17h16" />
+      <circle cx="9" cy="7" r="3" />
+      <circle cx="15" cy="17" r="3" />
+    </>
+  ),
+  shuffle: (
+    <>
+      <path d="M3 6h3c4 0 7 12 11 12h4m-4-4 4 4-4 4M3 18h3c1.8 0 3.4-2.4 5-5m2-3c1.3-2.2 2.6-4 4-4h4m-4-4 4 4-4 4" />
+    </>
+  ),
+  repeat: (
+    <>
+      <path d="M4 9V6h16l-3-3m3 3-3 3M20 15v3H4l3 3m-3-3 3-3" />
+    </>
+  ),
+  repeatOne: (
+    <>
+      <path d="M4 9V6h16l-3-3m3 3-3 3M20 15v3H4l3 3m-3-3 3-3M11 10l1-1v6m-1 0h2" />
+    </>
+  ),
+  sequential: (
+    <>
+      <path d="M3 12h18m-6-6 6 6-6 6" />
+    </>
+  ),
   album: (
     <>
       <circle cx="12" cy="12" r="8.5" />

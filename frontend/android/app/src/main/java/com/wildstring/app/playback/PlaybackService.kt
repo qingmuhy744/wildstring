@@ -42,6 +42,7 @@ import okhttp3.Request
 fun Track.mediaItem(repository: Repository, entryId: String = UUID.randomUUID().toString()): MediaItem =
     MediaItem.Builder().setMediaId(entryId).setUri(repository.stream(id))
         .setMediaMetadata(MediaMetadata.Builder().setTitle(title).setArtist(artist).setAlbumTitle(album)
+            .setDurationMs(durationMs.takeIf { it > 0 })
             .setArtworkUri(if (hasCover) Uri.parse(repository.cover(id)) else null)
             .setExtras(Bundle().apply { putString("profile", repository.session.cacheScope()); putString("track_id", id); putLong("duration_ms", durationMs); putString("format", format); putString("original_stream", repository.originalStream(id)) }).build()).build()
 
@@ -101,6 +102,25 @@ class PlaybackService : MediaSessionService() {
                     return MediaSession.ConnectionResult.AcceptedResultBuilder(session).setAvailablePlayerCommands(commands).build()
                 }
             }).build()
+        val platform = android.media.session.MediaController(this, checkNotNull(session).platformToken)
+        health.diagnostics = {
+            val metadata = platform.metadata
+            val state = platform.playbackState
+            val current = engine.currentMediaItem?.localConfiguration?.uri?.toString()
+            val plan = current?.let(resolver::plan)
+            PlaybackDiagnosticSnapshot(com.wildstring.app.BuildConfig.VERSION_NAME, android.os.Build.MANUFACTURER,
+                android.os.Build.MODEL, android.os.Build.VERSION.SDK_INT, SystemClock.elapsedRealtime(), settings.state.value.aacBitrate,
+                plan?.mode?.takeIf { it in listOf("original", "transcode") } ?: if (current?.let(PlaybackRequest::isAac) == true) "unresolved" else "original",
+                (plan?.output?.codec ?: engine.currentMediaItem?.mediaMetadata?.extras?.getString("format"))
+                    ?.takeIf { it.matches(Regex("[a-zA-Z0-9_-]{1,20}")) } ?: "unknown",
+                metadata?.takeIf { it.containsKey(android.media.MediaMetadata.METADATA_KEY_DURATION) }
+                    ?.getLong(android.media.MediaMetadata.METADATA_KEY_DURATION)?.takeIf { it >= 0 },
+                state?.position?.takeIf { it >= 0 }, state?.playbackSpeed, state?.state, state?.actions,
+                state?.actions?.and(android.media.session.PlaybackState.ACTION_SEEK_TO) != 0L && state != null,
+                state?.lastPositionUpdateTime, player.duration.takeIf { it >= 0 }, player.currentPosition,
+                player.isCurrentMediaItemLive, player.isCurrentMediaItemSeekable,
+                engine.duration.takeIf { it >= 0 }, engine.isCurrentMediaItemLive, engine.isCurrentMediaItemSeekable)
+        }
         player.addListener(object : Player.Listener {
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                 if (mediaItem?.mediaId == listeningEntry && reason == Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED) return
@@ -128,7 +148,10 @@ class PlaybackService : MediaSessionService() {
             }
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 clock.sample(SystemClock.elapsedRealtime(), player.currentPosition, isPlaying)
-                report(); persist()
+                report(); persist(force = !isPlaying)
+            }
+            override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+                if (playWhenReady) sharing.localPlaybackStarted() else persist(force = true)
             }
             override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
                 if (oldPosition.mediaItem?.mediaMetadata?.extras?.getString("track_id") == listeningTrack && oldPosition.mediaItem?.mediaMetadata?.extras?.getString("profile") == listeningOwner) {
@@ -215,7 +238,7 @@ class PlaybackService : MediaSessionService() {
         }
     }
 
-    private fun persist() {
+    private fun persist(force: Boolean = false) {
         if (restoring) return
         val endpoint = repository.session.endpoint?.toString() ?: return
         val profile = queueOwner ?: return
@@ -226,7 +249,7 @@ class PlaybackService : MediaSessionService() {
                 Player.REPEAT_MODE_ONE -> "repeat_one"; Player.REPEAT_MODE_ALL -> "repeat_all"; else -> "sequential"
             })
         if (shared.trackIds.isNotEmpty()) scope.launch {
-            try { if (profile == repository.session.cacheScope()) sharing.publish(shared) }
+            try { if (profile == repository.session.cacheScope()) sharing.publish(shared, force = force) }
             catch (error: CancellationException) { throw error }
             catch (_: Exception) { /* Sharing failure never interrupts the local queue. */ }
         }
@@ -273,6 +296,7 @@ class PlaybackService : MediaSessionService() {
 
     override fun onDestroy() {
         scope.cancel()
+        health.diagnostics = null
         session?.release(); session = null
         player.release(); executor.shutdown()
         super.onDestroy()

@@ -235,17 +235,31 @@ test('处理中可以关窗，任务记录和歌曲建议说明具体失败原�
   await dialog.getByRole('button', { name: '关闭（后台继续）', exact: true }).click();
   await expect(dialog).toHaveCount(0);
   expect(posts).toBe(1);
-  await page.route('**/api/v1/manage/providers/jobs', (route) =>
+  await page.route('**/api/v1/manage/providers/tasks?**', (route) =>
     route.fulfill({
       json: {
         queued: 0,
         running: 0,
+        view: new URL(route.request().url()).searchParams.get('view'),
+        total: 1,
+        limit: 20,
+        offset: 0,
+        snapshot_at: Date.now() / 1000,
+        retention_days: 30,
+        counts: { active: 0, pending: 0, attention: 1, history: 0 },
         items: [
           {
             id: 'failed-job',
             track_id: track.id,
             title: track.title,
             status: 'failed',
+            created_at: Date.now() / 1000,
+            updated_at: Date.now() / 1000,
+            job_count: 1,
+            suggestion_count: 0,
+            has_issue: 1,
+            requires_attention: 1,
+            acknowledged_at: null,
             error: 'dns_error',
             warnings: '["tls_eof"]',
           },

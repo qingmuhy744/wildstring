@@ -33,7 +33,14 @@ class MobileCompletionTest {
             info.flags = info.flags or android.accessibilityservice.AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
             automation.serviceInfo = info
             if (automation.windows.any { it.type == android.view.accessibility.AccessibilityWindowInfo.TYPE_INPUT_METHOD }) {
-                check(automation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK))
+                // A disappearing dialog can leave a stale IME accessibility window.
+                // Global BACK then navigates the app instead of hiding that keyboard.
+                compose.runOnUiThread {
+                    val focused = if (android.os.Build.VERSION.SDK_INT >= 29) android.view.inspector.WindowInspector.getGlobalWindowViews()
+                        .firstOrNull { it.isAttachedToWindow && it.hasWindowFocus() } else null
+                    val view = focused ?: compose.activity.window.decorView
+                    androidx.core.view.ViewCompat.getWindowInsetsController(view)?.hide(androidx.core.view.WindowInsetsCompat.Type.ime())
+                }
                 compose.waitUntil(5_000) { automation.windows.none { it.type == android.view.accessibility.AccessibilityWindowInfo.TYPE_INPUT_METHOD } }
                 automation.waitForIdle(300, 5_000)
             }
@@ -61,11 +68,14 @@ class MobileCompletionTest {
         val showSuggestions = AtomicBoolean(false)
         val failLyrics = AtomicBoolean(false)
         val applied = AtomicBoolean(false)
+        val slowCatalog = AtomicBoolean(false)
+        val aacDownloads = AtomicBoolean(false)
+        val deletedPlaylist = AtomicBoolean(false)
         var snapshot = """{"version":0,"device_id":"","track_ids":[],"index":0,"position_ms":0,"mode":"sequential","updated_at":null}"""
         var lyrics = "第一句\n第二句"
         val audio = InstrumentationRegistry.getInstrumentation().context.assets.open("playback.mp3").use { it.readBytes() }
         fun track(index: Int) = """{"id":"completion-$index","title":"手机测试歌曲 $index","artists":["测试艺人"],"album":"手机测试专辑","duration_ms":12000,"has_cover":false,"loved":false,"format":"mp3","status":"available","play_count":2,"listened_ms":6000,"last_played_at":"2026-10-17T00:00:00Z"}"""
-        val manual = """{"id":"manual","name":"测试歌单","kind":"manual","version":1,"track_count":3,"cover_track_id":null}"""
+        var manual = """{"id":"manual","name":"测试歌单","kind":"manual","version":1,"track_count":3,"cover_track_id":null}"""
         init {
             server.dispatcher = object : Dispatcher() {
                 override fun dispatch(request: RecordedRequest): MockResponse {
@@ -78,7 +88,7 @@ class MobileCompletionTest {
                     if (request.method in listOf("POST", "PUT", "DELETE")) mutations += path to request.body.clone().readUtf8()
                     if (path.endsWith("/auth/logout")) return MockResponse().setResponseCode(204)
                     if (path.endsWith("/playback/state")) {
-                        if (request.method == "PUT") { val body = JsonParser.parseString(request.body.readUtf8()).asJsonObject; assertFalse(body.has("updated_at")); body.addProperty("version", body["version"].asInt + 1); body.addProperty("updated_at", "2026-10-17T00:00:00Z"); snapshot = body.toString() }
+                        if (request.method == "PUT") { val body = JsonParser.parseString(request.body.readUtf8()).asJsonObject; assertFalse(body.has("updated_at")); if (body["version"].asInt != JsonParser.parseString(snapshot).asJsonObject["version"].asInt) return json("""{"detail":"playback_version_conflict"}""").setResponseCode(409); body.addProperty("version", body["version"].asInt + 1); body.addProperty("updated_at", "2026-10-17T00:00:00Z"); snapshot = body.toString() }
                         return json(snapshot)
                     }
                     if (path.endsWith("/recommendations/preferences")) return json("""{"version":1,"use_ai":false,"use_lastfm":false,"count":20}""")
@@ -110,6 +120,10 @@ class MobileCompletionTest {
                         if (request.method == "HEAD") {
                             return audioStreamFixture(request, audio, "audio/mpeg", "\"source-v1\"").setResponseCode(headCode.get())
                         }
+                        if (aacDownloads.get() && url.queryParameter("format") == "aac") {
+                            val aac = InstrumentationRegistry.getInstrumentation().context.assets.open("aac-full.m4a").use { it.readBytes() }
+                            return MockResponse().setHeader("Content-Type", "audio/mp4").setHeader("X-Wildstring-Playback", "transcode").setChunkedBody(Buffer().write(aac), 1024)
+                        }
                         val start = request.getHeader("Range")?.substringAfter("bytes=")?.substringBefore('-')?.toIntOrNull() ?: 0
                         val response = MockResponse().setHeader("Content-Type", "audio/mpeg").setHeader("ETag", "\"source-v1\"").setHeader("Accept-Ranges", "bytes").setBody(Buffer().write(audio, start, audio.size - start))
                         if (start > 0) response.setResponseCode(206).setHeader("Content-Range", "bytes $start-${audio.lastIndex}/${audio.size}")
@@ -125,8 +139,16 @@ class MobileCompletionTest {
                         val limit = url.queryParameter("limit")?.toInt() ?: 50
                         return json("""{"items":[${(offset until minOf(count, offset + limit)).joinToString(",") { track(it) }}],"total":$count,"limit":$limit,"offset":$offset}""")
                     }
-                    if (path.endsWith("/playlists")) return if (request.method == "POST") json(manual) else json("""{"items":[$manual],"total":1,"limit":100,"offset":0}""")
-                    if (path.endsWith("/manual") || path.endsWith("/order")) return json(manual)
+                    if (path.endsWith("/playlists")) return if (request.method == "POST") json(manual) else json("""{"items":[${if (deletedPlaylist.get()) "" else manual}],"total":${if (deletedPlaylist.get()) 0 else 1},"limit":${url.queryParameter("limit") ?: "50"},"offset":0}""").apply { if (slowCatalog.get()) setBodyDelay(1200, TimeUnit.MILLISECONDS) }
+                    if (path.endsWith("/manual") || path.endsWith("/order")) {
+                        if (request.method == "DELETE") deletedPlaylist.set(true)
+                        if (request.method == "PUT") {
+                            val body = JsonParser.parseString(request.body.readUtf8()).asJsonObject
+                            val record = JsonParser.parseString(manual).asJsonObject
+                            record.addProperty("name", body["name"].asString); record.addProperty("version", record["version"].asInt + 1); manual = record.toString()
+                        }
+                        return json(manual)
+                    }
                     if (Regex(".*/completion-\\d+$").matches(path)) return json(track(path.substringAfterLast('-').toInt()))
                     return MockResponse().setResponseCode(404)
                 }
@@ -138,7 +160,7 @@ class MobileCompletionTest {
     private fun connect(fixture: Fixture): MusicViewModel {
         val vm = compose.runOnIdle { ViewModelProvider(compose.activity)[MusicViewModel::class.java] }
         val address = fixture.server.url("/").newBuilder().host("127.0.0.1").build().toString()
-        compose.runOnIdle { vm.repository.session.invalidate(); vm.settings.quality(0); vm.connect(address, "mobile-admin", "test-password", true) }
+        compose.runOnIdle { vm.repository.session.invalidate(); vm.settings.quality(0); vm.sharing.mode("off"); vm.connect(address, "mobile-admin", "test-password", true) }
         compose.waitUntil(20_000) { vm.state.value.connected && !vm.state.value.loading }
         return vm
     }
@@ -232,9 +254,12 @@ class MobileCompletionTest {
                 compose.waitUntil(10_000) { compose.onAllNodes(hasText("保存修改") and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
                 capture("mobile-metadata.png")
                 compose.onNodeWithText("歌曲名称").performTextReplacement("手机修正标题")
-                // Wait for IME dismissal before locating the save button after scrolling.
-                dismissKeyboard()
-                compose.onNodeWithText("保存修改").performScrollTo().performClick()
+                capture("mobile-metadata-edit-footer.png")
+                // The footer remains visible while the focused field requests the IME.
+                // Exercise its real accessibility click action rather than racing a changing
+                // keyboard animation with a previously measured screen coordinate.
+                compose.onNodeWithText("保存修改").assertIsDisplayed().assertIsEnabled()
+                    .performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnClick) { click -> assertTrue(click()) }
                 try { compose.waitUntil(10_000) { fixture.mutations.any { it.first.endsWith("/metadata") } } }
                 catch (error: Throwable) { capture("mobile-metadata-save-failure.png"); throw AssertionError("Metadata save requests=${fixture.requests.toList()} mutations=${fixture.mutations.toList()}", error) }
                 val saved = JsonParser.parseString(fixture.mutations.first { it.first.endsWith("/metadata") }.second).asJsonObject.getAsJsonObject("overrides")
@@ -316,4 +341,108 @@ class MobileCompletionTest {
         }
     }
 
+    @Test fun automaticPlaylistDownloadsUseChosenQualityAndKeepExistingFiles() {
+        Fixture().use { fixture -> val vm = connect(fixture)
+            try {
+                val downloads = vm.repository.downloads
+                downloads.wifiOnly = false; downloads.bitrate = 192; fixture.aacDownloads.set(true)
+                downloads.followPlaylist("manual", true)
+                runBlocking { withContext(Dispatchers.Main) { vm.syncOfflinePlaylists() } }
+                compose.waitUntil(20_000) { downloads.entries.value.count { it.state == "complete" } == 3 }
+                assertTrue(fixture.requests.any { it.contains("format=aac") && it.contains("bitrate_kbps=192") })
+                val entry = downloads.entries.value.first()
+                assertEquals(192, entry.bitrate); assertEquals("m4a", entry.audioFormat)
+                assertEquals("\"source-v1\"", entry.sourceEtag)
+                assertEquals("m4a", downloads.formatForStream(vm.repository.originalStream(entry.track.id)))
+                val count = fixture.requests.count { it.startsWith("GET ") && it.contains("/stream") }
+                downloads.bitrate = 128
+                runBlocking { withContext(Dispatchers.Main) { vm.syncOfflinePlaylists() } }
+                assertEquals(count, fixture.requests.count { it.startsWith("GET ") && it.contains("/stream") })
+                downloads.followPlaylist("manual", false)
+                assertEquals(3, downloads.entries.value.count { it.state == "complete" })
+                assertEquals(192, downloads.entries.value.first().bitrate)
+            } finally { vm.repository.downloads.bitrate = 0; cleanup(vm) }
+        }
+    }
+
+    @Test fun longPressPlaylistExposesEditDeleteAndDownloadActions() {
+        Fixture().use { fixture -> val vm = connect(fixture)
+            try {
+                compose.runOnIdle { vm.navigate("mine") }
+                compose.waitUntil(10_000) { vm.state.value.playlists.isNotEmpty() && !vm.state.value.loading }
+                compose.onNodeWithText("测试歌单", useUnmergedTree = true).performTouchInput { longClick() }
+                compose.onNodeWithText("自动下载歌单").assertIsDisplayed()
+                compose.onNodeWithText("编辑歌单").performClick()
+                compose.onNodeWithText("歌单名称").performTextClearance()
+                compose.onNodeWithText("歌单名称").performTextInput("长按改名")
+                compose.onNodeWithText("保存歌单").performScrollTo().performClick()
+                compose.waitUntil(10_000) { vm.state.value.playlists.any { it.name == "长按改名" } }
+                dismissKeyboard()
+                assertEquals("Closing the editor keyboard must preserve the current tab", "mine", vm.state.value.tab)
+                // The editor's IME can leave the saved lazy viewport below/above this row.
+                compose.onNodeWithTag("catalog-list").performScrollToIndex(1)
+                compose.waitUntil(10_000) { compose.onAllNodesWithText("长按改名", useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
+                compose.onNodeWithText("长按改名", useUnmergedTree = true).performTouchInput { longClick() }
+                compose.onNodeWithText("删除歌单").performClick()
+                compose.onNodeWithText("删除", useUnmergedTree = true).performClick()
+                compose.waitUntil(10_000) { fixture.deletedPlaylist.get() && vm.state.value.playlists.isEmpty() }
+                assertTrue(fixture.requests.any { it.startsWith("DELETE ") && it.contains("/playlists/manual") })
+            } finally { cleanup(vm) }
+        }
+    }
+
+    @Test fun minePullToRefreshUsesWaveIndicatorAndRealRequest() {
+        Fixture().use { fixture -> val vm = connect(fixture)
+            try {
+                compose.runOnIdle { vm.navigate("mine") }
+                compose.waitUntil(10_000) { vm.state.value.playlists.isNotEmpty() && !vm.state.value.loading }
+                val before = fixture.requests.count { it.contains("/playlists?") }
+                fixture.slowCatalog.set(true)
+                compose.onNodeWithTag("catalog-list").performTouchInput { swipeDown(startY = 80f, endY = 650f, durationMillis = 600) }
+                compose.waitUntil(10_000) { fixture.requests.count { it.contains("/playlists?") } > before }
+                compose.onNodeWithTag("wildstring-refresh").assertIsDisplayed()
+                capture("mine-wave-refresh")
+                compose.waitUntil(10_000) { !vm.state.value.loading }
+            } finally { cleanup(vm) }
+        }
+    }
+
+    @Test fun crossDevicePromptRestoresPausedAndPausePublishesWithoutManualClaim() {
+        Fixture().use { fixture -> val vm = connect(fixture)
+            try {
+                compose.runOnIdle { vm.sharing.mode("ask") }
+                fixture.snapshot = """{"version":70,"device_id":"other-device","track_ids":["completion-0","completion-1"],"index":1,"position_ms":3000,"mode":"repeat_all","updated_at":"2026-10-17T00:00:00Z"}"""
+                runBlocking { withContext(Dispatchers.Main) { vm.checkSharedPlayback() } }
+                compose.onNodeWithText("继续其他设备的播放？").assertIsDisplayed()
+                compose.onNodeWithText("载入进度").performClick()
+                try { compose.waitUntil(10_000) { vm.state.value.handoff == null && vm.state.value.queue.size == 2 } }
+                catch (e: Throwable) {
+                    val tree = runCatching { val roots = compose.onAllNodes(isRoot(), useUnmergedTree = true); (0 until roots.fetchSemanticsNodes().size).joinToString("\n") { roots[it].printToString() } }.getOrDefault("UI unavailable")
+                    throw AssertionError("handoff=${vm.state.value.handoff != null}, queue=${vm.state.value.queue.size}, error=${vm.state.value.error}\n$tree", e)
+                }
+                compose.waitUntil(10_000) { compose.runOnIdle { vm.controller!!.currentMediaItemIndex == 1 && vm.controller!!.currentPosition == 3000L } }
+                compose.runOnIdle { assertFalse(vm.controller!!.playWhenReady) }
+                assertFalse(fixture.mutations.any { it.first.endsWith("/playback/state") })
+                compose.runOnIdle { vm.toggle() }
+                compose.waitUntil(10_000) { vm.state.value.playing }
+                compose.runOnIdle { vm.seek(5000); vm.toggle() }
+                compose.waitUntil(10_000) { compose.runOnIdle { !vm.controller!!.playWhenReady && !vm.controller!!.isPlaying } }
+                compose.waitUntil(10_000) { JsonParser.parseString(fixture.snapshot).asJsonObject["position_ms"].asLong >= 4900 }
+                assertTrue(fixture.mutations.any { it.first.endsWith("/playback/state") })
+                val paused = gson.fromJson(fixture.snapshot, SharedPlayback::class.java)
+                val writes = fixture.mutations.count { it.first.endsWith("/playback/state") }
+                runBlocking { vm.sharing.publish(paused, force = true) }
+                assertEquals(writes, fixture.mutations.count { it.first.endsWith("/playback/state") })
+                fixture.snapshot = """{"version":90,"device_id":"other-device","track_ids":["completion-0"],"index":0,"position_ms":2000,"mode":"sequential","updated_at":null}"""
+                runBlocking { withContext(Dispatchers.Main) { vm.checkSharedPlayback() } }
+                compose.runOnIdle { assertNull(vm.state.value.handoff); vm.syncMode("off") }
+                runBlocking { withContext(Dispatchers.Main) { vm.checkSharedPlayback() } }
+                compose.runOnIdle { assertNull(vm.state.value.handoff); vm.sharing.mode("auto") }
+                runBlocking { withContext(Dispatchers.Main) { vm.checkSharedPlayback() } }
+                compose.waitUntil(10_000) { vm.state.value.queue.size == 1 }
+                compose.waitUntil(10_000) { compose.runOnIdle { vm.controller!!.currentPosition == 2000L } }
+                compose.runOnIdle { assertFalse(vm.controller!!.playWhenReady) }
+            } finally { vm.sharing.mode("off"); cleanup(vm) }
+        }
+    }
 }

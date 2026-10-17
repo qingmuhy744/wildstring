@@ -215,37 +215,41 @@ class MetadataEditor:
     def save(self, track_id, body, *, user_id="admin", source="manual"):
         with self.repository.database.connect(write=True) as connection:
             connection.execute("BEGIN IMMEDIATE")
-            row = connection.execute(
-                """SELECT m.version,m.overrides FROM track_metadata m JOIN tracks t
-                ON t.id=m.track_id WHERE t.id=? AND t.library_id=?""",
-                (track_id, self.repository.library_id()),
-            ).fetchone()
-            if row is None:
-                raise HTTPException(404, "track_not_found")
-            if row["version"] != body.version:
-                raise HTTPException(409, "metadata_version_conflict")
-            connection.execute(
-                "INSERT INTO metadata_history(id,track_id,user_id,before_values,after_version,created_at) VALUES (?,?,?,?,?,datetime('now'))",
-                (uuid4().hex, track_id, user_id, row["overrides"], body.version + 1),
-            )
-            connection.execute(
-                "UPDATE track_metadata SET overrides=?, version=version+1 WHERE track_id=?",
-                (
-                    json.dumps(body.overrides.model_dump(exclude_unset=True), ensure_ascii=False),
-                    track_id,
-                ),
-            )
-            before = json.loads(row["overrides"])
-            after = body.overrides.model_dump(exclude_unset=True)
-            for key in set(before) | set(after):
-                if key not in after:
-                    connection.execute(
-                        "DELETE FROM metadata_origins WHERE track_id=? AND field=?", (track_id, key)
-                    )
-                elif key not in before or before[key] != after[key]:
-                    connection.execute(
-                        "INSERT OR REPLACE INTO metadata_origins VALUES (?,?,?)",
-                        (track_id, key, source),
-                    )
-            apply_effective(connection, track_id)
+            self.save_in_transaction(connection, track_id, body, user_id=user_id, source=source)
         return self.read(track_id)
+
+    def save_in_transaction(self, connection, track_id, body, *, user_id="admin", source="manual"):
+        """Validate and write under a caller-owned transaction (e.g. proposal application)."""
+        row = connection.execute(
+            """SELECT m.version,m.overrides FROM track_metadata m JOIN tracks t
+            ON t.id=m.track_id WHERE t.id=? AND t.library_id=?""",
+            (track_id, self.repository.library_id()),
+        ).fetchone()
+        if row is None:
+            raise HTTPException(404, "track_not_found")
+        if row["version"] != body.version:
+            raise HTTPException(409, "metadata_version_conflict")
+        connection.execute(
+            "INSERT INTO metadata_history(id,track_id,user_id,before_values,after_version,created_at) VALUES (?,?,?,?,?,datetime('now'))",
+            (uuid4().hex, track_id, user_id, row["overrides"], body.version + 1),
+        )
+        connection.execute(
+            "UPDATE track_metadata SET overrides=?, version=version+1 WHERE track_id=?",
+            (
+                json.dumps(body.overrides.model_dump(exclude_unset=True), ensure_ascii=False),
+                track_id,
+            ),
+        )
+        before = json.loads(row["overrides"])
+        after = body.overrides.model_dump(exclude_unset=True)
+        for key in set(before) | set(after):
+            if key not in after:
+                connection.execute(
+                    "DELETE FROM metadata_origins WHERE track_id=? AND field=?", (track_id, key)
+                )
+            elif key not in before or before[key] != after[key]:
+                connection.execute(
+                    "INSERT OR REPLACE INTO metadata_origins VALUES (?,?,?)",
+                    (track_id, key, source),
+                )
+        apply_effective(connection, track_id)

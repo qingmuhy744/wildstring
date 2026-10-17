@@ -1,5 +1,13 @@
 import { useEffect, useState } from 'react';
-import { artist } from './api';
+import { artist, type Playlist } from './api';
+import {
+  allDownloadPlaylists,
+  allowMeteredDownloads,
+  followedPlaylists,
+  followPlaylist,
+  setAllowMeteredDownloads,
+  syncOfflinePlaylists,
+} from './offline-playlists';
 import { Cover } from './cover';
 import {
   offlineLimit,
@@ -8,6 +16,8 @@ import {
   removeDownload,
   resumeDownload,
   setOfflineLimit,
+  downloadBitrate,
+  setDownloadBitrate,
   type OfflineTrack,
 } from './offline';
 import type { Player } from './player';
@@ -24,10 +34,14 @@ const labels = {
   paused: '已暂停',
   failed: '下载失败',
 };
-export function OfflinePanel({ player }: { player: Player }) {
+export function OfflinePanel({ player, userId }: { player: Player; userId: string }) {
   const [records, setRecords] = useState<OfflineTrack[]>([]),
     [error, setError] = useState('');
   const [limit, setLimit] = useState(offlineLimit() / 1024 / 1024);
+  const [bitrate, setBitrate] = useState(downloadBitrate);
+  const [metered, setMetered] = useState(allowMeteredDownloads);
+  const [selected, setSelected] = useState(() => followedPlaylists(userId));
+  const [playlists, setPlaylists] = useState<Playlist[] | null>(null);
   useEffect(() => {
     let live = true;
     const reload = () => {
@@ -64,7 +78,7 @@ export function OfflinePanel({ player }: { player: Player }) {
         MB
       </p>
       <p className="muted">
-        从歌曲操作、专辑或歌单保存完整原音。退出登录会清除本机离线音乐。离线访问有效期 7
+        从歌曲操作、专辑或歌单保存音乐。退出登录会清除本机离线音乐。离线访问有效期 7
         天，浏览器空间不足时可能回收内容。
       </p>
       <div className="toolbar-actions">
@@ -99,6 +113,68 @@ export function OfflinePanel({ player }: { player: Player }) {
           />
         </label>
       </div>
+      <details className="management-card offline-options">
+        <summary>下载设置与自动下载歌单</summary>
+        <label>
+          默认下载音质
+          <select
+            aria-label="默认下载音质"
+            value={bitrate}
+            onChange={(e) => {
+              const value = Number(e.target.value);
+              setBitrate(value);
+              setDownloadBitrate(value);
+            }}
+          >
+            {[0, 128, 192, 256, 320].map((rate) => (
+              <option key={rate} value={rate}>
+                {rate ? `AAC ${rate} kbps` : '原音'}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="check-label">
+          <input
+            type="checkbox"
+            checked={metered}
+            onChange={(e) => {
+              setMetered(e.target.checked);
+              setAllowMeteredDownloads(e.target.checked);
+            }}
+          />
+          允许在移动数据或未知网络自动下载
+        </label>
+        <p className="muted">
+          未开启时仅在能识别的
+          Wi-Fi／有线网络自动下载。浏览器无法识别网络时可手动保存。音质仅影响新下载，有损音频保持原音。
+        </p>
+        <button onClick={() => void action(async () => setPlaylists(await allDownloadPlaylists()))}>
+          选择自动下载歌单
+        </button>
+        {playlists?.map((playlist) => (
+          <label className="check-label" key={playlist.id}>
+            <input
+              type="checkbox"
+              checked={selected.includes(playlist.id)}
+              onChange={(e) => {
+                followPlaylist(userId, playlist.id, e.target.checked);
+                setSelected(followedPlaylists(userId));
+              }}
+            />
+            {playlist.name}
+          </label>
+        ))}
+        <p className="muted">
+          已选 {selected.length}{' '}
+          个歌单。网页打开时自动检查，新歌曲会保存到本机；移出歌单的已下载文件保留。
+        </p>
+        <button
+          disabled={!selected.length}
+          onClick={() => void action(() => syncOfflinePlaylists(userId))}
+        >
+          立即检查歌单
+        </button>
+      </details>
       {(!('serviceWorker' in navigator) || !isSecureContext) && (
         <p className="muted" role="status">
           断网后重新打开网页需要 HTTPS 或 localhost。当前地址可以下载音频，离线页面壳暂不可用。
@@ -137,6 +213,10 @@ export function OfflinePanel({ player }: { player: Player }) {
               <p role="status">
                 {labels[record.state]} · {size(record.bytes)}
                 {record.total ? ` / ${size(record.total)}` : ''}
+                {' · '}
+                {record.bitrate && record.blob.type === 'audio/mp4'
+                  ? `AAC ${record.bitrate} kbps`
+                  : '原音'}
               </p>
               {record.error && <p className="error">{record.error}</p>}
               {record.total > 0 && (

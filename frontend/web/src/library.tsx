@@ -1,4 +1,6 @@
 import {
+  Suspense,
+  lazy,
   useCallback,
   useEffect,
   useRef,
@@ -29,6 +31,8 @@ import { useLibraryMotto } from './library-mottos';
 import { NowPlaying } from './now-playing';
 import { PlayerBar, usePlayer } from './player';
 import { PlaylistEditor } from './playlist-editor';
+import { PlaylistMenu } from './playlist-menu';
+import { PlaybackSync } from './playback-sync';
 import { QueuePanel } from './queue-panel';
 import { Management } from './management';
 import { MetadataEditor } from './metadata-editor';
@@ -46,8 +50,24 @@ import { Icon } from './icons';
 import type { TrackOperations } from './track-actions';
 import { Discover, Devices } from './discover';
 import { OfflinePanel } from './offline-panel';
+import { Notifications, useNotifications } from './notifications';
+import './workspace.css';
+import { followPlaylist, followedPlaylists, useOfflinePlaylistSync } from './offline-playlists';
 import { collectTracks } from './playback-state';
 import { saveDownloads, usingOfflineAccess } from './offline';
+
+const Assistant = lazy(() =>
+  import('./assistant').then((module) => ({ default: module.Assistant })),
+);
+const AgentTasks = lazy(() =>
+  import('./agent-workbench').then((module) => ({ default: module.AgentTasks })),
+);
+const Drafts = lazy(() =>
+  import('./agent-workbench').then((module) => ({ default: module.Drafts })),
+);
+const AssistantSettings = lazy(() =>
+  import('./assistant-settings').then((module) => ({ default: module.AssistantSettings })),
+);
 
 type View =
   | 'tracks'
@@ -58,7 +78,12 @@ type View =
   | 'listening'
   | 'discover'
   | 'offline'
-  | 'devices';
+  | 'devices'
+  | 'assistant'
+  | 'drafts'
+  | 'tasks'
+  | 'notifications'
+  | 'assistant-settings';
 type Result =
   | { kind: 'tracks'; page: TrackPage }
   | { kind: 'albums'; page: AlbumPage }
@@ -74,6 +99,11 @@ const labels: Record<View, string> = {
   discover: '每日推荐 · AI',
   offline: '离线音乐',
   devices: '跨设备继续',
+  assistant: '音乐助手',
+  drafts: '待确认草案',
+  tasks: '巡检与任务',
+  notifications: '通知中心',
+  'assistant-settings': '助手设置',
 };
 const icons: Record<View, string> = {
   tracks: '▤',
@@ -85,6 +115,11 @@ const icons: Record<View, string> = {
   discover: '✦',
   offline: '↓',
   devices: '⇄',
+  assistant: '✧',
+  drafts: '▧',
+  tasks: '◎',
+  notifications: '♧',
+  'assistant-settings': '⚙',
 };
 
 type CatalogLocation = {
@@ -105,10 +140,33 @@ type CatalogLocation = {
 export function Library({ onLogout, user }: { onLogout: () => Promise<void>; user: User }) {
   const isAdmin = user.role === 'admin';
   const [accountOpen, setAccountOpen] = useState(false);
+  const [connectionSettingsRevision, setConnectionSettingsRevision] = useState(0);
+  function openModelConnections() {
+    setConnectionSettingsRevision((value) => value + 1);
+    switchView('assistant-settings');
+  }
   const [view, setView] = useState<View>(
     navigator.onLine && !usingOfflineAccess() ? 'tracks' : 'offline',
   );
-  const specialView = view === 'discover' || view === 'offline' || view === 'devices';
+  const specialView = [
+    'discover',
+    'offline',
+    'devices',
+    'assistant',
+    'drafts',
+    'tasks',
+    'notifications',
+    'assistant-settings',
+  ].includes(view);
+  const inbox = useNotifications(user.id);
+  const [selectedAgentItem, setSelectedAgentItem] = useState<{
+    kind: 'drafts' | 'tasks';
+    id: string;
+  } | null>(null);
+  function openAgentItem(kind: 'drafts' | 'tasks', id: string) {
+    setSelectedAgentItem({ kind, id });
+    switchView(kind);
+  }
   const [collectionBusy, setCollectionBusy] = useState(false);
   const collectionRequest = useRef<AbortController | null>(null);
   const albumRequest = useRef<AbortController | null>(null);
@@ -151,6 +209,11 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
   const [editor, setEditor] = useState<{ initial: Playlist | null; track: Track | null } | null>(
     null,
   );
+  const [playlistMenu, setPlaylistMenu] = useState<{ item: Playlist; x: number; y: number } | null>(
+    null,
+  );
+  const closePlaylistMenu = useCallback(() => setPlaylistMenu(null), []);
+  useOfflinePlaylistSync(user.id);
   const [bulkTarget, setBulkTarget] = useState(''),
     [bulkBusy, setBulkBusy] = useState(false);
   const closePlayer = useCallback(() => setLyricsOpen(false), []);
@@ -312,6 +375,14 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
   const prependAnchor = useRef<{ id: string; top: number } | null>(null);
   const lastScroll = useRef(0);
   const upwardScroll = useRef(false);
+  function repositionList(scroll: () => void) {
+    scroll();
+    // Jump/retry, prepend anchors and history restoration move the document too.
+    // Record their final position before the queued scroll event is delivered so
+    // only a later user scroll can trigger loading the previous window.
+    lastScroll.current = window.scrollY;
+    upwardScroll.current = false;
+  }
   useEffect(() => {
     const scroll = () => {
       upwardScroll.current = window.scrollY < lastScroll.current;
@@ -336,13 +407,22 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
       const element = Array.from(
         listRoot.current?.querySelectorAll<HTMLElement>('[data-browse-id]') || [],
       ).find((item) => item.dataset.browseId === anchor.id);
-      if (element) window.scrollBy(0, element.getBoundingClientRect().top - anchor.top);
+      if (element)
+        repositionList(() =>
+          window.scrollBy({
+            top: element.getBoundingClientRect().top - anchor.top,
+            behavior: 'instant',
+          }),
+        );
       prependAnchor.current = null;
     } else if (pendingJump.current) {
-      listRoot.current?.scrollIntoView({ block: 'start' });
+      repositionList(() =>
+        listRoot.current?.scrollIntoView({ block: 'start', behavior: 'instant' }),
+      );
       pendingJump.current = false;
     } else if (scrollToRestore.current !== null) {
-      window.scrollTo(0, scrollToRestore.current);
+      const top = scrollToRestore.current;
+      repositionList(() => window.scrollTo({ top, behavior: 'instant' }));
       scrollToRestore.current = null;
     }
   }, [visible, lyricsOpen, navigation.length]);
@@ -439,6 +519,18 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
     setPlaylist(null);
     clearSearch();
   }
+  useEffect(() => {
+    const openLink = () => {
+      const match = /^#agent\/(drafts|tasks)\/([A-Za-z0-9_-]{1,128})$/.exec(location.hash);
+      if (!match) return;
+      const kind = match[1] as 'drafts' | 'tasks';
+      setSelectedAgentItem({ kind, id: match[2] });
+      switchView(kind);
+    };
+    openLink();
+    window.addEventListener('hashchange', openLink);
+    return () => window.removeEventListener('hashchange', openLink);
+  }, []);
   function switchTab(target: 'tracks' | 'albums') {
     if (selectedArtist) {
       setArtistView(target);
@@ -650,13 +742,14 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
     setCollectionRevision((value) => value + 1);
     openPlaylist(selected);
   }
-  async function deletePlaylist() {
-    if (!activePlaylist || !confirm(`删除歌单“${activePlaylist.name}”？歌曲文件会保留。`)) return;
+  async function deletePlaylist(target = activePlaylist) {
+    if (!target || !confirm(`删除歌单“${target.name}”？歌曲文件会保留。`)) return;
     try {
-      await api(`/playlists/${activePlaylist.id}?version=${activePlaylist.version}`, {
+      await api(`/playlists/${target.id}?version=${target.version}`, {
         method: 'DELETE',
       });
       switchView('playlists');
+      followPlaylist(user.id, target.id, false);
       setCollectionRevision((value) => value + 1);
     } catch (reason) {
       setNotice(reason instanceof ApiError ? reason.message : '歌单未删除，请重试。');
@@ -729,9 +822,27 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
               className={`nav-button ${view === target && !manageOpen ? 'nav-current' : ''}`}
               onClick={() => switchView(target)}
             >
-              <span aria-hidden="true">{icons[target]}</span>
+              <span aria-hidden="true">
+                {target === 'notifications' ? (
+                  <Icon name="bell" />
+                ) : target === 'assistant' ? (
+                  <Icon name="assistant" />
+                ) : target === 'drafts' ? (
+                  <Icon name="draft" />
+                ) : target === 'tasks' ? (
+                  <Icon name="task" />
+                ) : target === 'assistant-settings' ? (
+                  <Icon name="settings" />
+                ) : (
+                  icons[target]
+                )}
+              </span>
               {labels[target]}
-              {target === 'favorites' ? (
+              {target === 'notifications' && inbox.unread > 0 ? (
+                <small className="notification-count" aria-label={`${inbox.unread} 条未读通知`}>
+                  {inbox.unread > 99 ? '99+' : inbox.unread}
+                </small>
+              ) : target === 'favorites' ? (
                 <small>{favorites.ids.size}</small>
               ) : counts[target] !== undefined ? (
                 <small>{counts[target]}</small>
@@ -782,6 +893,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
             onEdit={setEditingTrack}
             onChanged={refreshLibrary}
             onRefresh={() => setMetadataRefresh({ scope: 'library', label: '整个曲库' })}
+            onOpenConnections={openModelConnections}
           />
         )}
         <main className={`library ${album ? 'is-album' : ''}`} hidden={manageOpen}>
@@ -846,14 +958,50 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
             <Discover
               player={player}
               favorites={favorites}
+              onConnections={openModelConnections}
               onSaved={(list) => {
                 setCollectionRevision((v) => v + 1);
                 setNotice(`已保存：${list.name}`);
               }}
             />
           )}
-          {view === 'offline' && <OfflinePanel player={player} />}
+          {view === 'offline' && <OfflinePanel player={player} userId={user.id} />}
           {view === 'devices' && <Devices player={player} user={user} />}
+          <Suspense
+            fallback={
+              <p role="status" className="workspace-empty">
+                正在打开工作台…
+              </p>
+            }
+          >
+            {view === 'assistant' && (
+              <Assistant
+                onDraft={(id) => openAgentItem('drafts', id)}
+                onConnections={openModelConnections}
+              />
+            )}
+            {view === 'drafts' && (
+              <Drafts
+                user={user}
+                selectedId={selectedAgentItem?.kind === 'drafts' ? selectedAgentItem.id : undefined}
+                onChanged={() => {
+                  refreshLibrary();
+                  setCollectionRevision((value) => value + 1);
+                  void inbox.refresh();
+                }}
+              />
+            )}
+            {view === 'tasks' && (
+              <AgentTasks
+                onDraft={(id) => openAgentItem('drafts', id)}
+                selectedId={selectedAgentItem?.kind === 'tasks' ? selectedAgentItem.id : undefined}
+              />
+            )}
+            {view === 'notifications' && <Notifications inbox={inbox} onOpen={openAgentItem} />}
+            {view === 'assistant-settings' && (
+              <AssistantSettings key={connectionSettingsRevision} user={user} />
+            )}
+          </Suspense>
           <div hidden={specialView}>
             <section
               className={`collection-heading ${album || selectedArtist ? 'album-heading' : ''}`}
@@ -1198,34 +1346,55 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
                 ) : kind === 'playlists' ? (
                   <div className="playlist-grid" aria-label="歌单列表">
                     {(visible as PlaylistPage).items.map((item) => (
-                      <button
-                        className={`playlist-card ${item.kind}`}
-                        key={item.id}
-                        data-browse-id={item.id}
-                        aria-label={`打开歌单 ${item.name}`}
-                        onClick={() => openPlaylist(item)}
-                      >
-                        {item.kind === 'favorites' ? (
-                          <span className="playlist-art favorites-art" aria-hidden="true">
-                            ♥
+                      <div className="playlist-tile" key={item.id}>
+                        <button
+                          className={`playlist-card ${item.kind}`}
+                          key={item.id}
+                          data-browse-id={item.id}
+                          aria-label={`打开歌单 ${item.name}`}
+                          onClick={() => openPlaylist(item)}
+                          onContextMenu={(event) => {
+                            event.preventDefault();
+                            const rect = event.currentTarget.getBoundingClientRect();
+                            setPlaylistMenu({
+                              item,
+                              x: event.clientX || rect.left + 24,
+                              y: event.clientY || rect.top + 24,
+                            });
+                          }}
+                        >
+                          {item.kind === 'favorites' ? (
+                            <span className="playlist-art favorites-art" aria-hidden="true">
+                              ♥
+                            </span>
+                          ) : item.cover_track_id ? (
+                            <Cover trackId={item.cover_track_id} title={item.name} size={320} />
+                          ) : (
+                            <span className="playlist-art" aria-hidden="true">
+                              {item.kind === 'smart' ? '✦' : '♫'}
+                            </span>
+                          )}
+                          <strong>{item.name}</strong>
+                          <span>
+                            {item.kind === 'favorites'
+                              ? '喜欢的声音'
+                              : item.kind === 'smart'
+                                ? '规则歌单'
+                                : '普通歌单'}{' '}
+                            · {item.track_count} 首
                           </span>
-                        ) : item.cover_track_id ? (
-                          <Cover trackId={item.cover_track_id} title={item.name} size={320} />
-                        ) : (
-                          <span className="playlist-art" aria-hidden="true">
-                            {item.kind === 'smart' ? '✦' : '♫'}
-                          </span>
-                        )}
-                        <strong>{item.name}</strong>
-                        <span>
-                          {item.kind === 'favorites'
-                            ? '喜欢的声音'
-                            : item.kind === 'smart'
-                              ? '规则歌单'
-                              : '普通歌单'}{' '}
-                          · {item.track_count} 首
-                        </span>
-                      </button>
+                        </button>
+                        <button
+                          className="playlist-menu-trigger icon-button"
+                          aria-label={`${item.name}的歌单操作`}
+                          onClick={(event) => {
+                            const rect = event.currentTarget.getBoundingClientRect();
+                            setPlaylistMenu({ item, x: rect.right - 220, y: rect.bottom + 4 });
+                          }}
+                        >
+                          <Icon name="more" />
+                        </button>
+                      </div>
                     ))}
                   </div>
                 ) : kind === 'albums' ? (
@@ -1344,6 +1513,40 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
       )}
       {metadataRefresh && (
         <MetadataRefreshDialog target={metadataRefresh} onClose={() => setMetadataRefresh(null)} />
+      )}
+      <PlaybackSync player={player} userId={user.id} />
+      {playlistMenu && (
+        <PlaylistMenu
+          playlist={playlistMenu.item}
+          x={playlistMenu.x}
+          y={playlistMenu.y}
+          following={followedPlaylists(user.id).includes(playlistMenu.item.id)}
+          onClose={closePlaylistMenu}
+          onOpen={() => {
+            openPlaylist(playlistMenu.item);
+            closePlaylistMenu();
+          }}
+          onEdit={() => {
+            void api<Playlist>(`/playlists/${playlistMenu.item.id}`)
+              .then((initial) => setEditor({ initial, track: null }))
+              .catch(() => setNotice('无法读取歌单，请重试。'));
+            closePlaylistMenu();
+          }}
+          onDelete={() => {
+            void deletePlaylist(playlistMenu.item);
+            closePlaylistMenu();
+          }}
+          onFollow={() => {
+            const enabled = !followedPlaylists(user.id).includes(playlistMenu.item.id);
+            followPlaylist(user.id, playlistMenu.item.id, enabled);
+            setNotice(
+              enabled
+                ? '已开启歌单自动下载，可在离线音乐中设置网络和音质。'
+                : '已关闭自动下载，离线音乐保留。',
+            );
+            closePlaylistMenu();
+          }}
+        />
       )}
       {editor && (
         <PlaylistEditor

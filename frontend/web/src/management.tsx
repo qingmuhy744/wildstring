@@ -1,3 +1,4 @@
+import { SystemDiagnostics } from './system-diagnostics';
 import { ProviderSettings } from './providers';
 import { UsersPanel } from './accounts';
 import { TranscodingSettings } from './transcoding-settings';
@@ -5,9 +6,8 @@ import { HostSettings } from './host-settings';
 import { useEffect, useRef, useState } from 'react';
 import { api, type Track, type TrackPage } from './api';
 import { Pagination } from './track-list';
-import { AISettings } from './ai-settings';
 import { IntakePanel } from './intake-panel';
-import { MetadataJobs } from './metadata-refresh';
+import { MetadataJobs } from './metadata-tasks';
 
 type Directory = {
   path: string;
@@ -133,16 +133,18 @@ export function Management({
   onEdit,
   onChanged,
   onRefresh,
+  onOpenConnections,
 }: {
   revision: number;
   onBack: () => void;
   onEdit: (track: Track) => void;
   onChanged: () => void;
   onRefresh: () => void;
+  onOpenConnections: () => void;
 }) {
-  const [tab, setTab] = useState<'overview' | 'tracks' | 'jobs' | 'intake' | 'settings' | 'users'>(
-    'overview',
-  );
+  const [tab, setTab] = useState<
+    'overview' | 'tracks' | 'jobs' | 'intake' | 'settings' | 'users' | 'diagnostics'
+  >('overview');
   const finished = useRef<string | null>(null);
   const [overview, setOverview] = useState<Overview | null>(null),
     [jobs, setJobs] = useState<Jobs | null>(null),
@@ -188,7 +190,9 @@ export function Management({
     if (overview) setName(overview.preferences.name);
   }, [overview?.preferences.name]);
   useEffect(() => {
-    const timer = setInterval(() => setTick((v) => v + 1), 2000);
+    const timer = setInterval(() => {
+      if (!document.hidden) setTick((v) => v + 1);
+    }, 2000);
     return () => clearInterval(timer);
   }, []);
   useEffect(() => {
@@ -266,6 +270,7 @@ export function Management({
             ['intake', '导入与整理'],
             ['settings', '设置'],
             ['users', '用户'],
+            ['diagnostics', '诊断'],
           ] as const
         ).map(([key, label]) => (
           <button key={key} aria-pressed={tab === key} onClick={() => setTab(key)}>
@@ -286,6 +291,7 @@ export function Management({
       ) : (
         overview && (
           <>
+            {tab === 'diagnostics' && <SystemDiagnostics />}
             {tab === 'intake' && <IntakePanel />}
             {tab === 'users' && <UsersPanel />}
             {tab === 'overview' && (
@@ -505,7 +511,13 @@ export function Management({
             {tab === 'settings' && (
               <>
                 <ProviderSettings />
-                <AISettings />
+                <section className="management-card">
+                  <h2>AI 模型连接</h2>
+                  <p className="muted">
+                    音乐助手、自然语言找歌、每日推荐与收歌建议共用同一组连接和调用额度。个人连接、实例共享与原有兼容连接都在一处管理。
+                  </p>
+                  <button onClick={onOpenConnections}>管理统一模型连接</button>
+                </section>
                 <TranscodingSettings />
                 <HostSettings />
                 <section className="management-card">
