@@ -69,6 +69,9 @@ private val LocalSettingsFeedback = staticCompositionLocalOf<() -> Unit> { {} }
                     "默认原音。选择 AAC 后，无损音源转码，有损音源直放。切换保留播放位置和暂停状态。", vm.settings::quality)
             }
             SettingsGroup("外观与触感") {
+                SettingsChoice("歌曲列表大小", preferences.songListSize.label, Icons.Default.FormatSize,
+                    com.wildstring.app.data.SongListSize.entries.map { it to it.label }, preferences.songListSize,
+                    "按习惯选择歌曲列表的显示大小。", vm.settings::songListSize)
                 SettingsChoice("播放样式", playbackStyles.first { it.first == preferences.playbackStyle }.second, Icons.Default.Style,
                     playbackStyles, preferences.playbackStyle, change = vm.settings::playbackStyle)
                 SettingsChoice("主题", if (preferences.redCloth) "一块红布" else "经典野弦", Icons.Default.Palette,

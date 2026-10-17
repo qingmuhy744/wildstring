@@ -34,6 +34,9 @@ interface Api {
     @GET("api/v1/albums") suspend fun albums(@Query("q") query: String, @Query("limit") limit: Int = 50, @Query("offset") offset: Int = 0): Page<Album>
     @GET suspend fun artistAlbums(@Url url: String, @Query("q") query: String, @Query("limit") limit: Int = 50, @Query("offset") offset: Int = 0, @Query("role") role: String = "artist"): Page<Album>
     @GET("api/v1/artists") suspend fun artists(@Query("q") query: String, @Query("limit") limit: Int = 50, @Query("offset") offset: Int = 0, @Query("role") role: String = "artist"): Page<Artist>
+    @GET("api/v1/browse-index") suspend fun browseIndex(@Query("kind") kind: String, @Query("q") query: String,
+        @Query("artist_id") artistId: String? = null, @Query("role") role: String? = null,
+        @Query("album_id") albumId: String? = null): BrowseIndex
     @GET("api/v1/playlists") suspend fun playlists(@Query("limit") limit: Int = 100, @Query("offset") offset: Int = 0): Page<Playlist>
     @GET suspend fun lyrics(@Url url: String): Lyrics
     @PUT suspend fun favorite(@Url url: String, @Body body: FavoriteRequest): ResponseBody

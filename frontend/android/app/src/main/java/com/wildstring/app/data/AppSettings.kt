@@ -11,15 +11,19 @@ import kotlinx.coroutines.flow.asStateFlow
 
 data class Preferences(val redCloth: Boolean = false, val redIcon: Boolean = false,
     val metadataMb: Int = 32, val artworkMb: Int = 64, val audioMb: Int = 256, val haptics: Boolean = true, val appearance: String = "system", val aacBitrate: Int = 0,
-    val playbackStyle: String = "cover")
+    val playbackStyle: String = "cover", val songListSize: SongListSize = SongListSize.MEDIUM)
 
 @Singleton
 class AppSettings @Inject constructor(@param:ApplicationContext private val context: Context) {
     private val prefs = context.getSharedPreferences("appearance_cache", Context.MODE_PRIVATE)
     private val mutable = MutableStateFlow(Preferences(prefs.getBoolean("red_cloth", false), prefs.getBoolean("red_icon", false),
         prefs.getInt("metadata_mb", 32), prefs.getInt("artwork_mb", 64), prefs.getInt("audio_mb", 256), prefs.getBoolean("haptics", true), prefs.getString("appearance", "system") ?: "system", prefs.getInt("aac_bitrate", 0).takeIf { it in listOf(0, 128, 192, 256, 320) } ?: 0,
-        prefs.getString("playback_style", "cover").takeIf { it in listOf("cover", "vinyl", "cassette") } ?: "cover"))
+        prefs.getString("playback_style", "cover").takeIf { it in listOf("cover", "vinyl", "cassette") } ?: "cover",
+        SongListSize.fromStored(runCatching { prefs.getString("song_list_size", null) }.getOrNull())))
     val state = mutable.asStateFlow()
+    fun songListSize(size: SongListSize) {
+        prefs.edit().putString("song_list_size", size.key).apply(); mutable.value = mutable.value.copy(songListSize = size)
+    }
     fun playbackStyle(style: String) {
         require(style in listOf("cover", "vinyl", "cassette"))
         prefs.edit().putString("playback_style", style).apply(); mutable.value = mutable.value.copy(playbackStyle = style)

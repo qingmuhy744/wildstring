@@ -15,6 +15,8 @@ data class Track(
     @SerializedName("last_played_at") val lastPlayedAt: String? = null,
     val loved: Boolean = false, val format: String = "", val status: String = "available",
     @SerializedName("album_id") val albumId: String? = null,
+    @SerializedName("track_number") val trackNumber: Int? = null,
+    @SerializedName("disc_number") val discNumber: Int? = null,
 ) { val artist: String get() = artists.joinToString(" / ").ifBlank { "未知艺人" } }
 data class Album(val id: String, val title: String, val artists: List<String>,
     @SerializedName("track_count") val trackCount: Int,
@@ -76,3 +78,7 @@ data class SharedPlaybackWrite(val version: Int, @SerializedName("device_id") va
     @SerializedName("position_ms") val positionMs: Long, val mode: String)
 fun SharedPlayback.writeBody() = SharedPlaybackWrite(version, deviceId, trackIds, index, positionMs, mode)
 fun networkGson(): com.google.gson.Gson = com.google.gson.GsonBuilder().serializeNulls().create()
+
+/** Server-owned order and offsets, shared by all clients (including Chinese pinyin). */
+data class BrowseGroup(val key: String, val offset: Int?, val count: Int)
+data class BrowseIndex(val kind: String, val total: Int, val groups: List<BrowseGroup>)

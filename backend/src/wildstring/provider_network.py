@@ -19,7 +19,7 @@ from urllib.request import (
 
 from pydantic import BaseModel, ConfigDict, Field
 
-UA = "WildString/0.3.2 (https://github.com/qingmuhy744/wildstring)"
+UA = "WildString/0.3.3 (https://github.com/qingmuhy744/wildstring)"
 MAX_RESPONSE = 256 * 1024
 
 

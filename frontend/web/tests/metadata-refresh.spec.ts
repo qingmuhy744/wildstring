@@ -125,6 +125,7 @@ test('歌曲、专辑、曲库手动更新先反馈再入队，保持当前音�
     .getByRole('button', { name: '专辑', exact: true })
     .click();
   await page.getByRole('button', { name: '打开专辑 合成测试专辑', exact: true }).click();
+  await page.getByLabel('集合更多操作', { exact: true }).click();
   await page.getByRole('button', { name: '更新专辑元数据', exact: true }).click();
   await dialog.getByRole('button', { name: '开始更新', exact: true }).click();
   await expect.poll(() => submitted.length).toBe(2);

@@ -45,7 +45,7 @@ from wildstring.provider_network import (
 MB = "https://musicbrainz.org/ws/2/"
 FM = "https://ws.audioscrobbler.com/2.0/"
 ACOUSTID = "https://api.acoustid.org/v2/lookup"
-UA = "WildString/0.3.2 (https://github.com/qingmuhy744/wildstring)"
+UA = "WildString/0.3.3 (https://github.com/qingmuhy744/wildstring)"
 logger = logging.getLogger(__name__)
 
 

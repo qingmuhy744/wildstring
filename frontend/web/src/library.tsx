@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type FormEvent,
+  type SetStateAction,
+} from 'react';
 import {
   api,
   ApiError,
@@ -28,7 +35,14 @@ import { MetadataEditor } from './metadata-editor';
 import { MetadataRefreshDialog, type RefreshTarget } from './metadata-refresh';
 import { AccountDialog } from './accounts';
 import { ThemeControl } from './theme';
-import { Pagination, TrackList } from './track-list';
+import { TrackList } from './track-list';
+import {
+  AlphabetRail,
+  useContinuousBrowse,
+  type BrowseIndex,
+  type BrowsePage,
+} from './continuous-browse';
+import { Icon } from './icons';
 import type { TrackOperations } from './track-actions';
 import { Discover, Devices } from './discover';
 import { OfflinePanel } from './offline-panel';
@@ -73,6 +87,21 @@ const icons: Record<View, string> = {
   devices: '⇄',
 };
 
+type CatalogLocation = {
+  view: View;
+  album: Album | null;
+  selectedArtist: Artist | null;
+  artistRole: string;
+  artistView: 'tracks' | 'albums';
+  playlist: Playlist | null;
+  query: string;
+  draft: string;
+  statsSort: string;
+  scroll: number;
+  playerOpen: boolean;
+  queueOpen: boolean;
+};
+
 export function Library({ onLogout, user }: { onLogout: () => Promise<void>; user: User }) {
   const isAdmin = user.role === 'admin';
   const [accountOpen, setAccountOpen] = useState(false);
@@ -102,7 +131,6 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
   const [artistRole, setArtistRole] = useState('');
   const [artistView, setArtistView] = useState<'tracks' | 'albums'>('tracks');
   const [playlist, setPlaylist] = useState<Playlist | null>(null);
-  const [result, setResult] = useState<Result | null>(null);
   const playlistPending = useRef(new Set<string>());
   const mutationEpoch = useRef(0);
   const [catalog, setCatalog] = useState<Playlist[]>([]);
@@ -113,13 +141,12 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
   const [listeningRevision, setListeningRevision] = useState(0);
   const [draft, setDraft] = useState(''),
     [query, setQuery] = useState('');
-  const [offset, setOffset] = useState(0),
-    [revision, setRevision] = useState(0);
-  const [loading, setLoading] = useState(true),
-    [error, setError] = useState('');
+  const [revision, setRevision] = useState(0);
+  const [localError, setError] = useState('');
   const [queueOpen, setQueueOpen] = useState(false),
     [lyricsOpen, setLyricsOpen] = useState(false);
   const [notice, setNotice] = useState('');
+  const [navigation, setNavigation] = useState<CatalogLocation[]>([]);
   const [counts, setCounts] = useState<Partial<Record<View, number>>>({});
   const [editor, setEditor] = useState<{ initial: Playlist | null; track: Track | null } | null>(
     null,
@@ -143,11 +170,9 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
       : playlistGrid
         ? 'playlists'
         : 'tracks';
-  const visible = result?.kind === kind ? result.page : null;
-  const page = kind === 'tracks' ? (visible as TrackPage | null) : null;
+
   const unit =
     kind === 'artists' ? '位' : kind === 'albums' ? '张' : kind === 'playlists' ? '个' : '首';
-  const lastQuery = useRef('');
   const collectionsMetrics = view === 'playlists' || view === 'favorites' ? listeningRevision : 0;
   const liveRules = activePlaylist?.kind === 'smart' || activePlaylist?.kind === 'favorites';
   useEffect(
@@ -212,95 +237,202 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
     return () => controller.abort();
   }, [view, revision, listeningRevision, favorites.change]);
 
-  useEffect(() => {
-    if (specialView) return;
-    if (view === 'favorites' && !activePlaylist) {
-      setLoading(collectionsLoading);
-      if (!collectionsLoading) setError('暂时无法读取我喜欢歌单，请刷新重试。');
-      return;
-    }
-    const controller = new AbortController();
-    setError('');
-    const parameters = new URLSearchParams({
-      q: album ? '' : query,
-      limit: album ? '200' : '50',
-      offset: String(offset),
+  const parameters = new URLSearchParams({ q: album ? '' : query });
+  let browsePath = '/tracks';
+  if (activePlaylist) browsePath = `/playlists/${activePlaylist.id}/tracks`;
+  else if (playlistGrid) browsePath = '/playlists';
+  else if (artistGrid) browsePath = '/artists';
+  else if (selectedArtist) {
+    browsePath = `/artists/${selectedArtist.id}/${albumGrid ? 'albums' : 'tracks'}`;
+    if (album) parameters.set('album_id', album.id);
+  } else if (album) browsePath = `/albums/${album.id}/tracks`;
+  else if (albumGrid) browsePath = '/albums';
+  if (view === 'artists' && artistRole) parameters.set('role', artistRole);
+  if (view === 'listening') {
+    parameters.set('played_only', 'true');
+    parameters.set('sort', statsSort);
+  }
+  const browseIdentity = `${revision}|${view}|${browsePath}?${parameters}|${activePlaylist?.version || 0}|${playlistGrid ? collectionRevision : 0}|${metricsRevision}|${liveRules ? favorites.change : 0}`;
+  const browse = useContinuousBrowse<Track | Album | Artist | Playlist>({
+    identity: browseIdentity,
+    path: `${browsePath}?${parameters}`,
+    enabled: !specialView && !(view === 'favorites' && !activePlaylist),
+  });
+  const visible = browse.page;
+  const result = visible ? ({ kind, page: visible } as Result) : null;
+  const page = kind === 'tracks' ? (visible as TrackPage | null) : null;
+  const loading = browse.loading || (view === 'favorites' && !activePlaylist && collectionsLoading);
+  const error =
+    localError ||
+    browse.error ||
+    (view === 'favorites' && !activePlaylist && !collectionsLoading
+      ? '暂时无法读取我喜欢歌单，请刷新重试。'
+      : '');
+  function setResult(update: SetStateAction<Result | null>) {
+    browse.setPage((before) => {
+      const wrapped = before ? ({ kind, page: before } as Result) : null;
+      const updated = typeof update === 'function' ? update(wrapped) : update;
+      return updated?.page as BrowsePage<Track | Album | Artist | Playlist> | null;
     });
-    const epoch = mutationEpoch.current;
-    let path = '/tracks';
-    if (activePlaylist) path = `/playlists/${activePlaylist.id}/tracks`;
-    else if (playlistGrid) path = '/playlists';
-    else if (artistGrid) path = '/artists';
-    else if (selectedArtist) {
-      path = `/artists/${selectedArtist.id}/${albumGrid ? 'albums' : 'tracks'}`;
-      if (album) parameters.set('album_id', album.id);
-    } else if (album) path = `/albums/${album.id}/tracks`;
-    else if (albumGrid) path = '/albums';
-    if (view === 'artists' && artistRole) parameters.set('role', artistRole);
-    if (view === 'listening') {
-      parameters.set('played_only', 'true');
-      parameters.set('sort', statsSort);
-    }
-    const queryKey = `${revision}|${path}?${parameters}`;
-    if (lastQuery.current !== queryKey) {
-      setLoading(true);
-      lastQuery.current = queryKey;
-    }
-    api<TrackPage | AlbumPage | ArtistPage | PlaylistPage>(`${path}?${parameters}`, {
-      signal: controller.signal,
-    })
-      .then((response) => {
-        if (controller.signal.aborted || epoch !== mutationEpoch.current) return;
-        if (response.total > 0 && offset >= response.total) {
-          setOffset(Math.floor((response.total - 1) / response.limit) * response.limit);
-          return;
-        }
-        setResult({ kind, page: response } as Result);
-        if (!query && !album && !selectedArtist && !activePlaylist)
-          setCounts((current) => ({ ...current, [view]: response.total }));
+  }
+  const indexEnabled =
+    !specialView && !activePlaylist && !album && view !== 'listening' && kind !== 'playlists';
+  const [browseIndex, setBrowseIndex] = useState<{ identity: string; index: BrowseIndex } | null>(
+    null,
+  );
+  const [indexError, setIndexError] = useState(false);
+  const [indexRevision, setIndexRevision] = useState(0);
+  useEffect(() => {
+    setIndexError(false);
+    if (!indexEnabled) return;
+    const controller = new AbortController();
+    const indexParameters = new URLSearchParams({ kind, q: query });
+    if (selectedArtist) indexParameters.set('artist_id', selectedArtist.id);
+    if (view === 'artists' && artistRole) indexParameters.set('role', artistRole);
+    api<BrowseIndex>(`/browse-index?${indexParameters}`, { signal: controller.signal })
+      .then((index) => {
+        if (!controller.signal.aborted) setBrowseIndex({ identity: browseIdentity, index });
       })
-      .catch((reason) => {
-        if (!controller.signal.aborted)
-          setError(reason instanceof ApiError ? reason.message : '无法连接音乐服务，请检查连接。');
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setLoading(false);
+      .catch(() => {
+        if (!controller.signal.aborted) setIndexError(true);
       });
     return () => controller.abort();
-  }, [
-    query,
-    offset,
-    revision,
-    view,
-    album?.id,
-    selectedArtist?.id,
-    artistView,
-    artistRole,
-    activePlaylist?.id,
-    activePlaylist?.version,
-    view === 'favorites' && !activePlaylist ? collectionsLoading : false,
-    playlistGrid ? collectionRevision : 0,
-    statsSort,
-    metricsRevision,
-    liveRules ? favorites.change : 0,
-  ]);
+  }, [browseIdentity, indexEnabled, indexRevision]);
+  useEffect(() => {
+    if (visible && !query && !album && !selectedArtist && !activePlaylist)
+      setCounts((current) =>
+        current[view] === visible.total ? current : { ...current, [view]: visible.total },
+      );
+  }, [visible?.total, view, query, album?.id, selectedArtist?.id, activePlaylist?.id]);
+  const listRoot = useRef<HTMLDivElement>(null);
+  const listEnd = useRef<HTMLDivElement>(null);
+  const listStart = useRef<HTMLDivElement>(null);
+  const scrollToRestore = useRef<number | null>(null);
+  const pendingJump = useRef(false);
+  const prependAnchor = useRef<{ id: string; top: number } | null>(null);
+  const lastScroll = useRef(0);
+  const upwardScroll = useRef(false);
+  useEffect(() => {
+    const scroll = () => {
+      upwardScroll.current = window.scrollY < lastScroll.current;
+      lastScroll.current = window.scrollY;
+      if (
+        upwardScroll.current &&
+        browse.hasPrevious &&
+        !browse.busy &&
+        !browse.error &&
+        listStart.current &&
+        listStart.current.getBoundingClientRect().bottom > -200
+      )
+        loadPrevious();
+    };
+    window.addEventListener('scroll', scroll, { passive: true });
+    return () => window.removeEventListener('scroll', scroll);
+  });
+  useEffect(() => {
+    if (!visible) return;
+    if (prependAnchor.current) {
+      const anchor = prependAnchor.current;
+      const element = Array.from(
+        listRoot.current?.querySelectorAll<HTMLElement>('[data-browse-id]') || [],
+      ).find((item) => item.dataset.browseId === anchor.id);
+      if (element) window.scrollBy(0, element.getBoundingClientRect().top - anchor.top);
+      prependAnchor.current = null;
+    } else if (pendingJump.current) {
+      listRoot.current?.scrollIntoView({ block: 'start' });
+      pendingJump.current = false;
+    } else if (scrollToRestore.current !== null) {
+      window.scrollTo(0, scrollToRestore.current);
+      scrollToRestore.current = null;
+    }
+  }, [visible, lyricsOpen, navigation.length]);
+  useEffect(() => {
+    pendingJump.current = false;
+    prependAnchor.current = null;
+  }, [browseIdentity]);
+  function loadPrevious() {
+    if (browse.busy || !browse.hasPrevious) return;
+    const first = listRoot.current?.querySelector<HTMLElement>('[data-browse-id]');
+    if (first)
+      prependAnchor.current = {
+        id: first.dataset.browseId!,
+        top: first.getBoundingClientRect().top,
+      };
+    void browse.loadPrevious();
+  }
+  useEffect(() => {
+    if (!browse.hasNext || browse.busy || browse.error || !listEnd.current) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) void browse.loadNext();
+      },
+      { rootMargin: '350px' },
+    );
+    observer.observe(listEnd.current);
+    return () => observer.disconnect();
+  }, [browseIdentity, visible, browse.busy, browse.error]);
 
   useEffect(() => {
     if (!notice) return;
     const timer = setTimeout(() => setNotice(''), 2500);
     return () => clearTimeout(timer);
   }, [notice]);
+  function rememberLocation() {
+    const location: CatalogLocation = {
+      view,
+      album,
+      selectedArtist,
+      artistRole,
+      artistView,
+      playlist,
+      query,
+      draft,
+      statsSort,
+      scroll: window.scrollY,
+      playerOpen: lyricsOpen,
+      queueOpen,
+    };
+    setNavigation((items) => [...items, location]);
+  }
+  function backToLocation() {
+    const previous = navigation.at(-1);
+    if (!previous) {
+      if (album) {
+        setAlbum(null);
+        clearSearch();
+      } else if (selectedArtist) switchView('artists');
+      else switchView('playlists');
+      return;
+    }
+    albumRequest.current?.abort();
+    setNavigation((items) => items.slice(0, -1));
+    setView(previous.view);
+    setAlbum(previous.album);
+    setSelectedArtist(previous.selectedArtist);
+    setArtistRole(previous.artistRole);
+    setArtistView(previous.artistView);
+    setPlaylist(previous.playlist);
+    setQuery(previous.query);
+    setDraft(previous.draft);
+    setStatsSort(previous.statsSort);
+    setLyricsOpen(previous.playerOpen);
+    setQueueOpen(previous.queueOpen);
+    setError('');
+    scrollToRestore.current = previous.scroll;
+  }
   function clearSearch() {
     albumRequest.current?.abort();
     setDraft('');
     setQuery('');
-    setOffset(0);
+    setError('');
   }
-  function switchView(target: View) {
+  function switchView(target: View, resetHistory = true) {
     collectionRequest.current?.abort();
     collectionRequest.current = null;
     setCollectionBusy(false);
     setManageOpen(false);
+    if (resetHistory) setNavigation([]);
+    window.scrollTo(0, 0);
     setView(target);
     setAlbum(null);
     setSelectedArtist(null);
@@ -315,12 +447,16 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
     } else switchView(target);
   }
   function openArtist(item: Artist) {
+    rememberLocation();
+    window.scrollTo(0, 0);
     setSelectedArtist(item);
     setArtistView('tracks');
     setAlbum(null);
     clearSearch();
   }
   function openPlaylist(item: Playlist) {
+    rememberLocation();
+    window.scrollTo(0, 0);
     setView(item.kind === 'favorites' ? 'favorites' : 'playlists');
     setPlaylist(item.kind === 'favorites' ? null : item);
     setSelectedArtist(null);
@@ -338,7 +474,8 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
         signal: controller.signal,
       });
       if (controller.signal.aborted) return;
-      switchView('albums');
+      rememberLocation();
+      switchView('albums', false);
       setAlbum(target);
       setLyricsOpen(false);
       setQueueOpen(false);
@@ -353,8 +490,10 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
   function search(event: FormEvent) {
     event.preventDefault();
     albumRequest.current?.abort();
+    setNavigation([]);
+    setError('');
+    window.scrollTo(0, 0);
     setAlbum(null);
-    setOffset(0);
     setQuery(draft.trim());
     setRevision((value) => value + 1);
   }
@@ -423,7 +562,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
       updateList(updated);
       setNotice(direction ? '已调整歌单顺序' : '已从歌单移除');
     } catch (reason) {
-      setResult((current) => (current === optimistic ? before : current));
+      setResult((current) => (current?.page === optimistic?.page ? before : current));
       setNotice(reason instanceof ApiError ? reason.message : '歌单未修改，已恢复，请重试。');
       setCollectionRevision((value) => value + 1);
     } finally {
@@ -536,7 +675,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
         }),
       });
       updateList(updated);
-      setNotice(`本页歌曲已加入：${list.name}`);
+      setNotice(`已加载歌曲已加入：${list.name}`);
       setBulkTarget('');
     } catch (reason) {
       setNotice(reason instanceof ApiError ? reason.message : '歌曲未加入歌单。');
@@ -645,7 +784,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
             onRefresh={() => setMetadataRefresh({ scope: 'library', label: '整个曲库' })}
           />
         )}
-        <main className="library" hidden={manageOpen}>
+        <main className={`library ${album ? 'is-album' : ''}`} hidden={manageOpen}>
           <header className="topbar">
             <div>
               <span className="eyebrow">YOUR OWN COLLECTION</span>
@@ -721,24 +860,17 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
             >
               <div>
                 {(album || selectedArtist || playlist) && (
-                  <button
-                    className="back-button text-button"
-                    onClick={() => {
-                      if (album) {
-                        setAlbum(null);
-                        setOffset(0);
-                      } else if (selectedArtist) switchView('artists');
-                      else switchView('playlists');
-                    }}
-                  >
+                  <button className="back-button text-button" onClick={backToLocation}>
                     ←{' '}
-                    {album
-                      ? selectedArtist
-                        ? `返回 ${selectedArtist.name}`
-                        : '返回专辑'
-                      : selectedArtist
-                        ? '返回艺人'
-                        : '返回歌单'}
+                    {navigation.at(-1)?.playerOpen
+                      ? '返回播放'
+                      : album
+                        ? selectedArtist
+                          ? `返回 ${selectedArtist.name}`
+                          : '返回专辑'
+                        : selectedArtist
+                          ? '返回艺人'
+                          : '返回歌单'}
                   </button>
                 )}
                 <p className="eyebrow">
@@ -802,32 +934,34 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
             )}
             <div className="library-toolbar">
               <div className="toolbar-actions">
-                <div className="view-switch" role="group" aria-label="曲库显示方式">
-                  <button
-                    aria-pressed={
-                      !artistGrid &&
-                      !playlistGrid &&
-                      !albumGrid &&
-                      (view === 'tracks' || !!selectedArtist)
-                    }
-                    onClick={() => switchTab('tracks')}
-                  >
-                    歌曲
-                  </button>
-                  <button aria-pressed={albumGrid || !!album} onClick={() => switchTab('albums')}>
-                    专辑
-                  </button>
-                  <button aria-pressed={artistGrid} onClick={() => switchView('artists')}>
-                    艺人
-                  </button>
-                  <button
-                    aria-pressed={view === 'playlists' || view === 'favorites'}
-                    onClick={() => switchView('playlists')}
-                  >
-                    歌单
-                  </button>
-                </div>
-                {view === 'artists' && (
+                {!album && (
+                  <div className="view-switch" role="group" aria-label="曲库显示方式">
+                    <button
+                      aria-pressed={
+                        !artistGrid &&
+                        !playlistGrid &&
+                        !albumGrid &&
+                        (view === 'tracks' || !!selectedArtist)
+                      }
+                      onClick={() => switchTab('tracks')}
+                    >
+                      歌曲
+                    </button>
+                    <button aria-pressed={albumGrid || !!album} onClick={() => switchTab('albums')}>
+                      专辑
+                    </button>
+                    <button aria-pressed={artistGrid} onClick={() => switchView('artists')}>
+                      艺人
+                    </button>
+                    <button
+                      aria-pressed={view === 'playlists' || view === 'favorites'}
+                      onClick={() => switchView('playlists')}
+                    >
+                      歌单
+                    </button>
+                  </div>
+                )}
+                {view === 'artists' && !album && (
                   <label className="artist-role">
                     参与角色{' '}
                     <select
@@ -837,7 +971,6 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
                         setArtistRole(e.target.value);
                         setSelectedArtist(null);
                         setAlbum(null);
-                        setOffset(0);
                       }}
                     >
                       <option value="">全部角色</option>
@@ -869,21 +1002,38 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
                   </button>
                 )}
                 {kind === 'tracks' && (
-                  <button
-                    disabled={loading || collectionBusy || !page?.items.length}
-                    onClick={() => void completeCollection(undefined, true)}
-                  >
-                    保存整个集合离线
-                  </button>
-                )}
-                {album && isAdmin && (
-                  <button
-                    onClick={() =>
-                      setMetadataRefresh({ scope: 'album', id: album.id, label: album.title })
-                    }
-                  >
-                    更新专辑元数据
-                  </button>
+                  <>
+                    <span className="collection-count">{visible?.total ?? '—'} 首</span>
+                    <details className="collection-menu">
+                      <summary aria-label="集合更多操作">
+                        <Icon name="more" />
+                      </summary>
+                      <div>
+                        <button
+                          disabled={loading || collectionBusy || !page?.items.length}
+                          onClick={() => void completeCollection(undefined, true)}
+                        >
+                          <Icon name="download" />
+                          保存整个集合离线
+                        </button>
+                        {album && isAdmin && (
+                          <button
+                            onClick={(event) => {
+                              event.currentTarget.closest('details')?.removeAttribute('open');
+                              setMetadataRefresh({
+                                scope: 'album',
+                                id: album.id,
+                                label: album.title,
+                              });
+                            }}
+                          >
+                            <Icon name="refresh" />
+                            更新专辑元数据
+                          </button>
+                        )}
+                      </div>
+                    </details>
+                  </>
                 )}
                 {(playlistGrid || view === 'favorites') && (
                   <button
@@ -909,7 +1059,6 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
                     value={statsSort}
                     onChange={(event) => {
                       setStatsSort(event.target.value);
-                      setOffset(0);
                     }}
                   >
                     <option value="last_played_at">最近听过</option>
@@ -931,37 +1080,53 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
                 {loading ? '读取中…' : '刷新曲库 ↻'}
               </button>
             </div>
+            {localError && visible && (
+              <div className="browse-error" role="alert">
+                <span>{localError}</span>
+                <button onClick={() => setError('')}>关闭</button>
+              </div>
+            )}
             {page &&
               page.items.length > 0 &&
               operations.playlists.length > 0 &&
               !loading &&
               !error && (
-                <div className="bulk-playlist">
-                  <label>
-                    <span>把这一页留进歌单</span>
-                    <select
-                      aria-label="本页加入歌单"
-                      value={bulkTarget}
-                      onChange={(event) => setBulkTarget(event.target.value)}
-                    >
-                      <option value="">选择普通歌单…</option>
-                      {operations.playlists.map((item) => (
-                        <option key={item.id} value={item.id}>
-                          {item.name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <button disabled={!bulkTarget || bulkBusy} onClick={() => void bulkAdd()}>
-                    {bulkBusy ? '加入中…' : '加入本页'}
-                  </button>
-                </div>
+                <details className="bulk-playlist-panel">
+                  <summary>批量加入歌单</summary>
+                  <div className="bulk-playlist">
+                    <label>
+                      <span>把已加载歌曲留进歌单</span>
+                      <select
+                        aria-label="已加载歌曲加入歌单"
+                        value={bulkTarget}
+                        onChange={(event) => setBulkTarget(event.target.value)}
+                      >
+                        <option value="">选择普通歌单…</option>
+                        {operations.playlists.map((item) => (
+                          <option key={item.id} value={item.id}>
+                            {item.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <button disabled={!bulkTarget || bulkBusy} onClick={() => void bulkAdd()}>
+                      {bulkBusy ? '加入中…' : '加入已加载'}
+                    </button>
+                  </div>
+                </details>
               )}
-            {error ? (
+            {error && !visible ? (
               <div className="empty" role="alert">
                 <h2>暂时无法读取曲库</h2>
                 <p>{error}</p>
-                <button onClick={() => setRevision((value) => value + 1)}>重新连接</button>
+                <button
+                  onClick={() => {
+                    setError('');
+                    browse.retry();
+                  }}
+                >
+                  重新连接
+                </button>
               </div>
             ) : loading ? (
               <div className="empty" role="status">
@@ -993,20 +1158,32 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
                       : activePlaylist?.kind === 'smart'
                         ? '可以编辑规则，换一种方式找歌。'
                         : activePlaylist
-                          ? '从歌曲的更多操作加入，或将一页歌曲一起加入。'
+                          ? '从歌曲的更多操作加入，或批量加入已加载的歌曲。'
                           : view === 'listening'
                             ? '听过的歌曲、次数和时长会留在这里。'
                             : '导入音乐后，刷新曲库。'}
                 </p>
               </div>
             ) : (
-              <>
+              <div
+                ref={listRoot}
+                className={`continuous-content ${indexEnabled ? 'has-alphabet' : ''}`}
+                data-testid="continuous-list"
+              >
+                <div ref={listStart} className="browse-boundary">
+                  {browse.hasPrevious && (
+                    <button disabled={browse.busy} onClick={loadPrevious}>
+                      加载前面的{kind === 'tracks' ? '歌曲' : kind === 'albums' ? '专辑' : '艺人'}
+                    </button>
+                  )}
+                </div>
                 {kind === 'artists' ? (
                   <div className="artist-grid" aria-label="艺人列表">
                     {(visible as ArtistPage).items.map((item) => (
                       <button
                         className="artist-card"
                         key={item.id}
+                        data-browse-id={item.id}
                         aria-label={`查看艺人 ${item.name}`}
                         onClick={() => openArtist(item)}
                       >
@@ -1024,6 +1201,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
                       <button
                         className={`playlist-card ${item.kind}`}
                         key={item.id}
+                        data-browse-id={item.id}
                         aria-label={`打开歌单 ${item.name}`}
                         onClick={() => openPlaylist(item)}
                       >
@@ -1056,11 +1234,13 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
                       <button
                         className="album-card"
                         key={item.id}
+                        data-browse-id={item.id}
                         aria-label={`打开专辑 ${item.title}`}
                         onClick={() => {
                           albumRequest.current?.abort();
+                          rememberLocation();
+                          window.scrollTo(0, 0);
                           setAlbum(item);
-                          setOffset(0);
                         }}
                       >
                         <Cover
@@ -1087,11 +1267,45 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
                       operations={operations}
                       onPlay={(track) => void completeCollection(track)}
                       showStats={view === 'listening'}
+                      statsSort={statsSort}
+                      albumTracks={!!album}
                     />
                   )
                 )}
-                <Pagination page={visible} onOffset={setOffset} unit={unit} />
-              </>
+                <div ref={listEnd} className="browse-boundary" aria-live="polite">
+                  {browse.busy ? (
+                    <span>正在加载更多…</span>
+                  ) : browse.error ? (
+                    <>
+                      <span role="alert">{browse.error}</span>
+                      <button onClick={browse.retry}>重试加载</button>
+                    </>
+                  ) : browse.hasNext ? (
+                    <button onClick={() => void browse.loadNext()}>加载更多</button>
+                  ) : (
+                    <span>
+                      共 {visible.total} {unit} · 已到底
+                    </span>
+                  )}
+                </div>
+                {indexEnabled && browseIndex?.identity === browseIdentity && (
+                  <AlphabetRail
+                    index={browseIndex.index}
+                    onJump={(offset) => {
+                      pendingJump.current = true;
+                      void browse.jump(offset);
+                    }}
+                  />
+                )}
+                {indexEnabled && indexError && (
+                  <button
+                    className="text-button"
+                    onClick={() => setIndexRevision((value) => value + 1)}
+                  >
+                    首字母索引未加载，重试
+                  </button>
+                )}
+              </div>
             )}
           </div>
         </main>
@@ -1118,8 +1332,9 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
           </p>
         )}
       </div>
-      {lyricsOpen && (
+      {(lyricsOpen || navigation.some((location) => location.playerOpen)) && (
         <NowPlaying
+          active={lyricsOpen}
           player={player}
           onClose={closePlayer}
           favorites={favorites}

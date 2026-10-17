@@ -10,6 +10,27 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class CachePrivacyTest {
+    @Test fun songListSizeSurvivesNewSettingsInstancesAndRejectsInvalidStorage() {
+        val original = InstrumentationRegistry.getInstrumentation().targetContext
+        val id = "list-size-${UUID.randomUUID()}"
+        val context = object : ContextWrapper(original) {
+            override fun getSharedPreferences(name: String, mode: Int) = original.getSharedPreferences("$id-$name", mode)
+        }
+        val prefs = context.getSharedPreferences("appearance_cache", Context.MODE_PRIVATE)
+        try {
+            val settings = AppSettings(context)
+            assertEquals(SongListSize.MEDIUM, settings.state.value.songListSize)
+            SongListSize.entries.forEach { size ->
+                settings.songListSize(size)
+                assertEquals(size, AppSettings(context).state.value.songListSize)
+            }
+            prefs.edit().putString("song_list_size", "unknown").commit()
+            assertEquals(SongListSize.MEDIUM, AppSettings(context).state.value.songListSize)
+            prefs.edit().putInt("song_list_size", 999).commit()
+            assertEquals(SongListSize.MEDIUM, AppSettings(context).state.value.songListSize)
+        } finally { prefs.edit().clear().commit() }
+    }
+
     @Test fun cachesAreIsolatedAcrossLogoutLoginAndServerChanges() {
         val original = InstrumentationRegistry.getInstrumentation().targetContext
         val id = "cache-test-${UUID.randomUUID()}"

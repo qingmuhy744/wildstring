@@ -65,6 +65,9 @@ test('从艺人歌曲打开完整所属专辑，清除艺人与搜索限制', as
   await expect(page.getByRole('table').getByRole('row')).toHaveCount(3);
   await expect(page.getByRole('table')).toContainText('夜晚测试曲');
   await expect(page.getByRole('button', { name: '返回专辑', exact: false })).toBeVisible();
+  await page.getByRole('button', { name: '返回专辑', exact: false }).click();
+  await expect(page.getByRole('heading', { name: '客席测试', exact: true })).toBeVisible();
+  await expect(page.getByRole('table').getByRole('row')).toHaveCount(2);
 });
 
 test('播放页点击专辑名后继续播放，队列和进度不重置', async ({ page }, info) => {
@@ -73,6 +76,8 @@ test('播放页点击专辑名后继续播放，队列和进度不重置', async
   await expect.poll(async () => (await audio(page)).time).toBeGreaterThan(0.5);
   await page.getByRole('button', { name: '全屏播放', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: '全屏播放', exact: true });
+  await dialog.getByRole('button', { name: '显示歌词', exact: true }).click();
+  await expect(dialog).toHaveAttribute('data-panel', 'cover');
   const before = await audio(page);
   await dialog.getByRole('button', { name: '查看所属专辑 合成测试专辑', exact: true }).click();
   await expect(dialog).not.toBeVisible();
@@ -81,6 +86,11 @@ test('播放页点击专辑名后继续播放，队列和进度不重置', async
   expect((await audio(page)).source).toBe(before.source);
   expect((await audio(page)).paused).toBe(false);
   await page.screenshot({ path: `../../artifacts/song-album-${info.project.name}.png` });
+  await page.getByRole('button', { name: '返回播放', exact: false }).click();
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toHaveAttribute('data-panel', 'cover');
+  expect((await audio(page)).source).toBe(before.source);
+  await dialog.getByRole('button', { name: '收起全屏播放', exact: true }).click();
   await page.getByRole('button', { name: '播放队列', exact: true }).last().click();
   await expect(
     page.getByRole('complementary', { name: '播放队列', exact: true }).getByRole('listitem'),

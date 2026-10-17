@@ -55,12 +55,14 @@ function coverPalette(image: HTMLImageElement): string[] | null {
 }
 
 export function NowPlaying({
+  active = true,
   player,
   onClose,
   favorites,
   onOpenAlbum,
   statusMessage,
 }: {
+  active?: boolean;
   player: Player;
   onClose: () => void;
   favorites: Favorites;
@@ -111,6 +113,10 @@ export function NowPlaying({
   }, [notice]);
 
   useEffect(() => {
+    if (!active) {
+      setArtwork(false);
+      return;
+    }
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const overflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
@@ -146,9 +152,10 @@ export function NowPlaying({
       document.body.style.overflow = overflow;
       previous?.focus({ preventScroll: true });
     };
-  }, [onClose]);
+  }, [onClose, active]);
 
   useEffect(() => {
+    if (!active) return;
     // A track change can disable the focused next/previous button or replace a lyric.
     if (
       !artworkDialog.current?.open &&
@@ -157,12 +164,13 @@ export function NowPlaying({
     ) {
       close.current?.focus({ preventScroll: true });
     }
-  }, [current?.id]);
+  }, [current?.id, active]);
 
   return (
     <>
       <section
         className="fullscreen-player"
+        hidden={!active}
         ref={dialog}
         role="dialog"
         aria-modal="true"
@@ -220,6 +228,7 @@ export function NowPlaying({
           {
             '--cover-primary': colors?.[0] || '#35373f',
             '--cover-accent': colors?.[1] || '#262a31',
+            display: active ? undefined : 'none',
           } as CSSProperties
         }
       >
@@ -253,6 +262,7 @@ export function NowPlaying({
                 track={current}
                 style={style}
                 playing={
+                  active &&
                   player.playing &&
                   !player.buffering &&
                   !player.error &&
