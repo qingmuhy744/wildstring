@@ -360,7 +360,7 @@ private fun SongAction(label: String, icon: ImageVector, navigate: Boolean = fal
         leadingContent = { Icon(icon, null, Modifier.size(24.dp)) },
         trailingContent = { if (navigate) Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, Modifier.size(20.dp), tint = Muted) },
         colors = ListItemDefaults.colors(containerColor = Color.Transparent, headlineColor = color, leadingIconColor = if (destructive) color else Muted),
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
+        modifier = Modifier.fillMaxWidth().testTag("song-action-$label").clickable(onClick = onClick),
     )
 }
 

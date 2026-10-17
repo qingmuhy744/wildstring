@@ -72,7 +72,7 @@ class SongAlbumNavigationTest {
                 compose.runOnIdle { vm.openArtist(Artist("guest", "客席", 1, null)) }
                 compose.waitUntil(10_000) { vm.state.value.tracks.size == 1 && !vm.state.value.loading }
                 compose.onNodeWithContentDescription("第一首的操作").performClick()
-                compose.onNodeWithText("离线保存").assertIsDisplayed()
+                compose.onNodeWithTag("song-action-离线保存").assertIsDisplayed()
                 val labelPositions = listOf("查看所属专辑", "下一首播放", "加入播放队列").map {
                     compose.onNodeWithText(it, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot.left
                 }
