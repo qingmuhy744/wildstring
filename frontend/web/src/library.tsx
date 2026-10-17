@@ -375,6 +375,14 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
   const prependAnchor = useRef<{ id: string; top: number } | null>(null);
   const lastScroll = useRef(0);
   const upwardScroll = useRef(false);
+  function repositionList(scroll: () => void) {
+    scroll();
+    // Jump/retry, prepend anchors and history restoration move the document too.
+    // Record their final position before the queued scroll event is delivered so
+    // only a later user scroll can trigger loading the previous window.
+    lastScroll.current = window.scrollY;
+    upwardScroll.current = false;
+  }
   useEffect(() => {
     const scroll = () => {
       upwardScroll.current = window.scrollY < lastScroll.current;
@@ -399,13 +407,22 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
       const element = Array.from(
         listRoot.current?.querySelectorAll<HTMLElement>('[data-browse-id]') || [],
       ).find((item) => item.dataset.browseId === anchor.id);
-      if (element) window.scrollBy(0, element.getBoundingClientRect().top - anchor.top);
+      if (element)
+        repositionList(() =>
+          window.scrollBy({
+            top: element.getBoundingClientRect().top - anchor.top,
+            behavior: 'instant',
+          }),
+        );
       prependAnchor.current = null;
     } else if (pendingJump.current) {
-      listRoot.current?.scrollIntoView({ block: 'start' });
+      repositionList(() =>
+        listRoot.current?.scrollIntoView({ block: 'start', behavior: 'instant' }),
+      );
       pendingJump.current = false;
     } else if (scrollToRestore.current !== null) {
-      window.scrollTo(0, scrollToRestore.current);
+      const top = scrollToRestore.current;
+      repositionList(() => window.scrollTo({ top, behavior: 'instant' }));
       scrollToRestore.current = null;
     }
   }, [visible, lyricsOpen, navigation.length]);

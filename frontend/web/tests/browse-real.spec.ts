@@ -159,9 +159,34 @@ test('远跳失败重试替换窗口，快速搜索不会回填过期结果', as
     .getByRole('button', { name: '定位到 Z', exact: true })
     .click();
   await expect(page.getByRole('button', { name: '重试加载', exact: true })).toBeVisible();
-  await page.getByRole('button', { name: '重试加载', exact: true }).click();
+  const retry = page.getByRole('button', { name: '重试加载', exact: true });
+  await retry.scrollIntoViewIfNeeded();
+  // The error lives below the old 50-row window. Retrying must scroll upwards
+  // to Z without interpreting that programmatic move as backward browsing.
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+      ),
+  );
+  const retryOffsets: number[] = [];
+  page.on('request', (request) => {
+    const url = new URL(request.url());
+    if (url.pathname.endsWith('/tracks')) retryOffsets.push(Number(url.searchParams.get('offset')));
+  });
+  await retry.click();
   await expect(page.getByRole('table').getByRole('row').nth(1)).toContainText('最后歌曲');
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+      ),
+  );
+  expect(retryOffsets).toEqual([last.offset]);
   await expect(page.locator('.track-number').first()).toHaveText(String(last.offset + 1));
+  // A real upward gesture still extends the window and keeps earlier tracks accessible.
+  await page.mouse.wheel(0, -150);
+  await expect(page.locator('.track-number').first()).toHaveText(String(last.offset - 50 + 1));
   await page.unroute('**/api/v1/tracks?*');
   let release: (() => void) | undefined;
   let intercepted: (() => void) | undefined;
