@@ -11,9 +11,12 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 
 @Composable internal fun CatalogTopBar(state: MusicState, back: () -> Unit, refresh: () -> Unit, settings: () -> Unit, compact: Boolean = false, albumRefresh: (() -> Unit)? = null) {
@@ -44,15 +47,27 @@ import androidx.compose.ui.unit.dp
 
 @Composable internal fun CatalogSearch(query: String, search: (String) -> Unit) {
     val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
-    TextField(query, search, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp).testTag("catalog-search"),
+    var input by rememberSaveable(stateSaver = TextFieldValue.Saver) { mutableStateOf(TextFieldValue(query)) }
+    // Query results may replace the catalogue, but must not replace an IME's composing buffer.
+    LaunchedEffect(query) {
+        if (input.text != query && input.composition == null) input = TextFieldValue(query, TextRange(query.length))
+    }
+    TextField(input, { value ->
+        input = value
+        if (value.composition == null && value.text != query) search(value.text)
+    }, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp).testTag("catalog-search"),
         placeholder = { Text("搜索歌曲、艺人或专辑") }, singleLine = true, shape = RoundedCornerShape(28.dp),
         leadingIcon = { Icon(Icons.Default.Search, null) }, trailingIcon = {
-            if (query.isNotEmpty()) IconButton({ search("") }) { Icon(Icons.Default.Close, "清空搜索") }
+            if (input.text.isNotEmpty()) IconButton({ input = TextFieldValue(""); search("") }) { Icon(Icons.Default.Close, "清空搜索") }
         }, colors = TextFieldDefaults.colors(unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
             focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLowest, unfocusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
             focusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent),
         keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Search),
-        keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSearch = { keyboard?.hide() }))
+        keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSearch = {
+            input = input.copy(composition = null)
+            if (input.text != query) search(input.text)
+            keyboard?.hide()
+        }))
 }
 
 @Composable internal fun PersonalHeader(state: MusicState, recent: () -> Unit, compact: Boolean = false) {
