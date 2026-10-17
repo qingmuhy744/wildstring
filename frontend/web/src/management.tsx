@@ -6,7 +6,6 @@ import { HostSettings } from './host-settings';
 import { useEffect, useRef, useState } from 'react';
 import { api, type Track, type TrackPage } from './api';
 import { Pagination } from './track-list';
-import { AISettings } from './ai-settings';
 import { IntakePanel } from './intake-panel';
 import { MetadataJobs } from './metadata-tasks';
 
@@ -134,12 +133,14 @@ export function Management({
   onEdit,
   onChanged,
   onRefresh,
+  onOpenConnections,
 }: {
   revision: number;
   onBack: () => void;
   onEdit: (track: Track) => void;
   onChanged: () => void;
   onRefresh: () => void;
+  onOpenConnections: () => void;
 }) {
   const [tab, setTab] = useState<
     'overview' | 'tracks' | 'jobs' | 'intake' | 'settings' | 'users' | 'diagnostics'
@@ -510,7 +511,13 @@ export function Management({
             {tab === 'settings' && (
               <>
                 <ProviderSettings />
-                <AISettings />
+                <section className="management-card">
+                  <h2>AI 模型连接</h2>
+                  <p className="muted">
+                    音乐助手、自然语言找歌、每日推荐与收歌建议共用同一组连接和调用额度。个人连接、实例共享与原有兼容连接都在一处管理。
+                  </p>
+                  <button onClick={onOpenConnections}>管理统一模型连接</button>
+                </section>
                 <TranscodingSettings />
                 <HostSettings />
                 <section className="management-card">

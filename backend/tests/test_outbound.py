@@ -83,7 +83,11 @@ def test_probe_selection_provider_and_telegram_share_real_proxy(
         )
         probe = client.post("/api/v1/manage/ai/test", headers=HEADERS)
         assert probe.status_code == 200, probe.text
-        result = client.post("/api/v1/ai/discover", headers=HEADERS, json={"prompt": "找一首歌"})
+        result = client.post(
+            "/api/v1/ai/discover",
+            headers=HEADERS,
+            json={"prompt": "找一首歌", "connection_id": "legacy"},
+        )
         assert result.status_code == 200 and result.json()["mode"] == "ai"
         assert providers.request("http://source.fixture.invalid/entity")["id"] == "public-fixture"
         assert json_request(

@@ -224,14 +224,34 @@ private fun displayValue(value: com.google.gson.JsonElement?): String = when { v
     if (delete) AlertDialog(onDismissRequest = { delete = false }, title = { Text("删除当前对话？") }, text = { Text("删除服务端的对话历史，已有草案单独保留。") }, confirmButton = { TextButton({ scope.launch { action.run { vm.agent.request("conversations/${conversation!!.text("id")}", "DELETE"); conversation = null; conversations = vm.agent.all("conversations"); delete = false } } }) { Text("删除") } }, dismissButton = { TextButton({ delete = false }) { Text("取消") } })
 }
 
-@Composable private fun AgentConnectionChoice(connections: List<JsonObject>, selected: String?, enabled: Boolean = true, choose: (String?) -> Unit) {
+/** Every AI entry point uses the same permission-filtered connection list; null is explicitly local. */
+@Composable internal fun AgentConnectionChoice(connections: List<JsonObject>, selected: String?, enabled: Boolean = true, choose: (String?) -> Unit) {
     var open by remember { mutableStateOf(false) }
-    Box { TextButton({ open = true }, enabled = enabled) { Text(connections.firstOrNull { it.text("id") == selected }?.text("name") ?: "本地找歌（不使用模型）"); Icon(Icons.Default.ArrowDropDown, null) }
-        DropdownMenu(open, { open = false }) {
-            DropdownMenuItem(text = { Text("本地找歌（不使用模型）") }, onClick = { choose(null); open = false })
-            connections.filter { it.flag("enabled") }.forEach { item -> DropdownMenuItem(text = { Text("${item.text("name")} · ${item.text("model")}") }, onClick = { choose(item.text("id")); open = false }) }
+    val chosen = connections.firstOrNull { it.text("id") == selected }
+    Column {
+        Box {
+            TextButton({ open = true }, enabled = enabled, modifier = Modifier.testTag("ai-connection-choice")) {
+                Text(if (selected == null) "本地找歌（不使用模型）" else chosen?.text("name") ?: "已选连接不可用")
+                Icon(Icons.Default.ArrowDropDown, null)
+            }
+            DropdownMenu(open, { open = false }) {
+                DropdownMenuItem(text = { Text("本地找歌（不使用模型）") }, onClick = { choose(null); open = false })
+                connections.filter { it.flag("enabled") }.forEach { item ->
+                    DropdownMenuItem(text = { Column {
+                        Text("${item.text("name")} · ${item.text("model")}")
+                        Text(connectionBudget(item), style = MaterialTheme.typography.labelSmall)
+                    } }, onClick = { choose(item.text("id")); open = false })
+                }
+            }
         }
+        if (selected != null) Text(chosen?.let(::connectionBudget) ?: "连接已删除或无权使用，请重新选择。", Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.bodySmall)
     }
+}
+
+internal fun connectionBudget(connection: JsonObject): String {
+    val scope = when { connection.flag("read_only") -> "实例兼容"; connection.text("scope") == "instance" -> "实例共享"; else -> "个人连接" }
+    val used = connection.get("daily_calls_used")?.takeUnless { it.isJsonNull }?.asLong
+    return "$scope · 每日预算 ${connection.number("daily_call_budget")} 次" + used?.let { " · 已用 $it 次" }.orEmpty()
 }
 
 @Composable private fun AgentTasks(vm: MusicViewModel, selectedId: String?) {

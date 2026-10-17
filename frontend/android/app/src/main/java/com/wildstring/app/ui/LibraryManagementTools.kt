@@ -38,6 +38,8 @@ private fun parseField(key: String, value: String): JsonElement = when {
 @Composable
 internal fun MetadataPanel(vm: MusicViewModel, track: Track) {
     val scope = rememberCoroutineScope(); val action = remember { FeatureAction() }
+    val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+    val focus = androidx.compose.ui.platform.LocalFocusManager.current
     var original by remember { mutableStateOf<JsonObject?>(null) }
     val fields = remember { mutableStateMapOf<String, String>() }; var restore by remember { mutableStateOf(setOf<String>()) }
     suspend fun load() {
@@ -45,18 +47,24 @@ internal fun MetadataPanel(vm: MusicViewModel, track: Track) {
         val effective = original!!.getAsJsonObject("effective")
         metadataFields.forEach { (key, _) -> fields[key] = fieldText(effective.get(key)) }; restore = emptySet()
     }
-    LaunchedEffect(track.id) { action.run { load() } }
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    LaunchedEffect(track.id) { action.run { load() }; if (action.message == "已完成") action.message = null }
+    Column(Modifier.fillMaxSize()) {
+      Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(track.title, style = MaterialTheme.typography.titleLarge)
         Text("保存为人工修正。音乐文件不会被自动改写；“恢复文件值”可撤销该字段的人工覆盖。", style = MaterialTheme.typography.bodySmall)
-        ActionStatus(action)
         if (original != null) metadataFields.forEach { (key, label) ->
             OutlinedTextField(fields[key].orEmpty(), { fields[key] = it.take(8000); restore = restore - key }, Modifier.fillMaxWidth(), label = { Text(label) }, enabled = !action.busy && key !in restore, minLines = if (key in arrayFields) 2 else 1)
             if (original!!.getAsJsonObject("overrides")?.has(key) == true) Row(verticalAlignment = Alignment.CenterVertically) {
                 Checkbox(key in restore, { restore = if (it) restore + key else restore - key }); Text("恢复文件值", style = MaterialTheme.typography.bodySmall)
             }
         }
-        Button({ scope.launch { action.run {
+      }
+      // Keep the primary action reachable while editing any field or while the IME is open.
+      // The enclosing FeatureDialog applies imePadding, so this footer remains above the keyboard.
+      Surface(tonalElevation = 2.dp) {
+       Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp)) {
+        ActionStatus(action)
+        Button({ focus.clearFocus(); keyboard?.hide(); scope.launch { action.run {
             val record = original ?: return@run
             val overrides = record.getAsJsonObject("overrides").deepCopy()
             val effective = record.getAsJsonObject("effective")
@@ -66,7 +74,9 @@ internal fun MetadataPanel(vm: MusicViewModel, track: Track) {
             }
             vm.repository.api().objectPut(vm.repository.url("api", "v1", "manage", "tracks", track.id, "metadata"), obj("version" to record.get("version"), "overrides" to overrides))
             load(); vm.load(); action.message = "歌曲信息已保存"
-        } } }, enabled = original != null && !action.busy) { Text("保存修改") }
+        } } }, enabled = original != null && !action.busy, modifier = Modifier.fillMaxWidth()) { Text("保存修改") }
+       }
+      }
     }
 }
 

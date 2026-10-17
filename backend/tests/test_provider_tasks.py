@@ -272,9 +272,12 @@ def test_permissions_pagination_library_scope_and_schema15_upgrade(settings, aut
 
         drop_agent_tables(connection)
         connection.execute("DROP TABLE provider_task_reviews")
+        from migration_support import pre18
+
+        pre18(connection)
         connection.execute("PRAGMA user_version=15")
     database.initialize()
     database.initialize()
     with database.connect() as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION == 17
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION == 18
         assert connection.execute("SELECT count(*) FROM provider_jobs").fetchone()[0] == 1

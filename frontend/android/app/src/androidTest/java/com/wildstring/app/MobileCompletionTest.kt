@@ -254,9 +254,12 @@ class MobileCompletionTest {
                 compose.waitUntil(10_000) { compose.onAllNodes(hasText("保存修改") and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
                 capture("mobile-metadata.png")
                 compose.onNodeWithText("歌曲名称").performTextReplacement("手机修正标题")
-                // Wait for IME dismissal before locating the save button after scrolling.
-                dismissKeyboard()
-                compose.onNodeWithText("保存修改").performScrollTo().performClick()
+                capture("mobile-metadata-edit-footer.png")
+                // The footer remains visible while the focused field requests the IME.
+                // Exercise its real accessibility click action rather than racing a changing
+                // keyboard animation with a previously measured screen coordinate.
+                compose.onNodeWithText("保存修改").assertIsDisplayed().assertIsEnabled()
+                    .performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnClick) { click -> assertTrue(click()) }
                 try { compose.waitUntil(10_000) { fixture.mutations.any { it.first.endsWith("/metadata") } } }
                 catch (error: Throwable) { capture("mobile-metadata-save-failure.png"); throw AssertionError("Metadata save requests=${fixture.requests.toList()} mutations=${fixture.mutations.toList()}", error) }
                 val saved = JsonParser.parseString(fixture.mutations.first { it.first.endsWith("/metadata") }.second).asJsonObject.getAsJsonObject("overrides")

@@ -63,14 +63,50 @@ data class SharedPlayback(val version: Int = 0, @SerializedName("device_id") val
     @SerializedName("track_ids") val trackIds: List<String> = emptyList(), val index: Int = 0,
     @SerializedName("position_ms") val positionMs: Long = 0, val mode: String = "sequential",
     @SerializedName("updated_at") val updatedAt: String? = null)
-data class RecommendationItem(val track: Track, val reason: String = "")
-data class DailyRecommendations(val id: String = "", val date: String = "", val items: List<RecommendationItem> = emptyList(), val engine: String = "local")
+data class RecommendationItem(val track: Track, val reason: String = "",
+    @SerializedName("source_ids") val sourceIds: List<String>? = emptyList())
+data class RecommendationSourceStatus(val id: String = "", val status: String = "", val matched: Int = 0,
+    val cached: Boolean = false, @SerializedName("error_code") val errorCode: String? = null,
+    @SerializedName("candidate_count") val candidateCount: Int = 0, val unmatched: Int = 0)
+data class RecommendationWarning(val source: String = "", val code: String = "")
+data class DailyRecommendations(val id: String = "", val date: String = "", val items: List<RecommendationItem> = emptyList(), val engine: String = "local",
+    @SerializedName("connection_id") val connectionId: String = "local",
+    @SerializedName("source_status") val sourceStatus: List<RecommendationSourceStatus> = emptyList(),
+    val warnings: List<RecommendationWarning> = emptyList(), val degraded: Boolean = false)
 data class RecommendationPreferences(val version: Int = 1, @SerializedName("use_ai") val useAi: Boolean = false,
-    @SerializedName("use_lastfm") val useLastfm: Boolean = false, val count: Int = 20)
+    @SerializedName("use_lastfm") val useLastfm: Boolean = false, val count: Int = 20,
+    @SerializedName("connection_id") val connectionId: String = "local",
+    val sources: List<String> = listOf("personal", "community", "discovery", "revisit"),
+    @SerializedName("lastfm_tags") val lastfmTags: List<String> = emptyList(),
+    @SerializedName("external_enabled") val externalEnabled: Boolean = false,
+    @SerializedName("external_refresh_days") val externalRefreshDays: Int = 7,
+    @SerializedName("external_sources") val externalSources: List<String> = listOf("lastfm_charts", "lastfm_tags", "lastfm_artists"),
+    @SerializedName("external_use_ai") val externalUseAi: Boolean = false,
+    @SerializedName("external_call_limit") val externalCallLimit: Int = 6)
 data class RecommendationFeedback(@SerializedName("event_id") val eventId: String = java.util.UUID.randomUUID().toString(),
     @SerializedName("track_id") val trackId: String, val action: String)
-data class DiscoveryRequest(val prompt: String, val limit: Int = 20)
-data class DiscoveryResult(val title: String, val items: List<RecommendationItem>, val mode: String = "local", val warning: String? = null)
+data class DiscoveryRequest(val prompt: String, val limit: Int = 20,
+    @SerializedName("connection_id") val connectionId: String = "local", val sources: List<String>? = null)
+data class DiscoveryResult(val title: String = "", val items: List<RecommendationItem> = emptyList(), val mode: String = "local", val warning: String? = null,
+    @SerializedName("connection_id") val connectionId: String = "local",
+    @SerializedName("source_status") val sourceStatus: List<RecommendationSourceStatus> = emptyList(),
+    val warnings: List<RecommendationWarning> = emptyList(), val degraded: Boolean = false)
+data class ListeningRankingItem(val rank: Int, val track: Track,
+    @SerializedName("play_count") val playCount: Long = 0, @SerializedName("listened_ms") val listenedMs: Long = 0, val reason: String = "")
+data class ListeningRankings(val items: List<ListeningRankingItem> = emptyList(), val total: Int = 0,
+    val limit: Int = 20, val offset: Int = 0, val scope: String = "personal", val period: String = "30d", val metric: String = "plays")
+
+data class ExternalMusicEvidence(val source: String = "", val summary: String = "", val url: String? = null)
+data class ExternalMusicItem(@SerializedName("external_id") val externalId: String, val name: String,
+    val artists: List<String>, val album: String? = null, @SerializedName("source_url") val sourceUrl: String? = null,
+    val reason: String = "", val evidence: List<ExternalMusicEvidence> = emptyList(),
+    @SerializedName("local_track") val localTrack: Track? = null, val wanted: Boolean = false)
+data class ExternalMusicResult(val id: String? = null, val items: List<ExternalMusicItem> = emptyList(), val status: String = "disabled",
+    @SerializedName("generated_at") val generatedAt: String? = null, @SerializedName("next_refresh_at") val nextRefreshAt: String? = null,
+    val cached: Boolean = false, val stale: Boolean = false, val warnings: List<RecommendationWarning> = emptyList(), val degraded: Boolean = false,
+    @SerializedName("source_status") val sourceStatus: List<RecommendationSourceStatus> = emptyList(),
+    @SerializedName("connection_id") val connectionId: String = "local")
+data class ExternalMusicFeedback(@SerializedName("external_id") val externalId: String, val action: String)
 
 
 data class SharedPlaybackWrite(val version: Int, @SerializedName("device_id") val deviceId: String,

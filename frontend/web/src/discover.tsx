@@ -1,3 +1,4 @@
+import './recommendations.css';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { api, eventId, artist, time, type Playlist, type Track, type User } from './api';
 import { Cover } from './cover';
@@ -5,25 +6,31 @@ import { FavoriteButton, type Favorites } from './favorites';
 import type { Player } from './player';
 import { SyncModeControl } from './playback-sync';
 import { modeNames, QUEUE_LIMIT, type PlaybackMode } from './playback-state';
+import { ModelConnectionChoice, useModelConnections } from './model-connection';
+import { RecommendationPreferencesForm, RecommendationSources } from './recommendation-preferences';
+import { ListeningRankings } from './listening-rankings';
+import { ExternalRecommendations } from './external-recommendations';
+import {
+  recommendationSources,
+  type DailyRecommendation,
+  type RecommendationChoice,
+  type RecommendationPreferences,
+  type RecommendationWarning,
+  type SourceStatus,
+} from './recommendation-types';
 
-type Choice = { track: Track; reason: string };
-interface Daily {
-  id: string;
-  date: string;
-  items: Choice[];
-  engine: string;
-}
-interface Preferences {
-  version: number;
-  use_ai: boolean;
-  use_lastfm: boolean;
-  count: number;
-}
+type Choice = RecommendationChoice;
+type Daily = DailyRecommendation;
+type Preferences = RecommendationPreferences;
 interface Discovery {
   title: string;
   items: Choice[];
   mode: 'ai' | 'local';
   warning?: string;
+  connection_id?: string;
+  source_status?: SourceStatus[];
+  warnings?: RecommendationWarning[];
+  degraded?: boolean;
 }
 function explanation(reason: unknown): string {
   return typeof reason === 'string' ? reason : '来自你的曲库';
@@ -43,7 +50,7 @@ function Choices({
 }) {
   return (
     <div className="discovery-list">
-      {items.map(({ track, reason }, index) => (
+      {items.map(({ track, reason, source_ids }, index) => (
         <article key={track.id} className="discovery-track">
           <Cover trackId={track.id} title={track.title} />
           <button
@@ -60,6 +67,13 @@ function Choices({
             <strong>{track.title}</strong>
             <small>{artist(track)}</small>
             <small>{explanation(reason)}</small>
+            {!!source_ids?.length && (
+              <span className="recommendation-source-pills">
+                {source_ids.slice(0, 3).map((id) => (
+                  <span key={id}>{recommendationSources[id] || id}</span>
+                ))}
+              </span>
+            )}
           </button>
           <FavoriteButton track={track} favorites={favorites} />
           {onChange && (
@@ -113,11 +127,15 @@ export function Discover({
   player,
   favorites,
   onSaved,
+  onConnections,
 }: {
   player: Player;
   favorites: Favorites;
   onSaved: (list: Playlist) => void;
+  onConnections: () => void;
 }) {
+  const connections = useModelConnections();
+  const [section, setSection] = useState('daily');
   const [daily, setDaily] = useState<Daily | null>(null),
     [preferences, setPreferences] = useState<Preferences | null>(null);
   const [draftPreferences, setDraftPreferences] = useState<Preferences | null>(null);
@@ -156,19 +174,21 @@ export function Discover({
   useEffect(() => {
     const controller = new AbortController();
     setError('');
-    void Promise.all([
-      api<Daily>('/recommendations/daily', { signal: controller.signal }),
-      api<Preferences>('/recommendations/preferences', { signal: controller.signal }),
-    ])
-      .then(([daily, settings]) => {
-        if (!controller.signal.aborted) {
-          setDaily(daily);
-          setPreferences(settings);
-          setDraftPreferences(settings);
+    void api<Preferences>('/recommendations/preferences', { signal: controller.signal })
+      .then(async (settings) => {
+        if (controller.signal.aborted) return;
+        setPreferences(settings);
+        setDraftPreferences(settings);
+        if (!Array.isArray(settings.sources) && settings.use_ai) {
+          setDaily({ id: 'legacy-not-generated', date: '', items: [], engine: 'local' });
+          return;
         }
+        const daily = await api<Daily>('/recommendations/daily', { signal: controller.signal });
+        if (!controller.signal.aborted) setDaily(daily);
       })
-      .catch(() => {
-        if (!controller.signal.aborted) setError('推荐暂时无法读取，联网后可重试。');
+      .catch((reason) => {
+        if (!controller.signal.aborted)
+          setError(reason instanceof Error ? reason.message : '推荐暂时无法读取，联网后可重试。');
       });
     return () => controller.abort();
   }, [refresh]);
@@ -185,6 +205,7 @@ export function Discover({
     } finally {
       pending.current = false;
       setBusy('');
+      connections.reload();
     }
   }
   function feedback(id: string, action: string) {
@@ -225,145 +246,63 @@ export function Discover({
   function discover(event: FormEvent) {
     event.preventDefault();
     void action('正在找歌…', async () => {
-      const result = await api<Discovery>('/ai/discover', {
-        method: 'POST',
-        body: JSON.stringify({ prompt, limit: 30 }),
-      });
+      let result: Discovery;
+      if (!Array.isArray(preferences?.sources)) {
+        const page = await api<{ items: Track[] }>(
+          `/tracks?q=${encodeURIComponent(prompt.trim())}&limit=30`,
+        );
+        result = {
+          title: prompt.trim().slice(0, 100),
+          items: page.items.map((track) => ({ track, reason: '本地关键词匹配' })),
+          mode: 'local',
+        };
+      } else
+        result = await api<Discovery>('/ai/discover', {
+          method: 'POST',
+          body: JSON.stringify({
+            prompt,
+            limit: 30,
+            connection_id: draftPreferences?.connection_id || 'local',
+            sources: draftPreferences?.sources || preferences.sources,
+          }),
+        });
       setDiscovery(result);
       setName(result.title);
     });
   }
+  function openPreferences() {
+    const details = document.getElementById(
+      'recommendation-preferences',
+    ) as HTMLDetailsElement | null;
+    if (details) {
+      details.open = true;
+      details.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    }
+  }
   return (
-    <section className="completion-page" aria-label="音乐发现">
+    <section className="completion-page music-discovery" aria-label="音乐发现">
       <p className="eyebrow">MADE FOR YOUR EARS</p>
       <h1>今天，听点什么。</h1>
-      <p className="muted">从自己的曲库，找到下一段回响。</p>
+      <p className="muted">熟悉的旋律，再听一遍；还没遇见的，留一份收歌线索。</p>
+      {connections.error && (
+        <p className="error" role="alert">
+          {connections.error}
+        </p>
+      )}
       {error && (
         <p className="error" role="alert">
           {error} <button onClick={() => setRefresh((v) => v + 1)}>重新读取</button>
         </p>
       )}
       {(busy || message) && <p role="status">{busy || message}</p>}
-      <div className="discovery-heading">
-        <div>
-          <h2>每日推荐</h2>
-          <p className="muted">
-            {daily
-              ? `${daily.date} · ${daily.items.length} 首 · ${daily.engine.includes('ai') ? 'AI 编排' : '本地推荐'}${daily.engine.includes('lastfm') ? ' · Last.fm 增强' : ''}`
-              : '正在准备推荐…'}
-          </p>
-        </div>
-        <div className="toolbar-actions">
-          <button
-            disabled={!daily?.items.length}
-            onClick={() =>
-              daily &&
-              player.start(
-                daily.items.map((i) => i.track),
-                0,
-              )
-            }
-          >
-            播放推荐
-          </button>
-          <button
-            disabled={!!busy}
-            onClick={() =>
-              void action('正在换一批…', async () => {
-                setDaily(
-                  await api<Daily>('/recommendations/daily/refresh', {
-                    method: 'POST',
-                    body: '{}',
-                  }),
-                );
-              })
-            }
-          >
-            换一批
-          </button>
-          <button
-            disabled={!!busy || !daily?.items.length}
-            onClick={() =>
-              void action('正在保存歌单…', async () => {
-                const list = await saveList(
-                  `每日推荐 ${daily!.date}`,
-                  daily!.items.map((i) => i.track.id),
-                );
-                onSaved(list);
-                setMessage('每日推荐已保存为歌单。');
-              })
-            }
-          >
-            保存推荐歌单
-          </button>
-        </div>
-      </div>
-      {daily && (
-        <Choices items={daily.items} player={player} favorites={favorites} feedback={feedback} />
-      )}
-      {draftPreferences && (
-        <details className="discovery-preferences">
-          <summary>推荐偏好</summary>
-          <form
-            onSubmit={(event) => {
-              event.preventDefault();
-              void action('正在保存偏好…', async () => {
-                const settings = await api<Preferences>('/recommendations/preferences', {
-                  method: 'PUT',
-                  body: JSON.stringify(draftPreferences),
-                });
-                setPreferences(settings);
-                setDraftPreferences(settings);
-                setMessage('偏好已保存，点击“换一批”生成新的推荐。');
-              });
-            }}
-          >
-            <label className="checkbox-label">
-              <input
-                type="checkbox"
-                checked={draftPreferences.use_ai}
-                onChange={(e) =>
-                  setDraftPreferences({ ...draftPreferences, use_ai: e.target.checked })
-                }
-              />
-              使用 AI 编排候选
-            </label>
-            <label className="checkbox-label">
-              <input
-                type="checkbox"
-                checked={draftPreferences.use_lastfm}
-                onChange={(e) =>
-                  setDraftPreferences({ ...draftPreferences, use_lastfm: e.target.checked })
-                }
-              />
-              使用 Last.fm 相似关系
-            </label>
-            <p className="muted">
-              开启后会向已配置的服务发送必要曲目资料；服务不可用时使用本地推荐。默认关闭。
-            </p>
-            <label>
-              每日首数
-              <input
-                type="number"
-                min="5"
-                max="50"
-                value={draftPreferences.count}
-                onChange={(e) =>
-                  setDraftPreferences({ ...draftPreferences, count: Number(e.target.value) })
-                }
-              />
-            </label>
-            <button
-              disabled={!!busy || JSON.stringify(preferences) === JSON.stringify(draftPreferences)}
-            >
-              保存推荐偏好
-            </button>
-          </form>
-        </details>
-      )}
-      <section className="ai-discover">
-        <p className="eyebrow">ASK YOUR COLLECTION</p>
-        <h2>说说你想听的。</h2>
+      <details className="ai-discover">
+        <summary>
+          <span className="eyebrow">ASK YOUR COLLECTION</span>
+          <span className="discovery-prompt-title">说说你想听的。</span>
+          <span className="muted">
+            找歌，或生成一张歌单 <span aria-hidden="true">↗</span>
+          </span>
+        </summary>
         <form onSubmit={discover}>
           <label>
             找歌或生成歌单
@@ -376,7 +315,26 @@ export function Discover({
               onChange={(e) => setPrompt(e.target.value)}
             />
           </label>
-          <p className="muted">点击后从本曲库选歌；模型未配置或不可用时，明确使用本地检索。</p>
+          {draftPreferences && (
+            <ModelConnectionChoice
+              items={connections.items}
+              value={draftPreferences.connection_id || 'local'}
+              onChange={(id) =>
+                setDraftPreferences({
+                  ...draftPreferences,
+                  connection_id: id,
+                  use_ai: id !== 'local',
+                  ...(id === 'local' ? { external_use_ai: false } : {}),
+                })
+              }
+              label="这次找歌使用的连接"
+              disabled={!!busy || connections.loading || !Array.isArray(preferences?.sources)}
+              onManage={onConnections}
+            />
+          )}
+          <p className="muted">
+            点击后从真实本库候选中选歌。模型不可用时会说明降级，不切换其他付费连接；库外线索在“发现新音乐”单独展示。
+          </p>
           <button className="primary" disabled={!!busy || !prompt.trim()}>
             {busy === '正在找歌…' ? busy : '生成候选'}
           </button>
@@ -392,6 +350,11 @@ export function Discover({
                   ? '模型暂不可用，基础找歌仍可使用。'
                   : ''}
             </p>
+            <RecommendationSources
+              items={discovery.source_status}
+              warnings={discovery.warnings}
+              degraded={discovery.degraded}
+            />
             <Choices
               items={discovery.items}
               player={player}
@@ -443,7 +406,143 @@ export function Discover({
             )}
           </div>
         )}
-      </section>
+      </details>
+      <div className="discovery-sections workspace-tabs" role="group" aria-label="发现分类">
+        <button aria-pressed={section === 'daily'} onClick={() => setSection('daily')}>
+          每日推荐
+        </button>
+        <button aria-pressed={section === 'rankings'} onClick={() => setSection('rankings')}>
+          收听排行
+        </button>
+        <button aria-pressed={section === 'external'} onClick={() => setSection('external')}>
+          发现新音乐
+        </button>
+      </div>
+      <div hidden={section !== 'daily'}>
+        <div className="discovery-heading">
+          <div>
+            <h2>每日推荐</h2>
+            <p className="muted">
+              {daily
+                ? `${daily.date} · ${daily.items.length} 首 · ${daily.engine.includes('ai') ? 'AI 编排' : '本地推荐'}${daily.engine.includes('lastfm') ? ' · Last.fm 增强' : ''}`
+                : '正在准备推荐…'}
+            </p>
+          </div>
+          <div className="toolbar-actions">
+            <button
+              disabled={!daily?.items.length}
+              onClick={() =>
+                daily &&
+                player.start(
+                  daily.items.map((i) => i.track),
+                  0,
+                )
+              }
+            >
+              播放推荐
+            </button>
+            <button
+              disabled={!!busy}
+              onClick={() =>
+                void action('正在换一批…', async () => {
+                  if (!Array.isArray(preferences?.sources)) {
+                    const page = await api<{ items: Track[] }>(
+                      `/tracks?limit=${draftPreferences?.count || 20}`,
+                    );
+                    setDaily({
+                      id: 'legacy-local',
+                      date: new Date().toLocaleDateString(),
+                      engine: 'local',
+                      items: page.items.map((track) => ({ track, reason: '本地曲库候选' })),
+                    });
+                    return;
+                  }
+                  setDaily(
+                    await api<Daily>('/recommendations/daily/refresh', {
+                      method: 'POST',
+                      body: JSON.stringify(
+                        Array.isArray(preferences?.sources)
+                          ? {
+                              connection_id: draftPreferences?.connection_id || 'local',
+                              sources: draftPreferences?.sources || preferences.sources,
+                            }
+                          : {},
+                      ),
+                    }),
+                  );
+                })
+              }
+            >
+              换一批
+            </button>
+            <button
+              disabled={!!busy || !daily?.items.length}
+              onClick={() =>
+                void action('正在保存歌单…', async () => {
+                  const list = await saveList(
+                    `每日推荐 ${daily!.date}`,
+                    daily!.items.map((i) => i.track.id),
+                  );
+                  onSaved(list);
+                  setMessage('每日推荐已保存为歌单。');
+                })
+              }
+            >
+              保存推荐歌单
+            </button>
+          </div>
+        </div>
+        {daily && (
+          <Choices items={daily.items} player={player} favorites={favorites} feedback={feedback} />
+        )}
+        <RecommendationSources
+          items={daily?.source_status}
+          warnings={daily?.warnings}
+          degraded={daily?.degraded}
+        />
+      </div>
+      {draftPreferences && (
+        <RecommendationPreferencesForm
+          value={draftPreferences}
+          saved={preferences}
+          onChange={setDraftPreferences}
+          busy={!!busy}
+          connections={connections.items}
+          connectionsBusy={connections.loading || connections.unsupported}
+          onConnections={onConnections}
+          onSave={() =>
+            void action('正在保存偏好…', async () => {
+              const body = Array.isArray(draftPreferences.sources)
+                ? {
+                    ...draftPreferences,
+                    use_ai: (draftPreferences.connection_id || 'local') !== 'local',
+                  }
+                : {
+                    version: draftPreferences.version,
+                    use_ai: false,
+                    use_lastfm: draftPreferences.use_lastfm,
+                    count: draftPreferences.count,
+                  };
+              const settings = await api<Preferences>('/recommendations/preferences', {
+                method: 'PUT',
+                body: JSON.stringify(body),
+              });
+              setPreferences(settings);
+              setDraftPreferences(settings);
+              setMessage('偏好已保存。点击“换一批”或“获取收歌建议”生成新结果。');
+            })
+          }
+        />
+      )}
+      {section === 'rankings' && <ListeningRankings player={player} favorites={favorites} />}
+      {section === 'external' && preferences?.external_enabled !== undefined && (
+        <ExternalRecommendations
+          preferences={preferences}
+          player={player}
+          onPreferences={openPreferences}
+          onUsage={connections.reload}
+        />
+      )}
     </section>
   );
 }

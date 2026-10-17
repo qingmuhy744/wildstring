@@ -136,7 +136,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(listening_router(repository, auth, providers))
     app.include_router(playlist_router(playlists, auth))
     app.include_router(management_router(management, auth, providers))
-    app.include_router(experience_router(repository, auth, providers))
+    app.include_router(experience_router(repository, auth, providers, platform))
 
     app.include_router(diagnostics_router(diagnostics, auth, database))
 

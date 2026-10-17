@@ -238,6 +238,9 @@ def test_schema14_upgrade_preserves_existing_jobs_and_repeated_start_keeps_batch
     with database.connect(write=True) as connection:
         connection.execute("DROP TABLE provider_refresh_members")
         connection.execute("DROP TABLE provider_refresh_batches")
+        from migration_support import pre18
+
+        pre18(connection)
         connection.execute("PRAGMA user_version=14")
     database.initialize()
     database.initialize()

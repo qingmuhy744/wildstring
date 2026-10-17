@@ -348,9 +348,16 @@ def test_real_http_model_selects_only_candidates_sanitizes_and_never_creates_pla
     with authenticated_client(settings) as client, model_server() as (state, address):
         configure_model(client, address)
         before = client.get(BASE + "/playlists").json()
-        assert client.post(BASE + "/ai/discover", json={"prompt": "找歌"}).status_code == 403
+        assert (
+            client.post(
+                BASE + "/ai/discover", json={"connection_id": "legacy", "prompt": "找歌"}
+            ).status_code
+            == 403
+        )
         result = client.post(
-            BASE + "/ai/discover", headers=HEADERS, json={"prompt": "找几首艺人1的歌", "limit": 3}
+            BASE + "/ai/discover",
+            headers=HEADERS,
+            json={"connection_id": "legacy", "prompt": "找几首艺人1的歌", "limit": 3},
         ).json()
         assert result["mode"] == "ai" and len(result["items"]) == 1
         assert result["items"][0]["track"]["id"] in {item["id"] for item in tracks(client)}
@@ -369,7 +376,9 @@ def test_real_http_model_selects_only_candidates_sanitizes_and_never_creates_pla
         assert before == client.get(BASE + "/playlists").json()
         state["content"] = '{"items":[{"track_id":"hallucinated-only"}]}'
         fallback = client.post(
-            BASE + "/ai/discover", headers=HEADERS, json={"prompt": "找歌", "limit": 2}
+            BASE + "/ai/discover",
+            headers=HEADERS,
+            json={"connection_id": "legacy", "prompt": "找歌", "limit": 2},
         ).json()
         assert (
             fallback["mode"] == "local" and fallback["warning"] == "ai_unavailable_local_fallback"
@@ -381,20 +390,34 @@ def test_real_http_model_selects_only_candidates_sanitizes_and_never_creates_pla
                 "items": [{"track_id": result["items"][0]["track"]["id"]}],
             }
         )
-        safe = client.post(BASE + "/ai/discover", headers=HEADERS, json={"prompt": "找歌"})
+        safe = client.post(
+            BASE + "/ai/discover",
+            headers=HEADERS,
+            json={"connection_id": "legacy", "prompt": "找歌"},
+        )
         assert "private-test-model-secret" not in safe.text
         state["content"] = '{"title":"没有符合条件的歌曲","items":[]}'
-        empty = client.post(BASE + "/ai/discover", headers=HEADERS, json={"prompt": "找歌"}).json()
+        empty = client.post(
+            BASE + "/ai/discover",
+            headers=HEADERS,
+            json={"connection_id": "legacy", "prompt": "找歌"},
+        ).json()
         assert empty["mode"] == "ai" and empty["items"] == []
         state["status"] = 302
         request_count = len(state["requests"])
-        failed = client.post(BASE + "/ai/discover", headers=HEADERS, json={"prompt": "找歌"})
+        failed = client.post(
+            BASE + "/ai/discover",
+            headers=HEADERS,
+            json={"connection_id": "legacy", "prompt": "找歌"},
+        )
         assert failed.json()["mode"] == "local" and "private-test-model-secret" not in failed.text
         assert len(state["requests"]) == request_count + 1
         for value in ["x" * 2001, " "]:
             assert (
                 client.post(
-                    BASE + "/ai/discover", headers=HEADERS, json={"prompt": value}
+                    BASE + "/ai/discover",
+                    headers=HEADERS,
+                    json={"connection_id": "legacy", "prompt": value},
                 ).status_code
                 == 422
             )
@@ -434,8 +457,8 @@ def test_lastfm_optional_enrichment_uses_existing_cache_and_maps_only_local_trac
     def settings_stub(_self):
         return {"enabled": True, "lastfm": True, "lastfm_configured": True}
 
-    def cached(_self, provider, key, address, parameters):
-        calls.append((provider, address, parameters))
+    def cached(_self, address, parameters, **_kwargs):
+        calls.append(("lastfm", address, parameters))
         return {
             "similartracks": {
                 "track": [
@@ -446,7 +469,7 @@ def test_lastfm_optional_enrichment_uses_existing_cache_and_maps_only_local_trac
         }
 
     monkeypatch.setattr(Providers, "settings", settings_stub)
-    monkeypatch.setattr(Providers, "cached", cached)
+    monkeypatch.setattr(Providers, "request", cached)
     with authenticated_client(settings) as client:
         items = tracks(client)
         client.put(
@@ -478,17 +501,20 @@ def test_schema13_migration_preserves_existing_library(settings, authenticated_c
             "recommendation_feedback",
         ]:
             connection.execute(f"DROP TABLE {table}")
+        from migration_support import pre18
+
+        pre18(connection)
         connection.execute("PRAGMA user_version=13")
     database.initialize()
     assert database.check_ready()
     with authenticated_client(settings) as client:
         assert before == tracks(client)
-        assert client.get(BASE + "/recommendations/preferences").json() == {
-            "version": 1,
-            "use_ai": False,
-            "use_lastfm": False,
-            "count": 20,
-        }
+        from wildstring.recommendations import Preferences
+
+        assert (
+            client.get(BASE + "/recommendations/preferences").json()
+            == Preferences(version=1, connection_id="local").model_dump()
+        )
 
 
 def test_thirty_real_local_queries_obey_artist_song_favorite_and_unplayed_constraints(
@@ -651,7 +677,11 @@ def test_model_read_timeout_returns_local_results_without_credential_error(
         configure_model(client, address)
         state["delay"] = 2.5
         started = time.monotonic()
-        response = client.post(BASE + "/ai/discover", headers=HEADERS, json={"prompt": "来两首歌"})
+        response = client.post(
+            BASE + "/ai/discover",
+            headers=HEADERS,
+            json={"connection_id": "legacy", "prompt": "来两首歌"},
+        )
         assert 1.5 < time.monotonic() - started < 5
         assert response.status_code == 200 and response.json()["mode"] == "local"
         assert (
@@ -677,7 +707,7 @@ def test_simultaneous_daily_requests_generate_once_and_report_busy(
     entered, release = threading.Event(), threading.Event()
     calls = []
 
-    def blocked(_self, candidates, _prompt, _limit):
+    def blocked(_self, candidates, _prompt, _limit, **_kwargs):
         calls.append(1)
         entered.set()
         assert release.wait(timeout=8)
@@ -718,14 +748,18 @@ def test_untrusted_model_json_depth_and_fenced_output_stay_bounded(settings, aut
             state["content"] = text
             started = time.monotonic()
             response = client.post(
-                BASE + "/ai/discover", headers=HEADERS, json={"prompt": "来点歌"}
+                BASE + "/ai/discover",
+                headers=HEADERS,
+                json={"connection_id": "legacy", "prompt": "来点歌"},
             )
             assert time.monotonic() - started < 3
             assert response.status_code == 200 and response.json()["mode"] == "local"
         identity = tracks(client)[0]["id"]
         state["content"] = "```json\n" + json.dumps({"items": [{"track_id": identity}]}) + "\n```"
         response = client.post(
-            BASE + "/ai/discover", headers=HEADERS, json={"prompt": "来点歌"}
+            BASE + "/ai/discover",
+            headers=HEADERS,
+            json={"connection_id": "legacy", "prompt": "来点歌"},
         ).json()
         assert response["mode"] == "ai" and response["items"][0]["track"]["id"] == identity
 
@@ -755,7 +789,9 @@ def test_daily_deduplicates_known_recordings_but_keeps_distinct_live_and_unknown
             assert {track["id"] for track in items[2:]} <= ids
         # Explicit searches may inspect release variants; recording dedup is a daily-playlist rule.
         discovery = client.post(
-            BASE + "/ai/discover", headers=HEADERS, json={"prompt": "同名歌曲"}
+            BASE + "/ai/discover",
+            headers=HEADERS,
+            json={"connection_id": "legacy", "prompt": "同名歌曲"},
         ).json()
         assert len(discovery["items"]) == 5
         # An explicit metadata repair can reveal a duplicate inside a cached daily set.

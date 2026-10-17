@@ -165,7 +165,36 @@ class Assistant:
         legacy = self.legacy_connection()
         if legacy:
             result.append({key: value for key, value in legacy.items() if key != "user_id"})
+        for item in result:
+            item.update(self.usage_summary(actor, item["id"], item["daily_call_budget"]))
         return result
+
+    def usage_summary(self, actor, identity, budget):
+        day = datetime.now(UTC).date().isoformat()
+        with self.database.connect() as connection:
+            total = connection.execute(
+                "SELECT COALESCE(sum(calls),0) FROM agent_usage WHERE connection_id=? AND day=?",
+                (identity, day),
+            ).fetchone()[0]
+            mine = connection.execute(
+                "SELECT calls,tokens,unknown_calls FROM agent_usage WHERE connection_id=? AND user_id=? AND day=?",
+                (identity, actor.user_id, day),
+            ).fetchone()
+        own = dict(mine) if mine else {"calls": 0, "tokens": 0, "unknown_calls": 0}
+        remaining = max(0, budget - total)
+        return {
+            "daily_calls_used": total,
+            "daily_calls_remaining": remaining,
+            "my_usage": own,
+            "usage": {
+                "calls_today": total,
+                "remaining_calls": remaining,
+                "daily_call_budget": budget,
+                "my_calls_today": own["calls"],
+                "tokens_today": own["tokens"],
+                "unknown_calls": own["unknown_calls"],
+            },
+        }
 
     def connection_for(self, actor, identity, *, background=False):
         if identity == "legacy":
@@ -301,7 +330,15 @@ class Assistant:
         return day
 
     def model_request(
-        self, actor, configuration, messages, *, tools=None, background=False, on_call=None
+        self,
+        actor,
+        configuration,
+        messages,
+        *,
+        tools=None,
+        background=False,
+        on_call=None,
+        timeout_limit=None,
     ):
         latest = self.connection_for(
             self.refresh_actor(actor), configuration["id"], background=background
@@ -334,7 +371,9 @@ class Assistant:
                 configuration["base_url"] + "/chat/completions",
                 payload=payload,
                 headers=headers,
-                timeout=configuration["timeout"],
+                timeout=min(configuration["timeout"], timeout_limit)
+                if timeout_limit
+                else configuration["timeout"],
                 proxy_mode=mode,
                 proxy_url=proxy,
                 service="agent_model",
@@ -366,7 +405,7 @@ class Assistant:
             if isinstance(response.get("usage"), dict)
             else None
         )
-        if isinstance(tokens, int) and 0 <= tokens <= 100000000:
+        if type(tokens) is int and 0 <= tokens <= 100000000:
             with self.database.connect(write=True) as connection:
                 connection.execute(
                     "UPDATE agent_usage SET tokens=tokens+? WHERE connection_id=? AND user_id=? AND day=?",

@@ -20,12 +20,18 @@ interface Api {
     @GET("api/v1/listening/summary") suspend fun listeningSummary(): ListeningSummary
     @GET("api/v1/playback/state") suspend fun sharedPlayback(@Tag owner: RequestOwner? = null): SharedPlayback
     @PUT("api/v1/playback/state") suspend fun saveSharedPlayback(@Body body: SharedPlaybackWrite, @Tag owner: RequestOwner? = null): SharedPlayback
-    @GET("api/v1/recommendations/daily") suspend fun daily(): DailyRecommendations
-    @POST("api/v1/recommendations/daily/refresh") suspend fun refreshDaily(@Body body: JsonObject = JsonObject()): DailyRecommendations
+    @GET("api/v1/recommendations/daily") suspend fun daily(@Tag policy: AgentRequestPolicy? = AgentRequestPolicy()): DailyRecommendations
+    @POST("api/v1/recommendations/daily/refresh") suspend fun refreshDaily(@Body body: JsonObject = JsonObject(), @Tag policy: AgentRequestPolicy? = AgentRequestPolicy()): DailyRecommendations
     @GET("api/v1/recommendations/preferences") suspend fun recommendationPreferences(): RecommendationPreferences
     @PUT("api/v1/recommendations/preferences") suspend fun saveRecommendationPreferences(@Body body: RecommendationPreferences): RecommendationPreferences
     @POST("api/v1/recommendations/feedback") suspend fun recommendationFeedback(@Body body: RecommendationFeedback, @Tag owner: RequestOwner? = null): ResponseBody
-    @POST("api/v1/ai/discover") suspend fun discover(@Body body: DiscoveryRequest): DiscoveryResult
+    @GET("api/v1/recommendations/external") suspend fun externalMusic(@Tag policy: AgentRequestPolicy? = AgentRequestPolicy()): ExternalMusicResult
+    @POST("api/v1/recommendations/external/refresh") suspend fun refreshExternalMusic(@Body body: JsonObject = JsonObject(), @Tag policy: AgentRequestPolicy? = AgentRequestPolicy()): ExternalMusicResult
+    @POST("api/v1/recommendations/external/feedback") suspend fun externalMusicFeedback(@Body body: ExternalMusicFeedback): JsonObject
+    @GET("api/v1/recommendations/rankings") suspend fun listeningRankings(@Query("scope") scope: String = "personal",
+        @Query("period") period: String = "30d", @Query("metric") metric: String = "plays", @Query("limit") limit: Int = 20,
+        @Query("offset") offset: Int = 0): ListeningRankings
+    @POST("api/v1/ai/discover") suspend fun discover(@Body body: DiscoveryRequest, @Tag policy: AgentRequestPolicy? = AgentRequestPolicy()): DiscoveryResult
     @GET("api/v1/lastfm") suspend fun lastfm(): LastfmStatus
     @POST("api/v1/lastfm/authorize") suspend fun authorizeLastfm(): AuthorizationUrl
     @PUT("api/v1/lastfm") suspend fun updateLastfm(@Body body: LastfmPreferences): LastfmStatus

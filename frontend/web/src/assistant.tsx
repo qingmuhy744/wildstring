@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from './api';
-import type { AgentConnection, AgentPage, Conversation } from './agent-api';
+import type { AgentPage, Conversation } from './agent-api';
+import { ModelConnectionChoice, useModelConnections } from './model-connection';
 import {
   DiagnosticId,
   errorText,
@@ -12,9 +13,15 @@ import {
   WorkspaceNotice,
 } from './workspace-ui';
 
-export function Assistant({ onDraft }: { onDraft: (id: string) => void }) {
+export function Assistant({
+  onDraft,
+  onConnections,
+}: {
+  onDraft: (id: string) => void;
+  onConnections?: () => void;
+}) {
   const sessions = useWorkspaceResource<AgentPage<Conversation>>('/agent/conversations?limit=100'),
-    connections = useWorkspaceResource<AgentPage<AgentConnection>>('/agent/connections?limit=100');
+    connections = useModelConnections();
   const [selected, setSelected] = useState<string | null>(null),
     [conversation, setConversation] = useState<Conversation | null>(null),
     [content, setContent] = useState(''),
@@ -102,7 +109,10 @@ export function Assistant({ onDraft }: { onDraft: (id: string) => void }) {
         setNotice('连接中断时，服务端可能仍在处理。刷新对话可恢复已保存结果。');
       }
     } finally {
-      if (epoch === sequence.current) setBusy(false);
+      if (epoch === sequence.current) {
+        setBusy(false);
+        connections.reload();
+      }
     }
   }
   async function remove() {
@@ -120,7 +130,7 @@ export function Assistant({ onDraft }: { onDraft: (id: string) => void }) {
       setBusy(false);
     }
   }
-  const activeConnection = connections.value?.items.find((item) => item.id === connection);
+  const activeConnection = connections.items.find((item) => item.id === connection);
   return (
     <section className="workspace-page" aria-label="AI 音乐助手">
       <WorkspaceHeader
@@ -180,24 +190,14 @@ export function Assistant({ onDraft }: { onDraft: (id: string) => void }) {
           )}
           <div className="workspace-card">
             <div className="workspace-card-head">
-              <label>
-                模型连接
-                <select
-                  aria-label="助手模型连接"
-                  disabled={busy}
-                  value={connection}
-                  onChange={(e) => setConnection(e.target.value)}
-                >
-                  <option value="local">本地找歌回退</option>
-                  {connections.value?.items
-                    .filter((c) => c.enabled)
-                    .map((c) => (
-                      <option value={c.id} key={c.id}>
-                        {c.name} · {c.model}
-                      </option>
-                    ))}
-                </select>
-              </label>
+              <ModelConnectionChoice
+                items={connections.items}
+                value={connection}
+                onChange={setConnection}
+                label="助手模型连接"
+                disabled={busy || connections.loading}
+                onManage={onConnections}
+              />
               {selected && (
                 <button disabled={busy} onClick={() => void remove()}>
                   删除对话

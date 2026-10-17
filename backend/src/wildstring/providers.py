@@ -12,7 +12,7 @@ import shutil
 import sqlite3
 import threading
 import time
-from contextlib import suppress
+from contextlib import contextmanager, suppress
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Annotated, Literal
@@ -58,6 +58,17 @@ FM = "https://ws.audioscrobbler.com/2.0/"
 ACOUSTID = "https://api.acoustid.org/v2/lookup"
 UA = "WildString/0.3.3 (https://github.com/qingmuhy744/wildstring)"
 logger = logging.getLogger(__name__)
+
+
+@contextmanager
+def request_lock(path, timeout_limit):
+    """Interactive queries can shorten the entire provider wait, including its lock."""
+    started = time.monotonic()
+    try:
+        with FileLock(str(path), timeout=timeout_limit if timeout_limit is not None else -1):
+            yield started + timeout_limit if timeout_limit is not None else None
+    except Timeout:
+        raise ProviderError("provider_request_timeout") from None
 
 
 def missing_fields(track, manual, fields):
@@ -201,7 +212,9 @@ class Providers:
         proxy_mode=None,
         proxy_url=None,
         diagnostic=False,
+        timeout_limit=None,
     ):
+        timeout_limit = min(15, max(0.01, timeout_limit)) if timeout_limit is not None else None
         parameters = dict(parameters or {})
         if url == FM:
             credentials = self.secrets()
@@ -233,12 +246,14 @@ class Providers:
             data = gzip.compress(data)
         address = url + (("?" + urlencode(parameters)) if parameters and not post else "")
         # Shared across worker processes. Never hold a SQLite transaction while doing network I/O.
-        with FileLock(str(self.directory / f"{provider}.lock")):
+        with request_lock(self.directory / f"{provider}.lock", timeout_limit) as deadline:
             with self.database.connect() as connection:
                 previous = connection.execute(
                     "SELECT called_at FROM provider_limits WHERE provider=?", (provider,)
                 ).fetchone()
             delay = max(0, 1.05 - (time.time() - previous[0])) if previous else 0
+            if deadline is not None and delay >= deadline - time.monotonic():
+                raise ProviderError("provider_request_timeout")
             if diagnostic:
                 time.sleep(delay)
             elif self.exit.wait(delay):
@@ -271,7 +286,9 @@ class Providers:
                         req,
                         proxy_mode=mode,
                         proxy_url=proxy,
-                        timeout=15,
+                        timeout=max(0.01, deadline - time.monotonic())
+                        if deadline is not None
+                        else 15,
                         limit=8 * 1024 * 1024 if image else 2 * 1024 * 1024,
                         redirect=SafeRedirect() if provider == "caa" else None,
                         opener_factory=build_opener,

@@ -1,5 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { api, type User } from './api';
+import { AISettings } from './ai-settings';
+import { useModelConnections } from './model-connection';
 import type { AgentConnection, AgentPage, ToolCredential } from './agent-api';
 import {
   DiagnosticId,
@@ -24,7 +26,7 @@ const empty = {
   enabled: true,
 };
 export function AgentConnections({ user }: { user: User }) {
-  const list = useWorkspaceResource<AgentPage<AgentConnection>>('/agent/connections?limit=100'),
+  const list = useModelConnections(),
     policy = useWorkspaceResource<{ allowed_hosts: string[]; allow_private: boolean }>(
       user.role === 'admin' ? '/agent/endpoint-policy' : null,
     );
@@ -151,17 +153,21 @@ export function AgentConnections({ user }: { user: User }) {
       {!list.unsupported && (
         <>
           <div>
-            {list.value?.items.map((item) => (
+            {list.items.map((item) => (
               <article className="workspace-row" key={item.id}>
                 <div className="workspace-row-main">
                   <strong>{item.name}</strong>
                   <small>
                     {item.model} ·{' '}
                     {item.scope === 'personal' ? '仅本人' : item.shared ? '实例共享' : '管理员专用'}
-                    {item.read_only ? ' · 原有实例配置' : ''}
+                    {item.id === 'legacy' ? ' · 原有实例配置' : item.read_only ? ' · 仅可使用' : ''}
                     <br />
                     {item.background_allowed ? '允许后台使用' : '仅交互使用'} · 每日最多{' '}
                     {item.daily_call_budget} 次
+                    {item.daily_calls_remaining != null
+                      ? ` · 今日剩余 ${item.daily_calls_remaining} 次`
+                      : ''}
+                    {item.my_usage?.calls != null ? ` · 我已用 ${item.my_usage.calls} 次` : ''}
                   </small>
                 </div>
                 <StateBadge state={item.enabled ? 'ready' : 'disabled'} />
@@ -335,6 +341,16 @@ export function AgentConnections({ user }: { user: User }) {
               </div>
             </div>
           </form>
+          {user.role === 'admin' && (
+            <details className="legacy-ai-compatibility">
+              <summary>原有实例连接（兼容配置）</summary>
+              <p className="muted">
+                这是连接列表中的 legacy
+                实例连接，为旧客户端保留。推荐优先添加具备共享控制与统一额度的新连接；修改这里不会更改当前功能已选中的连接。
+              </p>
+              <AISettings />
+            </details>
+          )}
           {user.role === 'admin' && (
             <details>
               <summary>个人连接的端点规则</summary>

@@ -437,6 +437,9 @@ def test_metadata_migration_and_backfill_commit_together(settings, monkeypatch):
     with db.connect(write=True) as connection:
         identity = connection.execute("SELECT id FROM tracks").fetchone()[0]
         restore_v7_account_layout(connection)
+        from migration_support import pre18
+
+        pre18(connection)
         connection.execute("PRAGMA user_version=7")
     original = edits.apply_effective
 

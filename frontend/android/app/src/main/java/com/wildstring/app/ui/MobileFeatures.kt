@@ -31,7 +31,7 @@ import kotlinx.coroutines.launch
 @Composable
 internal fun MobileShortcuts(admin: Boolean, unread: Int = 0, open: (String) -> Unit) {
     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        listOf("daily" to "每日推荐", "ai" to "AI 找歌", "offline" to "离线保存", "statistics" to "收听统计", "devices" to "其他设备继续", "assistant" to "野弦助手", "notifications" to if (unread > 0) "通知 · $unread" else "通知").forEach { (route, title) ->
+        listOf("daily" to "每日推荐", "ai" to "AI 找歌", "offline" to "离线保存", "statistics" to "收听统计", "devices" to "其他设备继续", "assistant" to "野弦助手", "notifications" to if (unread > 0) "通知 · $unread" else "通知", "external" to "发现新音乐", "rankings" to "收听排行").forEach { (route, title) ->
             AssistChip({ open(route) }, label = { Text(title) })
         }
         if (admin) AssistChip({ open("management") }, label = { Text("曲库管理") })
@@ -43,7 +43,7 @@ internal fun FeatureDialog(vm: MusicViewModel, route: String, track: Track? = nu
     val account by vm.state.collectAsStateWithLifecycle()
     val title = when (route) {
         "assistant" -> "野弦助手"; "notifications" -> "通知与任务"
-        "daily" -> "每日推荐"; "ai" -> "AI 找歌与歌单"; "offline" -> "离线保存"; "statistics" -> "收听统计"; "devices" -> "其他设备继续"
+        "external" -> "发现新音乐"; "rankings" -> "收听排行"; "daily" -> "每日推荐"; "ai" -> "AI 找歌与歌单"; "offline" -> "离线保存"; "statistics" -> "收听统计"; "devices" -> "其他设备继续"
         "playlist" -> if (playlist == null) "新建歌单" else "编辑歌单"; "order" -> "歌单排序"; "multi" -> "多选加入歌单"
         "metadata" -> "编辑歌曲信息"; "lyrics" -> "编辑歌词"; "suggestions" -> "更新元数据与建议"; else -> "曲库管理"
     }
@@ -72,6 +72,8 @@ internal fun FeatureDialog(vm: MusicViewModel, route: String, track: Track? = nu
                     when (route) {
                         "assistant", "notifications" -> AgentWorkspace(vm, if (route == "notifications") "notifications" else "chat")
                         "daily" -> DailyPanel(vm)
+                        "rankings" -> RankingsPanel(vm)
+                        "external" -> ExternalMusicPanel(vm)
                         "ai" -> AiPanel(vm)
                         "offline" -> OfflinePanel(vm)
                         "statistics" -> StatisticsPanel(vm)
@@ -205,51 +207,7 @@ private fun DevicesPanel(vm: MusicViewModel) {
     }
 }
 
-@Composable
-private fun DailyPanel(vm: MusicViewModel) {
-    val current by vm.state.collectAsStateWithLifecycle()
-    val scope = rememberCoroutineScope(); val action = remember { FeatureAction() }
-    var daily by remember { mutableStateOf<DailyRecommendations?>(null) }
-    var preferences by remember { mutableStateOf<RecommendationPreferences?>(null) }
-    var rejected by remember { mutableStateOf(setOf<String>()) }
-    LaunchedEffect(Unit) { action.run { daily = vm.repository.api().daily(); preferences = vm.repository.api().recommendationPreferences() } }
-    Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
-        ActionStatus(action)
-        preferences?.let { p ->
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("每天 ${p.count} 首", Modifier.weight(1f))
-                TextButton({ preferences = p.copy(count = (p.count - 5).coerceAtLeast(1)) }) { Text("减少") }
-                TextButton({ preferences = p.copy(count = (p.count + 5).coerceAtMost(50)) }) { Text("增加") }
-            }
-            Row(verticalAlignment = Alignment.CenterVertically) { Checkbox(p.useAi, { preferences = p.copy(useAi = it) }); Text("AI 编排")
-                Checkbox(p.useLastfm, { preferences = p.copy(useLastfm = it) }); Text("Last.fm 增强") }
-            Row {
-                TextButton({ scope.launch { action.run { preferences = vm.repository.api().saveRecommendationPreferences(p); action.message = "偏好已保存，下次换一批生效" } } }, enabled = !action.busy) { Text("保存偏好") }
-                TextButton({ scope.launch { action.run { daily = vm.repository.api().refreshDaily(); rejected = emptySet() } } }, enabled = !action.busy) { Text("换一批") }
-            }
-        }
-        val items = daily?.items.orEmpty().filter { it.track.id !in rejected }
-        Row {
-            Button({ vm.play(items.map { it.track }); items.firstOrNull()?.let { first -> scope.launch { runCatching { vm.repository.feedback(RecommendationFeedback(trackId = first.track.id, action = "accept")).close() } } } }, enabled = items.isNotEmpty()) { Text("播放推荐") }
-            TextButton({ scope.launch { action.run { saveRecommendations(vm, "每日推荐 ${daily?.date.orEmpty()}", items); action.message = "已保存为歌单" } } }, enabled = !action.busy && items.isNotEmpty()) { Text("保存歌单") }
-        }
-        LazyColumn(Modifier.weight(1f)) { items(items, key = { it.track.id }) { item ->
-            Column(Modifier.fillMaxWidth().padding(vertical = 12.dp)) {
-                Text(item.track.title, Modifier.clickable { vm.play(items.map { it.track }, items.indexOf(item)) })
-                Text(item.track.artist + " · " + item.reason, style = MaterialTheme.typography.bodySmall)
-                Row {
-                    TextButton({ vm.favorite(item.track) }, enabled = item.track.id !in current.pendingFavorites) { Text(if (vm.repository.knownTracks[item.track.id]?.loved ?: item.track.loved) "已收藏" else "收藏") }
-                    listOf("dismiss_track" to "不感兴趣", "less_artist" to "少推荐此艺人").forEach { (key, name) ->
-                        TextButton({ scope.launch { action.run { vm.repository.feedback(RecommendationFeedback(trackId = item.track.id, action = key)).close(); rejected = rejected + item.track.id } } }, enabled = !action.busy) { Text(name) }
-                    }
-                }
-            }
-        } }
-        if (items.isEmpty() && !action.busy) Text("暂无推荐，可增加曲库或调整偏好后换一批。", Modifier.padding(16.dp))
-    }
-}
-
-private suspend fun saveRecommendations(vm: MusicViewModel, name: String, items: List<RecommendationItem>) {
+internal suspend fun saveRecommendations(vm: MusicViewModel, name: String, items: List<RecommendationItem>) {
     val owner = vm.repository.session.cacheScope() ?: throw CancellationException("登录已失效。")
     fun requireOwner() { if (owner != vm.repository.session.cacheScope()) throw CancellationException("服务器或账号已变化。") }
     val api = vm.repository.api()
@@ -263,27 +221,4 @@ private suspend fun saveRecommendations(vm: MusicViewModel, name: String, items:
         throw error
     }
     requireOwner(); vm.load()
-}
-
-@Composable
-private fun AiPanel(vm: MusicViewModel) {
-    val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
-    var excluded by remember { mutableStateOf(setOf<String>()) }; var draftName by remember { mutableStateOf("") }
-    var prompt by remember { mutableStateOf("") }; var result by remember { mutableStateOf<DiscoveryResult?>(null) }
-    val action = remember { FeatureAction() }; val scope = rememberCoroutineScope()
-    Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
-        OutlinedTextField(prompt, { prompt = it.take(2000) }, Modifier.fillMaxWidth(), label = { Text("想听什么？") }, placeholder = { Text("来半小时我很久没听过的摇滚") }, minLines = 2)
-        Button({ keyboard?.hide(); scope.launch { action.run { result = vm.repository.api().discover(DiscoveryRequest(prompt)); draftName = result!!.title; excluded = emptySet(); action.message = if (result?.mode == "local") "当前使用本地检索" else "已生成候选，请预览后保存" } } }, enabled = !action.busy && prompt.isNotBlank()) { Text(if (action.busy) "正在找歌…" else "生成候选") }
-        ActionStatus(action)
-        result?.let { draft ->
-            val selected = draft.items.filter { it.track.id !in excluded }
-            OutlinedTextField(draftName, { draftName = it.take(100) }, Modifier.fillMaxWidth(), label = { Text("歌单名称") }, singleLine = true)
-            draft.warning?.let { Text("AI 暂不可用，已返回本地候选。", style = MaterialTheme.typography.bodySmall) }
-            Row {
-                TextButton({ vm.play(selected.map { it.track }) }, enabled = selected.isNotEmpty()) { Text("试听候选") }
-                TextButton({ scope.launch { action.run { saveRecommendations(vm, draftName, selected); action.message = "歌单已保存" } } }, enabled = !action.busy && selected.isNotEmpty() && draftName.isNotBlank()) { Text("确认保存歌单") }
-            }
-            LazyColumn(Modifier.weight(1f)) { items(draft.items, key = { it.track.id }) { item -> ListItem(headlineContent = { Text(item.track.title) }, supportingContent = { Text(item.track.artist + " · " + item.reason) }, leadingContent = { Checkbox(item.track.id !in excluded, { checked -> excluded = if (checked) excluded - item.track.id else excluded + item.track.id }) }) } }
-        }
-    }
 }

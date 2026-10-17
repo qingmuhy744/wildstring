@@ -37,7 +37,7 @@ class AgentWorkspaceTest {
                 if (path.endsWith("/auth/login")) return@synchronized json("{}").setHeader("Set-Cookie", "wildstring_session=agent-alice; Path=/; Max-Age=3600")
                 if (path == "/api/v1/agent/notifications/read") { read = true; return@synchronized json("{}") }
                 if (path == "/api/v1/agent/notifications") return@synchronized json("""{"items":[{"id":"notice-one","event_id":"event-one","title":"新草案待确认","summary":"已生成 1 份草案，尚未应用。","severity":"info","draft_id":"draft-one","trace_id":"$trace","created_at":"2026-10-17T12:00:00Z","read_at":${if (read) "\"2026-10-17T12:01:00Z\"" else "null"},"version":${if (read) 2 else 1}}],"total":1,"limit":100,"offset":0,"unread_count":${if (read) 0 else 1},"high_watermark":${if (read) 2 else 1},"next_cursor":"c${if (read) 2 else 1}"}""")
-                if (path == "/api/v1/agent/connections") return@synchronized json("""{"items":[],"total":0,"limit":100,"offset":0}""")
+                if (path == "/api/v1/agent/connections") return@synchronized json("""{"items":[],"total":0,"limit":100,"offset":0}""").setBodyDelay(350, java.util.concurrent.TimeUnit.MILLISECONDS)
                 if (path == "/api/v1/agent/conversations" && request.method == "GET") return@synchronized json("""{"items":[],"total":0,"limit":100,"offset":0}""")
                 if (path == "/api/v1/agent/conversations" && request.method == "POST") return@synchronized json("""{"id":"conversation-one","title":"新对话","messages":[],"runs":[]}""")
                 if (path.endsWith("/conversation-one/messages")) return@synchronized json("""{"id":"conversation-one","messages":[{"id":"message-user","role":"user","content":"${body.text("content")}"},{"id":"message-ai","role":"assistant","content":"已整理为草案，请查看后确认。"}],"runs":[{"id":"run-one","status":"succeeded","draft_ids":["draft-one"],"trace_id":"$trace"}]}""")
@@ -78,6 +78,9 @@ class AgentWorkspaceTest {
             compose.waitUntil(15_000) { vm.agent.inbox.value.unread == 0 }
             compose.onNodeWithText("0 条未读").assertExists()
             compose.onNodeWithTag("agent-tab-chat").performClick()
+            // The chat tab independently loads connection permissions and history.
+            // Wait for the actual editor to leave its loading/disabled state.
+            compose.waitUntil(15_000) { compose.onAllNodes(hasTestTag("agent-chat-input") and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithTag("agent-chat-input").performTextInput("整理很久没听的收藏")
             compose.onNodeWithTag("agent-chat-send").performClick()
             compose.waitUntil(15_000) { compose.onAllNodesWithText("已整理为草案，请查看后确认。").fetchSemanticsNodes().isNotEmpty() }

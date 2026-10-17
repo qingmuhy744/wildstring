@@ -86,6 +86,9 @@ export interface AgentConnection {
   shared: boolean;
   background_allowed: boolean;
   daily_call_budget: number;
+  daily_calls_used?: number;
+  daily_calls_remaining?: number;
+  my_usage?: { calls: number; tokens?: number; unknown_calls?: number };
   enabled: boolean;
   has_api_key: boolean;
   version: number;

@@ -140,6 +140,11 @@ type CatalogLocation = {
 export function Library({ onLogout, user }: { onLogout: () => Promise<void>; user: User }) {
   const isAdmin = user.role === 'admin';
   const [accountOpen, setAccountOpen] = useState(false);
+  const [connectionSettingsRevision, setConnectionSettingsRevision] = useState(0);
+  function openModelConnections() {
+    setConnectionSettingsRevision((value) => value + 1);
+    switchView('assistant-settings');
+  }
   const [view, setView] = useState<View>(
     navigator.onLine && !usingOfflineAccess() ? 'tracks' : 'offline',
   );
@@ -871,6 +876,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
             onEdit={setEditingTrack}
             onChanged={refreshLibrary}
             onRefresh={() => setMetadataRefresh({ scope: 'library', label: '整个曲库' })}
+            onOpenConnections={openModelConnections}
           />
         )}
         <main className={`library ${album ? 'is-album' : ''}`} hidden={manageOpen}>
@@ -935,6 +941,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
             <Discover
               player={player}
               favorites={favorites}
+              onConnections={openModelConnections}
               onSaved={(list) => {
                 setCollectionRevision((v) => v + 1);
                 setNotice(`已保存：${list.name}`);
@@ -950,7 +957,12 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
               </p>
             }
           >
-            {view === 'assistant' && <Assistant onDraft={(id) => openAgentItem('drafts', id)} />}
+            {view === 'assistant' && (
+              <Assistant
+                onDraft={(id) => openAgentItem('drafts', id)}
+                onConnections={openModelConnections}
+              />
+            )}
             {view === 'drafts' && (
               <Drafts
                 user={user}
@@ -969,7 +981,9 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
               />
             )}
             {view === 'notifications' && <Notifications inbox={inbox} onOpen={openAgentItem} />}
-            {view === 'assistant-settings' && <AssistantSettings user={user} />}
+            {view === 'assistant-settings' && (
+              <AssistantSettings key={connectionSettingsRevision} user={user} />
+            )}
           </Suspense>
           <div hidden={specialView}>
             <section
