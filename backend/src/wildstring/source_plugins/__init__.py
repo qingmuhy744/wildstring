@@ -2,6 +2,7 @@
 
 import importlib.util
 import json
+import shutil
 from dataclasses import asdict, dataclass, field
 
 
@@ -18,6 +19,7 @@ class Manifest:
     entrypoint: str = "adapter:Plugin"
     requires_modules: tuple = field(default_factory=tuple)
     cover_hosts: tuple = field(default_factory=tuple)
+    requires_programs: tuple = field(default_factory=tuple)
 
     def public(self):
         return asdict(self)
@@ -50,7 +52,7 @@ class InstalledPlugin:
             or (self.path / "lib" / name).is_dir()
             or (self.path / "lib" / (name + ".py")).is_file()
             for name in self.manifest.requires_modules
-        )
+        ) and all(shutil.which(name) is not None for name in self.manifest.requires_programs)
 
     def invoke(self, context, method, value):
         from wildstring.plugin_archives import execute

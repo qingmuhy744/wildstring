@@ -64,7 +64,7 @@ test('歌词编辑、播放打点、撤销、毫秒修正、导出与全屏生�
     const download = await downloading;
     expect(download.suggestedFilename()).toBe('夜晚测试曲.lrc');
     await dialog.getByRole('button', { name: '保存歌词', exact: true }).click();
-    await expect(dialog.getByRole('status')).toContainText('歌词已保存');
+    await expect(dialog.getByRole('status', { name: '歌词编辑状态' })).toContainText('歌词已保存');
     const stored = await (await page.request.get(`/api/v1/tracks/${track.id}/lyrics`)).json();
     expect(stored.source).toBe('user');
     expect(stored.lines.map((line: { time_ms: number }) => line.time_ms)).toEqual([

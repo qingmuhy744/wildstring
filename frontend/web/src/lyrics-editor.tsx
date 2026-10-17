@@ -471,7 +471,7 @@ export function LyricsEditor({
             </p>
           )}
           {notice && (
-            <p className="ai-status" role="status">
+            <p className="ai-status" role="status" aria-label="歌词编辑状态">
               {notice}
             </p>
           )}

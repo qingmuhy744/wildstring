@@ -36,6 +36,8 @@ RUN apt-get update --error-on=any \
     && chown wildstring:wildstring /data
 COPY --from=builder /app/.venv /app/.venv
 COPY --from=web /web/dist /app/web
+COPY --from=web /usr/local/bin/node /usr/local/bin/node
+COPY --from=web /usr/local/LICENSE /usr/share/doc/node/LICENSE
 USER 10001:10001
 EXPOSE 8000
 HEALTHCHECK --interval=10s --timeout=6s --start-period=10s --retries=3 \

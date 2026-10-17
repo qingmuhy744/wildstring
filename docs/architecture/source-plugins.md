@@ -26,6 +26,7 @@ README.txt             配置、依赖及平台使用条件
   "entrypoint": "adapter:Plugin",
   "capabilities": ["metadata", "lyrics", "cover"],
   "requires_modules": [],
+  "requires_programs": [],
   "cover_hosts": ["images.example.com"],
   "settings": [
     {"key": "base_url", "label": "API 服务地址", "type": "url", "required": true},
@@ -38,7 +39,7 @@ ID 为 2–41 个小写字母、数字、下划线或连字符，以字母开头
 
 ZIP 最大16 MiB、展开32 MiB、300个条目，拒绝路径穿越、链接、加密、重复路径和文件／目录冲突。导入只注册并停用，不执行插件代码。升级须提交原配置版本及预期插件 ID，配置保留、版本递增且停用，管理员重新确认启用。历史已选歌词不因插件停用／卸载而消失；旧包文件保留用于恢复，卸载清除活动注册和该插件凭据。
 
-插件是管理员信任的服务端 Python 代码，有服务进程账号所能访问的权限。独立子进程用于限制生命周期和故障影响，**不构成操作系统安全沙箱**。普通账号、模型和 MCP 凭据不能导入或启用插件。官方镜像提供固定 Python 3.12 及 QQ SDK 运行依赖；维护者可用 `lib/` 携带兼容依赖并覆盖同名模块，无需修改核心。含本机二进制的依赖需匹配服务端架构。
+插件是管理员信任的服务端 Python 代码，有服务进程账号所能访问的权限。独立子进程用于限制生命周期和故障影响，**不构成操作系统安全沙箱**。普通账号、模型和 MCP 凭据不能导入或启用插件。官方镜像提供固定 Python 3.12、Node 22 及 QQ SDK 运行依赖；维护者可用 `lib/` 携带兼容依赖并覆盖同名模块，无需修改核心。含本机二进制的依赖需匹配服务端架构。
 
 ## 入口契约
 
@@ -86,6 +87,8 @@ class Plugin:
 - 仅允许 `search`、`metadata`、`lyrics` 方法。子进程调用最长60秒，每个查询上下文90秒；测试按钮25秒。结果缓存30分钟，按包摘要、配置版本和请求隔离。改变配置或升级后旧缓存不会复用。
 - 错误用 `raise PluginError("source_plugin_no_lyrics")` 等简短代码；不要把 Cookie、令牌、URL 查询里的密钥或上游完整异常放入错误文本。stdout 留给协议，普通打印转 stderr 并丢弃。
 
-QQ 包使用 [QQMusicApi](https://github.com/L-1124/QQMusicApi) 0.8.2；酷狗包对应 [KuGouMusicApi](https://github.com/MakcRe/KuGouMusicApi)；网易云包对应 [NeteaseCloudMusicApiEnhanced](https://github.com/NeteaseCloudMusicApiEnhanced/api-enhanced)。后两个需要用户独立部署上游 HTTP 服务，可能需要平台 Cookie。它们均为社区项目，并非平台官方 API；不提供音频下载。格式处理参考 [LDDC](https://github.com/chenmozhijin/LDDC)，不加载 Qt 桌面程序。上游及平台条款、覆盖和可用性由插件说明和维护者核验。
+QQ 包使用 [QQMusicApi](https://github.com/L-1124/QQMusicApi) 0.8.2；酷狗包对应 [KuGouMusicApi](https://github.com/MakcRe/KuGouMusicApi)；网易云包对应 [NeteaseCloudMusicApiEnhanced](https://github.com/NeteaseCloudMusicApiEnhanced/api-enhanced)。后两个 ZIP 已包含锁定提交的元数据／歌词模块，官方镜像提供 Node 22 通用运行时，默认无需单独部署上游服务；也可填写外部 HTTP 服务地址。平台 Cookie 为可选配置，覆盖仍取决于上游授权。它们均为社区项目，并非平台官方 API；不提供音频下载。格式处理参考 [LDDC](https://github.com/chenmozhijin/LDDC)，不加载 Qt 桌面程序。上游及平台条款、覆盖和可用性由插件说明和维护者核验。
 
-本仓库参考包源码在 `plugins/`，用 `make source-plugins` 打包。第三方可独立维护同样格式的 ZIP，不需要向核心增加平台枚举。无需为此部署额外 MCP Server。
+本仓库参考包源码在 `plugins/`，用 `make source-plugins` 打包。网易云／酷狗包内的 `service.cjs` 由 `plugins/node-runtime/package-lock.json` 锁定上游提交与传递依赖，只包含所用元数据和歌词接口；不用上游登录／反作弊模块、PAC／FTP 代理，不包含音频下载。Node-forge 的已知签名校验通告未覆盖本包仅使用的公钥加密路径；维护者扩展接口前仍应重新审计依赖和可达路径。许可证保留在 `THIRD-PARTY-NOTICES.txt`。
+
+第三方可独立维护同样格式的 ZIP，不需要向核心增加平台枚举。无需为此部署额外 MCP Server。

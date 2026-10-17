@@ -1,19 +1,22 @@
 """Adapters for community projects; these are not official music-platform APIs.
 
-QQMusicApi is used as a pinned optional dependency. KuGouMusicApi and
-NeteaseCloudMusicApiEnhanced are independently deployed HTTP services.
+QQMusicApi is a pinned runtime dependency. KuGouMusicApi and
+NeteaseCloudMusicApiEnhanced modules ship in the ZIP; external services are optional.
 """
 
 import asyncio
 import importlib.util
 import json
+import os
+import subprocess
 from datetime import UTC, datetime
+from pathlib import Path
 from urllib.parse import urlencode, urlsplit
 
 from wildstring.plugin_api import Manifest, PluginError
 
 BRIDGE_SETTINGS = (
-    {"key": "base_url", "label": "自托管 API 服务地址", "type": "url", "required": True},
+    {"key": "base_url", "label": "外部服务地址（可选，留空使用插件内置）", "type": "url"},
     {"key": "cookie", "label": "平台 Cookie（可选，留空保留）", "type": "secret"},
 )
 
@@ -22,6 +25,56 @@ def clean(value):
     import re
 
     return re.sub(r"<[^>]*>", "", str(value or "")).strip()[:1000]
+
+
+def bridge(context, path, parameters):
+    if context.data["config"].get("base_url"):
+        return context.bridge(path, parameters)
+    environment = dict(os.environ)
+    environment["TMPDIR"] = str(context.directory)
+    mode = context.data["proxy_mode"]
+    proxy = context.data.get("proxy_url") if mode == "manual" else None
+    if mode != "environment":
+        for key in (
+            "HTTP_PROXY",
+            "HTTPS_PROXY",
+            "ALL_PROXY",
+            "http_proxy",
+            "https_proxy",
+            "all_proxy",
+        ):
+            environment[key] = proxy or ""
+    environment["KUGOU_API_PROXY"] = (
+        proxy or (environment.get("HTTPS_PROXY") if mode == "environment" else "") or ""
+    )
+    result = subprocess.run(
+        ["node", str(Path(__file__).with_name("service.cjs"))],
+        input=json.dumps(
+            {
+                "path": path,
+                "parameters": parameters,
+                "cookie": context.data["secrets"].get("cookie") or "",
+            }
+        ).encode(),
+        capture_output=True,
+        timeout=35,
+        check=False,
+        cwd=context.directory,
+        env=environment,
+    )
+    if result.returncode or len(result.stdout) > 2 * 1024 * 1024:
+        raise PluginError("source_plugin_worker_failed")
+    try:
+        value = json.loads(result.stdout)
+        if (
+            not isinstance(value, dict)
+            or value.get("code") not in (None, 0, 200)
+            or value.get("error_code") not in (None, 0)
+        ):
+            raise ValueError
+        return value
+    except ValueError:
+        raise PluginError("source_plugin_auth_or_rejected") from None
 
 
 def positive(value):
@@ -166,6 +219,7 @@ class NeteasePlugin:
         "GPL-3.0-only",
         settings=BRIDGE_SETTINGS,
         cover_hosts=("music.126.net",),
+        requires_programs=("node",),
     )
 
     def available(self):
@@ -173,16 +227,16 @@ class NeteasePlugin:
 
     def search(self, context, query):
         return (
-            context.bridge("/cloudsearch", {"keywords": query, "type": 1, "limit": 3})
+            bridge(context, "/cloudsearch", {"keywords": query, "type": 1, "limit": 3})
             .get("result", {})
             .get("songs", [])[:3]
         )
 
     def metadata(self, context, candidate):
-        result = context.bridge("/song/detail", {"ids": str(candidate["id"])})
+        result = bridge(context, "/song/detail", {"ids": str(candidate["id"])})
         song = result["songs"][0]
         album = song.get("al") or song.get("album") or {}
-        details = context.bridge("/album", {"id": album["id"]}).get("album") or album
+        details = bridge(context, "/album", {"id": album["id"]}).get("album") or album
         fields = {
             "title": clean(song["name"]),
             "artists": [clean(a["name"]) for a in (song.get("ar") or song.get("artists") or [])],
@@ -209,7 +263,7 @@ class NeteasePlugin:
         }
 
     def lyrics(self, context, candidate):
-        data = context.bridge("/lyric/new", {"id": candidate["id"]})
+        data = bridge(context, "/lyric/new", {"id": candidate["id"]})
         original = data.get("yrc", {}).get("lyric") or data.get("lrc", {}).get("lyric", "")
         return {
             "format": "yrc" if data.get("yrc", {}).get("lyric") else "lrc",
@@ -227,13 +281,14 @@ class KuGouPlugin:
         "GPL-3.0-only",
         settings=BRIDGE_SETTINGS,
         cover_hosts=("kugou.com",),
+        requires_programs=("node",),
     )
 
     def available(self):
         return True
 
     def search(self, context, query):
-        result = context.bridge("/search", {"keywords": query, "type": "song", "pagesize": 3})
+        result = bridge(context, "/search", {"keywords": query, "type": "song", "pagesize": 3})
         data = result.get("data") or {}
         return (data.get("lists") or data.get("info") or [])[:3]
 
@@ -246,8 +301,10 @@ class KuGouPlugin:
             or ""
         )
         data = (
-            context.bridge(
-                "/krm/audio", {"album_audio_id": identity, "fields": "album_info,base,authors.base"}
+            bridge(
+                context,
+                "/krm/audio",
+                {"album_audio_id": identity, "fields": "album_info,base,authors.base"},
             ).get("data")
             or []
         )
@@ -285,7 +342,8 @@ class KuGouPlugin:
         }
 
     def lyrics(self, context, candidate):
-        found = context.bridge(
+        found = bridge(
+            context,
             "/search/lyric",
             {
                 "keywords": candidate["title"] + " " + " ".join(candidate["artists"]),
@@ -298,7 +356,8 @@ class KuGouPlugin:
         if not choices:
             raise PluginError("source_plugin_no_lyrics")
         lyric = choices[0]
-        data = context.bridge(
+        data = bridge(
+            context,
             "/lyric",
             {"id": lyric["id"], "accesskey": lyric["accesskey"], "fmt": "krc", "decode": "true"},
         )

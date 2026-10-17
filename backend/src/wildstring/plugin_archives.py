@@ -6,9 +6,11 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import time
+from contextlib import suppress
 from pathlib import Path, PurePosixPath
 from tempfile import TemporaryDirectory, TemporaryFile
 from urllib.parse import urlsplit
@@ -105,6 +107,15 @@ def inspect_package(data):
                 or not re.fullmatch(r"[a-z][a-z0-9-]*(?:\.[a-z0-9-]+)+", host)
                 or host.endswith((".local", ".localhost", ".internal"))
                 for host in manifest.cover_hosts
+            )
+        ):
+            raise ValueError
+        if (
+            not isinstance(manifest.requires_programs, (list, tuple))
+            or len(manifest.requires_programs) > 10
+            or any(
+                not isinstance(name, str) or not re.fullmatch(r"[a-z][a-z0-9_-]{0,50}", name)
+                for name in manifest.requires_programs
             )
         ):
             raise ValueError
@@ -218,13 +229,12 @@ def execute(plugin, context, method, value):
         source.write(json.dumps(payload).encode())
         source.seek(0)
         try:
-            completed = subprocess.run(
+            process = subprocess.Popen(
                 [sys.executable, "-I", "-m", "wildstring.plugin_worker"],
                 stdin=source,
                 stdout=output,
                 stderr=subprocess.DEVNULL,
-                timeout=remaining,
-                check=False,
+                start_new_session=os.name == "posix",
                 env={
                     key: value
                     for key, value in os.environ.items()
@@ -245,9 +255,18 @@ def execute(plugin, context, method, value):
                     }
                 },
             )
+            try:
+                process.wait(timeout=remaining)
+            finally:
+                if os.name == "posix":
+                    with suppress(ProcessLookupError):
+                        os.killpg(process.pid, signal.SIGKILL)
+                elif process.poll() is None:
+                    process.kill()
+                process.wait()
         except subprocess.TimeoutExpired:
             raise PluginError("source_plugin_timeout") from None
-        if completed.returncode or output.tell() > 2 * 1024 * 1024:
+        if process.returncode or output.tell() > 2 * 1024 * 1024:
             raise PluginError("source_plugin_worker_failed")
         output.seek(0)
         try:

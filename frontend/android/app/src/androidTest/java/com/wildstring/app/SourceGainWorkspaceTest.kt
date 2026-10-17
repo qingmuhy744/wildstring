@@ -52,8 +52,8 @@ class SourceGainWorkspaceTest {
     private fun connect(fixture: Fixture): MusicViewModel {
         val vm = compose.runOnIdle { ViewModelProvider(compose.activity)[MusicViewModel::class.java] }
         val address = fixture.server.url("/").newBuilder().host("127.0.0.1").build().toString()
-        compose.runOnIdle { vm.connect(address, "alice", "synthetic-password", true) }
-        compose.waitUntil(20_000) { vm.state.value.connected && !vm.state.value.connecting }
+        val login = compose.runOnIdle { vm.connect(address, "alice", "synthetic-password", true) }
+        compose.waitUntil(20_000) { login.isCompleted && vm.state.value.connected && !vm.state.value.connecting }
         return vm
     }
     private fun capture(name: String) {

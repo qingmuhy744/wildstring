@@ -31,6 +31,8 @@ sync: ## Install locked Python and Web dependencies
 
 .PHONY: source-plugins
 source-plugins: ## Package independently importable community source ZIPs
+	npm --prefix plugins/node-runtime ci --ignore-scripts
+	node scripts/build_source_runtimes.mjs
 	$(RUN) python scripts/package_source_plugins.py
 
 setup: env sync ## Set up dependencies and install the local Git hook
@@ -133,7 +135,7 @@ test-transcoding-web: build-web ## Verify real AAC playback and seeking (require
 web-test-server: ## Internal: serve a disposable library for browser tests
 	$(RUN) python scripts/serve_web_tests.py
 
-ci: check test test-web test-large-web test-browse-web test-transcoding-web ## Run checks, backend tests, Web build and browser tests (install Chromium first)
+ci: check source-plugins test test-web test-large-web test-browse-web test-transcoding-web ## Run checks, backend tests, Web build and browser tests (install Chromium first)
 	$(UV) lock --check --project backend
 
 health: ## Check the locally configured API readiness

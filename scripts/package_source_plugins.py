@@ -27,7 +27,7 @@ def main():
         keep = (
             {"clean", "positive", name, "QQTransport"}
             if name == "QQPlugin"
-            else {"clean", "positive", name}
+            else {"clean", "positive", "bridge", name}
         )
         body = [
             node
@@ -52,11 +52,18 @@ class Plugin({name}):
                 "manifest.json", json.dumps(plugin.manifest.public(), ensure_ascii=False, indent=2)
             )
             archive.writestr("adapter.py", adapter + "\n")
+            if plugin.manifest.id in {"kugou", "netease"}:
+                runtime = ROOT / ".cache/source-runtimes"
+                archive.write(runtime / (plugin.manifest.id + ".cjs"), "service.cjs")
+                archive.write(
+                    runtime / (plugin.manifest.id + "-THIRD-PARTY-NOTICES.txt"),
+                    "THIRD-PARTY-NOTICES.txt",
+                )
             archive.write(ROOT / "plugins/lyric_formats.py", "lyric_formats.py")
             archive.write(ROOT / "LICENSE", "LICENSE")
             archive.writestr(
                 "README.txt",
-                f"WildString source plugin API v1\nUpstream: {plugin.manifest.upstream}\nLicense: {plugin.manifest.license}\nOnly metadata and lyrics; no audio download.\n",
+                f"WildString source plugin API v1\nUpstream: {plugin.manifest.upstream}\nLicense: {plugin.manifest.license}\nOfficial image: Python 3.12 + Node 22 + QQ SDK. Import and enable; external service URL is optional.\nOnly metadata and lyrics; no audio download.\n",
             )
         print(path.name)
 

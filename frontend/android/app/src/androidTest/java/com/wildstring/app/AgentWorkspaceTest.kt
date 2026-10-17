@@ -87,8 +87,8 @@ class AgentWorkspaceTest {
     private fun vm(): MusicViewModel = compose.runOnIdle { ViewModelProvider(compose.activity)[MusicViewModel::class.java] }
     private fun connect(vm: MusicViewModel, fixture: Fixture) {
         val address = fixture.server.url("/").newBuilder().host("127.0.0.1").build().toString()
-        compose.runOnIdle { vm.connect(address, "alice", "synthetic-password", true) }
-        compose.waitUntil(20_000) { vm.state.value.connected && !vm.state.value.connecting }
+        val login = compose.runOnIdle { vm.connect(address, "alice", "synthetic-password", true) }
+        compose.waitUntil(20_000) { login.isCompleted && vm.state.value.connected && !vm.state.value.connecting }
     }
     @Test fun researchSettingsAndExplicitMemoryCanBeSavedEditedAndDeleted() {
         val vm = vm()
@@ -129,8 +129,8 @@ class AgentWorkspaceTest {
             assertTrue(fixture.requests.any { it.first == "PATCH /api/v1/agent/memories/memory-one" && it.second.number("version") >= 2 })
         } catch (error: Throwable) {
             println("Research fixture requests: ${fixture.requests.map { it.first }}")
+            println("Research original failure: ${error.stackTraceToString()}")
             runCatching {
-                compose.onNodeWithTag("agent-research").performScrollToIndex(0)
                 capture("research-failure-phone.png")
                 compose.onAllNodes(isRoot()).onLast().printToLog("ResearchFailure")
             }
