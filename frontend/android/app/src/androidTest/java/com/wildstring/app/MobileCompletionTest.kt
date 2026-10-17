@@ -25,6 +25,21 @@ import org.junit.Test
 class MobileCompletionTest {
     @get:Rule val compose = createAndroidComposeRule<MainActivity>()
     private val gson = Gson()
+    private fun dismissKeyboard() {
+        val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
+        val info = automation.serviceInfo
+        val previous = info.flags
+        try {
+            info.flags = info.flags or android.accessibilityservice.AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
+            automation.serviceInfo = info
+            if (automation.windows.any { it.type == android.view.accessibility.AccessibilityWindowInfo.TYPE_INPUT_METHOD }) {
+                check(automation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK))
+                compose.waitUntil(5_000) { automation.windows.none { it.type == android.view.accessibility.AccessibilityWindowInfo.TYPE_INPUT_METHOD } }
+                automation.waitForIdle(300, 5_000)
+            }
+        } finally { info.flags = previous; automation.serviceInfo = info }
+        compose.waitForIdle()
+    }
     private fun capture(name: String) {
         compose.waitForIdle()
         val instrumentation = InstrumentationRegistry.getInstrumentation()
@@ -217,8 +232,11 @@ class MobileCompletionTest {
                 compose.waitUntil(10_000) { compose.onAllNodes(hasText("保存修改") and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
                 capture("mobile-metadata.png")
                 compose.onNodeWithText("歌曲名称").performTextReplacement("手机修正标题")
+                // Wait for IME dismissal before locating the save button after scrolling.
+                dismissKeyboard()
                 compose.onNodeWithText("保存修改").performScrollTo().performClick()
-                compose.waitUntil(10_000) { fixture.mutations.any { it.first.endsWith("/metadata") } }
+                try { compose.waitUntil(10_000) { fixture.mutations.any { it.first.endsWith("/metadata") } } }
+                catch (error: Throwable) { capture("mobile-metadata-save-failure.png"); throw AssertionError("Metadata save requests=${fixture.requests.toList()} mutations=${fixture.mutations.toList()}", error) }
                 val saved = JsonParser.parseString(fixture.mutations.first { it.first.endsWith("/metadata") }.second).asJsonObject.getAsJsonObject("overrides")
                 assertEquals("手机修正标题", saved["title"].asString); assertEquals("人工专辑", saved["album"].asString); assertFalse(saved.has("artists"))
             } finally { cleanup(vm) }

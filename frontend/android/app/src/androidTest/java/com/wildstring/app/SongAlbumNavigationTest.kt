@@ -100,6 +100,7 @@ class SongAlbumNavigationTest {
                 compose.onNodeWithTag("player-album").assertIsDisplayed()
                 capture("song-player-album.png")
                 val entries = vm.state.value.queue.map { it.entryId }
+                val repeatMode = vm.state.value.repeatMode
                 val position = compose.runOnIdle { vm.controller!!.currentPosition }
                 compose.onNodeWithTag("player-album").performClick()
                 compose.onNodeWithTag("player-phone").assertDoesNotExist()
@@ -110,7 +111,7 @@ class SongAlbumNavigationTest {
                     assertTrue(vm.controller!!.isPlaying)
                     assertTrue(vm.controller!!.currentPosition >= position)
                 }
-                assertEquals(Player.REPEAT_MODE_OFF, vm.state.value.repeatMode)
+                assertEquals(repeatMode, vm.state.value.repeatMode)
                 assertFalse(requests.any { it.contains("/albums/wrong-album/") })
                 compose.runOnIdle { vm.back() }
                 compose.waitUntil(10_000) { vm.state.value.collection == "artists" && !vm.state.value.loading }
