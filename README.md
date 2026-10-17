@@ -110,7 +110,7 @@ make docker-down     # 停止服务，保留数据卷
 ## CI/CD
 
 - `main` 提交和 PR：检查、测试、Web 构建与容器实测。
-- 推送 `vX.Y.Z` 标签：完整检查、Android 功能测试与正式包安装检查通过后，发布 amd64/arm64 镜像到 `ghcr.io/qingmuhy744/wildstring`，自动创建包含签名 APK、Web ZIP、公开签名指纹与 `SHA256SUMS` 的 GitHub Release。
+- 推送 `vX.Y.Z` 标签：完整检查、Android 功能测试与正式包安装检查通过后，发布 amd64/arm64 镜像到 `ghcr.io/qingmuhy744/wildstring`，自动创建包含签名 APK、Web ZIP、QQ／酷狗／网易云数据源插件 ZIP、公开签名指纹与 `SHA256SUMS` 的 GitHub Release。
 - 正式 Release 更新 `latest`；预发布保留独立版本标签。
 - Android [Kotlin/Compose/Media3 原生客户端](frontend/android/README.md) 已接入真实曲库、后台播放与手机/平板歌词布局。显示名称「野弦」，正式包名 `com.wildstring.app`；签名 APK 从 [Releases](https://github.com/qingmuhy744/wildstring/releases) 直接下载。`make android-ci` 和独立 **Android APK** 工作流继续提供开发用 debug 包。IPA 和桌面安装包后续交付。
 
@@ -129,5 +129,20 @@ tests/fixtures/   后续使用的合法测试样本
 ```
 
 [组件分工](docs/architecture/components.md) · [技术决策](docs/decisions/0001-python-web-foundation.md) · [AI／MCP／日志与通知开发计划](docs/product/agent-mcp-observability-notifications-plan.md)（待分阶段开发） · [原始讨论](docs/research/README.md)
+
+## 致谢
+
+感谢以下项目的作者、贡献者和维护者。野弦的数据源插件与歌词处理建立在这些社区工作的基础上：
+
+| 项目 | 在野弦中的用途 |
+| --- | --- |
+| [QQMusicApi](https://github.com/L-1124/QQMusicApi) | QQ 音乐插件使用的歌曲、专辑、封面与歌词接口 |
+| [KuGouMusicApi](https://github.com/MakcRe/KuGouMusicApi) | 酷狗插件内置的元数据与歌词接口模块 |
+| [NeteaseCloudMusicApiEnhanced](https://github.com/NeteaseCloudMusicApiEnhanced/api-enhanced) | 网易云插件内置的元数据与歌词接口模块，亦感谢其上游 NeteaseCloudMusicApi 的贡献者 |
+| [LDDC](https://github.com/chenmozhijin/LDDC) | QRC／KRC／YRC 歌词格式解析与逐字时间轴处理的参考 |
+
+也感谢 [MusicBrainz](https://musicbrainz.org/)、[Cover Art Archive](https://coverartarchive.org/)、[AcoustID／Chromaprint](https://acoustid.org/)、[Last.fm](https://www.last.fm/api) 提供音乐资料、封面、音频指纹及收听记录服务，以及 [FFmpeg](https://ffmpeg.org/) 提供音频转换与响度分析能力。响度均衡与专辑／单曲调整的使用体验参考了 [foobar2000](https://www.foobar2000.org/) 的 ReplayGain 功能。
+
+第三方项目保留各自的许可证与版权声明；插件中的上游来源、许可证及依赖说明见随包文件和[插件文档](docs/architecture/source-plugins.md)。
 
 许可证沿用仓库已有的 [GPLv3](LICENSE)。
