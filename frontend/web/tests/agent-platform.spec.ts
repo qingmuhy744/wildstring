@@ -252,7 +252,7 @@ test('多轮助手保留中文组合输入，失败不丢草稿，回退与草�
   await expect(box).toHaveValue(/找出许嵩/);
   await page.getByRole('button', { name: '发送', exact: true }).click();
   await expect(page.getByRole('region', { name: 'AI 音乐助手' })).toContainText(
-    '本次使用本地检索回退',
+    '本地关键词检索 · 未调用模型',
   );
   await expect(page.getByRole('button', { name: '查看待确认草案' })).toBeVisible();
   await expect(box).toHaveValue('');
@@ -423,6 +423,52 @@ test('连接编辑仅发送允许字段，MCP 凭据只显示一次且可撤销'
   await expect(
     page.getByRole('region', { name: 'MCP 工具凭据' }).getByRole('status'),
   ).toContainText('凭据已撤销');
+});
+
+test('已有实例模型可手动巡检，定时计划仍要求自动使用授权', async ({ page }, info) => {
+  await fixture(page);
+  const legacy = {
+    id: 'legacy',
+    name: '实例 AI（已有配置）',
+    model: 'synthetic',
+    enabled: true,
+    read_only: true,
+    background_allowed: false,
+  };
+  const automatic = {
+    ...legacy,
+    id: 'automatic',
+    name: '自动巡检模型',
+    read_only: false,
+    background_allowed: true,
+  };
+  await page.route('**/api/v1/agent/connections', (r) =>
+    r.fulfill({ json: list([legacy, automatic]) }),
+  );
+  let submitted: any = null;
+  await page.route('**/api/v1/agent/tasks', (r) => {
+    submitted = r.request().postDataJSON();
+    return r.fulfill({ json: { id: 'task-manual' } });
+  });
+  await login(page);
+  await section(page, '巡检与任务');
+  await page.getByLabel('使用 AI 辅助巡检', { exact: true }).check();
+  const submit = page.getByRole('button', { name: '提交 AI 辅助巡检', exact: true });
+  await expect(submit).toBeDisabled();
+  await expect(page.getByText('请选择用于本次巡检的 AI 连接。', { exact: true })).toBeVisible();
+  await page.getByLabel('巡检模型连接', { exact: true }).selectOption('legacy');
+  await expect(submit).toBeEnabled();
+  await page.screenshot({ path: info.outputPath('manual-ai-inspection.png'), fullPage: true });
+  await submit.click();
+  await expect
+    .poll(() => submitted)
+    .toEqual({ max_tracks: 500, max_calls: 4, use_ai: true, connection_id: 'legacy' });
+  await page.getByRole('button', { name: '定时巡检', exact: true }).click();
+  const save = page.getByRole('button', { name: '保存关闭的计划', exact: true });
+  await expect(save).toBeDisabled();
+  await expect(page.getByLabel('巡检模型连接').locator('option[value="legacy"]')).toHaveCount(0);
+  await page.getByLabel('巡检模型连接').selectOption('automatic');
+  await expect(save).toBeEnabled();
 });
 
 test('规则巡检不调用模型，计划默认关闭并通过完整版本参数启用', async ({ page }) => {

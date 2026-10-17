@@ -226,7 +226,7 @@ export function Assistant({
               {conversation?.runs?.map((run) => (
                 <div className="workspace-run" key={run.id}>
                   {run.status === 'local_fallback' ? (
-                    <p className="workspace-notice">本次使用本地检索回退，未进行模型推理。</p>
+                    <p className="workspace-notice">本地关键词检索 · 未调用模型</p>
                   ) : (
                     <StateBadge state={run.status} />
                   )}

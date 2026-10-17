@@ -162,13 +162,18 @@ export function AgentConnections({ user }: { user: User }) {
                     {item.scope === 'personal' ? '仅本人' : item.shared ? '实例共享' : '管理员专用'}
                     {item.id === 'legacy' ? ' · 原有实例配置' : item.read_only ? ' · 仅可使用' : ''}
                     <br />
-                    {item.background_allowed ? '允许后台使用' : '仅交互使用'} · 每日最多{' '}
+                    {item.background_allowed ? '允许自动巡检' : '可手动使用'} · 每日最多{' '}
                     {item.daily_call_budget} 次
                     {item.daily_calls_remaining != null
                       ? ` · 今日剩余 ${item.daily_calls_remaining} 次`
                       : ''}
                     {item.my_usage?.calls != null ? ` · 我已用 ${item.my_usage.calls} 次` : ''}
                   </small>
+                  {item.id === 'legacy' && (
+                    <small>
+                      沿用服务端已有 AI 配置，可用于手动巡检。定时巡检请添加并授权新连接。
+                    </small>
+                  )}
                 </div>
                 <StateBadge state={item.enabled ? 'ready' : 'disabled'} />
                 <div className="workspace-actions">
@@ -306,8 +311,9 @@ export function AgentConnections({ user }: { user: User }) {
                     checked={form.background_allowed}
                     onChange={(e) => setForm({ ...form, background_allowed: e.target.checked })}
                   />
-                  允许后台巡检使用
+                  允许自动巡检使用
                 </label>
+                <p className="muted">用于定时巡检等自动任务；手动开始无需开启。</p>
                 {user.role === 'admin' && form.scope === 'instance' && (
                   <label className="workspace-check">
                     <input

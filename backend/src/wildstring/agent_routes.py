@@ -247,7 +247,7 @@ def agent_router(service):
 
     @router.post("/tasks")
     def submit(body: Inspection, actor: Annotated[object, Depends(session)]):
-        return service.submit_task(actor, body)
+        return service.submit_task(actor, body, manual=True)
 
     @router.get("/tasks/{identity}")
     def task(identity: str, actor: Annotated[object, Depends(session)]):

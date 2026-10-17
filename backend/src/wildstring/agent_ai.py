@@ -727,7 +727,7 @@ class Assistant:
                 candidates = self.repository_for(actor).tracks(q=body.content[:256], limit=10)[
                     "items"
                 ]
-                result["content"] = "AI 未配置，已使用本地关键词检索。" + (
+                result["content"] = "本次使用本地关键词检索，未调用模型。" + (
                     "\n"
                     + "\n".join(
                         f"{track['title']} · {' / '.join(track['artists'])}" for track in candidates

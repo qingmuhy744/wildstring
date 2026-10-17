@@ -190,7 +190,7 @@ private fun displayValue(value: com.google.gson.JsonElement?): String = when { v
             }
             conversation?.objects("runs")?.forEach { run -> item(key = "run-${run.text("id")}") {
                 val fallback = run.text("status") == "local_fallback"
-                if (fallback) Text("AI 暂不可用，本次使用本地找歌。", style = MaterialTheme.typography.bodySmall)
+                if (fallback) Text("本地关键词检索 · 未调用模型", style = MaterialTheme.typography.bodySmall)
                 if (run.text("error_code").isNotBlank()) Text("状态：${run.text("status")} · ${run.text("error_code")}", style = MaterialTheme.typography.bodySmall)
                 run.getAsJsonArray("draft_ids")?.forEach { draft -> TextButton({ openDraft(draft.asString) }) { Text("查看生成的草案") } }
                 AgentTrace(run)
@@ -225,17 +225,17 @@ private fun displayValue(value: com.google.gson.JsonElement?): String = when { v
 }
 
 /** Every AI entry point uses the same permission-filtered connection list; null is explicitly local. */
-@Composable internal fun AgentConnectionChoice(connections: List<JsonObject>, selected: String?, enabled: Boolean = true, choose: (String?) -> Unit) {
+@Composable internal fun AgentConnectionChoice(connections: List<JsonObject>, selected: String?, enabled: Boolean = true, emptyLabel: String = "本地找歌（不使用模型）", choose: (String?) -> Unit) {
     var open by remember { mutableStateOf(false) }
     val chosen = connections.firstOrNull { it.text("id") == selected }
     Column {
         Box {
             TextButton({ open = true }, enabled = enabled, modifier = Modifier.testTag("ai-connection-choice")) {
-                Text(if (selected == null) "本地找歌（不使用模型）" else chosen?.text("name") ?: "已选连接不可用")
+                Text(if (selected == null) emptyLabel else chosen?.text("name") ?: "已选连接不可用")
                 Icon(Icons.Default.ArrowDropDown, null)
             }
             DropdownMenu(open, { open = false }) {
-                DropdownMenuItem(text = { Text("本地找歌（不使用模型）") }, onClick = { choose(null); open = false })
+                DropdownMenuItem(text = { Text(emptyLabel) }, onClick = { choose(null); open = false })
                 connections.filter { it.flag("enabled") }.forEach { item ->
                     DropdownMenuItem(text = { Column {
                         Text("${item.text("name")} · ${item.text("model")}")
@@ -314,15 +314,24 @@ internal fun connectionBudget(connection: JsonObject): String {
     var timezone by remember { mutableStateOf(java.util.TimeZone.getDefault().id) }; var enabled by remember { mutableStateOf(false) }; var connections by remember { mutableStateOf<List<JsonObject>>(emptyList()) }
     val action = remember { FeatureAction() }; val scope = rememberCoroutineScope()
     LaunchedEffect(Unit) { action.run { connections = vm.agent.all("connections") }; if (action.message == "已完成") action.message = null }
+    val available = connections.filter { it.flag("enabled") && (!schedule || it.flag("background_allowed")) }
+    val selectedAvailable = available.any { it.text("id") == connection }
     AlertDialog(onDismissRequest = { if (!action.busy) dismiss() }, title = { Text(if (schedule) "定时巡检" else "开始曲库巡检") }, text = {
         Column(Modifier.heightIn(max = 500.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             if (schedule) OutlinedTextField(name, { name = it }, label = { Text("计划名称") }, singleLine = true)
             OutlinedTextField(maxTracks, { maxTracks = it.filter(Char::isDigit) }, label = { Text("最多检查歌曲数") }, singleLine = true)
-            Row(verticalAlignment = Alignment.CenterVertically) { Text("使用 AI 分析", Modifier.weight(1f)); Switch(ai, { ai = it }) }
+            Row(verticalAlignment = Alignment.CenterVertically) { Text("使用 AI 分析", Modifier.weight(1f)); Switch(ai, { ai = it }, modifier = Modifier.testTag("inspection-use-ai")) }
             if (ai) {
-                AgentConnectionChoice(connections.filter { it.flag("background_allowed") }, connection) { connection = it }
+                AgentConnectionChoice(available, connection, !action.busy, emptyLabel = "请选择 AI 连接") { connection = it }
+                if (!selectedAvailable && !action.busy) Text(
+                    if (available.isEmpty()) {
+                        if (schedule) "没有可用于定时巡检的连接。请在「AI 连接」添加或编辑连接，开启「允许自动巡检使用」。"
+                        else "没有可用的 AI 连接。请先在「AI 连接」添加并启用连接。"
+                    } else "请选择用于本次巡检的 AI 连接。",
+                    style = MaterialTheme.typography.bodySmall,
+                )
                 OutlinedTextField(maxCalls, { maxCalls = it.filter(Char::isDigit) }, label = { Text("最多模型调用次数") }, singleLine = true)
-                Text("仅使用已授权后台使用的连接，受每日预算约束。结果先生成草案。", style = MaterialTheme.typography.bodySmall)
+                Text(if (schedule) "定时巡检仅使用已授权自动使用的连接，受每日预算约束。结果先生成草案。" else "点击开始仅授权本次 AI 巡检，可能产生模型费用，受调用上限与每日预算约束。结果先生成草案。", style = MaterialTheme.typography.bodySmall)
             }
             if (schedule) {
                 OutlinedTextField(hours, { hours = it.filter(Char::isDigit) }, label = { Text("间隔小时（1–720）") }, singleLine = true)
@@ -336,7 +345,7 @@ internal fun connectionBudget(connection: JsonObject): String {
         val parameters = jsonBody("max_tracks" to (maxTracks.toIntOrNull() ?: 0), "use_ai" to ai, "max_calls" to if (ai) maxCalls.toIntOrNull() ?: 0 else 0, "connection_id" to if (ai) connection else null)
         if (schedule) vm.agent.request("schedules", "POST", jsonBody("name" to name, "enabled" to enabled, "interval_hours" to (hours.toIntOrNull() ?: 0), "timezone" to timezone, "parameters" to parameters)) else vm.agent.request("tasks", "POST", parameters)
         submitted(); dismiss(); vm.agent.refreshInbox()
-    } } }, enabled = !action.busy && (maxTracks.toIntOrNull() ?: 0) > 0 && (!ai || connection != null)) { Text(if (schedule) "保存计划" else "开始") } }, dismissButton = { TextButton(dismiss, enabled = !action.busy) { Text("取消") } })
+    } } }, enabled = !action.busy && (maxTracks.toIntOrNull() ?: 0) in 1..5000 && (!ai || (selectedAvailable && (maxCalls.toIntOrNull() ?: 0) in 1..100))) { Text(if (schedule) "保存计划" else "开始") } }, dismissButton = { TextButton(dismiss, enabled = !action.busy) { Text("取消") } })
 }
 @Composable private fun AgentScheduleCard(vm: MusicViewModel, initial: JsonObject, refresh: () -> Unit) {
     var schedule by remember(initial) { mutableStateOf(initial) }; var deleting by remember { mutableStateOf(false) }
@@ -364,6 +373,7 @@ internal fun connectionBudget(connection: JsonObject): String {
             Text(connection.text("name"), fontWeight = FontWeight.Medium); Text("${connection.text("model")} · ${if (connection.text("scope") == "instance") "实例连接" else "个人连接"}")
             Text(connection.text("base_url"), style = MaterialTheme.typography.bodySmall)
             Text("${if (connection.flag("enabled")) "已启用" else "未启用"} · 每日最多 ${connection.number("daily_call_budget")} 次", style = MaterialTheme.typography.bodySmall)
+            if (connection.text("id") == "legacy") Text("沿用服务端已有 AI 配置，可用于手动巡检。定时巡检请添加并授权新连接。", style = MaterialTheme.typography.bodySmall)
             connection.getAsJsonObject("capabilities")?.let { caps -> caps.entrySet().forEach { (name, value) -> Text("${fieldName(name)}：${displayValue(value)}", style = MaterialTheme.typography.labelSmall) } }
             Row {
                 TextButton({ scope.launch { action.run {
@@ -398,7 +408,8 @@ internal fun connectionBudget(connection: JsonObject): String {
             OutlinedTextField(timeout, { timeout = it.filter(Char::isDigit) }, label = { Text("请求超时秒数") }, singleLine = true)
             OutlinedTextField(budget, { budget = it.filter(Char::isDigit) }, label = { Text("每日调用预算") }, singleLine = true)
             Row(verticalAlignment = Alignment.CenterVertically) { Text("启用连接", Modifier.weight(1f)); Switch(enabled, { enabled = it }) }
-            Row(verticalAlignment = Alignment.CenterVertically) { Text("允许后台巡检使用", Modifier.weight(1f)); Switch(background, { background = it }) }
+            Row(verticalAlignment = Alignment.CenterVertically) { Text("允许自动巡检使用", Modifier.weight(1f)); Switch(background, { background = it }) }
+            Text("用于定时巡检等自动任务；手动开始无需开启。", style = MaterialTheme.typography.bodySmall)
             if (admin && original == null) Row(verticalAlignment = Alignment.CenterVertically) { Text("实例连接", Modifier.weight(1f)); Switch(instance, { instance = it }) }
             if (admin && instance) Row(verticalAlignment = Alignment.CenterVertically) { Text("共享给其他用户", Modifier.weight(1f)); Switch(shared, { shared = it }) }
             Text("个人端点受管理员的域名策略约束，保存后可单独检测能力。检测会进行少量实际模型请求。", style = MaterialTheme.typography.bodySmall)

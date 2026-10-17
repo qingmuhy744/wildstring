@@ -34,6 +34,8 @@
 
 `GET /schedules`；`POST /schedules {name,enabled:false,interval_hours:24,timezone:Asia/Shanghai,parameters:{…任务参数}}`；`PATCH /schedules/{id}` 同字段加 version；`DELETE /schedules/{id}`。interval 1–720 小时，错过多周期只补一次，任务去重；timezone 校验 IANA，next_run_at 为 UTC。计划默认关闭，AI 后台需连接明确授权。
 
+已登录的 UI 通过 `POST /tasks` 显式选择 `use_ai=true`、连接及调用上限，授予本次任务使用该连接的权限，无需 `background_allowed`，可以选择只读的 `legacy` 实例连接。仅该入口在服务端持久记录单次授权，不增加客户端可写字段，也不开放配置编辑权限。定时计划及 `submit_inspection` 工具仍要求 `background_allowed=true`；恢复任务不提升原来的授权。所有模型请求继续检查连接版本、当前用户权限、每日额度及任务调用上限。旧任务没有单次授权记录时保留原限制。
+
 ## 连接与助手
 
 `GET /endpoint-policy` 管理员读取；`PUT /endpoint-policy {allowed_hosts:[域名/IP],allow_private:false}` 管理员设置个人连接允许的精确端点；私网需显式 allow_private 和主机允许。管理员自己的连接可以配置局域网。`GET /connections` 包含本人连接、显式共享实例连接和现有 legacy 连接（id=`legacy`，read_only=true）。`POST /connections {name,scope:personal|instance,base_url,model,api_key?,timeout:30,shared:false,background_allowed:false,daily_call_budget:100,enabled:true}`；`PATCH /connections/{id}` 同字段加 version；`DELETE /connections/{id}`；`POST /connections/{id}/test {}` 返回文本/工具能力及检测时间。仅管理员可创建 instance/shared。字段 `id,name,scope,base_url,model,timeout,shared,background_allowed,daily_call_budget,enabled,has_api_key,version,capabilities,created_at`。不返回密钥。
