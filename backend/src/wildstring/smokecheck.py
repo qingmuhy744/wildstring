@@ -34,6 +34,7 @@ def main() -> None:
         ):
             raise SystemExit("Authentication API is unavailable")
     subprocess.run(["/usr/bin/ffmpeg", "-version"], check=True, capture_output=True)
+    subprocess.run(["/usr/bin/fpcalc", "-version"], check=True, capture_output=True)
     settings = Settings()
     with TemporaryFile(dir=settings.library_dir) as probe:
         probe.write(b"managed-library-write-check")
@@ -46,7 +47,7 @@ def main() -> None:
     else:
         raise SystemExit("Music directory must be read-only")
     print(
-        "Container smoke passed: ready, protected library API, Web UI, FFmpeg, non-root, read-only music"
+        "Container smoke passed: ready, protected library API, Web UI, FFmpeg, Chromaprint, non-root, read-only music"
     )
 
 

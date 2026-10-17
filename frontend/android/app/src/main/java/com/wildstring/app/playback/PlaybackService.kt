@@ -52,6 +52,8 @@ class PlaybackService : MediaSessionService() {
     @Inject lateinit var audioCache: AudioCache
     @Inject lateinit var health: PlaybackHealth
     @Inject lateinit var resolver: PlaybackResolver
+    @Inject lateinit var sharing: PlaybackSharing
+    @Inject lateinit var sleep: SleepTimer
     @Inject lateinit var settings: AppSettings
     private lateinit var player: AbsolutePlayer
     private lateinit var engine: ExoPlayer
@@ -94,12 +96,26 @@ class PlaybackService : MediaSessionService() {
         player.addListener(object : Player.Listener {
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                 if (mediaItem?.mediaId == listeningEntry && reason == Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED) return
+                if (reason in listOf(Player.MEDIA_ITEM_TRANSITION_REASON_AUTO, Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT)) completeFeedback()
+                if (sleep.state.value.endsOnTransition(listeningEntry, mediaItem?.mediaId,
+                    reason in listOf(Player.MEDIA_ITEM_TRANSITION_REASON_AUTO, Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT))) {
+                    player.pause(); sleep.cancel()
+                } else if (sleep.state.value.entryId == listeningEntry && mediaItem?.mediaId != listeningEntry &&
+                    reason !in listOf(Player.MEDIA_ITEM_TRANSITION_REASON_AUTO, Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT)) {
+                    sleep.cancel()
+                }
                 listeningEntry = mediaItem?.mediaId
                 report()
                 clock = ListeningClock(); sentMs = 0; listeningId = UUID.randomUUID().toString(); listeningStarted = System.currentTimeMillis() / 1000.0
                 listeningTrack = mediaItem?.mediaMetadata?.extras?.getString("track_id")
                 clock.reset(SystemClock.elapsedRealtime(), player.currentPosition, player.isPlaying)
                 persist()
+            }
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                if (playbackState == Player.STATE_ENDED) {
+                    clock.sample(SystemClock.elapsedRealtime(), player.currentPosition, false)
+                    completeFeedback(); report()
+                }
             }
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 clock.sample(SystemClock.elapsedRealtime(), player.currentPosition, isPlaying)
@@ -121,10 +137,19 @@ class PlaybackService : MediaSessionService() {
                 persist()
             }
         })
+        scope.launch {
+            while (isActive) {
+                delay(500)
+                val timer = sleep.state.value
+                if (timer.expired(SystemClock.elapsedRealtime()) || (timer.entryId != null && player.playbackState == Player.STATE_ENDED)) {
+                    player.pause(); sleep.cancel()
+                }
+            }
+        }
         scope.launch { resolver.changes.collect { player.refreshResolution() } }
         scope.launch { settings.state.map { it.aacBitrate }.distinctUntilChanged().drop(1).collect { player.quality(it) } }
         scope.launch { repository.session.invalidations.collect {
-            player.stop(); player.clearMediaItems()
+            sleep.cancel(); player.stop(); player.clearMediaItems()
             saveMutex.withLock { withContext(Dispatchers.IO) { repository.database.queue().clear() }; lastSavedQueue = null }
         } }
         scope.launch {
@@ -137,14 +162,26 @@ class PlaybackService : MediaSessionService() {
         scope.launch { try { restore() } finally { restoring = false; persist() } }
     }
 
+    private fun completeFeedback() {
+        val id = listeningTrack ?: return
+        if (clock.totalMs < 5_000) return
+        val event = RecommendationFeedback(eventId = listeningId, trackId = id, action = "complete")
+        val profile = repository.session.cacheScope()
+        scope.launch {
+            if (profile != repository.session.cacheScope()) return@launch
+            runCatching { repository.api().recommendationFeedback(event, RequestOwner(profile)).close() }
+        }
+    }
     private fun report() {
         val id = listeningTrack ?: return
         val value = clock.totalMs
         if (value <= sentMs) return
-        val report = ListeningRequest(listeningId, id, value, listeningStarted, if (player.isPlaying) "playing" else "paused")
+        val report = ListeningRequest(listeningId, id, value, listeningStarted, if (player.playbackState == Player.STATE_ENDED) "ended" else if (player.isPlaying) "playing" else "paused")
         sentMs = value
+        val profile = repository.session.cacheScope()
         scope.launch {
-            try { repository.api().listening(report).close() }
+            if (profile == null || profile != repository.session.cacheScope()) return@launch
+            try { repository.api().listening(report, RequestOwner(profile)).close() }
             catch (error: CancellationException) { throw error }
             catch (_: Exception) { if (listeningId == report.sessionId) sentMs = 0 }
         }
@@ -155,6 +192,15 @@ class PlaybackService : MediaSessionService() {
         val endpoint = repository.session.endpoint?.toString() ?: return
         val profile = repository.session.cacheScope() ?: return
         val entries = queueEntries
+        val shared = SharedPlayback(trackIds = entries.map { it.trackId }, index = player.currentMediaItemIndex.coerceAtLeast(0),
+            positionMs = player.currentPosition.coerceAtLeast(0), mode = if (player.shuffleModeEnabled) "shuffle" else when (player.repeatMode) {
+                Player.REPEAT_MODE_ONE -> "repeat_one"; Player.REPEAT_MODE_ALL -> "repeat_all"; else -> "sequential"
+            })
+        if (shared.trackIds.isNotEmpty()) scope.launch {
+            try { if (profile == repository.session.cacheScope()) sharing.publish(shared) }
+            catch (error: CancellationException) { throw error }
+            catch (_: Exception) { /* Sharing failure never interrupts the local queue. */ }
+        }
         val position = SavedPosition(endpoint = endpoint, entryId = player.currentMediaItem?.mediaId, positionMs = player.currentPosition.coerceAtLeast(0))
         scope.launch { saveMutex.withLock {
             if (profile != repository.session.cacheScope() || endpoint != repository.session.endpoint?.toString()) return@withLock

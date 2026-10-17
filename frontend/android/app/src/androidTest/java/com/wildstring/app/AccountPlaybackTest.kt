@@ -3,6 +3,7 @@ package com.wildstring.app
 import android.graphics.Bitmap
 import android.os.ParcelFileDescriptor
 import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
@@ -22,7 +23,6 @@ import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.RecordedRequest
-import okio.Buffer
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
@@ -48,8 +48,13 @@ class AccountPlaybackTest {
         compose.onAllNodes(hasSetTextAction())[1].performTextReplacement(username)
         compose.onAllNodes(hasSetTextAction())[2].performTextReplacement("test-password-original")
         compose.activityRule.scenario.onActivity { activity -> WindowCompat.getInsetsController(activity.window, activity.window.decorView).hide(WindowInsetsCompat.Type.ime()) }
-        compose.onNode(isToggleable()).performScrollTo().apply { if (fetchSemanticsNode().config[SemanticsProperties.ToggleableState] != ToggleableState.On) performClick() }
-        compose.onNodeWithText("连接并登录").performScrollTo().performClick()
+        // IME resizing can move physical tap targets during fixture setup on a fresh emulator.
+        compose.onNode(isToggleable()).apply {
+            if (fetchSemanticsNode().config[SemanticsProperties.ToggleableState] != ToggleableState.On)
+                performSemanticsAction(SemanticsActions.OnClick) { it() }
+            assertIsOn()
+        }
+        compose.onNodeWithText("连接并登录").performSemanticsAction(SemanticsActions.OnClick) { it() }
         compose.waitUntil(15_000) { compose.onAllNodesWithText("同步测试专辑").fetchSemanticsNodes().isNotEmpty() }
     }
     @Test fun aacAbsoluteTimelineEditedLyricsAndAccountIsolation() {
@@ -72,6 +77,7 @@ class AccountPlaybackTest {
         val requests = ConcurrentLinkedQueue<String>()
         val account = AtomicReference<String?>(null)
         val lyric = AtomicReference("初始人工歌词")
+        val completedAac = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
         val lossless = """{"id":"lossless","title":"无损测试曲目","artists":["合成音频"],"album":"同步测试专辑","duration_ms":12000,"has_cover":false,"loved":true,"format":"flac","status":"available"}"""
         val lossy = lossless.replace("lossless", "lossy").replace("无损", "有损").replace("flac", "mp3")
         MockWebServer().use { server ->
@@ -110,13 +116,10 @@ class AccountPlaybackTest {
                         val convert = url.queryParameter("format") == "aac" && path.contains("/lossless/")
                         val bytes = if (convert) { if ((url.queryParameter("start_ms")?.toLong() ?: 0) >= 6000) tail else aac }
                             else if (path.contains("/lossless/")) flac else mp3
-                        if (convert) return MockResponse().setHeader("Content-Type", "audio/mp4").setHeader("Accept-Ranges", "none").setChunkedBody(Buffer().write(bytes), 4096)
-                        val start = request.getHeader("Range")?.substringAfter("bytes=")?.substringBefore('-')?.toIntOrNull() ?: 0
-                        if (start >= bytes.size) return MockResponse().setResponseCode(416).setHeader("Content-Range", "bytes */${bytes.size}")
-                        return MockResponse().setHeader("Content-Type", if (path.contains("/lossless/")) "audio/flac" else "audio/mpeg")
-                            .setHeader("Accept-Ranges", "bytes").setBody(Buffer().write(bytes, start, bytes.size - start)).apply {
-                                if (request.getHeader("Range") != null) setResponseCode(206).setHeader("Content-Range", "bytes $start-${bytes.lastIndex}/${bytes.size}")
-                            }
+                        val key = path + "?" + url.encodedQuery.orEmpty()
+                        val encoding = convert && if (request.method == "GET") completedAac.add(key) else key !in completedAac
+                        return audioStreamFixture(request, bytes, if (convert) "audio/mp4" else if (path.contains("/lossless/")) "audio/flac" else "audio/mpeg",
+                            "\"account-${key.hashCode()}\"", encoding)
                     }
                     if (path.endsWith("/lyrics")) return json("""{"kind":"synced","source":"user","lines":[{"time_ms":0,"text":"${lyric.get()}"},{"time_ms":6000,"text":"六秒后的人工歌词"}]}""")
                     if (path.endsWith("/lastfm")) return json("""{"configured":false,"connected":false,"scrobble":false,"now_playing":false,"version":0}""")
@@ -128,8 +131,9 @@ class AccountPlaybackTest {
                     return MockResponse().setResponseCode(404)
                 }
             }
-            server.start()
-            login(server.url("/").toString(), "alice")
+            server.start(java.net.InetAddress.getByName("127.0.0.1"), 0)
+            val address = server.url("/").newBuilder().host("127.0.0.1").build().toString()
+            login(address, "alice")
             assertEquals("alice", vm.state.value.account!!.username)
             val firstProfile = vm.repository.session.cacheScope()
             compose.onNodeWithText("同步测试专辑").performClick()
@@ -166,7 +170,7 @@ class AccountPlaybackTest {
             compose.waitUntil(15_000) { vm.state.value.playbackQuality == "AAC · 320 kbps" && compose.runOnIdle { vm.controller!!.playbackState == Player.STATE_READY } }
             assertTrue(kotlin.math.abs(compose.runOnIdle { vm.controller!!.currentPosition } - 6000) < 200)
             assertFalse(compose.runOnIdle { vm.controller!!.playWhenReady })
-            compose.onNodeWithText("歌词", useUnmergedTree = true).performClick()
+            compose.onNodeWithTag("player-visual-stage").performTouchInput { click(androidx.compose.ui.geometry.Offset(4f, 4f)) }
             compose.onNodeWithText("六秒后的人工歌词").assertIsDisplayed()
             // READY/bufferedPosition may still describe the previous quality while Media3 drains its loader.
             // Establish a paused, non-loading, stable baseline before attributing new reads to lyric refresh.
@@ -188,7 +192,11 @@ class AccountPlaybackTest {
             val streamsBeforeRefresh = requests.count { it.contains("/stream") }
             lyric.set("网页修改后的人工歌词")
             compose.onNodeWithContentDescription("刷新歌词").performClick()
-            compose.waitUntil(10_000) { vm.state.value.lyrics.lines.first().text == "网页修改后的人工歌词" }
+            try {
+                compose.waitUntil(10_000) { vm.state.value.lyrics.lines.first().text == "网页修改后的人工歌词" }
+            } catch (failure: Throwable) {
+                throw AssertionError("Lyric refresh failed: ${vm.state.value.lyricsError}; requests=${requests.toList()}", failure)
+            }
             assertFalse(compose.runOnIdle { vm.controller!!.playWhenReady })
             assertEquals(entryBeforeRefresh, vm.state.value.entryId)
             assertEquals(positionBeforeRefresh, compose.runOnIdle { vm.controller!!.currentPosition })
@@ -201,7 +209,7 @@ class AccountPlaybackTest {
             assertTrue(requests.any { it == "/api/v1/tracks/lossy/stream" })
             compose.runOnIdle { vm.logout() }
             compose.waitUntil(10_000) { !vm.state.value.connected && compose.onAllNodes(hasSetTextAction()).fetchSemanticsNodes().size == 3 }
-            login(server.url("/").toString(), "bob")
+            login(address, "bob")
             assertEquals("bob", vm.state.value.account!!.username)
             assertNotEquals(firstProfile, vm.repository.session.cacheScope())
             assertTrue(vm.state.value.queue.isEmpty())

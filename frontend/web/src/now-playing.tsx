@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { api, artist, time, type Lyrics } from './api';
 import { Cover, coverUrl } from './cover';
+import { PlaybackVisual, usePlaybackStyle } from './playback-style';
 import { FavoriteButton, type Favorites } from './favorites';
 import {
   PlaybackControls,
   PlaybackError,
   QualityControl,
+  SleepControl,
   VolumeControl,
   type Player,
 } from './player';
@@ -63,11 +65,41 @@ export function NowPlaying({
   const dialog = useRef<HTMLElement>(null);
   const close = useRef<HTMLButtonElement>(null);
   const queueToggle = useRef<HTMLButtonElement>(null);
-  const [panel, setPanel] = useState<'lyrics' | 'queue' | null>('lyrics');
+  const gesture = useRef({ x: 0, y: 0, moved: false, held: false, pointer: -1 });
+  const holdTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const artworkDialog = useRef<HTMLDialogElement>(null);
+  const [artwork, setArtwork] = useState(false);
+  const cancelHold = () => clearTimeout(holdTimer.current);
+  const canPreview = (target: EventTarget | null) =>
+    target instanceof Element && !!target.closest('.playback-visual, .lyric-scroll');
+  const [landscape, setLandscape] = useState(
+    () => matchMedia('(orientation: landscape) and (max-height: 540px)').matches,
+  );
+  const [panel, setPanel] = useState<'lyrics' | 'queue' | null>(() =>
+    landscape ? null : 'lyrics',
+  );
   const [notice, setNotice] = useState('');
   const current = player.current;
+  const style = usePlaybackStyle();
   const [palette, setPalette] = useState<{ track: string; colors: string[] } | null>(null);
   const colors = palette?.track === current?.id ? palette?.colors : null;
+  useEffect(() => () => clearTimeout(holdTimer.current), []);
+  useEffect(() => {
+    if (!artwork) return;
+    const preview = artworkDialog.current;
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    preview?.showModal();
+    return () => {
+      preview?.close();
+      previous?.focus({ preventScroll: true });
+    };
+  }, [artwork]);
+  useEffect(() => {
+    const query = matchMedia('(orientation: landscape) and (max-height: 540px)');
+    const changed = () => setLandscape(query.matches);
+    query.addEventListener('change', changed);
+    return () => query.removeEventListener('change', changed);
+  }, []);
   useEffect(() => {
     const timer = setTimeout(() => setNotice(''), 2500);
     return () => clearTimeout(timer);
@@ -79,13 +111,14 @@ export function NowPlaying({
     document.body.style.overflow = 'hidden';
     close.current?.focus({ preventScroll: true });
     const handleKey = (event: KeyboardEvent) => {
+      if (artworkDialog.current?.open) return;
       if (event.key === 'Escape') {
         event.preventDefault();
         onClose();
       } else if (event.key === 'Tab') {
         const controls = Array.from(
           dialog.current?.querySelectorAll<HTMLElement>(
-            'button:not(:disabled), input:not(:disabled)',
+            'button:not(:disabled), input:not(:disabled), select:not(:disabled)',
           ) || [],
         ).filter((node) => node.getClientRects().length > 0);
         const first = controls[0],
@@ -113,135 +146,234 @@ export function NowPlaying({
   useEffect(() => {
     // A track change can disable the focused next/previous button or replace a lyric.
     if (
-      !dialog.current?.contains(document.activeElement) ||
-      document.activeElement?.matches(':disabled')
+      !artworkDialog.current?.open &&
+      (!dialog.current?.contains(document.activeElement) ||
+        document.activeElement?.matches(':disabled'))
     ) {
       close.current?.focus({ preventScroll: true });
     }
   }, [current?.id]);
 
   return (
-    <section
-      className="fullscreen-player"
-      ref={dialog}
-      role="dialog"
-      aria-modal="true"
-      aria-label="全屏播放"
-      style={
-        {
-          '--cover-primary': colors?.[0] || '#35373f',
-          '--cover-accent': colors?.[1] || '#262a31',
-        } as CSSProperties
-      }
-    >
-      {current && (
-        <div
-          className="player-atmosphere"
-          style={{ backgroundImage: `url("${coverUrl(current.id, 768)}")` }}
-          aria-hidden="true"
-        />
-      )}
-      <header className="fullscreen-header">
-        <button ref={close} className="collapse-player" aria-label="收起全屏播放" onClick={onClose}>
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="m5 9 7 7 7-7" />
-          </svg>
-          <span>收起</span>
-        </button>
-        <span className="eyebrow">
-          野弦 <span aria-hidden="true">/</span> WILDSTRING
-        </span>
-        <span className="fullscreen-mode">NOW PLAYING</span>
-      </header>
-      {current ? (
-        <div className={`fullscreen-content ${panel ? '' : 'is-cover-only'}`}>
-          <div className="fullscreen-record">
-            <Cover
-              trackId={current.id}
-              title={current.album || current.title}
-              size={768}
-              className="fullscreen-cover"
-              onImage={(image) => {
-                if (image.currentSrc !== new URL(coverUrl(current.id, 768), location.href).href)
-                  return;
-                const colors = coverPalette(image);
-                if (colors) setPalette({ track: current.id, colors });
-              }}
-            />
-            <div className="fullscreen-metadata">
-              <FavoriteButton track={current} favorites={favorites} />
-              <h1>{current.title}</h1>
-              <p>{artist(current)}</p>
-              <span>{current.album || '未知专辑'}</span>
+    <>
+      <section
+        className="fullscreen-player"
+        ref={dialog}
+        role="dialog"
+        aria-modal="true"
+        aria-label="全屏播放"
+        data-panel={panel || 'cover'}
+        onPointerDown={(event) => {
+          cancelHold();
+          if (!event.isPrimary || event.button !== 0) return;
+          gesture.current = {
+            x: event.clientX,
+            y: event.clientY,
+            moved: false,
+            held: false,
+            pointer: event.pointerId,
+          };
+          if (current && canPreview(event.target)) {
+            holdTimer.current = setTimeout(() => {
+              gesture.current.held = true;
+              setArtwork(true);
+            }, 500);
+          }
+        }}
+        onPointerMove={(event) => {
+          if (
+            event.pointerId === gesture.current.pointer &&
+            Math.hypot(event.clientX - gesture.current.x, event.clientY - gesture.current.y) > 8
+          ) {
+            gesture.current.moved = true;
+            cancelHold();
+          }
+        }}
+        onPointerUp={cancelHold}
+        onPointerCancel={cancelHold}
+        onPointerLeave={cancelHold}
+        onContextMenu={(event) => {
+          if (canPreview(event.target)) event.preventDefault();
+        }}
+        onClickCapture={(event) => {
+          if (event.detail > 0 && (gesture.current.moved || gesture.current.held)) {
+            event.preventDefault();
+            event.stopPropagation();
+          }
+        }}
+        onClick={(event) => {
+          const target = event.target as HTMLElement;
+          if (
+            target.closest(
+              'button, a, input, select, label, .fullscreen-header, .fullscreen-controls, .fullscreen-metadata, .embedded-queue, .lyrics-toolbar',
+            )
+          )
+            return;
+          setPanel((value) => (value === 'lyrics' ? null : 'lyrics'));
+        }}
+        style={
+          {
+            '--cover-primary': colors?.[0] || '#35373f',
+            '--cover-accent': colors?.[1] || '#262a31',
+          } as CSSProperties
+        }
+      >
+        {current && (
+          <div
+            className="player-atmosphere"
+            style={{ backgroundImage: `url("${coverUrl(current.id, 768)}")` }}
+            aria-hidden="true"
+          />
+        )}
+        <header className="fullscreen-header">
+          <button
+            ref={close}
+            className="collapse-player"
+            aria-label="收起全屏播放"
+            onClick={onClose}
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="m5 9 7 7 7-7" />
+            </svg>
+            <span>收起</span>
+          </button>
+          <span className="eyebrow">
+            野弦 <span aria-hidden="true">/</span> WILDSTRING
+          </span>
+        </header>
+        {current ? (
+          <div className={`fullscreen-content ${panel ? '' : 'is-cover-only'}`}>
+            <div className="fullscreen-record">
+              <PlaybackVisual
+                track={current}
+                style={style}
+                playing={
+                  player.playing &&
+                  !player.buffering &&
+                  !player.error &&
+                  !(landscape && panel) &&
+                  !artwork
+                }
+                position={player.position}
+                duration={player.duration}
+                phase={player.visualPhase}
+                onLyrics={() => setPanel((value) => (value === 'lyrics' ? null : 'lyrics'))}
+                onImage={(image) => {
+                  if (image.currentSrc !== new URL(coverUrl(current.id, 768), location.href).href)
+                    return;
+                  const colors = coverPalette(image);
+                  if (colors) setPalette({ track: current.id, colors });
+                }}
+              />
+              <div className="fullscreen-metadata">
+                <FavoriteButton track={current} favorites={favorites} />
+                <h1>{current.title}</h1>
+                <p>{artist(current)}</p>
+                <span>{current.album || '未知专辑'}</span>
+              </div>
+            </div>
+            {panel === 'lyrics' && <LyricsPanel key={current.id} player={player} />}
+            {panel === 'queue' && (
+              <QueuePanel
+                player={player}
+                embedded
+                onNotice={setNotice}
+                onClose={() => {
+                  setPanel(null);
+                  queueToggle.current?.focus({ preventScroll: true });
+                }}
+              />
+            )}
+          </div>
+        ) : (
+          <p className="lyric-empty">先播放一首喜欢的歌。</p>
+        )}
+        <footer className="fullscreen-controls">
+          <div className="fullscreen-quality">
+            {current && <span className="format">{current.format.toUpperCase()}</span>}
+            <span>
+              {player.playbackLabel}
+              <small>
+                第 {player.index + 1} 首 / 共 {player.queue.length} 首
+              </small>
+            </span>
+          </div>
+          <PlaybackControls player={player} />
+          <div className="fullscreen-options">
+            <SleepControl player={player} />
+            <QualityControl player={player} />
+            <VolumeControl player={player} />
+            <div className="fullscreen-panel-switches" role="group" aria-label="全屏显示内容">
+              <button
+                aria-label="显示歌词"
+                aria-pressed={panel === 'lyrics'}
+                title="歌词"
+                onClick={() => setPanel((current) => (current === 'lyrics' ? null : 'lyrics'))}
+              >
+                词
+              </button>
+              <button
+                ref={queueToggle}
+                aria-label="显示播放队列"
+                aria-pressed={panel === 'queue'}
+                title="播放队列"
+                onClick={() => setPanel((current) => (current === 'queue' ? null : 'queue'))}
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.6"
+                  aria-hidden="true"
+                >
+                  <path d="M8 6h12M8 12h12M8 18h12M3 6h1M3 12h1M3 18h1" strokeLinecap="round" />
+                </svg>
+                <span>{player.queue.length}</span>
+              </button>
             </div>
           </div>
-          {panel === 'lyrics' && <LyricsPanel key={current.id} player={player} />}
-          {panel === 'queue' && (
-            <QueuePanel
-              player={player}
-              embedded
-              onNotice={setNotice}
-              onClose={() => {
-                setPanel(null);
-                queueToggle.current?.focus({ preventScroll: true });
-              }}
-            />
-          )}
-        </div>
-      ) : (
-        <p className="lyric-empty">先播放一首喜欢的歌。</p>
+          <PlaybackError player={player} />
+        </footer>
+        {notice && (
+          <p className="fullscreen-notice" role="status">
+            {notice}
+          </p>
+        )}
+      </section>
+      {artwork && current && (
+        <dialog
+          ref={artworkDialog}
+          className="artwork-preview"
+          aria-label="大封面"
+          onPointerDown={() => {
+            gesture.current.held = false;
+          }}
+          onClickCapture={(event) => {
+            if (event.detail > 0 && gesture.current.held) {
+              event.preventDefault();
+              event.stopPropagation();
+            }
+          }}
+          onCancel={(event) => {
+            event.preventDefault();
+            setArtwork(false);
+          }}
+          onClick={(event) => {
+            if (event.target === event.currentTarget) setArtwork(false);
+          }}
+        >
+          <button
+            autoFocus
+            className="artwork-preview-close"
+            aria-label="关闭大封面"
+            onClick={() => setArtwork(false)}
+          >
+            ×
+          </button>
+          <Cover trackId={current.id} title={current.title} size={768} />
+        </dialog>
       )}
-      <footer className="fullscreen-controls">
-        <div className="fullscreen-quality">
-          {current && <span className="format">{current.format.toUpperCase()}</span>}
-          <span>
-            {player.playbackLabel}
-            <small>
-              第 {player.index + 1} 首 / 共 {player.queue.length} 首
-            </small>
-          </span>
-        </div>
-        <PlaybackControls player={player} />
-        <div className="fullscreen-options">
-          <QualityControl player={player} />
-          <VolumeControl player={player} />
-          <div className="fullscreen-panel-switches" role="group" aria-label="全屏显示内容">
-            <button
-              aria-label="显示歌词"
-              aria-pressed={panel === 'lyrics'}
-              title="歌词"
-              onClick={() => setPanel((current) => (current === 'lyrics' ? null : 'lyrics'))}
-            >
-              词
-            </button>
-            <button
-              ref={queueToggle}
-              aria-label="显示播放队列"
-              aria-pressed={panel === 'queue'}
-              title="播放队列"
-              onClick={() => setPanel((current) => (current === 'queue' ? null : 'queue'))}
-            >
-              <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.6"
-                aria-hidden="true"
-              >
-                <path d="M8 6h12M8 12h12M8 18h12M3 6h1M3 12h1M3 18h1" strokeLinecap="round" />
-              </svg>
-              <span>{player.queue.length}</span>
-            </button>
-          </div>
-        </div>
-        <PlaybackError player={player} />
-      </footer>
-      {notice && (
-        <p className="fullscreen-notice" role="status">
-          {notice}
-        </p>
-      )}
-    </section>
+    </>
   );
 }
 
@@ -251,8 +383,33 @@ function LyricsPanel({ player }: { player: Player }) {
   const [error, setError] = useState(false);
   const [revision, setRevision] = useState(0);
   const [follow, setFollow] = useState(true);
+  const [coarse, setCoarse] = useState(() => matchMedia('(pointer: coarse)').matches);
+  const [preview, setPreview] = useState<number | null>(null);
   const scroll = useRef<HTMLDivElement>(null);
   const lines = useRef<(HTMLButtonElement | null)[]>([]);
+  useEffect(() => {
+    const query = matchMedia('(pointer: coarse)');
+    const changed = () => setCoarse(query.matches);
+    query.addEventListener('change', changed);
+    return () => query.removeEventListener('change', changed);
+  }, []);
+  function selectCentered() {
+    const container = scroll.current;
+    if (!container) return;
+    let closest: number | null = null;
+    let distance = Infinity;
+    lines.current.forEach((line, index) => {
+      if (!line) return;
+      const delta = Math.abs(
+        line.offsetTop + line.clientHeight / 2 - container.scrollTop - container.clientHeight / 2,
+      );
+      if (delta < distance) {
+        closest = index;
+        distance = delta;
+      }
+    });
+    setPreview(closest);
+  }
   useEffect(() => {
     const changed = (event: Event) => {
       if (event instanceof CustomEvent && event.detail === current?.id)
@@ -333,51 +490,89 @@ function LyricsPanel({ player }: { player: Player }) {
           ↻
         </button>
       </div>
-      <div
-        className="lyric-scroll"
-        ref={scroll}
-        onWheel={() => setFollow(false)}
-        onTouchMove={() => setFollow(false)}
-      >
-        {error ? (
-          <p className="lyric-empty" role="status">
-            暂时无法读取歌词。播放不受影响，可点击上方 ↻ 重试。
-          </p>
-        ) : !lyrics ? (
-          <p className="lyric-empty" role="status">
-            正在读取歌词…
-          </p>
-        ) : lyrics.kind === 'none' ? (
-          <div className="lyric-empty">
-            <span>让旋律先说话。</span>
-            <p>暂无本地歌词。支持音频内嵌歌词，或在同目录放入同名 .lrc 文件。</p>
+      <div className="lyric-viewport">
+        <div
+          className="lyric-scroll"
+          ref={scroll}
+          onWheel={() => setFollow(false)}
+          onTouchMove={() => {
+            setFollow(false);
+            selectCentered();
+          }}
+          onScroll={() => {
+            if (coarse && !follow) selectCentered();
+          }}
+        >
+          {error ? (
+            <p className="lyric-empty" role="status">
+              暂时无法读取歌词。播放不受影响，可点击上方 ↻ 重试。
+            </p>
+          ) : !lyrics ? (
+            <p className="lyric-empty" role="status">
+              正在读取歌词…
+            </p>
+          ) : lyrics.kind === 'none' ? (
+            <div className="lyric-empty">
+              <span>让旋律先说话。</span>
+              <p>暂无本地歌词。支持音频内嵌歌词，或在同目录放入同名 .lrc 文件。</p>
+            </div>
+          ) : (
+            <ol aria-label="歌词" className={lyrics.kind === 'plain' ? 'plain-lyrics' : ''}>
+              {lyrics.lines.map((line, index) => (
+                <li key={index}>
+                  {line.time_ms === null ? (
+                    <p className="lyric-line">{line.text}</p>
+                  ) : (
+                    <button
+                      ref={(node) => {
+                        lines.current[index] = node;
+                      }}
+                      className={`lyric-line ${active === index ? 'active-line' : ''}`}
+                      aria-current={active === index ? 'true' : undefined}
+                      aria-label={`${coarse ? '选择' : '跳转到'} ${time(line.time_ms / 1000)}：${line.text || '间奏'}`}
+                      disabled={!player.duration}
+                      onClick={() => {
+                        if (coarse) {
+                          setFollow(false);
+                          setPreview(index);
+                          const container = scroll.current;
+                          const row = lines.current[index];
+                          if (container && row)
+                            container.scrollTo({
+                              top:
+                                row.offsetTop - container.clientHeight / 2 + row.clientHeight / 2,
+                              behavior: 'instant',
+                            });
+                        } else {
+                          player.seek(line.time_ms! / 1000);
+                          setFollow(true);
+                        }
+                      }}
+                    >
+                      {line.text || '♪'}
+                    </button>
+                  )}
+                </li>
+              ))}
+            </ol>
+          )}
+        </div>
+        {coarse && !follow && preview !== null && lyrics?.lines[preview]?.time_ms != null && (
+          <div className="lyric-seek-preview" role="group" aria-label="歌词跳转预览">
+            <span>{time(lyrics.lines[preview].time_ms! / 1000)}</span>
+            <hr />
+            <button
+              aria-label={`确认跳转到 ${time(lyrics.lines[preview].time_ms! / 1000)}`}
+              onClick={() => {
+                player.seek(lyrics.lines[preview!].time_ms! / 1000);
+                setFollow(true);
+              }}
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="m8 5 11 7-11 7z" />
+              </svg>
+            </button>
           </div>
-        ) : (
-          <ol aria-label="歌词" className={lyrics.kind === 'plain' ? 'plain-lyrics' : ''}>
-            {lyrics.lines.map((line, index) => (
-              <li key={index}>
-                {line.time_ms === null ? (
-                  <p className="lyric-line">{line.text}</p>
-                ) : (
-                  <button
-                    ref={(node) => {
-                      lines.current[index] = node;
-                    }}
-                    className={`lyric-line ${active === index ? 'active-line' : ''}`}
-                    aria-current={active === index ? 'true' : undefined}
-                    aria-label={`跳转到 ${time(line.time_ms / 1000)}：${line.text || '间奏'}`}
-                    disabled={!player.duration}
-                    onClick={() => {
-                      player.seek(line.time_ms! / 1000);
-                      setFollow(true);
-                    }}
-                  >
-                    {line.text || '♪'}
-                  </button>
-                )}
-              </li>
-            ))}
-          </ol>
         )}
       </div>
     </div>

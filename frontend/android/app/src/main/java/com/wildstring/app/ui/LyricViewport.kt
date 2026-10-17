@@ -1,0 +1,93 @@
+package com.wildstring.app.ui
+
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.animateScrollBy
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.interaction.DragInteraction
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.wildstring.app.data.Lyrics
+import com.wildstring.app.data.formatTime
+import kotlinx.coroutines.launch
+import kotlin.math.abs
+
+/** Browsing only moves the viewport. The explicit preview button is the only seek action. */
+@Composable internal fun LyricViewport(lyrics: Lyrics, position: Long, onSeek: (Long) -> Unit,
+    onBlank: () -> Unit, modifier: Modifier = Modifier, onArtwork: () -> Unit = {}) {
+    val list = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+    val feedback = LocalTactileFeedback.current
+    var follow by remember(lyrics) { mutableStateOf(true) }
+    val lines = lyrics.lines
+    val active = if (lyrics.kind == "synced") lines.indexOfLast { (it.timeMs ?: Long.MAX_VALUE) <= position } else -1
+    val candidate by remember {
+        derivedStateOf {
+            val layout = list.layoutInfo
+            val center = (layout.viewportStartOffset + layout.viewportEndOffset) / 2
+            layout.visibleItemsInfo.minByOrNull { abs(it.offset + it.size / 2 - center) }?.index
+        }
+    }
+    suspend fun centerLine(index: Int) {
+        list.animateScrollToItem(index)
+        val layout = list.layoutInfo
+        layout.visibleItemsInfo.firstOrNull { it.index == index }?.let { item ->
+            list.animateScrollBy(item.offset + item.size / 2f - (layout.viewportStartOffset + layout.viewportEndOffset) / 2f)
+        }
+    }
+    LaunchedEffect(list) { list.interactionSource.interactions.collect { if (it is DragInteraction.Start) follow = false } }
+    LaunchedEffect(active, follow, lyrics) { if (follow && active >= 0) centerLine(active) }
+    BoxWithConstraints(modifier.testTag("lyrics-viewport").clipToBounds().pointerInput(onBlank, onArtwork) {
+        detectTapGestures(onLongPress = { onArtwork() }, onTap = { onBlank() })
+    }.semantics {
+        customActions = listOf(CustomAccessibilityAction("切换歌词与播放动画") { onBlank(); true },
+            CustomAccessibilityAction("查看大封面") { onArtwork(); true })
+    }) {
+        LazyColumn(state = list, contentPadding = PaddingValues(vertical = maxHeight / 2),
+            modifier = Modifier.fillMaxSize().testTag("lyric-scroll")) {
+            items(lines.size) { index ->
+                val line = lines[index]
+                val highlighted = if (follow) active == index else candidate == index
+                Box(Modifier.fillMaxWidth().padding(horizontal = 40.dp, vertical = 14.dp), contentAlignment = Alignment.Center) {
+                    Text(line.text.ifBlank { "♪" }, Modifier.testTag("lyric-line-$index").then(
+                        if (line.timeMs != null) Modifier.combinedClickable(onClickLabel = "选择歌词时间",
+                            onLongClickLabel = "查看大封面", onLongClick = onArtwork, hapticFeedbackEnabled = false, onClick = {
+                            follow = false
+                            scope.launch { centerLine(index) }
+                        }) else Modifier),
+                        fontSize = 22.sp, lineHeight = 34.sp, textAlign = TextAlign.Center,
+                        fontWeight = if (highlighted) FontWeight.Medium else FontWeight.Normal,
+                        color = if (lyrics.kind == "plain" || highlighted) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .65f))
+                }
+            }
+        }
+        if (!follow) {
+            TextButton({ follow = true }, Modifier.align(Alignment.TopEnd)) { Text("回到当前歌词", fontSize = 11.sp) }
+            val target = candidate?.let { lines.getOrNull(it)?.timeMs }
+            if (target != null) Row(Modifier.align(Alignment.Center).fillMaxWidth().testTag("lyric-seek-preview"),
+                verticalAlignment = Alignment.CenterVertically) {
+                Text(formatTime(target), fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                HorizontalDivider(Modifier.weight(1f).padding(horizontal = 8.dp), color = MaterialTheme.colorScheme.onSurface.copy(alpha = .12f))
+                IconButton({ feedback(TactileKind.Tap); onSeek(target); follow = true }, Modifier.testTag("lyric-seek-confirm")) {
+                    Icon(Icons.Default.PlayArrow, "跳转到 ${formatTime(target)}")
+                }
+            }
+        }
+    }
+}

@@ -57,7 +57,7 @@ internal fun QueuePanel(vm: MusicViewModel, state: MusicState, modifier: Modifie
 internal fun QueueList(
     rows: List<QueueRow>, currentEntry: String?, modifier: Modifier = Modifier,
     onPlay: (QueueRow) -> Unit, onRemove: (QueueRow) -> Unit,
-    onMove: (String, Int) -> Unit, onHaptic: (TactileKind) -> Unit,
+    onMove: (String, Int) -> Unit, onHaptic: (TactileKind) -> Unit, allowRemove: Boolean = true, title: String = "播放队列 · ${rows.size}",
 ) {
     val list = rememberLazyListState()
     val drag = remember(list) { QueueDragState(list) }
@@ -95,7 +95,7 @@ internal fun QueueList(
     }
     Column(modifier) {
         Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("播放队列 · ${rows.size}", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+            Text(title, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
             Text("拖动排序", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
         }
         LazyColumn(
@@ -168,7 +168,7 @@ internal fun QueueList(
                         }, contentAlignment = Alignment.Center) {
                         Icon(Icons.Default.Menu, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
-                    IconButton({ onRemove(row) }, enabled = drag.entryId == null) { Icon(Icons.Default.Close, "移除${row.title}") }
+                    if (allowRemove) IconButton({ onRemove(row) }, enabled = drag.entryId == null) { Icon(Icons.Default.Close, "移除${row.title}") }
                 }
             }
         }

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from './api';
+import { MetadataRefreshDialog, ProviderPriority } from './metadata-refresh';
 
 type Config = {
   version: number;
@@ -8,6 +9,10 @@ type Config = {
   musicbrainz: boolean;
   lastfm: boolean;
   caa: boolean;
+  acoustid: boolean;
+  priority: string[];
+  acoustid_configured: boolean;
+  fingerprint_available: boolean;
   public_url: string;
   lastfm_configured: boolean;
   proxy_mode: 'environment' | 'custom' | 'direct';
@@ -17,6 +22,7 @@ type Config = {
 export function ProviderSettings() {
   const [config, setConfig] = useState<Config | null>(null);
   const [key, setKey] = useState(''),
+    [acoustidKey, setAcoustidKey] = useState(''),
     [secret, setSecret] = useState(''),
     [proxy, setProxy] = useState('');
   const [busy, setBusy] = useState(false),
@@ -39,6 +45,8 @@ export function ProviderSettings() {
         lastfm_configured: _configured,
         proxy_configured: _proxyConfigured,
         environment_proxy_configured: _envConfigured,
+        acoustid_configured: _acoustidConfigured,
+        fingerprint_available: _fingerprintAvailable,
         ...body
       } = config;
       setConfig(
@@ -48,16 +56,20 @@ export function ProviderSettings() {
             ...body,
             ...(key ? { api_key: key } : {}),
             ...(secret ? { api_secret: secret } : {}),
+            ...(acoustidKey ? { acoustid_api_key: acoustidKey } : {}),
             ...(proxy ? { proxy_url: proxy } : {}),
           }),
         }),
       );
       setKey('');
       setSecret('');
+      setAcoustidKey('');
       setProxy('');
       setMessage('联网设置已保存。');
-    } catch {
-      setMessage('设置未保存，请检查地址、密钥或重新打开设置。');
+    } catch (error) {
+      setMessage(
+        error instanceof Error ? error.message : '设置未保存，请检查地址、密钥或重新打开设置。',
+      );
     } finally {
       setBusy(false);
     }
@@ -83,11 +95,56 @@ export function ProviderSettings() {
               <input
                 type="checkbox"
                 checked={Boolean(config[field])}
-                onChange={(e) => setConfig({ ...config, [field]: e.target.checked })}
+                onChange={(e) =>
+                  setConfig({
+                    ...config,
+                    [field]: e.target.checked,
+                    ...(field === 'musicbrainz' && !e.target.checked ? { acoustid: false } : {}),
+                  })
+                }
               />
               {label}
             </label>
           ))}
+          <label className="check-label">
+            <input
+              type="checkbox"
+              checked={config.acoustid}
+              disabled={!config.fingerprint_available}
+              onChange={(e) =>
+                setConfig({
+                  ...config,
+                  acoustid: e.target.checked,
+                  ...(e.target.checked ? { musicbrainz: true } : {}),
+                })
+              }
+            />
+            AcoustID 音频指纹识别
+          </label>
+          <p className="muted">
+            先识别录音，再由 MusicBrainz 补充资料；只发送指纹和时长。没有匹配时按现有标签查询。
+          </p>
+          {!config.fingerprint_available && (
+            <p role="status">服务端缺少指纹工具，请更新 Docker 镜像或安装 Chromaprint。</p>
+          )}
+          <label>
+            AcoustID API Key
+            <input
+              type="password"
+              autoComplete="new-password"
+              value={acoustidKey}
+              onChange={(e) => setAcoustidKey(e.target.value)}
+              placeholder={config.acoustid_configured ? '已配置，留空保留' : '应用 API Key'}
+            />
+          </label>
+          <ProviderPriority
+            value={config.priority}
+            onChange={(priority) => setConfig({ ...config, priority })}
+          />
+          <p className="muted">
+            人工修改保留，已有本地封面优先。AcoustID 用于识别录音，封面由 CAA
+            提供候选；它们不参与资料字段排序。
+          </p>
           <label>
             联网代理
             <select
@@ -157,6 +214,10 @@ export function ProviderSettings() {
       <p className="muted">
         <a href="https://musicbrainz.org" target="_blank" rel="noreferrer">
           MusicBrainz
+        </a>{' '}
+        ·{' '}
+        <a href="https://acoustid.org/new-application" target="_blank" rel="noreferrer">
+          申请 AcoustID API Key
         </a>{' '}
         ·{' '}
         <a href="https://www.last.fm/api/account/create" target="_blank" rel="noreferrer">
@@ -313,6 +374,7 @@ type Suggestion = {
   fields: Record<string, unknown>;
   cover_url: string | null;
   status: string;
+  match: { method?: string; score?: number; acoustid_id?: string };
 };
 type Results = {
   suggestions: Suggestion[];
@@ -341,6 +403,27 @@ const statuses: Record<string, string> = {
   no_match: '没有匹配结果',
   stale: '歌曲信息已变化，请重新查询',
 };
+function CandidateCover({ id }: { id: string }) {
+  const [failed, setFailed] = useState(false);
+  return (
+    <div className="candidate-cover-preview">
+      {failed ? (
+        <p role="status">
+          封面预览暂不可用。<button onClick={() => setFailed(false)}>重新预览</button>
+        </p>
+      ) : (
+        <img
+          src={`/api/v1/manage/providers/suggestions/${encodeURIComponent(id)}/cover-preview`}
+          alt="CAA 封面候选"
+          loading="lazy"
+          width="160"
+          height="160"
+          onError={() => setFailed(true)}
+        />
+      )}
+    </div>
+  );
+}
 export function MetadataSuggestions({
   id,
   version,
@@ -356,6 +439,7 @@ export function MetadataSuggestions({
     [tick, setTick] = useState(0);
   const [selection, setSelection] = useState<Record<string, string[]>>({});
   const request = useRef(false);
+  const [refreshOpen, setRefreshOpen] = useState(false);
   useEffect(() => {
     const c = new AbortController();
     api<Results>(`/manage/providers/tracks/${id}`, { signal: c.signal })
@@ -392,9 +476,9 @@ export function MetadataSuggestions({
       <p className="muted">选择需要的字段后应用。勾选已有人工值的字段，会替换该字段。</p>
       <button
         disabled={busy || result?.jobs.some((j) => ['queued', 'running'].includes(j.status))}
-        onClick={() => void run('/manage/providers/query', { track_ids: [id] })}
+        onClick={() => setRefreshOpen(true)}
       >
-        查询联网资料
+        更新元数据
       </button>
       <p role="status">
         {result?.jobs[0] && statuses[result.jobs[0].status]}
@@ -405,6 +489,18 @@ export function MetadataSuggestions({
           <a href={s.source_url} target="_blank" rel="noreferrer">
             {s.provider === 'musicbrainz' ? 'MusicBrainz' : 'Last.fm'} 来源
           </a>
+          {s.match?.method === 'acoustid' && (
+            <p className="muted">
+              AcoustID 指纹匹配 · 相似度 {Math.round((s.match.score || 0) * 100)}%{' '}
+              <a
+                href={`https://acoustid.org/track/${s.match.acoustid_id}`}
+                target="_blank"
+                rel="noreferrer"
+              >
+                查看识别来源
+              </a>
+            </p>
+          )}
           {Object.entries(s.fields).map(([field, value]) => (
             <label className="check-label" key={field}>
               <input
@@ -422,6 +518,11 @@ export function MetadataSuggestions({
               />
               <span>
                 <strong>{labels[field] || field}</strong>：
+                {result.suggestions.find(
+                  (candidate) => candidate.status === 'pending' && field in candidate.fields,
+                )?.provider === s.provider && (
+                  <small className="provider-recommended">优先来源</small>
+                )}
                 {Array.isArray(value)
                   ? value.join(' / ')
                   : typeof value === 'object'
@@ -447,23 +548,35 @@ export function MetadataSuggestions({
             应用选中字段
           </button>
           {s.cover_url && (
-            <p>
-              <a href={s.cover_url.replace(/^http:/, 'https:')} target="_blank" rel="noreferrer">
-                查看 CAA 封面候选
-              </a>{' '}
-              <button
-                disabled={busy || s.metadata_version !== version}
-                onClick={() => void run(`/manage/providers/suggestions/${s.id}/cover`, { version })}
-              >
-                使用此封面
-              </button>
-            </p>
+            <div>
+              <CandidateCover key={s.id} id={s.id} />
+              <p>
+                <a href={s.cover_url.replace(/^http:/, 'https:')} target="_blank" rel="noreferrer">
+                  查看 CAA 封面候选
+                </a>{' '}
+                <button
+                  disabled={busy || s.metadata_version !== version}
+                  onClick={() =>
+                    void run(`/manage/providers/suggestions/${s.id}/cover`, { version })
+                  }
+                >
+                  使用此封面
+                </button>
+              </p>
+            </div>
           )}
           {s.metadata_version !== version && (
             <p className="muted">歌曲已变化，此候选仅供查看，请重新查询。</p>
           )}
         </article>
       ))}
+      {refreshOpen && (
+        <MetadataRefreshDialog
+          target={{ scope: 'track', id, label: '当前歌曲' }}
+          onClose={() => setRefreshOpen(false)}
+          onQueued={() => setTick((value) => value + 1)}
+        />
+      )}
       {error && (
         <p role="alert" className="error">
           {error}

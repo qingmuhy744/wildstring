@@ -83,12 +83,7 @@ class NativeNavigationTest {
                     if (path.endsWith("/cover")) return MockResponse().setHeader("Content-Type", "image/png").setBody(Buffer().write(cover))
                     if (path.endsWith("/stream")) {
                         streamRequests.incrementAndGet()
-                        val start = request.getHeader("Range")?.substringAfter("bytes=")?.substringBefore('-')?.toIntOrNull() ?: 0
-                        if (start >= audio.size) return MockResponse().setResponseCode(416)
-                        val response = MockResponse().setHeader("Content-Type", "audio/mpeg").setHeader("Accept-Ranges", "bytes")
-                            .setHeader("ETag", "\"navigation-v1\"").setBody(Buffer().write(audio, start, audio.size - start))
-                        if (request.getHeader("Range") != null) response.setResponseCode(206).setHeader("Content-Range", "bytes $start-${audio.lastIndex}/${audio.size}")
-                        return response
+                        return audioStreamFixture(request, audio, "audio/mpeg", "\"navigation-v1\"")
                     }
                     if (path.endsWith("/navigation-track")) return json(track)
                     if (path.endsWith("/lyrics")) return json("""{"kind":"none","lines":[]}""")
@@ -259,6 +254,7 @@ class NativeNavigationTest {
                 history.set(false)
                 compose.runOnIdle { vm.load() }
                 compose.waitUntil(15_000) { !vm.state.value.loading && vm.state.value.tracks.isEmpty() }
+                compose.onNodeWithTag("discovery-page").performScrollToNode(hasText("听过的歌曲会出现在这里。"))
                 compose.onNodeWithText("听过的歌曲会出现在这里。").assertIsDisplayed()
                 assertTrue(vm.state.value.albums.isNotEmpty())
             } catch (failure: Throwable) {

@@ -1,10 +1,13 @@
 """Bounded public-source lookups. All results are suggestions, never file writes."""
 
+import gzip
 import hashlib
 import json
+import math
 import os
 import re
 import secrets
+import shutil
 import sqlite3
 import threading
 import time
@@ -24,15 +27,38 @@ from urllib.request import (
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 from filelock import FileLock, Timeout
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
+from wildstring.fingerprints import FingerprintError, calculate
 from wildstring.library.edits import MetadataEditor, MetadataUpdate, Overrides
 
 MB = "https://musicbrainz.org/ws/2/"
 FM = "https://ws.audioscrobbler.com/2.0/"
-UA = "WildString/0.2.2 (https://github.com/qingmuhy744/wildstring)"
+ACOUSTID = "https://api.acoustid.org/v2/lookup"
+UA = "WildString/0.2.3 (https://github.com/qingmuhy744/wildstring)"
+
+
+def missing_fields(track, manual, fields):
+    result = {}
+    for key, value in fields.items():
+        if key in manual:
+            continue
+        current = track.get(key)
+        if key == "external_ids" and current:
+            if (
+                current.get("recording")
+                and value.get("recording")
+                and current["recording"] != value["recording"]
+            ):
+                continue
+            additions = {name: item for name, item in value.items() if not current.get(name)}
+            if additions:
+                result[key] = current | additions
+        elif not current or (key == "title" and track.get("title_source") == "filename"):
+            result[key] = value
+    return result
 
 
 class ProviderError(Exception):
@@ -112,8 +138,11 @@ class Providers:
                 connection.execute("SELECT * FROM provider_settings WHERE id=1").fetchone()
             )
         config.pop("id", None)
-        for flag in ("enabled", "auto_new", "musicbrainz", "lastfm", "caa"):
+        for flag in ("enabled", "auto_new", "musicbrainz", "lastfm", "caa", "acoustid"):
             config[flag] = bool(config[flag])
+        config["priority"] = json.loads(config["priority"])
+        config["acoustid_configured"] = bool(self.secrets().get("acoustid_api_key"))
+        config["fingerprint_available"] = shutil.which("fpcalc") is not None
         config["lastfm_configured"] = bool(
             self.secrets().get("api_key") and self.secrets().get("api_secret")
         )
@@ -133,9 +162,26 @@ class Providers:
             if signed:
                 parameters["api_sig"] = lastfm_signature(parameters, credentials["api_secret"])
             parameters["format"] = "json"
-        provider = "lastfm" if url == FM else "musicbrainz" if url.startswith(MB) else "caa"
-        post = signed and parameters.get("method") in {"track.scrobble", "track.updateNowPlaying"}
+        if url == ACOUSTID:
+            key = self.secrets().get("acoustid_api_key")
+            if not key:
+                raise ProviderError("acoustid_not_configured", False)
+            parameters.update(client=key, format="json")
+        provider = (
+            "acoustid"
+            if url == ACOUSTID
+            else "lastfm"
+            if url == FM
+            else "musicbrainz"
+            if url.startswith(MB)
+            else "caa"
+        )
+        post = url == ACOUSTID or (
+            signed and parameters.get("method") in {"track.scrobble", "track.updateNowPlaying"}
+        )
         data = urlencode(parameters).encode() if post else None
+        if url == ACOUSTID:
+            data = gzip.compress(data)
         address = url + (("?" + urlencode(parameters)) if parameters and not post else "")
         # Shared across worker processes. Never hold a SQLite transaction while doing network I/O.
         with FileLock(str(self.directory / f"{provider}.lock")):
@@ -157,6 +203,14 @@ class Providers:
                     headers={
                         "User-Agent": UA,
                         "Accept": "image/*" if image else "application/json",
+                        **(
+                            {
+                                "Content-Type": "application/x-www-form-urlencoded",
+                                "Content-Encoding": "gzip",
+                            }
+                            if url == ACOUSTID
+                            else {}
+                        ),
                     },
                 )
                 mode = self.settings()["proxy_mode"]
@@ -184,7 +238,9 @@ class Providers:
                 result = raw if image else json.loads(raw)
                 if not image and not isinstance(result, dict):
                     raise ProviderError("provider_invalid_response")
-                if isinstance(result, dict) and "error" in result:
+                if url == ACOUSTID and result.get("status") != "ok":
+                    raise ProviderError("acoustid_rejected", False)
+                if url == FM and "error" in result:
                     code = int(result["error"])
                     raise ProviderError(
                         "lastfm_reauthorize" if code == 9 else f"lastfm_error_{code}",
@@ -199,14 +255,45 @@ class Providers:
             except (URLError, TimeoutError, OSError, ValueError) as error:
                 raise ProviderError() from error
 
-    def cached(self, provider, key, url, parameters=None):
+    def cover_data(self, url):
+        """Use the configured server proxy and the same image guards for preview and apply."""
+        from wildstring.library.assets import TrackAssets
+
+        try:
+            parsed = urlsplit(url)
+            valid = (
+                parsed.scheme in {"http", "https"}
+                and parsed.hostname == "coverartarchive.org"
+                and parsed.port in (None, 80, 443)
+                and not parsed.username
+                and not parsed.password
+                and not parsed.query
+                and not parsed.fragment
+                and re.fullmatch(
+                    r"/release/[0-9a-f-]{36}/[0-9]+(?:-[0-9]+)?\.(?:jpg|png)", parsed.path
+                )
+            )
+        except ValueError:
+            valid = False
+        if not valid:
+            raise HTTPException(422, "invalid_cover_url")
+        try:
+            data = self.request("https://coverartarchive.org" + parsed.path, image=True)
+            thumbnail = TrackAssets(self.repository).thumbnail(data, 768)
+            if thumbnail is None:
+                raise ProviderError("invalid_cover", False)
+            return data, thumbnail
+        except ProviderError:
+            raise HTTPException(502, "cover_download_failed") from None
+
+    def cached(self, provider, key, url, parameters=None, *, force=False):
         digest = hashlib.sha256(key.encode()).hexdigest()
         with self.database.connect() as connection:
             row = connection.execute(
                 "SELECT payload FROM provider_cache WHERE provider=? AND cache_key=? AND expires_at>?",
                 (provider, digest, time.time()),
             ).fetchone()
-        if row:
+        if row and not force:
             return json.loads(row[0])
         result = self.request(url, parameters)
         payload = json.dumps(result, ensure_ascii=False)
@@ -227,31 +314,83 @@ class Providers:
             )
         return result
 
-    def enqueue(self, track_ids):
+    def enqueue(self, track_ids=None, *, scope=None, identity=None, mode="all", force=False):
         config = self.settings()
         if not config["enabled"]:
             raise HTTPException(409, "providers_disabled")
-        ids = list(dict.fromkeys(track_ids))
+        ids = list(dict.fromkeys(track_ids or []))
         with self.database.connect(write=True) as connection:
             connection.execute("BEGIN IMMEDIATE")
-            rows = []
-            for track_id in ids:
-                row = connection.execute(
-                    "SELECT m.version FROM track_metadata m JOIN tracks t ON t.id=m.track_id WHERE t.id=? AND t.library_id=? AND t.status='available'",
-                    (track_id, self.repository.library_id()),
-                ).fetchone()
-                if row is None:
-                    raise HTTPException(404, "track_not_found")
-                rows.append((track_id, row[0]))
-            for track_id, version in rows:
-                connection.execute(
-                    "INSERT OR IGNORE INTO provider_jobs(id,track_id,metadata_version,status,created_at,updated_at) VALUES (?,?,?,'queued',?,?)",
-                    (uuid4().hex, track_id, version, time.time(), time.time()),
-                )
-                connection.execute("INSERT OR IGNORE INTO provider_seen VALUES (?)", (track_id,))
-        return {"queued": len(rows)}
+            sql = "SELECT t.id,m.version FROM track_metadata m JOIN tracks t ON t.id=m.track_id WHERE t.library_id=? AND t.status='available'"
+            parameters = [self.repository.library_id()]
+            if scope == "album":
+                sql += " AND t.album_id=?"
+                parameters.append(identity)
+            elif scope == "track":
+                sql += " AND t.id=?"
+                parameters.append(identity)
+            elif scope != "library":
+                if not ids:
+                    return {"queued": 0, "already_active": 0, "total": 0}
+                sql += " AND t.id IN (" + ",".join("?" for _ in ids) + ")"
+                parameters.extend(ids)
+            rows = connection.execute(sql, parameters).fetchall()
+            if (scope in {"album", "track"} and not rows) or (
+                scope is None and len(rows) != len(ids)
+            ):
+                raise HTTPException(404, "track_not_found")
+            before = connection.total_changes
+            clock = time.time()
+            connection.executemany(
+                "INSERT OR IGNORE INTO provider_jobs(id,track_id,metadata_version,status,created_at,updated_at,refresh_mode,force) VALUES (?,?,?,'queued',?,?,?,?)",
+                [
+                    (uuid4().hex, row["id"], row["version"], clock, clock, mode, force)
+                    for row in rows
+                ],
+            )
+            added = connection.total_changes - before
+            connection.executemany(
+                "INSERT OR IGNORE INTO provider_seen VALUES (?)", [(row["id"],) for row in rows]
+            )
+        return {"queued": added, "already_active": len(rows) - added, "total": len(rows)}
 
-    def suggestions(self, track):
+    def identify(self, track, *, force=False):
+        audio = calculate(self.repository, track["id"], self.exit)
+        result = self.cached(
+            "acoustid",
+            json.dumps(audio, sort_keys=True),
+            ACOUSTID,
+            audio | {"meta": "recordingids"},
+            force=force,
+        )
+        matches = {}
+        for item in result.get("results", [])[:30]:
+            score = item.get("score")
+            if (
+                isinstance(score, bool)
+                or not isinstance(score, int | float)
+                or not math.isfinite(score)
+                or not 0.7 <= score <= 1
+            ):
+                continue
+            try:
+                acoustid = str(UUID(item["id"]))
+                for recording in item.get("recordings", [])[:30]:
+                    identity = str(UUID(recording["id"]))
+                    if score > matches.get(identity, {}).get("match", {}).get("score", -1):
+                        matches[identity] = {
+                            "id": identity,
+                            "match": {
+                                "method": "acoustid",
+                                "score": score,
+                                "acoustid_id": acoustid,
+                            },
+                        }
+            except (KeyError, ValueError, TypeError, AttributeError):
+                continue
+        return sorted(matches.values(), key=lambda item: item["match"]["score"], reverse=True)[:3]
+
+    def suggestions(self, track, *, force=False):
         output, warnings = [], []
         config = self.settings()
         local_cover = bool(track.get("has_cover"))
@@ -261,11 +400,28 @@ class Providers:
             with suppress(HTTPException):
                 local_cover = TrackAssets(self.repository).cover(track["id"], 96) is not None
         if config["musicbrainz"]:
+            recordings = []
+            if config["acoustid"]:
+                try:
+                    recordings = self.identify(track, force=force)
+                except (
+                    ProviderError,
+                    FingerprintError,
+                    KeyError,
+                    TypeError,
+                    ValueError,
+                    AttributeError,
+                ) as error:
+                    warnings.append(
+                        error.code
+                        if isinstance(error, ProviderError | FingerprintError)
+                        else "acoustid_invalid_response"
+                    )
             try:
                 identity = track.get("external_ids", {}).get("recording")
-                if identity:
+                if not recordings and identity:
                     recordings = [{"id": str(UUID(identity))}]
-                else:
+                elif not recordings:
 
                     def escape(text):
                         return re.sub(r'([+\-!(){}\[\]^"~*?:\\/]|&&|\|\|)', r"\\\1", text)
@@ -278,6 +434,7 @@ class Providers:
                         query,
                         MB + "recording",
                         {"query": query, "limit": 3, "fmt": "json"},
+                        force=force,
                     ).get("recordings", [])
                 for item in recordings[:3]:
                     recording = self.cached(
@@ -288,6 +445,7 @@ class Providers:
                             "inc": "artists artist-rels work-rels work-level-rels releases",
                             "fmt": "json",
                         },
+                        force=force,
                     )
                     credits = recording.get("artist-credit", [])
                     fields = {
@@ -316,10 +474,11 @@ class Providers:
                             fields.setdefault(role, []).append(relation["artist"]["name"])
                     release_id = track.get("external_ids", {}).get("release")
                     releases = recording.get("releases", [])
+                    # An embedded release ID is a hint, not a filter: downloaded tags may
+                    # point at a different recording or an unrelated pressing entirely.
+                    releases = sorted(releases, key=lambda release: release.get("id") != release_id)
                     # Keep different releases separate; never silently pick the first pressing.
                     for release in releases[:3] or [None]:
-                        if release_id and release and release["id"] != release_id:
-                            continue
                         candidate = json.loads(json.dumps(fields))
                         cover = None
                         if release:
@@ -335,6 +494,7 @@ class Providers:
                                         "caa",
                                         release["id"],
                                         f"https://coverartarchive.org/release/{UUID(release['id'])}",
+                                        force=force,
                                     )
                                     cover = next(
                                         (
@@ -350,6 +510,7 @@ class Providers:
                                 f"https://musicbrainz.org/recording/{recording['id']}",
                                 candidate,
                                 cover,
+                                item.get("match", {}),
                             )
                         )
             except (ProviderError, KeyError, TypeError, ValueError, AttributeError) as error:
@@ -366,9 +527,9 @@ class Providers:
                     "track": track["title"],
                     "autocorrect": 0,
                 }
-                result = self.cached("lastfm", json.dumps(params, sort_keys=True), FM, params).get(
-                    "track", {}
-                )
+                result = self.cached(
+                    "lastfm", json.dumps(params, sort_keys=True), FM, params, force=force
+                ).get("track", {})
                 fields = {
                     "tags": [tag["name"] for tag in result.get("toptags", {}).get("tag", [])][:50]
                 }
@@ -383,19 +544,22 @@ class Providers:
                         + quote(track["title"], safe=""),
                         fields,
                         None,
+                        {},
                     )
                 )
             except (ProviderError, KeyError, TypeError, ValueError, AttributeError) as error:
                 warnings.append(
                     error.code if isinstance(error, ProviderError) else "lastfm_invalid_response"
                 )
+        output.sort(key=lambda item: config["priority"].index(item[0]))
         return output, warnings
 
     def process_job(self, job):
         track = self.repository.track(job["track_id"])
         if track is None:
             raise ProviderError("track_not_found", False)
-        suggestions, warnings = self.suggestions(track)
+        suggestions, warnings = self.suggestions(track, force=bool(job["force"]))
+        manual = MetadataEditor(self.repository).read(job["track_id"])["overrides"]
         with self.database.connect(write=True) as connection:
             version = connection.execute(
                 "SELECT version FROM track_metadata WHERE track_id=?", (job["track_id"],)
@@ -403,7 +567,12 @@ class Providers:
             if version != job["metadata_version"]:
                 status = "stale"
             else:
-                for source, url, fields, cover in suggestions:
+                saved = 0
+                for source, url, fields, cover, match in suggestions:
+                    if job["refresh_mode"] == "missing":
+                        fields = missing_fields(track, manual, fields)
+                    if not fields and not cover:
+                        continue
                     if cover:
                         parsed = urlsplit(cover)
                         if (
@@ -419,7 +588,7 @@ class Providers:
                             cover = "https://coverartarchive.org" + parsed.path
                     validated = Overrides.model_validate(fields).model_dump(exclude_unset=True)
                     connection.execute(
-                        "INSERT INTO metadata_suggestions(id,job_id,track_id,metadata_version,provider,source_url,fields,cover_url,created_at) VALUES (?,?,?,?,?,?,?,?,?)",
+                        "INSERT INTO metadata_suggestions(id,job_id,track_id,metadata_version,provider,source_url,fields,cover_url,created_at,match) VALUES (?,?,?,?,?,?,?,?,?,?)",
                         (
                             uuid4().hex,
                             job["id"],
@@ -430,9 +599,11 @@ class Providers:
                             json.dumps(validated, ensure_ascii=False),
                             cover,
                             time.time(),
+                            json.dumps(match),
                         ),
                     )
-                status = "completed" if suggestions else "failed" if warnings else "no_match"
+                    saved += 1
+                status = "completed" if saved else "failed" if warnings else "no_match"
             connection.execute(
                 "UPDATE provider_jobs SET status=?,warnings=?,updated_at=? WHERE id=?",
                 (status, json.dumps(warnings), time.time(), job["id"]),
@@ -707,6 +878,19 @@ class Providers:
                     if value and not re.fullmatch("[a-fA-F0-9]{32}", value):
                         raise HTTPException(422, "invalid_provider_credentials")
                     credentials[key] = value
+            if body.acoustid_api_key is not None:
+                if body.acoustid_api_key and not re.fullmatch(
+                    r"[A-Za-z0-9_-]{8,128}", body.acoustid_api_key
+                ):
+                    raise HTTPException(422, "invalid_acoustid_credentials")
+                credentials["acoustid_api_key"] = body.acoustid_api_key
+            if body.acoustid:
+                if not body.musicbrainz:
+                    raise HTTPException(422, "acoustid_requires_musicbrainz")
+                if not credentials.get("acoustid_api_key", self.secrets().get("acoustid_api_key")):
+                    raise HTTPException(422, "acoustid_not_configured")
+                if not shutil.which("fpcalc"):
+                    raise HTTPException(422, "fingerprint_tool_missing")
             if body.proxy_url is not None:
                 try:
                     proxy = urlsplit(body.proxy_url)
@@ -754,7 +938,7 @@ class Providers:
                             "INSERT OR IGNORE INTO provider_seen SELECT id FROM tracks"
                         )
                     connection.execute(
-                        "UPDATE provider_settings SET enabled=?,auto_new=?,musicbrainz=?,lastfm=?,caa=?,public_url=?,proxy_mode=?,version=version+1 WHERE id=1",
+                        "UPDATE provider_settings SET enabled=?,auto_new=?,musicbrainz=?,lastfm=?,caa=?,public_url=?,proxy_mode=?,acoustid=?,priority=?,version=version+1 WHERE id=1",
                         (
                             body.enabled,
                             body.auto_new,
@@ -763,6 +947,8 @@ class Providers:
                             body.caa,
                             body.public_url.rstrip("/"),
                             body.proxy_mode,
+                            body.acoustid,
+                            json.dumps(body.priority),
                         ),
                     )
                     if credentials:
@@ -772,6 +958,36 @@ class Providers:
         @router.post("/manage/providers/query", dependencies=mutation)
         def query(body: BatchQuery, user: admin):
             return self.enqueue(body.track_ids)
+
+        @router.post("/manage/providers/refresh", dependencies=mutation)
+        def refresh(body: RefreshQuery, user: admin):
+            if (body.scope == "library") != (body.id is None):
+                raise HTTPException(422, "invalid_refresh_scope")
+            return self.enqueue(
+                scope=body.scope, identity=body.id, mode=body.mode, force=body.force
+            )
+
+        @router.get("/manage/providers/jobs")
+        def provider_jobs(user: admin):
+            with self.database.connect() as connection:
+                items = [
+                    dict(row)
+                    for row in connection.execute(
+                        "SELECT j.*,t.title FROM provider_jobs j JOIN tracks t ON t.id=j.track_id WHERE t.library_id=? ORDER BY j.created_at DESC LIMIT 20",
+                        (self.repository.library_id(),),
+                    )
+                ]
+                counts = dict(
+                    connection.execute(
+                        "SELECT j.status,count(*) FROM provider_jobs j JOIN tracks t ON t.id=j.track_id WHERE t.library_id=? AND j.status IN ('queued','running') GROUP BY j.status",
+                        (self.repository.library_id(),),
+                    ).fetchall()
+                )
+            return {
+                "items": items,
+                "queued": counts.get("queued", 0),
+                "running": counts.get("running", 0),
+            }
 
         @router.get("/manage/providers/tracks/{track_id}")
         def results(track_id: str, user: admin):
@@ -793,6 +1009,11 @@ class Providers:
                 ]
             for result in suggestions:
                 result["fields"] = json.loads(result["fields"])
+                result["match"] = json.loads(result["match"])
+            priority = self.settings()["priority"]
+            suggestions.sort(
+                key=lambda item: (priority.index(item["provider"]), -item["match"].get("score", 0))
+            )
             return {"suggestions": suggestions, "jobs": jobs}
 
         @router.post("/manage/providers/suggestions/{identity}/apply", dependencies=mutation)
@@ -823,10 +1044,29 @@ class Providers:
                 )
             return saved
 
+        @router.get("/manage/providers/suggestions/{identity}/cover-preview")
+        def cover_preview(identity: str, user: admin):
+            with self.database.connect() as connection:
+                row = connection.execute(
+                    "SELECT s.cover_url FROM metadata_suggestions s JOIN tracks t ON t.id=s.track_id "
+                    "WHERE s.id=? AND t.library_id=?",
+                    (identity, self.repository.library_id()),
+                ).fetchone()
+            if row is None or not row["cover_url"]:
+                raise HTTPException(404, "suggestion_not_found")
+            _, thumbnail = self.cover_data(row["cover_url"])
+            return Response(
+                thumbnail,
+                media_type="image/jpeg",
+                headers={
+                    "Cache-Control": "private, no-store",
+                    "Vary": "Cookie",
+                    "X-Content-Type-Options": "nosniff",
+                },
+            )
+
         @router.post("/manage/providers/suggestions/{identity}/cover", dependencies=mutation)
         def apply_cover(identity: str, body: CoverApply, user: admin):
-            from wildstring.library.assets import TrackAssets
-
             with self.database.connect() as connection:
                 row = connection.execute(
                     "SELECT * FROM metadata_suggestions WHERE id=?", (identity,)
@@ -835,22 +1075,7 @@ class Providers:
                 raise HTTPException(404, "suggestion_not_found")
             if row["metadata_version"] != body.version:
                 raise HTTPException(409, "metadata_version_conflict")
-            parsed = urlsplit(row["cover_url"])
-            if (
-                parsed.hostname != "coverartarchive.org"
-                or parsed.port not in (None, 80, 443)
-                or not re.fullmatch(
-                    r"/release/[0-9a-f-]{36}/[0-9]+(?:-[0-9]+)?\.(?:jpg|png)", parsed.path
-                )
-            ):
-                raise HTTPException(422, "invalid_cover_url")
-            try:
-                data = self.request("https://coverartarchive.org" + parsed.path, image=True)
-                asset = TrackAssets(self.repository)
-                if asset.thumbnail(data, 768) is None:
-                    raise ProviderError("invalid_cover", False)
-            except ProviderError:
-                raise HTTPException(502, "cover_download_failed") from None
+            data, _ = self.cover_data(row["cover_url"])
             key = hashlib.sha256(data).hexdigest()
             folder = self.database.path.parent / "artwork"
             folder.mkdir(exist_ok=True)
@@ -1031,15 +1256,35 @@ class ProviderSettings(BaseModel):
     musicbrainz: bool = True
     lastfm: bool = True
     caa: bool = True
+    acoustid: bool = False
+    priority: list[Literal["musicbrainz", "lastfm"]] = Field(
+        default_factory=lambda: ["musicbrainz", "lastfm"], min_length=2, max_length=2
+    )
     public_url: str = Field(default="", max_length=2048)
     proxy_mode: Literal["environment", "custom", "direct"] = "environment"
     proxy_url: str | None = Field(default=None, max_length=2048, repr=False)
     api_key: str | None = Field(default=None, max_length=128, repr=False)
     api_secret: str | None = Field(default=None, max_length=128, repr=False)
+    acoustid_api_key: str | None = Field(default=None, max_length=128, repr=False)
+
+    @field_validator("priority")
+    @classmethod
+    def unique_priority(cls, value):
+        if len(set(value)) != 2:
+            raise ValueError("Duplicate metadata source")
+        return value
 
 
 class BatchQuery(BaseModel):
     track_ids: list[str] = Field(min_length=1, max_length=100)
+
+
+class RefreshQuery(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    scope: Literal["track", "album", "library"]
+    id: str | None = Field(default=None, min_length=1, max_length=128)
+    mode: Literal["missing", "all"] = "missing"
+    force: bool = False
 
 
 class ApplySuggestion(BaseModel):

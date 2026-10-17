@@ -28,7 +28,13 @@ RECORDING = "12029af2-f6fb-4423-b145-5ee157714ed4"
 
 def enable(client, **changes):
     settings = client.get("/api/v1/manage/providers").json()
-    for key in ("lastfm_configured", "proxy_configured", "environment_proxy_configured"):
+    for key in (
+        "lastfm_configured",
+        "proxy_configured",
+        "environment_proxy_configured",
+        "acoustid_configured",
+        "fingerprint_available",
+    ):
         settings.pop(key)
     return client.put(
         "/api/v1/manage/providers", headers=HEADERS, json=settings | {"enabled": True} | changes
@@ -102,13 +108,14 @@ def test_suggestions_are_explicit_versioned_and_keep_user_data(settings, authent
         providers.stop()
         assert enable(client).status_code == 200
         track = client.get("/api/v1/tracks").json()["items"][0]
-        providers.suggestions = lambda _: (
+        providers.suggestions = lambda _, **_kwargs: (
             [
                 (
                     "musicbrainz",
                     "https://musicbrainz.org/recording/" + RECORDING,
                     {"title": "新名", "composers": ["作者"]},
                     None,
+                    {},
                 )
             ],
             [],
@@ -354,7 +361,7 @@ def test_auto_queries_only_new_tracks_after_enable(settings, authenticated_clien
         providers = client.app.state.providers
         providers.stop()
         assert enable(client).status_code == 200
-        providers.suggestions = lambda _: ([], [])
+        providers.suggestions = lambda _, **_kwargs: ([], [])
         providers.step()
         with providers.database.connect() as connection:
             assert connection.execute("SELECT count(*) FROM provider_jobs").fetchone()[0] == 0
@@ -377,13 +384,14 @@ def test_caa_cover_requires_fresh_confirmation_and_survives_rescan(settings, aut
         assert enable(client).status_code == 200
         track = client.get("/api/v1/tracks").json()["items"][0]
         url = "https://coverartarchive.org/release/" + RECORDING + "/12345.jpg"
-        providers.suggestions = lambda _: (
+        providers.suggestions = lambda _, **_kwargs: (
             [
                 (
                     "musicbrainz",
                     "https://musicbrainz.org/recording/" + RECORDING,
                     {"title": "候选"},
                     url,
+                    {},
                 )
             ],
             [],
@@ -473,7 +481,7 @@ def test_invalid_json_shape_and_nested_relations_are_failures_not_worker_crashes
         with pytest.raises(ProviderError, match="provider_invalid_response"):
             providers.request("https://musicbrainz.org/ws/2/recording")
 
-        def malformed(_provider, _key, url, *_args):
+        def malformed(_provider, _key, url, *_args, **_kwargs):
             return (
                 {"recordings": [{"id": RECORDING}]}
                 if url.endswith("recording")

@@ -9,6 +9,7 @@ import javax.inject.Singleton
 import okhttp3.OkHttpClient
 import okhttp3.CookieJar
 import okhttp3.Request
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.RequestBody.Companion.toRequestBody
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
@@ -19,14 +20,14 @@ import retrofit2.converter.gson.GsonConverterFactory
 
 data class CatalogQuery(val tab: String = "search", val kind: String = "discover", val title: String = "发现",
     val query: String = "", val offset: Int = 0, val collection: String? = null, val collectionId: String? = null,
-    val playlist: Playlist? = null) {
-    val key: String get() = Gson().toJson(listOf(tab, kind, query, offset, collection, collectionId))
+    val playlist: Playlist? = null, val role: String = "artist", val sort: String = "title", val albumFilter: String? = null) {
+    val key: String get() = Gson().toJson(listOf(tab, kind, query, offset, collection, collectionId, role, sort, albumFilter))
 }
 data class CatalogPage(val tracks: List<Track> = emptyList(), val albums: List<Album> = emptyList(),
     val artists: List<Artist> = emptyList(), val playlists: List<Playlist> = emptyList(), val total: Int = 0)
 
 @Singleton
-class Repository @Inject constructor(val session: SessionStore, val client: OkHttpClient, val database: QueueDatabase, val cache: ClientCache, val settings: AppSettings) {
+class Repository @Inject constructor(val session: SessionStore, val client: OkHttpClient, val database: QueueDatabase, val cache: ClientCache, val settings: AppSettings, val downloads: OfflineDownloads) {
     private val gson = Gson()
     private var cachedUrl: String? = null
     private var cachedApi: Api? = null
@@ -40,6 +41,7 @@ class Repository @Inject constructor(val session: SessionStore, val client: OkHt
         knownTracks[track.id] = merged
         return merged
     }
+    fun rememberPlaybackTrack(track: Track): Track = rememberTrack(track)
     @Synchronized private fun favoriteChanged(id: String) { favoriteVersions[id] = favoriteClock.incrementAndGet() }
     @Synchronized fun publishFavorite(track: Track): Track {
         favoriteChanged(track.id)
@@ -48,7 +50,7 @@ class Repository @Inject constructor(val session: SessionStore, val client: OkHt
     @Synchronized fun api(): Api {
         val base = session.endpoint ?: throw IOException("请先连接服务器。")
         if (cachedUrl != base.toString()) {
-            cachedApi = Retrofit.Builder().baseUrl(base).client(client).addConverterFactory(GsonConverterFactory.create()).build().create(Api::class.java)
+            cachedApi = Retrofit.Builder().baseUrl(base).client(client).addConverterFactory(GsonConverterFactory.create(networkGson())).build().create(Api::class.java)
             cachedUrl = base.toString()
         }
         return checkNotNull(cachedApi)
@@ -60,7 +62,7 @@ class Repository @Inject constructor(val session: SessionStore, val client: OkHt
     }
     fun cover(id: String): String = url("api", "v1", "tracks", id, "cover") + "?size=768"
     fun originalStream(id: String): String = url("api", "v1", "tracks", id, "stream")
-    fun stream(id: String): String = PlaybackRequest.url(originalStream(id), settings.state.value.aacBitrate)
+    fun stream(id: String): String = PlaybackRequest.url(originalStream(id), if (downloads.file(id) != null) 0 else settings.state.value.aacBitrate)
     suspend fun status(): AuthStatus {
         val owner = session.cacheScope()
         val endpoint = session.endpoint
@@ -82,17 +84,21 @@ class Repository @Inject constructor(val session: SessionStore, val client: OkHt
         val cookie = session.read()?.substringBefore(';') ?: throw IOException("登录已失效。")
         // A late password response must never clear cookies belonging to a newer login.
         val isolated = Retrofit.Builder().baseUrl(base).client(client.newBuilder().cookieJar(CookieJar.NO_COOKIES).build())
-            .addConverterFactory(GsonConverterFactory.create()).build().create(Api::class.java)
+            .addConverterFactory(GsonConverterFactory.create(networkGson())).build().create(Api::class.java)
         val response = isolated.changePassword(cookie, PasswordChange(current, next))
         if (owner != session.cacheScope() || base != session.endpoint) throw CancellationException("会话已变化。")
         if (!response.isSuccessful) throw HttpException(response)
     }
-    suspend fun tracks(query: String = "", offset: Int = 0, collection: String? = null, collectionId: String? = null, recent: Boolean = false): Page<Track> {
+    suspend fun tracks(query: String = "", offset: Int = 0, collection: String? = null, collectionId: String? = null, recent: Boolean = false, role: String = "artist", sort: String = "title", limit: Int = 50, albumFilter: String? = null): Page<Track> {
         val profile = session.cacheScope()
         val snapshot = favoriteClock.get()
         val resource = if (collection != null && collectionId != null) url("api", "v1", collection, collectionId, "tracks") else url("api", "v1", "tracks")
-        val target = if (recent) "$resource?played_only=true&sort=last_played_at" else resource
-        return api().tracks(target, query, offset = offset).let { page -> requireProfile(profile); page.copy(items = page.items.map { rememberTrack(it, snapshot) }) }
+        val target = resource.toHttpUrl().newBuilder().apply {
+            addQueryParameter("sort", if (recent && sort == "title") "last_played_at" else sort)
+            if (recent) addQueryParameter("played_only", "true")
+            if (collection == "artists") { addQueryParameter("role", role); if (albumFilter != null) addQueryParameter("album_id", albumFilter) }
+        }.build().toString()
+        return api().tracks(target, query, limit = limit, offset = offset).let { page -> requireProfile(profile); page.copy(items = page.items.map { rememberTrack(it, snapshot) }) }
     }
     private fun requireProfile(profile: String?) { if (profile == null || session.cacheScope() != profile) throw CancellationException("会话已变化。") }
     private suspend fun <T> saved(key: String, type: Class<T>): T? = withContext(Dispatchers.IO) {
@@ -110,10 +116,10 @@ class Repository @Inject constructor(val session: SessionStore, val client: OkHt
                 val albumPage = albums.await()
                 CatalogPage(albums = albumPage.items, tracks = recent.await().items, total = albumPage.total)
             }
-            "albums" -> api().albums(query.query, offset = query.offset).let { CatalogPage(albums = it.items, total = it.total) }
-            "artists" -> api().artists(query.query, offset = query.offset).let { CatalogPage(artists = it.items, total = it.total) }
+            "albums" -> (if (query.collection == "artists" && query.collectionId != null) api().artistAlbums(url("api", "v1", "artists", query.collectionId, "albums"), query.query, offset = query.offset, role = query.role) else api().albums(query.query, offset = query.offset)).let { CatalogPage(albums = it.items, total = it.total) }
+            "artists" -> api().artists(query.query, offset = query.offset, role = query.role).let { CatalogPage(artists = it.items, total = it.total) }
             "playlists" -> api().playlists(limit = 50, offset = query.offset).let { CatalogPage(playlists = it.items, total = it.total) }
-            else -> tracks(query.query, query.offset, query.collection, query.collectionId, query.kind == "recent").let { CatalogPage(tracks = it.items, total = it.total) }
+            else -> tracks(query.query, query.offset, query.collection, query.collectionId, query.kind == "recent", query.role, query.sort, albumFilter = query.albumFilter).let { CatalogPage(tracks = it.items, total = it.total) }
         }
         requireProfile(profile)
         if (revision != cache.catalogRevision) throw CancellationException("曲库已更新。")
@@ -122,14 +128,34 @@ class Repository @Inject constructor(val session: SessionStore, val client: OkHt
         if (revision != cache.catalogRevision) throw CancellationException("曲库已更新。")
         return page
     }
+    /** Build the complete snapshot before touching playback. Any failed page preserves the old queue. */
+    suspend fun collectionTracks(query: CatalogQuery): List<Track> {
+        val owner = session.cacheScope() ?: throw IOException("登录已失效。")
+        val result = linkedMapOf<String, Track>()
+        var offset = 0
+        var expected = -1
+        while (true) {
+            val page = tracks(query.query, offset, query.collection, query.collectionId, query.kind == "recent", query.role, query.sort, 200, query.albumFilter)
+            requireProfile(owner)
+            if (expected == -1) { expected = page.total; require(expected <= 5000) { "集合超过 5000 首，请筛选后播放。" } }
+            require(expected == page.total) { "集合已变化，请重试。" }
+            if (page.items.isEmpty()) { require(offset >= expected) { "集合读取不完整，请重试。" }; break }
+            page.items.forEach { result[it.id] = it }
+            offset += page.items.size
+            if (offset >= expected) break
+        }
+        require(result.size == expected) { "集合已变化，请重试。" }
+        return result.values.toList()
+    }
     suspend fun cachedTrack(id: String): Track? = saved("track:$id", Track::class.java)?.let { rememberTrack(it) }
     suspend fun track(id: String): Track {
         val profile = session.cacheScope()
         val snapshot = favoriteClock.get()
-        return try { api().track(url("api", "v1", "tracks", id)).let { requireProfile(profile); val merged = rememberTrack(it, snapshot); save("track:$id", merged, profile); requireProfile(profile); rememberTrack(merged, snapshot) } }
+        return try { api().track(url("api", "v1", "tracks", id)).let { requireProfile(profile); val merged = rememberTrack(it, snapshot); downloads.refreshTrack(merged); save("track:$id", merged, profile); requireProfile(profile); rememberTrack(merged, snapshot) } }
+        catch (error: HttpException) { if (error.code() in listOf(401, 403, 404)) downloads.remove(id); throw error }
         catch (error: IOException) {
             if (error is javax.net.ssl.SSLException || session.cacheScope() != profile) throw error
-            (saved("track:$id", Track::class.java) ?: throw error).let { requireProfile(profile); rememberTrack(it) }
+            (downloads.track(id) ?: saved("track:$id", Track::class.java) ?: throw error).let { requireProfile(profile); rememberTrack(it) }
         }
     }
     suspend fun cachedLyrics(id: String): Lyrics? = saved("lyrics:$id", Lyrics::class.java)
@@ -146,6 +172,12 @@ class Repository @Inject constructor(val session: SessionStore, val client: OkHt
         save("track:${updated.id}", updated, profile)
         requireProfile(profile)
         return publishFavorite(updated)
+    }
+    suspend fun feedback(body: RecommendationFeedback): okhttp3.ResponseBody {
+        val profile = session.cacheScope()
+        return api().recommendationFeedback(body, RequestOwner(profile)).also { response ->
+            if (profile == null || profile != session.cacheScope()) { response.close(); throw CancellationException("会话已变化。") }
+        }
     }
     suspend fun logout() {
         val target = url("api", "v1", "auth", "logout")

@@ -25,12 +25,26 @@ import { PlaylistEditor } from './playlist-editor';
 import { QueuePanel } from './queue-panel';
 import { Management } from './management';
 import { MetadataEditor } from './metadata-editor';
+import { MetadataRefreshDialog, type RefreshTarget } from './metadata-refresh';
 import { AccountDialog } from './accounts';
 import { ThemeControl } from './theme';
 import { Pagination, TrackList } from './track-list';
 import type { TrackOperations } from './track-actions';
+import { Discover, Devices } from './discover';
+import { OfflinePanel } from './offline-panel';
+import { collectTracks } from './playback-state';
+import { saveDownloads, usingOfflineAccess } from './offline';
 
-type View = 'tracks' | 'albums' | 'artists' | 'playlists' | 'favorites' | 'listening';
+type View =
+  | 'tracks'
+  | 'albums'
+  | 'artists'
+  | 'playlists'
+  | 'favorites'
+  | 'listening'
+  | 'discover'
+  | 'offline'
+  | 'devices';
 type Result =
   | { kind: 'tracks'; page: TrackPage }
   | { kind: 'albums'; page: AlbumPage }
@@ -43,6 +57,9 @@ const labels: Record<View, string> = {
   playlists: '歌单',
   favorites: '♥ 我喜欢',
   listening: '收听记录',
+  discover: '每日推荐 · AI',
+  offline: '离线音乐',
+  devices: '跨设备继续',
 };
 const icons: Record<View, string> = {
   tracks: '▤',
@@ -51,14 +68,24 @@ const icons: Record<View, string> = {
   playlists: '♫',
   favorites: '♡',
   listening: '◷',
+  discover: '✦',
+  offline: '↓',
+  devices: '⇄',
 };
 
 export function Library({ onLogout, user }: { onLogout: () => Promise<void>; user: User }) {
   const isAdmin = user.role === 'admin';
   const [accountOpen, setAccountOpen] = useState(false);
-  const [view, setView] = useState<View>('tracks');
+  const [view, setView] = useState<View>(
+    navigator.onLine && !usingOfflineAccess() ? 'tracks' : 'offline',
+  );
+  const specialView = view === 'discover' || view === 'offline' || view === 'devices';
+  const [collectionBusy, setCollectionBusy] = useState(false);
+  const collectionRequest = useRef<AbortController | null>(null);
+  useEffect(() => () => collectionRequest.current?.abort(), []);
   const [manageOpen, setManageOpen] = useState(false);
   const [editingTrack, setEditingTrack] = useState<Track | null>(null);
+  const [metadataRefresh, setMetadataRefresh] = useState<RefreshTarget | null>(null);
   useEffect(() => {
     if (manageOpen) window.scrollTo({ top: 0 });
   }, [manageOpen]);
@@ -93,7 +120,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
   const [bulkTarget, setBulkTarget] = useState(''),
     [bulkBusy, setBulkBusy] = useState(false);
   const closePlayer = useCallback(() => setLyricsOpen(false), []);
-  const player = usePlayer(),
+  const player = usePlayer(user.id),
     motto = useLibraryMotto(),
     favorites = useFavorites(revision, setNotice);
   const favoritesPlaylist = catalog.find((item) => item.kind === 'favorites');
@@ -116,9 +143,21 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
   const lastQuery = useRef('');
   const collectionsMetrics = view === 'playlists' || view === 'favorites' ? listeningRevision : 0;
   const liveRules = activePlaylist?.kind === 'smart' || activePlaylist?.kind === 'favorites';
+  useEffect(
+    () => () => {
+      collectionRequest.current?.abort();
+      collectionRequest.current = null;
+      setCollectionBusy(false);
+    },
+    [query, album?.id, selectedArtist?.id, artistRole, activePlaylist?.id, statsSort],
+  );
 
   useEffect(() => {
     const controller = new AbortController();
+    if (!navigator.onLine) {
+      setCollectionsLoading(false);
+      return;
+    }
     setCollectionsLoading(true);
     const epoch = mutationEpoch.current;
     async function load() {
@@ -167,6 +206,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
   }, [view, revision, listeningRevision, favorites.change]);
 
   useEffect(() => {
+    if (specialView) return;
     if (view === 'favorites' && !activePlaylist) {
       setLoading(collectionsLoading);
       if (!collectionsLoading) setError('暂时无法读取我喜欢歌单，请刷新重试。');
@@ -249,6 +289,9 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
     setOffset(0);
   }
   function switchView(target: View) {
+    collectionRequest.current?.abort();
+    collectionRequest.current = null;
+    setCollectionBusy(false);
     setManageOpen(false);
     setView(target);
     setAlbum(null);
@@ -355,12 +398,63 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
       playlistPending.current.delete(list.id);
     }
   }
+  function collectionPath() {
+    const parameters = new URLSearchParams({ q: album ? '' : query });
+    let path = '/tracks';
+    if (activePlaylist) path = `/playlists/${activePlaylist.id}/tracks`;
+    else if (selectedArtist) {
+      path = `/artists/${selectedArtist.id}/tracks`;
+      if (album) parameters.set('album_id', album.id);
+    } else if (album) path = `/albums/${album.id}/tracks`;
+    if (view === 'artists' && artistRole) parameters.set('role', artistRole);
+    if (view === 'listening') {
+      parameters.set('played_only', 'true');
+      parameters.set('sort', statsSort);
+    }
+    return `${path}?${parameters}`;
+  }
+  async function completeCollection(target?: Track, download = false) {
+    if (collectionRequest.current) return;
+    const controller = new AbortController();
+    collectionRequest.current = controller;
+    setCollectionBusy(true);
+    setNotice(download ? '正在准备离线歌曲…' : '正在读取完整播放列表…');
+    try {
+      const tracks = await collectTracks(collectionPath(), controller.signal);
+      if (controller.signal.aborted) return;
+      if (download) {
+        await saveDownloads(tracks);
+        setNotice(`已添加 ${tracks.length} 首到离线下载，可在“离线音乐”查看。`);
+      } else {
+        const index = target ? tracks.findIndex((t) => t.id === target.id) : 0;
+        if (index < 0) throw new Error('歌曲已从集合移除，请刷新。');
+        player.start(tracks, index);
+        setNotice(`完整队列已就位，共 ${tracks.length} 首。`);
+      }
+    } catch (e) {
+      if (!controller.signal.aborted)
+        setNotice(e instanceof Error ? e.message : '完整集合未读取成功，请重试。');
+    } finally {
+      if (collectionRequest.current === controller) {
+        collectionRequest.current = null;
+        setCollectionBusy(false);
+      }
+    }
+  }
   const operations: TrackOperations = {
     favorites,
+    onDownload: (track) => {
+      void saveDownloads([track])
+        .then(() => setNotice('已添加到离线下载。'))
+        .catch((e) => setNotice(e instanceof Error ? e.message : '离线保存未完成。'));
+    },
     playlists: catalog.filter((item) => item.kind === 'manual'),
     onAdd: addToPlaylist,
     onCreate: (track) => setEditor({ initial: null, track }),
     onEdit: isAdmin ? setEditingTrack : undefined,
+    onRefresh: isAdmin
+      ? (track) => setMetadataRefresh({ scope: 'track', id: track.id, label: track.title })
+      : undefined,
     ...(activePlaylist?.kind === 'manual'
       ? {
           onRemove: (track: Track) => void editPlaylistTrack(track),
@@ -515,6 +609,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
             onBack={() => setManageOpen(false)}
             onEdit={setEditingTrack}
             onChanged={refreshLibrary}
+            onRefresh={() => setMetadataRefresh({ scope: 'library', label: '整个曲库' })}
           />
         )}
         <main className="library" hidden={manageOpen}>
@@ -575,364 +670,396 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
               </button>
             </form>
           </header>
-          <section
-            className={`collection-heading ${album || selectedArtist ? 'album-heading' : ''}`}
-          >
-            <div>
-              {(album || selectedArtist || playlist) && (
-                <button
-                  className="back-button text-button"
-                  onClick={() => {
-                    if (album) {
-                      setAlbum(null);
-                      setOffset(0);
-                    } else if (selectedArtist) switchView('artists');
-                    else switchView('playlists');
-                  }}
-                >
-                  ←{' '}
-                  {album
-                    ? selectedArtist
-                      ? `返回 ${selectedArtist.name}`
-                      : '返回专辑'
-                    : selectedArtist
-                      ? '返回艺人'
-                      : '返回歌单'}
-                </button>
-              )}
-              <p className="eyebrow">
-                LIBRARY /{' '}
-                {album
-                  ? 'ALBUM'
-                  : selectedArtist
-                    ? 'ARTIST'
-                    : activePlaylist
-                      ? activePlaylist.kind === 'smart'
-                        ? 'SMART PLAYLIST'
-                        : 'PLAYLIST'
-                      : query
-                        ? 'SEARCH'
-                        : view.toUpperCase()}
-              </p>
-              <h1>{title}</h1>
-              <p className="muted">{subtitle}</p>
-            </div>
-            {headingCover && (
-              <Cover
-                key={`${headingCover}-${revision}`}
-                trackId={headingCover}
-                title={title}
-                size={320}
-                className={`album-heading-cover ${selectedArtist && !album ? 'artist-portrait' : ''}`}
-              />
-            )}
-            <div className="collection-stat">
-              <strong>{visible?.total ?? '—'}</strong>
-              <span>
-                {kind === 'artists'
-                  ? '位曲库艺人'
-                  : kind === 'playlists'
-                    ? '个歌单'
-                    : kind === 'albums'
-                      ? '张专辑'
-                      : '首歌曲'}
-              </span>
-            </div>
-          </section>
-          {view === 'listening' && (
-            <div className="listening-summary" aria-label="收听统计">
-              <div>
-                <strong>{stats?.play_count ?? 0}</strong>
-                <span title="累计听过半首或 4 分钟计一次；同一次播放只计一次">播放次数</span>
-              </div>
-              <div>
-                <strong>{listeningTime(stats?.listened_ms || 0)}</strong>
-                <span>累计收听</span>
-              </div>
-              <div>
-                <strong>{stats?.tracks_played ?? 0}</strong>
-                <span>听过的歌曲</span>
-              </div>
-              <div>
-                <strong>{stats?.favorites ?? 0}</strong>
-                <span>喜欢的歌曲</span>
-              </div>
-            </div>
+          {view === 'discover' && (
+            <Discover
+              player={player}
+              favorites={favorites}
+              onSaved={(list) => {
+                setCollectionRevision((v) => v + 1);
+                setNotice(`已保存：${list.name}`);
+              }}
+            />
           )}
-          <div className="library-toolbar">
-            <div className="toolbar-actions">
-              <div className="view-switch" role="group" aria-label="曲库显示方式">
-                <button
-                  aria-pressed={
-                    !artistGrid &&
-                    !playlistGrid &&
-                    !albumGrid &&
-                    (view === 'tracks' || !!selectedArtist)
-                  }
-                  onClick={() => switchTab('tracks')}
-                >
-                  歌曲
-                </button>
-                <button aria-pressed={albumGrid || !!album} onClick={() => switchTab('albums')}>
-                  专辑
-                </button>
-                <button aria-pressed={artistGrid} onClick={() => switchView('artists')}>
-                  艺人
-                </button>
-                <button
-                  aria-pressed={view === 'playlists' || view === 'favorites'}
-                  onClick={() => switchView('playlists')}
-                >
-                  歌单
-                </button>
-              </div>
-              {view === 'artists' && (
-                <label className="artist-role">
-                  参与角色{' '}
-                  <select
-                    aria-label="艺人参与角色"
-                    value={artistRole}
-                    onChange={(e) => {
-                      setArtistRole(e.target.value);
-                      setSelectedArtist(null);
-                      setAlbum(null);
-                      setOffset(0);
+          {view === 'offline' && <OfflinePanel player={player} />}
+          {view === 'devices' && <Devices player={player} user={user} />}
+          <div hidden={specialView}>
+            <section
+              className={`collection-heading ${album || selectedArtist ? 'album-heading' : ''}`}
+            >
+              <div>
+                {(album || selectedArtist || playlist) && (
+                  <button
+                    className="back-button text-button"
+                    onClick={() => {
+                      if (album) {
+                        setAlbum(null);
+                        setOffset(0);
+                      } else if (selectedArtist) switchView('artists');
+                      else switchView('playlists');
                     }}
                   >
-                    <option value="">全部角色</option>
-                    <option value="artist">歌曲艺人</option>
-                    <option value="album_artist">专辑艺人</option>
-                    <option value="vocalist">演唱</option>
-                    <option value="lyricist">作词</option>
-                    <option value="composer">作曲</option>
-                    <option value="arranger">编曲</option>
-                  </select>
-                </label>
-              )}
-              {kind === 'tracks' && (
-                <button
-                  className="primary"
-                  disabled={loading || !!error || !page?.items.length}
-                  onClick={() => page && player.start(page.items, 0)}
-                >
-                  <span aria-hidden="true">▶ </span>
-                  {page && page.total > page.items.length
-                    ? '播放本页'
-                    : album
-                      ? '播放专辑'
+                    ←{' '}
+                    {album
+                      ? selectedArtist
+                        ? `返回 ${selectedArtist.name}`
+                        : '返回专辑'
                       : selectedArtist
-                        ? '播放艺人'
-                        : activePlaylist
-                          ? '播放歌单'
-                          : '播放全部'}
-                </button>
-              )}
-              {(playlistGrid || view === 'favorites') && (
-                <button
-                  className="primary"
-                  onClick={() => setEditor({ initial: null, track: null })}
-                >
-                  ＋ 新建歌单
-                </button>
-              )}
-              {activePlaylist && activePlaylist.kind !== 'favorites' && (
-                <>
-                  <button onClick={() => setEditor({ initial: activePlaylist, track: null })}>
-                    编辑歌单
+                        ? '返回艺人'
+                        : '返回歌单'}
                   </button>
-                  <button className="text-button" onClick={() => void deletePlaylist()}>
-                    删除歌单
-                  </button>
-                </>
+                )}
+                <p className="eyebrow">
+                  LIBRARY /{' '}
+                  {album
+                    ? 'ALBUM'
+                    : selectedArtist
+                      ? 'ARTIST'
+                      : activePlaylist
+                        ? activePlaylist.kind === 'smart'
+                          ? 'SMART PLAYLIST'
+                          : 'PLAYLIST'
+                        : query
+                          ? 'SEARCH'
+                          : view.toUpperCase()}
+                </p>
+                <h1>{title}</h1>
+                <p className="muted">{subtitle}</p>
+              </div>
+              {headingCover && (
+                <Cover
+                  key={`${headingCover}-${revision}`}
+                  trackId={headingCover}
+                  title={title}
+                  size={320}
+                  className={`album-heading-cover ${selectedArtist && !album ? 'artist-portrait' : ''}`}
+                />
               )}
-              {view === 'listening' && (
-                <select
-                  aria-label="收听排序"
-                  value={statsSort}
-                  onChange={(event) => {
-                    setStatsSort(event.target.value);
-                    setOffset(0);
-                  }}
-                >
-                  <option value="last_played_at">最近听过</option>
-                  <option value="play_count">经常播放</option>
-                  <option value="listened_ms">收听最久</option>
-                </select>
-              )}
-              {query && !album && (
-                <button className="text-button" onClick={clearSearch}>
-                  清除搜索
-                </button>
-              )}
-            </div>
-            <button
-              className="text-button"
-              onClick={() => setRevision((value) => value + 1)}
-              disabled={loading}
-            >
-              {loading ? '读取中…' : '刷新曲库 ↻'}
-            </button>
-          </div>
-          {page &&
-            page.items.length > 0 &&
-            operations.playlists.length > 0 &&
-            !loading &&
-            !error && (
-              <div className="bulk-playlist">
-                <label>
-                  <span>把这一页留进歌单</span>
-                  <select
-                    aria-label="本页加入歌单"
-                    value={bulkTarget}
-                    onChange={(event) => setBulkTarget(event.target.value)}
-                  >
-                    <option value="">选择普通歌单…</option>
-                    {operations.playlists.map((item) => (
-                      <option key={item.id} value={item.id}>
-                        {item.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <button disabled={!bulkTarget || bulkBusy} onClick={() => void bulkAdd()}>
-                  {bulkBusy ? '加入中…' : '加入本页'}
-                </button>
+              <div className="collection-stat">
+                <strong>{visible?.total ?? '—'}</strong>
+                <span>
+                  {kind === 'artists'
+                    ? '位曲库艺人'
+                    : kind === 'playlists'
+                      ? '个歌单'
+                      : kind === 'albums'
+                        ? '张专辑'
+                        : '首歌曲'}
+                </span>
+              </div>
+            </section>
+            {view === 'listening' && (
+              <div className="listening-summary" aria-label="收听统计">
+                <div>
+                  <strong>{stats?.play_count ?? 0}</strong>
+                  <span title="累计听过半首或 4 分钟计一次；同一次播放只计一次">播放次数</span>
+                </div>
+                <div>
+                  <strong>{listeningTime(stats?.listened_ms || 0)}</strong>
+                  <span>累计收听</span>
+                </div>
+                <div>
+                  <strong>{stats?.tracks_played ?? 0}</strong>
+                  <span>听过的歌曲</span>
+                </div>
+                <div>
+                  <strong>{stats?.favorites ?? 0}</strong>
+                  <span>喜欢的歌曲</span>
+                </div>
               </div>
             )}
-          {error ? (
-            <div className="empty" role="alert">
-              <h2>暂时无法读取曲库</h2>
-              <p>{error}</p>
-              <button onClick={() => setRevision((value) => value + 1)}>重新连接</button>
-            </div>
-          ) : loading ? (
-            <div className="empty" role="status">
-              正在读取你的音乐…
-            </div>
-          ) : !visible?.items.length ? (
-            <div className="empty">
-              <span className="empty-symbol">≋</span>
-              <h2>
-                {query
-                  ? `没有找到匹配的${kind === 'artists' ? '艺人' : kind === 'albums' ? '专辑' : kind === 'playlists' ? '歌单' : '歌曲'}`
-                  : activePlaylist?.kind === 'favorites'
-                    ? '喜欢的歌，留在这里。'
-                    : activePlaylist?.kind === 'smart'
-                      ? '还没有符合规则的歌'
-                      : activePlaylist
-                        ? '给这张歌单，选一首开场。'
-                        : view === 'listening'
-                          ? '从一首喜欢的歌开始。'
-                          : artistGrid
-                            ? '还没有艺人信息'
-                            : '曲库还很安静'}
-              </h2>
-              <p>
-                {query
-                  ? '试试其他关键词。'
-                  : activePlaylist?.kind === 'favorites'
-                    ? '点击歌曲旁的心形，收藏就会出现在这里。'
-                    : activePlaylist?.kind === 'smart'
-                      ? '可以编辑规则，换一种方式找歌。'
-                      : activePlaylist
-                        ? '从歌曲的更多操作加入，或将一页歌曲一起加入。'
-                        : view === 'listening'
-                          ? '听过的歌曲、次数和时长会留在这里。'
-                          : '导入音乐后，刷新曲库。'}
-              </p>
-            </div>
-          ) : (
-            <>
-              {kind === 'artists' ? (
-                <div className="artist-grid" aria-label="艺人列表">
-                  {(visible as ArtistPage).items.map((item) => (
-                    <button
-                      className="artist-card"
-                      key={item.id}
-                      aria-label={`查看艺人 ${item.name}`}
-                      onClick={() => openArtist(item)}
-                    >
-                      <Cover trackId={item.cover_track_id} title={item.name} size={320} />
-                      <strong>{item.name}</strong>
-                      <small>
-                        {item.album_count} 张专辑 · {item.track_count} 首歌曲
-                      </small>
-                    </button>
-                  ))}
+            <div className="library-toolbar">
+              <div className="toolbar-actions">
+                <div className="view-switch" role="group" aria-label="曲库显示方式">
+                  <button
+                    aria-pressed={
+                      !artistGrid &&
+                      !playlistGrid &&
+                      !albumGrid &&
+                      (view === 'tracks' || !!selectedArtist)
+                    }
+                    onClick={() => switchTab('tracks')}
+                  >
+                    歌曲
+                  </button>
+                  <button aria-pressed={albumGrid || !!album} onClick={() => switchTab('albums')}>
+                    专辑
+                  </button>
+                  <button aria-pressed={artistGrid} onClick={() => switchView('artists')}>
+                    艺人
+                  </button>
+                  <button
+                    aria-pressed={view === 'playlists' || view === 'favorites'}
+                    onClick={() => switchView('playlists')}
+                  >
+                    歌单
+                  </button>
                 </div>
-              ) : kind === 'playlists' ? (
-                <div className="playlist-grid" aria-label="歌单列表">
-                  {(visible as PlaylistPage).items.map((item) => (
-                    <button
-                      className={`playlist-card ${item.kind}`}
-                      key={item.id}
-                      aria-label={`打开歌单 ${item.name}`}
-                      onClick={() => openPlaylist(item)}
-                    >
-                      {item.kind === 'favorites' ? (
-                        <span className="playlist-art favorites-art" aria-hidden="true">
-                          ♥
-                        </span>
-                      ) : item.cover_track_id ? (
-                        <Cover trackId={item.cover_track_id} title={item.name} size={320} />
-                      ) : (
-                        <span className="playlist-art" aria-hidden="true">
-                          {item.kind === 'smart' ? '✦' : '♫'}
-                        </span>
-                      )}
-                      <strong>{item.name}</strong>
-                      <span>
-                        {item.kind === 'favorites'
-                          ? '喜欢的声音'
-                          : item.kind === 'smart'
-                            ? '规则歌单'
-                            : '普通歌单'}{' '}
-                        · {item.track_count} 首
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              ) : kind === 'albums' ? (
-                <div className="album-grid" aria-label="专辑列表">
-                  {(visible as AlbumPage).items.map((item) => (
-                    <button
-                      className="album-card"
-                      key={item.id}
-                      aria-label={`打开专辑 ${item.title}`}
-                      onClick={() => {
-                        setAlbum(item);
+                {view === 'artists' && (
+                  <label className="artist-role">
+                    参与角色{' '}
+                    <select
+                      aria-label="艺人参与角色"
+                      value={artistRole}
+                      onChange={(e) => {
+                        setArtistRole(e.target.value);
+                        setSelectedArtist(null);
+                        setAlbum(null);
                         setOffset(0);
                       }}
                     >
-                      <Cover
-                        key={`${item.id}-${revision}`}
-                        trackId={item.cover_track_id}
-                        title={item.title}
-                        size={320}
-                      />
-                      <strong>{item.title}</strong>
-                      <span>{item.artists.join(' / ') || '未知艺人'}</span>
-                      <small>
-                        {item.track_count} 首 · {time(item.duration_ms / 1000)}
-                      </small>
+                      <option value="">全部角色</option>
+                      <option value="artist">歌曲艺人</option>
+                      <option value="album_artist">专辑艺人</option>
+                      <option value="vocalist">演唱</option>
+                      <option value="lyricist">作词</option>
+                      <option value="composer">作曲</option>
+                      <option value="arranger">编曲</option>
+                    </select>
+                  </label>
+                )}
+                {kind === 'tracks' && (
+                  <button
+                    className="primary"
+                    disabled={loading || !!error || !page?.items.length || collectionBusy}
+                    onClick={() => void completeCollection()}
+                  >
+                    <span aria-hidden="true">▶ </span>
+                    {collectionBusy
+                      ? '准备中…'
+                      : album
+                        ? '播放专辑'
+                        : selectedArtist
+                          ? '播放艺人'
+                          : activePlaylist
+                            ? '播放歌单'
+                            : '播放全部'}
+                  </button>
+                )}
+                {kind === 'tracks' && (
+                  <button
+                    disabled={loading || collectionBusy || !page?.items.length}
+                    onClick={() => void completeCollection(undefined, true)}
+                  >
+                    保存整个集合离线
+                  </button>
+                )}
+                {album && isAdmin && (
+                  <button
+                    onClick={() =>
+                      setMetadataRefresh({ scope: 'album', id: album.id, label: album.title })
+                    }
+                  >
+                    更新专辑元数据
+                  </button>
+                )}
+                {(playlistGrid || view === 'favorites') && (
+                  <button
+                    className="primary"
+                    onClick={() => setEditor({ initial: null, track: null })}
+                  >
+                    ＋ 新建歌单
+                  </button>
+                )}
+                {activePlaylist && activePlaylist.kind !== 'favorites' && (
+                  <>
+                    <button onClick={() => setEditor({ initial: activePlaylist, track: null })}>
+                      编辑歌单
                     </button>
-                  ))}
+                    <button className="text-button" onClick={() => void deletePlaylist()}>
+                      删除歌单
+                    </button>
+                  </>
+                )}
+                {view === 'listening' && (
+                  <select
+                    aria-label="收听排序"
+                    value={statsSort}
+                    onChange={(event) => {
+                      setStatsSort(event.target.value);
+                      setOffset(0);
+                    }}
+                  >
+                    <option value="last_played_at">最近听过</option>
+                    <option value="play_count">经常播放</option>
+                    <option value="listened_ms">收听最久</option>
+                  </select>
+                )}
+                {query && !album && (
+                  <button className="text-button" onClick={clearSearch}>
+                    清除搜索
+                  </button>
+                )}
+              </div>
+              <button
+                className="text-button"
+                onClick={() => setRevision((value) => value + 1)}
+                disabled={loading}
+              >
+                {loading ? '读取中…' : '刷新曲库 ↻'}
+              </button>
+            </div>
+            {page &&
+              page.items.length > 0 &&
+              operations.playlists.length > 0 &&
+              !loading &&
+              !error && (
+                <div className="bulk-playlist">
+                  <label>
+                    <span>把这一页留进歌单</span>
+                    <select
+                      aria-label="本页加入歌单"
+                      value={bulkTarget}
+                      onChange={(event) => setBulkTarget(event.target.value)}
+                    >
+                      <option value="">选择普通歌单…</option>
+                      {operations.playlists.map((item) => (
+                        <option key={item.id} value={item.id}>
+                          {item.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <button disabled={!bulkTarget || bulkBusy} onClick={() => void bulkAdd()}>
+                    {bulkBusy ? '加入中…' : '加入本页'}
+                  </button>
                 </div>
-              ) : (
-                page && (
-                  <TrackList
-                    page={page}
-                    player={player}
-                    onNotice={setNotice}
-                    revision={revision}
-                    operations={operations}
-                    showStats={view === 'listening'}
-                  />
-                )
               )}
-              <Pagination page={visible} onOffset={setOffset} unit={unit} />
-            </>
-          )}
+            {error ? (
+              <div className="empty" role="alert">
+                <h2>暂时无法读取曲库</h2>
+                <p>{error}</p>
+                <button onClick={() => setRevision((value) => value + 1)}>重新连接</button>
+              </div>
+            ) : loading ? (
+              <div className="empty" role="status">
+                正在读取你的音乐…
+              </div>
+            ) : !visible?.items.length ? (
+              <div className="empty">
+                <span className="empty-symbol">≋</span>
+                <h2>
+                  {query
+                    ? `没有找到匹配的${kind === 'artists' ? '艺人' : kind === 'albums' ? '专辑' : kind === 'playlists' ? '歌单' : '歌曲'}`
+                    : activePlaylist?.kind === 'favorites'
+                      ? '喜欢的歌，留在这里。'
+                      : activePlaylist?.kind === 'smart'
+                        ? '还没有符合规则的歌'
+                        : activePlaylist
+                          ? '给这张歌单，选一首开场。'
+                          : view === 'listening'
+                            ? '从一首喜欢的歌开始。'
+                            : artistGrid
+                              ? '还没有艺人信息'
+                              : '曲库还很安静'}
+                </h2>
+                <p>
+                  {query
+                    ? '试试其他关键词。'
+                    : activePlaylist?.kind === 'favorites'
+                      ? '点击歌曲旁的心形，收藏就会出现在这里。'
+                      : activePlaylist?.kind === 'smart'
+                        ? '可以编辑规则，换一种方式找歌。'
+                        : activePlaylist
+                          ? '从歌曲的更多操作加入，或将一页歌曲一起加入。'
+                          : view === 'listening'
+                            ? '听过的歌曲、次数和时长会留在这里。'
+                            : '导入音乐后，刷新曲库。'}
+                </p>
+              </div>
+            ) : (
+              <>
+                {kind === 'artists' ? (
+                  <div className="artist-grid" aria-label="艺人列表">
+                    {(visible as ArtistPage).items.map((item) => (
+                      <button
+                        className="artist-card"
+                        key={item.id}
+                        aria-label={`查看艺人 ${item.name}`}
+                        onClick={() => openArtist(item)}
+                      >
+                        <Cover trackId={item.cover_track_id} title={item.name} size={320} />
+                        <strong>{item.name}</strong>
+                        <small>
+                          {item.album_count} 张专辑 · {item.track_count} 首歌曲
+                        </small>
+                      </button>
+                    ))}
+                  </div>
+                ) : kind === 'playlists' ? (
+                  <div className="playlist-grid" aria-label="歌单列表">
+                    {(visible as PlaylistPage).items.map((item) => (
+                      <button
+                        className={`playlist-card ${item.kind}`}
+                        key={item.id}
+                        aria-label={`打开歌单 ${item.name}`}
+                        onClick={() => openPlaylist(item)}
+                      >
+                        {item.kind === 'favorites' ? (
+                          <span className="playlist-art favorites-art" aria-hidden="true">
+                            ♥
+                          </span>
+                        ) : item.cover_track_id ? (
+                          <Cover trackId={item.cover_track_id} title={item.name} size={320} />
+                        ) : (
+                          <span className="playlist-art" aria-hidden="true">
+                            {item.kind === 'smart' ? '✦' : '♫'}
+                          </span>
+                        )}
+                        <strong>{item.name}</strong>
+                        <span>
+                          {item.kind === 'favorites'
+                            ? '喜欢的声音'
+                            : item.kind === 'smart'
+                              ? '规则歌单'
+                              : '普通歌单'}{' '}
+                          · {item.track_count} 首
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                ) : kind === 'albums' ? (
+                  <div className="album-grid" aria-label="专辑列表">
+                    {(visible as AlbumPage).items.map((item) => (
+                      <button
+                        className="album-card"
+                        key={item.id}
+                        aria-label={`打开专辑 ${item.title}`}
+                        onClick={() => {
+                          setAlbum(item);
+                          setOffset(0);
+                        }}
+                      >
+                        <Cover
+                          key={`${item.id}-${revision}`}
+                          trackId={item.cover_track_id}
+                          title={item.title}
+                          size={320}
+                        />
+                        <strong>{item.title}</strong>
+                        <span>{item.artists.join(' / ') || '未知艺人'}</span>
+                        <small>
+                          {item.track_count} 首 · {time(item.duration_ms / 1000)}
+                        </small>
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  page && (
+                    <TrackList
+                      page={page}
+                      player={player}
+                      onNotice={setNotice}
+                      revision={revision}
+                      operations={operations}
+                      onPlay={(track) => void completeCollection(track)}
+                      showStats={view === 'listening'}
+                    />
+                  )
+                )}
+                <Pagination page={visible} onOffset={setOffset} unit={unit} />
+              </>
+            )}
+          </div>
         </main>
         {queueOpen && (
           <QueuePanel player={player} onClose={() => setQueueOpen(false)} onNotice={setNotice} />
@@ -958,6 +1085,9 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
         )}
       </div>
       {lyricsOpen && <NowPlaying player={player} onClose={closePlayer} favorites={favorites} />}
+      {metadataRefresh && (
+        <MetadataRefreshDialog target={metadataRefresh} onClose={() => setMetadataRefresh(null)} />
+      )}
       {editor && (
         <PlaylistEditor
           key={editor.initial?.id || 'new'}

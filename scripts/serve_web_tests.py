@@ -88,6 +88,17 @@ def main() -> None:
                 audio["lyrics"] = "[00:00]内嵌第一行\n[00:04]内嵌第二行\n[00:08]内嵌第三行"
                 audio.save()
                 path.unlink()
+        if os.environ.get("WILDSTRING_TEST_LARGE_LIBRARY") == "1":
+            for index in range(257):
+                path = music / f"multipage-{index:03d}.mp3"
+                shutil.copyfile(ROOT / "tests/fixtures/audio/playback.mp3", path)
+                audio = MP3(path)
+                audio["TIT2"] = TIT2(encoding=3, text=[f"跨页测试曲 {index + 1:03d}"])
+                audio["TALB"] = TALB(encoding=3, text=["跨页连续专辑"])
+                audio["TPE1"] = TPE1(encoding=3, text=["跨页测试艺人"])
+                audio["TPE2"] = TPE2(encoding=3, text=["跨页测试艺人"])
+                audio["TRCK"] = TRCK(encoding=3, text=[str(index + 1)])
+                audio.save()
         source = root / "source"
         source.mkdir()
         (source / "broken.flac").write_bytes(b"Not a valid music file")
@@ -102,7 +113,11 @@ def main() -> None:
             music_dir=root / "source",
             library_dir=music,
             data_dir=root / "runtime",
-            web_dir=ROOT / "frontend/web/dist",
+            web_dir=(
+                None
+                if os.environ.get("WILDSTRING_TEST_API_ONLY") == "1"
+                else ROOT / "frontend/web/dist"
+            ),
             admin_password=SecretStr("disposable-browser-test-password"),
             cookie_secure=False,
         )

@@ -10,6 +10,7 @@ export function TrackList({
   revision,
   operations,
   showStats = false,
+  onPlay,
 }: {
   page: TrackPage;
   player: Player;
@@ -17,6 +18,7 @@ export function TrackList({
   revision: number;
   operations: TrackOperations;
   showStats?: boolean;
+  onPlay?: (track: TrackPage['items'][number]) => void;
 }) {
   return (
     <div className="track-list" role="table" aria-label="歌曲列表">
@@ -53,7 +55,7 @@ export function TrackList({
             />
             <button
               className="track-title"
-              onClick={() => player.start(page.items, i)}
+              onClick={() => (onPlay ? onPlay(track) : player.start(page.items, i))}
               aria-label={`播放 ${track.title}`}
             >
               <strong>{track.title}</strong>

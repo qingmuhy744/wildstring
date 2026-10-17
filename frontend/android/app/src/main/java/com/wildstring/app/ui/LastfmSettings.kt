@@ -47,7 +47,7 @@ import kotlinx.coroutines.launch
             ListItem(headlineContent = { Text("同步已听记录") }, trailingContent = { Switch(current.scrobble, { update(it, current.nowPlaying) }, enabled = !busy) })
             ListItem(headlineContent = { Text("同步正在播放") }, trailingContent = { Switch(current.nowPlaying, { update(current.scrobble, it) }, enabled = !busy) })
             TextButton(enabled = !busy, onClick = { busy = true; scope.launch {
-                try { vm.repository.api().disconnectLastfm().close(); status = vm.repository.api().lastfm() }
+                try { vm.repository.api().disconnectLastfm().let { if (!it.isSuccessful) throw retrofit2.HttpException(it) }; status = vm.repository.api().lastfm() }
                 catch (e: CancellationException) { throw e }
                 catch (_: Exception) { message = "断开失败，请重试。" }
                 finally { busy = false }

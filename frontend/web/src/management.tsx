@@ -7,6 +7,7 @@ import { api, type Track, type TrackPage } from './api';
 import { Pagination } from './track-list';
 import { AISettings } from './ai-settings';
 import { IntakePanel } from './intake-panel';
+import { MetadataJobs } from './metadata-refresh';
 
 type Directory = {
   path: string;
@@ -131,11 +132,13 @@ export function Management({
   onBack,
   onEdit,
   onChanged,
+  onRefresh,
 }: {
   revision: number;
   onBack: () => void;
   onEdit: (track: Track) => void;
   onChanged: () => void;
+  onRefresh: () => void;
 }) {
   const [tab, setTab] = useState<'overview' | 'tracks' | 'jobs' | 'intake' | 'settings' | 'users'>(
     'overview',
@@ -303,6 +306,7 @@ export function Management({
                 <section className="management-card">
                   <span className="eyebrow">YOUR LIBRARY</span>
                   <h2>{overview.preferences.name}</h2>
+                  <button onClick={onRefresh}>更新曲库元数据</button>
                   <div className="library-locations">
                     {(
                       [
@@ -445,6 +449,13 @@ export function Management({
             )}
             {tab === 'jobs' && (
               <section className="management-card">
+                <MetadataJobs
+                  onInspect={(id) => {
+                    void api<Track>(`/tracks/${id}`)
+                      .then(onEdit)
+                      .catch(() => setError('无法读取歌曲，请刷新后重试。'));
+                  }}
+                />
                 <div className="management-section-heading">
                   <h2>任务记录</h2>
                   <button onClick={() => setTick((v) => v + 1)}>刷新任务</button>

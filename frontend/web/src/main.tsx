@@ -1,10 +1,12 @@
-import { StrictMode, useEffect, useState, type FormEvent } from 'react';
+import { StrictMode, useEffect, useRef, useState, type FormEvent } from 'react';
 import { createRoot } from 'react-dom/client';
 import { api, type User } from './api';
 import { Brand } from './brand';
 import { Library } from './library';
 import { ThemeControl } from './theme';
+import { clearOfflineAccount, offlineUser, setOfflineAccount } from './offline';
 import './style.css';
+import './completion.css';
 
 type AuthStatus = { configured: boolean; authenticated: boolean; user?: User };
 
@@ -14,7 +16,7 @@ function Login({
   notice,
 }: {
   configured: boolean;
-  onLogin: (user: User) => void;
+  onLogin: (user: User) => void | Promise<void>;
   notice: string;
 }) {
   const [username, setUsername] = useState('admin');
@@ -31,7 +33,7 @@ function Login({
         body: JSON.stringify({ username, password }),
       });
       setPassword('');
-      onLogin(user);
+      await onLogin(user);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '登录失败，请重试。');
     } finally {
@@ -124,23 +126,45 @@ function Login({
 }
 
 function App() {
+  const logoutPending = useRef(false);
   const [notice, setNotice] = useState('');
   const [auth, setAuth] = useState<AuthStatus | null>(null);
   const [error, setError] = useState('');
   const [revision, setRevision] = useState(0);
   useEffect(() => {
     const controller = new AbortController();
+    const useOffline = () => {
+      const user = !localStorage.getItem('wildstring:offline-signed-out') ? offlineUser() : null;
+      if (!user) return false;
+      setOfflineAccount(user, false);
+      setAuth({ configured: true, authenticated: true, user });
+      setError('');
+      return true;
+    };
     const timer = setTimeout(() => {
       controller.abort();
-      setError('连接超时，请检查音乐服务。');
+      if (!useOffline()) setError('连接超时，请检查音乐服务。');
     }, 8000);
     setError('');
     api<AuthStatus>('/auth/status', { signal: controller.signal })
-      .then((status) => {
+      .then(async (status) => {
+        if (controller.signal.aborted) return;
+        if (localStorage.getItem('wildstring:offline-signed-out')) {
+          if (status.authenticated)
+            await api('/auth/logout', { method: 'POST', signal: controller.signal });
+          if (!controller.signal.aborted)
+            setAuth({ configured: status.configured, authenticated: false });
+          return;
+        }
+        if (status.authenticated && status.user) {
+          if (offlineUser() && offlineUser()?.id !== status.user.id) await clearOfflineAccount();
+          setOfflineAccount(status.user);
+        } else await clearOfflineAccount();
         if (!controller.signal.aborted) setAuth(status);
       })
-      .catch(() => {
-        if (!controller.signal.aborted) setError('无法连接音乐服务。');
+      .catch((reason) => {
+        if (!controller.signal.aborted && !(reason instanceof TypeError && useOffline()))
+          setError('无法连接音乐服务。');
       })
       .finally(() => clearTimeout(timer));
     return () => {
@@ -156,10 +180,49 @@ function App() {
           : '登录已过期，请重新登录。',
       );
       setAuth((value) => value && { ...value, authenticated: false });
+      void clearOfflineAccount().catch(() =>
+        setNotice('已退出，浏览器未能清理部分离线存储，可在浏览器设置中清除本站数据。'),
+      );
     };
     window.addEventListener('wildstring:unauthorized', expired);
     return () => window.removeEventListener('wildstring:unauthorized', expired);
   }, []);
+  useEffect(() => {
+    if (!auth?.authenticated) return;
+    const changed = (event: StorageEvent) => {
+      if (event.key !== 'wildstring:offline-account') return;
+      if (offlineUser()?.id !== auth.user?.id)
+        window.dispatchEvent(
+          new CustomEvent('wildstring:unauthorized', {
+            detail: '账号已在其他页面变化，请重新登录。',
+          }),
+        );
+    };
+    window.addEventListener('storage', changed);
+    return () => window.removeEventListener('storage', changed);
+  }, [auth?.authenticated, auth?.user?.id]);
+  useEffect(() => {
+    if (!auth?.authenticated) return;
+    const verify = async () => {
+      if (!navigator.onLine) return;
+      try {
+        const status = await api<AuthStatus>('/auth/status');
+        if (!status.authenticated || status.user?.id !== auth.user?.id) {
+          await clearOfflineAccount();
+          setNotice('账号状态已变化，请重新登录。');
+          setAuth({ ...status, authenticated: false });
+        }
+      } catch {
+        /* network outages do not revoke offline access */
+      }
+    };
+    window.addEventListener('online', verify);
+    const timer = setInterval(verify, 60000);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener('online', verify);
+    };
+  }, [auth?.authenticated, auth?.user?.id]);
   if (error)
     return (
       <main className="connection-page">
@@ -181,19 +244,45 @@ function App() {
       <Login
         configured={auth.configured}
         notice={notice}
-        onLogin={(user) => {
+        onLogin={async (user) => {
           setNotice('');
+          if (offlineUser() && offlineUser()?.id !== user.id) await clearOfflineAccount();
+          localStorage.removeItem('wildstring:offline-signed-out');
+          setOfflineAccount(user);
           setAuth({ configured: true, authenticated: true, user });
         }}
       />
     );
   return (
     <Library
+      key={auth.user!.id}
       user={auth.user!}
       onLogout={async () => {
-        await api('/auth/logout', { method: 'POST' });
-        setNotice('');
+        if (logoutPending.current) return;
+        logoutPending.current = true;
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 2000);
+        let revoked = false;
+        try {
+          if (navigator.onLine) {
+            await api('/auth/logout', { method: 'POST', signal: controller.signal });
+            revoked = true;
+          }
+        } catch {
+          /* Local sign-out must remain available when the server is unreachable. */
+        } finally {
+          clearTimeout(timer);
+        }
+        localStorage.setItem('wildstring:offline-signed-out', '1');
         setAuth({ ...auth, authenticated: false });
+        try {
+          await clearOfflineAccount();
+          setNotice(revoked ? '' : '本机已退出，服务端会话将在下次连接时注销。');
+        } catch {
+          setNotice('本机已退出；浏览器未能清理部分离线存储，可在浏览器设置中清除本站数据。');
+        } finally {
+          logoutPending.current = false;
+        }
       }}
     />
   );
@@ -204,3 +293,9 @@ createRoot(document.getElementById('root')!).render(
     <App />
   </StrictMode>,
 );
+
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    void navigator.serviceWorker.register('/sw.js').catch(() => {});
+  });
+}

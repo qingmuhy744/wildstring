@@ -1,4 +1,4 @@
-import type { Track } from './api';
+import { eventId, type Track } from './api';
 
 type Report = {
   session_id: string;
@@ -17,7 +17,7 @@ export class ListeningTracker {
   start(track: Track, audio: HTMLAudioElement) {
     this.finish(audio);
     this.session = {
-      session_id: crypto.randomUUID(),
+      session_id: eventId(),
       track_id: track.id,
       listened_ms: 0,
       started_at: Date.now() / 1000,

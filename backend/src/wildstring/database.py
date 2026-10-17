@@ -9,7 +9,7 @@ from pathlib import Path
 from wildstring.library.albums import album_key
 from wildstring.provider_schema import SCHEMA as PROVIDER_SCHEMA
 
-SCHEMA_VERSION = 12
+SCHEMA_VERSION = 14
 TRANSCODING_SCHEMA = """
 BEGIN IMMEDIATE;
 CREATE TABLE transcoding_settings (
@@ -390,6 +390,21 @@ class Database:
                     apply_effective(connection, row["id"])
                 connection.execute("PRAGMA user_version = 12")
                 connection.commit()
+            if current < 13:
+                connection.executescript("""
+                    BEGIN IMMEDIATE;
+                    ALTER TABLE provider_settings ADD COLUMN acoustid INTEGER NOT NULL DEFAULT 0;
+                    ALTER TABLE provider_settings ADD COLUMN priority TEXT NOT NULL DEFAULT '["musicbrainz","lastfm"]';
+                    ALTER TABLE metadata_suggestions ADD COLUMN match TEXT NOT NULL DEFAULT '{}';
+                    ALTER TABLE provider_jobs ADD COLUMN refresh_mode TEXT NOT NULL DEFAULT 'all';
+                    ALTER TABLE provider_jobs ADD COLUMN force INTEGER NOT NULL DEFAULT 0;
+                    PRAGMA user_version = 13;
+                    COMMIT;
+                """)
+            if current < 14:
+                from wildstring.experience_schema import SCHEMA as EXPERIENCE_SCHEMA
+
+                connection.executescript(EXPERIENCE_SCHEMA)
             connection.execute("PRAGMA journal_mode = WAL")
 
     def check_ready(self) -> bool:

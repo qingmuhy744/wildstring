@@ -2,11 +2,13 @@
 
 Kotlin / Compose / Media3 原生客户端，Android 8.0（API 26）起可安装。所有曲库、封面、歌词、收藏与歌单来自用户配置的野弦实例；生产 APK 没有内置演示曲库或测试音频。测试夹具只打包到独立的 androidTest APK。
 
-当前版本：0.2.1（versionCode 4）。
+当前版本：0.3.0（versionCode 7）。本版合并了原未发布 0.2.3；正式安装包以 GitHub Releases 为准。
+
+0.3.0 在设置中增加封面／黑胶／磁带选择，默认封面并记住本机选择。黑胶中心封面放大，手机横屏采用视觉与播放控制左右布局。长按视觉或歌词可查看正向大封面，点空白或返回关闭，播放继续。唱臂、唱片与双卷轴跟随实际播放状态，暂停、缓冲、后台及关闭系统动画时停转；三种样式共用音频和队列。播放背景延伸至系统栏，按钮保留安全间距，进度条使用主题配色。实现与验证状态见 [播放页样式](../../docs/product/player-styles-0.2.3.md)。
 
 当前功能：服务器连接/登录与加密会话保存；歌曲、专辑、艺人、关键词搜索与分页；原音串流、后台媒体服务、系统控制、队列增删/三横杠拖动排序、循环/随机；手机全屏歌词、平板双栏与窄分屏布局；收藏、歌单浏览/创建/加入和在线收听上报；按曲目 ID 保存队列及暂停恢复。
 
-完整歌单编辑/排序、离线下载、AI 业务、Android Auto 单独交付。支持的容器以服务端曲库协议为准，实际编码仍需设备解码验证。无歌词、无封面和网络错误使用真实空态或反馈，不填充虚构内容。
+0.3.0 增加普通／规则歌单编辑、多选加入、拖动排序、角色筛选、统计、管理员元数据与歌词编辑／打点、曲库导入扫描任务；两端共享每日推荐、AI 找歌预览和跨设备进度。完整原音离线下载与片段缓存分开管理，支持容量设置、暂停继续、重试和删除；睡眠定时支持分钟数与播完本曲。详见 [本批验收](../../docs/product/mobile-completion-0.3.0.md)。Android Auto、iOS 和小组件另行安排。支持的容器以服务端曲库协议为准，实际编码仍需设备解码验证。无歌词、无封面和网络错误使用真实空态或反馈，不填充虚构内容。
 
 0.2.0 增加可调缓存、封面取色毛玻璃、自然过渡、轻触反馈，以及独立红布彩蛋。经典深色主题保留原暖橙 / 深绿，支持浅色及跟随系统自动切换；红布固定正红，不随日夜变化。变化与验证状态见 [CHANGELOG](../../CHANGELOG.md)。
 
@@ -32,7 +34,9 @@ make android-locks              # 修改依赖后刷新锁与 SHA-256 校验元�
 
 `ANDROID_HOME` 指向本机 SDK，`JAVA_HOME` 指向 JDK；`local.properties` 只用于本机且不跟踪。Gradle Wrapper、版本目录与依赖校验资料入库，构建缓存、APK 和签名私钥不提交。
 
-`make android-ci` 的安装包位于 `artifacts/android/`，包含 `wildstring-<version>-debug.apk`（当前为 `wildstring-0.2.1-debug.apk`）与 `SHA256SUMS`。GitHub 的 **Android APK** 工作流通过后，在该次运行的 **Artifacts → wildstring-android-debug** 下载并解压 ZIP 后安装 APK。原有 Python/Web/Docker CI 继续独立运行。
+`make android-ci` 的安装包位于 `artifacts/android/`，包含 `wildstring-<version>-debug.apk`（当前开发包为 `wildstring-0.3.0-debug.apk`）与 `SHA256SUMS`。GitHub 的 **Android APK** 工作流通过后，在该次运行的 **Artifacts → wildstring-android-debug** 下载并解压 ZIP 后安装 APK。原有 Python/Web/Docker CI 继续独立运行。
+
+CI 另启动一次性合成曲库，并通过 `ANDROID_TEST_ARGS=-Pandroid.testInstrumentationRunnerArguments.realBackend=http://10.0.2.2:19882/` 运行真实 API 集成。该参数只允许指向临时测试实例，使用固定的公开测试账号，会创建／删除测试歌单及修改测试曲目。不要指向个人服务器。
 
 设备测试用 `UiAutomation.takeScreenshot()` 生成手机和平板 PNG，写入 AGP 传入的 `additionalTestOutputDir`，在测试卸载应用前自动取回到 `frontend/android/app/build/outputs/connected_android_test_additional_output/`。Actions 的 `android-test-reports` 同时保存这些截图及失败截图。手工查看本地已连接设备时，也可用 `adb exec-out screencap -p > screenshot.png` 保存当前屏幕。
 
@@ -42,7 +46,7 @@ debug 包 ID 为 `com.wildstring.app.debug`，与正式包 `com.wildstring.app` 
 
 显示名称为「野弦」，英文名称 WildString。0.1.0 的正式包 ID 为 `com.wildstring.app`，versionCode 为 2。旧的 `dev.wildstring.app.debug` 测试包属于另一应用，无法直接覆盖；首次安装正式版需要重新连接服务端。服务端曲库不受影响。
 
-GitHub [Releases](https://github.com/qingmuhy744/wildstring/releases) 提供 `wildstring-0.2.1-release.apk` 与校验和。正式包启用 R8 优化，使用固定发布签名；后续保留同一包名和密钥，以递增 versionCode 更新。私钥不进入源码、Actions 缓存或发布附件。公开证书指纹在 Release 的 `android-signing-certificate.sha256` 中。
+GitHub [Releases](https://github.com/qingmuhy744/wildstring/releases) 提供正式的 `wildstring-<version>-release.apk` 与校验和，实际已发布版本以该列表为准。正式包启用 R8 优化，使用固定发布签名；后续保留同一包名和密钥，以递增 versionCode 更新。私钥不进入源码、Actions 缓存或发布附件。公开证书指纹在 Release 的 `android-signing-certificate.sha256` 中。
 
 本地签名构建需要从未跟踪的 `.env.android-release` 导出 `ANDROID_KEYSTORE_PATH`、`ANDROID_KEYSTORE_PASSWORD`、`ANDROID_KEY_ALIAS`、`ANDROID_KEY_PASSWORD`，再执行 `make android-release`。`make android-release-smoke` 会在一次性模拟器安装正式包并检查连接页；不要对正在使用的正式客户端运行这个安装检查。工作流与密钥备份约定见 [发布说明](../../docs/releasing.md)。
 
@@ -52,7 +56,7 @@ GitHub [Releases](https://github.com/qingmuhy744/wildstring/releases) 提供 `wi
 - 服务端默认回环监听，手机不能用自己的 `127.0.0.1` 访问另一台服务器。使用可达的 HTTPS 反向代理，客户端不会修改服务器监听或防火墙。
 - 普通接口、封面与媒体 Range 请求共用 CookieJar 和同源/路径校验；拒绝重定向。当前服务支持 `X-Wildstring-Client: android`；旧服务仅返回明确的 `client_header_required` 时，在同一地址使用已有 Web 标识重试，认证仍需有效 Cookie。
 - 密码只用于本次登录，不落盘。Cookie 由 Android Keystore 管理的 AES-GCM 密钥加密，应用禁止系统备份。401 清理会话并停止受保护播放。
-- Room 保存队列条目 ID/曲目 ID、顺序和位置。0.2.0 新增应用级曲库 / 歌词 / 封面 / 最近播放片段缓存，容量可在设置中调整或关闭，退出或切换服务器清理。短时断网仅能播放已缓存片段，不包含完整离线下载。策略与边界见 [Android 缓存](../../docs/architecture/android-cache.md)。
+- Room 保存队列条目 ID/曲目 ID、顺序和位置。0.2.0 新增应用级曲库 / 歌词 / 封面 / 最近播放片段缓存，容量可在设置中调整或关闭，退出或切换服务器清理。0.3.0 另提供完整原音离线副本，未完成下载仍只具有片段缓存的能力；在线播放离线副本前核验权限与文件版本，退出／切换账号清理私密离线内容。策略与边界见 [Android 缓存](../../docs/architecture/android-cache.md)。
 - 进程重建后恢复到暂停状态；后台服务仍在时重新连接同一播放器。强制停止、厂商省电策略和断网尾段统计另按真机结果验收，不能以可构建 APK 代替这些验证。
 
 ## main 新功能适配（0.2.0）

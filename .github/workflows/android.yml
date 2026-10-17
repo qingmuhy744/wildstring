@@ -5,6 +5,9 @@ on:
     branches: [main]
     paths:
       - "frontend/android/**"
+      - "backend/**"
+      - "scripts/serve_web_tests.py"
+      - "tests/fixtures/audio/**"
       - "scripts/package_android.py"
       - "scripts/smoke_android_release.py"
       - ".github/workflows/android.yml"
@@ -13,6 +16,9 @@ on:
   pull_request:
     paths:
       - "frontend/android/**"
+      - "backend/**"
+      - "scripts/serve_web_tests.py"
+      - "tests/fixtures/audio/**"
       - "scripts/package_android.py"
       - "scripts/smoke_android_release.py"
       - ".github/workflows/android.yml"
@@ -51,12 +57,28 @@ jobs:
           log-accepted-android-sdk-licenses: false
       - name: Check, test and package APK
         run: make android-ci
+      - uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff # v6
+        with:
+          version: "0.9.18"
+      - name: Start disposable synthetic API for native integration
+        run: |
+          mkdir -p artifacts
+          uv sync --frozen --project backend
+          WILDSTRING_WEB_TEST_PORT=19882 WILDSTRING_TEST_LARGE_LIBRARY=1 WILDSTRING_TEST_API_ONLY=1 uv run --frozen --project backend python scripts/serve_web_tests.py > artifacts/android-synthetic-api.log 2>&1 &
+          echo $! > "$RUNNER_TEMP/wildstring-synthetic-api.pid"
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:19882/health/ready > /dev/null; then exit 0; fi
+            sleep 1
+          done
+          cat artifacts/android-synthetic-api.log
+          exit 1
       - name: Enable emulator acceleration
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
       - name: Native login, streaming and lyrics test
+        timeout-minutes: 10
         uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2
         with:
           api-level: 35
@@ -65,7 +87,13 @@ jobs:
           profile: pixel_2
           ram-size: 2048M
           disable-animations: true
-          script: make android-connected-test
+          script: make android-connected-test ANDROID_TEST_ARGS=-Pandroid.testInstrumentationRunnerArguments.realBackend=http://10.0.2.2:19882/
+      - name: Stop synthetic API
+        if: always()
+        run: |
+          if test -f "$RUNNER_TEMP/wildstring-synthetic-api.pid"; then
+            kill "$(cat "$RUNNER_TEMP/wildstring-synthetic-api.pid")" || true
+          fi
       - name: Upload installable debug APK
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -79,6 +107,7 @@ jobs:
         with:
           name: android-test-reports
           path: |
+            artifacts/android-synthetic-api.log
             frontend/android/build/reports/
             frontend/android/app/build/reports/
             frontend/android/app/build/outputs/androidTest-results/
