@@ -25,6 +25,7 @@ import { PlaylistEditor } from './playlist-editor';
 import { QueuePanel } from './queue-panel';
 import { Management } from './management';
 import { MetadataEditor } from './metadata-editor';
+import { MetadataRefreshDialog, type RefreshTarget } from './metadata-refresh';
 import { AccountDialog } from './accounts';
 import { ThemeControl } from './theme';
 import { Pagination, TrackList } from './track-list';
@@ -59,6 +60,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
   const [view, setView] = useState<View>('tracks');
   const [manageOpen, setManageOpen] = useState(false);
   const [editingTrack, setEditingTrack] = useState<Track | null>(null);
+  const [metadataRefresh, setMetadataRefresh] = useState<RefreshTarget | null>(null);
   useEffect(() => {
     if (manageOpen) window.scrollTo({ top: 0 });
   }, [manageOpen]);
@@ -361,6 +363,9 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
     onAdd: addToPlaylist,
     onCreate: (track) => setEditor({ initial: null, track }),
     onEdit: isAdmin ? setEditingTrack : undefined,
+    onRefresh: isAdmin
+      ? (track) => setMetadataRefresh({ scope: 'track', id: track.id, label: track.title })
+      : undefined,
     ...(activePlaylist?.kind === 'manual'
       ? {
           onRemove: (track: Track) => void editPlaylistTrack(track),
@@ -515,6 +520,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
             onBack={() => setManageOpen(false)}
             onEdit={setEditingTrack}
             onChanged={refreshLibrary}
+            onRefresh={() => setMetadataRefresh({ scope: 'library', label: '整个曲库' })}
           />
         )}
         <main className="library" hidden={manageOpen}>
@@ -725,6 +731,15 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
                         : activePlaylist
                           ? '播放歌单'
                           : '播放全部'}
+                </button>
+              )}
+              {album && isAdmin && (
+                <button
+                  onClick={() =>
+                    setMetadataRefresh({ scope: 'album', id: album.id, label: album.title })
+                  }
+                >
+                  更新专辑元数据
                 </button>
               )}
               {(playlistGrid || view === 'favorites') && (
@@ -958,6 +973,9 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
         )}
       </div>
       {lyricsOpen && <NowPlaying player={player} onClose={closePlayer} favorites={favorites} />}
+      {metadataRefresh && (
+        <MetadataRefreshDialog target={metadataRefresh} onClose={() => setMetadataRefresh(null)} />
+      )}
       {editor && (
         <PlaylistEditor
           key={editor.initial?.id || 'new'}

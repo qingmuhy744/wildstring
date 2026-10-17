@@ -13,7 +13,7 @@ RUN = $(UV) run --frozen --project backend
 ANDROID = ./frontend/android/gradlew -p frontend/android --console=plain
 DOCKER = $(COMPOSE) --project-directory "$(CURDIR)" --env-file .env -p "$(PROJECT)" -f deploy/compose.yaml
 
-.PHONY: help env setup sync dev dev-web android-design scan import-music admin check hooks-check lint format format-check security test build-web icons browser-install test-web test-transcoding-web web-test-server ci health docker-config docker-build docker-up docker-pull docker-down docker-status docker-logs docker-smoke docker-scan docker-import docker-admin docker-test
+.PHONY: help env setup sync dev dev-web android-design scan import-music admin check hooks-check lint format format-check security test build-web icons browser-install test-web test-transcoding-web web-test-server ci health docker-config docker-build docker-up docker-pull docker-down docker-status docker-logs docker-smoke docker-scan docker-import docker-admin docker-test fingerprint-check
 
 help: ## Show available commands
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "  make %-17s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -164,3 +164,6 @@ docker-import: env ## Import from the read-only source into the persistent manag
 
 docker-admin: env ## Set/reset the container administrator password interactively
 	$(DOCKER) exec api python -m wildstring.admin
+
+fingerprint-check: ## Check the optional native Chromaprint fingerprint tool
+	fpcalc -version

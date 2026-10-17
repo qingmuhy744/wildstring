@@ -146,6 +146,8 @@ test('管理员网页可保存代理模式，认证地址不回显', async ({ pa
     lastfm_configured: _fm,
     proxy_configured: _proxy,
     environment_proxy_configured: _env,
+    acoustid_configured: _acoustid,
+    fingerprint_available: _fingerprint,
     ...body
   } = original;
   try {

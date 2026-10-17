@@ -9,6 +9,7 @@ export interface TrackOperations {
   onAdd: (track: Track, playlist: Playlist) => Promise<void>;
   onCreate: (track: Track) => void;
   onEdit?: (track: Track) => void;
+  onRefresh?: (track: Track) => void;
   onRemove?: (track: Track) => void;
   onMove?: (track: Track, direction: -1 | 1) => void;
 }
@@ -69,6 +70,16 @@ export function TrackActions({
             }}
           >
             编辑歌曲信息
+          </button>
+        )}
+        {operations.onRefresh && (
+          <button
+            onClick={() => {
+              operations.onRefresh!(track);
+              hide();
+            }}
+          >
+            更新元数据
           </button>
         )}
         <button

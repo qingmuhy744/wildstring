@@ -28,7 +28,7 @@ ENV PATH="/app/.venv/bin:$PATH" \
     WILDSTRING_WEB_DIR=/app/web
 WORKDIR /app
 RUN apt-get update --error-on=any \
-    && apt-get install -y --no-install-recommends ca-certificates ffmpeg \
+    && apt-get install -y --no-install-recommends ca-certificates ffmpeg libchromaprint-tools \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid 10001 wildstring \
     && useradd --uid 10001 --gid wildstring --no-create-home wildstring \

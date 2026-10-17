@@ -12,7 +12,8 @@
 | Last.fm | 曲目、专辑、艺人资料、标签、简介；用户授权并启用后同步已听记录与正在播放 | 只读资料查询已验证；真实用户授权与收听外发待验 |
 | Cover Art Archive | 缺少本地封面时，按 MusicBrainz 具体发行版获取封面候选，确认后应用 | 配套接入已确认；已实查不同发行版图片可用性，应用内适配和版本匹配尚待验证 |
 | 豆瓣 | 保留资料研究候选 | 历史 OAuth / 音乐 API 不能证明当前可申请、可用或登录提额；不加入首期依赖 |
-| 酷狗、Shazam、QQ 音乐、网易云、AcoustID | 后续分别核验 | 页面、SDK、指纹和完整元数据接口不能混为一谈；尚未确定接入 |
+| AcoustID | 本地 Chromaprint 指纹识别录音，衔接 MusicBrainz 资料建议 | 0.2.3 可选接入；只发送指纹和时长，建议确认后应用 |
+| 酷狗、Shazam、QQ 音乐、网易云 | 后续分别核验 | 页面、SDK、指纹和完整元数据接口不能混为一谈；尚未确定接入 |
 
 MusicBrainz 的[公开查询](https://musicbrainz.org/doc/MusicBrainz_API)不需要用户登录或 API Key，使用可识别的 User-Agent，按官方[限流要求](https://musicbrainz.org/doc/MusicBrainz_API/Rate_Limiting)控制请求间隔。统一服务端队列协调查询；多进程部署时共享限流状态，不能每个客户端或进程各自并发占用同一出口的额度。
 
@@ -127,17 +128,21 @@ NO_PROXY=127.0.0.1,localhost,host.docker.internal
 
 代理仅用于外部资料、封面下载与 Last.fm 授权/同步，不代理音乐串流、前端 API 或 AI 连接。反向代理访问日志也应隐藏 `/api/v1/lastfm/callback` 的查询参数；内置 Uvicorn 启动入口已做脱敏。
 
-## AcoustID 接入前的凭据核对（尚未接入）
+## AcoustID 与手动刷新（0.2.3）
 
-2026-10-17 核对：当前没有 AcoustID 查询、Chromaprint 或 `fpcalc` 执行代码。MetaBrainz 是维护 MusicBrainz 等项目的基金会，当前公开资料来源为 MusicBrainz；不需要额外申请一个通用的 MetaBrainz Key。
+2026-10-17 用户提供应用 Key 并确认接入。新增可选 AcoustID lookup、只读 fpcalc 计算与缓存，复用 MusicBrainz／CAA 的建议和确认流程。MetaBrainz 是维护 MusicBrainz 等项目的基金会；不需要额外申请一个通用的 MetaBrainz Key。
 
 | 准备项 | 查询识别需要什么 |
 | --- | --- |
 | AcoustID Application API key | 登录后[注册应用](https://acoustid.org/new-application)，作为 `client` 参数使用 |
 | AcoustID User API key | 仅向服务提交新指纹时需要；只查询不需要 |
 | MusicBrainz | 普通公开资料查询无需 API Key；继续提供应用 User-Agent，并控制到每秒最多一次请求 |
-| Chromaprint / fpcalc | 在本机从音频生成指纹，不需要申请 API；未来由服务端封装执行 |
+| Chromaprint / fpcalc | 在服务端从托管副本计算指纹，不需要申请 API；Docker 原镜像已增加工具，原生 macOS／Linux 可单独安装 |
 
-规划流程为本机计算指纹与时长 → AcoustID 返回录音候选 → 衔接现有 MusicBrainz／CAA 建议。不会因为准备了 Key 就自动开启外发或上传整首音频；实现和启用范围仍需后续安排。AcoustID 公开免费服务用于非商业场景，官方当前要求每秒不超过三次请求。
+实现流程为本机计算指纹与完整时长 → AcoustID 返回录音候选 → 衔接现有 MusicBrainz／CAA 建议，按录音与发行版分别展示相似度及来源。只调用 lookup，不调用 submit；识别默认关闭，保存 Key 不自动启用外发。AcoustID 公开免费服务用于非商业场景，官方当前要求每秒不超过三次请求；应用继续保守地按每秒约一次共享限流。
+
+网页新增歌曲、专辑与整库的手动元数据更新，支持只查缺失／查询全部、绕过联网缓存和后台任务状态；MusicBrainz／Last.fm 来源优先级可拖动排序。人工值及本地封面保留，联网结果仍确认后应用。规则、契约和部署依赖见 [元数据刷新与指纹识别](../product/metadata-refresh-0.2.3.md)。
+
+验证边界：本机合成音频已真实生成指纹并通过 AcoustID lookup（无匹配属于正常结果），说明应用 Key 可用；官方公开指纹样例识别到两个录音候选，并成功衔接 MusicBrainz。用户明确允许私人曲库测试后，使用独立临时数据库只读测试崔健《新长征路上的摇滚》：AcoustID 返回两个录音候选，相似度均约 0.98；MusicBrainz 返回六个发行版候选，包含词曲、演唱等资料，无查询警告。测试未应用建议，前后音频 SHA-256 一致。单首成功不等于全库覆盖率，资料完整度和发行版仍需人工核对。联网错误和多候选、错误标签、缺失字段保护与显式应用使用隔离回归验证。生产服务是否启用，以管理员设置为准，代码接入不等于已部署。
 
 依据：[AcoustID Web Service](https://acoustid.org/webservice)、[Chromaprint](https://acoustid.org/chromaprint)、[MusicBrainz API](https://musicbrainz.org/doc/MusicBrainz_API)、[MetaBrainz 项目](https://metabrainz.org/projects)。

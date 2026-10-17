@@ -49,6 +49,11 @@ export class ApiError extends Error {
 }
 
 const messages: Record<string, string> = {
+  providers_disabled: '请先在管理设置中启用联网资料。',
+  acoustid_not_configured: '请先保存 AcoustID 应用 API Key。',
+  acoustid_requires_musicbrainz: 'AcoustID 识别需要同时启用 MusicBrainz。',
+  invalid_acoustid_credentials: '请检查 AcoustID 应用 API Key。',
+  fingerprint_tool_missing: '服务端缺少 Chromaprint 指纹工具，请更新镜像或安装后重试。',
   ai_settings_version_conflict: 'AI 配置已变化，请重新读取后修改。',
   invalid_ai_settings: '请检查 API 地址、模型名称、密钥和超时设置。',
   ai_not_configured: '请先保存 API 地址和模型。',

@@ -28,6 +28,8 @@
 
 0.2.3 开发版增加 Android / Web 封面、黑胶和磁带播放样式，默认封面并记住本机选择；同步改善 Android 系统栏衔接与播放进度条配色。切换样式复用当前音频，拟物动画随播放、可见性和系统减少动态效果设置启停。范围与验证状态见 [播放页样式](docs/product/player-styles-0.2.3.md)，正式可下载版本以 Releases 为准。
 
+同一开发版接入可选的 AcoustID 指纹识别，并提供单曲、专辑和整库的「更新元数据」。网页可拖动设置 MusicBrainz / Last.fm 的推荐优先级；更新先生成建议，确认后应用。AcoustID 应用 Key 在管理设置中填写，只保存于服务端私有配置。入口、缺失／全部更新方式和验证边界见 [元数据更新](docs/product/metadata-refresh-0.2.3.md)。
+
 服务端元数据整理将支持手动/批量编辑、差异预览和显式写回，减少使用 mp3tag 前后下载与上传整首音频的重复传输，见 [整理设计](docs/architecture/metadata-repair.md)。
 
 ## 本地开发
@@ -46,6 +48,8 @@ make ci            # 提交检查、后端测试、Web 构建、锁文件核验
 ```
 
 `make setup` 保留已有 `.env`。通过 `WILDSTRING_MUSIC_DIR` 指向自己的音乐目录；个人曲库、运行数据与模型密钥不入库。
+
+原生 macOS／Linux 后端使用指纹识别时需安装 [Chromaprint 的 fpcalc](https://acoustid.org/chromaprint)，运行 `make fingerprint-check` 核对。Docker 镜像已包含该工具，不需要额外容器；未启用指纹识别时，普通资料查询与播放仍可使用。
 
 仓库根目录 `data/` 已从 Git 和 Docker 构建上下文排除，可存放本地测试音乐。导入使用 `make import-music`；托管副本默认位于 `runtime/library/`。全量重扫使用 `make scan SCAN_ARGS=--full`。按“专辑艺人/专辑/CD01/01 - 歌名”整理副本，保留原件；重复导入不覆盖已有修改，见 [托管规则](contracts/managed-library.md)。
 

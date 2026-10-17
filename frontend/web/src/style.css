@@ -3770,3 +3770,91 @@ select {
     bottom: 18px;
   }
 }
+
+.metadata-refresh-dialog {
+  width: min(540px, calc(100vw - 32px));
+  max-height: 90dvh;
+  overflow: auto;
+  padding: 24px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: #20221c;
+  color: #eeeae2;
+}
+.metadata-refresh-dialog::backdrop {
+  background: #0009;
+  backdrop-filter: blur(8px);
+}
+.metadata-refresh-dialog header,
+.metadata-refresh-dialog footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+}
+.metadata-refresh-dialog h2 {
+  margin: 0;
+  font-size: 22px;
+}
+.metadata-refresh-dialog fieldset {
+  border: 0;
+  padding: 0;
+  display: grid;
+  gap: 12px;
+  margin: 24px 0;
+}
+.metadata-refresh-dialog label {
+  display: grid;
+  gap: 8px;
+}
+.metadata-refresh-dialog label.check-label {
+  display: flex;
+}
+.metadata-refresh-dialog select {
+  width: 100%;
+  color: #eeeae2;
+}
+.metadata-refresh-dialog select:disabled {
+  opacity: 0.75;
+  -webkit-text-fill-color: currentColor;
+}
+.provider-priority {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.provider-priority li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin: 8px 0;
+  padding: 8px;
+}
+.provider-priority button {
+  touch-action: none;
+  width: 44px;
+  height: 44px;
+}
+.provider-priority svg {
+  width: 22px;
+  height: 22px;
+}
+.provider-priority .priority-target {
+  border-color: var(--accent);
+}
+.provider-recommended {
+  color: var(--accent);
+  margin-right: 8px;
+  font-size: 10px;
+}
+:root[data-theme='light'] .metadata-refresh-dialog {
+  background: #f7f7f2;
+  color: #25271f;
+}
+:root[data-theme='light'] .metadata-refresh-dialog select {
+  background: #faf9f5;
+  color: #30332a;
+  border-color: #c9cbbd;
+}
