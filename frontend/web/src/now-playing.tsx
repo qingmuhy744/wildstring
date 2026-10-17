@@ -12,6 +12,7 @@ import {
   type Player,
 } from './player';
 import { QueuePanel } from './queue-panel';
+import { AlbumLink } from './album-link';
 
 function coverPalette(image: HTMLImageElement): string[] | null {
   try {
@@ -57,10 +58,14 @@ export function NowPlaying({
   player,
   onClose,
   favorites,
+  onOpenAlbum,
+  statusMessage,
 }: {
   player: Player;
   onClose: () => void;
   favorites: Favorites;
+  onOpenAlbum: (track: NonNullable<Player['current']>) => void;
+  statusMessage: string;
 }) {
   const dialog = useRef<HTMLElement>(null);
   const close = useRef<HTMLButtonElement>(null);
@@ -269,7 +274,13 @@ export function NowPlaying({
                 <FavoriteButton track={current} favorites={favorites} />
                 <h1>{current.title}</h1>
                 <p>{artist(current)}</p>
-                <span>{current.album || '未知专辑'}</span>
+                <span>
+                  {current.album_id ? (
+                    <AlbumLink track={current} onOpen={onOpenAlbum} />
+                  ) : (
+                    current.album || '未知专辑'
+                  )}
+                </span>
               </div>
             </div>
             {panel === 'lyrics' && <LyricsPanel key={current.id} player={player} />}
@@ -334,9 +345,9 @@ export function NowPlaying({
           </div>
           <PlaybackError player={player} />
         </footer>
-        {notice && (
+        {(statusMessage || notice) && (
           <p className="fullscreen-notice" role="status">
-            {notice}
+            {statusMessage || notice}
           </p>
         )}
       </section>

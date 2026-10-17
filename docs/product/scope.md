@@ -52,6 +52,8 @@
 
 0.3.1 增加网页服务端网络检测、持久刷新批次及逐曲失败说明，修正 Last.fm 不透明会话密钥校验，补充回调日志脱敏与安全错误分类。Android 增加多个服务端配置、独立切换与退出，以及 GitHub Release 检查与确认安装；验证、发布和部署分别记录，见 [0.3.1 更新说明](../releases/v0.3.1.md) 与 [联网诊断与任务反馈](../architecture/provider-network-diagnostics.md)。
 
+0.3.2 补齐 Web / Android 从歌曲查看所属专辑，统一歌曲操作图标及对齐，保持浏览跳转时的播放与队列。使用与验证边界见 [0.3.2 更新说明](../releases/v0.3.2.md)。
+
 ## 里程碑
 
 1. **M0 工程基座**：依赖锁、Make、hooks、测试、Docker、Actions；网页显示真实连接状态。

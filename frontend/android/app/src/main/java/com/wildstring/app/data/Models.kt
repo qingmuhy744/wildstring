@@ -14,6 +14,7 @@ data class Track(
     @SerializedName("play_count") val playCount: Int = 0, @SerializedName("listened_ms") val listenedMs: Long = 0,
     @SerializedName("last_played_at") val lastPlayedAt: String? = null,
     val loved: Boolean = false, val format: String = "", val status: String = "available",
+    @SerializedName("album_id") val albumId: String? = null,
 ) { val artist: String get() = artists.joinToString(" / ").ifBlank { "未知艺人" } }
 data class Album(val id: String, val title: String, val artists: List<String>,
     @SerializedName("track_count") val trackCount: Int,

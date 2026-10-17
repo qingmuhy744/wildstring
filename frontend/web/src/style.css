@@ -546,6 +546,47 @@ a {
   color: #b0b3a2;
   font-size: 12px;
 }
+.album-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  padding: 6px 0;
+  max-width: 100%;
+  font: inherit;
+  color: inherit;
+  text-align: inherit;
+  vertical-align: middle;
+  min-height: 32px;
+}
+.album-link:hover {
+  color: var(--accent);
+  background: transparent;
+}
+.album-link:hover > span {
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+.ui-icon {
+  display: block;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+}
+.album-link > .ui-icon {
+  width: 16px;
+  height: 16px;
+}
+.album-link > .album-chevron {
+  width: 12px;
+  height: 12px;
+  opacity: 0.55;
+}
+.album-link > span {
+  min-width: 0;
+}
 .format {
   border: 1px solid #4a4d3c;
   padding: 3px 5px;
@@ -1985,16 +2026,22 @@ select {
 }
 .track-header,
 .track-row {
-  grid-template-columns: 32px minmax(160px, 1.5fr) minmax(90px, 1fr) 70px 48px 70px;
+  grid-template-columns: 32px minmax(160px, 1.5fr) minmax(90px, 1fr) 70px 48px 84px;
 }
 .track-actions {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 3px;
+  gap: 4px;
 }
 .track-actions .icon-button {
-  padding: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  flex: 0 0 40px;
+  padding: 0;
   border: 0;
 }
 .favorite-button svg {
@@ -2015,8 +2062,7 @@ select {
   fill: currentColor;
 }
 .track-more {
-  font-size: 21px;
-  min-width: 30px;
+  color: var(--muted);
 }
 .track-popover {
   width: 240px;
@@ -2036,32 +2082,51 @@ select {
   gap: 4px;
 }
 .track-popover > p {
-  margin: 4px 8px 8px;
+  margin: 4px 9px 8px;
   color: var(--muted);
   font-size: 11px;
 }
 .track-popover button {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 42px;
   border: 0;
   text-align: left;
   padding: 10px 9px;
   font-size: 12px;
 }
+.track-popover button > .ui-icon {
+  color: var(--muted);
+}
+.track-popover button > .menu-chevron {
+  width: 14px;
+  height: 14px;
+  margin-left: auto;
+}
+.track-menu-label {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
 .track-popover label {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 8px;
+  padding: 8px 9px;
   font-size: 11px;
   color: var(--muted);
   border-top: 1px solid #414638;
   margin-top: 4px;
 }
 .track-popover select {
-  width: 100%;
+  width: calc(100% - 32px);
+  margin-left: 32px;
   color: #eee7d7;
 }
 .playlist-move {
   display: flex;
+  flex-direction: column;
   border-top: 1px solid #414638;
   padding-top: 4px;
 }
@@ -2314,14 +2379,14 @@ select {
   }
   .track-header,
   .track-row {
-    grid-template-columns: 22px minmax(0, 1fr) 35px 64px;
+    grid-template-columns: 22px minmax(0, 1fr) 35px 84px;
     gap: 7px;
   }
   .track-identity {
     gap: 8px;
   }
   .track-actions .icon-button {
-    padding: 6px 4px;
+    padding: 0;
   }
   .track-stat {
     white-space: normal !important;
@@ -2952,6 +3017,7 @@ select {
   color: #eee4d77d;
 }
 .fullscreen-notice {
+  pointer-events: none;
   position: absolute;
   left: 50%;
   bottom: 180px;
@@ -3725,7 +3791,7 @@ select {
     margin-bottom: 4px;
   }
   .fullscreen-metadata > span {
-    display: none;
+    display: block;
   }
   .fullscreen-controls {
     grid-column: 2;

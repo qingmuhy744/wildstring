@@ -29,6 +29,9 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
+import androidx.compose.material.icons.automirrored.filled.PlaylistPlay
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -152,6 +155,12 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
         expanded = false
         if (playerFromSettings) { settings = true; playerFromSettings = false }
     }
+    fun openTrackAlbum(track: Track) {
+        actions = null
+        vm.openTrackAlbum(track) {
+            expanded = false; queue = false; lyrics = false; settings = false; playerFromSettings = false
+        }
+    }
     val scope = rememberCoroutineScope()
     val mutationSnackbar = remember { SnackbarHostState() }
     LaunchedEffect(state.error, state.mutationMessage) {
@@ -194,6 +203,7 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
             PlayerScreen(vm, state, wide, landscape, lyrics, queue, rotation,
                 onBack = { if (lyrics && !wide) lyrics = false else collapsePlayer() },
                 onLyrics = { lyrics = !lyrics; queue = false }, onQueue = { queue = !queue },
+                onAlbum = { state.current?.let(::openTrackAlbum) },
                 onAdd = { actions = state.current }, onSleep = { sleepDialog = true })
         } else {
             Row(Modifier.fillMaxSize()) {
@@ -305,20 +315,31 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
     refreshAlbum?.let { albumId -> MetadataRefreshPrompt(vm, "album", albumId) { refreshAlbum = null } }
     if (sleepDialog) SleepDialog(vm) { sleepDialog = false }
     deletingPlaylist?.let { playlist -> AlertDialog(onDismissRequest = { if (!playlistAction.busy) deletingPlaylist = null }, title = { Text("删除歌单？") }, text = { Column { Text(playlist.name); ActionStatus(playlistAction) } }, confirmButton = { TextButton({ scope.launch { playlistAction.run { vm.deletePlaylist(playlist); deletingPlaylist = null } } }, enabled = !playlistAction.busy) { Text("删除") } }, dismissButton = { TextButton({ deletingPlaylist = null }, enabled = !playlistAction.busy) { Text("取消") } }) }
-    actions?.let { track -> ModalBottomSheet(onDismissRequest = { actions = null }) {
+    actions?.let { track -> ModalBottomSheet(onDismissRequest = { actions = null }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
         Column(Modifier.fillMaxWidth().heightIn(max = 640.dp).verticalScroll(rememberScrollState())) {
-        Text(track.title, Modifier.padding(24.dp), style = MaterialTheme.typography.titleLarge)
-        TextButton(tactile { vm.addToQueue(track, true); actions = null }, Modifier.fillMaxWidth()) { Text("下一首播放") }
-        TextButton(tactile { vm.addToQueue(track); actions = null }, Modifier.fillMaxWidth()) { Text("加入播放队列") }
-        TextButton(tactile { vm.favorite(track); actions = null }, Modifier.fillMaxWidth()) { Text(if (track.loved) "取消收藏" else "收藏") }
-        TextButton({
+        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            Cover(vm, track.id.takeIf { track.hasCover }, track.title, Modifier.size(48.dp))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(track.title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text(track.artist, style = MaterialTheme.typography.bodySmall, color = Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+        SongAction("查看所属专辑", Icons.Default.Album, navigate = true) { openTrackAlbum(track) }
+        HorizontalDivider(Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+        SongAction("下一首播放", Icons.AutoMirrored.Filled.PlaylistPlay, onClick = tactile { vm.addToQueue(track, true); actions = null })
+        SongAction("加入播放队列", Icons.AutoMirrored.Filled.QueueMusic, onClick = tactile { vm.addToQueue(track); actions = null })
+        SongAction(if (track.loved) "取消收藏" else "收藏", if (track.loved) Icons.Default.Favorite else Icons.Default.FavoriteBorder, onClick = tactile { vm.favorite(track); actions = null })
+        SongAction("加入歌单", Icons.AutoMirrored.Filled.PlaylistAdd) {
             chooseTrack = track; actions = null
             scope.launch { try { playlistChoices = vm.playlistsForAdd() } catch (e: Exception) { localError = friendlyError(e) } }
-        }, Modifier.fillMaxWidth()) { Text("加入歌单") }
-        TextButton({ vm.download(listOf(track)); actions = null }, Modifier.fillMaxWidth()) { Text("离线保存") }
-        state.activePlaylist?.takeIf { it.kind == "manual" }?.let { playlist -> TextButton({ actions = null; scope.launch { try { vm.removePlaylistTrack(track, playlist) } catch (e: Exception) { localError = friendlyError(e) } } }, Modifier.fillMaxWidth()) { Text("从当前歌单移除") } }
-        if (state.account?.role == "admin") listOf("metadata" to "编辑歌曲信息", "lyrics" to "编辑歌词与打点", "suggestions" to "更新元数据与建议").forEach { (route, title) ->
-            TextButton({ featureTrack = track; feature = route; actions = null }, Modifier.fillMaxWidth()) { Text(title) }
+        }
+        SongAction("离线保存", Icons.Default.Download) { vm.download(listOf(track)); actions = null }
+        state.activePlaylist?.takeIf { it.kind == "manual" }?.let { playlist -> SongAction("从当前歌单移除", Icons.Default.RemoveCircleOutline, destructive = true) { actions = null; scope.launch { try { vm.removePlaylistTrack(track, playlist) } catch (e: Exception) { localError = friendlyError(e) } } } }
+        if (state.account?.role == "admin") {
+            HorizontalDivider(Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+            listOf(Triple("metadata", "编辑歌曲信息", Icons.Default.Edit), Triple("lyrics", "编辑歌词与打点", Icons.Default.Lyrics), Triple("suggestions", "更新元数据与建议", Icons.Default.Refresh)).forEach { (route, title, icon) ->
+                SongAction(title, icon, navigate = true) { featureTrack = track; feature = route; actions = null }
+            }
         }
         Spacer(Modifier.height(24.dp))
         }
@@ -329,6 +350,18 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
         }
     }, confirmButton = { TextButton({ playlistChoices = null }) { Text("关闭") } }) }
     localError?.let { text -> AlertDialog(onDismissRequest = { localError = null }, text = { Text(text) }, confirmButton = { TextButton({ localError = null }) { Text("关闭") } }) }
+}
+
+@Composable
+private fun SongAction(label: String, icon: ImageVector, navigate: Boolean = false, destructive: Boolean = false, onClick: () -> Unit) {
+    val color = if (destructive) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
+    ListItem(
+        headlineContent = { Text(label, style = MaterialTheme.typography.bodyLarge) },
+        leadingContent = { Icon(icon, null, Modifier.size(24.dp)) },
+        trailingContent = { if (navigate) Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, Modifier.size(20.dp), tint = Muted) },
+        colors = ListItemDefaults.colors(containerColor = Color.Transparent, headlineColor = color, leadingIconColor = if (destructive) color else Muted),
+        modifier = Modifier.fillMaxWidth().testTag("song-action-$label").clickable(onClick = onClick),
+    )
 }
 
 @Composable
@@ -362,7 +395,7 @@ private fun TrackRow(vm: MusicViewModel, track: Track, play: () -> Unit, actions
 }
 @Composable
 private fun PlayerScreen(vm: MusicViewModel, input: MusicState, wide: Boolean, landscape: Boolean, lyrics: Boolean, queue: Boolean, rotation: PlaybackRotation,
-    onBack: () -> Unit, onLyrics: () -> Unit, onQueue: () -> Unit, onAdd: () -> Unit, onSleep: () -> Unit) {
+    onBack: () -> Unit, onLyrics: () -> Unit, onQueue: () -> Unit, onAlbum: () -> Unit, onAdd: () -> Unit, onSleep: () -> Unit) {
     val position by vm.position.collectAsStateWithLifecycle()
     val state = input.copy(position = position)
     val preferences by vm.settings.state.collectAsStateWithLifecycle()
@@ -377,7 +410,13 @@ private fun PlayerScreen(vm: MusicViewModel, input: MusicState, wide: Boolean, l
     Column(Modifier.testTag(if (wide) "player-tablet" else if (landscape) "player-landscape" else "player-phone").fillMaxSize().padding(horizontal = if (wide) 34.dp else 20.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
             IconButton(onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, if (lyrics && !wide) "返回封面" else "收起播放器") }
-            Text(track.album ?: "正在播放", color = Muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).padding(horizontal = 16.dp))
+            TextButton(onAlbum, Modifier.weight(1f).testTag("player-album"), contentPadding = PaddingValues(horizontal = 6.dp)) {
+                Icon(Icons.Default.Album, null, Modifier.size(16.dp), tint = Muted)
+                Spacer(Modifier.width(6.dp))
+                Text(track.album ?: "未知专辑", Modifier.weight(1f, fill = false), color = Muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Spacer(Modifier.width(2.dp))
+                Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, Modifier.size(14.dp), tint = Muted)
+            }
             IconButton(onSleep) { Icon(Icons.Default.Bedtime, "睡眠定时", tint = if (sleep.deadline != null || sleep.entryId != null) Accent else Muted) }
             IconButton(vm::refreshLyrics) { Icon(Icons.Default.Refresh, "刷新歌词") }
             IconButton(onAdd) { Icon(Icons.Default.MoreVert, "当前歌曲操作") }

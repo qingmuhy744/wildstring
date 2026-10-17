@@ -82,7 +82,14 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
   const specialView = view === 'discover' || view === 'offline' || view === 'devices';
   const [collectionBusy, setCollectionBusy] = useState(false);
   const collectionRequest = useRef<AbortController | null>(null);
-  useEffect(() => () => collectionRequest.current?.abort(), []);
+  const albumRequest = useRef<AbortController | null>(null);
+  useEffect(
+    () => () => {
+      collectionRequest.current?.abort();
+      albumRequest.current?.abort();
+    },
+    [],
+  );
   const [manageOpen, setManageOpen] = useState(false);
   const [editingTrack, setEditingTrack] = useState<Track | null>(null);
   const [metadataRefresh, setMetadataRefresh] = useState<RefreshTarget | null>(null);
@@ -284,6 +291,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
     return () => clearTimeout(timer);
   }, [notice]);
   function clearSearch() {
+    albumRequest.current?.abort();
     setDraft('');
     setQuery('');
     setOffset(0);
@@ -319,8 +327,32 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
     setAlbum(null);
     clearSearch();
   }
+  async function openTrackAlbum(track: Track) {
+    if (!track.album_id) return;
+    albumRequest.current?.abort();
+    const controller = new AbortController();
+    albumRequest.current = controller;
+    setNotice('正在打开专辑…');
+    try {
+      const target = await api<Album>(`/albums/${encodeURIComponent(track.album_id)}`, {
+        signal: controller.signal,
+      });
+      if (controller.signal.aborted) return;
+      switchView('albums');
+      setAlbum(target);
+      setLyricsOpen(false);
+      setQueueOpen(false);
+      setNotice('');
+    } catch (reason) {
+      if (!controller.signal.aborted)
+        setNotice(reason instanceof ApiError ? reason.message : '专辑暂时无法打开，请重试。');
+    } finally {
+      if (albumRequest.current === controller) albumRequest.current = null;
+    }
+  }
   function search(event: FormEvent) {
     event.preventDefault();
+    albumRequest.current?.abort();
     setAlbum(null);
     setOffset(0);
     setQuery(draft.trim());
@@ -443,6 +475,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
   }
   const operations: TrackOperations = {
     favorites,
+    onOpenAlbum: (track) => void openTrackAlbum(track),
     onDownload: (track) => {
       void saveDownloads([track])
         .then(() => setNotice('已添加到离线下载。'))
@@ -1025,6 +1058,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
                         key={item.id}
                         aria-label={`打开专辑 ${item.title}`}
                         onClick={() => {
+                          albumRequest.current?.abort();
                           setAlbum(item);
                           setOffset(0);
                         }}
@@ -1078,13 +1112,21 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
           lyricsOpen={lyricsOpen}
           favorites={favorites}
         />
-        {notice && (
+        {notice && !lyricsOpen && (
           <p className="toast" role="status">
             {notice}
           </p>
         )}
       </div>
-      {lyricsOpen && <NowPlaying player={player} onClose={closePlayer} favorites={favorites} />}
+      {lyricsOpen && (
+        <NowPlaying
+          player={player}
+          onClose={closePlayer}
+          favorites={favorites}
+          onOpenAlbum={(track) => void openTrackAlbum(track)}
+          statusMessage={notice}
+        />
+      )}
       {metadataRefresh && (
         <MetadataRefreshDialog target={metadataRefresh} onClose={() => setMetadataRefresh(null)} />
       )}
