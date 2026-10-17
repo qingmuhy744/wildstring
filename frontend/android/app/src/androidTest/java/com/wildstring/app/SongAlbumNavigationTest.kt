@@ -11,6 +11,7 @@ import com.wildstring.app.data.Artist
 import com.wildstring.app.data.Track
 import com.wildstring.app.ui.MusicViewModel
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
@@ -58,7 +59,7 @@ class SongAlbumNavigationTest {
                         "/api/v1/tracks/song-one/stream", "/api/v1/tracks/song-two/stream" -> audioStreamFixture(request, audio, "audio/mpeg", "\"song-album-v1\"")
                         "/api/v1/tracks/song-one/lyrics", "/api/v1/tracks/song-two/lyrics" -> json(mapOf("kind" to "none", "lines" to emptyList<String>()))
                         "/api/v1/tracks", "/api/v1/artists/guest/tracks" -> page(listOf(track))
-                        "/api/v1/albums/exact-album/tracks" -> page(listOf(track, second))
+                        "/api/v1/albums/exact-album/tracks" -> page(listOf(track, second)).setBodyDelay(250, TimeUnit.MILLISECONDS)
                         "/api/v1/albums" -> page(listOf(Album("wrong-album", "同名专辑", listOf("其他艺人"), 1, null)))
                         else -> page(emptyList())
                     }
@@ -103,6 +104,8 @@ class SongAlbumNavigationTest {
                 val repeatMode = vm.state.value.repeatMode
                 val position = compose.runOnIdle { vm.controller!!.currentPosition }
                 compose.onNodeWithTag("player-album").performClick()
+                // Navigation waits for the album response before closing the player.
+                compose.waitUntil(10_000) { compose.onAllNodesWithTag("player-phone").fetchSemanticsNodes().isEmpty() }
                 compose.onNodeWithTag("player-phone").assertDoesNotExist()
                 assertEquals("exact-album", vm.state.value.collectionId)
                 assertEquals(entries, vm.state.value.queue.map { it.entryId })
@@ -116,6 +119,7 @@ class SongAlbumNavigationTest {
                 // Same-album navigation still has an explicit player origin, even when the
                 // underlying catalog was already this album before expanding playback.
                 compose.onNodeWithContentDescription("返回上一页").performClick()
+                compose.waitUntil(10_000) { compose.onAllNodesWithTag("player-phone").fetchSemanticsNodes().size == 1 }
                 compose.onNodeWithTag("player-phone").assertIsDisplayed()
                 assertEquals("exact-album", vm.state.value.collectionId)
                 compose.onNodeWithContentDescription("收起播放器").performClick()
