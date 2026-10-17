@@ -12,6 +12,7 @@ import kotlinx.coroutines.runBlocking
 import okio.Buffer
 import com.wildstring.app.ui.MusicViewModel
 import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.atomic.AtomicBoolean
 import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
@@ -36,11 +37,17 @@ class MultiServerUiTest {
         compose.onNodeWithText("服务器 / 切换服务器").performScrollTo().performClick()
         compose.onNodeWithTag("server-manager").assertIsDisplayed()
     }
+    private fun serverAction(tag: String) {
+        compose.onNode(hasScrollToIndexAction() and hasAnyAncestor(hasTestTag("server-manager")))
+            .performScrollToNode(hasTestTag(tag))
+        compose.onNodeWithTag(tag).performClick()
+    }
     @Test fun switchingKeepsEachLoginAndLogoutOnlyClearsTheSelectedServer() {
         val vm = compose.runOnIdle { ViewModelProvider(compose.activity)[MusicViewModel::class.java] }
         compose.runOnIdle { vm.repository.session.invalidate(); vm.settings.theme(false); vm.settings.appearance("light") }
         compose.waitUntil(10000) { !vm.state.value.connected }
         val aRequests = ConcurrentLinkedQueue<RecordedRequest>(); val bRequests = ConcurrentLinkedQueue<RecordedRequest>()
+        val revoked = AtomicBoolean(false)
         val audio = InstrumentationRegistry.getInstrumentation().context.assets.open("playback.mp3").use { it.readBytes() }
         fun fixture(name: String, requests: ConcurrentLinkedQueue<RecordedRequest>) = object : Dispatcher() {
             override fun dispatch(request: RecordedRequest): MockResponse {
@@ -49,7 +56,7 @@ class MultiServerUiTest {
                 fun json(body: String) = MockResponse().setHeader("Content-Type", "application/json").setBody(body)
                 val authenticated = request.getHeader("Cookie")?.contains("wildstring_session=$token") == true
                 val user = """{"id":"$name-user","username":"$name","role":"user","enabled":true,"version":1}"""
-                if (path.endsWith("/auth/status")) return json("""{"configured":true,"authenticated":$authenticated,"user":${if (authenticated) user else "null"}}""")
+                if (path.endsWith("/auth/status")) return if (revoked.get()) MockResponse().setResponseCode(401) else json("""{"configured":true,"authenticated":$authenticated,"user":${if (authenticated) user else "null"}}""")
                 if (path.endsWith("/auth/login")) return json(user).setHeader("Set-Cookie", "wildstring_session=$token; Max-Age=3600; Path=/; HttpOnly")
                 if (path.endsWith("/auth/logout")) return MockResponse().setResponseCode(204)
                 if (!authenticated) return MockResponse().setResponseCode(401)
@@ -71,6 +78,7 @@ class MultiServerUiTest {
                 login(a.url("/").toString(), "甲")
                 compose.waitUntil(15000) { vm.state.value.account?.username == "甲" && vm.state.value.connected }
                 val aId = vm.repository.session.activeServerId!!
+                compose.waitUntil(15000) { !vm.state.value.loading && compose.onAllNodesWithText("甲 的歌曲", useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
                 compose.onNodeWithText("甲 的歌曲", useUnmergedTree = true).performClick()
                 compose.waitUntil(15000) { compose.runOnIdle { vm.controller?.isPlaying == true && vm.controller!!.currentPosition >= 1200 } }
                 android.util.Log.i("MultiServerStage", "A is playing, share snapshot")
@@ -85,7 +93,7 @@ class MultiServerUiTest {
                 compose.onNodeWithTag("server-save").performClick()
                 compose.waitUntil(10000) { vm.repository.session.servers.value.any { it.name == "卧室服务" } }
                 val bId = vm.repository.session.servers.value.first { it.name == "卧室服务" }.id
-                compose.onNodeWithTag("server-select-$bId").performScrollTo().performClick()
+                serverAction("server-select-$bId")
                 compose.waitUntil(10000) { vm.state.value.server == b.url("/").toString() && !vm.state.value.connected && !vm.state.value.connecting }
                 assertTrue(vm.repository.session.hasSession(aId))
                 android.util.Log.i("MultiServerStage", "login B")
@@ -97,7 +105,7 @@ class MultiServerUiTest {
                 assertTrue("A listening events must never reach B", bRequests.none { it.requestUrl!!.encodedPath.endsWith("/listening") })
                 assertTrue("A snapshots must never reach B", bRequests.none { it.requestUrl!!.encodedPath.endsWith("/playback/state") })
                 manager()
-                compose.onNodeWithTag("server-select-$aId").performScrollTo().performClick()
+                serverAction("server-select-$aId")
                 compose.waitUntil(15000) { vm.state.value.connected && vm.state.value.account?.username == "甲" && !vm.state.value.loading }
                 assertEquals("甲 的专辑", vm.state.value.albums.single().title)
                 assertTrue(vm.state.value.queue.isEmpty()); assertNull(vm.state.value.current)
@@ -109,18 +117,18 @@ class MultiServerUiTest {
                 compose.waitUntil(15000) { !vm.state.value.connected && !vm.repository.session.hasSession(aId) }
                 assertTrue(vm.repository.session.hasSession(bId))
                 compose.onNodeWithTag("connection-servers").performScrollTo().performClick()
-                compose.onNodeWithTag("server-select-$bId").performScrollTo().performClick()
+                serverAction("server-select-$bId")
                 compose.waitUntil(15000) { vm.state.value.connected && vm.state.value.account?.username == "乙" }
                 assertEquals(1, bRequests.count { it.requestUrl!!.encodedPath.endsWith("/auth/login") })
                 assertTrue(aRequests.filter { it.requestUrl!!.encodedPath.endsWith("/albums") }.all { it.getHeader("Cookie")?.contains("wildstring_session=first") == true })
                 assertTrue(bRequests.filter { it.requestUrl!!.encodedPath.endsWith("/albums") }.all { it.getHeader("Cookie")?.contains("wildstring_session=second") == true })
                 manager()
-                compose.onNodeWithTag("server-edit-$bId").performScrollTo().performClick()
+                serverAction("server-edit-$bId")
                 compose.onNodeWithTag("server-name").performTextReplacement("客厅服务")
                 compose.onNodeWithTag("server-save").performClick()
                 compose.waitUntil(10000) { vm.repository.session.servers.value.any { it.name == "客厅服务" } }
                 assertTrue(vm.repository.session.hasSession(bId))
-                compose.onNodeWithTag("server-delete-$aId").performScrollTo().performClick()
+                serverAction("server-delete-$aId")
                 compose.onNodeWithText("删除", substring = false).performClick()
                 compose.waitUntil(10000) { vm.repository.session.servers.value.none { it.id == aId } }
                 assertTrue(vm.repository.session.hasSession(bId))
@@ -132,6 +140,12 @@ class MultiServerUiTest {
                     ?: checkNotNull(InstrumentationRegistry.getInstrumentation().targetContext.getExternalFilesDir(null))
                 output.mkdirs(); compose.waitForIdle()
                 automation.takeScreenshot()?.let { image -> java.io.File(output, "multi-server-settings-updater.png").outputStream().use { image.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }; image.recycle() }
+                // A new 401 after reconnecting is not the superseded expiry from the previous visit.
+                revoked.set(true)
+                runBlocking { runCatching { vm.repository.status() } }
+                compose.waitUntil(10000) { !vm.state.value.connected && !vm.repository.session.hasSession(bId) }
+                assertNull(vm.repository.session.read())
+                compose.onNodeWithText("连接并登录").assertExists()
             } catch (failure: Throwable) { android.util.Log.e("MultiServerStage", "Failure before cleanup", failure); throw failure } finally { compose.runOnIdle { vm.repository.session.invalidate(); vm.deleteServer(vm.repository.session.activeServerId.orEmpty()) } }
         } }
     }

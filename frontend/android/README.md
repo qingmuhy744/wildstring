@@ -2,7 +2,7 @@
 
 Kotlin / Compose / Media3 原生客户端，Android 8.0（API 26）起可安装。所有曲库、封面、歌词、收藏与歌单来自用户配置的野弦实例；生产 APK 没有内置演示曲库或测试音频。测试夹具只打包到独立的 androidTest APK。
 
-当前版本：0.3.0（versionCode 7）。本版合并了原未发布 0.2.3；正式安装包以 GitHub Releases 为准。
+当前版本：0.3.1（versionCode 8）。0.3.0 合并了原未发布 0.2.3；正式安装包以 GitHub Releases 为准。
 
 0.3.0 在设置中增加封面／黑胶／磁带选择，默认封面并记住本机选择。黑胶中心封面放大，手机横屏采用视觉与播放控制左右布局。长按视觉或歌词可查看正向大封面，点空白或返回关闭，播放继续。唱臂、唱片与双卷轴跟随实际播放状态，暂停、缓冲、后台及关闭系统动画时停转；三种样式共用音频和队列。播放背景延伸至系统栏，按钮保留安全间距，进度条使用主题配色。实现与验证状态见 [播放页样式](../../docs/product/player-styles-0.2.3.md)。
 
@@ -34,7 +34,7 @@ make android-locks              # 修改依赖后刷新锁与 SHA-256 校验元�
 
 `ANDROID_HOME` 指向本机 SDK，`JAVA_HOME` 指向 JDK；`local.properties` 只用于本机且不跟踪。Gradle Wrapper、版本目录与依赖校验资料入库，构建缓存、APK 和签名私钥不提交。
 
-`make android-ci` 的安装包位于 `artifacts/android/`，包含 `wildstring-<version>-debug.apk`（当前开发包为 `wildstring-0.3.0-debug.apk`）与 `SHA256SUMS`。GitHub 的 **Android APK** 工作流通过后，在该次运行的 **Artifacts → wildstring-android-debug** 下载并解压 ZIP 后安装 APK。原有 Python/Web/Docker CI 继续独立运行。
+`make android-ci` 的安装包位于 `artifacts/android/`，包含 `wildstring-<version>-debug.apk`（当前开发包为 `wildstring-0.3.1-debug.apk`）与 `SHA256SUMS`。GitHub 的 **Android APK** 工作流通过后，在该次运行的 **Artifacts → wildstring-android-debug** 下载并解压 ZIP 后安装 APK。原有 Python/Web/Docker CI 继续独立运行。
 
 CI 另启动一次性合成曲库，并通过 `ANDROID_TEST_ARGS=-Pandroid.testInstrumentationRunnerArguments.realBackend=http://10.0.2.2:19882/` 运行真实 API 集成。该参数只允许指向临时测试实例，使用固定的公开测试账号，会创建／删除测试歌单及修改测试曲目。不要指向个人服务器。
 
@@ -56,7 +56,7 @@ GitHub [Releases](https://github.com/qingmuhy744/wildstring/releases) 提供正�
 - 服务端默认回环监听，手机不能用自己的 `127.0.0.1` 访问另一台服务器。使用可达的 HTTPS 反向代理，客户端不会修改服务器监听或防火墙。
 - 普通接口、封面与媒体 Range 请求共用 CookieJar 和同源/路径校验；拒绝重定向。当前服务支持 `X-Wildstring-Client: android`；旧服务仅返回明确的 `client_header_required` 时，在同一地址使用已有 Web 标识重试，认证仍需有效 Cookie。
 - 密码只用于本次登录，不落盘。Cookie 由 Android Keystore 管理的 AES-GCM 密钥加密，应用禁止系统备份。401 清理会话并停止受保护播放。
-- Room 保存队列条目 ID/曲目 ID、顺序和位置。0.2.0 新增应用级曲库 / 歌词 / 封面 / 最近播放片段缓存，容量可在设置中调整或关闭，退出或切换服务器清理。0.3.0 另提供完整原音离线副本，未完成下载仍只具有片段缓存的能力；在线播放离线副本前核验权限与文件版本，退出／切换账号清理私密离线内容。策略与边界见 [Android 缓存](../../docs/architecture/android-cache.md)。
+- Room 保存队列条目 ID/曲目 ID、顺序和位置。0.2.0 新增应用级曲库 / 歌词 / 封面 / 最近播放片段缓存，容量可在设置中调整或关闭。0.3.0 另提供完整原音离线副本，未完成下载仍只具有片段缓存的能力；在线播放离线副本前核验权限与文件版本。0.3.1 按服务器隔离缓存及离线内容，切换保留各服内容，退出只清除当前服务器的私密内容，详见下方多服务器说明与 [Android 缓存](../../docs/architecture/android-cache.md)。
 - 进程重建后恢复到暂停状态；后台服务仍在时重新连接同一播放器。强制停止、厂商省电策略和断网尾段统计另按真机结果验收，不能以可构建 APK 代替这些验证。
 
 ## main 新功能适配（0.2.0）

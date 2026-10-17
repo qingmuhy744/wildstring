@@ -60,6 +60,7 @@ class MusicViewModel @Inject constructor(
     private var progressJob: Job? = null
     private var lyricTrack: String? = null
     private var invalidationMessage: String? = null
+    private var supersededInvalidationSelection: String? = null
     @Volatile private var authGeneration = 0
     private var loadGeneration = 0L
     private val tabs = mutableMapOf<String, CatalogQuery>()
@@ -103,7 +104,7 @@ class MusicViewModel @Inject constructor(
         }, ContextCompat.getMainExecutor(context))
         viewModelScope.launch { repository.session.invalidations.collect { selection ->
             yield()
-            if (selection != repository.session.requestState()?.selection.orEmpty()) return@collect
+            if (selection == supersededInvalidationSelection || selection != repository.session.requestState()?.selection.orEmpty()) return@collect
             authGeneration++; optimisticFavorites.clear();
             loadGeneration++; loadJob?.cancel(); lyricJob?.cancel(); lyricTrack = null; pages.clear(); tabs.clear(); history.clear(); repository.knownTracks.clear(); controller?.stop(); controller?.clearMediaItems()
             val message = invalidationMessage ?: "登录已失效，请重新登录。"
@@ -150,6 +151,9 @@ class MusicViewModel @Inject constructor(
         if (visible) progressJob = viewModelScope.launch { while (isActive) { refreshPlayer(); delay(500) } }
     }
     private suspend fun stopForServerChange() {
+        // A pending expiry must not cancel an explicit reconnect while its first IO is suspended.
+        // A later expiry rotates the selection token and remains actionable.
+        supersededInvalidationSelection = repository.session.requestState()?.selection.orEmpty()
         val generation = ++authGeneration
         invalidationMessage = null
         loadGeneration++; optimisticFavorites.clear(); favoriteJobs.clear(); playlistJobs.clear()
