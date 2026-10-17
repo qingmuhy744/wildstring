@@ -125,7 +125,29 @@ class NativePlaybackTest {
         // A configuration change briefly leaves no Compose root at all. Retry only
         // this readiness check; the playback and geometry assertions still run below.
         compose.waitUntil(15_000) {
-            runCatching { compose.onNodeWithTag(tag).assertIsDisplayed() }.isSuccess
+            runCatching { compose.onNodeWithTag(tag).assertIsDisplayed(); compose.runOnIdle { compose.activity.hasWindowFocus() } }.getOrDefault(false)
+        }
+    }
+
+    private fun waitForActivityWindow() {
+        compose.waitUntil(5_000) {
+            runCatching { compose.runOnIdle { compose.activity.hasWindowFocus() } }.getOrDefault(false)
+        }
+    }
+
+    private fun waitForArtworkWindow() {
+        // A Compose dialog can expose semantics before InputDispatcher gives its
+        // Android window focus. Send Back only once that actual window is active.
+        compose.waitUntil(5_000) {
+            runCatching {
+                compose.onNodeWithTag("artwork-preview").assertIsDisplayed()
+                compose.runOnIdle {
+                    val activityWindow = compose.activity.window.decorView
+                    if (android.os.Build.VERSION.SDK_INT >= 29) android.view.inspector.WindowInspector.getGlobalWindowViews()
+                        .any { it !== activityWindow && it.isAttachedToWindow && it.hasWindowFocus() }
+                    else !activityWindow.hasWindowFocus()
+                }
+            }.getOrDefault(false)
         }
     }
 
@@ -226,6 +248,7 @@ class NativePlaybackTest {
                 shell("wm density reset")
 
             }
+            waitForConfigurationTag("player-phone")
             compose.waitUntil(10_000) { vm.audioCache.bytes() >= audio.size }
             compose.waitUntil(10_000) { compose.onAllNodesWithTag("artwork-atmosphere").fetchSemanticsNodes().isNotEmpty() }
             val nightPosition = compose.runOnIdle { player.currentPosition }
@@ -249,6 +272,7 @@ class NativePlaybackTest {
                 compose.onNodeWithContentDescription("设置").performClick()
                 compose.onNodeWithTag("setting-播放样式").performScrollTo().performClick()
                 compose.onNode(hasText(label) and hasAnyAncestor(isDialog()), useUnmergedTree = true).performClick()
+                waitForActivityWindow()
                 compose.onNodeWithTag("settings-back").performClick()
                 compose.onNodeWithTag("mini-player-open").performClick()
                 compose.mainClock.advanceTimeBy(250)
@@ -265,10 +289,12 @@ class NativePlaybackTest {
                 assertTrue(kotlin.math.abs(compose.runOnIdle { player.currentPosition } - stylePosition) < 250)
                 compose.onNodeWithTag("playback-visual-$key").performTouchInput { longClick() }
                 compose.onNodeWithTag("artwork-preview").assertIsDisplayed()
+                waitForArtworkWindow()
                 if (key == "vinyl") capture("player-artwork-preview.png")
                 if (key == "cassette") InstrumentationRegistry.getInstrumentation().sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
                 else compose.onNodeWithContentDescription("关闭大封面").performClick()
                 compose.waitUntil(5_000) { compose.onAllNodesWithTag("artwork-preview").fetchSemanticsNodes().isEmpty() }
+                waitForActivityWindow()
                 compose.onNodeWithTag("artwork-preview").assertDoesNotExist()
                 compose.onNodeWithTag("playback-visual-$key").assertIsDisplayed()
                 assertEquals(styleEntry, compose.runOnIdle { player.currentMediaItem!!.mediaId })
@@ -334,8 +360,19 @@ class NativePlaybackTest {
                 }
                 queue.performTouchInput { up() }
             }
+            compose.runOnIdle { vm.notify("播放队列操作反馈") }
+            compose.waitUntil(5_000) { compose.onAllNodesWithText("播放队列操作反馈").fetchSemanticsNodes().isNotEmpty() }
+            val feedbackBounds = compose.onNodeWithTag("mutation-feedback").fetchSemanticsNode().boundsInRoot
+            val queueButtonBounds = compose.onNodeWithContentDescription("播放队列").fetchSemanticsNode().boundsInRoot
+            assertFalse("Feedback must leave playback controls reachable", feedbackBounds.overlaps(queueButtonBounds))
+            capture("phone-player-before-queue.png")
             compose.onNodeWithContentDescription("播放队列").performClick()
-            compose.waitUntil(10_000) { compose.onAllNodesWithTag("playback-queue").fetchSemanticsNodes().isNotEmpty() }
+            try { compose.waitUntil(10_000) { compose.onAllNodesWithTag("playback-queue").fetchSemanticsNodes().isNotEmpty() } }
+            catch (failure: Throwable) {
+                capture("phone-queue-failure.png")
+                compose.onRoot(useUnmergedTree = true).printToLog("PhoneQueueFailure")
+                throw failure
+            }
             val queuePosition = compose.runOnIdle { player.currentPosition }
             dragEntry(playingEntry, originalOrder.last())
             compose.waitUntil(10_000) { vm.state.value.queue.last().entryId == playingEntry }
@@ -364,6 +401,7 @@ class NativePlaybackTest {
                 runCatching { capture("tablet-queue-failure.png", resized = true) }
                 throw failure
             } finally { shellForTest("wm size reset"); shellForTest("wm density reset") }
+            waitForConfigurationTag("player-phone")
             compose.runOnIdle { player.removeMediaItems(1, player.mediaItemCount) }
             // Exercise actual controls during playback and inspect both appearance options.
             compose.onNodeWithContentDescription("返回封面").performClick()
@@ -371,20 +409,26 @@ class NativePlaybackTest {
             compose.onNodeWithContentDescription("设置").performClick()
             compose.onNodeWithTag("setting-日夜模式").performScrollTo().performClick()
             compose.onNodeWithText("深色", substring = false).performClick()
+            waitForActivityWindow()
             compose.onNodeWithTag("appearance-dark").assertExists()
             compose.onNodeWithTag("setting-日夜模式").performScrollTo().performClick()
             compose.onNodeWithText("浅色", substring = false).performClick()
+            waitForActivityWindow()
             compose.onNodeWithTag("appearance-light").assertExists()
             compose.onNodeWithTag("setting-日夜模式").performScrollTo().performClick()
             compose.onNodeWithText("跟随系统").performClick()
+            waitForActivityWindow()
             compose.onNodeWithTag("setting-主题").performScrollTo().performClick()
             compose.onNodeWithText("一块红布").performClick()
+            waitForActivityWindow()
             compose.onNodeWithTag("appearance-red-cloth").assertExists()
             compose.onAllNodesWithText("日夜模式").assertCountEquals(0)
             compose.onNodeWithTag("setting-桌面图标").performScrollTo().performClick()
             compose.onNodeWithText("红布", substring = false).performClick()
+            waitForActivityWindow()
             compose.onNodeWithTag("setting-最近播放音频").performScrollTo().performClick()
             compose.onNodeWithText("128 MB").performClick()
+            waitForActivityWindow()
             compose.waitUntil { vm.settings.state.value.audioMb == 128 && vm.settings.state.value.redCloth && vm.settings.state.value.redIcon }
             capture("red-cloth-settings.png")
             compose.onNodeWithTag("settings-back").performClick()
@@ -413,6 +457,7 @@ class NativePlaybackTest {
                 }
                 compose.runOnIdle { vm.settings.playbackStyle("cover") }
             } finally { shellForTest("wm size reset"); shellForTest("wm density reset") }
+            waitForConfigurationTag("player-phone")
             val streamCount = requests.count { it.path?.contains("/stream") == true }
             offline.set(true)
             compose.runOnIdle { player.stop(); player.seekTo(0); player.prepare(); player.play() }

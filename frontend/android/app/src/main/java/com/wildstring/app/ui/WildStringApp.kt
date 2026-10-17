@@ -150,7 +150,12 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
     }
     val scope = rememberCoroutineScope()
     val mutationSnackbar = remember { SnackbarHostState() }
-    LaunchedEffect(state.error, state.mutationMessage) { (state.error ?: state.mutationMessage)?.let { mutationSnackbar.showSnackbar(it) } }
+    LaunchedEffect(state.error, state.mutationMessage) {
+        (state.error ?: state.mutationMessage)?.let { message ->
+            try { mutationSnackbar.showSnackbar(message) }
+            finally { if (state.error == null) vm.acknowledgeMessage(message) }
+        }
+    }
     val savedPages = rememberSaveableStateHolder()
     val savedKeys = remember { ArrayDeque<String>() }
     LaunchedEffect(state.contentKey) {
@@ -288,7 +293,10 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
         }
         if (queue && ((!wide && !landscape) || !expanded)) ModalBottomSheet(onDismissRequest = { queue = false }) { QueuePanel(vm, state, Modifier.fillMaxWidth().heightIn(max = 560.dp)) }
     }
-    Box(Modifier.fillMaxSize().safeDrawingPadding(), contentAlignment = Alignment.BottomCenter) { SnackbarHost(mutationSnackbar, Modifier.padding(16.dp)) }
+    val playerFeedback = expanded && state.current != null && !settings
+    Box(Modifier.fillMaxSize().safeDrawingPadding(), contentAlignment = if (playerFeedback) Alignment.TopCenter else Alignment.BottomCenter) {
+        SnackbarHost(mutationSnackbar, Modifier.padding(horizontal = 16.dp, vertical = if (playerFeedback) 64.dp else 16.dp).testTag("mutation-feedback"))
+    }
     feature?.let { route -> FeatureDialog(vm, route, featureTrack, featurePlaylist) { feature = null; featureTrack = null; featurePlaylist = null } }
     refreshAlbum?.let { albumId -> MetadataRefreshPrompt(vm, "album", albumId) { refreshAlbum = null } }
     if (sleepDialog) SleepDialog(vm) { sleepDialog = false }

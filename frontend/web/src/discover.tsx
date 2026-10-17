@@ -148,7 +148,7 @@ export function Discover({
       pendingLists.current.delete(key);
       return updated;
     } catch {
-      throw new Error('歌单已建立，曲目尚未加入；再次确认会继续保存。');
+      throw new Error('歌单已建立，曲目保存结果尚未确认；请查看歌单，或再次尝试。');
     }
   }
 

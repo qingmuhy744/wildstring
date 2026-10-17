@@ -293,7 +293,7 @@ class MusicViewModel @Inject constructor(
             if (profile != repository.session.cacheScope()) return@launch
             if (tracks.isEmpty()) { mutable.update { it.copy(mutationMessage = "集合中没有可播放的音乐") }; return@launch }
             play(tracks, startId?.let { id -> tracks.indexOfFirst { it.id == id }.coerceAtLeast(0) } ?: 0)
-            mutable.update { it.copy(mutationMessage = "已加入完整集合 · ${tracks.size} 首") }; onStarted()
+            mutable.update { it.copy(mutationMessage = "已载入 ${tracks.size} 首歌曲") }; onStarted()
         } catch (error: CancellationException) { throw error }
         catch (error: Exception) { mutable.update { it.copy(error = friendlyError(error), mutationMessage = null) } }
         finally { mutable.update { it.copy(collecting = false) } }
@@ -311,6 +311,7 @@ class MusicViewModel @Inject constructor(
         finally { mutable.update { it.copy(collecting = false) } }
     }
     fun notify(message: String) { mutable.update { it.copy(mutationMessage = message) } }
+    fun acknowledgeMessage(message: String) { mutable.update { if (it.mutationMessage == message) it.copy(mutationMessage = null) else it } }
     fun toggle() { controller?.let { if (it.isPlaying) it.pause() else { if (it.playbackState == Player.STATE_IDLE) it.prepare(); it.play() } } }
     fun seek(ms: Long) { controller?.seekTo(ms.coerceAtLeast(0)) }
     fun next() {
