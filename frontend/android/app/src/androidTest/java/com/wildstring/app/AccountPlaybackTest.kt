@@ -23,7 +23,6 @@ import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.RecordedRequest
-import okio.Buffer
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
@@ -78,6 +77,7 @@ class AccountPlaybackTest {
         val requests = ConcurrentLinkedQueue<String>()
         val account = AtomicReference<String?>(null)
         val lyric = AtomicReference("初始人工歌词")
+        val completedAac = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
         val lossless = """{"id":"lossless","title":"无损测试曲目","artists":["合成音频"],"album":"同步测试专辑","duration_ms":12000,"has_cover":false,"loved":true,"format":"flac","status":"available"}"""
         val lossy = lossless.replace("lossless", "lossy").replace("无损", "有损").replace("flac", "mp3")
         MockWebServer().use { server ->
@@ -116,13 +116,10 @@ class AccountPlaybackTest {
                         val convert = url.queryParameter("format") == "aac" && path.contains("/lossless/")
                         val bytes = if (convert) { if ((url.queryParameter("start_ms")?.toLong() ?: 0) >= 6000) tail else aac }
                             else if (path.contains("/lossless/")) flac else mp3
-                        if (convert) return MockResponse().setHeader("Content-Type", "audio/mp4").setHeader("Accept-Ranges", "none").setChunkedBody(Buffer().write(bytes), 4096)
-                        val start = request.getHeader("Range")?.substringAfter("bytes=")?.substringBefore('-')?.toIntOrNull() ?: 0
-                        if (start >= bytes.size) return MockResponse().setResponseCode(416).setHeader("Content-Range", "bytes */${bytes.size}")
-                        return MockResponse().setHeader("Content-Type", if (path.contains("/lossless/")) "audio/flac" else "audio/mpeg")
-                            .setHeader("Accept-Ranges", "bytes").setBody(Buffer().write(bytes, start, bytes.size - start)).apply {
-                                if (request.getHeader("Range") != null) setResponseCode(206).setHeader("Content-Range", "bytes $start-${bytes.lastIndex}/${bytes.size}")
-                            }
+                        val key = path + "?" + url.encodedQuery.orEmpty()
+                        val encoding = convert && if (request.method == "GET") completedAac.add(key) else key !in completedAac
+                        return audioStreamFixture(request, bytes, if (convert) "audio/mp4" else if (path.contains("/lossless/")) "audio/flac" else "audio/mpeg",
+                            "\"account-${key.hashCode()}\"", encoding)
                     }
                     if (path.endsWith("/lyrics")) return json("""{"kind":"synced","source":"user","lines":[{"time_ms":0,"text":"${lyric.get()}"},{"time_ms":6000,"text":"六秒后的人工歌词"}]}""")
                     if (path.endsWith("/lastfm")) return json("""{"configured":false,"connected":false,"scrobble":false,"now_playing":false,"version":0}""")

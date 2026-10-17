@@ -4,8 +4,13 @@ import android.content.ComponentName
 import android.content.pm.ActivityInfo
 import android.graphics.Bitmap
 import java.io.ByteArrayOutputStream
+import android.content.res.Configuration
+import android.os.Handler
+import android.os.Looper
 import android.os.ParcelFileDescriptor
 import android.os.SystemClock
+import android.view.View
+import android.view.ViewTreeObserver
 import androidx.compose.ui.test.*
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
@@ -22,10 +27,15 @@ import okhttp3.mockwebserver.SocketPolicy
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import androidx.test.platform.app.InstrumentationRegistry
+import androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry
+import androidx.test.runner.lifecycle.Stage
 import com.wildstring.app.playback.PlaybackService
 import java.io.File
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicReference
 import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
@@ -39,7 +49,114 @@ import org.junit.Test
 class NativePlaybackTest {
     @get:Rule val compose = createAndroidComposeRule<MainActivity>()
 
+    private data class WindowSpec(val width: Int, val height: Int, val density: Int, val night: Int? = null)
+    private lateinit var phoneWindow: WindowSpec
+    private lateinit var expectedWindow: WindowSpec
+    private val androidMain = Handler(Looper.getMainLooper())
+
+    private fun stage(message: String) = android.util.Log.i("NativeStage", message)
+
+    // Compose queries synchronize with its registered roots. During recreation one
+    // of those roots can be an old, detached decor; its frame callback never runs.
+    // Keep the Android-window prerequisite independent of Compose/Espresso and bounded.
+    private fun <T> onAndroidMain(action: () -> T): T {
+        val value = AtomicReference<Result<T>>()
+        val done = CountDownLatch(1)
+        check(androidMain.post { value.set(runCatching(action)); done.countDown() })
+        check(done.await(2, TimeUnit.SECONDS)) { "Android main thread did not answer within 2 seconds" }
+        return value.get().getOrThrow()
+    }
+
+    private fun resumedActivity(): MainActivity? = ActivityLifecycleMonitorRegistry.getInstance()
+        .getActivitiesInStage(Stage.RESUMED).filterIsInstance<MainActivity>().singleOrNull()
+
+    private fun globalWindows(): List<View> = if (android.os.Build.VERSION.SDK_INT >= 29)
+        android.view.inspector.WindowInspector.getGlobalWindowViews() else emptyList()
+
+    private fun windowMatches(activity: MainActivity, spec: WindowSpec): Boolean {
+        val decor = activity.window.decorView
+        val configuration = activity.resources.configuration
+        return decor.isAttachedToWindow && decor.isLaidOut && decor.isShown &&
+            decor.width == spec.width && decor.height == spec.height && configuration.densityDpi == spec.density &&
+            configuration.orientation == (if (spec.width > spec.height) Configuration.ORIENTATION_LANDSCAPE else Configuration.ORIENTATION_PORTRAIT) &&
+            (spec.night == null || configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == spec.night)
+    }
+
+    private fun waitForAndroidWindow(label: String, spec: WindowSpec = expectedWindow, dialog: Boolean = false) {
+        stage("window begin $label expected=${spec.width}x${spec.height}@${spec.density} night=${spec.night} dialog=$dialog")
+        val deadline = SystemClock.elapsedRealtime() + 15_000
+        var lastObserved = ""
+        while (SystemClock.elapsedRealtime() < deadline) {
+            val rendered = CountDownLatch(1)
+            val frameReady = AtomicBoolean(false)
+            var observer: ViewTreeObserver? = null
+            var listener: ViewTreeObserver.OnDrawListener? = null
+            var candidate: View? = null
+            onAndroidMain {
+                val activity = resumedActivity()
+                val decor = activity?.window?.decorView
+                val configuration = activity?.resources?.configuration
+                val observed = "activity=${activity?.hashCode()} decor=${decor?.width}x${decor?.height}@${configuration?.densityDpi} night=${configuration?.uiMode?.and(Configuration.UI_MODE_NIGHT_MASK)} attached=${decor?.isAttachedToWindow} focus=${decor?.hasWindowFocus()}" +
+                    if (dialog) " windows=" + globalWindows().joinToString { "${it.javaClass.simpleName}:${it.width}x${it.height}:focus=${it.hasWindowFocus()}:attached=${it.isAttachedToWindow}" } else ""
+                if (observed != lastObserved) { stage("window observed $label $observed"); lastObserved = observed }
+                if (activity != null && windowMatches(activity, spec)) {
+                    val activityDecor = activity.window.decorView
+                    val target = if (dialog) globalWindows()
+                        .firstOrNull { it !== activityDecor && it.isAttachedToWindow && it.isLaidOut && it.isShown && it.hasWindowFocus() }
+                        else activityDecor.takeIf { it.hasWindowFocus() }
+                    if (target != null) {
+                        candidate = target
+                        observer = target.viewTreeObserver
+                        var draws = 0
+                        listener = ViewTreeObserver.OnDrawListener {
+                            if (resumedActivity() !== activity || !windowMatches(activity, spec) ||
+                                !target.isAttachedToWindow || !target.hasWindowFocus()) {
+                                rendered.countDown()
+                            } else if (++draws >= 2) {
+                                // Post after onDraw: the same final-size decor must finish two
+                                // actual frames, including wm size + density's separate changes.
+                                target.post { frameReady.set(true); rendered.countDown() }
+                            } else target.postInvalidateOnAnimation()
+                        }
+                        observer!!.addOnDrawListener(listener)
+                        target.postInvalidateOnAnimation()
+                    }
+                }
+            }
+            if (candidate != null) rendered.await(minOf(1_500L, maxOf(1L, deadline - SystemClock.elapsedRealtime())), TimeUnit.MILLISECONDS)
+            val ready = onAndroidMain {
+                if (observer?.isAlive == true && listener != null) observer!!.removeOnDrawListener(listener)
+                val activity = resumedActivity()
+                frameReady.get() && activity != null && windowMatches(activity, spec) &&
+                    candidate?.isAttachedToWindow == true && candidate?.hasWindowFocus() == true &&
+                    (dialog || activity.window.decorView === candidate)
+            }
+            if (ready) { stage("window ready $label"); return }
+            // Poll a real readiness condition; no guessed animation-duration delay.
+            SystemClock.sleep(25)
+        }
+        error("Android window was not ready for $label (${spec.width}x${spec.height}@${spec.density}); $lastObserved")
+    }
+
+    private fun captureFailure(name: String = "failure.png") {
+        // Failure reporting must not enter Compose's potentially blocked synchronization.
+        val executor = Executors.newSingleThreadExecutor { task -> Thread(task, "native-failure-screenshot").apply { isDaemon = true } }
+        try {
+            executor.submit {
+                val instrumentation = InstrumentationRegistry.getInstrumentation()
+                val directory = InstrumentationRegistry.getArguments().getString("additionalTestOutputDir")?.let(::File)
+                    ?: checkNotNull(instrumentation.targetContext.getExternalFilesDir(null))
+                directory.mkdirs()
+                instrumentation.uiAutomation.takeScreenshot()?.let { image ->
+                    File(directory, name).outputStream().use { image.compress(Bitmap.CompressFormat.PNG, 100, it) }
+                    image.recycle()
+                }
+            }.get(3, TimeUnit.SECONDS)
+        } finally { executor.shutdownNow() }
+    }
+
     private fun capture(name: String, resized: Boolean = false, style: String? = null) {
+        stage("capture begin $name")
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val directory = InstrumentationRegistry.getArguments().getString("additionalTestOutputDir")?.let(::File)
             ?: checkNotNull(context.getExternalFilesDir(null))
@@ -78,6 +195,7 @@ class NativePlaybackTest {
             if (fresh) {
                 file.outputStream().use { image.compress(Bitmap.CompressFormat.PNG, 100, it) }
                 image.recycle()
+                stage("capture complete $name")
                 return
             }
             image.recycle()
@@ -87,14 +205,16 @@ class NativePlaybackTest {
     }
 
     @Test fun loginCookieStreamingAndFullscreenLyrics() {
+        stage("test begin")
         val previousNight = shellForTest("cmd uimode night").substringAfter("Night mode: ", "auto").trim().substringBefore('\n').let { if (it in listOf("yes", "no", "auto")) it else "auto" }
         try { exercisePlayback() } catch (failure: Throwable) {
-            runCatching { capture("failure.png") }
-            runCatching { compose.onRoot(useUnmergedTree = true).printToLog("NativeTestUI") }
+            android.util.Log.e("NativeStage", "test failed", failure)
+            runCatching { captureFailure() }
             throw failure
         } finally {
-            runCatching { compose.runOnIdle { ViewModelProvider(compose.activity)[MusicViewModel::class.java].let { vm -> vm.settings.playbackStyle("cover"); vm.repository.session.invalidate(); vm.controller?.stop(); vm.controller?.clearMediaItems() } } }
+            runCatching { onAndroidMain { resumedActivity()?.let { ViewModelProvider(it)[MusicViewModel::class.java] }?.let { vm -> vm.settings.playbackStyle("cover"); vm.repository.session.invalidate(); vm.controller?.stop(); vm.controller?.clearMediaItems() } } }
             shellForTest("cmd uimode night $previousNight")
+            stage("test cleanup complete")
         }
     }
 
@@ -104,54 +224,54 @@ class NativePlaybackTest {
     }
 
     private fun changeSystemNightMode(mode: String) {
+        stage("system night $mode")
         shellForTest("cmd uimode night $mode")
-        // uiMode recreates the activity asynchronously. Querying Compose roots while
-        // their window detaches can wait forever for a frame on the disposed decor.
-        // Let Android finish the window transition before checking the new semantics.
-        val instrumentation = InstrumentationRegistry.getInstrumentation()
-        instrumentation.waitForIdleSync()
-        instrumentation.uiAutomation.waitForIdle(500, 5_000)
     }
 
     private fun rotate(orientation: Int) {
-        compose.runOnIdle { compose.activity.requestedOrientation = orientation }
-        // Wait for Android's window recreation before querying the replacement Compose root.
-        val instrumentation = InstrumentationRegistry.getInstrumentation()
-        instrumentation.waitForIdleSync()
-        instrumentation.uiAutomation.waitForIdle(500, 5_000)
+        stage("rotate $orientation")
+        onAndroidMain { checkNotNull(resumedActivity()).requestedOrientation = orientation }
     }
 
     private fun waitForConfigurationTag(tag: String) {
-        // A configuration change briefly leaves no Compose root at all. Retry only
-        // this readiness check; the playback and geometry assertions still run below.
-        compose.waitUntil(15_000) {
-            runCatching { compose.onNodeWithTag(tag).assertIsDisplayed(); compose.runOnIdle { compose.activity.hasWindowFocus() } }.getOrDefault(false)
+        expectedWindow = when (tag) {
+            "player-tablet" -> WindowSpec(1600, 1000, 160)
+            "player-landscape" -> phoneWindow.copy(width = maxOf(phoneWindow.width, phoneWindow.height), height = minOf(phoneWindow.width, phoneWindow.height))
+            "player-phone" -> phoneWindow
+            "appearance-dark" -> expectedWindow.copy(night = Configuration.UI_MODE_NIGHT_YES)
+            "appearance-light" -> expectedWindow.copy(night = Configuration.UI_MODE_NIGHT_NO)
+            else -> error("Unknown configuration expectation $tag")
         }
+        waitForAndroidWindow(tag)
+        compose.onNodeWithTag(tag).assertIsDisplayed()
+        stage("semantics ready $tag")
     }
 
     private fun waitForActivityWindow() {
-        compose.waitUntil(5_000) {
-            runCatching { compose.runOnIdle { compose.activity.hasWindowFocus() } }.getOrDefault(false)
-        }
+        // The injected click schedules dialog dismissal on Compose's test clock.
+        // Advance that clock without querying/synchronizing any possibly replaced root.
+        compose.mainClock.advanceTimeByFrame()
+        waitForAndroidWindow("activity")
+    }
+
+    private fun waitForDialogWindow(label: String) {
+        compose.mainClock.advanceTimeByFrame()
+        waitForAndroidWindow(label, dialog = true)
     }
 
     private fun waitForArtworkWindow() {
         // A Compose dialog can expose semantics before InputDispatcher gives its
         // Android window focus. Send Back only once that actual window is active.
-        compose.waitUntil(5_000) {
-            runCatching {
-                compose.onNodeWithTag("artwork-preview").assertIsDisplayed()
-                compose.runOnIdle {
-                    val activityWindow = compose.activity.window.decorView
-                    if (android.os.Build.VERSION.SDK_INT >= 29) android.view.inspector.WindowInspector.getGlobalWindowViews()
-                        .any { it !== activityWindow && it.isAttachedToWindow && it.hasWindowFocus() }
-                    else !activityWindow.hasWindowFocus()
-                }
-            }.getOrDefault(false)
-        }
+        waitForDialogWindow("artwork")
+        compose.onNodeWithTag("artwork-preview").assertIsDisplayed()
     }
 
     private fun exercisePlayback() {
+        phoneWindow = onAndroidMain {
+            val activity = checkNotNull(resumedActivity())
+            WindowSpec(activity.window.decorView.width, activity.window.decorView.height, activity.resources.configuration.densityDpi)
+        }
+        expectedWindow = phoneWindow
         val vm = compose.runOnIdle { ViewModelProvider(compose.activity)[MusicViewModel::class.java] }
         compose.runOnIdle { vm.settings.playbackStyle("cover") }
         val requests = ConcurrentLinkedQueue<RecordedRequest>()
@@ -184,11 +304,7 @@ class NativePlaybackTest {
                     if (!authenticated) return json("""{"detail":"authentication_required"}""").setResponseCode(401)
                     if (path.endsWith("/auth/logout")) return MockResponse().setResponseCode(204).setHeader("Set-Cookie", "wildstring_session=; Max-Age=0; Path=/")
                     if (path.endsWith("/stream")) {
-                        val start = request.getHeader("Range")?.substringAfter("bytes=")?.substringBefore('-')?.toIntOrNull() ?: 0
-                        if (start >= audio.size) return MockResponse().setResponseCode(416)
-                        val response = MockResponse().setHeader("Content-Type", "audio/mpeg").setHeader("Accept-Ranges", "bytes").setHeader("ETag", "\"fixture-v1\"").setBody(Buffer().write(audio, start, audio.size - start))
-                        if (request.getHeader("Range") != null) response.setResponseCode(206).setHeader("Content-Range", "bytes $start-${audio.lastIndex}/${audio.size}")
-                        return response
+                        return audioStreamFixture(request, audio, "audio/mpeg", "\"fixture-v1\"")
                     }
                     if (path.endsWith("/cover")) return MockResponse().setHeader("Content-Type", "image/png").setBody(Buffer().write(cover))
                     if (path.endsWith("/lyrics")) return json("""{"kind":"synced","source":"sidecar_lrc","lines":[{"time_ms":0,"text":"来自测试接口的歌词"},{"time_ms":5000,"text":"下一行测试歌词"}]}""")
@@ -200,6 +316,7 @@ class NativePlaybackTest {
                 }
             }
             server.start()
+            stage("login begin")
             compose.onNodeWithText("服务器地址").performTextReplacement(server.url("/").toString())
             compose.onAllNodes(hasSetTextAction())[1].performTextReplacement("admin")
             compose.onNodeWithText("密码", useUnmergedTree = true).assertExists()
@@ -215,6 +332,7 @@ class NativePlaybackTest {
             }
             compose.onNodeWithText("连接并登录").performSemanticsAction(SemanticsActions.OnClick) { it() }
             compose.waitUntil(30_000) { compose.onAllNodesWithText("接口测试专辑").fetchSemanticsNodes().isNotEmpty() }
+            stage("login complete")
             compose.onNodeWithText("接口测试专辑").performClick()
             compose.waitUntil(15_000) { compose.onAllNodesWithText("接口测试歌曲").fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithText("接口测试歌曲").performClick()
@@ -223,6 +341,7 @@ class NativePlaybackTest {
             val future = compose.runOnIdle { MediaController.Builder(context, SessionToken(context, ComponentName(context, PlaybackService::class.java))).buildAsync() }
             val player = future.get(15, TimeUnit.SECONDS)
             compose.waitUntil(20_000) { compose.runOnIdle { player.playbackState == Player.STATE_READY && player.currentPosition > 250 } }
+            stage("audio ready")
             compose.runOnIdle { player.pause() }
             compose.onNodeWithTag("player-visual-stage").performTouchInput { click(androidx.compose.ui.geometry.Offset(4f, 4f)) }
             compose.waitUntil(15_000) { compose.onAllNodesWithText("来自测试接口的歌词").fetchSemanticsNodes().isNotEmpty() }
@@ -268,9 +387,11 @@ class NativePlaybackTest {
             val stylePosition = compose.runOnIdle { player.currentPosition }
             val styleStreams = requests.count { it.path?.contains("/stream") == true }
             for ((key, label) in listOf("vinyl" to "黑胶", "cassette" to "磁带", "cover" to "封面")) {
+                stage("style begin $key")
                 compose.onNodeWithContentDescription("收起播放器").performClick()
                 compose.onNodeWithContentDescription("设置").performClick()
                 compose.onNodeWithTag("setting-播放样式").performScrollTo().performClick()
+                waitForDialogWindow("style choice $key")
                 compose.onNode(hasText(label) and hasAnyAncestor(isDialog()), useUnmergedTree = true).performClick()
                 waitForActivityWindow()
                 compose.onNodeWithTag("settings-back").performClick()
@@ -288,12 +409,10 @@ class NativePlaybackTest {
                 assertFalse(compose.runOnIdle { player.playWhenReady })
                 assertTrue(kotlin.math.abs(compose.runOnIdle { player.currentPosition } - stylePosition) < 250)
                 compose.onNodeWithTag("playback-visual-$key").performTouchInput { longClick() }
-                compose.onNodeWithTag("artwork-preview").assertIsDisplayed()
                 waitForArtworkWindow()
                 if (key == "vinyl") capture("player-artwork-preview.png")
                 if (key == "cassette") InstrumentationRegistry.getInstrumentation().sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
                 else compose.onNodeWithContentDescription("关闭大封面").performClick()
-                compose.waitUntil(5_000) { compose.onAllNodesWithTag("artwork-preview").fetchSemanticsNodes().isEmpty() }
                 waitForActivityWindow()
                 compose.onNodeWithTag("artwork-preview").assertDoesNotExist()
                 compose.onNodeWithTag("playback-visual-$key").assertIsDisplayed()
@@ -320,6 +439,7 @@ class NativePlaybackTest {
                     } finally { rotate(orientation) }
                     waitForConfigurationTag("player-phone")
                 }
+                stage("style complete $key")
             }
             assertEquals("Changing style must not reopen audio", styleStreams, requests.count { it.path?.contains("/stream") == true })
             compose.onNodeWithTag("player-visual-stage").performTouchInput { click(androidx.compose.ui.geometry.Offset(4f, 4f)) }
@@ -369,10 +489,10 @@ class NativePlaybackTest {
             compose.onNodeWithContentDescription("播放队列").performClick()
             try { compose.waitUntil(10_000) { compose.onAllNodesWithTag("playback-queue").fetchSemanticsNodes().isNotEmpty() } }
             catch (failure: Throwable) {
-                capture("phone-queue-failure.png")
-                compose.onRoot(useUnmergedTree = true).printToLog("PhoneQueueFailure")
+                runCatching { captureFailure("phone-queue-failure.png") }
                 throw failure
             }
+            waitForDialogWindow("phone queue")
             val queuePosition = compose.runOnIdle { player.currentPosition }
             dragEntry(playingEntry, originalOrder.last())
             compose.waitUntil(10_000) { vm.state.value.queue.last().entryId == playingEntry }
@@ -382,7 +502,8 @@ class NativePlaybackTest {
             compose.waitUntil(10_000) { runBlocking { vm.repository.database.queue().entries().map { it.entryId } } == vm.state.value.queue.map { it.entryId } }
             capture("phone-queue.png")
             compose.runOnIdle { compose.activity.onBackPressedDispatcher.onBackPressed() }
-            compose.waitUntil(10_000) { compose.onAllNodesWithTag("playback-queue").fetchSemanticsNodes().isEmpty() }
+            waitForActivityWindow()
+            compose.onNodeWithTag("playback-queue").assertDoesNotExist()
             try {
                 shellForTest("wm size 1600x1000"); shellForTest("wm density 160")
                 waitForConfigurationTag("player-tablet")
@@ -398,35 +519,42 @@ class NativePlaybackTest {
                 capture("tablet-queue.png", resized = true)
                 compose.onNodeWithContentDescription("播放队列").performClick()
             } catch (failure: Throwable) {
-                runCatching { capture("tablet-queue-failure.png", resized = true) }
+                runCatching { captureFailure("tablet-queue-failure.png") }
                 throw failure
             } finally { shellForTest("wm size reset"); shellForTest("wm density reset") }
             waitForConfigurationTag("player-phone")
+            stage("appearance controls begin")
             compose.runOnIdle { player.removeMediaItems(1, player.mediaItemCount) }
             // Exercise actual controls during playback and inspect both appearance options.
             compose.onNodeWithContentDescription("返回封面").performClick()
             compose.onNodeWithContentDescription("收起播放器").performClick()
             compose.onNodeWithContentDescription("设置").performClick()
             compose.onNodeWithTag("setting-日夜模式").performScrollTo().performClick()
+            waitForDialogWindow("dark choice")
             compose.onNodeWithText("深色", substring = false).performClick()
             waitForActivityWindow()
             compose.onNodeWithTag("appearance-dark").assertExists()
             compose.onNodeWithTag("setting-日夜模式").performScrollTo().performClick()
+            waitForDialogWindow("light choice")
             compose.onNodeWithText("浅色", substring = false).performClick()
             waitForActivityWindow()
             compose.onNodeWithTag("appearance-light").assertExists()
             compose.onNodeWithTag("setting-日夜模式").performScrollTo().performClick()
+            waitForDialogWindow("system choice")
             compose.onNodeWithText("跟随系统").performClick()
             waitForActivityWindow()
             compose.onNodeWithTag("setting-主题").performScrollTo().performClick()
+            waitForDialogWindow("theme choice")
             compose.onNodeWithText("一块红布").performClick()
             waitForActivityWindow()
             compose.onNodeWithTag("appearance-red-cloth").assertExists()
             compose.onAllNodesWithText("日夜模式").assertCountEquals(0)
             compose.onNodeWithTag("setting-桌面图标").performScrollTo().performClick()
+            waitForDialogWindow("icon choice")
             compose.onNodeWithText("红布", substring = false).performClick()
             waitForActivityWindow()
             compose.onNodeWithTag("setting-最近播放音频").performScrollTo().performClick()
+            waitForDialogWindow("cache choice")
             compose.onNodeWithText("128 MB").performClick()
             waitForActivityWindow()
             compose.waitUntil { vm.settings.state.value.audioMb == 128 && vm.settings.state.value.redCloth && vm.settings.state.value.redIcon }
@@ -458,6 +586,7 @@ class NativePlaybackTest {
                 compose.runOnIdle { vm.settings.playbackStyle("cover") }
             } finally { shellForTest("wm size reset"); shellForTest("wm density reset") }
             waitForConfigurationTag("player-phone")
+            stage("offline begin")
             val streamCount = requests.count { it.path?.contains("/stream") == true }
             offline.set(true)
             compose.runOnIdle { player.stop(); player.seekTo(0); player.prepare(); player.play() }
@@ -475,6 +604,7 @@ class NativePlaybackTest {
             assertTrue(requests.filter { it.path?.contains("/stream") == true }.all { it.getHeader("Cookie")?.contains("wildstring_session=instrumentation") == true })
             assertTrue(requests.filter { it.path?.contains("/auth/login") == true }.all { it.getHeader("X-Wildstring-Client") == "android" })
             compose.runOnIdle { MediaController.releaseFuture(future) }
+            stage("playback assertions complete")
         }
     }
 }

@@ -93,7 +93,7 @@ class MobileCompletionTest {
                     if (path.endsWith("/stream")) {
                         if (disconnected.get()) return MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AFTER_REQUEST)
                         if (request.method == "HEAD") {
-                            return MockResponse().setResponseCode(headCode.get()).setHeader("ETag", "\"source-v1\"").setHeader("Content-Length", audio.size)
+                            return audioStreamFixture(request, audio, "audio/mpeg", "\"source-v1\"").setResponseCode(headCode.get())
                         }
                         val start = request.getHeader("Range")?.substringAfter("bytes=")?.substringBefore('-')?.toIntOrNull() ?: 0
                         val response = MockResponse().setHeader("Content-Type", "audio/mpeg").setHeader("ETag", "\"source-v1\"").setHeader("Accept-Ranges", "bytes").setBody(Buffer().write(audio, start, audio.size - start))
