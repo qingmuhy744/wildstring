@@ -82,7 +82,7 @@ export function PlaybackVisual({
   duration,
   phase,
   onImage,
-  onLyrics,
+  onPreview,
 }: {
   track: Track;
   style: PlaybackStyle;
@@ -91,9 +91,9 @@ export function PlaybackVisual({
   duration: number;
   phase: MutableRefObject<number>;
   onImage: (image: HTMLImageElement) => void;
-  onLyrics: () => void;
+  onPreview: () => void;
 }) {
-  const root = useRef<HTMLButtonElement>(null);
+  const root = useRef<HTMLDivElement>(null);
   const [motion, setMotion] = useState(false);
   const [settled, setSettled] = useState(false);
   useEffect(() => {
@@ -131,20 +131,29 @@ export function PlaybackVisual({
   }, [playing, style, phase]);
   const progress = duration > 0 ? Math.max(0, Math.min(position / duration, 1)) : 0;
   return (
-    <button
+    <div
       ref={root}
       className={`playback-visual visual-${style}`}
       data-style={style}
       data-moving={motion}
       data-engaged={playing && settled}
-      aria-label="切换封面与歌词"
+      role="img"
+      tabIndex={0}
+      aria-label="歌曲封面，长按或按回车查看大图"
+      title="长按查看大封面"
       style={
         {
           '--left-pack': `${38 - progress * 13}%`,
           '--right-pack': `${25 + progress * 13}%`,
         } as CSSProperties
       }
-      onClick={onLyrics}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          event.stopPropagation();
+          onPreview();
+        }
+      }}
     >
       <span className="cassette-case" aria-hidden="true">
         <span className="cassette-paper">
@@ -179,6 +188,6 @@ export function PlaybackVisual({
         <span className="tonearm-pivot" />
         <span className="tonearm-head" />
       </span>
-    </button>
+    </div>
   );
 }

@@ -5,6 +5,11 @@ import com.google.gson.JsonObject
 import retrofit2.http.*
 
 interface Api {
+    @GET suspend fun agentGet(@Url url: String): retrofit2.Response<JsonObject>
+    @POST suspend fun agentPost(@Url url: String, @Body body: JsonObject, @Tag policy: AgentRequestPolicy? = null): retrofit2.Response<JsonObject>
+    @PATCH suspend fun agentPatch(@Url url: String, @Body body: JsonObject): retrofit2.Response<JsonObject>
+    @PUT suspend fun agentPut(@Url url: String, @Body body: JsonObject): retrofit2.Response<JsonObject>
+    @DELETE suspend fun agentDelete(@Url url: String): retrofit2.Response<JsonObject>
     @GET suspend fun objectGet(@Url url: String): JsonObject
     @POST suspend fun objectPost(@Url url: String, @Body body: JsonObject): JsonObject
     @PUT suspend fun objectPut(@Url url: String, @Body body: JsonObject): JsonObject

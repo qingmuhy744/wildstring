@@ -29,6 +29,8 @@ import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material.icons.automirrored.filled.PlaylistPlay
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
@@ -92,6 +94,14 @@ fun WildStringApp(model: MusicViewModel) {
                     if (!connected) ConnectionScreen(state, model::connect) { servers = true } else LibraryApp(model, state)
                 } }
                 com.wildstring.app.update.UpdatePrompt()
+                state.handoff?.let { saved ->
+                    val action = remember(saved.version) { FeatureAction() }; val scope = rememberCoroutineScope()
+                    AlertDialog(onDismissRequest = { if (!action.busy) model.dismissHandoff() },
+                        title = { Text("继续其他设备的播放？") },
+                        text = { Column { Text("${saved.trackIds.size} 首队列 · 第 ${saved.index + 1} 首 · ${formatTime(saved.positionMs)}。载入后保持暂停。"); ActionStatus(action) } },
+                        confirmButton = { TextButton({ scope.launch { action.run { model.acceptHandoff() } } }, enabled = !action.busy) { Text("载入进度") } },
+                        dismissButton = { TextButton(model::dismissHandoff, enabled = !action.busy) { Text("暂不") } })
+                }
                 if (servers) ServersScreen(model) { servers = false }
             }
         }
@@ -129,6 +139,8 @@ fun ConnectionScreen(state: MusicState, connect: (String, String, String, Boolea
 
 @Composable
 private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
+    val inbox by vm.agent.inbox.collectAsStateWithLifecycle()
+    val unread = inbox.unread.takeIf { inbox.owner == vm.repository.session.cacheScope() } ?: 0
     val rotation = rememberSaveable(saver = PlaybackRotation.Saver) { PlaybackRotation() }
     var expanded by rememberSaveable { mutableStateOf(false) }
     var playerReturnDepth by rememberSaveable { mutableIntStateOf(-1) }
@@ -144,8 +156,10 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
     var featureTrack by remember { mutableStateOf<Track?>(null) }
     var featurePlaylist by remember { mutableStateOf<Playlist?>(null) }
     var sleepDialog by remember { mutableStateOf(false) }
+    var diagnostics by remember { mutableStateOf(false) }
     var refreshAlbum by remember { mutableStateOf<String?>(null) }
     var deletingPlaylist by remember { mutableStateOf<Playlist?>(null) }
+    var playlistActions by remember { mutableStateOf<Playlist?>(null) }
     val playlistAction = remember { FeatureAction() }
     var actions by remember { mutableStateOf<Track?>(null) }
     var playlistChoices by remember { mutableStateOf<List<Playlist>?>(null) }
@@ -189,6 +203,7 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
         }
     }
     val savedPages = rememberSaveableStateHolder()
+    val pullRefresh = rememberPullToRefreshState()
     val savedKeys = remember { ArrayDeque<String>() }
     LaunchedEffect(state.contentKey) {
         savedKeys.remove(state.contentKey); savedKeys.addLast(state.contentKey)
@@ -232,7 +247,8 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
                 }
                 Scaffold(
                     contentWindowInsets = WindowInsets(0, 0, 0, 0),
-                    topBar = { CatalogTopBar(state, vm::back, { vm.load() }, { settings = true }, compact = true,
+                    topBar = { CatalogTopBar(state, vm::back, { vm.load() }, { settings = true }, compact = true, unread = unread,
+                        notifications = { feature = "notifications" },
                         albumRefresh = if (state.account?.role == "admin" && (state.collection == "albums" || state.albumFilter != null))
                             ({ refreshAlbum = state.albumFilter ?: state.collectionId }) else null) },
                     bottomBar = { Column {
@@ -253,7 +269,7 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
                                         IconButton({ featurePlaylist = null; feature = "playlist" }) { Icon(Icons.Default.Add, "新建歌单") }
                                     }
                                 }
-                                if (state.tab == "mine" && state.collection == null) MobileShortcuts(state.account?.role == "admin") { feature = it }
+                                if (state.tab == "mine" && state.collection == null) MobileShortcuts(state.account?.role == "admin", unread) { feature = it }
                                 if (state.kind == "artists" && state.collection == null) Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                     listOf("artist" to "艺人", "album_artist" to "专辑艺人", "vocalist" to "演唱", "lyricist" to "作词", "composer" to "作曲", "arranger" to "编曲").forEach { (key, name) -> FilterChip(state.role == key, { vm.role(key) }, label = { Text(name) }) }
                                 }
@@ -261,12 +277,9 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
                                     FilterChip(state.kind == "tracks", { vm.kind("tracks") }, label = { Text("歌曲") })
                                     FilterChip(state.kind == "albums", { vm.kind("albums") }, label = { Text("专辑") })
                                 }
-                                if (state.tab == "search" && state.kind == "discover") MobileShortcuts(false) { feature = it }
+                                if (state.tab == "search" && state.kind == "discover") MobileShortcuts(false, unread) { feature = it }
                                 state.error?.let { ErrorMessage(it, vm::load) }
                                 if (state.offline) Text("网络暂不可用 · 显示本机缓存", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
-                                Box(Modifier.fillMaxWidth().height(3.dp)) {
-                                    if (delayed(state.loading, 350)) LinearProgressIndicator(Modifier.fillMaxWidth().testTag("catalog-loading"))
-                                }
                                 if (state.kind == "tracks" || state.kind == "recent") CatalogToolbar(state,
                                     play = tactile { vm.playCollection { playerReturnDepth = -1; expanded = true; lyrics = false; queue = false } }, sort = vm::sort,
                                     multi = { feature = "multi" }, download = { vm.downloadCollection() },
@@ -275,14 +288,16 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
                                     delete = { deletingPlaylist = state.activePlaylist })
                             }
                         }
-                        Box(Modifier.weight(1f)) {
+                        PullToRefreshBox(isRefreshing = state.loading, onRefresh = { if (!state.loading) vm.load() },
+                            modifier = Modifier.weight(1f), state = pullRefresh,
+                            indicator = { WildRefreshIndicator(state.loading, pullRefresh, Modifier.align(Alignment.TopCenter)) }) {
                             savedPages.SaveableStateProvider(state.contentKey.ifBlank { "initial" }) {
                                 if (state.kind == "discover") Column {
                                     header()
                                     DiscoveryPage(vm, state, play = { index -> vm.play(state.tracks, index); playerReturnDepth = -1; expanded = true; lyrics = false; queue = false }, recent = vm::recent)
                                 } else CatalogBrowser(vm, state, header,
                                     play = { track -> vm.playCollection(track.id) { playerReturnDepth = -1; expanded = true; lyrics = false; queue = false } },
-                                    actions = { actions = it })
+                                    actions = { actions = it }, playlistActions = { playlistActions = it })
                             }
                         }
                     }
@@ -297,8 +312,22 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
         SnackbarHost(mutationSnackbar, Modifier.padding(horizontal = 16.dp, vertical = if (playerFeedback) 64.dp else 16.dp).testTag("mutation-feedback"))
     }
     feature?.let { route -> FeatureDialog(vm, route, featureTrack, featurePlaylist) { feature = null; featureTrack = null; featurePlaylist = null } }
+    playlistActions?.let { playlist -> ModalBottomSheet(onDismissRequest = { playlistActions = null }) {
+        Text(playlist.name, Modifier.padding(horizontal = 20.dp, vertical = 12.dp), style = MaterialTheme.typography.titleLarge)
+        SongAction("打开歌单", Icons.AutoMirrored.Filled.PlaylistPlay) { playlistActions = null; vm.openPlaylist(playlist) }
+        SongAction(if (playlist.id in vm.repository.downloads.followedPlaylists()) "关闭自动下载" else "自动下载歌单", Icons.Default.Download) {
+            vm.followPlaylist(playlist, playlist.id !in vm.repository.downloads.followedPlaylists()); playlistActions = null
+        }
+        if (playlist.kind != "favorites") {
+            SongAction("编辑歌单", Icons.Default.Edit) { featurePlaylist = playlist; feature = "playlist"; playlistActions = null }
+            if (playlist.kind == "manual") SongAction("管理歌单曲目", Icons.AutoMirrored.Filled.QueueMusic) { featurePlaylist = playlist; feature = "order"; playlistActions = null }
+            SongAction("删除歌单", Icons.Default.Delete, destructive = true) { deletingPlaylist = playlist; playlistActions = null }
+        }
+        Spacer(Modifier.height(24.dp))
+    } }
     refreshAlbum?.let { albumId -> MetadataRefreshPrompt(vm, "album", albumId) { refreshAlbum = null } }
     if (sleepDialog) SleepDialog(vm) { sleepDialog = false }
+    if (diagnostics) PlaybackDiagnosticsDialog(vm) { diagnostics = false }
     deletingPlaylist?.let { playlist -> AlertDialog(onDismissRequest = { if (!playlistAction.busy) deletingPlaylist = null }, title = { Text("删除歌单？") }, text = { Column { Text(playlist.name); ActionStatus(playlistAction) } }, confirmButton = { TextButton({ scope.launch { playlistAction.run { vm.deletePlaylist(playlist); deletingPlaylist = null } } }, enabled = !playlistAction.busy) { Text("删除") } }, dismissButton = { TextButton({ deletingPlaylist = null }, enabled = !playlistAction.busy) { Text("取消") } }) }
     actions?.let { track -> ModalBottomSheet(onDismissRequest = { actions = null }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
         Column(Modifier.fillMaxWidth().heightIn(max = 640.dp).verticalScroll(rememberScrollState())) {
@@ -310,6 +339,7 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
             }
         }
         SongAction("查看所属专辑", Icons.Default.Album, navigate = true) { openTrackAlbum(track) }
+        if (track.id == state.current?.id) SongAction("播放诊断", Icons.Default.Troubleshoot) { diagnostics = true; actions = null }
         HorizontalDivider(Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
         SongAction("下一首播放", Icons.AutoMirrored.Filled.PlaylistPlay, onClick = tactile { vm.addToQueue(track, true); actions = null })
         SongAction("加入播放队列", Icons.AutoMirrored.Filled.QueueMusic, onClick = tactile { vm.addToQueue(track); actions = null })
@@ -557,7 +587,7 @@ private fun LyricsPanel(vm: MusicViewModel, state: MusicState, modifier: Modifie
 
 @Composable
 private fun ErrorMessage(message: String, retry: () -> Unit) {
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Text(message, Modifier.weight(1f), color = MaterialTheme.colorScheme.error, fontSize = 12.sp); TextButton(retry) { Text("重试") } }
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { androidx.compose.foundation.text.selection.SelectionContainer(Modifier.weight(1f)) { Text(message, color = MaterialTheme.colorScheme.error, fontSize = 12.sp) }; TextButton(retry) { Text("重试") } }
 }
 @Composable
 private fun NameDialog(title: String, initial: String, dismiss: () -> Unit, save: (String) -> Unit) {

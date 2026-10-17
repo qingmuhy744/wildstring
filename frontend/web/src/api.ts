@@ -43,12 +43,31 @@ export class ApiError extends Error {
   constructor(
     public status: number,
     message: string,
+    public code?: string,
+    public traceId?: string,
   ) {
-    super(message);
+    super(traceId ? `${message}（诊断编号：${traceId}）` : message);
   }
 }
 
 const messages: Record<string, string> = {
+  draft_version_conflict: '草案已变化，请刷新并重新核对当前版本。',
+  draft_not_approved: '请先核对并批准当前草案版本。',
+  draft_not_found: '草案已不可用，请刷新列表。',
+  draft_already_applied: '此草案已经应用，请读取最新结果。',
+  notification_cursor_expired: '通知同步位置已过期，正在重新读取。',
+  connection_not_found: '模型连接已被撤销，请选择其他连接。',
+  connection_disabled: '模型连接已关闭，请到助手设置中启用。',
+  connection_not_authorized: '当前连接未授权用于此操作，请检查共享和后台使用设置。',
+  daily_budget_exceeded: '这条连接的每日调用预算已用完。',
+  ai_budget_exhausted: '本次模型调用已达到预算，已保存完成的部分。',
+  ai_endpoint_not_allowed: 'API 主机不在允许的端点列表中，请联系管理员。',
+  telegram_target_unverified: '请先验证 Telegram 接收目标。',
+  telegram_verification_invalid: '验证码不正确或已过期，请重新发送后核对。',
+  verification_invalid: '验证码不正确或已过期，请重新发送后核对。',
+  unknown_delivery_requires_acknowledgement: '请先核对 Telegram 中是否已收到消息，再确认重试。',
+  scope_denied: '当前凭据没有此操作所需的权限。',
+
   album_not_found: '所属专辑已变化或不可用，请刷新曲库后重试。',
   playback_version_conflict: '共享进度已在其他设备更新，请先读取最新进度，再决定是否共享。',
   playback_track_unavailable: '共享队列中有歌曲已经不可用，请回原设备刷新后重新共享。',
@@ -58,6 +77,8 @@ const messages: Record<string, string> = {
   recommendation_generation_in_progress: '推荐正在准备，请稍后重新读取。',
   preferences_version_conflict: '推荐偏好已变化，请重新读取后再保存。',
   providers_disabled: '请先在管理设置中启用联网资料。',
+  provider_task_not_found: '这条任务已经不可用，请刷新任务列表。',
+  provider_task_not_retryable: '任务状态已经变化，请刷新后重试。',
   invalid_proxy_settings: '请检查代理方式和地址；手动代理需使用 http://地址:端口。',
   proxy_not_configured: '请填写手动代理地址，或选择直接连接。',
   proxy_protocol_unsupported: '代理协议不受支持，请使用 http:// 开头的代理地址。',
@@ -115,7 +136,17 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
     if (response.status === 401 && path !== '/auth/login') {
       window.dispatchEvent(new Event('wildstring:unauthorized'));
     }
-    throw new ApiError(response.status, messages[body.detail] || '请求未完成，请重试。');
+    const code = typeof body.detail === 'string' ? body.detail : body.detail?.code || body.code;
+    const suppliedTrace =
+      body.trace_id ||
+      body.diagnostic_id ||
+      response.headers.get('X-Wildstring-Trace-Id') ||
+      response.headers.get('X-Trace-Id');
+    const traceId =
+      typeof suppliedTrace === 'string' && /^[A-Za-z0-9_-]{8,80}$/.test(suppliedTrace)
+        ? suppliedTrace
+        : undefined;
+    throw new ApiError(response.status, messages[code] || '请求未完成，请重试。', code, traceId);
   }
   return response.status === 204 ? (undefined as T) : response.json();
 }

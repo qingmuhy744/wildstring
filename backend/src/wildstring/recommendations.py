@@ -9,8 +9,6 @@ from collections import Counter
 from datetime import UTC, datetime, timedelta, timezone
 from typing import Literal
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlsplit
-from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 from uuid import UUID, uuid4
 
 from fastapi import HTTPException
@@ -20,6 +18,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from wildstring.ai_config import AIService
 from wildstring.library.metadata import normalize
 from wildstring.library.repository import now
+from wildstring.model_client import completion
+from wildstring.outbound import OutboundError
 from wildstring.providers import FM, ProviderError
 
 # One server-side day boundary across devices; independent of the host's timezone.
@@ -45,12 +45,6 @@ class Feedback(BaseModel):
     event_id: UUID
     track_id: str = Field(min_length=1, max_length=128)
     action: Literal["dismiss_track", "less_artist", "accept", "skip", "complete"]
-
-
-class NoRedirect(HTTPRedirectHandler):
-    def redirect_request(self, *_args, **_kwargs):
-        # Never forward an administrator's model credential to a redirect target.
-        return None
 
 
 def today():
@@ -447,38 +441,9 @@ class Recommendations:
             "max_tokens": 4096,
             "stream": False,
         }
-        # Same explicit proxy mode as metadata providers; failures are sanitized by the caller.
-        mode = self.providers.settings()["proxy_mode"]
-        proxies = {}
-        if mode == "custom":
-            proxy = self.providers.secrets().get("proxy_url")
-            if not proxy:
-                raise HTTPException(502, "ai_connection_failed")
-            proxies = {"http": proxy, "https": proxy}
-        if mode == "environment":
-            from urllib.request import getproxies_environment
-
-            environment = getproxies_environment()
-            proxies = {
-                name: value
-                for name in ("http", "https")
-                if (value := environment.get(name) or environment.get("all"))
-            }
-        if any(urlsplit(value).scheme != "http" for value in proxies.values()):
-            raise HTTPException(502, "ai_connection_failed")
-        headers = {"Content-Type": "application/json", "User-Agent": "WildString/0.3.0"}
-        if config["api_key"]:
-            headers["Authorization"] = "Bearer " + config["api_key"]
-        address = config["base_url"].rstrip("/") + "/chat/completions"
-        request = Request(address, data=json.dumps(request_body).encode(), headers=headers)
         try:
-            with build_opener(ProxyHandler(proxies), NoRedirect()).open(  # nosec B310
-                request, timeout=config["timeout"]
-            ) as response:
-                raw = response.read(65537)
-                if not 200 <= response.status < 300 or len(raw) > 65536:
-                    raise ValueError("invalid model response")
-            content = json.loads(raw)["choices"][0]["message"]["content"]
+            response = completion(config, request_body, self.providers)
+            content = response["choices"][0]["message"]["content"]
             if not isinstance(content, str):
                 raise ValueError("invalid model content")
             content = content.strip()
@@ -518,6 +483,7 @@ class Recommendations:
         except HTTPException:
             raise
         except (
+            OutboundError,
             HTTPError,
             URLError,
             OSError,

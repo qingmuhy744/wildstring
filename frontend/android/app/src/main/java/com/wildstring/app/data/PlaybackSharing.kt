@@ -6,6 +6,8 @@ import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import retrofit2.HttpException
 import java.util.UUID
 
@@ -18,22 +20,38 @@ class PlaybackSharing @Inject constructor(@ApplicationContext context: Context, 
     private var revision: Int? = null
     private var enabled = false
     private var lastAt = 0L
-    suspend fun publish(snapshot: SharedPlayback, claim: Boolean = false, claimVersion: Int? = null): SharedPlayback? = lock.withLock {
+    private var lastSnapshot: SharedPlayback? = null
+    private var claimedGeneration = -1L
+    private val mutableMode = MutableStateFlow(prefs.getString("sync_mode", "ask").takeIf { it in listOf("off", "ask", "auto") } ?: "ask")
+    val mode = mutableMode.asStateFlow()
+    @Volatile private var automaticOwner: String? = null
+    @Volatile private var automaticGeneration = 0L
+    fun mode(value: String) { require(value in listOf("off", "ask", "auto")); prefs.edit().putString("sync_mode", value).apply(); mutableMode.value = value; if (value == "off") automaticOwner = null }
+    fun localPlaybackStarted() { automaticOwner = repository.session.cacheScope(); automaticGeneration++ }
+    fun seen(version: Int) { repository.session.cacheScope()?.let { prefs.edit().putInt("seen:$it", version).apply() } }
+    fun lastSeen(): Int = repository.session.cacheScope()?.let { prefs.getInt("seen:$it", 0) } ?: 0
+    suspend fun acceptRemote(version: Int) = lock.withLock { automaticOwner = null; enabled = false; revision = version; seen(version) }
+    suspend fun publish(snapshot: SharedPlayback, claim: Boolean = false, claimVersion: Int? = null, force: Boolean = false): SharedPlayback? = lock.withLock {
         val profile = repository.session.cacheScope() ?: return@withLock null
-        if (profile != owner) { owner = profile; revision = null; enabled = false; lastAt = 0 }
-        if (claim) {
+        if (profile != owner) { owner = profile; revision = null; enabled = false; lastAt = 0; lastSnapshot = null; claimedGeneration = -1 }
+        if (!claim && (mutableMode.value == "off" || automaticOwner != profile)) return@withLock null
+        val generation = automaticGeneration
+        val automaticClaim = automaticOwner == profile && (!enabled || claimedGeneration != generation)
+        val content = snapshot.copy(version = 0, deviceId = "", updatedAt = null)
+        if (!claim && !automaticClaim && content == lastSnapshot) return@withLock null
+        if (claim || automaticClaim) {
             revision = claimVersion ?: repository.api().sharedPlayback(RequestOwner(profile)).version
             if (profile != repository.session.cacheScope()) throw kotlinx.coroutines.CancellationException("会话已变化。")
-            enabled = true
+            enabled = true; claimedGeneration = generation
         }
         if (!enabled || snapshot.trackIds.isEmpty()) return@withLock null
-        if (!claim && android.os.SystemClock.elapsedRealtime() - lastAt < 15_000) return@withLock null
+        if (!claim && !automaticClaim && !force && android.os.SystemClock.elapsedRealtime() - lastAt < 15_000) return@withLock null
         try {
             val saved = repository.api().saveSharedPlayback(snapshot.copy(version = revision ?: 0, deviceId = deviceId, updatedAt = null).writeBody(), RequestOwner(profile))
             if (profile != repository.session.cacheScope()) return@withLock null
-            revision = saved.version; lastAt = android.os.SystemClock.elapsedRealtime(); saved
+            revision = saved.version; lastSnapshot = content; seen(saved.version); lastAt = android.os.SystemClock.elapsedRealtime(); saved
         } catch (error: HttpException) {
-            if (error.code() == 409) enabled = false
+            if (error.code() == 409) { enabled = false; if (generation == automaticGeneration) automaticOwner = null }
             throw error
         }
     }

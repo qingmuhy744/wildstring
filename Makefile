@@ -177,3 +177,13 @@ docker-admin: env ## Set/reset the container administrator password interactivel
 
 fingerprint-check: ## Check the optional native Chromaprint fingerprint tool
 	fpcalc -version
+
+.PHONY: mcp test-agent test-network
+mcp: ## Run the stdio MCP bridge (URL and scoped token must be environment variables)
+	@$(RUN) python -m wildstring.mcp_bridge
+
+test-agent: ## Verify controlled tools, drafts, notifications, inspection and the real MCP protocol
+	$(RUN) pytest -c backend/pyproject.toml backend/tests/test_agent*.py backend/tests/test_mcp_bridge.py backend/tests/test_diagnostics.py backend/tests/test_task_notifications.py
+
+test-network: ## Verify probes and production requests share actual proxy and model clients
+	$(RUN) pytest -c backend/pyproject.toml backend/tests/test_outbound.py backend/tests/test_provider_network.py backend/tests/test_ai_config.py

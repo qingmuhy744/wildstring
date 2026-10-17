@@ -3,6 +3,7 @@ package com.wildstring.app.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -38,10 +39,12 @@ import kotlin.math.roundToInt
 @Composable internal fun CatalogBrowser(
     vm: MusicViewModel, state: MusicState, header: @Composable () -> Unit,
     play: (Track) -> Unit, actions: (Track) -> Unit,
+    playlistActions: (Playlist) -> Unit = {},
 ) {
     val list = rememberLazyListState()
     val grid = rememberLazyGridState()
     val scope = rememberCoroutineScope()
+    val playlistFeedback = LocalTactileFeedback.current
     val tracksById = remember(state.tracks) { state.tracks.associateBy { it.id } }
     val playlistsById = remember(state.playlists) { state.playlists.associateBy { it.id } }
     val groups = state.browseIndex?.groups.orEmpty()
@@ -100,7 +103,11 @@ import kotlin.math.roundToInt
                         ListItem(headlineContent = { Text(playlist.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                             supportingContent = { Text("${playlist.trackCount} 首${if (playlist.kind == "smart") " · 规则歌单" else ""}") },
                             leadingContent = { Cover(vm, playlist.coverTrackId, playlist.name, Modifier.size(44.dp)) },
-                            modifier = Modifier.testTag("catalog-item-$index").clickable { vm.openPlaylist(playlist) })
+                            modifier = Modifier.testTag("catalog-item-$index").combinedClickable(
+                                onClick = { vm.openPlaylist(playlist) },
+                                hapticFeedbackEnabled = false,
+                                onLongClickLabel = "歌单操作",
+                                onLongClick = { playlistFeedback(TactileKind.DragStart); playlistActions(playlist) }))
                     } ?: CatalogPlaceholder(vm, state, index)
                     else -> state.window.trackAt(index)?.let { track ->
                         val display = tracksById[track.id] ?: track

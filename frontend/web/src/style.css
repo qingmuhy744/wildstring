@@ -2155,6 +2155,15 @@ select {
   padding: 10px 8px;
   border: 0;
   color: #f0dfcb8c;
+  background: transparent;
+  min-width: 48px;
+  min-height: 48px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+}
+.fullscreen-metadata > .favorite-button:hover {
+  background: #fff3df14;
 }
 .fullscreen-metadata > .favorite-button.is-loved {
   color: #e9a68d;
@@ -3656,6 +3665,42 @@ select {
   width: auto;
   min-width: 0;
   font-size: 0.75rem;
+}
+.fullscreen-options .quality-control {
+  color: #f5ead9cc;
+  gap: 8px;
+}
+.fullscreen-options .quality-control select {
+  min-height: 40px;
+  padding: 8px 26px 8px 12px;
+  border: 1px solid #fff4de30;
+  border-radius: 10px;
+  color: #fff3df;
+  background-color: #fff4df12;
+  backdrop-filter: blur(16px);
+}
+.fullscreen-options .quality-control select:hover {
+  background-color: #fff4df20;
+}
+.fullscreen-options .quality-control option {
+  color: #eeeae2;
+  background: #25241f;
+}
+.transport-buttons .playback-mode {
+  display: grid;
+  place-items: center;
+  min-width: 44px;
+  min-height: 44px;
+}
+.transport-buttons .playback-mode .ui-icon {
+  width: 24px;
+  height: 24px;
+  fill: none;
+  stroke-width: 1.8;
+}
+.fullscreen-controls .transport-buttons .playback-mode .ui-icon {
+  width: 26px;
+  height: 26px;
 }
 .settings-actions {
   display: flex;

@@ -60,6 +60,8 @@ def test_cover_preview_uses_private_proxy_and_does_not_apply_or_modify_audio(
         calls = []
 
         class Response:
+            status = 200
+
             def __enter__(self):
                 return self
 

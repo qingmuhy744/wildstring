@@ -41,7 +41,7 @@ test('三种样式共用音频，暂停保留进度，开关歌词不重开串�
   expect(await element!.evaluate((node) => node === document.querySelector('audio'))).toBe(true);
   await dialog.getByRole('button', { name: '显示歌词', exact: true }).click();
   await page.screenshot({ path: `../../artifacts/player-vinyl-${info.project.name}.png` });
-  await dialog.getByRole('button', { name: '切换封面与歌词', exact: true }).click();
+  await dialog.getByRole('button', { name: '显示歌词', exact: true }).click();
   await expect(dialog.getByRole('list', { name: '歌词', exact: true })).toBeVisible();
   expect(await audio(page)).toEqual(paused);
   expect(streams).toBe(reads);

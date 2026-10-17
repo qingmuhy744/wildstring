@@ -17,9 +17,10 @@ import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 
-/** Complete, explicitly retained originals. Never shares the evictable playback chunk cache. */
+/** Complete, explicitly retained audio. Never shares the evictable playback chunk cache. */
 data class OfflineEntry(val track: Track, val state: String = "queued", val bytes: Long = 0, val total: Long = 0,
-    val etag: String? = null, val error: String? = null)
+    val etag: String? = null, val error: String? = null, val bitrate: Int = 0,
+    val audioFormat: String? = null, val sourceEtag: String? = null, val automatic: Boolean = false)
 private data class OfflineIndex(val owner: String?, val entries: List<OfflineEntry>)
 
 @Singleton
@@ -42,6 +43,17 @@ class OfflineDownloads @Inject constructor(@ApplicationContext private val conte
     var wifiOnly: Boolean
         get() = prefs.getBoolean("wifi_only", true)
         set(value) { prefs.edit().putBoolean("wifi_only", value).apply() }
+    var bitrate: Int
+        get() = prefs.getInt("download_bitrate", 0).takeIf { it in PlaybackRequest.bitrates } ?: 0
+        set(value) { require(value in PlaybackRequest.bitrates); prefs.edit().putInt("download_bitrate", value).apply() }
+    @Synchronized fun followedPlaylists(): Set<String> = ensureOwner()?.let {
+        prefs.getStringSet("playlists:$it", emptySet())?.toSet()
+    }.orEmpty()
+    @Synchronized fun followPlaylist(id: String, enabled: Boolean) {
+        val profile = ensureOwner() ?: return
+        val ids = followedPlaylists().toMutableSet().apply { if (enabled) add(id) else remove(id) }
+        prefs.edit().putStringSet("playlists:$profile", ids).apply()
+    }
     init {
         synchronized(this) {
             // Old files already live in the owner's UUID directory; only move the index.
@@ -102,15 +114,15 @@ class OfflineDownloads @Inject constructor(@ApplicationContext private val conte
         update(value)
     }
     @Synchronized fun switchScope() { ensureOwner() }
-    @Synchronized fun enqueue(tracks: List<Track>) {
+    @Synchronized fun enqueue(tracks: List<Track>, automatic: Boolean = false) {
         check(ensureOwner() != null) { "请先登录。" }
         require((tracks.map { it.id } + mutable.value.map { it.track.id }).distinct().size <= 5000) { "离线保存最多 5000 首。" }
         val previous = mutable.value.associateBy { it.track.id }
         val incoming = tracks.associateBy { it.id }
         mutable.value = mutable.value.map { entry -> incoming[entry.track.id]?.let { track ->
-            if (entry.state in listOf("paused", "failed")) entry.copy(track = track, state = "queued", error = null) else entry.copy(track = track)
+            if (entry.state in listOf("paused", "failed") && (!automatic || entry.error == "等待 Wi-Fi；连接后自动继续。")) entry.copy(track = track, state = "queued", error = null) else entry.copy(track = track)
         } ?: entry }
-        mutable.value = (mutable.value + tracks.distinctBy { it.id }.filter { it.id !in previous }.map { OfflineEntry(it) })
+        mutable.value = (mutable.value + tracks.distinctBy { it.id }.filter { it.id !in previous }.map { OfflineEntry(it, bitrate = bitrate, automatic = automatic) })
         persist()
     }
     @Synchronized fun resume(id: String) {
@@ -128,6 +140,12 @@ class OfflineDownloads @Inject constructor(@ApplicationContext private val conte
     }
     @Synchronized fun resumeAll() {
         ensureOwner(); mutable.value = mutable.value.map { if (it.state in listOf("paused", "failed")) it.copy(state = "queued", error = null) else it }; persist()
+    }
+    @Synchronized fun resumeNetworkWaiting() {
+        ensureOwner()
+        if (!networkAllowed()) return
+        mutable.value = mutable.value.map { if (it.state == "paused" && it.error == "等待 Wi-Fi；连接后自动继续。") it.copy(state = "queued", error = null) else it }
+        persist()
     }
     @Synchronized fun remove(id: String) {
         ensureOwner()
@@ -160,7 +178,7 @@ class OfflineDownloads @Inject constructor(@ApplicationContext private val conte
         val file = fileForStream(uri) ?: return null
         val profile = session.cacheScope() ?: return null
         val id = uri.toHttpUrlOrNull()?.pathSegments?.dropLast(1)?.lastOrNull() ?: return null
-        val expected = synchronized(this) { mutable.value.firstOrNull { it.track.id == id }?.etag }
+        val expected = synchronized(this) { mutable.value.firstOrNull { it.track.id == id }?.let { it.sourceEtag ?: it.etag.takeIf { _ -> it.bitrate == 0 } } }
         try {
             val original = uri.toHttpUrlOrNull()!!.newBuilder().query(null).build()
             client.newCall(Request.Builder().url(original).tag(RequestOwner::class.java, RequestOwner(profile)).head().build()).execute().use { response ->
@@ -179,9 +197,9 @@ class OfflineDownloads @Inject constructor(@ApplicationContext private val conte
     fun formatForStream(uri: String): String? {
         val target = uri.toHttpUrlOrNull() ?: return null
         val id = target.pathSegments.dropLast(1).lastOrNull() ?: return null
-        return track(id)?.format
+        return synchronized(this) { if (file(id) != null) mutable.value.firstOrNull { it.track.id == id }?.let { it.audioFormat ?: it.track.format } else null }
     }
-    private fun networkAllowed(): Boolean {
+    fun networkAllowed(): Boolean {
         if (!wifiOnly) return true
         val manager = context.getSystemService(ConnectivityManager::class.java)
         val caps = manager.getNetworkCapabilities(manager.activeNetwork) ?: return false
@@ -200,7 +218,7 @@ class OfflineDownloads @Inject constructor(@ApplicationContext private val conte
             val id = entry.track.id
             if (!networkAllowed()) {
                 synchronized(this@OfflineDownloads) {
-                    if (profile == ensureOwner() && epoch == generation && mutable.value.any { it.track.id == id && it.state == "queued" }) update(entry.copy(state = "paused", error = "等待 Wi-Fi；连接后点击继续。"))
+                    if (profile == ensureOwner() && epoch == generation && mutable.value.any { it.track.id == id && it.state == "queued" }) update(entry.copy(state = "paused", error = "等待 Wi-Fi；连接后自动继续。"))
                 }
                 continue
             }
@@ -208,7 +226,12 @@ class OfflineDownloads @Inject constructor(@ApplicationContext private val conte
             val part = filename(id, true, profile)
             try {
                 val base = session.endpoint ?: throw IOException("连接已失效。")
-                val target = base.newBuilder().addPathSegments("api/v1/tracks").addPathSegment(id).addPathSegment("stream").build()
+                val original = base.newBuilder().addPathSegments("api/v1/tracks").addPathSegment(id).addPathSegment("stream").build()
+                val target = PlaybackRequest.url(original.toString(), entry.bitrate)
+                if (entry.bitrate > 0) client.newCall(Request.Builder().url(original).tag(RequestOwner::class.java, RequestOwner(requestToken)).head().build()).execute().use { response ->
+                    if (!response.isSuccessful) throw IOException("无法验证原始音频，请重新连接。")
+                    progress = progress.copy(sourceEtag = response.header("ETag"))
+                }
                 var offset = if (!entry.etag.isNullOrBlank()) part.length() else 0L
                 if (offset == 0L) part.delete()
                 val request = Request.Builder().url(target).tag(RequestOwner::class.java, RequestOwner(requestToken)).header("Accept-Encoding", "identity").apply {
@@ -240,7 +263,8 @@ class OfflineDownloads @Inject constructor(@ApplicationContext private val conte
                     val otherBytes = synchronized(this@OfflineDownloads) { mutable.value.filter { it.track.id != id }.sumOf { it.bytes } }
                     require(expected == 0L || expected + otherBytes <= capacityGb * 1024L * 1024 * 1024) { "超过离线总容量，请删除音乐或提高限额。" }
                     require(expected <= MAX_FILE_BYTES && (expected == 0L || expected - offset + RESERVE < root.usableSpace)) { "离线空间不足或文件超过 2 GiB。" }
-                    progress = progress.copy(bytes = offset, total = expected, etag = response.header("ETag"))
+                    progress = progress.copy(bytes = offset, total = expected, etag = response.header("ETag"),
+                        audioFormat = if (response.header("X-Wildstring-Playback") == "transcode") "m4a" else entry.track.format)
                     synchronized(this@OfflineDownloads) { updateCurrent(progress, profile, epoch) }
                     val fileOutput = synchronized(this@OfflineDownloads) {
                         if (profile != ensureOwner() || epoch != generation) { throw CancellationException("会话已变化。") }
@@ -267,13 +291,13 @@ class OfflineDownloads @Inject constructor(@ApplicationContext private val conte
                                 }
                                 if (System.currentTimeMillis() - last > 500) {
                                     if (!networkAllowed()) {
-                                        synchronized(this@OfflineDownloads) { updateCurrent(progress.copy(state = "paused", bytes = written, error = "等待 Wi-Fi；连接后点击继续。"), profile, epoch) }
+                                        synchronized(this@OfflineDownloads) { updateCurrent(progress.copy(state = "paused", bytes = written, error = "等待 Wi-Fi；连接后自动继续。"), profile, epoch) }
                                         throw CancellationException("等待 Wi-Fi。")
                                     }
                                     progress = progress.copy(bytes = written); synchronized(this@OfflineDownloads) { updateCurrent(progress, profile, epoch) }; onProgress(progress); last = System.currentTimeMillis()
                                 }
                             }
-                            if (expected > 0 && written != expected) throw IOException("文件尚未下载完整，请继续。")
+                            if (written == 0L || (expected > 0 && written != expected)) throw IOException("文件尚未下载完整，请继续。")
                             output.fd.sync()
                             progress = progress.copy(bytes = written, total = written)
                         }

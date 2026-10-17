@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { api, eventId, artist, streamUrl, time, type PlaybackPlan, type Track } from './api';
 import { Cover } from './cover';
+import { Icon } from './icons';
 import { FavoriteButton, type Favorites } from './favorites';
 import { ListeningTracker } from './listening';
 import {
@@ -458,7 +459,7 @@ export function usePlayer(userId: string) {
     },
     playbackTime: () => offset.current + (audio.current?.currentTime || 0),
     playbackLabel: objectUrl.current
-      ? '本机原音'
+      ? '离线播放'
       : plan?.mode === 'transcode'
         ? `AAC ${plan.output.bitrate_kbps} kbps`
         : '原音直放',
@@ -655,13 +656,17 @@ export function PlaybackControls({ player }: { player: Player }) {
             player.setMode(modes[(modes.indexOf(player.mode) + 1) % modes.length]);
           }}
         >
-          {player.mode === 'shuffle'
-            ? '⤨'
-            : player.mode === 'repeat_one'
-              ? '↻₁'
-              : player.mode === 'repeat_all'
-                ? '↻'
-                : '→'}
+          <Icon
+            name={
+              player.mode === 'shuffle'
+                ? 'shuffle'
+                : player.mode === 'repeat_one'
+                  ? 'repeatOne'
+                  : player.mode === 'repeat_all'
+                    ? 'repeat'
+                    : 'sequential'
+            }
+          />
         </button>
         <button
           className="icon-button"

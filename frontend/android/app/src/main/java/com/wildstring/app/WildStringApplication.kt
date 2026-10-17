@@ -24,6 +24,7 @@ object ApplicationModule {
         .addInterceptor(OriginGuard({ session.endpoint }, profile = session::cacheScope, unauthorized = session::invalidate))
         .addInterceptor(ScopedSessionInterceptor(session::requestState, session::cookieFor, session::cookieFrom))
         .addInterceptor(CoverCacheInterceptor(cache, session))
+        .addInterceptor(AgentTimeoutInterceptor())
         .connectTimeout(15, TimeUnit.SECONDS).readTimeout(30, TimeUnit.SECONDS)
         .followRedirects(false).followSslRedirects(false).cache(null).build()
     @Provides @Singleton fun database(@ApplicationContext context: Context): QueueDatabase =

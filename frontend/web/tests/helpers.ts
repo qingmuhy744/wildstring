@@ -1,6 +1,8 @@
 import { expect, type Page } from '@playwright/test';
 
-export async function login(page: Page) {
+export async function login(page: Page, options: { automaticSync?: boolean } = {}) {
+  if (!options.automaticSync)
+    await page.addInitScript(() => localStorage.setItem('wildstring:playback-sync:admin', 'off'));
   await page.goto('/');
   await page.getByLabel('密码', { exact: true }).fill('disposable-browser-test-password');
   await page.getByRole('button', { name: '进入曲库' }).click();

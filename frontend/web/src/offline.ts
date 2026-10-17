@@ -13,6 +13,9 @@ export interface OfflineTrack {
   etag?: string;
   error?: string;
   updated: number;
+  bitrate?: number;
+  sourceEtag?: string;
+  automatic?: boolean;
 }
 const DB = 'wildstring-offline-v1';
 const STORE = 'tracks';
@@ -27,6 +30,26 @@ export function usingOfflineAccess() {
 }
 const removed = new Set<string>();
 const active = new Map<string, AbortController>();
+export function activeOfflineUserId() {
+  return account?.id || null;
+}
+export function downloadBitrate() {
+  const value = Number(localStorage.getItem('wildstring:download-bitrate')) || 0;
+  return [0, 128, 192, 256, 320].includes(value) ? value : 0;
+}
+export function setDownloadBitrate(value: number) {
+  if (![0, 128, 192, 256, 320].includes(value)) return;
+  localStorage.setItem('wildstring:download-bitrate', String(value));
+  changed();
+}
+export function automaticDownloadNetworkAllowed() {
+  const connection = (navigator as Navigator & { connection?: { type?: string } }).connection;
+  return (
+    navigator.onLine &&
+    (localStorage.getItem('wildstring:download-any-network') === 'true' ||
+      ['wifi', 'ethernet'].includes(connection?.type || ''))
+  );
+}
 function changed() {
   window.dispatchEvent(new Event('wildstring:offline-updated'));
 }
@@ -183,7 +206,9 @@ export async function offlineAudio(id: string, signal?: AbortSignal): Promise<Bl
     if (
       response.status === 404 ||
       response.status === 409 ||
-      (response.ok && record.etag && response.headers.get('etag') !== record.etag)
+      (response.ok &&
+        (record.sourceEtag || (!record.bitrate && record.etag)) &&
+        response.headers.get('etag') !== (record.sourceEtag || record.etag))
     ) {
       await removeDownload(id);
       throw new Error('服务端音频已变化，离线副本已移除，请重新保存。');
@@ -218,17 +243,17 @@ export function pauseDownload(id: string) {
     });
 }
 let scheduling: Promise<void> = Promise.resolve();
-export function saveDownloads(tracks: Track[]): Promise<void> {
+export function saveDownloads(tracks: Track[], automatic = false): Promise<void> {
   const epoch = generation,
     user = account;
   if (!user) return Promise.reject(new Error('请先登录再保存离线音乐。'));
   const task = scheduling.then(() => {
-    if (epoch === generation && account?.id === user.id) return queueDownloads(tracks);
+    if (epoch === generation && account?.id === user.id) return queueDownloads(tracks, automatic);
   });
   scheduling = task.catch(() => {});
   return task;
 }
-async function queueDownloads(tracks: Track[]) {
+async function queueDownloads(tracks: Track[], automatic: boolean) {
   if (!account) throw new Error('请先登录再保存离线音乐。');
   const epoch = generation,
     user = account;
@@ -240,6 +265,14 @@ async function queueDownloads(tracks: Track[]) {
   for (const track of unique) {
     if (epoch !== generation || account?.id !== user.id) return;
     removed.delete(key(user.id, track.id));
+    const previous = before.find((entry) => entry.track.id === track.id);
+    if (
+      automatic &&
+      previous?.automatic &&
+      previous.state === 'paused' &&
+      previous.error === '等待允许的下载网络。'
+    )
+      await write({ ...previous, state: 'queued', error: undefined }, epoch);
     if (!before.some((r) => r.track.id === track.id))
       await write(
         {
@@ -251,6 +284,8 @@ async function queueDownloads(tracks: Track[]) {
           total: 0,
           blob: new Blob(),
           updated: Date.now(),
+          bitrate: downloadBitrate(),
+          automatic,
         },
         epoch,
       );
@@ -290,6 +325,7 @@ async function download(record: OfflineTrack, used: number, currentGeneration: n
   const controller = new AbortController();
   active.set(record.track.id, controller);
   const guard = () => {
+    if (record.automatic && !automaticDownloadNetworkAllowed()) controller.abort();
     if (generation !== currentGeneration || !account || controller.signal.aborted)
       throw new DOMException('Paused', 'AbortError');
   };
@@ -301,7 +337,22 @@ async function download(record: OfflineTrack, used: number, currentGeneration: n
   try {
     await write(next, currentGeneration);
     guard();
-    const response = await fetch(streamUrl(record.track), {
+    const target = new URL(streamUrl(record.track), window.location.origin);
+    if (record.bitrate) {
+      const source = await fetch(target, {
+        method: 'HEAD',
+        credentials: 'same-origin',
+        signal: controller.signal,
+      });
+      if (!source.ok) throw new Error('无法验证原音，请重新连接后下载。');
+      const sourceEtag = source.headers.get('etag') || undefined;
+      if (record.sourceEtag && record.sourceEtag !== sourceEtag)
+        throw new Error('原音已变化，请删除后重新保存。');
+      next.sourceEtag = sourceEtag;
+      target.searchParams.set('format', 'aac');
+      target.searchParams.set('bitrate_kbps', String(record.bitrate));
+    }
+    const response = await fetch(target, {
       credentials: 'same-origin',
       signal: controller.signal,
       headers:
@@ -324,8 +375,10 @@ async function download(record: OfflineTrack, used: number, currentGeneration: n
       throw new Error('音频版本已变化，请删除后重新保存。');
     if (resumed && !response.headers.get('content-range')?.startsWith(`bytes ${record.bytes}-`))
       throw new Error('续传位置不一致，请删除后重新保存。');
+    const streamingAac =
+      !!record.bitrate && response.headers.get('x-wildstring-playback') === 'transcode';
     const total = Number(response.headers.get('content-length')) + (resumed ? record.bytes : 0);
-    if (!Number.isFinite(total) || total <= 0)
+    if (!Number.isFinite(total) || (total <= 0 && !streamingAac))
       throw new Error('服务端未提供完整音频大小，无法安全离线保存。');
     if (used - record.bytes + total > offlineLimit())
       throw new Error('达到离线容量上限，请清理歌曲或提高上限。');
@@ -348,7 +401,7 @@ async function download(record: OfflineTrack, used: number, currentGeneration: n
         const part = await reader.read();
         if (part.done) break;
         next.bytes += part.value.byteLength;
-        if (next.bytes > total || used - record.bytes + next.bytes > offlineLimit())
+        if ((total > 0 && next.bytes > total) || used - record.bytes + next.bytes > offlineLimit())
           throw new Error('音频大小异常或超出容量上限。');
         pieces.push(part.value.slice().buffer);
         if (next.bytes - checkpoint >= 4 * 1024 * 1024) {
@@ -365,7 +418,9 @@ async function download(record: OfflineTrack, used: number, currentGeneration: n
     }
     guard();
     next.blob = new Blob(pieces, { type: response.headers.get('content-type') || 'audio/mpeg' });
-    if (next.bytes !== total) throw new Error('音频未下载完整，可以继续。');
+    if (!next.bytes || (total > 0 && next.bytes !== total))
+      throw new Error('音频未下载完整，可以继续。');
+    next.total = next.bytes;
     try {
       const cover = await fetch(`/api/v1/tracks/${record.track.id}/cover?size=320`, {
         signal: controller.signal,
@@ -386,11 +441,14 @@ async function download(record: OfflineTrack, used: number, currentGeneration: n
         ...next,
         bytes,
         state: controller.signal.aborted ? 'paused' : 'failed',
-        error: controller.signal.aborted
-          ? undefined
-          : reason instanceof Error
-            ? reason.message
-            : '下载失败，可重试。',
+        error:
+          record.automatic && !automaticDownloadNetworkAllowed()
+            ? '等待允许的下载网络。'
+            : controller.signal.aborted
+              ? undefined
+              : reason instanceof Error
+                ? reason.message
+                : '下载失败，可重试。',
       },
       currentGeneration,
     );

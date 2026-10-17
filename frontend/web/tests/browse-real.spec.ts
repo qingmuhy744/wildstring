@@ -4,6 +4,7 @@ import { audio } from './helpers';
 test.skip(process.env.WILDSTRING_TEST_BROWSE_LIBRARY !== '1', '独立的连续浏览曲库夹具');
 
 async function login(page: Page) {
+  await page.addInitScript(() => localStorage.setItem('wildstring:playback-sync:admin', 'off'));
   await page.goto('/');
   await page.getByLabel('密码', { exact: true }).fill('disposable-browser-test-password');
   await page.getByRole('button', { name: '进入曲库' }).click();

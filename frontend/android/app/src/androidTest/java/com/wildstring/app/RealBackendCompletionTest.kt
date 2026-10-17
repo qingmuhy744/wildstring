@@ -17,6 +17,7 @@ import org.junit.Assume.assumeTrue
 import org.junit.Rule
 import org.junit.Test
 import retrofit2.HttpException
+import java.io.IOException
 
 /** CI and explicit local integration: only the supplied disposable synthetic backend is touched. */
 class RealBackendCompletionTest {
@@ -25,7 +26,7 @@ class RealBackendCompletionTest {
         val endpoint = InstrumentationRegistry.getArguments().getString("realBackend")
         assumeTrue("Pass realBackend for an isolated synthetic server", endpoint != null)
         val vm = compose.runOnIdle { ViewModelProvider(compose.activity)[MusicViewModel::class.java] }
-        compose.runOnIdle { vm.repository.session.invalidate(); vm.settings.quality(0); vm.connect(endpoint!!, "admin", "disposable-browser-test-password", true) }
+        compose.runOnIdle { vm.repository.session.invalidate(); vm.settings.quality(0); vm.sharing.mode("off"); vm.connect(endpoint!!, "admin", "disposable-browser-test-password", true) }
         compose.waitUntil(20_000) { vm.state.value.connected && !vm.state.value.loading }
         var step = "login"
         try {
@@ -92,9 +93,11 @@ class RealBackendCompletionTest {
             step = "other"
             val other = runBlocking { api.saveSharedPlayback(shared.copy(deviceId = "other-test-device", updatedAt = null).writeBody()) }
             val previous = compose.runOnIdle { vm.controller!!.currentMediaItem!!.mediaId }
-            try { runBlocking { withContext(Dispatchers.Main) { vm.resumeShared(shared) } }; fail("Stale handoff must fail") } catch (error: HttpException) { assertEquals(409, error.code()) }
+            try { runBlocking { withContext(Dispatchers.Main) { vm.resumeShared(shared) } }; fail("Stale handoff must fail") } catch (error: IOException) { assertTrue(error.message.orEmpty().contains("进度已更新")) }
             assertEquals(previous, compose.runOnIdle { vm.controller!!.currentMediaItem!!.mediaId })
             runBlocking { withContext(Dispatchers.Main) { vm.resumeShared(other) } }
+            compose.waitUntil(10_000) { compose.runOnIdle { vm.controller!!.currentPosition == other.positionMs } }
+            compose.runOnIdle { assertFalse(vm.controller!!.playWhenReady); vm.toggle() }
             compose.waitUntil(15_000) { compose.runOnIdle { vm.controller!!.isPlaying } }
             compose.runOnIdle { vm.controller!!.pause() }
             step = "downloads"

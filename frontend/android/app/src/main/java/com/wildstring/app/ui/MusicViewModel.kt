@@ -42,6 +42,7 @@ data class MusicState(
     val rangeErrors: Map<Int, String> = emptyMap(), val browseIndex: BrowseIndex? = null,
 
     val pendingFavorites: Set<String> = emptySet(), val mutationMessage: String? = null,
+    val handoff: SharedPlayback? = null,
 )
 
 @HiltViewModel
@@ -49,6 +50,9 @@ class MusicViewModel @Inject constructor(
     val repository: Repository, val imageLoader: ImageLoader, val settings: AppSettings,
     val sharing: PlaybackSharing, val sleep: com.wildstring.app.playback.SleepTimer, val audioCache: AudioCache, val playbackHealth: com.wildstring.app.playback.PlaybackHealth, @ApplicationContext private val context: Context,
 ) : ViewModel() {
+    val agent = AgentPlatform(repository)
+    private var agentJob: Job? = null
+    private var agentNetworkCallback: android.net.ConnectivityManager.NetworkCallback? = null
     private fun connectionState(error: String? = null) = MusicState(account = repository.session.account, server = repository.session.endpoint?.toString().orEmpty(), serverSelection = repository.session.requestState()?.selection.orEmpty(), localHttp = repository.session.localHttp, error = error)
     private val mutable = MutableStateFlow(connectionState())
     val state = mutable.asStateFlow()
@@ -66,6 +70,13 @@ class MusicViewModel @Inject constructor(
     }
     private val browseIndices = mutableMapOf<String, BrowseIndex>()
     private var progressJob: Job? = null
+    private var handoffJob: Job? = null
+    private var localPlaybackEpoch = 0L
+    private var handoffDismissed = false
+    private var offlineSyncJob: Job? = null
+    private val offlineSyncLock = kotlinx.coroutines.sync.Mutex()
+    private val mutableOfflineSync = MutableStateFlow("")
+    val offlineSyncStatus = mutableOfflineSync.asStateFlow()
     private var albumNavigationJob: Job? = null
     private var lyricTrack: String? = null
     private var invalidationMessage: String? = null
@@ -113,6 +124,7 @@ class MusicViewModel @Inject constructor(
     }
 
     init {
+        viewModelScope.launch { repository.session.profiles.collect { agent.reset() } }
         controllerFuture.addListener({
             runCatching { controllerFuture.get() }.onSuccess { c -> controller = c; c.addListener(playerListener); rebuildQueue(); refreshPlayer() }
                 .onFailure { mutable.update { it.copy(error = "播放器连接失败，请重新打开应用。") } }
@@ -120,7 +132,7 @@ class MusicViewModel @Inject constructor(
         viewModelScope.launch { repository.session.invalidations.collect { selection ->
             yield()
             if (selection == supersededInvalidationSelection || selection != repository.session.requestState()?.selection.orEmpty()) return@collect
-            authGeneration++; optimisticFavorites.clear();
+            authGeneration++; optimisticFavorites.clear(); handoffDismissed = false
             loadGeneration++; loadJob?.cancel(); lyricJob?.cancel(); lyricTrack = null; pages.clear(); windows.clear(); browseIndices.clear(); cancelRanges(); tabs.clear(); history.clear(); repository.knownTracks.clear(); controller?.stop(); controller?.clearMediaItems()
             val message = invalidationMessage ?: "登录已失效，请重新登录。"
             invalidationMessage = null
@@ -162,8 +174,45 @@ class MusicViewModel @Inject constructor(
     }
 
     fun observeProgress(visible: Boolean) {
+        observeAgent(visible)
+        if (visible) handoffDismissed = false
         progressJob?.cancel()
         if (visible) progressJob = viewModelScope.launch { while (isActive) { refreshPlayer(); delay(500) } }
+        handoffJob?.cancel()
+        if (visible) handoffJob = viewModelScope.launch {
+            while (isActive) {
+                if (mutable.value.connected) { runCatching { checkSharedPlayback() }; delay(15_000) }
+                else delay(500)
+            }
+        }
+        offlineSyncJob?.cancel()
+        if (visible) offlineSyncJob = viewModelScope.launch {
+            while (isActive) {
+                if (mutable.value.connected) runCatching { syncOfflinePlaylists() }
+                delay(60_000)
+            }
+        }
+    }
+    private fun observeAgent(visible: Boolean) {
+        agentJob?.cancel()
+        val manager = context.getSystemService(android.net.ConnectivityManager::class.java)
+        agentNetworkCallback?.let { runCatching { manager.unregisterNetworkCallback(it) } }
+        agentNetworkCallback = null
+        if (!visible) return
+        agentJob = viewModelScope.launch {
+            combine(state.map { it.connected }.distinctUntilChanged(), repository.session.profiles) { connected, owner -> connected to owner }
+                .distinctUntilChanged().collectLatest { (connected, owner) ->
+                if (!connected || owner == null) return@collectLatest
+                var first = true
+                while (isActive) {
+                    agent.refreshInbox(force = first); first = false; delay(300_000)
+                }
+            }
+        }
+        val callback = object : android.net.ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: android.net.Network) { viewModelScope.launch { if (mutable.value.connected) agent.refreshInbox(force = true) } }
+        }
+        runCatching { manager.registerDefaultNetworkCallback(callback); agentNetworkCallback = callback }
     }
     private suspend fun stopForServerChange() {
         // A pending expiry must not cancel an explicit reconnect while its first IO is suspended.
@@ -428,26 +477,54 @@ class MusicViewModel @Inject constructor(
     }
 
     fun deviceId() = sharing.deviceId
-    suspend fun sharePlayback(): SharedPlayback {
+    fun syncMode(value: String) { handoffDismissed = false; sharing.mode(value) }
+    suspend fun checkSharedPlayback(): Unit = withContext(Dispatchers.Main.immediate) {
+        if (sharing.mode.value == "off" || mutable.value.handoff != null) return@withContext
+        if (sharing.mode.value == "ask" && handoffDismissed) return@withContext
+        val c = controller ?: return@withContext
+        if (c.isPlaying || c.playWhenReady) return@withContext
+        val owner = repository.session.cacheScope(); requireOwner(owner)
+        val epoch = localPlaybackEpoch
+        val saved = repository.api().sharedPlayback(RequestOwner(owner)); requireOwner(owner)
+        if (epoch != localPlaybackEpoch || c.isPlaying || c.playWhenReady || saved.trackIds.isEmpty() ||
+            saved.deviceId == sharing.deviceId || saved.version <= sharing.lastSeen()) return@withContext
+        if (sharing.mode.value == "auto") resumeShared(saved)
+        else if (sharing.mode.value == "ask") mutable.update { it.copy(handoff = saved) }
+    }
+    fun dismissHandoff() { handoffDismissed = true; mutable.value.handoff?.let { sharing.seen(it.version) }; mutable.update { it.copy(handoff = null) } }
+    suspend fun acceptHandoff() {
+        if (mutable.value.handoff == null) return
+        val owner = repository.session.cacheScope(); requireOwner(owner)
+        val saved = repository.api().sharedPlayback(RequestOwner(owner)); requireOwner(owner)
+        mutable.update { it.copy(handoff = saved) }
+        resumeShared(saved)
+        handoffDismissed = true
+        mutable.update { it.copy(handoff = null) }
+    }
+    suspend fun sharePlayback(): SharedPlayback = withContext(Dispatchers.Main.immediate) {
         val c = controller ?: throw IOException("播放器尚未连接。")
         val snapshot = SharedPlayback(trackIds = queueSnapshot.map { it.trackId }, index = c.currentMediaItemIndex.coerceAtLeast(0),
             positionMs = c.currentPosition.coerceAtLeast(0), mode = if (c.shuffleModeEnabled) "shuffle" else when(c.repeatMode) {
                 Player.REPEAT_MODE_ONE -> "repeat_one"; Player.REPEAT_MODE_ALL -> "repeat_all"; else -> "sequential"
             })
-        return sharing.publish(snapshot, claim = true) ?: throw IOException("尚无可同步的播放。")
+        sharing.publish(snapshot, claim = true) ?: throw IOException("尚无可同步的播放。")
     }
-    suspend fun resumeShared(saved: SharedPlayback) {
+    suspend fun resumeShared(saved: SharedPlayback): Unit = withContext(Dispatchers.Main.immediate) {
         require(saved.trackIds.size <= 5000) { "共享队列超过本机 5000 首上限。" }
         val owner = repository.session.cacheScope()
+        val epoch = localPlaybackEpoch
         val tracks = saved.trackIds.chunked(8).flatMap { batch -> coroutineScope { batch.map { async { repository.track(it) } }.awaitAll() } }
         check(owner != null && owner == repository.session.cacheScope()) { "会话已变化。" }
-        sharing.publish(saved.copy(updatedAt = null), claim = true, claimVersion = saved.version)
         requireOwner(owner)
-        play(tracks, saved.index); controller?.seekTo(saved.positionMs)
+        val latest = repository.api().sharedPlayback(RequestOwner(owner)); requireOwner(owner)
+        if (latest.version != saved.version) throw IOException("其他设备的进度已更新，请重新读取后继续。")
+        check(epoch == localPlaybackEpoch && controller?.playWhenReady != true) { "本机播放已变化，请重新读取后继续。" }
+        sharing.acceptRemote(saved.version)
+        play(tracks, saved.index, autoplay = false, positionMs = saved.positionMs)
         controller?.shuffleModeEnabled = saved.mode == "shuffle"
         controller?.repeatMode = when(saved.mode) { "repeat_one" -> Player.REPEAT_MODE_ONE; "repeat_all", "shuffle" -> Player.REPEAT_MODE_ALL; else -> Player.REPEAT_MODE_OFF }
     }
-    fun play(tracks: List<Track>, index: Int = 0) {
+    fun play(tracks: List<Track>, index: Int = 0, autoplay: Boolean = true, positionMs: Long = 0) {
         val c = controller ?: return
         if (tracks.isEmpty()) return
         require(tracks.size <= 5000) { "播放队列最多 5000 首。" }
@@ -455,14 +532,15 @@ class MusicViewModel @Inject constructor(
         tracks.forEach { repository.rememberPlaybackTrack(it) }
         val items = tracks.map { it.mediaItem(repository) }
         val previous = (0 until c.mediaItemCount).map { c.getMediaItemAt(it) }
-        val previousIndex = c.currentMediaItemIndex; val position = c.currentPosition; val autoplay = c.playWhenReady
+        localPlaybackEpoch++
+        val previousIndex = c.currentMediaItemIndex; val position = c.currentPosition; val previousAutoplay = c.playWhenReady
         try {
             val batches = items.chunked(100)
             c.setMediaItems(batches.first(), 0, 0)
             batches.drop(1).forEach { c.addMediaItems(it) }
-            c.seekTo(index.coerceIn(tracks.indices), 0); c.prepare(); c.play(); refreshPlayer()
+            c.seekTo(index.coerceIn(tracks.indices), positionMs.coerceAtLeast(0)); c.prepare(); c.playWhenReady = autoplay; refreshPlayer()
         } catch (e: Exception) {
-            if (previous.isNotEmpty()) { c.setMediaItems(previous.take(100), 0, 0); previous.drop(100).chunked(100).forEach { c.addMediaItems(it) }; c.seekTo(previousIndex, position); c.prepare(); c.playWhenReady = autoplay }
+            if (previous.isNotEmpty()) { c.setMediaItems(previous.take(100), 0, 0); previous.drop(100).chunked(100).forEach { c.addMediaItems(it) }; c.seekTo(previousIndex, position); c.prepare(); c.playWhenReady = previousAutoplay }
             else c.clearMediaItems()
             mutable.update { it.copy(error = "队列未能更新，已保留原播放。") }
         }
@@ -486,6 +564,44 @@ class MusicViewModel @Inject constructor(
         repository.downloads.enqueue(tracks); startDownloads(); notify("已加入离线保存任务"); true
     }.getOrElse { error -> mutable.update { it.copy(error = friendlyError(error), mutationMessage = null) }; false }
     fun startDownloads() { ContextCompat.startForegroundService(context, android.content.Intent(context, com.wildstring.app.playback.DownloadService::class.java)) }
+    suspend fun allPlaylists(): List<Playlist> {
+        val owner = repository.session.cacheScope(); requireOwner(owner)
+        val result = mutableListOf<Playlist>(); var offset = 0
+        while (true) {
+            val page = repository.api().playlists(limit = 100, offset = offset); requireOwner(owner)
+            result += page.items; offset += page.items.size
+            if (offset >= page.total || page.items.isEmpty()) break
+        }
+        return result
+    }
+    fun followPlaylist(playlist: Playlist, enabled: Boolean) {
+        repository.downloads.followPlaylist(playlist.id, enabled)
+        notify(if (enabled) "已开启歌单自动下载" else "已关闭歌单自动下载，离线音乐保留")
+        viewModelScope.launch { runCatching { syncOfflinePlaylists() } }
+    }
+    suspend fun syncOfflinePlaylists() {
+        if (!offlineSyncLock.tryLock()) return
+        try {
+            val owner = repository.session.cacheScope(); requireOwner(owner)
+            if (!repository.downloads.networkAllowed()) {
+                mutableOfflineSync.value = "等待 Wi-Fi，返回应用后自动检查。"; return
+            }
+            repository.downloads.resumeNetworkWaiting()
+            val selected = repository.downloads.followedPlaylists()
+            if (selected.isNotEmpty()) mutableOfflineSync.value = "正在同步已选歌单…"
+            for (id in selected) {
+                val tracks = try { repository.collectionTracks(CatalogQuery(collection = "playlists", collectionId = id)) }
+                    catch (e: HttpException) { if (e.code() == 404) { requireOwner(owner); repository.downloads.followPlaylist(id, false); continue } else throw e }
+                requireOwner(owner)
+                if (id in repository.downloads.followedPlaylists()) repository.downloads.enqueue(tracks, automatic = true)
+            }
+            requireOwner(owner)
+            if (repository.downloads.entries.value.any { it.state == "queued" }) startDownloads()
+            mutableOfflineSync.value = if (selected.isEmpty()) "" else "歌单已检查，新歌曲会自动保存；已下载文件保留。"
+        } catch (e: CancellationException) { throw e }
+        catch (e: Exception) { mutableOfflineSync.value = friendlyError(e); throw e }
+        finally { offlineSyncLock.unlock() }
+    }
     fun downloadCollection() = viewModelScope.launch {
         if (mutable.value.collecting) return@launch
         mutable.update { it.copy(collecting = true, mutationMessage = "正在准备离线保存…") }
@@ -496,9 +612,10 @@ class MusicViewModel @Inject constructor(
     }
     fun notify(message: String) { mutable.update { it.copy(mutationMessage = message) } }
     fun acknowledgeMessage(message: String) { mutable.update { if (it.mutationMessage == message) it.copy(mutationMessage = null) else it } }
-    fun toggle() { controller?.let { if (it.isPlaying) it.pause() else { if (it.playbackState == Player.STATE_IDLE) it.prepare(); it.play() } } }
-    fun seek(ms: Long) { controller?.seekTo(ms.coerceAtLeast(0)) }
+    fun toggle() { localPlaybackEpoch++; controller?.let { if (it.playWhenReady) it.pause() else { if (it.playbackState == Player.STATE_IDLE) it.prepare(); it.play() } } }
+    fun seek(ms: Long) { localPlaybackEpoch++; controller?.seekTo(ms.coerceAtLeast(0)) }
     fun next() {
+        localPlaybackEpoch++
         val c = controller ?: return
         if (!c.hasNextMediaItem()) return
         mutable.value.current?.id?.let { id -> val profile = repository.session.cacheScope(); viewModelScope.launch {
@@ -506,14 +623,15 @@ class MusicViewModel @Inject constructor(
         } }
         c.seekToNextMediaItem()
     }
-    fun previous() { controller?.seekToPreviousMediaItem() }
-    fun cycleMode() { controller?.let { c ->
+    fun previous() { localPlaybackEpoch++; controller?.seekToPreviousMediaItem() }
+    fun cycleMode() { localPlaybackEpoch++; controller?.let { c ->
         when { c.shuffleModeEnabled -> { c.shuffleModeEnabled = false; c.repeatMode = Player.REPEAT_MODE_OFF }
             c.repeatMode == Player.REPEAT_MODE_OFF -> c.repeatMode = Player.REPEAT_MODE_ALL
             c.repeatMode == Player.REPEAT_MODE_ALL -> c.repeatMode = Player.REPEAT_MODE_ONE
             else -> { c.repeatMode = Player.REPEAT_MODE_ALL; c.shuffleModeEnabled = true } }
     } }
     fun addToQueue(track: Track, next: Boolean = false) {
+        localPlaybackEpoch++
         controller?.let { c ->
             if (c.mediaItemCount >= 5000) { mutable.update { it.copy(error = "播放队列最多 5000 项。") }; return }
             if (c.mediaItemCount == 0) play(listOf(track))
@@ -521,9 +639,10 @@ class MusicViewModel @Inject constructor(
             else c.addMediaItem(track.mediaItem(repository))
         }
     }
-    fun playQueue(index: Int) { controller?.let { it.seekToDefaultPosition(index); it.prepare(); it.play() } }
-    fun removeQueue(index: Int) { controller?.removeMediaItem(index) }
+    fun playQueue(index: Int) { localPlaybackEpoch++; controller?.let { it.seekToDefaultPosition(index); it.prepare(); it.play() } }
+    fun removeQueue(index: Int) { localPlaybackEpoch++; controller?.removeMediaItem(index) }
     fun moveQueue(entryId: String, toIndex: Int) {
+        localPlaybackEpoch++
         controller?.let { c ->
             val from = (0 until c.mediaItemCount).firstOrNull { c.getMediaItemAt(it).mediaId == entryId } ?: return
             if (toIndex in 0 until c.mediaItemCount && from != toIndex) c.moveMediaItem(from, toIndex)
@@ -618,14 +737,16 @@ class MusicViewModel @Inject constructor(
     suspend fun deletePlaylist(playlist: Playlist) {
         val owner = repository.session.cacheScope(); requireOwner(owner)
         repository.api().deletePlaylist(repository.url("api", "v1", "playlists", playlist.id), playlist.version).let { if (!it.isSuccessful) throw HttpException(it) }
-        requireOwner(owner); invalidateCatalog(owner); back(); notify("歌单已删除")
+        requireOwner(owner); repository.downloads.followPlaylist(playlist.id, false); invalidateCatalog(owner)
+        if (mutable.value.collectionId == playlist.id) back() else load()
+        notify("歌单已删除")
     }
     suspend fun removePlaylistTrack(track: Track, playlist: Playlist) {
         val owner = repository.session.cacheScope(); requireOwner(owner)
         repository.api().removeTrack(repository.url("api", "v1", "playlists", playlist.id, "tracks", track.id), playlist.version).close()
         requireOwner(owner)
         val fresh = repository.api().playlist(repository.url("api", "v1", "playlists", playlist.id))
-        requireOwner(owner); mutable.update { it.copy(activePlaylist = fresh) }; invalidateCatalog(owner); load(); notify("已从歌单移除")
+        requireOwner(owner); mutable.update { if (it.collectionId == playlist.id) it.copy(activePlaylist = fresh) else it }; invalidateCatalog(owner); load(); notify("已从歌单移除")
     }
     suspend fun playlistTracks(playlist: Playlist) = repository.collectionTracks(CatalogQuery(collection = "playlists", collectionId = playlist.id))
     suspend fun reorderPlaylist(playlist: Playlist, ids: List<String>) {
@@ -680,5 +801,8 @@ class MusicViewModel @Inject constructor(
             }
         }
     }
-    override fun onCleared() { controller?.removeListener(playerListener); MediaController.releaseFuture(controllerFuture); super.onCleared() }
+    override fun onCleared() {
+        agentNetworkCallback?.let { callback -> runCatching { context.getSystemService(android.net.ConnectivityManager::class.java).unregisterNetworkCallback(callback) } }
+        controller?.removeListener(playerListener); MediaController.releaseFuture(controllerFuture); super.onCleared()
+    }
 }

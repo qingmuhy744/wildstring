@@ -1,6 +1,5 @@
 """Private AI connection settings; model access never grants library write access."""
 
-import http.client
 import json
 import os
 import tempfile
@@ -10,6 +9,9 @@ from urllib.parse import urlsplit
 from fastapi import HTTPException
 from filelock import FileLock
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
+
+from wildstring.model_client import completion, content
+from wildstring.outbound import OutboundError
 
 
 class AIUpdate(BaseModel):
@@ -49,7 +51,8 @@ class AIUpdate(BaseModel):
 
 
 class AIService:
-    def __init__(self, data_dir: Path):
+    def __init__(self, data_dir: Path, providers=None):
+        self.providers = providers
         self.directory = data_dir / "ai"
         self.path = self.directory / ".env"
         self.lock = FileLock(data_dir / "ai-settings.lock", timeout=5)
@@ -118,36 +121,35 @@ class AIService:
         config = self.read()
         if not config["base_url"] or not config["model"]:
             raise HTTPException(409, "ai_not_configured")
-        parts = urlsplit(config["base_url"])
-        connector = (
-            http.client.HTTPSConnection if parts.scheme == "https" else http.client.HTTPConnection
-        )
-        connection = connector(parts.hostname, parts.port, timeout=config["timeout"])
         try:
-            headers = {"Content-Type": "application/json"}
-            if config["api_key"]:
-                headers["Authorization"] = f"Bearer {config['api_key']}"
-            body = json.dumps(
+            result = completion(
+                config,
                 {
                     "model": config["model"],
                     "messages": [{"role": "user", "content": "Reply OK."}],
                     "max_tokens": 16,
                     "stream": False,
-                }
+                },
+                self.providers,
             )
-            connection.request("POST", parts.path.rstrip("/") + "/chat/completions", body, headers)
-            response = connection.getresponse()
-            if not 200 <= response.status < 300:
-                raise HTTPException(502, "ai_connection_failed")
-            raw = response.read(65537)
-            if (
-                len(raw) > 65536
-                or not isinstance(json.loads(raw).get("choices"), list)
-                or not json.loads(raw)["choices"]
-            ):
-                raise HTTPException(502, "ai_invalid_response")
-            return {"ok": True, "model": config["model"], "scope": "chat_completion"}
-        except (OSError, http.client.HTTPException, ValueError, AttributeError):
+            content(result)
+            return {
+                "ok": True,
+                "model": config["model"],
+                "scope": "chat_completion",
+                "capabilities": {
+                    "text": "ok",
+                    "structured_selection": "unverified",
+                    "tools": "unverified",
+                },
+            }
+        except (
+            OutboundError,
+            OSError,
+            ValueError,
+            KeyError,
+            TypeError,
+            IndexError,
+            AttributeError,
+        ):
             raise HTTPException(502, "ai_connection_failed") from None
-        finally:
-            connection.close()

@@ -89,7 +89,8 @@ class NativeNavigationTest {
                     if (path.endsWith("/lyrics")) return json("""{"kind":"none","lines":[]}""")
                     if (path.endsWith("/listening")) return json("""{"accepted_ms":1000}""")
                     if (path.endsWith("/lastfm")) return json("""{"configured":false,"connected":false,"scrobble":false,"now_playing":false,"version":0}""")
-                    requests.incrementAndGet()
+                    // Lifecycle inbox/continuity probes are independent of catalog restoration.
+                    if (listOf("/albums", "/artists", "/playlists", "/tracks", "/browse-index").any(path::endsWith)) requests.incrementAndGet()
                     return when {
                         path.endsWith("/albums") -> json("""{"items":[$albums],"total":20,"limit":50,"offset":0}""")
                         path.endsWith("/artists") -> json("""{"items":[{"id":"artist","name":"测试艺人","track_count":1}],"total":1,"limit":50,"offset":0}""")

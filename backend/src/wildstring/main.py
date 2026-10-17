@@ -12,9 +12,11 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from wildstring.agent_platform import AgentPlatform
 from wildstring.auth import Auth
 from wildstring.config import Settings
 from wildstring.database import Database
+from wildstring.diagnostics import Diagnostics, RequestTrace, diagnostics_router, install_logging
 from wildstring.library.api import library_router
 from wildstring.library.listening import listening_router
 from wildstring.library.playlists import PlaylistStore, playlist_router
@@ -40,12 +42,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     access = SiteAccess(database)
     transcoding = Transcoding(repository)
     providers = Providers(repository)
+    diagnostics = Diagnostics(current.data_dir)
+    diagnostics.database = database
+    diagnostics.repository = repository
+    platform = AgentPlatform(repository, auth)
+    platform.diagnostics = diagnostics
+    platform.providers = providers
+    providers.diagnostics = diagnostics
+    management.diagnostics = diagnostics
+    providers.platform = platform
+    management.platform = platform
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         current.data_dir.mkdir(parents=True, exist_ok=True)
         current.library_dir.mkdir(parents=True, exist_ok=True)
         database.initialize()
+        diagnostics.start()
+        install_logging()
         playlists.ensure_default()
         if (
             current.admin_password is not None
@@ -56,12 +70,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         management.start()
         transcoding.start()
         providers.start()
+        platform.start()
         try:
             yield
         finally:
+            await asyncio.to_thread(platform.stop)
             await asyncio.to_thread(providers.stop)
             await asyncio.to_thread(management.stop)
             await asyncio.to_thread(transcoding.stop)
+            await asyncio.to_thread(diagnostics.stop)
 
     development = current.environment != "production"
     app = FastAPI(
@@ -110,18 +127,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(access.router(auth))
     app.state.transcoding = transcoding
     app.state.providers = providers
+    app.state.diagnostics = diagnostics
+    app.state.agent_platform = platform
+    app.include_router(platform.router())
     app.include_router(providers.router(auth))
     app.include_router(library_router(repository, auth, transcoding))
     app.include_router(transcoding.router(auth))
     app.include_router(listening_router(repository, auth, providers))
     app.include_router(playlist_router(playlists, auth))
-    app.include_router(management_router(management, auth))
+    app.include_router(management_router(management, auth, providers))
     app.include_router(experience_router(repository, auth, providers))
+
+    app.include_router(diagnostics_router(diagnostics, auth, database))
 
     if current.web_dir is not None:
         app.mount("/", StaticFiles(directory=current.web_dir, html=True), name="web")
 
     app.add_middleware(HostAllowlist, access=access)
     app.add_middleware(CallbackPrivacy)
+    app.add_middleware(RequestTrace, diagnostics=diagnostics)
 
     return app

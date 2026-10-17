@@ -16,12 +16,14 @@ from filelock import FileLock, Timeout
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from wildstring.ai_config import AIService, AIUpdate
+from wildstring.diagnostics import record_event, trace_context
 from wildstring.library.edits import MetadataEditor, MetadataUpdate
 from wildstring.library.importer import import_music
 from wildstring.library.intake import Intake, IntakeApproval, IntakeSettings
 from wildstring.library.lyric_edits import LyricsEditor, LyricsText, LyricsUpdate
 from wildstring.library.repository import now
 from wildstring.library.scanner import ScanBusyError, scan_library
+from wildstring.task_notifications import management_result
 
 logger = logging.getLogger(__name__)
 
@@ -201,6 +203,7 @@ class Management:
                     "UPDATE admin_jobs SET status=?, finished_at=?, result=? WHERE id=?",
                     (result["status"], now(), json.dumps(result), job["id"]),
                 )
+                management_result(self, connection, job, result["status"])
         except ScanBusyError:
             with self.database.connect(write=True) as connection:
                 connection.execute(
@@ -214,6 +217,7 @@ class Management:
                     "UPDATE admin_jobs SET status='failed', finished_at=?, error='task_failed' WHERE id=?",
                     (now(), job["id"]),
                 )
+                management_result(self, connection, job, "failed")
 
     def work(self):
         while not self.stopping.is_set():
@@ -245,7 +249,16 @@ class Management:
                         self.check_storage()
                         job = self.claim()
                         if job:
-                            self.execute(job)
+                            with trace_context(
+                                job["id"].replace("-", ""),
+                                task_id=job["id"],
+                                sink=getattr(self, "diagnostics", None),
+                            ):
+                                record_event("library.task.started", operation=job["kind"])
+                                self.execute(job)
+                                record_event(
+                                    "library.task.finished", stage=self.job(job["id"])["status"]
+                                )
                         if time.monotonic() >= self.next_discovery:
                             self.next_discovery = (
                                 time.monotonic() + self.intake.preferences()["interval_seconds"]
@@ -326,11 +339,11 @@ class Management:
         }
 
 
-def management_router(service, auth):
+def management_router(service, auth, providers=None):
     router = APIRouter(prefix="/api/v1/manage", dependencies=[Depends(auth.require_admin)])
     editor = MetadataEditor(service.repository)
     lyrics = LyricsEditor(service.repository)
-    ai = AIService(service.settings.data_dir)
+    ai = AIService(service.settings.data_dir, providers)
 
     @router.get("/intake/settings")
     def intake_settings():

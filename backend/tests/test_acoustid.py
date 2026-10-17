@@ -38,6 +38,8 @@ def test_private_key_compressed_post_and_shared_proxy(settings, authenticated_cl
         seen = []
 
         class Response:
+            status = 200
+
             def __enter__(self):
                 return self
 

@@ -8,4 +8,6 @@ import javax.inject.Singleton
 @Singleton
 class PlaybackHealth @Inject constructor() {
     val audioUnderruns = AtomicInteger(0)
+    /** Invoked only from the main thread while the service owns its single session. */
+    var diagnostics: (() -> PlaybackDiagnosticSnapshot)? = null
 }

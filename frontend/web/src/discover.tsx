@@ -3,6 +3,7 @@ import { api, eventId, artist, time, type Playlist, type Track, type User } from
 import { Cover } from './cover';
 import { FavoriteButton, type Favorites } from './favorites';
 import type { Player } from './player';
+import { SyncModeControl } from './playback-sync';
 import { modeNames, QUEUE_LIMIT, type PlaybackMode } from './playback-state';
 
 type Choice = { track: Track; reason: string };
@@ -495,7 +496,8 @@ export function Devices({ player, user }: { player: Player; user: User }) {
     <section className="completion-page" aria-label="跨设备继续">
       <p className="eyebrow">TAKE YOUR MUSIC WITH YOU</p>
       <h1>换个地方，接着听。</h1>
-      <p className="muted">先在当前设备共享，再在另一台设备点击继续。每次都由你决定。</p>
+      <p className="muted">暂停时自动保存进度。默认发现其他设备的新记录时询问，载入后保持暂停。</p>
+      <SyncModeControl userId={user.id} />
       <div className="management-card">
         <h2>账号共享进度</h2>
         <p>

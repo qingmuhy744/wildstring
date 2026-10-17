@@ -486,6 +486,8 @@ export function MetadataSuggestions({
       {result?.jobs[0] && <JobDiagnostics job={result.jobs[0]} />}
       {result?.suggestions.map((s) => (
         <article className="suggestion-card" key={s.id}>
+          {s.status === 'ignored' && <p className="muted">此建议已忽略。</p>}
+          {s.status === 'applied' && <p className="muted">此建议已应用。</p>}
           <a href={s.source_url} target="_blank" rel="noreferrer">
             {s.provider === 'musicbrainz' ? 'MusicBrainz' : 'Last.fm'} 来源
           </a>
@@ -555,7 +557,7 @@ export function MetadataSuggestions({
                   查看 CAA 封面候选
                 </a>{' '}
                 <button
-                  disabled={busy || s.metadata_version !== version}
+                  disabled={busy || s.status === 'ignored' || s.metadata_version !== version}
                   onClick={() =>
                     void run(`/manage/providers/suggestions/${s.id}/cover`, { version })
                   }

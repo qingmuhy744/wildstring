@@ -184,6 +184,8 @@ def test_proxy_is_private_optional_and_shared_by_outgoing_requests(
         requests = []
 
         class Response:
+            status = 200
+
             def __enter__(self):
                 return self
 
@@ -464,6 +466,8 @@ def test_invalid_json_shape_and_nested_relations_are_failures_not_worker_crashes
         assert enable(client, proxy_mode="direct").status_code == 200
 
         class Response:
+            status = 200
+
             def __enter__(self):
                 return self
 

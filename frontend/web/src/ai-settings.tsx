@@ -197,7 +197,7 @@ export function AISettings() {
         </fieldset>
       </form>
       <p className="muted">
-        当前提供连接配置；自然语言找歌、整理 Agent 与 MCP 接入仍在开发规划中。
+        这是原有实例连接。个人连接、工具能力检测与后台授权可在“助手设置”中管理。
       </p>
     </section>
   );

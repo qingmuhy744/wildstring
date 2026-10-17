@@ -25,6 +25,7 @@ internal class AbsolutePlayer(private val engine: ExoPlayer, private val resolve
     private fun requested(item: MediaItem) = uri(item).takeIf { it.isNotEmpty() }?.let(PlaybackRequest::isAac) == true
     private fun offset(item: MediaItem): Long = if (!requested(item)) 0 else resolver.plan(uri(item))?.startMs ?: PlaybackRequest.offset(uri(item))
     private fun duration(item: MediaItem): Long = resolver.plan(uri(item))?.durationMs?.takeIf { it > 0 }
+        ?: item.mediaMetadata.durationMs?.takeIf { it > 0 }
         ?: item.mediaMetadata.extras?.getLong("duration_ms") ?: 0L
     private fun transcode(item: MediaItem) = requested(item) && resolver.plan(uri(item))?.mode != "original"
 
@@ -48,7 +49,11 @@ internal class AbsolutePlayer(private val engine: ExoPlayer, private val resolve
         val plan = resolver.plan(uri(item))
         val label = if (plan?.mode == "transcode") "AAC · ${plan.output.bitrateKbps} kbps"
             else "原音" + (plan?.output?.codec ?: item.mediaMetadata.extras?.getString("format"))?.takeIf { it.isNotBlank() }?.let { " · ${it.uppercase()}" }.orEmpty()
-        val metadata = state.currentMetadata.buildUpon().setDescription(label).setExtras(Bundle(state.currentMetadata.extras ?: Bundle()).apply { putString("playback_label", label) }).build()
+        // A chunked AAC response has no container duration until encoding finishes.
+        // SystemUI reads standard metadata; our private duration_ms extra is invisible there.
+        val metadata = state.currentMetadata.buildUpon().setDurationMs(total.takeIf { it > 0 }
+            ?: state.currentMetadata.durationMs).setDescription(label)
+            .setExtras(Bundle(state.currentMetadata.extras ?: Bundle()).apply { putString("playback_label", label) }).build()
         if (!transcode(item)) return state.buildUpon().setPlaylist(state.timeline, state.currentTracks, metadata).build()
         val timeline = object : ForwardingTimeline(state.timeline) {
             override fun getWindow(index: Int, window: Timeline.Window, defaultPositionProjectionUs: Long): Timeline.Window {
@@ -56,6 +61,9 @@ internal class AbsolutePlayer(private val engine: ExoPlayer, private val resolve
                 if (transcode(window.mediaItem)) {
                     duration(window.mediaItem).takeIf { it > 0 }?.let { window.durationUs = it * 1000 }
                     window.isSeekable = true; window.isDynamic = false
+                    // These are finite songs even while the encoder streams without Content-Length.
+                    // isDynamic=false alone does not clear Timeline.Window.isLive.
+                    window.liveConfiguration = null
                 }
                 return window
             }
