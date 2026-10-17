@@ -242,9 +242,10 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
                 ) { padding ->
                     Column(Modifier.fillMaxSize().padding(padding)) {
                         if (state.tab == "library" && state.collection == null) LibraryTabs(state.kind, vm::kind)
+                        // Keep the editor outside query-keyed pages and discover/result branches.
+                        if (state.tab == "search" && state.collection == null && state.kind != "recent") CatalogSearch(state.query, vm::search)
                         val header: @Composable () -> Unit = {
                             Column(Modifier.fillMaxWidth()) {
-                                if (state.tab == "search" && state.collection == null && state.kind != "recent") CatalogSearch(state.query, vm::search)
                                 if (state.tab == "mine" && state.collection == null && state.kind != "recent") {
                                     PersonalHeader(state, { vm.recent() }, compact = compact)
                                     Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {

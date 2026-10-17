@@ -103,10 +103,12 @@ class ContinuousCatalogTest {
                 compose.onNodeWithTag("alphabet-Z").performClick()
                 compose.waitUntil(10_000) { vm.state.value.window.trackAt(160) != null }
                 compose.onNodeWithTag("catalog-item-160").assertIsDisplayed()
+                compose.onNodeWithTag("alphabet-Z").assertIsSelected()
                 assertTrue(requests.any { it.startsWith("/api/v1/tracks?") && it.contains("offset=150") })
                 compose.onNodeWithTag("catalog-list").performScrollToIndex(150)
                 compose.waitUntil(10_000) { vm.state.value.window.trackAt(149) != null }
                 compose.onNodeWithTag("catalog-item-149").assertIsDisplayed()
+                compose.onNodeWithTag("alphabet-M").assertIsSelected()
                 compose.onNodeWithTag("alphabet-Z").performClick()
                 compose.onNodeWithContentDescription("Z 旋律 160的操作").performClick()
                 compose.onNodeWithText("查看所属专辑").performClick()
@@ -155,7 +157,7 @@ class ContinuousCatalogTest {
         }
     }
 
-    @Test fun draggingPreviewsUntilReleaseAndAlbumArtistListsUseGlobalPositions() {
+    @Test fun draggingJumpsBeforeReleaseAndAlbumArtistListsUseGlobalPositions() {
         MockWebServer().use { server ->
             fixture(server); val vm = connect(server)
             try {
@@ -164,7 +166,8 @@ class ContinuousCatalogTest {
                     down(Offset(center.x, height * .15f)); moveTo(Offset(center.x, height * 26.5f / 28f), delayMillis = 200)
                 }
                 compose.onNodeWithTag("alphabet-preview").assertIsDisplayed()
-                assertFalse(requests.any { it.startsWith("/api/v1/albums?") && it.contains("offset=150") })
+                compose.waitUntil(10_000) { vm.state.value.window.albumAt(160) != null }
+                compose.onNodeWithTag("catalog-item-160").assertIsDisplayed()
                 compose.onNodeWithTag("alphabet-rail").performTouchInput { up() }
                 compose.waitUntil(10_000) { vm.state.value.window.albumAt(160) != null }
                 compose.onNodeWithTag("catalog-item-160").assertIsDisplayed()
@@ -176,6 +179,23 @@ class ContinuousCatalogTest {
                 compose.onNodeWithTag("catalog-list").performScrollToIndex(150)
                 compose.waitUntil(10_000) { vm.state.value.window.artistAt(149) != null }
                 compose.onNodeWithTag("catalog-item-149").assertIsDisplayed()
+            } finally { compose.runOnIdle { vm.repository.session.invalidate() } }
+        }
+    }
+
+    @Test fun searchEditorKeepsFocusAcrossDiscoverAndResultPages() {
+        MockWebServer().use { server ->
+            fixture(server); val vm = connect(server)
+            try {
+                compose.onNodeWithTag("catalog-search").performClick().performTextInput("许")
+                compose.waitUntil(10_000) { vm.state.value.query == "许" && !vm.state.value.loading }
+                compose.onNodeWithTag("catalog-search").assertIsFocused().performTextInput("嵩")
+                compose.waitUntil(10_000) { vm.state.value.query == "许嵩" && !vm.state.value.loading }
+                compose.onNodeWithTag("catalog-search").assertTextEquals("许嵩").assertIsFocused()
+                capture("chinese-search-editor.png")
+                compose.onNodeWithContentDescription("清空搜索").performClick()
+                compose.waitUntil(10_000) { vm.state.value.kind == "discover" && !vm.state.value.loading }
+                compose.onNodeWithTag("catalog-search").assert(SemanticsMatcher.expectValue(androidx.compose.ui.semantics.SemanticsProperties.EditableText, androidx.compose.ui.text.AnnotatedString(""))).assertIsFocused()
             } finally { compose.runOnIdle { vm.repository.session.invalidate() } }
         }
     }

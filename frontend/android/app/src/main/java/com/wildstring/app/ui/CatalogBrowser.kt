@@ -19,14 +19,20 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.wildstring.app.data.*
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 
 /** One absolute slot per server result. Placeholders cannot start playback or open an item. */
 @Composable internal fun CatalogBrowser(
@@ -41,6 +47,11 @@ import kotlinx.coroutines.launch
     val groups = state.browseIndex?.groups.orEmpty()
     val indexed = groups.isNotEmpty()
     val albumGrid = state.kind == "albums"
+    var jumpJob by remember { mutableStateOf<Job?>(null) }
+    val firstPosition by remember(albumGrid) { derivedStateOf {
+        ((if (albumGrid) grid.firstVisibleItemIndex else list.firstVisibleItemIndex) - 1).coerceAtLeast(0)
+    } }
+    val activeKey = groups.lastOrNull { it.count > 0 && it.offset != null && it.offset <= firstPosition }?.key
     // Page ownership lives in the ViewModel; changing visible positions never changes the route.
     LaunchedEffect(state.contentKey, albumGrid, state.total, state.loading, state.window.pages.keys, state.rangeErrors.keys) {
         snapshotFlow {
@@ -97,9 +108,10 @@ import kotlinx.coroutines.launch
                 }
             }
         }
-        if (indexed) AlphabetRail(groups, Modifier.align(Alignment.CenterEnd).fillMaxHeight().width(30.dp)) { offset ->
+        if (indexed) AlphabetRail(groups, activeKey, Modifier.align(Alignment.CenterEnd).fillMaxHeight().width(30.dp)) { offset ->
             vm.ensureRange(offset, retry = true)
-            scope.launch {
+            jumpJob?.cancel()
+            jumpJob = scope.launch {
                 if (albumGrid) grid.scrollToItem(offset + 1) else list.scrollToItem(offset + 1)
             }
         }
@@ -125,31 +137,48 @@ import kotlinx.coroutines.launch
     }
 }
 
-/** Touch previews a letter while dragging; release commits exactly one server offset. */
-@Composable private fun AlphabetRail(groups: List<BrowseGroup>, modifier: Modifier, jump: (Int) -> Unit) {
+/** Crossing a populated letter jumps immediately; empty/repeated letters never buzz. */
+@Composable internal fun AlphabetRail(groups: List<BrowseGroup>, activeKey: String?, modifier: Modifier, jump: (Int) -> Unit) {
     var height by remember { mutableIntStateOf(1) }
     var preview by remember { mutableStateOf<String?>(null) }
-    var selected by remember { mutableStateOf<BrowseGroup?>(null) }
+    var previewY by remember { mutableFloatStateOf(0f) }
+    var lastKey by remember { mutableStateOf<String?>(null) }
+    val currentJump by rememberUpdatedState(jump)
+    val feedback = LocalTactileFeedback.current
+    val density = LocalDensity.current
+    val bubbleSize = with(density) { 72.dp.toPx() }
+    val padding = with(density) { 6.dp.toPx() }
     fun select(y: Float) {
         val group = groups[(y / height * groups.size).toInt().coerceIn(groups.indices)]
-        preview = group.key; selected = group.takeIf { it.count > 0 && it.offset != null }
+        preview = group.key; previewY = y.coerceIn(0f, height.toFloat())
+        if (group.count > 0 && group.offset != null && group.key != lastKey) {
+            lastKey = group.key
+            feedback(TactileKind.Tap)
+            currentJump(group.offset)
+        }
     }
     Box(modifier) {
         Column(Modifier.fillMaxSize().padding(vertical = 6.dp).onSizeChanged { height = it.height.coerceAtLeast(1) }
             .testTag("alphabet-rail").pointerInput(groups) {
-                detectDragGestures(onDragStart = { select(it.y) }, onDragEnd = {
-                    selected?.offset?.let(jump); selected = null; preview = null
-                }, onDragCancel = { selected = null; preview = null }) { change, _ -> change.consume(); select(change.position.y) }
+                detectDragGestures(onDragStart = { lastKey = null; select(it.y) }, onDragEnd = {
+                    lastKey = null; preview = null
+                }, onDragCancel = { lastKey = null; preview = null }) { change, _ -> change.consume(); select(change.position.y) }
             }, verticalArrangement = Arrangement.SpaceEvenly, horizontalAlignment = Alignment.CenterHorizontally) {
             groups.forEach { group ->
                 val enabled = group.count > 0 && group.offset != null
                 Text(group.key, style = MaterialTheme.typography.labelSmall, fontSize = if (group.key == "0–9") 9.sp else 11.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = if (enabled) 1f else .28f),
-                    modifier = Modifier.fillMaxWidth().weight(1f).wrapContentSize(Alignment.Center).testTag("alphabet-${group.key}")
-                        .semantics { contentDescription = "跳至 ${group.key}" }.clickable(enabled = enabled) { group.offset?.let(jump) })
+                    fontWeight = if (group.key == activeKey) FontWeight.Bold else FontWeight.Normal,
+                    color = if (group.key == activeKey) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = if (enabled) 1f else .28f),
+                    modifier = Modifier.fillMaxWidth().weight(1f)
+                        .background(if (group.key == activeKey) MaterialTheme.colorScheme.primaryContainer else androidx.compose.ui.graphics.Color.Transparent, RoundedCornerShape(8.dp))
+                        .wrapContentSize(Alignment.Center).testTag("alphabet-${group.key}")
+                        .semantics { contentDescription = "跳至 ${group.key}"; selected = group.key == activeKey }
+                        .clickable(enabled = enabled) { feedback(TactileKind.Tap); group.offset?.let(currentJump) })
             }
         }
-        preview?.let { letter -> Surface(Modifier.align(Alignment.CenterEnd).offset(x = (-44).dp).size(72.dp).testTag("alphabet-preview"),
+        preview?.let { letter -> Surface(Modifier.align(Alignment.TopEnd).offset {
+            IntOffset(with(density) { (-44).dp.roundToPx() }, (previewY + padding - bubbleSize / 2).coerceIn(0f, (height + 2 * padding - bubbleSize).coerceAtLeast(0f)).roundToInt())
+        }.size(72.dp).testTag("alphabet-preview"),
             shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.primaryContainer, shadowElevation = 6.dp) {
             Box(contentAlignment = Alignment.Center) { Text(letter, style = MaterialTheme.typography.headlineLarge) }
         } }
