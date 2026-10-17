@@ -45,7 +45,8 @@ import kotlin.math.roundToInt
     val tracksById = remember(state.tracks) { state.tracks.associateBy { it.id } }
     val playlistsById = remember(state.playlists) { state.playlists.associateBy { it.id } }
     val groups = state.browseIndex?.groups.orEmpty()
-    val indexed = groups.isNotEmpty()
+    // The keyboard leaves too little height for 28 readable letter targets.
+    val indexed = groups.isNotEmpty() && WindowInsets.ime.getBottom(LocalDensity.current) == 0
     val albumGrid = state.kind == "albums"
     var jumpJob by remember { mutableStateOf<Job?>(null) }
     val firstPosition by remember(albumGrid) { derivedStateOf {

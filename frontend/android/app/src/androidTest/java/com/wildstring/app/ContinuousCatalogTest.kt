@@ -192,7 +192,14 @@ class ContinuousCatalogTest {
                 compose.onNodeWithTag("catalog-search").assertIsFocused().performTextInput("嵩")
                 compose.waitUntil(10_000) { vm.state.value.query == "许嵩" && !vm.state.value.loading }
                 compose.onNodeWithTag("catalog-search").assertTextEquals("许嵩").assertIsFocused()
+                compose.waitUntil(5_000) {
+                    androidx.core.view.ViewCompat.getRootWindowInsets(compose.activity.window.decorView)
+                        ?.isVisible(androidx.core.view.WindowInsetsCompat.Type.ime()) == true
+                }
+                compose.onNodeWithTag("alphabet-rail").assertDoesNotExist()
                 capture("chinese-search-editor.png")
+                compose.onNodeWithTag("catalog-search").performImeAction()
+                compose.waitUntil(5_000) { compose.onAllNodesWithTag("alphabet-rail").fetchSemanticsNodes().isNotEmpty() }
                 compose.onNodeWithContentDescription("清空搜索").performClick()
                 compose.waitUntil(10_000) { vm.state.value.kind == "discover" && !vm.state.value.loading }
                 compose.onNodeWithTag("catalog-search").assert(SemanticsMatcher.expectValue(androidx.compose.ui.semantics.SemanticsProperties.EditableText, androidx.compose.ui.text.AnnotatedString(""))).assertIsFocused()
