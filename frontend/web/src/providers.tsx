@@ -403,6 +403,27 @@ const statuses: Record<string, string> = {
   no_match: '没有匹配结果',
   stale: '歌曲信息已变化，请重新查询',
 };
+function CandidateCover({ id }: { id: string }) {
+  const [failed, setFailed] = useState(false);
+  return (
+    <div className="candidate-cover-preview">
+      {failed ? (
+        <p role="status">
+          封面预览暂不可用。<button onClick={() => setFailed(false)}>重新预览</button>
+        </p>
+      ) : (
+        <img
+          src={`/api/v1/manage/providers/suggestions/${encodeURIComponent(id)}/cover-preview`}
+          alt="CAA 封面候选"
+          loading="lazy"
+          width="160"
+          height="160"
+          onError={() => setFailed(true)}
+        />
+      )}
+    </div>
+  );
+}
 export function MetadataSuggestions({
   id,
   version,
@@ -527,17 +548,22 @@ export function MetadataSuggestions({
             应用选中字段
           </button>
           {s.cover_url && (
-            <p>
-              <a href={s.cover_url.replace(/^http:/, 'https:')} target="_blank" rel="noreferrer">
-                查看 CAA 封面候选
-              </a>{' '}
-              <button
-                disabled={busy || s.metadata_version !== version}
-                onClick={() => void run(`/manage/providers/suggestions/${s.id}/cover`, { version })}
-              >
-                使用此封面
-              </button>
-            </p>
+            <div>
+              <CandidateCover key={s.id} id={s.id} />
+              <p>
+                <a href={s.cover_url.replace(/^http:/, 'https:')} target="_blank" rel="noreferrer">
+                  查看 CAA 封面候选
+                </a>{' '}
+                <button
+                  disabled={busy || s.metadata_version !== version}
+                  onClick={() =>
+                    void run(`/manage/providers/suggestions/${s.id}/cover`, { version })
+                  }
+                >
+                  使用此封面
+                </button>
+              </p>
+            </div>
           )}
           {s.metadata_version !== version && (
             <p className="muted">歌曲已变化，此候选仅供查看，请重新查询。</p>

@@ -27,7 +27,7 @@ from urllib.request import (
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 from filelock import FileLock, Timeout
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
@@ -254,6 +254,37 @@ class Providers:
                 ) from None
             except (URLError, TimeoutError, OSError, ValueError) as error:
                 raise ProviderError() from error
+
+    def cover_data(self, url):
+        """Use the configured server proxy and the same image guards for preview and apply."""
+        from wildstring.library.assets import TrackAssets
+
+        try:
+            parsed = urlsplit(url)
+            valid = (
+                parsed.scheme in {"http", "https"}
+                and parsed.hostname == "coverartarchive.org"
+                and parsed.port in (None, 80, 443)
+                and not parsed.username
+                and not parsed.password
+                and not parsed.query
+                and not parsed.fragment
+                and re.fullmatch(
+                    r"/release/[0-9a-f-]{36}/[0-9]+(?:-[0-9]+)?\.(?:jpg|png)", parsed.path
+                )
+            )
+        except ValueError:
+            valid = False
+        if not valid:
+            raise HTTPException(422, "invalid_cover_url")
+        try:
+            data = self.request("https://coverartarchive.org" + parsed.path, image=True)
+            thumbnail = TrackAssets(self.repository).thumbnail(data, 768)
+            if thumbnail is None:
+                raise ProviderError("invalid_cover", False)
+            return data, thumbnail
+        except ProviderError:
+            raise HTTPException(502, "cover_download_failed") from None
 
     def cached(self, provider, key, url, parameters=None, *, force=False):
         digest = hashlib.sha256(key.encode()).hexdigest()
@@ -1013,10 +1044,29 @@ class Providers:
                 )
             return saved
 
+        @router.get("/manage/providers/suggestions/{identity}/cover-preview")
+        def cover_preview(identity: str, user: admin):
+            with self.database.connect() as connection:
+                row = connection.execute(
+                    "SELECT s.cover_url FROM metadata_suggestions s JOIN tracks t ON t.id=s.track_id "
+                    "WHERE s.id=? AND t.library_id=?",
+                    (identity, self.repository.library_id()),
+                ).fetchone()
+            if row is None or not row["cover_url"]:
+                raise HTTPException(404, "suggestion_not_found")
+            _, thumbnail = self.cover_data(row["cover_url"])
+            return Response(
+                thumbnail,
+                media_type="image/jpeg",
+                headers={
+                    "Cache-Control": "private, no-store",
+                    "Vary": "Cookie",
+                    "X-Content-Type-Options": "nosniff",
+                },
+            )
+
         @router.post("/manage/providers/suggestions/{identity}/cover", dependencies=mutation)
         def apply_cover(identity: str, body: CoverApply, user: admin):
-            from wildstring.library.assets import TrackAssets
-
             with self.database.connect() as connection:
                 row = connection.execute(
                     "SELECT * FROM metadata_suggestions WHERE id=?", (identity,)
@@ -1025,22 +1075,7 @@ class Providers:
                 raise HTTPException(404, "suggestion_not_found")
             if row["metadata_version"] != body.version:
                 raise HTTPException(409, "metadata_version_conflict")
-            parsed = urlsplit(row["cover_url"])
-            if (
-                parsed.hostname != "coverartarchive.org"
-                or parsed.port not in (None, 80, 443)
-                or not re.fullmatch(
-                    r"/release/[0-9a-f-]{36}/[0-9]+(?:-[0-9]+)?\.(?:jpg|png)", parsed.path
-                )
-            ):
-                raise HTTPException(422, "invalid_cover_url")
-            try:
-                data = self.request("https://coverartarchive.org" + parsed.path, image=True)
-                asset = TrackAssets(self.repository)
-                if asset.thumbnail(data, 768) is None:
-                    raise ProviderError("invalid_cover", False)
-            except ProviderError:
-                raise HTTPException(502, "cover_download_failed") from None
+            data, _ = self.cover_data(row["cover_url"])
             key = hashlib.sha256(data).hexdigest()
             folder = self.database.path.parent / "artwork"
             folder.mkdir(exist_ok=True)

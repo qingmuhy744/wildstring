@@ -6,11 +6,13 @@
 
 `.github/workflows/android.yml` 检查 Android Lint、JVM 测试、debug 构建和 R8 release 构建，再通过模拟器检查登录、认证音频串流、播放/暂停、手机全屏歌词和平板双栏。上传 `wildstring-android-debug` 与报告/截图。debug 使用临时签名，供开发验证；正式安装包从 Releases 下载。
 
+Android CI 会启动一次性合成曲库 API，再把 `realBackend` 参数传给模拟器，验证真实后端契约；不连接个人服务器或曲库。后端及合成夹具变更同样触发原生验证。
+
 PR 工作流只有仓库读取权限，不读取发布私钥。
 
 ## 版本和签名
 
-显示名称「野弦 / WildString」。正式 Android applicationId 为 `com.wildstring.app`，debug 为 `com.wildstring.app.debug`。0.1.0 的 Android versionCode 为 2；0.2.0 为 3，0.2.1 为 4，0.2.2 为 5，0.2.3 为 6，后续发布必须递增。旧的 `dev.wildstring.app.debug` 属于独立应用，安装新版后重新连接即可，服务端数据保留。
+显示名称「野弦 / WildString」。正式 Android applicationId 为 `com.wildstring.app`，debug 为 `com.wildstring.app.debug`。0.1.0 的 Android versionCode 为 2；0.2.0 为 3，0.2.1 为 4，0.2.2 为 5，未发布 0.2.3 为 6、0.3.0 为 7，后续发布必须递增。旧的 `dev.wildstring.app.debug` 属于独立应用，安装新版后重新连接即可，服务端数据保留。
 
 同时更新 Python、Web、Android 版本及对应锁文件：
 
@@ -20,11 +22,11 @@ PR 工作流只有仓库读取权限，不读取发布私钥。
 | `v0.2.0` | `0.2.0` | `0.2.0` |
 | `v0.2.1` | `0.2.1` | `0.2.1` |
 | `v0.2.2` | `0.2.2` | `0.2.2` |
-| `v0.2.3` | `0.2.3` | `0.2.3` |
+| `v0.3.0` | `0.3.0` | `0.3.0` |
 | `v0.1.0-rc.1` | `0.1.0rc1` | `0.1.0-rc.1` |
 | `v0.1.0-dev.1` | `0.1.0.dev1` | `0.1.0-dev.1` |
 
-`python3 scripts/package_release.py --tag v0.2.1 --check-only` 检查当前三个端版本一致；正式发布时将参数替换为实际标签。
+`python3 scripts/package_release.py --tag v0.3.0 --check-only` 检查当前三个端版本一致；正式发布时将参数替换为实际标签。
 
 正式签名使用仓库 Actions secrets：`ANDROID_KEYSTORE_BASE64`、`ANDROID_KEYSTORE_PASSWORD`、`ANDROID_KEY_ALIAS`、`ANDROID_KEY_PASSWORD`、`ANDROID_SIGNING_CERT_SHA256`。密钥仅在签名步骤写入 runner 临时目录，权限 0600，步骤退出立即删除；校验证书指纹后才上传 APK。Gradle 的常规依赖缓存不包含私钥。
 
@@ -33,6 +35,8 @@ PR 工作流只有仓库读取权限，不读取发布私钥。
 ## 功能批次与更新记录
 
 从 0.1.0 后的改进批次开始，在根目录 [CHANGELOG.md](../CHANGELOG.md) 的「未发布」记录用户可见变化，并单列实现 / 验证状态。完成有意义的一批功能后，先与用户核对内容、验证结果和仍有的限制，由用户确定版本号，再更新三个端版本及 Android versionCode、准备对应发布说明、构建并更新 App。不要因为功能代码完成就自行发布或预占版本号。
+
+本批用户已确认 Android＋Web（排除上传）与每日推荐，版本为 0.3.0，完成验证后发布；不启用 PR 自动合并。
 
 ## 发布顺序
 

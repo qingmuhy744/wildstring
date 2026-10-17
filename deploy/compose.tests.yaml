@@ -1,10 +1,12 @@
 services:
   tests:
-    image: wildstring-tests:dev
+    image: ${WILDSTRING_TEST_IMAGE:-wildstring-tests:dev}
     build:
       context: .
       dockerfile: deploy/Dockerfile.tests
       args:
+        RUNTIME_IMAGE: ${WILDSTRING_TEST_RUNTIME_IMAGE:-wildstring:dev}
+        BUILDER_IMAGE: ${WILDSTRING_TEST_BUILDER_IMAGE:-wildstring-builder:dev}
         HTTP_PROXY: ${DOCKER_HTTP_PROXY:-}
         HTTPS_PROXY: ${DOCKER_HTTPS_PROXY:-}
     network_mode: none

@@ -1,24 +1,40 @@
-import { useEffect, useRef, useState } from 'react';
-import { api, artist, streamUrl, time, type PlaybackPlan, type Track } from './api';
+import { useEffect, useId, useRef, useState } from 'react';
+import { api, eventId, artist, streamUrl, time, type PlaybackPlan, type Track } from './api';
 import { Cover } from './cover';
 import { FavoriteButton, type Favorites } from './favorites';
 import { ListeningTracker } from './listening';
+import {
+  modeNames,
+  readPlayback,
+  savePlayback,
+  QUEUE_LIMIT,
+  type PlaybackMode,
+} from './playback-state';
+import { offlineAudio, usingOfflineAccess } from './offline';
 
-export function usePlayer() {
+export function usePlayer(userId: string) {
+  const saved = useRef(readPlayback(userId));
+  const [mode, setMode] = useState<PlaybackMode>(saved.current?.mode || 'sequential');
+  const [sleep, setSleep] = useState<number | 'track' | null>(null);
+  const [clock, setClock] = useState(Date.now());
+  const objectUrl = useRef<string | null>(null);
+  const restored = useRef(false);
+  const shuffleHistory = useRef<number[]>([]);
+  const shuffleBag = useRef<number[]>([]);
   const audio = useRef<HTMLAudioElement>(null);
   const visualPhase = useRef(0);
   const tracker = useRef(new ListeningTracker());
-  const [queue, setQueue] = useState<Track[]>([]);
-  const [index, setIndex] = useState(-1);
+  const [queue, setQueue] = useState<Track[]>(saved.current?.tracks || []);
+  const [index, setIndex] = useState(saved.current?.index ?? -1);
   const [playing, setPlaying] = useState(false);
-  const [position, setPosition] = useState(0);
+  const [position, setPosition] = useState(saved.current?.position || 0);
   const [duration, setDuration] = useState(0);
-  const [volume, setVolume] = useState(0.8);
+  const [volume, setVolume] = useState(saved.current?.volume ?? 0.8);
   const [error, setError] = useState('');
   const [buffering, setBuffering] = useState(false);
   const generation = useRef(0);
-  const [quality, setQuality] = useState('original');
-  const qualityRef = useRef('original');
+  const [quality, setQuality] = useState(saved.current?.quality || 'original');
+  const qualityRef = useRef(saved.current?.quality || 'original');
   const [plan, setPlan] = useState<PlaybackPlan | null>(null);
   const planRef = useRef<PlaybackPlan | null>(null);
   const offset = useRef(0);
@@ -27,6 +43,80 @@ export function usePlayer() {
   const sourceRequest = useRef<AbortController | null>(null);
   const pendingSeek = useRef<number | null>(null);
   const current = queue[index];
+
+  const saveRef = useRef(() => {});
+  saveRef.current = () => {
+    if (queue.length)
+      savePlayback(userId, {
+        tracks: queue,
+        index,
+        position: offset.current + (audio.current?.currentTime || position),
+        quality,
+        volume,
+        mode,
+      });
+  };
+  useEffect(() => {
+    saveRef.current();
+  }, [queue, index, quality, volume, mode, playing]);
+  useEffect(() => {
+    const save = () => saveRef.current();
+    window.addEventListener('pagehide', save);
+    const timer = setInterval(save, 5000);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener('pagehide', save);
+      if (objectUrl.current) URL.revokeObjectURL(objectUrl.current);
+    };
+  }, []);
+  useEffect(() => {
+    if (restored.current) return;
+    restored.current = true;
+    const state = saved.current;
+    if (!state) return;
+    const controller = new AbortController();
+    const restore = async () => {
+      const track = state.tracks[state.index];
+      // A saved queue restores paused, with a fresh authorization check while online.
+      if (navigator.onLine && !usingOfflineAccess())
+        await api<Track>(`/tracks/${encodeURIComponent(track.id)}`, { signal: controller.signal });
+      if (!controller.signal.aborted) {
+        tracker.current.start(track, audio.current!);
+        await loadSource(track, state.position, false);
+      }
+    };
+    void restore().catch(() => {
+      if (!controller.signal.aborted) setError('未能恢复上次播放，可以重新选择歌曲。');
+    });
+    return () => {
+      controller.abort();
+      restored.current = false;
+    };
+  }, []);
+  useEffect(() => {
+    if (sleep === null || sleep === 'track') return;
+    const check = () => {
+      setClock(Date.now());
+      if (Date.now() >= sleep) {
+        desiredPlay.current = false;
+        audio.current?.pause();
+        setSleep(null);
+      }
+    };
+    check();
+    const timer = setInterval(check, 500);
+    window.addEventListener('focus', check);
+    document.addEventListener('visibilitychange', check);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener('focus', check);
+      document.removeEventListener('visibilitychange', check);
+    };
+  }, [sleep]);
+  useEffect(() => {
+    shuffleHistory.current = [];
+    shuffleBag.current = [];
+  }, [mode, queue]);
 
   useEffect(() => {
     if (audio.current) audio.current.volume = volume;
@@ -56,6 +146,7 @@ export function usePlayer() {
       element?.pause();
       element?.removeAttribute('src');
       element?.load();
+      if (objectUrl.current) URL.revokeObjectURL(objectUrl.current);
       if ('mediaSession' in navigator) {
         navigator.mediaSession.metadata = null;
         navigator.mediaSession.playbackState = 'none';
@@ -108,8 +199,10 @@ export function usePlayer() {
     try {
       if (delay) await new Promise((resolve) => setTimeout(resolve, delay));
       if (controller.signal.aborted || attempt !== generation.current) return;
+      const offline = await offlineAudio(track.id, controller.signal);
+      if (!navigator.onLine && !offline) throw new Error('这首歌尚未完整离线保存。');
       let next: PlaybackPlan | null = null;
-      if (qualityRef.current !== 'original') {
+      if (!offline && qualityRef.current !== 'original') {
         const query = new URLSearchParams({
           format: 'aac',
           bitrate_kbps: qualityRef.current,
@@ -125,7 +218,10 @@ export function usePlayer() {
       setPlan(next);
       offset.current = next?.mode === 'transcode' ? next.start_ms / 1000 : 0;
       setDuration(next ? next.duration_ms / 1000 : track.duration_ms / 1000);
-      const url = next?.stream_url || streamUrl(track);
+      const previousUrl = objectUrl.current;
+      objectUrl.current = offline ? URL.createObjectURL(offline) : null;
+      const url = objectUrl.current || next?.stream_url || streamUrl(track);
+      if (previousUrl) URL.revokeObjectURL(previousUrl);
       // Switching AAC preferences on a lossy source should keep the same audio element loaded.
       if (element.getAttribute('src') === url && next?.mode === 'original' && !element.error) {
         loading.current = false;
@@ -150,19 +246,56 @@ export function usePlayer() {
     }
   }
 
-  function start(tracks: Track[], target: number) {
+  function start(tracks: Track[], target: number, seconds = 0, autoplay = true) {
     const element = audio.current;
     const track = tracks[target];
     if (!element || !track) return;
+    if (tracks.length > QUEUE_LIMIT) {
+      setError(`播放队列最多 ${QUEUE_LIMIT} 首。`);
+      return;
+    }
     tracker.current.start(track, element);
     setQueue(tracks);
     setIndex(target);
-    void loadSource(track, 0, true);
+    void loadSource(track, seconds, autoplay);
   }
 
-  function step(direction: number) {
-    const target = index + direction;
-    if (target >= 0 && target < queue.length) start(queue, target);
+  function feedback(action: 'skip' | 'complete') {
+    if (current && navigator.onLine)
+      void api('/recommendations/feedback', {
+        method: 'POST',
+        body: JSON.stringify({ event_id: eventId(), track_id: current.id, action }),
+      }).catch(() => {});
+  }
+  function step(direction: number, automatic = false) {
+    if (!queue.length) return;
+    let target = index + direction;
+    if (automatic && sleep === 'track') {
+      setSleep(null);
+      desiredPlay.current = false;
+      audio.current?.pause();
+      return;
+    }
+    if (automatic && mode === 'repeat_one') target = index;
+    else if (mode === 'shuffle') {
+      if (direction < 0) target = shuffleHistory.current.pop() ?? index;
+      else {
+        if (!shuffleBag.current.length)
+          shuffleBag.current = queue.map((_, i) => i).filter((i) => i !== index);
+        if (!shuffleBag.current.length) target = index;
+        else {
+          target = shuffleBag.current.splice(
+            Math.floor(Math.random() * shuffleBag.current.length),
+            1,
+          )[0];
+          shuffleHistory.current.push(index);
+        }
+      }
+    } else if (mode === 'repeat_all') target = (target + queue.length) % queue.length;
+    if (target >= 0 && target < queue.length) {
+      if (!automatic && direction > 0) feedback('skip');
+      start(queue, target);
+    }
   }
 
   function seek(value: number) {
@@ -310,8 +443,25 @@ export function usePlayer() {
     buffering,
     quality,
     changeQuality,
+    mode,
+    setMode,
+    sleep,
+    sleepLabel:
+      sleep === 'track'
+        ? '本曲结束停止'
+        : typeof sleep === 'number'
+          ? `约 ${Math.max(1, Math.ceil((sleep - clock) / 60000))} 分钟后停止`
+          : '睡眠定时',
+    setSleepTimer: (minutes: number | 'track' | null) => {
+      setClock(Date.now());
+      setSleep(minutes === 'track' || minutes === null ? minutes : Date.now() + minutes * 60000);
+    },
     playbackTime: () => offset.current + (audio.current?.currentTime || 0),
-    playbackLabel: plan?.mode === 'transcode' ? `AAC ${plan.output.bitrate_kbps} kbps` : '原音直放',
+    playbackLabel: objectUrl.current
+      ? '本机原音'
+      : plan?.mode === 'transcode'
+        ? `AAC ${plan.output.bitrate_kbps} kbps`
+        : '原音直放',
     start,
     step,
     seek,
@@ -321,11 +471,20 @@ export function usePlayer() {
       setQueue((items) => items.map((item) => (item.id === track.id ? track : item)));
     },
     playNext: (track: Track) => {
+      if (queue.length >= QUEUE_LIMIT) {
+        setError(`播放队列最多 ${QUEUE_LIMIT} 首。`);
+        return false;
+      }
       if (index < 0) {
         start([track], 0);
-        return;
+        return true;
       }
-      setQueue((items) => [...items.slice(0, index + 1), track, ...items.slice(index + 1)]);
+      setQueue((items) =>
+        items.length < QUEUE_LIMIT
+          ? [...items.slice(0, index + 1), track, ...items.slice(index + 1)]
+          : items,
+      );
+      return true;
     },
     move: (from: number, to: number) => {
       if (from < 0 || to < 0 || from >= queue.length || to >= queue.length || from === to) return;
@@ -337,7 +496,12 @@ export function usePlayer() {
       else if (from > index && to <= index) setIndex(index + 1);
     },
     enqueue: (track: Track) => {
-      setQueue((items) => [...items, track]);
+      if (queue.length >= QUEUE_LIMIT) {
+        setError(`播放队列最多 ${QUEUE_LIMIT} 首。`);
+        return false;
+      }
+      setQueue((items) => (items.length < QUEUE_LIMIT ? [...items, track] : items));
+      return true;
     },
     remove: (target: number) => {
       if (target === index) return;
@@ -373,6 +537,11 @@ export function usePlayer() {
       },
       onTimeUpdate: () => {
         if (loading.current) return;
+        if (typeof sleep === 'number' && Date.now() >= sleep) {
+          desiredPlay.current = false;
+          audio.current?.pause();
+          setSleep(null);
+        }
         if (audio.current) tracker.current.sample(audio.current);
         setPosition(offset.current + (audio.current?.currentTime || 0));
       },
@@ -386,7 +555,8 @@ export function usePlayer() {
         if (audio.current) tracker.current.finish(audio.current);
         setPlaying(false);
         setBuffering(false);
-        step(1);
+        feedback('complete');
+        step(1, true);
       },
       onError: mediaError,
     },
@@ -444,6 +614,7 @@ export function PlayerBar({
       </div>
       <PlaybackControls player={player} />
       <div className="player-options">
+        <SleepControl player={player} />
         <QualityControl player={player} />
         {current && <FavoriteButton track={current} favorites={favorites} />}
         <button
@@ -476,9 +647,26 @@ export function PlaybackControls({ player }: { player: Player }) {
     <div className="transport">
       <div className="transport-buttons">
         <button
+          className="icon-button playback-mode"
+          aria-label={`播放模式：${modeNames[player.mode]}`}
+          title={modeNames[player.mode]}
+          onClick={() => {
+            const modes = Object.keys(modeNames) as PlaybackMode[];
+            player.setMode(modes[(modes.indexOf(player.mode) + 1) % modes.length]);
+          }}
+        >
+          {player.mode === 'shuffle'
+            ? '⤨'
+            : player.mode === 'repeat_one'
+              ? '↻₁'
+              : player.mode === 'repeat_all'
+                ? '↻'
+                : '→'}
+        </button>
+        <button
           className="icon-button"
           onClick={() => player.step(-1)}
-          disabled={index <= 0}
+          disabled={!current || (index <= 0 && player.mode === 'sequential')}
           aria-label="上一首"
         >
           <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -498,7 +686,7 @@ export function PlaybackControls({ player }: { player: Player }) {
         <button
           className="icon-button"
           onClick={() => player.step(1)}
-          disabled={index < 0 || index >= queue.length - 1}
+          disabled={!current || (index >= queue.length - 1 && player.mode === 'sequential')}
           aria-label="下一首"
         >
           <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -570,5 +758,57 @@ export function QualityControl({ player }: { player: Player }) {
         ))}
       </select>
     </label>
+  );
+}
+
+export function SleepControl({ player }: { player: Player }) {
+  const id = useId();
+  const panel = useRef<HTMLDivElement>(null);
+  return (
+    <div className="sleep-setting">
+      <button
+        className={`icon-button sleep-trigger ${player.sleep !== null ? 'active' : ''}`}
+        aria-label="睡眠定时设置"
+        title={player.sleepLabel}
+        popoverTarget={id}
+        onClick={(event) => {
+          if (panel.current) {
+            const box = event.currentTarget.getBoundingClientRect();
+            panel.current.style.left = `${Math.max(12, Math.min(innerWidth - 232, box.right - 220))}px`;
+            panel.current.style.top = `${Math.max(12, box.top - 145)}px`;
+          }
+        }}
+      >
+        ☾
+      </button>
+      <div id={id} ref={panel} popover="auto" className="sleep-popover">
+        <p>{player.sleepLabel}</p>
+        <label>
+          停止时间
+          <select
+            aria-label="睡眠定时"
+            value={player.sleep === 'track' ? 'track' : player.sleep === null ? '' : 'active'}
+            onChange={(event) => {
+              const value = event.target.value;
+              player.setSleepTimer(
+                value === '' ? null : value === 'track' ? 'track' : Number(value),
+              );
+              panel.current?.hidePopover();
+            }}
+          >
+            <option value="">关闭</option>
+            {typeof player.sleep === 'number' && (
+              <option value="active" disabled>
+                定时中
+              </option>
+            )}
+            <option value="15">15 分钟</option>
+            <option value="30">30 分钟</option>
+            <option value="60">60 分钟</option>
+            <option value="track">播完本曲停止</option>
+          </select>
+        </label>
+      </div>
+    </div>
   );
 }

@@ -10,6 +10,7 @@ export interface TrackOperations {
   onCreate: (track: Track) => void;
   onEdit?: (track: Track) => void;
   onRefresh?: (track: Track) => void;
+  onDownload?: (track: Track) => void;
   onRemove?: (track: Track) => void;
   onMove?: (track: Track, direction: -1 | 1) => void;
 }
@@ -84,8 +85,8 @@ export function TrackActions({
         )}
         <button
           onClick={() => {
-            player.playNext(track);
-            onNotice(`下一首播放：${track.title}`);
+            if (player.playNext(track)) onNotice(`下一首播放：${track.title}`);
+            else onNotice('播放队列已满，请先移除一些歌曲。');
             hide();
           }}
         >
@@ -94,8 +95,8 @@ export function TrackActions({
         <button
           aria-label={`将 ${track.title} 加入队列`}
           onClick={() => {
-            player.enqueue(track);
-            onNotice(`已加入队列：${track.title}`);
+            if (player.enqueue(track)) onNotice(`已加入队列：${track.title}`);
+            else onNotice('播放队列已满，请先移除一些歌曲。');
             hide();
           }}
         >
@@ -133,6 +134,16 @@ export function TrackActions({
         >
           新建歌单…
         </button>
+        {operations.onDownload && (
+          <button
+            onClick={() => {
+              operations.onDownload!(track);
+              hide();
+            }}
+          >
+            保存离线
+          </button>
+        )}
         {operations.onMove && (
           <div className="playlist-move">
             <button

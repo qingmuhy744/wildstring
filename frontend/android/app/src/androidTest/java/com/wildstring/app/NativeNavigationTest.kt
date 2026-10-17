@@ -259,6 +259,7 @@ class NativeNavigationTest {
                 history.set(false)
                 compose.runOnIdle { vm.load() }
                 compose.waitUntil(15_000) { !vm.state.value.loading && vm.state.value.tracks.isEmpty() }
+                compose.onNodeWithTag("discovery-page").performScrollToNode(hasText("听过的歌曲会出现在这里。"))
                 compose.onNodeWithText("听过的歌曲会出现在这里。").assertIsDisplayed()
                 assertTrue(vm.state.value.albums.isNotEmpty())
             } catch (failure: Throwable) {

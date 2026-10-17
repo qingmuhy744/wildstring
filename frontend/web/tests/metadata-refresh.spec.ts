@@ -166,3 +166,64 @@ test('歌曲编辑里的更新弹窗关闭后保留编辑器与焦点', async ({
   await page.keyboard.press('Escape');
   await expect(editor).toHaveCount(0);
 });
+
+test('CAA封面经同源代理预览，查看不会应用修改', async ({ page }) => {
+  await login(page);
+  const tracks = (await (await page.request.get('/api/v1/tracks')).json()).items;
+  const track = tracks.find((t: { title: string }) => t.title === '晴天测试曲');
+  const metadata = await (
+    await page.request.get(`/api/v1/manage/tracks/${track.id}/metadata`)
+  ).json();
+  const cover = await page.request.get(`/api/v1/tracks/${track.id}/cover?size=320`);
+  let previewed = false,
+    applied = false;
+  await page.route('**/api/v1/manage/providers/tracks/*', (route) =>
+    route.fulfill({
+      json: {
+        suggestions: [
+          {
+            id: 'fixture-cover',
+            metadata_version: metadata.version,
+            provider: 'musicbrainz',
+            source_url: 'https://musicbrainz.org/',
+            fields: {},
+            cover_url: 'https://coverartarchive.org/test.jpg',
+            status: 'pending',
+            match: {},
+          },
+        ],
+        jobs: [],
+      },
+    }),
+  );
+  await page.route(
+    '**/api/v1/manage/providers/suggestions/fixture-cover/cover-preview',
+    async (route) => {
+      previewed = true;
+      await route.fulfill({
+        status: 200,
+        contentType: cover.headers()['content-type'],
+        body: await cover.body(),
+      });
+    },
+  );
+  await page.route('**/api/v1/manage/providers/suggestions/fixture-cover/cover', (route) => {
+    applied = true;
+    return route.fulfill({ status: 204 });
+  });
+  await page.getByRole('button', { name: '歌曲操作 晴天测试曲', exact: true }).click();
+  await page.getByRole('button', { name: '编辑歌曲信息', exact: true }).click();
+  const editor = page.getByRole('dialog', { name: '编辑歌曲信息', exact: true });
+  await editor.getByRole('button', { name: '联网建议', exact: true }).click();
+  const image = editor.getByAltText('CAA 封面候选', { exact: true });
+  await image.scrollIntoViewIfNeeded();
+  await expect
+    .poll(() => image.evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth > 0))
+    .toBe(true);
+  expect(previewed).toBe(true);
+  expect(applied).toBe(false);
+  await expect(image).toHaveAttribute(
+    'src',
+    '/api/v1/manage/providers/suggestions/fixture-cover/cover-preview',
+  );
+});

@@ -75,4 +75,15 @@ class NetworkPolicyTest {
         }
     }
 
+    @Test fun queuedOldOwnerRequestCannotUseNewAccount() {
+        MockWebServer().use { server ->
+            server.start(); val base = server.url("/")
+            val client = OkHttpClient.Builder().addInterceptor(OriginGuard({ base }, profile = { "new-account" })).build()
+            val request = Request.Builder().url(base.resolve("api/v1/listening")!!)
+                .tag(RequestOwner::class.java, RequestOwner("old-account")).build()
+            assertThrows(IOException::class.java) { client.newCall(request).execute() }
+            assertEquals(0, server.requestCount)
+        }
+    }
+
 }

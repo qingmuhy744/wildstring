@@ -21,6 +21,7 @@ from wildstring.library.playlists import PlaylistStore, playlist_router
 from wildstring.library.repository import LibraryRepository
 from wildstring.library.transcoding import Transcoding
 from wildstring.management import Management, management_router
+from wildstring.mobile_experience import experience_router
 from wildstring.providers import Providers
 from wildstring.site_access import HostAllowlist, SiteAccess
 
@@ -113,6 +114,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(listening_router(repository, auth, providers))
     app.include_router(playlist_router(playlists, auth))
     app.include_router(management_router(management, auth))
+    app.include_router(experience_router(repository, auth, providers))
 
     if current.web_dir is not None:
         app.mount("/", StaticFiles(directory=current.web_dir, html=True), name="web")

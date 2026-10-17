@@ -14,6 +14,7 @@ import androidx.activity.compose.LocalActivity
 import androidx.core.view.WindowCompat
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -131,7 +132,14 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
     var lyrics by rememberSaveable { mutableStateOf(false) }
     var queue by rememberSaveable { mutableStateOf(false) }
     var settings by rememberSaveable { mutableStateOf(false) }
-    var createPlaylist by remember { mutableStateOf(false) }
+    var feature by remember { mutableStateOf<String?>(null) }
+    var featureTrack by remember { mutableStateOf<Track?>(null) }
+    var featurePlaylist by remember { mutableStateOf<Playlist?>(null) }
+    var sleepDialog by remember { mutableStateOf(false) }
+    var playlistMenu by remember { mutableStateOf(false) }
+    var refreshAlbum by remember { mutableStateOf<String?>(null) }
+    var deletingPlaylist by remember { mutableStateOf<Playlist?>(null) }
+    val playlistAction = remember { FeatureAction() }
     var actions by remember { mutableStateOf<Track?>(null) }
     var playlistChoices by remember { mutableStateOf<List<Playlist>?>(null) }
     var chooseTrack by remember { mutableStateOf<Track?>(null) }
@@ -177,7 +185,7 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
             PlayerScreen(vm, state, wide, landscape, lyrics, queue, rotation,
                 onBack = { if (lyrics && !wide) lyrics = false else collapsePlayer() },
                 onLyrics = { lyrics = !lyrics; queue = false }, onQueue = { queue = !queue },
-                onAdd = { actions = state.current })
+                onAdd = { actions = state.current }, onSleep = { sleepDialog = true })
         } else {
             Row(Modifier.fillMaxSize()) {
                 if (rail) NavigationRail(windowInsets = WindowInsets(0, 0, 0, 0), modifier = Modifier.testTag("navigation-rail")) {
@@ -199,9 +207,28 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
                             PersonalHeader(state, { vm.recent() }, compact = compact)
                             Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                                 Text("我的歌单", style = MaterialTheme.typography.titleMedium)
-                                IconButton({ createPlaylist = true }) { Icon(Icons.Default.Add, "新建歌单") }
+                                IconButton({ featurePlaylist = null; feature = "playlist" }) { Icon(Icons.Default.Add, "新建歌单") }
                             }
                         }
+                        if (state.tab == "mine" && state.collection == null) MobileShortcuts(state.account?.role == "admin") { feature = it }
+                        if (state.kind == "artists" && state.collection == null) Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            listOf("artist" to "艺人", "album_artist" to "专辑艺人", "vocalist" to "演唱", "lyricist" to "作词", "composer" to "作曲", "arranger" to "编曲").forEach { (key, name) -> FilterChip(state.role == key, { vm.role(key) }, label = { Text(name) }) }
+                        }
+                        if (state.collection == "artists" && state.albumFilter == null) Row(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            FilterChip(state.kind == "tracks", { vm.kind("tracks") }, label = { Text("歌曲") })
+                            FilterChip(state.kind == "albums", { vm.kind("albums") }, label = { Text("专辑") })
+                        }
+                        if (state.collection == "albums" && state.account?.role == "admin") TextButton({ refreshAlbum = state.collectionId }) { Text("更新专辑元数据") }
+                        if (state.activePlaylist?.kind in listOf("manual", "smart") && state.tracks.isEmpty() && !state.loading) Row(Modifier.padding(horizontal = 16.dp)) {
+                            TextButton({ featurePlaylist = state.activePlaylist; feature = "playlist" }) { Text("编辑歌单") }
+                            TextButton({ deletingPlaylist = state.activePlaylist }) { Text("删除歌单") }
+                        }
+                        if (state.kind == "tracks" || state.kind == "recent") Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            if (state.collection != "playlists") listOf("title" to "名称", "play_count" to "播放次数", "listened_ms" to "收听时长", "last_played_at" to "最近听过").forEach { (key, name) -> FilterChip(state.sort == key, { vm.sort(key) }, label = { Text(name) }) }
+                            AssistChip({ feature = "multi" }, label = { Text("多选加入") })
+                            AssistChip({ vm.downloadCollection() }, label = { Text("离线保存") }, enabled = !state.collecting)
+                        }
+                        if (state.tab == "search" && state.kind == "discover") MobileShortcuts(false) { feature = it }
                         state.error?.let { ErrorMessage(it, vm::load) }
                         state.mutationMessage?.let { Text(it, Modifier.padding(12.dp), style = MaterialTheme.typography.bodySmall) }
                         if (state.offline) Text("网络暂不可用 · 显示本机缓存", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(vertical = 6.dp))
@@ -210,10 +237,20 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
                             if (delayed(state.loading, 350)) LinearProgressIndicator(Modifier.fillMaxWidth().testTag("catalog-loading"))
                         }
                         if (state.tracks.isNotEmpty() && state.kind != "discover") Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-                            FilledTonalButton(tactile { vm.play(state.tracks); expanded = true; lyrics = false; queue = false }, Modifier.padding(start = 16.dp, top = 8.dp, bottom = 8.dp)) {
-                                Icon(Icons.Default.PlayArrow, null, Modifier.size(20.dp)); Spacer(Modifier.width(6.dp)); Text(if (state.total > state.tracks.size) "播放本页" else "播放全部")
+                            FilledTonalButton(tactile { vm.playCollection { expanded = true; lyrics = false; queue = false } }, enabled = !state.collecting, modifier = Modifier.padding(start = 16.dp, top = 8.dp, bottom = 8.dp)) {
+                                Icon(Icons.Default.PlayArrow, null, Modifier.size(20.dp)); Spacer(Modifier.width(6.dp)); Text(if (state.collecting) "正在准备…" else "播放全部")
                             }
-                            Text("${state.total} 首", Modifier.padding(end = 20.dp), color = Muted, fontSize = 12.sp)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("${state.total} 首", color = Muted, fontSize = 12.sp)
+                                state.activePlaylist?.takeIf { it.kind != "favorites" }?.let { playlist -> Box {
+                                    IconButton({ playlistMenu = true }) { Icon(Icons.Default.MoreVert, "歌单操作") }
+                                    DropdownMenu(playlistMenu, { playlistMenu = false }) {
+                                        DropdownMenuItem(text = { Text("编辑歌单") }, onClick = { featurePlaylist = playlist; feature = "playlist"; playlistMenu = false })
+                                        if (playlist.kind == "manual") DropdownMenuItem(text = { Text("拖动排序") }, onClick = { featurePlaylist = playlist; feature = "order"; playlistMenu = false })
+                                        DropdownMenuItem(text = { Text("删除歌单") }, onClick = { deletingPlaylist = playlist; playlistMenu = false })
+                                    }
+                                } }
+                            }
                         }
                         Box(Modifier.weight(1f).padding(horizontal = if (state.kind == "discover") 0.dp else 16.dp)) {
                             savedPages.SaveableStateProvider(state.contentKey.ifBlank { "initial" }) {
@@ -232,7 +269,7 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
                                 "playlists" -> LazyColumn { items(state.playlists, key = { it.id }) { playlist -> ListItem(
                                     headlineContent = { Text(playlist.name) }, supportingContent = { Text("${playlist.trackCount} 首${if (playlist.kind == "smart") " · 规则歌单" else ""}") },
                                     leadingContent = { Cover(vm, playlist.coverTrackId, playlist.name, Modifier.size(48.dp)) }, modifier = Modifier.animateItem().clickable { vm.openPlaylist(playlist) }) } }
-                                else -> LazyColumn { items(state.tracks, key = { it.id }) { track -> TrackRow(vm, track, { vm.play(state.tracks, state.tracks.indexOf(track)); expanded = true }, { actions = track }) } }
+                                else -> LazyColumn { items(state.tracks, key = { it.id }) { track -> TrackRow(vm, track, { vm.playCollection(track.id) { expanded = true } }, { actions = track }) } }
                             }
                             }
                             if (state.kind != "discover" && !state.loading && state.total == 0 && state.error == null) Text(
@@ -252,8 +289,12 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
         if (queue && ((!wide && !landscape) || !expanded)) ModalBottomSheet(onDismissRequest = { queue = false }) { QueuePanel(vm, state, Modifier.fillMaxWidth().heightIn(max = 560.dp)) }
     }
     Box(Modifier.fillMaxSize().safeDrawingPadding(), contentAlignment = Alignment.BottomCenter) { SnackbarHost(mutationSnackbar, Modifier.padding(16.dp)) }
-    if (createPlaylist) NameDialog("新建歌单", "", { createPlaylist = false }) { vm.createPlaylist(it); createPlaylist = false }
+    feature?.let { route -> FeatureDialog(vm, route, featureTrack, featurePlaylist) { feature = null; featureTrack = null; featurePlaylist = null } }
+    refreshAlbum?.let { albumId -> MetadataRefreshPrompt(vm, "album", albumId) { refreshAlbum = null } }
+    if (sleepDialog) SleepDialog(vm) { sleepDialog = false }
+    deletingPlaylist?.let { playlist -> AlertDialog(onDismissRequest = { if (!playlistAction.busy) deletingPlaylist = null }, title = { Text("删除歌单？") }, text = { Column { Text(playlist.name); ActionStatus(playlistAction) } }, confirmButton = { TextButton({ scope.launch { playlistAction.run { vm.deletePlaylist(playlist); deletingPlaylist = null } } }, enabled = !playlistAction.busy) { Text("删除") } }, dismissButton = { TextButton({ deletingPlaylist = null }, enabled = !playlistAction.busy) { Text("取消") } }) }
     actions?.let { track -> ModalBottomSheet(onDismissRequest = { actions = null }) {
+        Column(Modifier.fillMaxWidth().heightIn(max = 640.dp).verticalScroll(rememberScrollState())) {
         Text(track.title, Modifier.padding(24.dp), style = MaterialTheme.typography.titleLarge)
         TextButton(tactile { vm.addToQueue(track, true); actions = null }, Modifier.fillMaxWidth()) { Text("下一首播放") }
         TextButton(tactile { vm.addToQueue(track); actions = null }, Modifier.fillMaxWidth()) { Text("加入播放队列") }
@@ -262,7 +303,13 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
             chooseTrack = track; actions = null
             scope.launch { try { playlistChoices = vm.playlistsForAdd() } catch (e: Exception) { localError = friendlyError(e) } }
         }, Modifier.fillMaxWidth()) { Text("加入歌单") }
+        TextButton({ vm.download(listOf(track)); actions = null }, Modifier.fillMaxWidth()) { Text("离线保存") }
+        state.activePlaylist?.takeIf { it.kind == "manual" }?.let { playlist -> TextButton({ actions = null; scope.launch { try { vm.removePlaylistTrack(track, playlist) } catch (e: Exception) { localError = friendlyError(e) } } }, Modifier.fillMaxWidth()) { Text("从当前歌单移除") } }
+        if (state.account?.role == "admin") listOf("metadata" to "编辑歌曲信息", "lyrics" to "编辑歌词与打点", "suggestions" to "更新元数据与建议").forEach { (route, title) ->
+            TextButton({ featureTrack = track; feature = route; actions = null }, Modifier.fillMaxWidth()) { Text(title) }
+        }
         Spacer(Modifier.height(24.dp))
+        }
     } }
     playlistChoices?.let { choices -> AlertDialog(onDismissRequest = { playlistChoices = null }, title = { Text("加入歌单") }, text = {
         if (choices.isEmpty()) Text("请先创建普通歌单。") else Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {
@@ -297,16 +344,17 @@ internal fun Cover(vm: MusicViewModel, id: String?, title: String, modifier: Mod
 }
 @Composable
 private fun TrackRow(vm: MusicViewModel, track: Track, play: () -> Unit, actions: () -> Unit) {
-    ListItem(headlineContent = { Text(track.title, maxLines = 1, overflow = TextOverflow.Ellipsis) }, supportingContent = { Text(track.artist, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+    ListItem(headlineContent = { Text(track.title, maxLines = 1, overflow = TextOverflow.Ellipsis) }, supportingContent = { Column { Text(track.artist, maxLines = 1, overflow = TextOverflow.Ellipsis); Text("${track.playCount} 次 · ${track.listenedMs / 60_000} 分钟", style = MaterialTheme.typography.labelSmall, color = Muted) } },
         leadingContent = { Cover(vm, track.id.takeIf { track.hasCover }, track.title, Modifier.size(48.dp)) },
         trailingContent = { IconButton(actions) { Icon(Icons.Default.MoreVert, "${track.title}的操作") } }, modifier = Modifier.clickable(onClick = tactile(play)))
 }
 @Composable
 private fun PlayerScreen(vm: MusicViewModel, input: MusicState, wide: Boolean, landscape: Boolean, lyrics: Boolean, queue: Boolean, rotation: PlaybackRotation,
-    onBack: () -> Unit, onLyrics: () -> Unit, onQueue: () -> Unit, onAdd: () -> Unit) {
+    onBack: () -> Unit, onLyrics: () -> Unit, onQueue: () -> Unit, onAdd: () -> Unit, onSleep: () -> Unit) {
     val position by vm.position.collectAsStateWithLifecycle()
     val state = input.copy(position = position)
     val preferences by vm.settings.state.collectAsStateWithLifecycle()
+    val sleep by vm.sleep.state.collectAsStateWithLifecycle()
     val track = state.current ?: return
     val progress = if (state.duration > 0) state.position.toFloat() / state.duration else 0f
     var artworkPreview by rememberSaveable { mutableStateOf(false) }
@@ -318,6 +366,7 @@ private fun PlayerScreen(vm: MusicViewModel, input: MusicState, wide: Boolean, l
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
             IconButton(onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, if (lyrics && !wide) "返回封面" else "收起播放器") }
             Text(track.album ?: "正在播放", color = Muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).padding(horizontal = 16.dp))
+            IconButton(onSleep) { Icon(Icons.Default.Bedtime, "睡眠定时", tint = if (sleep.deadline != null || sleep.entryId != null) Accent else Muted) }
             IconButton(vm::refreshLyrics) { Icon(Icons.Default.Refresh, "刷新歌词") }
             IconButton(onAdd) { Icon(Icons.Default.MoreVert, "当前歌曲操作") }
         }

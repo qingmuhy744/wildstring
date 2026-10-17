@@ -1,6 +1,9 @@
-FROM wildstring:dev
+ARG RUNTIME_IMAGE=wildstring:dev
+ARG BUILDER_IMAGE=wildstring-builder:dev
+FROM ${BUILDER_IMAGE} AS test_builder
+FROM ${RUNTIME_IMAGE}
 USER root
-COPY --from=wildstring-builder:dev /usr/local/bin/uv /usr/local/bin/uv
+COPY --from=test_builder /usr/local/bin/uv /usr/local/bin/uv
 ARG HTTP_PROXY
 ARG HTTPS_PROXY
 WORKDIR /workspace/backend

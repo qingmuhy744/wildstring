@@ -20,7 +20,9 @@
 - `GET/PUT/DELETE /api/v1/playlists/{id}`：详情/修改/删除。修改携带 `version`；删除通过查询参数携带版本。类型创建后不可转换。
 - `GET/POST /api/v1/playlists/{id}/tracks`：分页读取/追加 `{version, track_ids}`。
 - `DELETE /api/v1/playlists/{id}/tracks/{track_id}?version=...`：移除。
-- `PUT /api/v1/playlists/{id}/order`：提交 `{version, track_ids}`，必须与完整已有集合一致，不能借排序增删。
+- `PUT /api/v1/playlists/{id}/order`：提交 `{version, track_ids}`，接受严格的完整已有 ID 集合，或严格的当前全部可用 ID 集合。传全部可用 ID 时只替换原可用位置，缺失/不可读引用与原位置保持不变；不能仅提交某一页、遗漏可用 ID、重复 ID、混入未知 ID，不能借排序增删。全部曲目不可用时可传空数组，保留所有引用。版本仍在事务内核对，集合不符或版本过期返回 409。
+
+例如原顺序为 `[A, 缺失X, B, 缺失Y, C]`，提交全部可用曲目的新顺序 `[C, A, B]` 后保存为 `[C, 缺失X, A, 缺失Y, B]`。恢复 X、Y 后仍在原槽位重新出现；详情和列表继续只展示可用曲目。
 - `POST /api/v1/playlists/{id}/move`：提交 `{version, track_id, direction: -1|1}`，可跨页移动。
 
 写操作检查曲库归属，事务内核对版本并递增；版本过期返回 409，失效 ID 返回 404。批量加入中任一 ID 无效会整体回滚。只操作页面内存的播放队列与持久歌单分别管理。

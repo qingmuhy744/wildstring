@@ -5,15 +5,19 @@ UV ?= uv
 PYTHON ?= python3
 COMPOSE ?= docker compose
 PROJECT ?= wildstring
+TEST_RUNTIME_IMAGE ?= wildstring:dev
+TEST_BUILDER_IMAGE ?= wildstring-builder:dev
+TEST_IMAGE ?= wildstring-tests:dev
 LOG_ARGS ?= -f --tail=100
 SCAN_ARGS ?=
 export UV_CACHE_DIR ?= $(CURDIR)/.cache/uv
 export PRE_COMMIT_HOME ?= $(CURDIR)/.cache/pre-commit
 RUN = $(UV) run --frozen --project backend
 ANDROID = ./frontend/android/gradlew -p frontend/android --console=plain
+ANDROID_TEST_ARGS ?=
 DOCKER = $(COMPOSE) --project-directory "$(CURDIR)" --env-file .env -p "$(PROJECT)" -f deploy/compose.yaml
 
-.PHONY: help env setup sync dev dev-web android-design scan import-music admin check hooks-check lint format format-check security test build-web icons browser-install test-web test-transcoding-web web-test-server ci health docker-config docker-build docker-up docker-pull docker-down docker-status docker-logs docker-smoke docker-scan docker-import docker-admin docker-test fingerprint-check
+.PHONY: help env setup sync dev dev-web android-design scan import-music admin check hooks-check lint format format-check security test build-web icons browser-install test-web test-large-web test-transcoding-web web-test-server ci health docker-config docker-build docker-up docker-pull docker-down docker-status docker-logs docker-smoke docker-scan docker-import docker-admin docker-test fingerprint-check
 
 help: ## Show available commands
 	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "  make %-17s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -65,7 +69,7 @@ android-release-smoke: ## Install and smoke-test the signed release APK on a dis
 	$(PYTHON) scripts/smoke_android_release.py
 
 android-connected-test: ## Run native UI/playback tests on a connected emulator/device
-	$(ANDROID) :app:connectedDebugAndroidTest
+	$(ANDROID) :app:connectedDebugAndroidTest $(ANDROID_TEST_ARGS)
 
 android-locks: ## Refresh Android dependency locks and SHA-256 verification metadata
 	$(ANDROID) :app:assembleDebug :app:testDebugUnitTest :app:lintDebug :app:assembleDebugAndroidTest :app:assembleRelease :app:lintRelease --write-locks --write-verification-metadata sha256
@@ -113,13 +117,16 @@ browser-install: ## Install Chromium for the Web integration tests
 test-web: build-web ## Test login, search, playback and mobile UI with an isolated fixture library
 	npm --prefix frontend/web run test
 
+test-large-web: build-web ## Verify real API pagination and continuous playback with 257 album tracks
+	WILDSTRING_TEST_LARGE_LIBRARY=1 npm --prefix frontend/web run test -- multipage-real.spec.ts
+
 test-transcoding-web: build-web ## Verify real AAC playback and seeking (requires FFmpeg)
 	@if command -v ffmpeg >/dev/null && command -v ffprobe >/dev/null; then WILDSTRING_TEST_TRANSCODING=1 npm --prefix frontend/web run test -- transcoding.spec.ts; else echo "AAC browser tests skipped: install FFmpeg or run on CI."; fi
 
 web-test-server: ## Internal: serve a disposable library for browser tests
 	$(RUN) python scripts/serve_web_tests.py
 
-ci: check test test-web test-transcoding-web ## Run checks, backend tests, Web build and browser tests (install Chromium first)
+ci: check test test-web test-large-web test-transcoding-web ## Run checks, backend tests, Web build and browser tests (install Chromium first)
 	$(UV) lock --check --project backend
 
 health: ## Check the locally configured API readiness
@@ -135,10 +142,10 @@ docker-up: docker-build ## Build and start the local container; wait for health
 	$(DOCKER) up -d --no-build --wait --wait-timeout 60
 
 docker-test: env ## Run all backend tests with the container FFmpeg
-	WILDSTRING_IMAGE=wildstring:dev $(DOCKER) build
-	docker build --target builder -f deploy/Dockerfile -t wildstring-builder:dev .
-	$(DOCKER) -f deploy/compose.tests.yaml build tests
-	$(DOCKER) -f deploy/compose.tests.yaml run --rm --no-deps tests
+	WILDSTRING_IMAGE=$(TEST_RUNTIME_IMAGE) $(DOCKER) build
+	docker build --target builder -f deploy/Dockerfile -t $(TEST_BUILDER_IMAGE) .
+	WILDSTRING_TEST_RUNTIME_IMAGE=$(TEST_RUNTIME_IMAGE) WILDSTRING_TEST_BUILDER_IMAGE=$(TEST_BUILDER_IMAGE) WILDSTRING_TEST_IMAGE=$(TEST_IMAGE) $(DOCKER) -f deploy/compose.tests.yaml build tests
+	WILDSTRING_TEST_RUNTIME_IMAGE=$(TEST_RUNTIME_IMAGE) WILDSTRING_TEST_BUILDER_IMAGE=$(TEST_BUILDER_IMAGE) WILDSTRING_TEST_IMAGE=$(TEST_IMAGE) $(DOCKER) -f deploy/compose.tests.yaml run --rm --no-deps tests
 
 docker-pull: env ## Pull and run WILDSTRING_IMAGE configured in .env
 	$(DOCKER) pull

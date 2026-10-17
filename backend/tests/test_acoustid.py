@@ -14,7 +14,7 @@ from test_assets import FIXTURES
 from test_personal_library import music
 from test_providers import HEADERS, RECORDING, enable
 
-from wildstring.database import Database
+from wildstring.database import SCHEMA_VERSION, Database
 from wildstring.fingerprints import FingerprintError, calculate
 from wildstring.library.repository import LibraryRepository
 from wildstring.library.scanner import scan_library
@@ -361,7 +361,7 @@ def test_v12_upgrade_keeps_provider_settings_and_music(settings):
         connection.execute("PRAGMA user_version=12")
     database.initialize()
     with database.connect() as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 13
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
         config = dict(connection.execute("SELECT * FROM provider_settings").fetchone())
         assert config["enabled"] == 1 and config["public_url"] == "https://music.example.com"
         assert config["acoustid"] == 0 and json.loads(config["priority"]) == [

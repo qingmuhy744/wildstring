@@ -7,6 +7,7 @@ import {
   PlaybackControls,
   PlaybackError,
   QualityControl,
+  SleepControl,
   VolumeControl,
   type Player,
 } from './player';
@@ -299,6 +300,7 @@ export function NowPlaying({
           </div>
           <PlaybackControls player={player} />
           <div className="fullscreen-options">
+            <SleepControl player={player} />
             <QualityControl player={player} />
             <VolumeControl player={player} />
             <div className="fullscreen-panel-switches" role="group" aria-label="全屏显示内容">

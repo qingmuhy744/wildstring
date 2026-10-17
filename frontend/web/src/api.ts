@@ -49,6 +49,13 @@ export class ApiError extends Error {
 }
 
 const messages: Record<string, string> = {
+  playback_version_conflict: '共享进度已在其他设备更新，请先读取最新进度，再决定是否共享。',
+  playback_track_unavailable: '共享队列中有歌曲已经不可用，请回原设备刷新后重新共享。',
+  playback_position_invalid: '共享播放位置已失效，请重新共享进度。',
+  recommendation_version_conflict: '推荐偏好已变化，请重新读取后保存。',
+  recommendation_event_conflict: '这次偏好操作已变化，请重新读取推荐。',
+  recommendation_generation_in_progress: '推荐正在准备，请稍后重新读取。',
+  preferences_version_conflict: '推荐偏好已变化，请重新读取后再保存。',
   providers_disabled: '请先在管理设置中启用联网资料。',
   acoustid_not_configured: '请先保存 AcoustID 应用 API Key。',
   acoustid_requires_musicbrainz: 'AcoustID 识别需要同时启用 MusicBrainz。',
@@ -206,4 +213,14 @@ export interface PlaybackPlan {
   cache_state: 'none' | 'miss' | 'encoding' | 'hit';
   source: { codec: string; lossless: boolean; bitrate_kbps: number | null };
   output: { codec: string; bitrate_kbps: number | null };
+}
+
+// getRandomValues also works on LAN HTTP; randomUUID is secure-context-only.
+export function eventId(): string {
+  if (typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  bytes[6] = (bytes[6] & 15) | 64;
+  bytes[8] = (bytes[8] & 63) | 128;
+  const value = Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+  return `${value.slice(0, 8)}-${value.slice(8, 12)}-${value.slice(12, 16)}-${value.slice(16, 20)}-${value.slice(20)}`;
 }

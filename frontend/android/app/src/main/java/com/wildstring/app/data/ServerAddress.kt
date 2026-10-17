@@ -23,12 +23,15 @@ object ServerAddress {
             target.encodedPath.startsWith(base.encodedPath)
 }
 
+data class RequestOwner(val profile: String?)
+
 class OriginGuard(private val endpoint: () -> HttpUrl?, private val profile: () -> String? = { null }, private val unauthorized: () -> Unit = {}) : Interceptor {
     @Volatile private var legacyOrigin: String? = null
     override fun intercept(chain: Interceptor.Chain): Response {
         val base = endpoint() ?: throw IOException("尚未配置服务器。")
         if (!ServerAddress.contains(base, chain.request().url)) throw IOException("拒绝请求其他服务器或路径。")
         val requestProfile = profile()
+        chain.request().tag(RequestOwner::class.java)?.let { if (it.profile == null || it.profile != requestProfile) throw IOException("会话已变化。") }
         val client = if (legacyOrigin == base.toString()) "web" else "android"
         var response = chain.proceed(chain.request().newBuilder().header("X-Wildstring-Client", client).build())
         // Compatibility with existing Web-only servers, on the same validated origin.

@@ -462,3 +462,99 @@ def test_v4_upgrade_preserves_track_identity_and_seeds_one_default(settings, aut
         assert client.get("/api/v1/playlists").json()["total"] == 1
     with authenticated_client(settings) as client:
         assert client.get("/api/v1/playlists").json()["total"] == 1
+
+
+def test_reorder_visible_selection_preserves_missing_slots_and_requires_exact_set(
+    settings, authenticated_client
+):
+    for number in range(5):
+        music(settings, f"sort-{number}.flac", ["乐队"], [], number=number + 1)
+    scan_library(settings)
+    with authenticated_client(settings) as client:
+        items = client.get("/api/v1/tracks").json()["items"]
+        ids = [item["id"] for item in items]
+        playlist = create_playlist(client, "保留缺失引用")
+        endpoint = f"/api/v1/playlists/{playlist['id']}"
+        added = client.post(
+            endpoint + "/tracks",
+            headers=HEADERS,
+            json={"version": playlist["version"], "track_ids": ids},
+        ).json()
+        database = Database(settings.data_dir)
+        with database.connect(write=True) as connection:
+            connection.execute("UPDATE tracks SET status='missing' WHERE id=?", (ids[1],))
+            connection.execute("UPDATE tracks SET status='unreadable' WHERE id=?", (ids[3],))
+        response = client.put(
+            endpoint + "/order",
+            headers=HEADERS,
+            json={"version": added["version"], "track_ids": [ids[4], ids[0], ids[2]]},
+        )
+        assert response.status_code == 200, response.text
+        version = response.json()["version"]
+        expected = [ids[4], ids[1], ids[0], ids[3], ids[2]]
+
+        def stored():
+            with database.connect() as connection:
+                return [
+                    row[0]
+                    for row in connection.execute(
+                        "SELECT track_id FROM playlist_tracks WHERE playlist_id=? ORDER BY position",
+                        (playlist["id"],),
+                    )
+                ]
+
+        assert stored() == expected
+        assert [item["id"] for item in client.get(endpoint + "/tracks").json()["items"]] == [
+            ids[4],
+            ids[0],
+            ids[2],
+        ]
+        for invalid in (
+            [ids[4], ids[0]],
+            [ids[4], ids[4], ids[0]],
+            [ids[4], ids[0], "unknown"],
+            [ids[4], ids[1], ids[0], ids[2]],
+        ):
+            assert (
+                client.put(
+                    endpoint + "/order",
+                    headers=HEADERS,
+                    json={"version": version, "track_ids": invalid},
+                ).status_code
+                == 409
+            )
+            assert stored() == expected
+            assert client.get(endpoint).json()["version"] == version
+        assert (
+            client.put(
+                endpoint + "/order",
+                headers=HEADERS,
+                json={"version": added["version"], "track_ids": [ids[0], ids[2], ids[4]]},
+            ).status_code
+            == 409
+        )
+        assert stored() == expected
+        # Callers that know every reference may still reorder the entire exact set.
+        full = list(reversed(expected))
+        response = client.put(
+            endpoint + "/order", headers=HEADERS, json={"version": version, "track_ids": full}
+        )
+        assert response.status_code == 200 and stored() == full
+        version = response.json()["version"]
+        with database.connect(write=True) as connection:
+            connection.execute("UPDATE tracks SET status='missing'")
+        response = client.put(
+            endpoint + "/order", headers=HEADERS, json={"version": version, "track_ids": []}
+        )
+        assert response.status_code == 200 and stored() == full
+        assert (
+            client.post(
+                endpoint + "/tracks",
+                headers=HEADERS,
+                json={"version": response.json()["version"], "track_ids": []},
+            ).status_code
+            == 422
+        )
+        with database.connect(write=True) as connection:
+            connection.execute("UPDATE tracks SET status='available'")
+        assert [item["id"] for item in client.get(endpoint + "/tracks").json()["items"]] == full

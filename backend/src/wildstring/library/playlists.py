@@ -36,6 +36,11 @@ class PlaylistTracks(BaseModel):
     track_ids: list[str] = Field(min_length=1, max_length=5000)
 
 
+class PlaylistOrder(PlaylistTracks):
+    # An all-missing playlist has an empty visible selection; append remains nonempty.
+    track_ids: list[str] = Field(max_length=5000)
+
+
 class PlaylistStore:
     def __init__(self, library: LibraryRepository):
         self.library = library
@@ -248,9 +253,29 @@ class PlaylistStore:
                     raise HTTPException(404, "playlist_track_not_found")
                 ids.remove(remove)
             if reorder is not None:
-                if len(reorder) != len(ids) or set(reorder) != set(ids):
+                requested = set(reorder)
+                if len(reorder) != len(requested):
                     raise HTTPException(409, "playlist_order_conflict")
-                ids = reorder
+                if requested == set(ids):
+                    ids = reorder
+                else:
+                    available = {
+                        row["id"]
+                        for row in connection.execute(
+                            "SELECT id FROM tracks WHERE library_id=? AND status='available' "
+                            "AND id IN (SELECT value FROM json_each(?))",
+                            (self.library.library_id(), json.dumps(ids)),
+                        )
+                    }
+                    if requested != available:
+                        raise HTTPException(409, "playlist_order_conflict")
+                    # Preserve every unavailable reference and its slot. Sorting visible songs
+                    # must neither silently drop missing entries nor reinterpret a partial page.
+                    replacements = iter(reorder)
+                    ids = [
+                        next(replacements) if identity in available else identity
+                        for identity in ids
+                    ]
             if move is not None:
                 track_id, direction = move
                 if track_id not in ids:
@@ -343,7 +368,7 @@ def playlist_router(store: PlaylistStore, auth):
 
     @router.put("/{playlist_id}/order", dependencies=[Depends(auth.require_client)])
     def reorder(
-        playlist_id: str, body: PlaylistTracks, current: Annotated[PlaylistStore, Depends(scoped)]
+        playlist_id: str, body: PlaylistOrder, current: Annotated[PlaylistStore, Depends(scoped)]
     ):
         return current.edit_tracks(playlist_id, body.version, reorder=body.track_ids)
 

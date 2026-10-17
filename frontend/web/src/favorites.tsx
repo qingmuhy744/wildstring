@@ -18,6 +18,10 @@ export function useFavorites(revision: number, onError: (message: string) => voi
   }, []);
   useEffect(() => {
     changed.current.clear();
+    if (!navigator.onLine) {
+      setReady(false);
+      return;
+    }
     const controller = new AbortController();
     api<{ ids: string[] }>('/favorites/ids', { signal: controller.signal })
       .then((result) => {

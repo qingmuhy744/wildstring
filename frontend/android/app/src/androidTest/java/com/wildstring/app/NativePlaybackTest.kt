@@ -93,7 +93,7 @@ class NativePlaybackTest {
             runCatching { compose.onRoot(useUnmergedTree = true).printToLog("NativeTestUI") }
             throw failure
         } finally {
-            runCatching { compose.runOnIdle { ViewModelProvider(compose.activity)[MusicViewModel::class.java].settings.playbackStyle("cover") } }
+            runCatching { compose.runOnIdle { ViewModelProvider(compose.activity)[MusicViewModel::class.java].let { vm -> vm.settings.playbackStyle("cover"); vm.repository.session.invalidate(); vm.controller?.stop(); vm.controller?.clearMediaItems() } } }
             shellForTest("cmd uimode night $previousNight")
         }
     }
@@ -119,6 +119,14 @@ class NativePlaybackTest {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         instrumentation.waitForIdleSync()
         instrumentation.uiAutomation.waitForIdle(500, 5_000)
+    }
+
+    private fun waitForConfigurationTag(tag: String) {
+        // A configuration change briefly leaves no Compose root at all. Retry only
+        // this readiness check; the playback and geometry assertions still run below.
+        compose.waitUntil(15_000) {
+            runCatching { compose.onNodeWithTag(tag).assertIsDisplayed() }.isSuccess
+        }
     }
 
     private fun exercisePlayback() {
@@ -209,7 +217,7 @@ class NativePlaybackTest {
             try {
                 shell("wm size 1600x1000")
                 shell("wm density 160")
-                compose.waitUntil(15_000) { compose.onAllNodesWithTag("player-tablet").fetchSemanticsNodes().isNotEmpty() }
+                waitForConfigurationTag("player-tablet")
                 compose.onNodeWithText("来自测试接口的歌词").assertIsDisplayed()
                 assertTrue(kotlin.math.abs(compose.runOnIdle { player.currentPosition } - before) < 500)
                 capture("tablet-lyrics.png", resized = true)
@@ -223,11 +231,11 @@ class NativePlaybackTest {
             val nightPosition = compose.runOnIdle { player.currentPosition }
             compose.runOnIdle { vm.settings.appearance("system") }
             changeSystemNightMode("yes")
-            compose.waitUntil(15_000) { compose.onAllNodesWithTag("appearance-dark").fetchSemanticsNodes().isNotEmpty() }
+            waitForConfigurationTag("appearance-dark")
             compose.onNodeWithTag("player-phone").assertExists()
             capture("classic-dark-phone.png")
             changeSystemNightMode("no")
-            compose.waitUntil(15_000) { compose.onAllNodesWithTag("appearance-light").fetchSemanticsNodes().isNotEmpty() }
+            waitForConfigurationTag("appearance-light")
             compose.onNodeWithTag("player-phone").assertExists()
             assertTrue(kotlin.math.abs(compose.runOnIdle { player.currentPosition } - nightPosition) < 500)
             capture("classic-light-phone.png")
@@ -271,7 +279,7 @@ class NativePlaybackTest {
                     val orientation = compose.runOnIdle { compose.activity.requestedOrientation }
                     try {
                         rotate(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE)
-                        compose.waitUntil(15_000) { compose.onAllNodesWithTag("player-landscape").fetchSemanticsNodes().isNotEmpty() }
+                        waitForConfigurationTag("player-landscape")
                         capture("player-$key-landscape.png", style = key)
                         compose.onNodeWithContentDescription("播放").assertIsDisplayed()
                         compose.onNodeWithContentDescription("上一首").assertIsDisplayed()
@@ -284,7 +292,7 @@ class NativePlaybackTest {
                         assertEquals(styleEntry, compose.runOnIdle { player.currentMediaItem!!.mediaId })
                         assertTrue(kotlin.math.abs(compose.runOnIdle { player.currentPosition } - stylePosition) < 250)
                     } finally { rotate(orientation) }
-                    compose.waitUntil(15_000) { compose.onAllNodesWithTag("player-phone").fetchSemanticsNodes().isNotEmpty() }
+                    waitForConfigurationTag("player-phone")
                 }
             }
             assertEquals("Changing style must not reopen audio", styleStreams, requests.count { it.path?.contains("/stream") == true })
@@ -327,6 +335,7 @@ class NativePlaybackTest {
                 queue.performTouchInput { up() }
             }
             compose.onNodeWithContentDescription("播放队列").performClick()
+            compose.waitUntil(10_000) { compose.onAllNodesWithTag("playback-queue").fetchSemanticsNodes().isNotEmpty() }
             val queuePosition = compose.runOnIdle { player.currentPosition }
             dragEntry(playingEntry, originalOrder.last())
             compose.waitUntil(10_000) { vm.state.value.queue.last().entryId == playingEntry }
@@ -336,10 +345,13 @@ class NativePlaybackTest {
             compose.waitUntil(10_000) { runBlocking { vm.repository.database.queue().entries().map { it.entryId } } == vm.state.value.queue.map { it.entryId } }
             capture("phone-queue.png")
             compose.runOnIdle { compose.activity.onBackPressedDispatcher.onBackPressed() }
+            compose.waitUntil(10_000) { compose.onAllNodesWithTag("playback-queue").fetchSemanticsNodes().isEmpty() }
             try {
                 shellForTest("wm size 1600x1000"); shellForTest("wm density 160")
-                compose.waitUntil(15_000) { compose.onAllNodesWithTag("player-tablet").fetchSemanticsNodes().isNotEmpty() }
+                waitForConfigurationTag("player-tablet")
+                capture("tablet-player-before-queue.png", resized = true)
                 compose.onNodeWithContentDescription("播放队列").performClick()
+                compose.waitUntil(10_000) { compose.onAllNodesWithTag("playback-queue").fetchSemanticsNodes().isNotEmpty() }
                 // wm size and wm density recreate the activity separately. Wait for the new
                 // SurfaceFlinger buffer as well as semantics before injecting coordinates.
                 capture("tablet-queue-before-drag.png", resized = true)
@@ -390,7 +402,7 @@ class NativePlaybackTest {
             compose.runOnIdle { player.removeListener(listener); player.pause() }
             try {
                 shellForTest("wm size 1600x1000"); shellForTest("wm density 160")
-                compose.waitUntil(15_000) { compose.onAllNodesWithTag("player-tablet").fetchSemanticsNodes().isNotEmpty() }
+                waitForConfigurationTag("player-tablet")
                 capture("red-cloth-tablet.png", resized = true)
                 for (style in listOf("vinyl", "cassette")) {
                     compose.runOnIdle { vm.settings.playbackStyle(style) }

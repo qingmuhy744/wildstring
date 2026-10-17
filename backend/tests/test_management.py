@@ -13,7 +13,7 @@ from filelock import FileLock
 from mutagen.flac import FLAC
 from test_personal_library import FIXTURE, HEADERS, create_playlist, music
 
-from wildstring.database import Database
+from wildstring.database import SCHEMA_VERSION, Database
 from wildstring.library.repository import LibraryRepository
 from wildstring.library.scanner import scan_library
 from wildstring.main import create_app
@@ -180,7 +180,7 @@ def test_v5_migration_preserves_identity_and_personal_data(settings, authenticat
         scan_library(settings, full=True)
         # The first full scan observes the newly supported tag fields.
         assert client.get(metadata_url(track)).json()["version"] == 2
-        assert client.get("/api/v1/manage/overview").json()["schema_version"] == 13
+        assert client.get("/api/v1/manage/overview").json()["schema_version"] == SCHEMA_VERSION
 
 
 def test_real_import_scan_progress_and_bytes_unchanged(settings, authenticated_client):

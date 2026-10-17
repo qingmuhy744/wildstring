@@ -22,7 +22,7 @@ class PlaybackResolutionException(message: String) : IOException(message)
 
 /** Resolves on Media3's loader thread, including when the next queue item starts in the background. */
 @Singleton
-class PlaybackResolver @Inject constructor(private val session: SessionStore, private val client: OkHttpClient, private val cache: ClientCache) {
+class PlaybackResolver @Inject constructor(private val session: SessionStore, private val client: OkHttpClient, private val cache: ClientCache, private val downloads: OfflineDownloads) {
     private val gson = Gson()
     private data class Resolved(val value: PlaybackPlan, val at: Long)
     private val plans = object : LinkedHashMap<String, Resolved>(32, .75f, true) {
@@ -36,7 +36,9 @@ class PlaybackResolver @Inject constructor(private val session: SessionStore, pr
     }
     private val changed = MutableSharedFlow<Unit>(extraBufferCapacity = 16)
     val changes = changed.asSharedFlow()
-    @Synchronized internal fun plan(uri: String): PlaybackPlan? = session.cacheScope()?.let { plans["$it:$uri"]?.value }
+    @Synchronized internal fun plan(uri: String): PlaybackPlan? = if (downloads.fileForStream(uri) != null)
+        PlaybackPlan("original", null, AudioOutput(downloads.formatForStream(uri) ?: "original"), 0, 0, uri)
+        else session.cacheScope()?.let { plans["$it:$uri"]?.value }
 
     private fun resolve(uri: String): PlaybackPlan {
         val profile = session.cacheScope() ?: throw PlaybackResolutionException("登录已失效。")
@@ -81,11 +83,15 @@ class PlaybackResolver @Inject constructor(private val session: SessionStore, pr
     }
 
     fun factory(upstream: DataSource.Factory): DataSource.Factory = DataSource.Factory {
-        val source = upstream.createDataSource()
+        var source = upstream.createDataSource()
         object : DataSource {
             override fun addTransferListener(listener: TransferListener) = source.addTransferListener(listener)
             override fun open(spec: DataSpec): Long {
                 val uri = spec.uri.toString()
+                downloads.playableFile(uri)?.let { file ->
+                    source = androidx.media3.datasource.FileDataSource()
+                    return source.open(spec.withUri(Uri.fromFile(file)))
+                }
                 if (!PlaybackRequest.isAac(uri)) return source.open(spec)
                 val plan = resolve(uri)
                 val base = session.endpoint ?: throw PlaybackResolutionException("尚未连接服务器。")
