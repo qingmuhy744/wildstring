@@ -58,6 +58,7 @@ class MusicViewModel @Inject constructor(
     private var loadJob: Job? = null
     private var lyricJob: Job? = null
     private var progressJob: Job? = null
+    private var albumNavigationJob: Job? = null
     private var lyricTrack: String? = null
     private var invalidationMessage: String? = null
     private var supersededInvalidationSelection: String? = null
@@ -291,6 +292,35 @@ class MusicViewModel @Inject constructor(
     fun page(direction: Int) { show(query().copy(offset = (mutable.value.offset + direction * 50).coerceAtLeast(0))) }
     fun openAlbum(album: Album) = open(if (mutable.value.collection == "artists") query().copy(kind = "tracks", albumFilter = album.id, title = album.title, query = "", offset = 0)
         else query().copy(kind = "tracks", collection = "albums", collectionId = album.id, title = album.title, query = "", offset = 0, playlist = null, albumFilter = null))
+    fun openTrackAlbum(track: Track, onOpened: () -> Unit = {}) {
+        albumNavigationJob?.cancel()
+        albumNavigationJob = viewModelScope.launch {
+            val owner = repository.session.cacheScope()
+            val generation = authGeneration
+            val catalogGeneration = loadGeneration
+            try {
+                // Older queue/cache entries have no album ID; refresh the track before navigating.
+                val current = if (track.albumId.isNullOrBlank()) repository.track(track.id) else track
+                requireOwner(owner)
+                if (generation != authGeneration || catalogGeneration != loadGeneration) return@launch
+                val id = current.albumId?.takeIf { it.isNotBlank() }
+                if (id == null) {
+                    mutable.update { it.copy(error = "暂时无法读取所属专辑，请联网刷新歌曲后重试。") }
+                    return@launch
+                }
+                // Open the whole album, clearing any artist/playlist/search constraints.
+                val destination = query().copy(kind = "tracks", collection = "albums", collectionId = id,
+                    title = current.album ?: "未知专辑", query = "", offset = 0, playlist = null,
+                    albumFilter = null, sort = "title")
+                if (destination.key != query().key) open(destination)
+                onOpened()
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) {
+                if (generation == authGeneration && catalogGeneration == loadGeneration && owner == repository.session.cacheScope())
+                    mutable.update { it.copy(error = friendlyError(e)) }
+            }
+        }
+    }
     fun openArtist(artist: Artist) = open(query().copy(kind = "tracks", albumFilter = null, collection = "artists", collectionId = artist.id, title = artist.name, query = "", offset = 0, playlist = null))
     fun openPlaylist(playlist: Playlist) = open(query().copy(kind = "tracks", collection = "playlists", collectionId = playlist.id, playlist = playlist, title = playlist.name, query = "", offset = 0))
     fun recent() = open(query().copy(kind = "recent", title = "最近听过", collection = null, collectionId = null, offset = 0, query = ""))

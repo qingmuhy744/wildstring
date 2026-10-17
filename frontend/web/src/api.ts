@@ -49,6 +49,7 @@ export class ApiError extends Error {
 }
 
 const messages: Record<string, string> = {
+  album_not_found: '所属专辑已变化或不可用，请刷新曲库后重试。',
   playback_version_conflict: '共享进度已在其他设备更新，请先读取最新进度，再决定是否共享。',
   playback_track_unavailable: '共享队列中有歌曲已经不可用，请回原设备刷新后重新共享。',
   playback_position_invalid: '共享播放位置已失效，请重新共享进度。',

@@ -2,6 +2,7 @@ import { artist, listeningTime, time, type TrackPage } from './api';
 import { TrackActions, type TrackOperations } from './track-actions';
 import { Cover } from './cover';
 import type { Player } from './player';
+import { AlbumLink } from './album-link';
 
 export function TrackList({
   page,
@@ -71,7 +72,11 @@ export function TrackList({
             </button>
           </div>
           <span className="album-column ellipsis" role="cell" title={track.album || ''}>
-            {track.album || '未知专辑'}
+            {operations.onOpenAlbum && track.album_id ? (
+              <AlbumLink track={track} onOpen={operations.onOpenAlbum} />
+            ) : (
+              track.album || '未知专辑'
+            )}
           </span>
           <span className="quality-column" role="cell">
             <span className="format">{track.format.toUpperCase()}</span>
