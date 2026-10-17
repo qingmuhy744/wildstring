@@ -627,11 +627,12 @@ export function AssistantPreferences() {
   }
   return prefs.unsupported ? null : (
     <section className="workspace-card" aria-label="助手历史设置">
-      <h2>助手历史</h2>
+      <h2>助手对话历史</h2>
+      <p className="muted">按对话最后更新时间清理聊天记录，已有草案、歌单和音乐保留。</p>
       <WorkspaceNotice error={error || prefs.error} notice={notice} />
       <div className="workspace-inline">
         <label>
-          对话保留（天）
+          助手对话保留天数
           <input
             aria-label="助手历史保留天数"
             type="number"

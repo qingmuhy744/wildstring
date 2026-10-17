@@ -225,6 +225,10 @@ class ConversationCreate(Input):
     connection_id: str | None = Field(default=None, max_length=128)
 
 
+class ConversationRename(Input):
+    title: str = Field(min_length=1, max_length=200)
+
+
 class MessageCreate(Input):
     content: str = Field(min_length=1, max_length=8000)
     connection_id: str | None = Field(default=None, max_length=128)

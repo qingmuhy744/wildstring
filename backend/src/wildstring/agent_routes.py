@@ -10,6 +10,7 @@ from wildstring.agent_models import (
     AssistantPreferences,
     Connection,
     ConversationCreate,
+    ConversationRename,
     CredentialCreate,
     DraftCreate,
     DraftPatch,
@@ -345,6 +346,12 @@ def agent_router(service):
     @router.delete("/conversations/{identity}")
     def delete_conversation(identity: str, actor: Annotated[object, Depends(session)]):
         return service.delete_conversation(actor, identity)
+
+    @router.patch("/conversations/{identity}")
+    def rename_conversation(
+        identity: str, body: ConversationRename, actor: Annotated[object, Depends(session)]
+    ):
+        return service.rename_conversation(actor, identity, body)
 
     @router.delete("/conversations")
     def delete_conversations(actor: Annotated[object, Depends(session)]):

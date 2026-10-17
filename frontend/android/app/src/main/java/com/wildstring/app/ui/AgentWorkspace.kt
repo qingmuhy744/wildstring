@@ -19,6 +19,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.google.gson.JsonObject
@@ -169,7 +170,9 @@ private fun displayValue(value: com.google.gson.JsonElement?): String = when { v
 @Composable private fun AgentChat(vm: MusicViewModel, openDraft: (String) -> Unit) {
     var conversations by remember { mutableStateOf<List<JsonObject>>(emptyList()) }; var conversation by remember { mutableStateOf<JsonObject?>(null) }
     var connections by remember { mutableStateOf<List<JsonObject>>(emptyList()) }; var connection by remember { mutableStateOf<String?>(null) }
-    var input by remember { mutableStateOf("") }; var history by remember { mutableStateOf(false) }; var delete by remember { mutableStateOf(false) }
+    var input by remember { mutableStateOf("") }; var history by remember { mutableStateOf(false) }
+    var deleting by remember { mutableStateOf<JsonObject?>(null) }; var renaming by remember { mutableStateOf<JsonObject?>(null) }
+    var title by remember { mutableStateOf("") }; var historyMenu by remember { mutableStateOf<String?>(null) }
     val action = remember { FeatureAction() }; val scope = rememberCoroutineScope()
     LaunchedEffect(Unit) { action.run { connections = vm.agent.all("connections"); conversations = vm.agent.all("conversations") }; if (action.message == "已完成") action.message = null }
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
@@ -179,7 +182,7 @@ private fun displayValue(value: com.google.gson.JsonElement?): String = when { v
             Spacer(Modifier.weight(1f))
             if (conversation != null) {
                 IconButton({ scope.launch { action.run { conversation = vm.agent.request("conversations/${conversation!!.text("id")}"); action.message = null } } }, enabled = !action.busy) { Icon(Icons.Default.Refresh, "刷新当前对话") }
-                IconButton({ delete = true }, enabled = !action.busy) { Icon(Icons.Default.DeleteOutline, "删除当前对话") }
+                IconButton({ deleting = conversation; action.message = null }, enabled = !action.busy) { Icon(Icons.Default.DeleteOutline, "删除当前对话") }
             }
         }
         AgentConnectionChoice(connections, connection, !action.busy) { connection = it }
@@ -215,13 +218,39 @@ private fun displayValue(value: com.google.gson.JsonElement?): String = when { v
             }, enabled = !action.busy && input.isNotBlank(), modifier = Modifier.testTag("agent-chat-send")) { if (action.busy) CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp) else Icon(Icons.AutoMirrored.Filled.Send, "发送") }
         }
     }
-    if (history) AlertDialog(onDismissRequest = { history = false }, title = { Text("历史对话") }, text = {
-        LazyColumn(Modifier.heightIn(max = 400.dp)) {
+    if (history) AlertDialog(onDismissRequest = { if (!action.busy) history = false }, title = { Text("历史对话") }, text = {
+        LazyColumn(Modifier.heightIn(max = 400.dp).testTag("agent-history")) {
+            item { ActionStatus(action) }
             if (conversations.isEmpty()) item { AgentEmpty("暂无历史。") }
-            items(conversations, key = { it.text("id") }) { item -> ListItem(headlineContent = { Text(item.text("title")) }, modifier = Modifier.clickable { history = false; scope.launch { action.run { conversation = vm.agent.request("conversations/${item.text("id")}"); connection = conversation?.text("connection_id")?.takeIf { it.isNotBlank() } } } }) }
+            items(conversations, key = { it.text("id") }) { item ->
+                ListItem(headlineContent = { Text(item.text("title"), maxLines = 2, overflow = TextOverflow.Ellipsis) },
+                    modifier = Modifier.testTag("history-open-${item.text("id")}").clickable(enabled = !action.busy) { history = false; scope.launch { action.run { conversation = vm.agent.request("conversations/${item.text("id")}"); connection = conversation?.text("connection_id")?.takeIf { it.isNotBlank() } } } },
+                    trailingContent = { Box {
+                        IconButton({ historyMenu = item.text("id") }, enabled = !action.busy, modifier = Modifier.testTag("history-actions-${item.text("id")}")) { Icon(Icons.Default.MoreVert, "对话操作：${item.text("title")}") }
+                        DropdownMenu(historyMenu == item.text("id"), { historyMenu = null }) {
+                            DropdownMenuItem(text = { Text("改名") }, leadingIcon = { Icon(Icons.Default.Edit, null) }, onClick = { renaming = item; title = item.text("title"); historyMenu = null; action.message = null })
+                            DropdownMenuItem(text = { Text("删除") }, leadingIcon = { Icon(Icons.Default.DeleteOutline, null) }, onClick = { deleting = item; historyMenu = null; action.message = null })
+                        }
+                    } },
+                )
+            }
         }
-    }, confirmButton = { TextButton({ history = false }) { Text("关闭") } })
-    if (delete) AlertDialog(onDismissRequest = { delete = false }, title = { Text("删除当前对话？") }, text = { Text("删除服务端的对话历史，已有草案单独保留。") }, confirmButton = { TextButton({ scope.launch { action.run { vm.agent.request("conversations/${conversation!!.text("id")}", "DELETE"); conversation = null; conversations = vm.agent.all("conversations"); delete = false } } }) { Text("删除") } }, dismissButton = { TextButton({ delete = false }) { Text("取消") } })
+    }, confirmButton = { TextButton({ history = false }, enabled = !action.busy) { Text("关闭") } })
+    renaming?.let { item -> AlertDialog(onDismissRequest = { if (!action.busy) renaming = null }, title = { Text("对话改名") }, text = {
+        Column { OutlinedTextField(title, { title = it.take(200) }, label = { Text("对话名称") }, singleLine = true, enabled = !action.busy, modifier = Modifier.testTag("conversation-title")); ActionStatus(action) }
+    }, confirmButton = { TextButton({ scope.launch { action.run {
+        val changed = vm.agent.request("conversations/${item.text("id")}", "PATCH", jsonBody("title" to title.trim()))
+        conversations = conversations.map { if (it.text("id") == item.text("id")) changed else it }
+        if (conversation?.text("id") == item.text("id")) conversation = changed
+        renaming = null
+    } } }, enabled = !action.busy && title.isNotBlank()) { Text("保存") } }, dismissButton = { TextButton({ renaming = null }, enabled = !action.busy) { Text("取消") } }) }
+    deleting?.let { item -> AlertDialog(onDismissRequest = { if (!action.busy) deleting = null }, title = { Text("删除对话？") }, text = {
+        Column { Text("删除「${item.text("title")}」的对话历史，已有草案单独保留。"); ActionStatus(action) }
+    }, confirmButton = { TextButton({ scope.launch { action.run {
+        vm.agent.request("conversations/${item.text("id")}", "DELETE")
+        if (conversation?.text("id") == item.text("id")) conversation = null
+        conversations = conversations.filterNot { it.text("id") == item.text("id") }; deleting = null
+    } } }, enabled = !action.busy) { Text("删除") } }, dismissButton = { TextButton({ deleting = null }, enabled = !action.busy) { Text("取消") } }) }
 }
 
 /** Every AI entry point uses the same permission-filtered connection list; null is explicitly local. */
@@ -465,7 +494,8 @@ internal fun connectionBudget(connection: JsonObject): String {
             if (delivery.text("status") in listOf("failed", "unknown", "retry_wait")) TextButton({ retry = delivery }, enabled = !action.busy) { Text("重试投递") }
         } }
         item { HorizontalDivider(); Text("助手历史", Modifier.padding(top = 12.dp), fontWeight = FontWeight.Medium)
-            OutlinedTextField(retention, { retention = it.filter(Char::isDigit) }, label = { Text("历史保留天数（1–365）") }, singleLine = true)
+            OutlinedTextField(retention, { retention = it.filter(Char::isDigit) }, label = { Text("助手对话保留天数（1–365）") }, singleLine = true)
+            Text("按对话最后更新时间清理聊天记录，已有草案、歌单和音乐保留。", style = MaterialTheme.typography.bodySmall)
             TextButton({ scope.launch { action.run { vm.agent.request("assistant-preferences", "PUT", jsonBody("retention_days" to (retention.toIntOrNull() ?: 0))) } } }, enabled = !action.busy && (retention.toIntOrNull() ?: 0) in 1..365) { Text("保存保留设置") }
         }
     }

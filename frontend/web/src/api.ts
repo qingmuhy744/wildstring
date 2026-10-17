@@ -67,6 +67,7 @@ const messages: Record<string, string> = {
   verification_invalid: '验证码不正确或已过期，请重新发送后核对。',
   unknown_delivery_requires_acknowledgement: '请先核对 Telegram 中是否已收到消息，再确认重试。',
   scope_denied: '当前凭据没有此操作所需的权限。',
+  conversation_busy: '这段对话正在生成回复，请完成后再操作。',
 
   album_not_found: '所属专辑已变化或不可用，请刷新曲库后重试。',
   playback_version_conflict: '共享进度已在其他设备更新，请先读取最新进度，再决定是否共享。',

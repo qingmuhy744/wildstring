@@ -25,6 +25,8 @@ class AgentWorkspaceTest {
         val server = MockWebServer(); val requests = ConcurrentLinkedQueue<Pair<String, JsonObject>>()
         val writes = AtomicInteger(); var status = "pending"; var version = 1; var read = false
         @Volatile var connections = "[]"
+        @Volatile var history = "[]"
+        @Volatile var rejectHistoryDelete = false
         val trace = "b".repeat(32)
         fun json(body: String) = MockResponse().setHeader("Content-Type", "application/json").setHeader("X-Wildstring-Trace-Id", trace).setBody(body)
         fun draft() = """{"id":"draft-one","kind":"playlist","title":"久未听的收藏","payload":{"name":"重新听见","track_ids":["song-a","song-b"]},"before":{"name":"原歌单"},"evidence":[{"source":"library","summary":"从本人收藏挑选"}],"status":"$status","version":$version,"created_at":"2026-10-17T12:00:00Z","trace_id":"$trace"}"""
@@ -39,7 +41,19 @@ class AgentWorkspaceTest {
                 if (path == "/api/v1/agent/notifications/read") { read = true; return@synchronized json("{}") }
                 if (path == "/api/v1/agent/notifications") return@synchronized json("""{"items":[{"id":"notice-one","event_id":"event-one","title":"新草案待确认","summary":"已生成 1 份草案，尚未应用。","severity":"info","draft_id":"draft-one","trace_id":"$trace","created_at":"2026-10-17T12:00:00Z","read_at":${if (read) "\"2026-10-17T12:01:00Z\"" else "null"},"version":${if (read) 2 else 1}}],"total":1,"limit":100,"offset":0,"unread_count":${if (read) 0 else 1},"high_watermark":${if (read) 2 else 1},"next_cursor":"c${if (read) 2 else 1}"}""")
                 if (path == "/api/v1/agent/connections") return@synchronized json("""{"items":$connections,"total":${JsonParser.parseString(connections).asJsonArray.size()},"limit":100,"offset":0}""").setBodyDelay(350, java.util.concurrent.TimeUnit.MILLISECONDS)
-                if (path == "/api/v1/agent/conversations" && request.method == "GET") return@synchronized json("""{"items":[],"total":0,"limit":100,"offset":0}""")
+                if (path == "/api/v1/agent/conversations" && request.method == "GET") return@synchronized json("""{"items":$history,"total":${JsonParser.parseString(history).asJsonArray.size()},"limit":100,"offset":0}""")
+                if (path.startsWith("/api/v1/agent/conversations/history-")) {
+                    val items = JsonParser.parseString(history).asJsonArray.map { it.asJsonObject }
+                    val id = path.substringAfterLast('/')
+                    val item = items.firstOrNull { it.text("id") == id } ?: return@synchronized json("{}").setResponseCode(404)
+                    if (request.method == "PATCH") { item.addProperty("title", body.text("title")); history = items.joinToString(prefix = "[", postfix = "]") }
+                    if (request.method == "DELETE") {
+                        if (rejectHistoryDelete) { rejectHistoryDelete = false; return@synchronized json("""{"detail":"conversation_busy"}""").setResponseCode(409) }
+                        history = items.filterNot { it.text("id") == id }.joinToString(prefix = "[", postfix = "]")
+                        return@synchronized json("{\"ok\":true}")
+                    }
+                    return@synchronized json(item.toString())
+                }
                 if (path == "/api/v1/agent/conversations" && request.method == "POST") return@synchronized json("""{"id":"conversation-one","title":"新对话","messages":[],"runs":[]}""")
                 if (path.endsWith("/conversation-one/messages")) return@synchronized json("""{"id":"conversation-one","messages":[{"id":"message-user","role":"user","content":"${body.text("content")}"},{"id":"message-ai","role":"assistant","content":"已整理为草案，请查看后确认。"}],"runs":[{"id":"run-one","status":"succeeded","draft_ids":["draft-one"],"trace_id":"$trace"}]}""")
                 if (path == "/api/v1/agent/drafts") return@synchronized json("""{"items":[${draft()}],"total":1,"limit":100,"offset":0}""")
@@ -62,6 +76,51 @@ class AgentWorkspaceTest {
         val address = fixture.server.url("/").newBuilder().host("127.0.0.1").build().toString()
         compose.runOnIdle { vm.connect(address, "alice", "synthetic-password", true) }
         compose.waitUntil(20_000) { vm.state.value.connected && !vm.state.value.connecting }
+    }
+    @Test fun historyRenameDeleteAndBusyFailurePreserveCurrentConversation() {
+        val vm = vm()
+        Fixture().use { fixture -> try {
+            fixture.history = listOf("a", "b").joinToString(prefix = "[", postfix = "]") { id ->
+                """{"id":"history-$id","title":"${if (id == "a") "旧名字" else "另一段对话"}","connection_id":null,"messages":[{"id":"message-$id","role":"user","content":"保留内容 $id"}],"runs":[]}"""
+            }
+            fixture.rejectHistoryDelete = true
+            connect(vm, fixture)
+            compose.onNodeWithContentDescription("设置").performClick()
+            compose.onNodeWithText("野弦助手 / 通知与草案").performScrollTo().performClick()
+            compose.waitUntil(15_000) { compose.onAllNodes(hasText("历史") and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithText("历史", substring = false).performClick()
+            compose.waitUntil(15_000) { compose.onAllNodesWithTag("history-open-history-b").fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithTag("history-open-history-b").performClick()
+            compose.waitUntil(15_000) { compose.onAllNodesWithText("保留内容 b").fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithText("历史", substring = false).performClick()
+            compose.waitUntil(15_000) { compose.onAllNodesWithTag("history-actions-history-a").fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithTag("history-actions-history-a").performClick()
+            compose.onNodeWithText("改名", substring = false).performClick()
+            compose.onNodeWithTag("conversation-title").performTextReplacement("   ")
+            compose.onNodeWithText("保存", substring = false).assertIsNotEnabled()
+            compose.onNodeWithTag("conversation-title").performTextReplacement("  夜晚的摇滚歌单  ")
+            compose.onNodeWithText("保存", substring = false).performClick()
+            compose.waitUntil(15_000) { compose.onAllNodesWithTag("conversation-title").fetchSemanticsNodes().isEmpty() }
+            assertEquals("夜晚的摇滚歌单", fixture.requests.single { it.first == "PATCH /api/v1/agent/conversations/history-a" }.second.text("title"))
+            compose.onNodeWithText("夜晚的摇滚歌单", substring = false).assertExists()
+            capture("history-actions-phone.png")
+            compose.onNodeWithTag("history-actions-history-a").performClick()
+            compose.onNodeWithText("删除", substring = false).performClick()
+            compose.onNodeWithText("取消", substring = false).performClick()
+            assertFalse(fixture.requests.any { it.first == "DELETE /api/v1/agent/conversations/history-a" })
+            compose.onNodeWithTag("history-actions-history-a").performClick()
+            compose.onNodeWithText("删除", substring = false).performClick()
+            compose.onNodeWithText("删除", substring = false).performClick()
+            compose.waitUntil(15_000) { compose.onAllNodesWithText("这段对话正在生成回复", substring = true).fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithText("删除", substring = false).performClick()
+            compose.waitUntil(15_000) { compose.onAllNodesWithTag("history-open-history-a").fetchSemanticsNodes().isEmpty() }
+            compose.onNodeWithText("关闭", substring = false).performClick()
+            compose.onNodeWithText("保留内容 b", substring = false).assertExists()
+            compose.onNodeWithContentDescription("删除当前对话").performClick()
+            compose.onNodeWithText("删除", substring = false).performClick()
+            compose.waitUntil(15_000) { compose.onAllNodesWithText("保留内容 b").fetchSemanticsNodes().isEmpty() }
+            assertEquals(3, fixture.requests.count { it.first.startsWith("DELETE /api/v1/agent/conversations/") })
+        } finally { compose.runOnIdle { vm.repository.session.invalidate() } } }
     }
     @Test fun manualInspectionUsesLegacyConnectionButScheduleRequiresAutomaticAuthorization() {
         val vm = vm()

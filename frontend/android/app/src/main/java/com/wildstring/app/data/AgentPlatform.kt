@@ -33,6 +33,7 @@ class AgentApiException(val status: Int, val code: String, val traceId: String?)
 internal fun diagnosticId(value: String?): String? = value?.takeIf { it.matches(Regex("[a-fA-F0-9]{16,64}")) }
 internal fun agentError(status: Int, code: String, traceId: String?): String {
     val description = when {
+        code == "conversation_busy" -> "这段对话正在生成回复，请完成后再操作。"
         status == 401 -> "登录已失效，请重新登录。"
         status == 403 -> "当前账号没有这项操作的权限。"
         status == 404 -> "此功能或内容在当前服务器不可用，请确认服务端已升级至 0.4.0。"

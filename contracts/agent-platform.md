@@ -40,7 +40,11 @@
 
 `GET /endpoint-policy` 管理员读取；`PUT /endpoint-policy {allowed_hosts:[域名/IP],allow_private:false}` 管理员设置个人连接允许的精确端点；私网需显式 allow_private 和主机允许。管理员自己的连接可以配置局域网。`GET /connections` 包含本人连接、显式共享实例连接和现有 legacy 连接（id=`legacy`，read_only=true）。`POST /connections {name,scope:personal|instance,base_url,model,api_key?,timeout:30,shared:false,background_allowed:false,daily_call_budget:100,enabled:true}`；`PATCH /connections/{id}` 同字段加 version；`DELETE /connections/{id}`；`POST /connections/{id}/test {}` 返回文本/工具能力及检测时间。仅管理员可创建 instance/shared。字段 `id,name,scope,base_url,model,timeout,shared,background_allowed,daily_call_budget,enabled,has_api_key,version,capabilities,created_at`。不返回密钥。
 
-`GET /conversations`；`POST /conversations {title?:"新对话",connection_id?:null}`（空或 `local` 为本地检索；不自动选择付费连接）；`GET /conversations/{id}` 包含 messages；`DELETE /conversations/{id}`；`POST /conversations/{id}/messages {content,connection_id?:null,max_calls:4}` 同步有界多轮（客户端先显示发送状态，断连后 GET 恢复）；省略 connection_id 才沿用会话连接，显式 null 或 `local` 切换为本地模式，绝不自动更换付费路径。响应完整 conversation，messages 含 `{id,role:user|assistant,content,created_at,run_id}`，runs 含 `{id,status,connection_id,error_code,tool_calls,draft_ids,trace_id}`。运行固定连接版本，最多 8 次模型调用，每次最多 8 个工具调用；只能调用读工具和创建草案，不能批准或应用。模型不可用时明确 local_fallback，本地找歌继续可用。`DELETE /conversations` 清除本人历史。`GET/PUT /assistant-preferences {retention_days:30}`，保留范围 1–365 天。
+`GET /conversations`；`POST /conversations {title?:"新对话",connection_id?:null}`（空或 `local` 为本地检索；不自动选择付费连接）；`GET /conversations/{id}` 包含 messages；`DELETE /conversations/{id}`；`POST /conversations/{id}/messages {content,connection_id?:null,max_calls:4}` 同步有界多轮（客户端先显示发送状态，断连后 GET 恢复）；省略 connection_id 才沿用会话连接，显式 null 或 `local` 切换为本地模式，绝不自动更换付费路径。响应完整 conversation，messages 含 `{id,role:user|assistant,content,created_at,run_id}`，runs 含 `{id,status,connection_id,error_code,tool_calls,draft_ids,trace_id}`。运行固定连接版本，最多 8 次模型调用，每次最多 8 个工具调用；只能调用读工具和创建草案，不能批准或应用。显式选择本地模式时标记 local_fallback；模型请求失败标记 failed，不自动更换连接，本地找歌仍可单独使用。`DELETE /conversations` 清除本人历史。`GET/PUT /assistant-preferences {retention_days:30}`，保留范围 1–365 天。
+
+`PATCH /conversations/{id} {title}` 修改本人对话名称，首尾空白会去除，长度 1–200；消息、所选连接和草案不变。对话列表提供改名和逐条删除，删除前需用户确认。删除正在生成回复的对话返回 `409 conversation_busy`；删除会清理该对话消息和运行记录，已有草案和业务对象独立保留。
+
+聊天使用最近 19 条历史消息及本次提问，系统指令独立保留；单轮工具结果只参与该轮模型循环。保留天数控制数据库清理，不代表全部历史都会送给模型。目前尚无自动摘要或跨对话长期记忆。0.4.1 在 max_calls 内预留最后一次调用直接生成回答（tool_choice=none），不追加付费调用；提供方忽略该要求时不再执行工具。聊天没有实时网页或库外新发行搜索工具，发现页的 Last.fm 收藏建议也不保证最新发行。
 
 ## 安全和运行边界
 
