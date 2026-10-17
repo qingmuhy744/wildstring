@@ -3,6 +3,7 @@ import { api, type User } from './api';
 import { LastfmAccount } from './providers';
 import { ThemeControl } from './theme';
 import { PlaybackStyleControl } from './playback-style';
+import { TrackListSizeControl } from './track-list-size';
 
 export function AccountDialog({ user, onClose }: { user: User; onClose: () => void }) {
   const dialog = useRef<HTMLDialogElement>(null);
@@ -65,6 +66,7 @@ export function AccountDialog({ user, onClose }: { user: User; onClose: () => vo
       </div>
       <ThemeControl />
       <PlaybackStyleControl />
+      <TrackListSizeControl />
       <LastfmAccount />
       <form className="account-form" onSubmit={submit}>
         <label>

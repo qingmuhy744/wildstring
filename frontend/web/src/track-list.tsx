@@ -1,8 +1,10 @@
+import { useLayoutEffect, useRef } from 'react';
 import { artist, listeningTime, time, type TrackPage } from './api';
 import { TrackActions, type TrackOperations } from './track-actions';
 import { Cover } from './cover';
 import type { Player } from './player';
 import { AlbumLink } from './album-link';
+import { beforeTrackListSizeChange, useTrackListSize } from './track-list-size';
 
 export function TrackList({
   page,
@@ -11,6 +13,8 @@ export function TrackList({
   revision,
   operations,
   showStats = false,
+  statsSort = 'last_played_at',
+  albumTracks = false,
   onPlay,
 }: {
   page: TrackPage;
@@ -19,10 +23,57 @@ export function TrackList({
   revision: number;
   operations: TrackOperations;
   showStats?: boolean;
+  statsSort?: string;
+  albumTracks?: boolean;
   onPlay?: (track: TrackPage['items'][number]) => void;
 }) {
+  const listSize = useTrackListSize();
+  const root = useRef<HTMLDivElement>(null);
+  const anchor = useRef<{ id: string; top: number } | null>(null);
+  useLayoutEffect(
+    () =>
+      beforeTrackListSizeChange(() => {
+        const edge = Math.min(
+          innerHeight,
+          document.querySelector('.player')?.getBoundingClientRect().top ?? innerHeight,
+        );
+        const rows = Array.from(
+          root.current?.querySelectorAll<HTMLElement>('[data-browse-id]') || [],
+        );
+        // A mostly clipped row may become entirely invisible when shrinking.
+        // Prefer the first complete song so the visible reading anchor stays put.
+        const row =
+          rows.find((row) => {
+            const box = row.getBoundingClientRect();
+            return box.height > 0 && box.top >= 0 && box.bottom <= edge;
+          }) ||
+          rows.find((row) => {
+            const box = row.getBoundingClientRect();
+            return box.height > 0 && box.bottom > 0 && box.top < edge;
+          });
+        anchor.current = row
+          ? { id: row.dataset.browseId!, top: row.getBoundingClientRect().top }
+          : null;
+      }),
+    [],
+  );
+  useLayoutEffect(() => {
+    if (!anchor.current) return;
+    const previous = anchor.current;
+    anchor.current = null;
+    const row = Array.from(
+      root.current?.querySelectorAll<HTMLElement>('[data-browse-id]') || [],
+    ).find((row) => row.dataset.browseId === previous.id);
+    if (row) window.scrollBy(0, row.getBoundingClientRect().top - previous.top);
+  }, [listSize]);
   return (
-    <div className="track-list" role="table" aria-label="歌曲列表">
+    <div
+      className={`track-list ${albumTracks ? 'album-tracks' : ''}`}
+      data-list-size={listSize}
+      ref={root}
+      role="table"
+      aria-label="歌曲列表"
+    >
       <div className="track-header" role="row">
         <span role="columnheader">#</span>
         <span role="columnheader">歌曲 / 艺人</span>
@@ -42,33 +93,45 @@ export function TrackList({
           className={`track-row ${player.current?.id === track.id ? 'current' : ''}`}
           role="row"
           key={track.id}
+          data-browse-id={track.id}
         >
           <span role="cell" className="track-number">
             {player.current?.id === track.id && player.playing
               ? '♫'
-              : String(page.offset + i + 1).padStart(2, '0')}
+              : String(
+                  albumTracks ? track.track_number || page.offset + i + 1 : page.offset + i + 1,
+                ).padStart(2, '0')}
           </span>
           <div role="cell" className="track-identity">
-            <Cover
-              key={`${track.id}-${revision}`}
-              trackId={track.id}
-              title={track.album || track.title}
-            />
+            {!albumTracks && (
+              <Cover
+                key={`${track.id}-${revision}`}
+                trackId={track.id}
+                title={track.album || track.title}
+              />
+            )}
             <button
               className="track-title"
               onClick={() => (onPlay ? onPlay(track) : player.start(page.items, i))}
               aria-label={`播放 ${track.title}`}
             >
               <strong>{track.title}</strong>
-              <small>{artist(track)}</small>
-              {showStats && (
-                <small className="track-stat">
-                  {track.play_count} 次播放 · 已听 {listeningTime(track.listened_ms)}
-                  {track.last_played_at
-                    ? ` · ${new Date(track.last_played_at).toLocaleDateString()} 听过`
-                    : ''}
-                </small>
-              )}
+              <small>
+                {artist(track)}
+                {showStats && (
+                  <span className="track-stat">
+                    {' '}
+                    ·{' '}
+                    {statsSort === 'play_count'
+                      ? `${track.play_count} 次播放`
+                      : statsSort === 'listened_ms'
+                        ? `已听 ${listeningTime(track.listened_ms)}`
+                        : track.last_played_at
+                          ? `${new Date(track.last_played_at).toLocaleDateString()} 听过`
+                          : '还未播放'}
+                  </span>
+                )}
+              </small>
             </button>
           </div>
           <span className="album-column ellipsis" role="cell" title={track.album || ''}>

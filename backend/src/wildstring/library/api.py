@@ -8,8 +8,11 @@ from pydantic import BaseModel, Field
 
 from wildstring.auth import Auth
 from wildstring.library.assets import TrackAssets
+from wildstring.library.browsing import BrowseKind
 from wildstring.library.repository import LibraryRepository
 from wildstring.library.streaming import AudioResponse
+
+TrackSort = Literal["title", "play_count", "listened_ms", "last_played_at"]
 
 
 class Track(BaseModel):
@@ -90,6 +93,18 @@ class ArtistPage(BaseModel):
     offset: int
 
 
+class BrowseGroup(BaseModel):
+    key: str
+    offset: int | None
+    count: int
+
+
+class BrowseIndex(BaseModel):
+    kind: BrowseKind
+    total: int
+    groups: list[BrowseGroup]
+
+
 class LyricLine(BaseModel):
     time_ms: int | None
     text: str
@@ -130,6 +145,22 @@ def library_router(repository: LibraryRepository, auth: Auth, transcoding) -> AP
             raise HTTPException(404, "artist_not_found")
         return result
 
+    @router.get("/browse-index", response_model=BrowseIndex)
+    def browse_index(
+        kind: BrowseKind,
+        q: Annotated[str, Query(max_length=256)] = "",
+        artist_id: str | None = None,
+        album_id: str | None = None,
+        role: Literal["artist", "album_artist", "vocalist", "lyricist", "composer", "arranger"]
+        | None = None,
+    ):
+        # Album members keep disc/track order, so letter offsets would be misleading.
+        if album_id is not None or (kind == "artists" and artist_id is not None):
+            raise HTTPException(400, "browse_index_not_supported")
+        if artist_id is not None:
+            require_artist(artist_id)
+        return repository.browse_index(kind, q, artist_id=artist_id, role=role)
+
     @router.get("/artists", response_model=ArtistPage)
     def artists(
         q: Annotated[str, Query(max_length=256)] = "",
@@ -152,11 +183,14 @@ def library_router(repository: LibraryRepository, auth: Auth, transcoding) -> AP
         album_id: str | None = None,
         limit: Annotated[int, Query(ge=1, le=200)] = 50,
         offset: Annotated[int, Query(ge=0)] = 0,
+        sort: TrackSort = "title",
         role: Literal["artist", "album_artist", "vocalist", "lyricist", "composer", "arranger"]
         | None = None,
     ):
         require_artist(artist_id)
-        return current.tracks(q, limit, offset, album_id=album_id, artist_id=artist_id, role=role)
+        return current.tracks(
+            q, limit, offset, album_id=album_id, artist_id=artist_id, role=role, sort=sort
+        )
 
     @router.get("/artists/{artist_id}/albums", response_model=AlbumPage)
     def artist_albums(
@@ -216,10 +250,11 @@ def library_router(repository: LibraryRepository, auth: Auth, transcoding) -> AP
         current: Annotated[LibraryRepository, Depends(scoped)],
         limit: Annotated[int, Query(ge=1, le=200)] = 50,
         offset: Annotated[int, Query(ge=0)] = 0,
+        sort: TrackSort = "title",
     ):
         if repository.album(album_id) is None:
             raise HTTPException(404, "album_not_found")
-        return current.tracks(limit=limit, offset=offset, album_id=album_id)
+        return current.tracks(limit=limit, offset=offset, album_id=album_id, sort=sort)
 
     @router.api_route("/tracks/{track_id}/stream", methods=["GET", "HEAD"])
     def stream(
@@ -256,7 +291,7 @@ def library_router(repository: LibraryRepository, auth: Auth, transcoding) -> AP
         limit: Annotated[int, Query(ge=1, le=200)] = 50,
         offset: Annotated[int, Query(ge=0)] = 0,
         played_only: bool = False,
-        sort: Literal["title", "play_count", "listened_ms", "last_played_at"] = "title",
+        sort: TrackSort = "title",
     ):
         return current.tracks(q, limit, offset, played_only=played_only, sort=sort)
 

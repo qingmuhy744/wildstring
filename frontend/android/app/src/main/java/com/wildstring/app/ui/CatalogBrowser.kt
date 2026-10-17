@@ -1,0 +1,157 @@
+@file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+package com.wildstring.app.ui
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.wildstring.app.data.*
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.launch
+
+/** One absolute slot per server result. Placeholders cannot start playback or open an item. */
+@Composable internal fun CatalogBrowser(
+    vm: MusicViewModel, state: MusicState, header: @Composable () -> Unit,
+    play: (Track) -> Unit, actions: (Track) -> Unit,
+) {
+    val list = rememberLazyListState()
+    val grid = rememberLazyGridState()
+    val scope = rememberCoroutineScope()
+    val tracksById = remember(state.tracks) { state.tracks.associateBy { it.id } }
+    val playlistsById = remember(state.playlists) { state.playlists.associateBy { it.id } }
+    val groups = state.browseIndex?.groups.orEmpty()
+    val indexed = groups.isNotEmpty()
+    val albumGrid = state.kind == "albums"
+    // Page ownership lives in the ViewModel; changing visible positions never changes the route.
+    LaunchedEffect(state.contentKey, albumGrid, state.total, state.loading, state.window.pages.keys, state.rangeErrors.keys) {
+        snapshotFlow {
+            val visible = if (albumGrid) grid.layoutInfo.visibleItemsInfo.map { it.index } else list.layoutInfo.visibleItemsInfo.map { it.index }
+            visible.map { it - 1 }.filter { it in 0 until state.total }
+        }.distinctUntilChanged().collect { visible ->
+            if (visible.isNotEmpty()) {
+                val first = (visible.min() - 5).coerceAtLeast(0)
+                val last = (visible.max() + 10).coerceAtMost(state.total - 1)
+                for (index in first..last step CATALOG_PAGE_SIZE) vm.ensureRange(index)
+                vm.ensureRange(last)
+            }
+        }
+    }
+    Box(Modifier.fillMaxSize()) {
+        val gutter = if (indexed) 30.dp else 0.dp
+        if (albumGrid) LazyVerticalGrid(GridCells.Adaptive(140.dp), state = grid,
+            modifier = Modifier.fillMaxSize().padding(end = gutter).testTag("album-grid"),
+            horizontalArrangement = Arrangement.spacedBy(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp),
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 16.dp)) {
+            item(key = "catalog-header", span = { GridItemSpan(maxLineSpan) }) { header() }
+            items(state.total, key = { "album-position-$it" }) { index ->
+                val album = state.window.albumAt(index)
+                if (album == null) CatalogPlaceholder(vm, state, index, grid = true)
+                else Column(Modifier.testTag("catalog-item-$index").clickable { vm.openAlbum(album) }) {
+                    Cover(vm, album.coverTrackId, album.title, Modifier.fillMaxWidth().aspectRatio(1f))
+                    Text(album.title, Modifier.padding(top = 8.dp), maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text(album.artists.joinToString(" / "), color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+        } else LazyColumn(state = list, modifier = Modifier.fillMaxSize().padding(end = gutter).testTag("catalog-list"),
+            contentPadding = PaddingValues(bottom = 12.dp)) {
+            item(key = "catalog-header") { header() }
+            items(state.total, key = { "catalog-position-$it" }) { index ->
+                when (state.kind) {
+                    "artists" -> state.window.artistAt(index)?.let { artist ->
+                        ListItem(headlineContent = { Text(artist.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                            supportingContent = { Text("${artist.trackCount} 首") },
+                            leadingContent = { Cover(vm, artist.coverTrackId, artist.name, Modifier.size(44.dp)) },
+                            modifier = Modifier.testTag("catalog-item-$index").clickable { vm.openArtist(artist) })
+                    } ?: CatalogPlaceholder(vm, state, index)
+                    "playlists" -> state.window.playlistAt(index)?.let { cached ->
+                        val playlist = playlistsById[cached.id] ?: cached
+                        ListItem(headlineContent = { Text(playlist.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                            supportingContent = { Text("${playlist.trackCount} 首${if (playlist.kind == "smart") " · 规则歌单" else ""}") },
+                            leadingContent = { Cover(vm, playlist.coverTrackId, playlist.name, Modifier.size(44.dp)) },
+                            modifier = Modifier.testTag("catalog-item-$index").clickable { vm.openPlaylist(playlist) })
+                    } ?: CatalogPlaceholder(vm, state, index)
+                    else -> state.window.trackAt(index)?.let { track ->
+                        val display = tracksById[track.id] ?: track
+                        TrackRow(vm, display, state, index, { play(display) }, { actions(display) })
+                    } ?: CatalogPlaceholder(vm, state, index)
+                }
+            }
+        }
+        if (indexed) AlphabetRail(groups, Modifier.align(Alignment.CenterEnd).fillMaxHeight().width(30.dp)) { offset ->
+            vm.ensureRange(offset, retry = true)
+            scope.launch {
+                if (albumGrid) grid.scrollToItem(offset + 1) else list.scrollToItem(offset + 1)
+            }
+        }
+        if (!state.loading && state.total == 0 && state.error == null) Text(
+            if (state.query.isNotBlank()) "没有找到匹配的音乐" else if (state.kind == "playlists") "还没有歌单" else "这里还没有音乐，请先在网页端导入曲库。",
+            Modifier.align(Alignment.Center).padding(24.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+@Composable private fun CatalogPlaceholder(vm: MusicViewModel, state: MusicState, index: Int, grid: Boolean = false) {
+    val error = state.rangeErrors[index / CATALOG_PAGE_SIZE * CATALOG_PAGE_SIZE]
+    Column(Modifier.fillMaxWidth().then(if (grid) Modifier.aspectRatio(.8f) else Modifier.heightIn(min = if (state.kind in listOf("artists", "playlists")) 72.dp else LocalSongListSize.current.rowDp.dp))
+        .testTag("catalog-placeholder-$index").then(if (error != null) Modifier.clickable { vm.ensureRange(index, retry = true) } else Modifier)
+        .padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.Center) {
+        if (error != null) {
+            Text("加载失败，点击重试", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+            Text(error, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall)
+        } else {
+            Box(Modifier.fillMaxWidth(.6f).height(12.dp).background(MaterialTheme.colorScheme.surfaceContainerHigh, RoundedCornerShape(4.dp)))
+            Spacer(Modifier.height(9.dp))
+            Box(Modifier.fillMaxWidth(.35f).height(9.dp).background(MaterialTheme.colorScheme.surfaceContainerLow, RoundedCornerShape(4.dp)))
+        }
+    }
+}
+
+/** Touch previews a letter while dragging; release commits exactly one server offset. */
+@Composable private fun AlphabetRail(groups: List<BrowseGroup>, modifier: Modifier, jump: (Int) -> Unit) {
+    var height by remember { mutableIntStateOf(1) }
+    var preview by remember { mutableStateOf<String?>(null) }
+    var selected by remember { mutableStateOf<BrowseGroup?>(null) }
+    fun select(y: Float) {
+        val group = groups[(y / height * groups.size).toInt().coerceIn(groups.indices)]
+        preview = group.key; selected = group.takeIf { it.count > 0 && it.offset != null }
+    }
+    Box(modifier) {
+        Column(Modifier.fillMaxSize().padding(vertical = 6.dp).onSizeChanged { height = it.height.coerceAtLeast(1) }
+            .testTag("alphabet-rail").pointerInput(groups) {
+                detectDragGestures(onDragStart = { select(it.y) }, onDragEnd = {
+                    selected?.offset?.let(jump); selected = null; preview = null
+                }, onDragCancel = { selected = null; preview = null }) { change, _ -> change.consume(); select(change.position.y) }
+            }, verticalArrangement = Arrangement.SpaceEvenly, horizontalAlignment = Alignment.CenterHorizontally) {
+            groups.forEach { group ->
+                val enabled = group.count > 0 && group.offset != null
+                Text(group.key, style = MaterialTheme.typography.labelSmall, fontSize = if (group.key == "0–9") 9.sp else 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = if (enabled) 1f else .28f),
+                    modifier = Modifier.fillMaxWidth().weight(1f).wrapContentSize(Alignment.Center).testTag("alphabet-${group.key}")
+                        .semantics { contentDescription = "跳至 ${group.key}" }.clickable(enabled = enabled) { group.offset?.let(jump) })
+            }
+        }
+        preview?.let { letter -> Surface(Modifier.align(Alignment.CenterEnd).offset(x = (-44).dp).size(72.dp).testTag("alphabet-preview"),
+            shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.primaryContainer, shadowElevation = 6.dp) {
+            Box(contentAlignment = Alignment.Center) { Text(letter, style = MaterialTheme.typography.headlineLarge) }
+        } }
+    }
+}

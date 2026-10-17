@@ -109,9 +109,10 @@ test('普通歌单创建、单曲与整页加入、排序移除和持久化', as
       .getByLabel('将 晴天测试曲 加入歌单', { exact: true })
       .selectOption({ label: prefix });
     await expect(page.locator('.toast')).toContainText(`已加入：${prefix}`);
-    await page.getByLabel('本页加入歌单', { exact: true }).selectOption({ label: prefix });
-    await page.getByRole('button', { name: '加入本页', exact: true }).click();
-    await expect(page.locator('.toast')).toContainText('本页歌曲已加入');
+    await page.getByText('批量加入歌单', { exact: true }).click();
+    await page.getByLabel('已加载歌曲加入歌单', { exact: true }).selectOption({ label: prefix });
+    await page.getByRole('button', { name: '加入已加载', exact: true }).click();
+    await expect(page.locator('.toast')).toContainText('已加载歌曲已加入');
     await tab(page, '歌单');
     await page.getByRole('button', { name: `打开歌单 ${prefix}`, exact: true }).click();
     await expect(page.getByRole('table').getByRole('row')).toHaveCount(3);
@@ -180,15 +181,16 @@ test('可视化规则歌单、实时收藏筛选与编辑任一条件', async ({
 
 test('下一首插入、三横杠鼠标或触摸拖动保持当前播放', async ({ page }, info) => {
   await login(page);
+  const firstTitle = (await tracks(page))[0].title;
   await page.getByRole('button', { name: '播放全部', exact: true }).click();
   await expect.poll(async () => (await audio(page)).time).toBeGreaterThan(0.2);
   const before = await audio(page);
-  await page.getByRole('button', { name: '歌曲操作 晴天测试曲', exact: true }).click();
+  await page.getByRole('button', { name: '歌曲操作 夜晚测试曲', exact: true }).click();
   await page.getByRole('button', { name: '下一首播放', exact: true }).click();
   await page.getByRole('button', { name: '播放队列', exact: true }).last().click();
   const queue = page.getByRole('complementary', { name: '播放队列', exact: true });
   await expect(queue.getByRole('listitem')).toHaveCount(3);
-  await expect(queue.getByRole('listitem').nth(1)).toContainText('晴天测试曲');
+  await expect(queue.getByRole('listitem').nth(1)).toContainText('夜晚测试曲');
   await expect(queue.getByRole('button', { name: /上移队列|下移队列/ })).toHaveCount(0);
   async function drag(from: number, to: number) {
     const handle = await queue
@@ -223,13 +225,13 @@ test('下一首插入、三横杠鼠标或触摸拖动保持当前播放', async
     }
   }
   await drag(0, 2);
-  await expect(queue.getByRole('listitem').last()).toContainText('夜晚测试曲');
-  await expect(queue.locator('li.selected')).toContainText('夜晚测试曲');
+  await expect(queue.getByRole('listitem').last()).toContainText(firstTitle);
+  await expect(queue.locator('li.selected')).toContainText(firstTitle);
   expect((await audio(page)).source).toBe(before.source);
   expect((await audio(page)).time).toBeGreaterThanOrEqual(before.time);
   expect((await audio(page)).paused).toBe(false);
   await drag(2, 0);
-  await expect(queue.getByRole('listitem').first()).toContainText('夜晚测试曲');
+  await expect(queue.getByRole('listitem').first()).toContainText(firstTitle);
   const keyboardHandle = queue.getByRole('button', { name: '拖动队列第 1 首排序', exact: true });
   await keyboardHandle.focus();
   await keyboardHandle.press('ArrowDown');
@@ -237,7 +239,7 @@ test('下一首插入、三横杠鼠标或触摸拖动保持当前播放', async
     queue.getByRole('button', { name: '拖动队列第 2 首排序', exact: true }),
   ).toBeFocused();
   await page.keyboard.press('ArrowUp');
-  await expect(queue.getByRole('listitem').first()).toContainText('夜晚测试曲');
+  await expect(queue.getByRole('listitem').first()).toContainText(firstTitle);
   await queue.getByRole('button', { name: '关闭队列' }).click();
   await page.getByRole('button', { name: '下一首', exact: true }).click();
   await expect.poll(async () => (await audio(page)).source).not.toBe(before.source);
@@ -246,6 +248,7 @@ test('下一首插入、三横杠鼠标或触摸拖动保持当前播放', async
 
 test('长队列拖动边缘滚动、取消与暂停状态', async ({ page }, info) => {
   await login(page);
+  const firstTitle = (await tracks(page))[0].title;
   await page.getByRole('button', { name: '播放全部', exact: true }).click();
   await expect.poll(async () => (await audio(page)).time).toBeGreaterThan(0.2);
   await page.getByRole('button', { name: '暂停', exact: true }).click();
@@ -290,7 +293,7 @@ test('长队列拖动边缘滚动、取消与暂停状态', async ({ page }, inf
     await expect.poll(() => queue.evaluate((node) => node.scrollTop)).toBeGreaterThan(100);
     await pointer('cancel');
     await expect(queue.locator('.is-dragging')).toHaveCount(0);
-    await expect(queue.getByRole('listitem').first()).toContainText('夜晚测试曲');
+    await expect(queue.getByRole('listitem').first()).toContainText(firstTitle);
     await queue.evaluate((node) => {
       node.scrollTop = 0;
     });
@@ -298,7 +301,7 @@ test('长队列拖动边缘滚动、取消与暂停状态', async ({ page }, inf
     await pointer('move', edge);
     await expect.poll(() => queue.evaluate((node) => node.scrollTop)).toBeGreaterThan(250);
     await pointer('end', edge);
-    await expect(queue.locator('li.selected')).toContainText('夜晚测试曲');
+    await expect(queue.locator('li.selected')).toContainText(firstTitle);
     expect(
       await queue
         .locator('li.selected')
@@ -342,15 +345,15 @@ test('实际收听累计、一次计数、暂停跳转不增加与收听视图',
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   // Replaying the final queue entry must create a new listening session.
   await tab(page, '歌曲');
-  const sunny = (await tracks(page)).find((track) => track.title === '晴天测试曲')!;
+  const finalTrack = (await tracks(page)).at(-1)!;
   const sessions = new Set<string>();
   page.on('request', (request) => {
     if (!request.url().endsWith('/api/v1/listening') || request.method() !== 'POST') return;
     const payload = request.postDataJSON();
-    if (payload.track_id === sunny.id && payload.listened_ms === 0)
+    if (payload.track_id === finalTrack.id && payload.listened_ms === 0)
       sessions.add(payload.session_id);
   });
-  await page.getByRole('button', { name: '播放 晴天测试曲', exact: true }).click();
+  await page.getByRole('button', { name: `播放 ${finalTrack.title}`, exact: true }).click();
   await expect.poll(async () => (await audio(page)).time).toBeGreaterThan(0.2);
   await expect.poll(() => sessions.size).toBe(1);
   await page.getByLabel('播放进度').focus();

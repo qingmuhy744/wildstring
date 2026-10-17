@@ -7,6 +7,7 @@ import { ThemeControl } from './theme';
 import { clearOfflineAccount, offlineUser, setOfflineAccount } from './offline';
 import './style.css';
 import './completion.css';
+import './browse.css';
 
 type AuthStatus = { configured: boolean; authenticated: boolean; user?: User };
 

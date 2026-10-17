@@ -99,6 +99,34 @@ def main() -> None:
                 audio["TPE2"] = TPE2(encoding=3, text=["跨页测试艺人"])
                 audio["TRCK"] = TRCK(encoding=3, text=[str(index + 1)])
                 audio.save()
+        if os.environ.get("WILDSTRING_TEST_BROWSE_LIBRARY") == "1":
+            # Real scan/API fixture: each populated letter spans more than a page,
+            # and Z cannot be reached from the initially loaded window.
+            entries = [
+                (
+                    f"{prefix}歌曲 {number:03d}",
+                    f"{prefix}专辑 {number:03d}",
+                    f"{prefix}艺人 {number:03d}",
+                    1,
+                )
+                for prefix in ("Alpha", "北京", "夜晚", "最后")
+                for number in range(1, 61)
+            ]
+            entries.extend(
+                (f"紧凑测试曲 {number:02d}", "紧凑测试专辑", "紧凑测试艺人", number)
+                for number in range(1, 13)
+            )
+            entries.extend((name, name, name, 1) for name in ("123 数字", "9 数字", "🎵", "☂"))
+            for index, (title, album, artist, number) in enumerate(entries):
+                path = music / f"browse-{index:03d}.mp3"
+                shutil.copyfile(ROOT / "tests/fixtures/audio/playback.mp3", path)
+                audio = MP3(path)
+                audio["TIT2"] = TIT2(encoding=3, text=[title])
+                audio["TALB"] = TALB(encoding=3, text=[album])
+                audio["TPE1"] = TPE1(encoding=3, text=[artist])
+                audio["TPE2"] = TPE2(encoding=3, text=[artist])
+                audio["TRCK"] = TRCK(encoding=3, text=[str(number)])
+                audio.save()
         source = root / "source"
         source.mkdir()
         (source / "broken.flac").write_bytes(b"Not a valid music file")

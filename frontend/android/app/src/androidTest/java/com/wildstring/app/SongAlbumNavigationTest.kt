@@ -113,7 +113,13 @@ class SongAlbumNavigationTest {
                 }
                 assertEquals(repeatMode, vm.state.value.repeatMode)
                 assertFalse(requests.any { it.contains("/albums/wrong-album/") })
-                compose.runOnIdle { vm.back() }
+                // Same-album navigation still has an explicit player origin, even when the
+                // underlying catalog was already this album before expanding playback.
+                compose.onNodeWithContentDescription("返回上一页").performClick()
+                compose.onNodeWithTag("player-phone").assertIsDisplayed()
+                assertEquals("exact-album", vm.state.value.collectionId)
+                compose.onNodeWithContentDescription("收起播放器").performClick()
+                compose.onNodeWithContentDescription("返回上一页").performClick()
                 compose.waitUntil(10_000) { vm.state.value.collection == "artists" && !vm.state.value.loading }
                 assertEquals("guest", vm.state.value.collectionId)
             } finally { compose.runOnIdle { vm.controller?.stop(); vm.repository.session.invalidate() } }

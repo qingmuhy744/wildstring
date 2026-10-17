@@ -28,9 +28,15 @@ test('真实257首专辑：跨API分页收齐队列，从第201首连续播放�
       .getByRole('button', { name: '专辑', exact: true })
       .click();
   await page.getByRole('button', { name: /跨页连续专辑/ }).click();
-  await expect(page.locator('.pagination')).toContainText('第 1–200');
-  await page.getByRole('button', { name: '下一页', exact: true }).click();
-  await expect(page.locator('.pagination')).toContainText('第 201–257');
+  await expect(page.locator('.pagination')).toHaveCount(0);
+  for (let attempt = 0; attempt < 6; attempt++) {
+    if (await page.getByRole('button', { name: '播放 跨页测试曲 201', exact: true }).count()) break;
+    const before = await page.getByRole('table').getByRole('row').count();
+    await page.locator('.browse-boundary').last().scrollIntoViewIfNeeded();
+    await expect
+      .poll(async () => await page.getByRole('table').getByRole('row').count())
+      .toBeGreaterThan(before);
+  }
   const requests: number[] = [];
   page.on('request', (request) => {
     const url = new URL(request.url());

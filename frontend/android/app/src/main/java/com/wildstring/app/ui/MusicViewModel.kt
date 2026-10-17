@@ -37,7 +37,10 @@ data class MusicState(
     val playbackError: String? = null, val lyrics: Lyrics = Lyrics(), val lyricsLoading: Boolean = false,
     val lyricsError: String? = null, val offline: Boolean = false, val hasContent: Boolean = false,
     val role: String = "artist", val sort: String = "title", val albumFilter: String? = null, val collecting: Boolean = false,
-    val contentKey: String = "", val canGoBack: Boolean = false,
+    val contentKey: String = "", val canGoBack: Boolean = false, val navigationDepth: Int = 0,
+    val window: CatalogWindow = CatalogWindow(), val rangeLoading: Set<Int> = emptySet(),
+    val rangeErrors: Map<Int, String> = emptyMap(), val browseIndex: BrowseIndex? = null,
+
     val pendingFavorites: Set<String> = emptySet(), val mutationMessage: String? = null,
 )
 
@@ -57,6 +60,11 @@ class MusicViewModel @Inject constructor(
     private var selectionJob: Job? = null
     private var loadJob: Job? = null
     private var lyricJob: Job? = null
+    private val rangeJobs = mutableMapOf<Int, Job>()
+    private val windows = object : LinkedHashMap<String, CatalogWindow>(12, .75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, CatalogWindow>?) = size > 12
+    }
+    private val browseIndices = mutableMapOf<String, BrowseIndex>()
     private var progressJob: Job? = null
     private var albumNavigationJob: Job? = null
     private var lyricTrack: String? = null
@@ -74,17 +82,23 @@ class MusicViewModel @Inject constructor(
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, CatalogPage>?) = size > 24
     }
     private fun query() = mutable.value.let { CatalogQuery(it.tab, it.kind, it.title, it.query, it.offset, it.collection, it.collectionId, it.activePlaylist, it.role, it.sort, it.albumFilter) }
-    private fun MusicState.withPage(page: CatalogPage) = copy(tracks = page.tracks.map { track -> optimisticFavorites[track.id]?.let { track.copy(loved = it) } ?: track }, albums = page.albums, artists = page.artists,
+    private fun MusicState.withPage(page: CatalogPage) = copy(tracks = page.tracks.map { track -> track.copy(loved = optimisticFavorites[track.id] ?: repository.knownTracks[track.id]?.loved ?: track.loved) }, albums = page.albums, artists = page.artists,
         playlists = page.playlists, total = page.total, hasContent = true)
+    private fun MusicState.withWindow(value: CatalogWindow): MusicState {
+        val ordered = value.pages.toSortedMap().values
+        return withPage(CatalogPage(tracks = ordered.flatMap { it.tracks }, albums = ordered.flatMap { it.albums },
+            artists = ordered.flatMap { it.artists }, playlists = ordered.flatMap { it.playlists }, total = value.total)).copy(window = value)
+    }
+    private fun cancelRanges() { rangeJobs.values.forEach { it.cancel() }; rangeJobs.clear() }
     suspend fun cacheUsage(): Triple<Long, Long, Long> = withContext(Dispatchers.IO) { val (metadata, art) = repository.cache.usage(); Triple(metadata, art, audioCache.bytes()) }
     fun clearCache() = viewModelScope.launch {
         val owner = repository.session.cacheScope()
         withContext(Dispatchers.IO) { repository.cache.clear(owner); audioCache.clear(owner) }
-        if (owner == repository.session.cacheScope()) { pages.clear(); imageLoader.memoryCache?.clear() }
+        if (owner == repository.session.cacheScope()) { pages.clear(); windows.clear(); browseIndices.clear(); cancelRanges(); imageLoader.memoryCache?.clear() }
     }
     private fun requireOwner(owner: String?) { if (owner == null || owner != repository.session.cacheScope()) throw CancellationException("服务器或账号已变化。") }
     private suspend fun invalidateCatalog(owner: String? = repository.session.cacheScope()) {
-        requireOwner(owner); pages.clear()
+        requireOwner(owner); pages.clear(); windows.clear(); browseIndices.clear(); cancelRanges()
         withContext(Dispatchers.IO) { repository.cache.invalidateCatalog(owner) }
         requireOwner(owner)
     }
@@ -107,7 +121,7 @@ class MusicViewModel @Inject constructor(
             yield()
             if (selection == supersededInvalidationSelection || selection != repository.session.requestState()?.selection.orEmpty()) return@collect
             authGeneration++; optimisticFavorites.clear();
-            loadGeneration++; loadJob?.cancel(); lyricJob?.cancel(); lyricTrack = null; pages.clear(); tabs.clear(); history.clear(); repository.knownTracks.clear(); controller?.stop(); controller?.clearMediaItems()
+            loadGeneration++; loadJob?.cancel(); lyricJob?.cancel(); lyricTrack = null; pages.clear(); windows.clear(); browseIndices.clear(); cancelRanges(); tabs.clear(); history.clear(); repository.knownTracks.clear(); controller?.stop(); controller?.clearMediaItems()
             val message = invalidationMessage ?: "登录已失效，请重新登录。"
             invalidationMessage = null
             mutable.value = connectionState(message.takeIf { it.isNotBlank() })
@@ -126,7 +140,7 @@ class MusicViewModel @Inject constructor(
                 ?: repository.downloads.entries.value.filter { it.state == "complete" }.map { it.track }.takeIf { it.isNotEmpty() }?.let { CatalogPage(tracks = it, total = it.size) }
             requireSelection()
             if (saved != null && repository.session.cacheScope() != null) {
-                mutable.update { it.withPage(saved).copy(connected = true, offline = true, contentKey = query().key) }
+                mutable.update { it.withWindow(CatalogWindow(mapOf(0 to saved))).copy(connected = true, offline = true, contentKey = query().key) }
                 pages[query().key] = saved
             } else mutable.update { it.copy(connecting = true) }
             try {
@@ -136,7 +150,7 @@ class MusicViewModel @Inject constructor(
                     val changed = repository.acceptAccount(status.user)
                     if (generation != authGeneration) throw CancellationException("服务器已变化。")
                     if (changed) {
-                        pages.clear(); controller?.stop(); controller?.clearMediaItems()
+                        pages.clear(); windows.clear(); browseIndices.clear(); cancelRanges(); controller?.stop(); controller?.clearMediaItems()
                         mutable.update { connectionState().copy(account = status.user, connected = true) }
                     }
                     mutable.update { it.copy(connected = true, offline = false, account = status.user) }; load()
@@ -158,7 +172,7 @@ class MusicViewModel @Inject constructor(
         val generation = ++authGeneration
         invalidationMessage = null
         loadGeneration++; optimisticFavorites.clear(); favoriteJobs.clear(); playlistJobs.clear()
-        loadJob?.cancel(); lyricJob?.cancel(); lyricTrack = null; pages.clear(); tabs.clear(); history.clear()
+        loadJob?.cancel(); lyricJob?.cancel(); lyricTrack = null; pages.clear(); windows.clear(); browseIndices.clear(); cancelRanges(); tabs.clear(); history.clear()
         repository.client.dispatcher.cancelAll(); repository.downloads.pauseAll(); sleep.cancel()
         controller?.stop(); controller?.clearMediaItems(); repository.knownTracks.clear(); queueSnapshot = emptyList()
         withContext(Dispatchers.IO) { repository.database.queue().clear() }
@@ -267,32 +281,35 @@ class MusicViewModel @Inject constructor(
         show(CatalogQuery(tab = "library", kind = "albums", title = "曲库"))
     }
     private fun show(target: CatalogQuery, delayMs: Long = 0) {
-        val saved = pages[target.key]
+        val target = target.copy(offset = 0)
+        val savedWindow = windows[target.key] ?: pages[target.key]?.let { CatalogWindow(mapOf(0 to it)) }
         mutable.update { current ->
             val next = current.copy(tab = target.tab, kind = target.kind, title = target.title, query = target.query, offset = target.offset,
                 collection = target.collection, collectionId = target.collectionId, activePlaylist = target.playlist, role = target.role, sort = target.sort, albumFilter = target.albumFilter,
-                contentKey = target.key, canGoBack = history[target.tab]?.isNotEmpty() == true, error = null,
+                contentKey = target.key, canGoBack = history[target.tab]?.isNotEmpty() == true,
+                navigationDepth = history[target.tab]?.size ?: 0, error = null,
+                window = CatalogWindow(), rangeLoading = emptySet(), rangeErrors = emptyMap(), browseIndex = browseIndices[target.key],
                 tracks = emptyList(), albums = emptyList(), artists = emptyList(), playlists = emptyList(), total = 0, hasContent = false, loading = true)
-            if (saved == null) next else next.withPage(saved)
+            if (savedWindow == null) next else next.withWindow(savedWindow)
         }
-        load(delayMs)
+        load(delayMs, preserveWindow = true)
     }
     fun back() { history[mutable.value.tab]?.removeLastOrNull()?.let { show(it) } }
     private fun open(target: CatalogQuery) {
         history.getOrPut(mutable.value.tab) { ArrayDeque() }.apply { if (size >= 20) removeFirst(); addLast(query()) }
         show(target)
     }
-    fun kind(kind: String) { if (kind != mutable.value.kind) show(query().copy(kind = kind, offset = 0)) }
+    fun kind(kind: String) { if (kind != mutable.value.kind) show(query().copy(kind = kind, offset = 0, sort = "title")) }
     fun role(value: String) { show(query().copy(role = value, offset = 0)) }
     fun sort(value: String) { show(query().copy(sort = value, offset = 0)) }
     fun search(query: String) {
         show(this.query().copy(kind = if (query.isBlank()) "discover" else "tracks", query = query.take(256), offset = 0,
             title = "发现", collection = null, collectionId = null, playlist = null), 300)
     }
-    fun page(direction: Int) { show(query().copy(offset = (mutable.value.offset + direction * 50).coerceAtLeast(0))) }
-    fun openAlbum(album: Album) = open(if (mutable.value.collection == "artists") query().copy(kind = "tracks", albumFilter = album.id, title = album.title, query = "", offset = 0)
-        else query().copy(kind = "tracks", collection = "albums", collectionId = album.id, title = album.title, query = "", offset = 0, playlist = null, albumFilter = null))
-    fun openTrackAlbum(track: Track, onOpened: () -> Unit = {}) {
+    fun openAlbum(album: Album) = open(if (mutable.value.collection == "artists") query().copy(kind = "tracks", albumFilter = album.id, title = album.title, query = "", offset = 0, sort = "title")
+        else query().copy(kind = "tracks", collection = "albums", collectionId = album.id, title = album.title, query = "", offset = 0, playlist = null, albumFilter = null, sort = "title"))
+    fun cancelAlbumNavigation() { albumNavigationJob?.cancel() }
+    fun openTrackAlbum(track: Track, fromPlayer: Boolean = false, onOpened: () -> Unit = {}) {
         albumNavigationJob?.cancel()
         albumNavigationJob = viewModelScope.launch {
             val owner = repository.session.cacheScope()
@@ -312,7 +329,13 @@ class MusicViewModel @Inject constructor(
                 val destination = query().copy(kind = "tracks", collection = "albums", collectionId = id,
                     title = current.album ?: "未知专辑", query = "", offset = 0, playlist = null,
                     albumFilter = null, sort = "title")
-                if (destination.key != query().key) open(destination)
+                // Resolve the first page before dismissing the player. A failed lookup leaves it visible.
+                val first = repository.catalog(destination)
+                requireOwner(owner)
+                if (generation != authGeneration || catalogGeneration != loadGeneration) return@launch
+                pages[destination.key] = first
+                windows[destination.key] = CatalogWindow(mapOf(0 to first))
+                if (fromPlayer || destination.key != query().key) open(destination)
                 onOpened()
             } catch (e: CancellationException) { throw e }
             catch (e: Exception) {
@@ -323,24 +346,42 @@ class MusicViewModel @Inject constructor(
     }
     fun openArtist(artist: Artist) = open(query().copy(kind = "tracks", albumFilter = null, collection = "artists", collectionId = artist.id, title = artist.name, query = "", offset = 0, playlist = null))
     fun openPlaylist(playlist: Playlist) = open(query().copy(kind = "tracks", collection = "playlists", collectionId = playlist.id, playlist = playlist, title = playlist.name, query = "", offset = 0))
-    fun recent() = open(query().copy(kind = "recent", title = "最近听过", collection = null, collectionId = null, offset = 0, query = ""))
+    fun recent() = open(query().copy(kind = "recent", title = "最近听过", collection = null, collectionId = null, offset = 0, query = "",
+        sort = "last_played_at", playlist = null, albumFilter = null))
 
-    fun load(delayMs: Long = 0) {
-        loadJob?.cancel()
+    fun load(delayMs: Long = 0, preserveWindow: Boolean = false) {
+        loadJob?.cancel(); cancelRanges()
         val generation = ++loadGeneration
-        val request = query()
+        val request = query().copy(offset = 0)
+        val owner = repository.session.cacheScope()
+        if (!preserveWindow) { windows.remove(request.key); browseIndices.remove(request.key) }
         loadJob = viewModelScope.launch {
             if (!mutable.value.connected) return@launch
-            mutable.update { it.copy(loading = true, error = null, contentKey = request.key) }
+            mutable.update { it.copy(loading = true, error = null, rangeErrors = emptyMap(), rangeLoading = emptySet(), browseIndex = if (preserveWindow) it.browseIndex else null, contentKey = request.key) }
             try {
                 if (!mutable.value.hasContent) repository.cachedCatalog(request)?.let { cached ->
-                    if (generation == loadGeneration) { pages[request.key] = cached; mutable.update { it.withPage(cached) } }
+                    if (generation == loadGeneration) {
+                        val window = CatalogWindow(mapOf(0 to cached)); windows[request.key] = window
+                        pages[request.key] = cached; mutable.update { it.withWindow(window) }
+                    }
                 }
                 delay(delayMs)
                 val result = repository.catalog(request)
+                requireOwner(owner)
                 if (generation == loadGeneration) {
-                    pages[request.key] = result
-                    mutable.update { it.withPage(result).copy(offline = false) }
+                    val previous = windows[request.key]
+                    val window = if (previous != null && previous.total == result.total) previous.withPage(0, result) else CatalogWindow(mapOf(0 to result))
+                    pages[request.key] = result; windows[request.key] = window
+                    mutable.update { it.withWindow(window).copy(offline = false) }
+                }
+                if (request.indexed) {
+                    try {
+                        val index = repository.browseIndex(request)
+                        if (generation == loadGeneration && owner == repository.session.cacheScope() && index?.total == mutable.value.total) {
+                            browseIndices[request.key] = index; mutable.update { it.copy(browseIndex = index) }
+                        }
+                    } catch (e: CancellationException) { throw e }
+                    catch (_: Exception) { /* Basic browsing remains available when the index is unavailable. */ }
                 }
             } catch (e: CancellationException) { throw e }
             catch (e: Exception) {
@@ -348,6 +389,42 @@ class MusicViewModel @Inject constructor(
                     error = if (e is IOException && e !is javax.net.ssl.SSLException && it.hasContent) null else friendlyError(e)) }
             } finally { if (generation == loadGeneration) mutable.update { it.copy(loading = false) } }
         }
+    }
+
+    /** Fetch only missing visible slices; failures require explicit retry and never spin in a loop. */
+    fun ensureRange(index: Int, retry: Boolean = false) {
+        val current = mutable.value
+        if (current.loading || current.kind == "discover" || index !in 0 until current.total) return
+        val offset = index / CATALOG_PAGE_SIZE * CATALOG_PAGE_SIZE
+        if (current.window.pages.containsKey(offset) || offset in rangeJobs || (!retry && offset in current.rangeErrors)) return
+        val request = query().copy(offset = offset)
+        val generation = loadGeneration
+        val owner = repository.session.cacheScope()
+        val job = viewModelScope.launch(start = CoroutineStart.LAZY) {
+            mutable.update { it.copy(rangeLoading = it.rangeLoading + offset, rangeErrors = it.rangeErrors - offset) }
+            try {
+                val cached = if (current.offline) repository.cachedCatalog(request) else null
+                val page = cached ?: repository.catalog(request)
+                requireOwner(owner)
+                if (generation != loadGeneration) return@launch
+                require(page.total == mutable.value.total) { "曲库已变化，请刷新列表。" }
+                require(page.itemCount == minOf(CATALOG_PAGE_SIZE, page.total - offset)) { "列表读取不完整，请重试。" }
+                val window = mutable.value.window.withPage(offset, page)
+                windows[query().key] = window
+                mutable.update { it.withWindow(window).copy(offline = cached != null && current.offline) }
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) {
+                if (generation == loadGeneration && owner == repository.session.cacheScope())
+                    mutable.update { it.copy(rangeErrors = it.rangeErrors + (offset to friendlyError(e))) }
+            } finally {
+                if (generation == loadGeneration) {
+                    rangeJobs.remove(offset)
+                    mutable.update { it.copy(rangeLoading = it.rangeLoading - offset) }
+                }
+            }
+        }
+        rangeJobs[offset] = job
+        job.start()
     }
 
     fun deviceId() = sharing.deviceId

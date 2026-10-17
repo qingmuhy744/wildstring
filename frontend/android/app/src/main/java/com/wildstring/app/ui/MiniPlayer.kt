@@ -30,18 +30,18 @@ import androidx.compose.ui.unit.dp
     val colors = MaterialTheme.colorScheme
     val dark = LocalDarkAppearance.current || LocalRedCloth.current
     val tint = art?.tint ?: colors.secondary
-    Box(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), contentAlignment = Alignment.Center) {
+    Box(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 5.dp), contentAlignment = Alignment.Center) {
         Surface(Modifier.widthIn(max = 640.dp).fillMaxWidth().testTag("mini-player"), shape = RoundedCornerShape(36.dp),
             color = colors.surfaceContainerHigh, shadowElevation = 8.dp) {
             Box {
                 art?.let { Image(it.image, null, Modifier.matchParentSize(), contentScale = ContentScale.Crop,
                     alpha = if (LocalRedCloth.current) .10f else if (dark) .18f else .20f, filterQuality = FilterQuality.Medium) }
             Row(Modifier.background(Brush.horizontalGradient(listOf(tint.copy(alpha = if (dark) .28f else .15f), Color.Transparent)))
-                .padding(start = 8.dp, end = 8.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                .padding(start = 8.dp, end = 8.dp, top = 4.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 Row(Modifier.weight(1f).testTag("mini-player-open").clip(RoundedCornerShape(28.dp)).clickable(onClick = tactile(expand)),
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Box(Modifier.clip(CircleShape)) { Cover(vm, track.id.takeIf { track.hasCover }, track.title, Modifier.size(54.dp)) }
-                    Column(Modifier.weight(1f).padding(vertical = 8.dp)) {
+                    Box(Modifier.clip(CircleShape)) { Cover(vm, track.id.takeIf { track.hasCover }, track.title, Modifier.size(44.dp)) }
+                    Column(Modifier.weight(1f).padding(vertical = 4.dp)) {
                         Text(track.title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Text(track.artist, style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }

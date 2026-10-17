@@ -121,11 +121,12 @@ test('歌曲与专辑切换、真实封面和专辑曲号顺序', async ({ page 
   await page.getByRole('button', { name: '播放专辑', exact: true }).click();
   await expect.poll(async () => (await audio(page)).time).toBeGreaterThan(0.1);
   await expect(page.getByRole('region', { name: '音乐播放器' })).toContainText('晴天测试曲');
+  await page.getByRole('button', { name: '返回专辑', exact: false }).click();
   await page
     .getByRole('group', { name: '曲库显示方式' })
     .getByRole('button', { name: '歌曲', exact: true })
     .click();
-  await expect(page.getByRole('table').getByRole('row').nth(1)).toContainText('夜晚测试曲');
+  await expect(page.getByRole('table').getByRole('row').nth(1)).toContainText('晴天测试曲');
   expect((await audio(page)).paused).toBe(false);
 });
 
@@ -272,7 +273,7 @@ test('全屏展开收起连续播放、切歌、焦点边界与 Esc 返回', asy
   expect(await page.evaluate(() => !!document.activeElement?.closest('[role="dialog"]'))).toBe(
     true,
   );
-  await expect(dialog.locator('.lyrics-toolbar > span')).toHaveText('同名 LRC');
+  await expect(dialog.locator('.lyrics-toolbar > span')).toHaveText('内嵌歌词');
   await dialog.getByRole('button', { name: '暂停', exact: true }).click();
   await dialog.getByLabel('播放进度').focus();
   await dialog.getByLabel('播放进度').press('Home');
