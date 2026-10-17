@@ -78,6 +78,11 @@ class LyricsEditor:
             ).fetchone()
         override = row["text"] if row else None
         effective = parse_lyrics(override, "user") if override is not None else observed
+        if row and row["selected_candidate"]:
+            from wildstring.library.online_lyrics import selected_lyrics
+
+            with self.repository.database.connect() as connection:
+                effective = selected_lyrics(connection, row["selected_candidate"]) or effective
         return {
             "track_id": track_id,
             "version": row["version"] if row else 1,
@@ -104,7 +109,7 @@ class LyricsEditor:
                 raise HTTPException(409, "lyrics_version_conflict")
             connection.execute(
                 "INSERT INTO track_lyrics(track_id,text,version) VALUES (?,?,?) "
-                "ON CONFLICT(track_id) DO UPDATE SET text=excluded.text,version=excluded.version",
+                "ON CONFLICT(track_id) DO UPDATE SET text=excluded.text,version=excluded.version,selected_candidate=NULL",
                 (track_id, body.text, body.version + 1),
             )
         return self.read(track_id)

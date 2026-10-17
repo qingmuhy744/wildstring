@@ -139,6 +139,7 @@ jobs:
           npm --prefix frontend/web ci
           make build-web
           python3 scripts/package_release.py --tag "$RELEASE_TAG" --output-dir artifacts/release
+          python3 scripts/package_source_plugins.py --output-dir artifacts/release
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: wildstring-android-release

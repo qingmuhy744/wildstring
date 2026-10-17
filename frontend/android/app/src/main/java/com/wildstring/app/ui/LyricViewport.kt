@@ -20,6 +20,9 @@ import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -65,7 +68,15 @@ import kotlin.math.abs
                 val line = lines[index]
                 val highlighted = if (follow) active == index else candidate == index
                 Box(Modifier.fillMaxWidth().padding(horizontal = 40.dp, vertical = 14.dp), contentAlignment = Alignment.Center) {
-                    Text(line.text.ifBlank { "♪" }, Modifier.testTag("lyric-line-$index").then(
+                    val text = buildAnnotatedString {
+                        if (line.words.isNullOrEmpty()) append(line.text.ifBlank { "♪" })
+                        else line.words.forEach { word ->
+                            val progress = ((position - word.startMs).toFloat() / (word.endMs - word.startMs).coerceAtLeast(1)).coerceIn(0f, 1f)
+                            val color = androidx.compose.ui.graphics.lerp(MaterialTheme.colorScheme.onSurface.copy(alpha = .45f), MaterialTheme.colorScheme.primary, progress)
+                            withStyle(SpanStyle(color = color)) { append(word.text) }
+                        }
+                    }
+                    Text(text, Modifier.testTag("lyric-line-$index").then(
                         if (line.timeMs != null) Modifier.combinedClickable(onClickLabel = "选择歌词时间",
                             onLongClickLabel = "查看大封面", onLongClick = onArtwork, hapticFeedbackEnabled = false, onClick = {
                             follow = false

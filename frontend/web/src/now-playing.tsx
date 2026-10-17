@@ -481,11 +481,19 @@ function LyricsPanel({ player }: { player: Player }) {
         ? '同名文本'
         : lyrics?.source === 'user'
           ? '自定义歌词'
-          : '内嵌歌词';
+          : lyrics?.source_url
+            ? `歌词 · ${lyrics.source}`
+            : '内嵌歌词';
   return (
     <div className="fullscreen-lyrics">
       <div className="lyrics-toolbar">
-        <span>{lyrics && lyrics.kind !== 'none' ? source : '歌词'}</span>
+        {lyrics?.source_url ? (
+          <a href={lyrics.source_url} target="_blank" rel="noreferrer">
+            {source}
+          </a>
+        ) : (
+          <span>{lyrics && lyrics.kind !== 'none' ? source : '歌词'}</span>
+        )}
         <button
           className="text-button"
           onClick={() => setFollow(true)}
@@ -560,7 +568,30 @@ function LyricsPanel({ player }: { player: Player }) {
                         }
                       }}
                     >
-                      {line.text || '♪'}
+                      {line.words?.length
+                        ? line.words.map((word, wordIndex) => {
+                            const progress =
+                              Math.max(
+                                0,
+                                Math.min(
+                                  1,
+                                  (player.position * 1000 - word.start_ms) /
+                                    Math.max(1, word.end_ms - word.start_ms),
+                                ),
+                              ) * 100;
+                            return (
+                              <span
+                                key={wordIndex}
+                                className="lyric-word"
+                                style={{
+                                  backgroundImage: `linear-gradient(90deg, var(--accent) ${progress}%, var(--muted) ${progress}%)`,
+                                }}
+                              >
+                                {word.text}
+                              </span>
+                            );
+                          })
+                        : line.text || '♪'}
                     </button>
                   )}
                 </li>

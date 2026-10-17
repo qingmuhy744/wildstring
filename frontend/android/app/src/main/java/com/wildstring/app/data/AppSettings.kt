@@ -21,6 +21,9 @@ class AppSettings @Inject constructor(@param:ApplicationContext private val cont
         prefs.getString("playback_style", "cover").takeIf { it in listOf("cover", "vinyl", "cassette") } ?: "cover",
         SongListSize.fromStored(runCatching { prefs.getString("song_list_size", null) }.getOrNull())))
     val state = mutable.asStateFlow()
+    private val gainMutable = MutableStateFlow(0L)
+    val gainRevision = gainMutable.asStateFlow()
+    fun gainChanged() { gainMutable.value += 1 }
     fun songListSize(size: SongListSize) {
         prefs.edit().putString("song_list_size", size.key).apply(); mutable.value = mutable.value.copy(songListSize = size)
     }

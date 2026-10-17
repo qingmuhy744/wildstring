@@ -105,14 +105,27 @@ class BrowseIndex(BaseModel):
     groups: list[BrowseGroup]
 
 
+class LyricWord(BaseModel):
+    start_ms: int
+    end_ms: int
+    text: str
+
+
 class LyricLine(BaseModel):
     time_ms: int | None
     text: str
+    end_ms: int | None = None
+    words: list[LyricWord] | None = None
 
 
 class Lyrics(BaseModel):
     kind: Literal["none", "plain", "synced"]
-    source: Literal["sidecar_lrc", "embedded", "sidecar_text", "user"] | None
+    source: str | None
+    source_id: str | None = None
+    source_url: str | None = None
+    offset_ms: int | None = None
+    format: str | None = None
+    layers: dict[str, list[LyricLine]] | None = None
     lines: list[LyricLine]
 
 
@@ -224,7 +237,9 @@ def library_router(repository: LibraryRepository, auth: Auth, transcoding) -> AP
             },
         )
 
-    @router.get("/tracks/{track_id}/lyrics", response_model=Lyrics)
+    @router.get(
+        "/tracks/{track_id}/lyrics", response_model=Lyrics, response_model_exclude_unset=True
+    )
     def lyrics(track_id: str, response: Response):
         response.headers["Cache-Control"] = "private, no-store"
         return assets.lyrics(track_id)

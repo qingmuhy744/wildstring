@@ -31,6 +31,7 @@ def pre18(connection):
 
 
 def pre19(connection):
+    pre20(connection)
     for table in (
         "agent_search_settings",
         "agent_search_usage",
@@ -44,3 +45,19 @@ def pre19(connection):
     columns = {row[1] for row in connection.execute("PRAGMA table_info(agent_connections)")}
     if "options" in columns:
         connection.execute("ALTER TABLE agent_connections DROP COLUMN options")
+
+
+def pre20(connection):
+    for table in (
+        "source_plugin_packages",
+        "source_plugin_settings",
+        "lyric_candidates",
+        "lyric_lookup_jobs",
+        "playback_gain_settings",
+        "playback_gain_adjustments",
+        "loudness_analysis",
+    ):
+        connection.execute("DROP TABLE IF EXISTS " + table)
+    columns = {row[1] for row in connection.execute("PRAGMA table_info(track_lyrics)")}
+    if "selected_candidate" in columns:
+        connection.execute("ALTER TABLE track_lyrics DROP COLUMN selected_candidate")

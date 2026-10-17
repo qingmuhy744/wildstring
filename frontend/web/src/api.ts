@@ -51,6 +51,20 @@ export class ApiError extends Error {
 }
 
 const messages: Record<string, string> = {
+  source_plugin_invalid_zip: '插件 ZIP 不符合格式，请检查包结构和 API 版本。',
+  source_plugin_zip_too_large: '插件 ZIP 超过 16 MiB。',
+  source_plugin_identity_conflict: '此 ZIP 的插件 ID 不同，请选择对应插件的升级包。',
+  source_plugin_version_conflict: '插件配置已变化，请刷新后重新操作。',
+  source_plugin_disable_first: '请先停用插件，再卸载。',
+  source_plugin_dependency_missing: '运行环境缺少插件依赖，请按插件说明配置。',
+  source_plugin_invalid_config: '请检查插件必填配置。',
+  source_plugins_disabled: '请先导入并启用提供歌词的数据源插件。',
+  source_plugin_timeout: '插件查询超时，请检查服务地址或稍后重试。',
+  source_plugin_auth_or_rejected: '上游拒绝请求，请检查插件服务和平台授权。',
+  source_plugin_worker_failed: '插件运行失败，请检查插件与运行环境的兼容性。',
+  playback_gain_version_conflict: '响度设置已在其他设备变化，请重新打开后保存。',
+  loudness_tool_missing: '服务端缺少 FFmpeg，请更新官方镜像或安装后重试。',
+
   draft_version_conflict: '草案已变化，请刷新并重新核对当前版本。',
   draft_not_approved: '请先核对并批准当前草案版本。',
   draft_not_found: '草案已不可用，请刷新列表。',
@@ -188,8 +202,14 @@ export interface AlbumPage {
 }
 export interface Lyrics {
   kind: 'none' | 'plain' | 'synced';
-  source: 'sidecar_lrc' | 'embedded' | 'sidecar_text' | 'user' | null;
-  lines: { time_ms: number | null; text: string }[];
+  source: string | null;
+  source_url?: string;
+  layers?: Record<string, { time_ms: number | null; text: string }[]>;
+  lines: {
+    time_ms: number | null;
+    text: string;
+    words?: { start_ms: number; end_ms: number; text: string }[];
+  }[];
 }
 
 export interface Artist {

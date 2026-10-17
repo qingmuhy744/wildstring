@@ -60,6 +60,30 @@ UA = "WildString/0.3.3 (https://github.com/qingmuhy744/wildstring)"
 logger = logging.getLogger(__name__)
 
 
+def plugin_cover(value, hosts=()):
+    try:
+        parsed = urlsplit(value or "")
+        host = parsed.hostname or ""
+        if (
+            parsed.scheme in {"http", "https"}
+            and parsed.port in {None, 80, 443}
+            and not parsed.username
+            and not parsed.password
+            and not parsed.fragment
+            and not any(ord(c) < 32 for c in value)
+            and any(host == domain or host.endswith("." + domain) for domain in hosts)
+        ):
+            return (
+                "https://"
+                + parsed.netloc.split(":")[0]
+                + parsed.path
+                + ("?" + parsed.query if parsed.query else "")
+            )
+    except ValueError:
+        pass
+    return None
+
+
 @contextmanager
 def request_lock(path, timeout_limit):
     """Interactive queries can shorten the entire provider wait, including its lock."""
@@ -100,11 +124,17 @@ class ProviderError(Exception):
 
 
 class SafeRedirect(HTTPRedirectHandler):
+    def __init__(self, cover_hosts=()):
+        super().__init__()
+        self.cover_hosts = cover_hosts
+
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         parsed = urlsplit(newurl)
-        allowed = parsed.hostname in {"coverartarchive.org", "archive.org"} or (
-            parsed.hostname or ""
-        ).endswith(".archive.org")
+        allowed = (
+            bool(plugin_cover(newurl, self.cover_hosts))
+            or parsed.hostname in {"coverartarchive.org", "archive.org"}
+            or (parsed.hostname or "").endswith(".archive.org")
+        )
         if (
             parsed.scheme != "https"
             or not allowed
@@ -149,6 +179,12 @@ class Providers:
         self.storage_identity = None
         self.history_cleaned_at = 0.0
         self.network_test_lock = threading.Lock()
+        from wildstring.music_sources import MusicSources
+
+        self.sources = MusicSources(self)
+        from wildstring.loudness import Loudness
+
+        self.loudness = Loudness(repository, self.exit)
         self.worker_lock = FileLock(
             str(self.directory / "worker.lock"), timeout=0, thread_local=False
         )
@@ -290,7 +326,7 @@ class Providers:
                         if deadline is not None
                         else 15,
                         limit=8 * 1024 * 1024 if image else 2 * 1024 * 1024,
-                        redirect=SafeRedirect() if provider == "caa" else None,
+                        redirect=SafeRedirect(self.cover_hosts()) if provider == "caa" else None,
                         opener_factory=build_opener,
                         service=provider,
                     )
@@ -340,13 +376,22 @@ class Providers:
             except ValueError:
                 raise ProviderError("provider_invalid_response") from None
 
+    def cover_hosts(self):
+        return tuple(
+            {
+                host
+                for plugin in self.sources.plugins.values()
+                for host in plugin.manifest.cover_hosts
+            }
+        )
+
     def cover_data(self, url, **network):
         """Use the configured server proxy and the same image guards for preview and apply."""
         from wildstring.library.assets import TrackAssets
 
         try:
             parsed = urlsplit(url)
-            valid = (
+            valid = plugin_cover(url, self.cover_hosts()) or (
                 parsed.scheme in {"http", "https"}
                 and parsed.hostname == "coverartarchive.org"
                 and parsed.port in (None, 80, 443)
@@ -363,7 +408,12 @@ class Providers:
         if not valid:
             raise HTTPException(422, "invalid_cover_url")
         try:
-            data = self.request("https://coverartarchive.org" + parsed.path, image=True, **network)
+            data = self.request(
+                plugin_cover(url, self.cover_hosts())
+                or "https://coverartarchive.org" + parsed.path,
+                image=True,
+                **network,
+            )
             thumbnail = TrackAssets(self.repository).thumbnail(data, 768)
             if thumbnail is None:
                 raise ProviderError("invalid_cover", False)
@@ -661,8 +711,17 @@ class Providers:
                         if isinstance(error, ProviderError)
                         else "lastfm_invalid_response"
                     )
-        output.sort(key=lambda item: config["priority"].index(item[0]))
+        plugin_output, plugin_warnings = self.sources.suggestions(track)
+        output.extend(plugin_output)
+        warnings.extend(plugin_warnings)
+        priority = self.source_priority()
+        output.sort(
+            key=lambda item: priority.index(item[0]) if item[0] in priority else len(priority)
+        )
         return output, warnings
+
+    def source_priority(self):
+        return [value["id"] for value in self.sources.catalog()] + self.settings()["priority"]
 
     def process_job(self, job):
         track = self.repository.track(job["track_id"])
@@ -684,8 +743,11 @@ class Providers:
                     if not fields and not cover:
                         continue
                     if cover:
+                        public_cover = plugin_cover(cover, self.cover_hosts())
                         parsed = urlsplit(cover)
-                        if (
+                        if public_cover:
+                            cover = public_cover
+                        elif (
                             parsed.hostname != "coverartarchive.org"
                             or parsed.scheme not in {"http", "https"}
                             or not re.fullmatch(
@@ -745,6 +807,12 @@ class Providers:
                         "UPDATE provider_jobs SET status='queued' WHERE status='running'"
                     )
                     connection.execute(
+                        "UPDATE lyric_lookup_jobs SET status='queued' WHERE status='running'"
+                    )
+                    connection.execute(
+                        "UPDATE loudness_analysis SET status='queued' WHERE status='running'"
+                    )
+                    connection.execute(
                         "UPDATE lastfm_outbox SET status=CASE WHEN kind='now_playing' THEN 'cancelled' ELSE 'queued' END WHERE status='sending'"
                     )
                 while not self.exit.wait(1):
@@ -779,6 +847,10 @@ class Providers:
 
     def step(self):
         self.check_storage()
+        if self.sources.step():
+            return
+        if self.loudness.step():
+            return
         clock = time.time()
         if clock - self.history_cleaned_at >= 3600:
             clear_history(self.repository, clock - RETENTION_DAYS * 86400)
@@ -1209,11 +1281,21 @@ class Providers:
             for result in suggestions:
                 result["fields"] = json.loads(result["fields"])
                 result["match"] = json.loads(result["match"])
-            priority = self.settings()["priority"]
+            priority = self.source_priority()
             suggestions.sort(
-                key=lambda item: (priority.index(item["provider"]), -item["match"].get("score", 0))
+                key=lambda item: (
+                    priority.index(item["provider"])
+                    if item["provider"] in priority
+                    else len(priority),
+                    -item["match"].get("score", 0),
+                )
             )
-            return {"suggestions": suggestions, "jobs": jobs}
+            return {
+                "suggestions": suggestions,
+                "jobs": jobs,
+                "provider_names": {value["id"]: value["name"] for value in self.sources.catalog()}
+                | {"musicbrainz": "MusicBrainz", "lastfm": "Last.fm"},
+            }
 
         @router.post("/manage/providers/suggestions/{identity}/apply", dependencies=mutation)
         def apply(identity: str, body: ApplySuggestion, user: admin):

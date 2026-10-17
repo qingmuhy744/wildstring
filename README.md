@@ -1,5 +1,7 @@
 # 野弦 WildString
 
+0.5.0 更新：官方联网检索与记忆、独立 ZIP 数据源插件（QQ／酷狗／网易云）、逐字歌词、ReplayGain 与专辑／单曲手动增益。使用及验证边界见[发布说明](docs/releases/v0.5.0.md)。
+
 [![CI](https://github.com/qingmuhy744/wildstring/actions/workflows/ci.yml/badge.svg)](https://github.com/qingmuhy744/wildstring/actions/workflows/ci.yml)
 
 **AI native 的私人音乐播放器。** 从自己的音乐收藏出发，用自然语言找歌、生成歌单，让收藏的音乐有新的回响。

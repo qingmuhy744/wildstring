@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { api } from './api';
 import { MetadataRefreshDialog, ProviderPriority } from './metadata-refresh';
 import { JobDiagnostics, ProviderNetworkTest } from './provider-diagnostics';
+import { SourcePlugins } from './source-plugins';
 
 type Config = {
   version: number;
@@ -230,6 +231,7 @@ export function ProviderSettings() {
           Cover Art Archive
         </a>
       </p>
+      <SourcePlugins />
     </section>
   );
 }
@@ -380,6 +382,7 @@ type Suggestion = {
 };
 type Results = {
   suggestions: Suggestion[];
+  provider_names?: Record<string, string>;
   jobs: { id: string; status: string; error: string | null; warnings: string }[];
 };
 const labels: Record<string, string> = {
@@ -489,7 +492,13 @@ export function MetadataSuggestions({
           {s.status === 'ignored' && <p className="muted">此建议已忽略。</p>}
           {s.status === 'applied' && <p className="muted">此建议已应用。</p>}
           <a href={s.source_url} target="_blank" rel="noreferrer">
-            {s.provider === 'musicbrainz' ? 'MusicBrainz' : 'Last.fm'} 来源
+            {result.provider_names?.[s.provider] ||
+              (s.provider === 'musicbrainz'
+                ? 'MusicBrainz'
+                : s.provider === 'lastfm'
+                  ? 'Last.fm'
+                  : s.provider)}{' '}
+            来源
           </a>
           {s.match?.method === 'acoustid' && (
             <p className="muted">
@@ -554,7 +563,7 @@ export function MetadataSuggestions({
               <CandidateCover key={s.id} id={s.id} />
               <p>
                 <a href={s.cover_url.replace(/^http:/, 'https:')} target="_blank" rel="noreferrer">
-                  查看 CAA 封面候选
+                  查看来源封面候选
                 </a>{' '}
                 <button
                   disabled={busy || s.status === 'ignored' || s.metadata_version !== version}

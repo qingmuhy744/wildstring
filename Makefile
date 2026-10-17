@@ -12,7 +12,7 @@ LOG_ARGS ?= -f --tail=100
 SCAN_ARGS ?=
 export UV_CACHE_DIR ?= $(CURDIR)/.cache/uv
 export PRE_COMMIT_HOME ?= $(CURDIR)/.cache/pre-commit
-RUN = $(UV) run --frozen --project backend
+RUN = $(UV) run --frozen --project backend --extra community-sources
 ANDROID = ./frontend/android/gradlew -p frontend/android --console=plain
 ANDROID_TEST_ARGS ?=
 DOCKER = $(COMPOSE) --project-directory "$(CURDIR)" --env-file .env -p "$(PROJECT)" -f deploy/compose.yaml
@@ -26,8 +26,12 @@ env: ## Create local .env and directories without overwriting settings
 	$(PYTHON) scripts/setup.py
 
 sync: ## Install locked Python and Web dependencies
-	$(UV) sync --locked --project backend
+	$(UV) sync --locked --project backend --extra community-sources
 	npm --prefix frontend/web ci
+
+.PHONY: source-plugins
+source-plugins: ## Package independently importable community source ZIPs
+	$(RUN) python scripts/package_source_plugins.py
 
 setup: env sync ## Set up dependencies and install the local Git hook
 	$(RUN) pre-commit install --install-hooks
@@ -146,7 +150,7 @@ docker-up: docker-build ## Build and start the local container; wait for health
 
 docker-test: env ## Run all backend tests with the container FFmpeg
 	WILDSTRING_IMAGE=$(TEST_RUNTIME_IMAGE) $(DOCKER) build
-	docker build --target builder -f deploy/Dockerfile -t $(TEST_BUILDER_IMAGE) .
+	docker build --target builder -f deploy/Dockerfile --build-arg HTTP_PROXY="$(DOCKER_HTTP_PROXY)" --build-arg HTTPS_PROXY="$(DOCKER_HTTPS_PROXY)" -t $(TEST_BUILDER_IMAGE) .
 	WILDSTRING_TEST_RUNTIME_IMAGE=$(TEST_RUNTIME_IMAGE) WILDSTRING_TEST_BUILDER_IMAGE=$(TEST_BUILDER_IMAGE) WILDSTRING_TEST_IMAGE=$(TEST_IMAGE) $(DOCKER) -f deploy/compose.tests.yaml build tests
 	WILDSTRING_TEST_RUNTIME_IMAGE=$(TEST_RUNTIME_IMAGE) WILDSTRING_TEST_BUILDER_IMAGE=$(TEST_BUILDER_IMAGE) WILDSTRING_TEST_IMAGE=$(TEST_IMAGE) $(DOCKER) -f deploy/compose.tests.yaml run --rm --no-deps tests
 

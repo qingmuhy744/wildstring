@@ -33,6 +33,13 @@ class AgentApiException(val status: Int, val code: String, val traceId: String?)
 internal fun diagnosticId(value: String?): String? = value?.takeIf { it.matches(Regex("[a-fA-F0-9]{16,64}")) }
 internal fun agentError(status: Int, code: String, traceId: String?): String {
     val description = when {
+        code == "source_plugin_invalid_zip" -> "插件 ZIP 不符合格式，请检查包结构与 API 版本。"
+        code == "source_plugin_identity_conflict" -> "此 ZIP 的插件 ID 不同，请选择对应插件的升级包。"
+        code == "source_plugin_dependency_missing" -> "运行环境缺少插件依赖，请按插件说明配置。"
+        code == "source_plugins_disabled" -> "请先导入并启用提供歌词的数据源插件。"
+        code == "source_plugin_auth_or_rejected" -> "上游拒绝请求，请检查插件服务和平台授权。"
+        code == "source_plugin_timeout" -> "插件查询超时，请检查服务地址或稍后重试。"
+        code == "loudness_tool_missing" -> "服务端缺少 FFmpeg，请更新官方镜像或安装后重试。"
         code == "conversation_busy" -> "这段对话正在生成回复，请完成后再操作。"
         code == "search_provider_key_required" -> "请填写所选搜索服务的 API Key，再启用联网。"
         code == "search_daily_budget_exhausted" -> "今日搜索与读取请求已达到上限。"

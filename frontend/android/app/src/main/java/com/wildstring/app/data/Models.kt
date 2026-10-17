@@ -28,7 +28,8 @@ data class Playlist(val id: String, val name: String, val kind: String, val vers
     @SerializedName("cover_track_id") val coverTrackId: String?, @SerializedName("definition") private val definitionValue: com.google.gson.JsonElement? = null) {
     val definition: com.google.gson.JsonObject? get() = definitionValue?.takeIf { it.isJsonObject }?.asJsonObject
 }
-data class LyricLine(@SerializedName("time_ms") val timeMs: Long?, val text: String)
+data class LyricWord(@SerializedName("start_ms") val startMs: Long, @SerializedName("end_ms") val endMs: Long, val text: String)
+data class LyricLine(@SerializedName("time_ms") val timeMs: Long?, val text: String, val words: List<LyricWord>? = null)
 data class Lyrics(val kind: String = "none", val lines: List<LyricLine> = emptyList(), val source: String? = null)
 data class FavoriteRequest(val loved: Boolean)
 data class PlaylistRequest(val name: String, val kind: String = "manual", val definition: com.google.gson.JsonObject? = null)

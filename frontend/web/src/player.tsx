@@ -12,6 +12,7 @@ import {
   type PlaybackMode,
 } from './playback-state';
 import { offlineAudio, usingOfflineAccess } from './offline';
+import { GainControls, usePlaybackGain } from './playback-gain';
 
 export function usePlayer(userId: string) {
   const saved = useRef(readPlayback(userId));
@@ -44,6 +45,7 @@ export function usePlayer(userId: string) {
   const sourceRequest = useRef<AbortController | null>(null);
   const pendingSeek = useRef<number | null>(null);
   const current = queue[index];
+  const playbackGain = usePlaybackGain(audio, current?.id, userId, volume);
 
   const saveRef = useRef(() => {});
   saveRef.current = () => {
@@ -120,10 +122,6 @@ export function usePlayer(userId: string) {
   }, [mode, queue]);
 
   useEffect(() => {
-    if (audio.current) audio.current.volume = volume;
-  }, [volume]);
-
-  useEffect(() => {
     const element = audio.current;
     const currentTracker = tracker.current;
     const flush = () => {
@@ -162,6 +160,7 @@ export function usePlayer(userId: string) {
   }, [buffering, current]);
 
   function play() {
+    playbackGain.prepare();
     if (loading.current) {
       desiredPlay.current = true;
       return;
@@ -617,6 +616,7 @@ export function PlayerBar({
       <div className="player-options">
         <SleepControl player={player} />
         <QualityControl player={player} />
+        <GainControls trackId={current?.id} />
         {current && <FavoriteButton track={current} favorites={favorites} />}
         <button
           className={`lyrics-toggle icon-button ${lyricsOpen ? 'active' : ''}`}

@@ -126,6 +126,7 @@ internal fun LyricsEditorPanel(vm: MusicViewModel, track: Track) {
             } } }, enabled = record != null && !action.busy) { Text("保存歌词") }
         }
         TextButton({ scope.launch { action.run { val r = record!!; vm.repository.api().objectPut(vm.repository.url("api", "v1", "manage", "tracks", track.id, "lyrics"), obj("version" to r.get("version"), "file_version" to r.get("file_version"), "text" to null)); load(); vm.refreshLyrics(); action.message = "已恢复文件歌词" } } }, enabled = record != null && !action.busy && !timing) { Text("恢复文件歌词") }
+        if (!timing) OnlineLyricsPanel(vm, track) { scope.launch { load() } }
     }
 }
 
@@ -158,7 +159,7 @@ internal fun SuggestionsPanel(vm: MusicViewModel, track: Track) {
                 val stale = suggestion.get("metadata_version")?.asInt != currentVersion
                 val id = suggestion.text("id"); val fields = suggestion.getAsJsonObject("fields") ?: JsonObject()
                 Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp)) {
-                    Text(if (suggestion.text("provider") == "musicbrainz") "MusicBrainz" else "Last.fm", style = MaterialTheme.typography.titleMedium)
+                    Text(results?.getAsJsonObject("provider_names")?.text(suggestion.text("provider"))?.takeIf { it.isNotEmpty() } ?: suggestion.text("provider"), style = MaterialTheme.typography.titleMedium)
                     if (stale) Text("歌曲信息已变化，请重新查询。", color = MaterialTheme.colorScheme.error)
                     fields.entrySet().forEach { (key, value) -> Row(verticalAlignment = Alignment.CenterVertically) {
                         Checkbox(key in chosen[id].orEmpty(), { enabled -> chosen[id] = if (enabled) chosen[id].orEmpty() + key else chosen[id].orEmpty() - key }, enabled = !stale && !action.busy)

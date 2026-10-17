@@ -131,6 +131,26 @@ class Repository @Inject constructor(val session: SessionStore, val client: OkHt
         requireProfile(owner); return result
     }
     private suspend fun save(key: String, value: Any, profile: String?, revision: Long? = null) = withContext(Dispatchers.IO) { cache.put(key, gson.toJson(value).toByteArray(), profile, revision = revision) }
+    suspend fun playbackGain(id: String): com.google.gson.JsonObject {
+        val owner = session.cacheScope(); requireProfile(owner)
+        val value = api().objectGet(url("api", "v1", "tracks", id, "playback-gain"))
+        requireProfile(owner); save("playback-gain:$id", value, owner); return value
+    }
+    suspend fun cachedPlaybackGain(id: String): com.google.gson.JsonObject? = saved("playback-gain:$id", com.google.gson.JsonObject::class.java)
+    suspend fun feature(path: String, method: String = "GET", body: com.google.gson.JsonObject = com.google.gson.JsonObject()): com.google.gson.JsonObject {
+        val owner = session.cacheScope(); requireProfile(owner)
+        val target = url("api", "v1", *path.split('/').toTypedArray())
+        val response = when (method) {
+            "POST" -> api().agentPost(target, body, if (path.endsWith("/test")) AgentRequestPolicy() else null, RequestOwner(owner!!)); "PUT" -> api().agentPut(target, body, RequestOwner(owner!!))
+            "DELETE" -> api().agentDelete(target, RequestOwner(owner!!)); else -> api().agentGet(target, RequestOwner(owner!!))
+        }
+        requireProfile(owner)
+        if (!response.isSuccessful) {
+            val code = response.errorBody()?.use { runCatching { gson.fromJson(it.string(), com.google.gson.JsonObject::class.java).text("detail") }.getOrDefault("") }.orEmpty()
+            throw AgentApiException(response.code(), code, diagnosticId(response.headers()["X-Wildstring-Trace-Id"]))
+        }
+        return response.body() ?: com.google.gson.JsonObject()
+    }
     suspend fun cachedCatalog(query: CatalogQuery): CatalogPage? = saved("catalog:${query.key}", CatalogPage::class.java)?.let { it.copy(tracks = it.tracks.map { track -> rememberTrack(track) }) }
     private fun <T> Page<T>.checked(query: CatalogQuery): Page<T> {
         require(offset == query.offset && limit == CATALOG_PAGE_SIZE && total >= 0) { "列表位置发生变化，请刷新重试。" }

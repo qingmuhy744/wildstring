@@ -18,6 +18,9 @@ import androidx.media3.common.util.BitmapLoader
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.DefaultRenderersFactory
+import androidx.media3.exoplayer.audio.AudioSink
+import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.MediaSession
@@ -58,6 +61,26 @@ class PlaybackService : MediaSessionService() {
     @Inject lateinit var settings: AppSettings
     private lateinit var player: AbsolutePlayer
     private lateinit var engine: ExoPlayer
+    private val gainProcessor = GainAudioProcessor()
+    private var gainRequest: Job? = null
+
+    private fun refreshGain() {
+        gainRequest?.cancel()
+        val item = engine.currentMediaItem ?: return
+        val track = item.mediaMetadata.extras?.getString("track_id") ?: return
+        val owner = repository.session.cacheScope() ?: return
+        if (item.mediaMetadata.extras?.getString("profile") != owner) { gainProcessor.factor = 1f; return }
+        gainRequest = scope.launch {
+            fun apply(value: com.google.gson.JsonObject?) {
+                if (owner == repository.session.cacheScope() && engine.currentMediaItem?.mediaId == item.mediaId)
+                    gainProcessor.factor = value?.get("factor")?.takeUnless { it.isJsonNull }?.asFloat?.takeIf { it.isFinite() }?.coerceIn(0.001f, 32f) ?: 1f
+            }
+            runCatching { repository.cachedPlaybackGain(track) }.getOrNull()?.let(::apply)
+            try { apply(repository.playbackGain(track)) }
+            catch (error: CancellationException) { throw error }
+            catch (_: Exception) { /* Original playback and cached gain survive network failure. */ }
+        }
+    }
     private var session: MediaSession? = null
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val saveMutex = Mutex()
@@ -76,7 +99,12 @@ class PlaybackService : MediaSessionService() {
 
     override fun onCreate() {
         super.onCreate()
-        engine = ExoPlayer.Builder(this)
+        val renderers = object : DefaultRenderersFactory(this) {
+            override fun buildAudioSink(context: android.content.Context, enableFloatOutput: Boolean, enableAudioOutputPlaybackParameters: Boolean): AudioSink =
+                DefaultAudioSink.Builder(context).setAudioProcessors(arrayOf(gainProcessor)).setEnableFloatOutput(false)
+                    .setEnableAudioOutputPlaybackParameters(enableAudioOutputPlaybackParameters).build()
+        }
+        engine = ExoPlayer.Builder(this, renderers)
             .setMediaSourceFactory(DefaultMediaSourceFactory(resolver.factory(audioCache.factory(repository.client))))
             .setAudioAttributes(AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MUSIC).build(), true)
             .setHandleAudioBecomingNoisy(true).setWakeMode(C.WAKE_MODE_NETWORK).build()
@@ -123,6 +151,7 @@ class PlaybackService : MediaSessionService() {
         }
         player.addListener(object : Player.Listener {
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                gainProcessor.factor = 1f; refreshGain()
                 if (mediaItem?.mediaId == listeningEntry && reason == Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED) return
                 if (reason in listOf(Player.MEDIA_ITEM_TRANSITION_REASON_AUTO, Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT)) completeFeedback()
                 if (sleep.state.value.endsOnTransition(listeningEntry, mediaItem?.mediaId,
@@ -180,6 +209,7 @@ class PlaybackService : MediaSessionService() {
             }
         }
         scope.launch { resolver.changes.collect { player.refreshResolution() } }
+        scope.launch { settings.gainRevision.collect { refreshGain() } }
         scope.launch { settings.state.map { it.aacBitrate }.distinctUntilChanged().drop(1).collect { player.quality(it) } }
         scope.launch { repository.session.invalidations.collect { selection ->
             // StateFlow/SharedFlow can resume Main.immediate inline while SessionStore holds its monitor.
@@ -208,6 +238,7 @@ class PlaybackService : MediaSessionService() {
     }
 
     private fun discardPlaybackOwner() {
+        gainRequest?.cancel(); gainProcessor.factor = 1f
         listeningOwner = null; queueOwner = null; listeningTrack = null; listeningEntry = null
         queueEntries = emptyList(); clock = ListeningClock(); sentMs = 0
     }
@@ -274,7 +305,7 @@ class PlaybackService : MediaSessionService() {
             catch (error: IOException) { if (error is javax.net.ssl.SSLException || repository.session.cacheScope() != profile) return; true }
             val items = mutableListOf<MediaItem>()
             for (entry in entries.take(5000)) {
-                if (player.mediaItemCount != 0) return
+                if (player.mediaItemCount != 0) { return }
                 try {
                     val track = (if (offline) repository.cachedTrack(entry.trackId) else repository.track(entry.trackId)) ?: continue
                     if (track.status == "available") items += track.mediaItem(repository, entry.entryId)

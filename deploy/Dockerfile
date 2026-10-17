@@ -14,9 +14,9 @@ ENV UV_PYTHON_DOWNLOADS=never UV_LINK_MODE=copy
 WORKDIR /app
 RUN python -m pip install --no-cache-dir "uv==${UV_VERSION}"
 COPY backend/pyproject.toml backend/uv.lock ./
-RUN uv sync --locked --no-dev --no-install-project
+RUN uv sync --locked --no-dev --extra community-sources --no-install-project
 COPY backend/src/ ./src/
-RUN uv sync --locked --no-dev --no-editable
+RUN uv sync --locked --no-dev --extra community-sources --no-editable
 
 FROM ${PYTHON_IMAGE} AS runtime
 ENV PATH="/app/.venv/bin:$PATH" \

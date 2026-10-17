@@ -33,7 +33,7 @@ class AgentContractsTest {
     @Test fun diagnosticsOnlyAcceptBoundedHexAndMissingFeatureIsClear() {
         assertNull(diagnosticId("token=do-not-display")); assertNull(diagnosticId("https://private.example/path"))
         val trace = "a".repeat(32)
-        assertEquals(trace, diagnosticId(trace)); assertTrue(agentError(404, "not_found", trace).contains("0.4.0"))
+        assertEquals(trace, diagnosticId(trace)); assertTrue(agentError(404, "not_found", trace).contains("同步升级"))
         assertTrue(agentError(502, "upstream_failed", trace).contains(trace))
         assertFalse(agentError(502, "upstream_failed", "token=private").contains("private"))
     }

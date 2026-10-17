@@ -11,6 +11,7 @@ COPY backend/pyproject.toml backend/uv.lock ./
 COPY backend/src/ ./src/
 RUN uv sync --locked
 COPY backend/tests/ ./tests/
+COPY plugins/ /workspace/plugins/
 COPY tests/fixtures/audio/ /workspace/tests/fixtures/audio/
 USER 10001:10001
 CMD ["/workspace/backend/.venv/bin/python", "-m", "pytest", "-p", "no:cacheprovider", "-c", "pyproject.toml", "tests"]

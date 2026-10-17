@@ -18,6 +18,11 @@ dependencies = [
   "uvicorn>=0.34,<1",
 ]
 
+[project.optional-dependencies]
+community-sources = [
+    "qqmusic-api-python==0.8.2",
+]
+
 [dependency-groups]
 dev = [
   "bandit>=1.8,<2",

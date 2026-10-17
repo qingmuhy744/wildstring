@@ -35,6 +35,7 @@ internal fun MobileShortcuts(admin: Boolean, unread: Int = 0, open: (String) -> 
             AssistChip({ open(route) }, label = { Text(title) })
         }
         if (admin) AssistChip({ open("management") }, label = { Text("曲库管理") })
+        if (admin) AssistChip({ open("source-plugins") }, label = { Text("数据源插件") })
     }
 }
 
@@ -45,6 +46,7 @@ internal fun FeatureDialog(vm: MusicViewModel, route: String, track: Track? = nu
         "assistant" -> "野弦助手"; "notifications" -> "通知与任务"
         "external" -> "发现新音乐"; "rankings" -> "收听排行"; "daily" -> "每日推荐"; "ai" -> "AI 找歌与歌单"; "offline" -> "离线保存"; "statistics" -> "收听统计"; "devices" -> "其他设备继续"
         "playlist" -> if (playlist == null) "新建歌单" else "编辑歌单"; "order" -> "歌单排序"; "multi" -> "多选加入歌单"
+        "gain" -> "响度均衡与手动调整"; "source-plugins" -> "数据源 ZIP 插件"
         "metadata" -> "编辑歌曲信息"; "lyrics" -> "编辑歌词"; "suggestions" -> "更新元数据与建议"; else -> "曲库管理"
     }
     Dialog(onDismissRequest = dismiss, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
@@ -81,10 +83,12 @@ internal fun FeatureDialog(vm: MusicViewModel, route: String, track: Track? = nu
                         "playlist" -> PlaylistEditor(vm, playlist, dismiss)
                         "order" -> playlist?.let { PlaylistOrder(vm, it, dismiss) }
                         "multi" -> MultiSelectPanel(vm, dismiss)
+                        "gain" -> track?.let { PlaybackGainPanel(vm, it) }
                         else -> if (account.account?.role == "admin") when (route) {
                             "metadata" -> track?.let { MetadataPanel(vm, it) }
                             "lyrics" -> track?.let { LyricsEditorPanel(vm, it) }
                             "suggestions" -> track?.let { SuggestionsPanel(vm, it) }
+                            "source-plugins" -> SourcePluginsPanel(vm)
                             else -> ManagementPanel(vm)
                         } else Text("需要管理员权限。", Modifier.padding(24.dp))
                     }
