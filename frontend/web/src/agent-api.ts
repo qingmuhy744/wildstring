@@ -77,6 +77,11 @@ export interface NotificationPage extends AgentPage<AgentNotification> {
   high_watermark: number;
 }
 export interface AgentConnection {
+  protocol?: string;
+  provider?: string;
+  reasoning_effort?: string;
+  max_output_tokens?: number;
+  native_search?: boolean;
   id: string;
   name: string;
   scope: 'personal' | 'instance';
@@ -97,6 +102,13 @@ export interface AgentConnection {
   read_only?: boolean;
 }
 export interface ConversationMessage {
+  sources?: {
+    id: string;
+    title: string;
+    url: string;
+    retrieved_at?: string;
+    published_at?: string;
+  }[];
   id: string;
   role: 'user' | 'assistant';
   content: string;
@@ -113,6 +125,7 @@ export interface AgentRun {
   trace_id?: string;
 }
 export interface Conversation {
+  context_summary?: { summary: string; updated_at: string } | null;
   id: string;
   title: string;
   created_at: string;

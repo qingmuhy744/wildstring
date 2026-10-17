@@ -178,6 +178,32 @@
 .workspace-form .span-all {
   grid-column: 1/-1;
 }
+.workspace-form :is(input:not([type='checkbox']), select, textarea),
+.assistant-research :is(input:not([type='checkbox']), select, textarea) {
+  background: var(--workspace-bg);
+  color: var(--workspace-text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+.assistant-research > h2:not(:first-child) {
+  margin-top: 32px;
+}
+.assistant-research form {
+  display: grid;
+  gap: 16px;
+  margin: 18px 0;
+}
+.assistant-research form > button {
+  justify-self: start;
+}
+.assistant-research label {
+  line-height: 1.7;
+}
+.assistant-research .workspace-row p {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
 .workspace-form fieldset {
   border: 0;
   padding: 0;

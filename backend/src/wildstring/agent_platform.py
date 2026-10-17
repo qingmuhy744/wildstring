@@ -839,9 +839,10 @@ class Core:
 from wildstring.agent_ai import Assistant  # noqa: E402
 from wildstring.agent_automation import Automation  # noqa: E402
 from wildstring.agent_notifications import Notifications  # noqa: E402
+from wildstring.agent_research import Research  # noqa: E402
 
 
-class AgentPlatform(Core, Notifications, Automation, Assistant):
+class AgentPlatform(Core, Notifications, Automation, Assistant, Research):
     def __init__(self, repository, auth, transport=None):
         import threading
 

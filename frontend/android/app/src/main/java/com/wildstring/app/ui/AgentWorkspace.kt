@@ -17,6 +17,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -36,7 +37,7 @@ import java.time.format.DateTimeFormatter
     key(owner) {
         var tab by remember { mutableStateOf(initialTab) }
         var selected by remember { mutableStateOf<String?>(null) }
-        val tabs = listOf("chat" to "助手", "notifications" to "通知", "drafts" to "草案", "tasks" to "巡检", "connections" to "AI 连接", "channels" to "通知设置")
+        val tabs = listOf("chat" to "助手", "notifications" to "通知", "drafts" to "草案", "tasks" to "巡检", "connections" to "AI 连接", "research" to "联网与记忆", "channels" to "通知设置")
         Column(Modifier.fillMaxSize().testTag("agent-workspace")) {
             PrimaryScrollableTabRow(tabs.indexOfFirst { it.first == tab }.coerceAtLeast(0), edgePadding = 8.dp) {
                 tabs.forEach { (id, title) -> Tab(tab == id, { tab = id; selected = null }, text = { Text(title) }, modifier = Modifier.testTag("agent-tab-$id")) }
@@ -48,6 +49,7 @@ import java.time.format.DateTimeFormatter
                     "drafts" -> AgentDrafts(vm, selected)
                     "tasks" -> AgentTasks(vm, selected)
                     "connections" -> AgentConnections(vm)
+                    "research" -> AgentResearch(vm)
                     else -> AgentChannels(vm)
                 }
             }
@@ -168,6 +170,8 @@ private fun displayValue(value: com.google.gson.JsonElement?): String = when { v
 }
 
 @Composable private fun AgentChat(vm: MusicViewModel, openDraft: (String) -> Unit) {
+    val links = LocalUriHandler.current
+    var showSummary by remember { mutableStateOf(false) }
     var conversations by remember { mutableStateOf<List<JsonObject>>(emptyList()) }; var conversation by remember { mutableStateOf<JsonObject?>(null) }
     var connections by remember { mutableStateOf<List<JsonObject>>(emptyList()) }; var connection by remember { mutableStateOf<String?>(null) }
     var input by remember { mutableStateOf("") }; var history by remember { mutableStateOf(false) }
@@ -187,9 +191,15 @@ private fun displayValue(value: com.google.gson.JsonElement?): String = when { v
         }
         AgentConnectionChoice(connections, connection, !action.busy) { connection = it }
         LazyColumn(Modifier.weight(1f).fillMaxWidth().testTag("agent-messages"), verticalArrangement = Arrangement.spacedBy(12.dp), contentPadding = PaddingValues(vertical = 12.dp)) {
+            conversation?.get("context_summary")?.takeIf { it.isJsonObject }?.asJsonObject?.let { summary -> item {
+                TextButton({ showSummary = !showSummary }) { Text("已压缩较早对话 · 查看上下文摘要") }
+                if (showSummary) { Text(summary.text("summary"), style = MaterialTheme.typography.bodySmall); TextButton({ scope.launch { action.run { val id = conversation!!.text("id"); vm.agent.request("conversations/$id/summary", "DELETE"); conversation = vm.agent.request("conversations/$id") } } }, enabled = !action.busy) { Text("清除摘要") } }
+            } }
             if (conversation == null) item { AgentEmpty("试试“把我很久没听的收藏整理成歌单”。助手会先生成草案，等你确认。未配置 AI 时仍可本地找歌。") }
             items(conversation?.objects("messages") ?: emptyList(), key = { it.text("id") }) { message ->
-                AgentCard { Text(if (message.text("role") == "user") "你" else "野弦", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary); SelectionContainer { Text(message.text("content")) } }
+                AgentCard { Text(if (message.text("role") == "user") "你" else "野弦", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary); SelectionContainer { Text(message.text("content")) }; message.objects("sources").forEach { source ->
+                    source.text("url").takeIf { it.startsWith("https://") }?.let { url -> TextButton({ runCatching { links.openUri(url) }.onFailure { action.message = "无法打开来源。" } }) { Text("来源：${source.text("title")}") } }
+                } }
             }
             conversation?.objects("runs")?.forEach { run -> item(key = "run-${run.text("id")}") {
                 val fallback = run.text("status") == "local_fallback"
@@ -422,6 +432,11 @@ internal fun connectionBudget(connection: JsonObject): String {
 }
 
 @Composable private fun AgentConnectionForm(vm: MusicViewModel, original: JsonObject?, dismiss: () -> Unit, saved: () -> Unit) {
+    var protocol by remember { mutableStateOf(original?.text("protocol")?.ifBlank { "chat_completions" } ?: "chat_completions") }
+    var provider by remember { mutableStateOf(original?.text("provider")?.ifBlank { "generic" } ?: "generic") }
+    var effort by remember { mutableStateOf(original?.text("reasoning_effort")?.ifBlank { "auto" } ?: "auto") }
+    var outputLimit by remember { mutableStateOf((original?.number("max_output_tokens", 2048) ?: 2048).toString()) }
+    var nativeSearch by remember { mutableStateOf(original?.flag("native_search") ?: false) }
     var name by remember { mutableStateOf(original?.text("name") ?: "我的 AI") }; var base by remember { mutableStateOf(original?.text("base_url") ?: "") }
     var model by remember { mutableStateOf(original?.text("model") ?: "") }; var secret by remember { mutableStateOf("") }; var timeout by remember { mutableStateOf((original?.number("timeout") ?: 30).toString()) }
     var budget by remember { mutableStateOf((original?.number("daily_call_budget") ?: 100).toString()) }; var enabled by remember { mutableStateOf(original?.flag("enabled") ?: true) }
@@ -431,11 +446,16 @@ internal fun connectionBudget(connection: JsonObject): String {
     AlertDialog(onDismissRequest = { if (!action.busy) dismiss() }, title = { Text(if (original == null) "添加 AI 连接" else "编辑 AI 连接") }, text = {
         Column(Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             OutlinedTextField(name, { name = it }, label = { Text("名称") }, singleLine = true)
-            OutlinedTextField(base, { base = it }, label = { Text("Chat Completions 服务地址") }, singleLine = true)
+            ResearchChoice("API 协议", protocol, listOf("chat_completions" to "Chat Completions", "responses" to "Responses")) { protocol = it; nativeSearch = false }
+            ResearchChoice("供应商", provider, listOf("generic" to "通用兼容接口", "openai" to "OpenAI", "deepseek" to "DeepSeek", "qwen" to "千问 / 百炼", "gemini" to "Gemini 兼容接口")) { provider = it; nativeSearch = false }
+            OutlinedTextField(base, { base = it }, label = { Text("模型 API 服务地址") }, singleLine = true)
             OutlinedTextField(model, { model = it }, label = { Text("模型") }, singleLine = true)
             OutlinedTextField(secret, { secret = it }, label = { Text(if (original?.flag("has_api_key") == true) "API Key（留空保留）" else "API Key") }, singleLine = true, visualTransformation = PasswordVisualTransformation())
             OutlinedTextField(timeout, { timeout = it.filter(Char::isDigit) }, label = { Text("请求超时秒数") }, singleLine = true)
             OutlinedTextField(budget, { budget = it.filter(Char::isDigit) }, label = { Text("每日调用预算") }, singleLine = true)
+            ResearchChoice("推理强度", effort, listOf("auto" to "沿用模型默认", "none" to "none", "low" to "low", "medium" to "medium", "high" to "high", "max" to "max", "xhigh" to "xhigh")) { effort = it }
+            OutlinedTextField(outputLimit, { outputLimit = it.filter(Char::isDigit) }, label = { Text("单次输出 Token 上限") }, singleLine = true)
+            if (protocol == "responses" && provider in listOf("openai", "deepseek", "qwen")) { Row(verticalAlignment = Alignment.CenterVertically) { Text("模型原生联网搜索", Modifier.weight(1f)); Switch(nativeSearch, { nativeSearch = it }) }; Text("按供应商规则计费，单次模型请求可能多次搜索，不受独立搜索请求额度限制。", style = MaterialTheme.typography.bodySmall) }
             Row(verticalAlignment = Alignment.CenterVertically) { Text("启用连接", Modifier.weight(1f)); Switch(enabled, { enabled = it }) }
             Row(verticalAlignment = Alignment.CenterVertically) { Text("允许自动巡检使用", Modifier.weight(1f)); Switch(background, { background = it }) }
             Text("用于定时巡检等自动任务；手动开始无需开启。", style = MaterialTheme.typography.bodySmall)
@@ -446,6 +466,7 @@ internal fun connectionBudget(connection: JsonObject): String {
         }
     }, confirmButton = { TextButton({ scope.launch { action.run {
         val body = jsonBody("name" to name, "base_url" to base.trim(), "model" to model.trim(), "timeout" to (timeout.toIntOrNull() ?: 0), "daily_call_budget" to (budget.toIntOrNull() ?: 0), "enabled" to enabled, "background_allowed" to background)
+        body.addProperty("protocol", protocol); body.addProperty("provider", provider); body.addProperty("reasoning_effort", effort); body.addProperty("max_output_tokens", outputLimit.toIntOrNull() ?: 0); body.addProperty("native_search", nativeSearch)
         if (original == null) body.addProperty("scope", if (instance) "instance" else "personal") else body.addProperty("version", original.number("version"))
         if (admin && instance) body.addProperty("shared", shared)
         if (secret.isNotBlank()) body.addProperty("api_key", secret)

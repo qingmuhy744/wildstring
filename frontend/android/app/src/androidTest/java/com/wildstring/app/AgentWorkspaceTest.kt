@@ -27,6 +27,8 @@ class AgentWorkspaceTest {
         @Volatile var connections = "[]"
         @Volatile var history = "[]"
         @Volatile var rejectHistoryDelete = false
+        @Volatile var memoryContent = ""
+        var memoryVersion = 1; var searchEnabled = false
         val trace = "b".repeat(32)
         fun json(body: String) = MockResponse().setHeader("Content-Type", "application/json").setHeader("X-Wildstring-Trace-Id", trace).setBody(body)
         fun draft() = """{"id":"draft-one","kind":"playlist","title":"久未听的收藏","payload":{"name":"重新听见","track_ids":["song-a","song-b"]},"before":{"name":"原歌单"},"evidence":[{"source":"library","summary":"从本人收藏挑选"}],"status":"$status","version":$version,"created_at":"2026-10-17T12:00:00Z","trace_id":"$trace"}"""
@@ -38,6 +40,17 @@ class AgentWorkspaceTest {
                 if (request.method != "GET" && path.contains("/agent/")) writes.incrementAndGet()
                 if (path.endsWith("/auth/status")) return@synchronized json("""{"configured":true,"authenticated":${request.getHeader("Cookie") != null},"user":{"id":"agent-alice","username":"alice","role":"admin"}}""")
                 if (path.endsWith("/auth/login")) return@synchronized json("{}").setHeader("Set-Cookie", "wildstring_session=agent-alice; Path=/; Max-Age=3600")
+                if (path == "/api/v1/agent/search-settings") {
+                    if (request.method == "PUT") searchEnabled = body.flag("enabled")
+                    return@synchronized json("""{"provider":"deepseek","enabled":$searchEnabled,"daily_budget":10,"version":1,"has_api_key":false,"requests_today":0}""")
+                }
+                if (path == "/api/v1/agent/assistant-preferences") return@synchronized json("""{"retention_days":30,"context_summary":true,"long_term_memory":true}""")
+                if (path == "/api/v1/agent/memories" || path == "/api/v1/agent/memories/memory-one") {
+                    if (request.method == "POST" || request.method == "PATCH") { memoryContent = body.text("content"); memoryVersion++ }
+                    if (request.method == "DELETE") memoryContent = ""
+                    val memory = jsonBody("id" to "memory-one", "content" to memoryContent, "version" to memoryVersion)
+                    return@synchronized if (request.method == "GET") json("""{"items":${if (memoryContent.isEmpty()) "[]" else "[$memory]"},"total":${if (memoryContent.isEmpty()) 0 else 1},"limit":100,"offset":0}""") else json(memory.toString())
+                }
                 if (path == "/api/v1/agent/notifications/read") { read = true; return@synchronized json("{}") }
                 if (path == "/api/v1/agent/notifications") return@synchronized json("""{"items":[{"id":"notice-one","event_id":"event-one","title":"新草案待确认","summary":"已生成 1 份草案，尚未应用。","severity":"info","draft_id":"draft-one","trace_id":"$trace","created_at":"2026-10-17T12:00:00Z","read_at":${if (read) "\"2026-10-17T12:01:00Z\"" else "null"},"version":${if (read) 2 else 1}}],"total":1,"limit":100,"offset":0,"unread_count":${if (read) 0 else 1},"high_watermark":${if (read) 2 else 1},"next_cursor":"c${if (read) 2 else 1}"}""")
                 if (path == "/api/v1/agent/connections") return@synchronized json("""{"items":$connections,"total":${JsonParser.parseString(connections).asJsonArray.size()},"limit":100,"offset":0}""").setBodyDelay(350, java.util.concurrent.TimeUnit.MILLISECONDS)
@@ -76,6 +89,45 @@ class AgentWorkspaceTest {
         val address = fixture.server.url("/").newBuilder().host("127.0.0.1").build().toString()
         compose.runOnIdle { vm.connect(address, "alice", "synthetic-password", true) }
         compose.waitUntil(20_000) { vm.state.value.connected && !vm.state.value.connecting }
+    }
+    @Test fun researchSettingsAndExplicitMemoryCanBeSavedEditedAndDeleted() {
+        val vm = vm()
+        Fixture().use { fixture -> try {
+            connect(vm, fixture)
+            compose.onNodeWithContentDescription("设置").performClick()
+            compose.onNodeWithText("野弦助手 / 通知与草案").performScrollTo().performClick()
+            compose.onNodeWithTag("agent-tab-research").performScrollTo().performClick()
+            compose.waitUntil(15_000) { fixture.requests.any { it.first == "GET /api/v1/agent/search-settings" } }
+            compose.onNodeWithTag("agent-memory-input").performScrollTo().performTextInput("优先录音室版本")
+            compose.onNodeWithTag("agent-memory-save").performScrollTo().performClick()
+            compose.waitUntil(15_000) { fixture.memoryContent == "优先录音室版本" }
+            // Flush focus/IME work before waiting on the follow-up network request.
+            compose.waitForIdle()
+            compose.waitUntil(15_000) { fixture.requests.count { it.first == "GET /api/v1/agent/memories" } >= 2 }
+            compose.waitForIdle()
+            compose.onNodeWithTag("agent-research").performScrollToNode(hasText("编辑记忆"))
+            compose.waitUntil(10_000) { compose.onAllNodes(hasText("编辑记忆") and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithText("编辑记忆", substring = false).performScrollTo().performClick()
+            compose.onNodeWithTag("agent-memory-input").performScrollTo()
+            compose.waitForIdle()
+            compose.onNodeWithTag("agent-memory-input").performClick()
+            compose.waitForIdle()
+            compose.onNodeWithTag("agent-memory-input").performTextReplacement("优先原版专辑，保留发行年份")
+            compose.onNodeWithTag("agent-memory-save").performScrollTo().performClick()
+            compose.waitUntil(15_000) { fixture.memoryContent.contains("保留发行年份") }
+            compose.waitForIdle()
+            InstrumentationRegistry.getInstrumentation().uiAutomation.waitForIdle(500, 5_000)
+            compose.onNodeWithTag("agent-research").performScrollToNode(hasText("删除记忆"))
+            compose.waitUntil(15_000) { compose.onAllNodes(hasText("优先原版专辑，保留发行年份") and !hasSetTextAction()).fetchSemanticsNodes().isNotEmpty() }
+            compose.waitUntil(10_000) { compose.onAllNodes(hasText("删除记忆") and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithText("优先原版专辑，保留发行年份").assertExists()
+            capture("research-memory-phone.png")
+            compose.onNodeWithText("删除记忆", substring = false).performScrollTo().assertIsEnabled().performClick()
+            compose.waitUntil(5_000) { compose.onAllNodesWithTag("agent-memory-delete-confirm").fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithTag("agent-memory-delete-confirm").performClick()
+            compose.waitUntil(15_000) { fixture.memoryContent.isEmpty() }
+            assertTrue(fixture.requests.any { it.first == "PATCH /api/v1/agent/memories/memory-one" && it.second.number("version") >= 2 })
+        } finally { compose.runOnIdle { vm.repository.session.invalidate() } } }
     }
     @Test fun historyRenameDeleteAndBusyFailurePreserveCurrentConversation() {
         val vm = vm()
@@ -236,7 +288,7 @@ class AgentWorkspaceTest {
             fixture.server.dispatcher = object : Dispatcher() { override fun dispatch(request: RecordedRequest) = fixture.json("""{"detail":"not_found"}""").setResponseCode(404) }
             runBlocking { vm.agent.refreshInbox(force = true) }
             assertEquals(false, vm.agent.inbox.value.supported)
-            assertTrue(vm.agent.inbox.value.error!!.contains("0.4.0"))
+            assertTrue(vm.agent.inbox.value.error!!.contains("服务端"))
             assertTrue(vm.agent.inbox.value.error!!.contains(fixture.trace))
             assertEquals(0, fixture.writes.get())
         } finally { compose.runOnIdle { vm.repository.session.invalidate() } } }

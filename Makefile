@@ -187,3 +187,7 @@ test-agent: ## Verify controlled tools, drafts, notifications, inspection and th
 
 test-network: ## Verify probes and production requests share actual proxy and model clients
 	$(RUN) pytest -c backend/pyproject.toml backend/tests/test_outbound.py backend/tests/test_provider_network.py backend/tests/test_ai_config.py
+
+.PHONY: test-research
+test-research: ## Verify model protocols, live-search contracts, summaries and user-owned memories
+	$(RUN) pytest -c backend/pyproject.toml backend/tests/test_agent_research.py

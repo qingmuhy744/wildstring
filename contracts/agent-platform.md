@@ -49,3 +49,13 @@
 ## 安全和运行边界
 
 共享曲库只有一份，个人对象全部用户隔离；角色和 enabled 在每个调用及后台批次重新检查。外部输出仅业务投影，无绝对路径、密钥、歌词或音频。模型/Telegram 明确启用后才调用。Telegram 已确认 sent 不重发；响应丢失记 unknown，不自动重试。真实服务验证与合成自动化结果分别记录。
+
+## 0.5.0 助手扩展
+
+模型连接增加可选 `protocol`、`provider`、`reasoning_effort`、`max_output_tokens`、`native_search`；未提交选项时保留原值。`GET/PUT /search-settings` 管理本人的独立检索连接，`POST /search-settings/test` 消耗一次检索请求（缓存命中除外）。密钥只接受写入，不回传。
+
+`GET/POST /memories` 与 `PATCH/DELETE /memories/{id}` 为本人显式记忆管理，修改使用版本校验；不开放为模型或 MCP 写工具。`assistant-preferences` 增加 `context_summary` 与 `long_term_memory`，旧客户端只提交保留天数不会重置开关。
+
+对话返回可选 `context_summary`，消息返回 `sources`；`DELETE /conversations/{id}/summary` 清除摘要，生成中拒绝操作。来源 URL 保留必要查询参数。来源数组表示检索取得的资料，不代表每条资料都支持全部回答。
+
+详细执行和验证边界见[助手联网与记忆](../docs/architecture/assistant-research.md)。

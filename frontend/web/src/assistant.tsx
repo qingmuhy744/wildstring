@@ -256,6 +256,25 @@ export function Assistant({
                   : '之前选择的连接已不可用，请重新选择。'}
             </p>
             <div ref={messages} aria-live="polite">
+              {conversation?.context_summary && (
+                <details className="workspace-notice">
+                  <summary>已压缩较早对话 · 查看上下文摘要</summary>
+                  <p>{conversation.context_summary.summary}</p>
+                  <button
+                    disabled={busy}
+                    onClick={() => {
+                      if (confirm('清除本对话摘要？聊天记录保留，下次长对话可能重新摘要。'))
+                        void api(`/agent/conversations/${conversation.id}/summary`, {
+                          method: 'DELETE',
+                        })
+                          .then(() => setConversation({ ...conversation, context_summary: null }))
+                          .catch((reason) => setError(errorText(reason)));
+                    }}
+                  >
+                    清除摘要
+                  </button>
+                </details>
+              )}
               {!conversation?.messages?.length && (
                 <div className="workspace-empty">试试“找出许嵩的歌，先给我一份歌单草案”。</div>
               )}
@@ -265,6 +284,18 @@ export function Assistant({
                     {message.role === 'user' ? '你' : '野弦'} · {localDate(message.created_at)}
                   </small>
                   <p>{message.content}</p>
+                  {!!message.sources?.length && (
+                    <ul aria-label="联网来源">
+                      {message.sources.map((source) => (
+                        <li key={source.id}>
+                          <a href={source.url} target="_blank" rel="noopener noreferrer">
+                            {source.title}
+                          </a>
+                          {source.published_at && <small> · 来源日期 {source.published_at}</small>}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </article>
               ))}
               {conversation?.runs?.map((run) => (
