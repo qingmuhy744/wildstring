@@ -25,17 +25,17 @@ import java.util.concurrent.TimeUnit
 /** Cache writes follow playback only: no downloads or speculative prefetch. */
 @Singleton
 class AudioCache @Inject constructor(@ApplicationContext context: Context, private val session: SessionStore, private val settings: AppSettings) {
-    private val evictor = ResizableLruEvictor(settings.state.value.audioMb * 1024L * 1024) { key -> session.cacheScope()?.let { key.startsWith("$it:") } == true }
+    private val evictor = ResizableLruEvictor(settings.state.value.audioMb * 1024L * 1024) { key -> session.retainedStorageScopes().any { key.startsWith("$it:") } }
     val cache = SimpleCache(File(context.cacheDir, "recent-audio-v1"), evictor, StandaloneDatabaseProvider(context))
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     init {
         scope.launch { settings.state.collectLatest { synchronized(cache) { evictor.resize(cache, it.audioMb * 1024L * 1024) } } }
-        scope.launch { session.profiles.collectLatest { profile ->
-            synchronized(cache) { cache.keys.filter { profile == null || !it.startsWith("$profile:") }.forEach(cache::removeResource) }
+        scope.launch { session.retainedScopes.collectLatest { profiles ->
+            synchronized(cache) { cache.keys.filter { key -> profiles.none { key.startsWith("$it:") } }.forEach(cache::removeResource) }
         } }
     }
-    fun clear() { synchronized(cache) { cache.keys.toList().forEach(cache::removeResource) } }
-    fun bytes(): Long = cache.cacheSpace
+    fun clear(expected: String? = session.cacheScope()) { synchronized(cache) { session.withStorageScope(expected) { owner -> cache.keys.filter { key -> key.startsWith("$owner:") }.forEach(cache::removeResource) } } }
+    fun bytes(): Long = session.storageScope()?.let { owner -> cache.keys.filter { it.startsWith("$owner:") }.sumOf { key -> cache.getCachedSpans(key).sumOf { it.length } } } ?: 0
     private fun validateCached(key: String, url: String, client: OkHttpClient) {
         if (cache.getCachedSpans(key).isEmpty()) return
         val metadata = cache.getContentMetadata(key)
@@ -54,10 +54,11 @@ class AudioCache @Inject constructor(@ApplicationContext context: Context, priva
     }
     fun factory(client: OkHttpClient): DataSource.Factory = DataSource.Factory {
         var profile: String? = null
+        var storage: String? = null
         var key: String? = null
         val upstream = OkHttpDataSource.Factory(client)
         val cached = CacheDataSource.Factory().setCache(cache).setUpstreamDataSourceFactory(upstream)
-            .setCacheKeyFactory { spec -> "${profile ?: throw IOException("登录已失效。")}:${spec.uri}" }
+            .setCacheKeyFactory { spec -> "${storage ?: throw IOException("登录已失效。")}:${spec.uri}" }
             .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
         val source = if (settings.state.value.audioMb == 0) upstream.createDataSource() else cached.createDataSource()
         object : DataSource {
@@ -67,7 +68,8 @@ class AudioCache @Inject constructor(@ApplicationContext context: Context, priva
                 val target = dataSpec.uri.toString().toHttpUrlOrNull() ?: throw IOException("无效音频地址。")
                 profile = session.cacheScope() ?: throw IOException("登录已失效。")
                 if (!ServerAddress.contains(base, target) || !target.encodedPath.endsWith("/stream")) throw IOException("拒绝其他来源的音频。")
-                key = "$profile:${dataSpec.uri}"
+                storage = session.storageScope() ?: throw IOException("登录已失效。")
+                key = "$storage:${dataSpec.uri}"
                 if (settings.state.value.audioMb > 0) validateCached(key!!, dataSpec.uri.toString(), client)
                 if (profile != session.cacheScope()) throw IOException("登录已失效。")
                 val length = source.open(dataSpec)

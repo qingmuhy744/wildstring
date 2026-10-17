@@ -1,24 +1,14 @@
 """Start the local API from the repository root."""
 
-import logging
-
 import uvicorn
 
 from wildstring.config import Settings
-
-
-class RedactLastfmCallback(logging.Filter):
-    def filter(self, record):
-        if isinstance(record.args, tuple) and len(record.args) == 5:
-            values = list(record.args)
-            if str(values[2]).partition("?")[0] == "/api/v1/lastfm/callback":
-                values[2] = "/api/v1/lastfm/callback"
-                record.args = tuple(values)
-        return True
+from wildstring.request_privacy import RedactLastfmCallback as RedactLastfmCallback
+from wildstring.request_privacy import install_callback_filter
 
 
 def main() -> None:
-    logging.getLogger("uvicorn.access").addFilter(RedactLastfmCallback())
+    install_callback_filter()
     settings = Settings()
     uvicorn.run(
         "wildstring.main:create_app",

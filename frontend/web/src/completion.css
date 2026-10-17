@@ -289,3 +289,94 @@
   border-radius: 10px;
   border: 1px solid var(--border);
 }
+
+.provider-network-test {
+  margin: 24px 0;
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+.provider-network-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.provider-network-heading h3 {
+  margin: 0;
+}
+.provider-network-results {
+  list-style: none;
+  padding: 0;
+  margin: 12px 0 0;
+  display: grid;
+  gap: 12px;
+}
+.provider-network-results > li {
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+.provider-network-results > li > div {
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.provider-network-results span {
+  color: var(--muted);
+  font-size: 12px;
+}
+.provider-network-results p {
+  font-size: 12px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+  margin-bottom: 0;
+}
+.network-error strong {
+  color: var(--accent);
+}
+.provider-reasons {
+  margin: 8px 0;
+  padding-left: 18px;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--muted);
+}
+.manage-track-list .provider-reasons {
+  display: block;
+}
+.manage-track-list .provider-reasons li {
+  display: list-item;
+  padding: 0;
+  border: 0;
+}
+.metadata-batch-results progress {
+  width: 100%;
+  accent-color: var(--accent);
+}
+.metadata-batch-tracks {
+  list-style: none;
+  padding: 0;
+  max-height: 220px;
+  overflow: auto;
+}
+.metadata-batch-tracks > li {
+  border-top: 1px solid var(--border);
+  padding: 12px 0;
+}
+.metadata-batch-tracks > li > strong {
+  display: block;
+  font-size: 13px;
+  margin-bottom: 6px;
+}
+.metadata-batch-tracks > li > span {
+  color: var(--muted);
+  font-size: 12px;
+}
+.metadata-refresh-dialog footer {
+  position: sticky;
+  bottom: -24px;
+  padding: 16px 0;
+  background: inherit;
+}

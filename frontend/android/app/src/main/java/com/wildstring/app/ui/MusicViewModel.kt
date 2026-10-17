@@ -25,7 +25,7 @@ import com.wildstring.app.playback.AudioCache
 data class QueueRow(val entryId: String, val trackId: String, val title: String, val artist: String, val index: Int)
 data class MusicState(
     val account: Account? = null, val playbackQuality: String = "", val connected: Boolean = false, val connecting: Boolean = false, val loading: Boolean = false,
-    val server: String = "", val localHttp: Boolean = false, val error: String? = null,
+    val server: String = "", val serverSelection: String = "", val localHttp: Boolean = false, val error: String? = null,
     val tab: String = "search", val kind: String = "discover", val title: String = "发现",
     val query: String = "", val offset: Int = 0, val total: Int = 0,
     val collection: String? = null, val collectionId: String? = null, val activePlaylist: Playlist? = null,
@@ -46,19 +46,21 @@ class MusicViewModel @Inject constructor(
     val repository: Repository, val imageLoader: ImageLoader, val settings: AppSettings,
     val sharing: PlaybackSharing, val sleep: com.wildstring.app.playback.SleepTimer, val audioCache: AudioCache, val playbackHealth: com.wildstring.app.playback.PlaybackHealth, @ApplicationContext private val context: Context,
 ) : ViewModel() {
-    private val mutable = MutableStateFlow(MusicState(account = repository.session.account, server = repository.session.endpoint?.toString().orEmpty(), localHttp = repository.session.localHttp))
+    private fun connectionState(error: String? = null) = MusicState(account = repository.session.account, server = repository.session.endpoint?.toString().orEmpty(), serverSelection = repository.session.requestState()?.selection.orEmpty(), localHttp = repository.session.localHttp, error = error)
+    private val mutable = MutableStateFlow(connectionState())
     val state = mutable.asStateFlow()
     private val mutablePosition = MutableStateFlow(0L)
     val position = mutablePosition.asStateFlow()
     var controller: MediaController? = null
         private set
     private val controllerFuture = MediaController.Builder(context, SessionToken(context, ComponentName(context, PlaybackService::class.java))).buildAsync()
+    private var selectionJob: Job? = null
     private var loadJob: Job? = null
     private var lyricJob: Job? = null
     private var progressJob: Job? = null
     private var lyricTrack: String? = null
     private var invalidationMessage: String? = null
-    private var authGeneration = 0
+    @Volatile private var authGeneration = 0
     private var loadGeneration = 0L
     private val tabs = mutableMapOf<String, CatalogQuery>()
     private val history = mutableMapOf<String, ArrayDeque<CatalogQuery>>()
@@ -74,10 +76,16 @@ class MusicViewModel @Inject constructor(
         playlists = page.playlists, total = page.total, hasContent = true)
     suspend fun cacheUsage(): Triple<Long, Long, Long> = withContext(Dispatchers.IO) { val (metadata, art) = repository.cache.usage(); Triple(metadata, art, audioCache.bytes()) }
     fun clearCache() = viewModelScope.launch {
-        withContext(Dispatchers.IO) { repository.cache.clear(); audioCache.clear() }
-        pages.clear(); imageLoader.memoryCache?.clear()
+        val owner = repository.session.cacheScope()
+        withContext(Dispatchers.IO) { repository.cache.clear(owner); audioCache.clear(owner) }
+        if (owner == repository.session.cacheScope()) { pages.clear(); imageLoader.memoryCache?.clear() }
     }
-    private suspend fun invalidateCatalog() { pages.clear(); withContext(Dispatchers.IO) { repository.cache.invalidateCatalog() } }
+    private fun requireOwner(owner: String?) { if (owner == null || owner != repository.session.cacheScope()) throw CancellationException("服务器或账号已变化。") }
+    private suspend fun invalidateCatalog(owner: String? = repository.session.cacheScope()) {
+        requireOwner(owner); pages.clear()
+        withContext(Dispatchers.IO) { repository.cache.invalidateCatalog(owner) }
+        requireOwner(owner)
+    }
 
     private val playerListener = object : Player.Listener {
         override fun onEvents(player: Player, events: Player.Events) {
@@ -93,29 +101,41 @@ class MusicViewModel @Inject constructor(
             runCatching { controllerFuture.get() }.onSuccess { c -> controller = c; c.addListener(playerListener); rebuildQueue(); refreshPlayer() }
                 .onFailure { mutable.update { it.copy(error = "播放器连接失败，请重新打开应用。") } }
         }, ContextCompat.getMainExecutor(context))
-        viewModelScope.launch { repository.session.invalidations.collect {
+        viewModelScope.launch { repository.session.invalidations.collect { selection ->
+            yield()
+            if (selection != repository.session.requestState()?.selection.orEmpty()) return@collect
             authGeneration++; optimisticFavorites.clear();
             loadGeneration++; loadJob?.cancel(); lyricJob?.cancel(); lyricTrack = null; pages.clear(); tabs.clear(); history.clear(); repository.knownTracks.clear(); controller?.stop(); controller?.clearMediaItems()
             val message = invalidationMessage ?: "登录已失效，请重新登录。"
             invalidationMessage = null
-            mutable.update { MusicState(server = it.server, localHttp = it.localHttp, error = message) }
+            mutable.value = connectionState(message.takeIf { it.isNotBlank() })
             imageLoader.memoryCache?.clear()
         } }
-        if (repository.session.endpoint != null) viewModelScope.launch {
+        if (repository.session.endpoint != null) resumeServer()
+    }
+
+    private fun resumeServer() {
+        selectionJob = viewModelScope.launch {
             val generation = authGeneration
+            val selection = repository.session.requestState()?.selection
+            fun requireSelection() { if (generation != authGeneration || selection != repository.session.requestState()?.selection) throw CancellationException("服务器已变化。") }
             val saved = repository.cachedCatalog(CatalogQuery())
                 ?: repository.cachedCatalog(CatalogQuery(tab = "library", kind = "albums", title = "曲库"))
                 ?: repository.downloads.entries.value.filter { it.state == "complete" }.map { it.track }.takeIf { it.isNotEmpty() }?.let { CatalogPage(tracks = it, total = it.size) }
+            requireSelection()
             if (saved != null && repository.session.cacheScope() != null) {
                 mutable.update { it.withPage(saved).copy(connected = true, offline = true, contentKey = query().key) }
                 pages[query().key] = saved
             } else mutable.update { it.copy(connecting = true) }
             try {
                 val status = repository.status()
+                requireSelection()
                 if (status.authenticated) {
-                    if (repository.acceptAccount(status.user)) {
+                    val changed = repository.acceptAccount(status.user)
+                    if (generation != authGeneration) throw CancellationException("服务器已变化。")
+                    if (changed) {
                         pages.clear(); controller?.stop(); controller?.clearMediaItems()
-                        mutable.update { MusicState(account = status.user, connected = true, server = it.server, localHttp = it.localHttp) }
+                        mutable.update { connectionState().copy(account = status.user, connected = true) }
                     }
                     mutable.update { it.copy(connected = true, offline = false, account = status.user) }; load()
                 } else repository.session.invalidate()
@@ -129,35 +149,87 @@ class MusicViewModel @Inject constructor(
         progressJob?.cancel()
         if (visible) progressJob = viewModelScope.launch { while (isActive) { refreshPlayer(); delay(500) } }
     }
-    fun connect(server: String, username: String, password: String, localHttp: Boolean) = viewModelScope.launch {
-        if (mutable.value.connecting) return@launch
-        authGeneration++; optimisticFavorites.clear()
-        mutable.update { it.copy(connecting = true, error = null) }
-        try {
-            repository.client.dispatcher.cancelAll()
-            controller?.stop(); controller?.clearMediaItems()
-            repository.session.write(null)
-            withContext(Dispatchers.IO) { repository.database.queue().clear() }
-            pages.clear(); tabs.clear(); history.clear(); repository.knownTracks.clear()
-            repository.session.configure(server, localHttp)
-            val status = repository.status()
-            check(status.configured) { "请先在服务端初始化管理员。" }
-            repository.api().login(LoginRequest(username.trim(), password)).close()
-            val authenticated = repository.status()
-            check(authenticated.authenticated) { "登录未成功，请重试。" }
-            repository.acceptAccount(authenticated.user)
-            mutable.update { MusicState(account = authenticated.user, connected = true, server = repository.session.endpoint.toString(), localHttp = localHttp) }
-            load()
-        } catch (e: CancellationException) { throw e }
-        catch (e: Exception) { mutable.update { it.copy(error = if (e is HttpException && e.code() == 401) "账号或密码不正确。" else if (e is IllegalStateException) e.message else friendlyError(e)) } }
-        finally { mutable.update { it.copy(connecting = false) } }
-    }
-    fun logout() = viewModelScope.launch {
-        authGeneration++; optimisticFavorites.clear()
-        loadGeneration++; loadJob?.cancel(); lyricJob?.cancel(); lyricTrack = null; pages.clear(); tabs.clear(); history.clear(); repository.knownTracks.clear(); controller?.stop(); controller?.clearMediaItems()
-        runCatching { repository.logout() }
+    private suspend fun stopForServerChange() {
+        val generation = ++authGeneration
+        invalidationMessage = null
+        loadGeneration++; optimisticFavorites.clear(); favoriteJobs.clear(); playlistJobs.clear()
+        loadJob?.cancel(); lyricJob?.cancel(); lyricTrack = null; pages.clear(); tabs.clear(); history.clear()
+        repository.client.dispatcher.cancelAll(); repository.downloads.pauseAll(); sleep.cancel()
+        controller?.stop(); controller?.clearMediaItems(); repository.knownTracks.clear(); queueSnapshot = emptyList()
+        withContext(Dispatchers.IO) { repository.database.queue().clear() }
+        if (generation != authGeneration) throw CancellationException("服务器已变化。")
         imageLoader.memoryCache?.clear()
-        mutable.update { MusicState(server = it.server, localHttp = it.localHttp) }
+    }
+    fun switchServer(id: String) {
+        if (id == repository.session.activeServerId && mutable.value.connected) return
+        selectionJob?.cancel()
+        selectionJob = viewModelScope.launch {
+            stopForServerChange()
+            repository.session.selectServer(id)
+            repository.downloads.switchScope()
+            mutable.value = connectionState()
+            resumeServer()
+        }
+    }
+    suspend fun saveServer(id: String?, url: String, name: String, localHttp: Boolean): ServerConfiguration {
+        val old = repository.session.servers.value.firstOrNull { it.id == id }
+        val canonical = ServerAddress.normalize(url, com.wildstring.app.BuildConfig.DEBUG && localHttp).toString()
+        require(repository.session.servers.value.none { it.url == canonical && it.id != id }) { "这个服务器已经保存，请直接选择。" }
+        val changedActive = id != null && id == repository.session.activeServerId && old?.url != canonical
+        if (changedActive) { selectionJob?.cancel(); stopForServerChange() }
+        val saved = repository.session.saveServer(id, url, name, localHttp)
+        if (changedActive) { repository.downloads.switchScope(); mutable.value = connectionState() }
+        return saved
+    }
+    fun deleteServer(id: String) {
+        if (id != repository.session.activeServerId) {
+            repository.session.removeServer(id)
+            return
+        }
+        selectionJob?.cancel()
+        selectionJob = viewModelScope.launch {
+            stopForServerChange()
+            repository.session.removeServer(id)
+            repository.downloads.switchScope()
+            mutable.value = connectionState()
+        }
+    }
+    fun connect(server: String, username: String, password: String, localHttp: Boolean): Job {
+        selectionJob?.cancel()
+        return viewModelScope.launch {
+            var generation = authGeneration
+            try {
+                ServerAddress.normalize(server, com.wildstring.app.BuildConfig.DEBUG && localHttp)
+                stopForServerChange(); repository.session.configure(server, localHttp)
+                repository.session.write(null)
+                repository.downloads.switchScope()
+                generation = authGeneration
+                mutable.value = connectionState().copy(connecting = true)
+                val status = repository.status()
+                if (generation != authGeneration) throw CancellationException("服务器已变化。")
+                check(status.configured) { "请先在服务端初始化管理员。" }
+                repository.api().login(LoginRequest(username.trim(), password)).close()
+                val authenticated = repository.status()
+                if (generation != authGeneration) throw CancellationException("服务器已变化。")
+                check(authenticated.authenticated) { "登录未成功，请重试。" }
+                repository.acceptAccount(authenticated.user)
+                if (generation != authGeneration) return@launch
+                mutable.value = connectionState().copy(account = authenticated.user, connected = true)
+                load()
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) { if (generation == authGeneration) mutable.update { it.copy(error = if (e is HttpException && e.code() == 401) "账号或密码不正确。" else if (e is IllegalStateException) e.message else friendlyError(e)) } }
+            finally { if (generation == authGeneration) mutable.update { it.copy(connecting = false) } }
+        }.also { selectionJob = it }
+    }
+    fun logout(): Job {
+        selectionJob?.cancel()
+        return viewModelScope.launch {
+            stopForServerChange()
+            val generation = authGeneration
+            invalidationMessage = ""
+            runCatching { repository.logout() }
+            if (generation == authGeneration) mutable.value = connectionState()
+        }.also { selectionJob = it }
     }
 
     suspend fun changePassword(current: String, next: String) {
@@ -259,6 +331,7 @@ class MusicViewModel @Inject constructor(
         val tracks = saved.trackIds.chunked(8).flatMap { batch -> coroutineScope { batch.map { async { repository.track(it) } }.awaitAll() } }
         check(owner != null && owner == repository.session.cacheScope()) { "会话已变化。" }
         sharing.publish(saved.copy(updatedAt = null), claim = true, claimVersion = saved.version)
+        requireOwner(owner)
         play(tracks, saved.index); controller?.seekTo(saved.positionMs)
         controller?.shuffleModeEnabled = saved.mode == "shuffle"
         controller?.repeatMode = when(saved.mode) { "repeat_one" -> Player.REPEAT_MODE_ONE; "repeat_all", "shuffle" -> Player.REPEAT_MODE_ALL; else -> Player.REPEAT_MODE_OFF }
@@ -415,32 +488,39 @@ class MusicViewModel @Inject constructor(
         finally { playlistJobs.remove(playlist.id) }
     }
     suspend fun playlistsForAdd(): List<Playlist> {
+        val owner = repository.session.cacheScope(); requireOwner(owner)
         val result = mutableListOf<Playlist>(); var offset = 0
-        while (true) { val page = repository.api().playlists(limit = 100, offset = offset); result += page.items.filter { it.kind == "manual" }; offset += page.items.size; if (offset >= page.total || page.items.isEmpty()) break }
+        while (true) { val page = repository.api().playlists(limit = 100, offset = offset); requireOwner(owner); result += page.items.filter { it.kind == "manual" }; offset += page.items.size; if (offset >= page.total || page.items.isEmpty()) break }
         return result
     }
     suspend fun addTracksToPlaylist(tracks: List<Track>, playlist: Playlist) {
+        val owner = repository.session.cacheScope(); requireOwner(owner)
         repository.api().addTracks(repository.url("api", "v1", "playlists", playlist.id, "tracks"), AddTracks(playlist.version, tracks.map { it.id }.distinct()))
-        invalidateCatalog(); load(); notify("已加入：${playlist.name}")
+        requireOwner(owner); invalidateCatalog(owner); load(); notify("已加入：${playlist.name}")
     }
     suspend fun savePlaylist(name: String, definition: com.google.gson.JsonObject?, existing: Playlist?) {
+        val owner = repository.session.cacheScope(); requireOwner(owner)
         if (existing == null) repository.api().createPlaylist(PlaylistRequest(name, if (definition == null) "manual" else "smart", definition))
         else repository.api().updatePlaylist(repository.url("api", "v1", "playlists", existing.id), PlaylistUpdate(name, existing.version, definition, existing.kind))
-        invalidateCatalog(); load(); notify("歌单已保存")
+        requireOwner(owner); invalidateCatalog(owner); load(); notify("歌单已保存")
     }
     suspend fun deletePlaylist(playlist: Playlist) {
+        val owner = repository.session.cacheScope(); requireOwner(owner)
         repository.api().deletePlaylist(repository.url("api", "v1", "playlists", playlist.id), playlist.version).let { if (!it.isSuccessful) throw HttpException(it) }
-        invalidateCatalog(); back(); notify("歌单已删除")
+        requireOwner(owner); invalidateCatalog(owner); back(); notify("歌单已删除")
     }
     suspend fun removePlaylistTrack(track: Track, playlist: Playlist) {
+        val owner = repository.session.cacheScope(); requireOwner(owner)
         repository.api().removeTrack(repository.url("api", "v1", "playlists", playlist.id, "tracks", track.id), playlist.version).close()
+        requireOwner(owner)
         val fresh = repository.api().playlist(repository.url("api", "v1", "playlists", playlist.id))
-        mutable.update { it.copy(activePlaylist = fresh) }; invalidateCatalog(); load(); notify("已从歌单移除")
+        requireOwner(owner); mutable.update { it.copy(activePlaylist = fresh) }; invalidateCatalog(owner); load(); notify("已从歌单移除")
     }
     suspend fun playlistTracks(playlist: Playlist) = repository.collectionTracks(CatalogQuery(collection = "playlists", collectionId = playlist.id))
     suspend fun reorderPlaylist(playlist: Playlist, ids: List<String>) {
+        val owner = repository.session.cacheScope(); requireOwner(owner)
         val fresh = repository.api().reorderPlaylist(repository.url("api", "v1", "playlists", playlist.id, "order"), AddTracks(playlist.version, ids))
-        mutable.update { it.copy(activePlaylist = fresh) }; invalidateCatalog(); load(); notify("歌单顺序已保存")
+        requireOwner(owner); mutable.update { it.copy(activePlaylist = fresh) }; invalidateCatalog(owner); load(); notify("歌单顺序已保存")
     }
     fun addToPlaylist(track: Track, playlist: Playlist) = viewModelScope.launch {
         if (!playlistJobs.add(playlist.id)) return@launch

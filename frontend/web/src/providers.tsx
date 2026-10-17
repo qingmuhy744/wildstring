@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from './api';
 import { MetadataRefreshDialog, ProviderPriority } from './metadata-refresh';
+import { JobDiagnostics, ProviderNetworkTest } from './provider-diagnostics';
 
 type Config = {
   version: number;
@@ -178,6 +179,7 @@ export function ProviderSettings() {
           <p className="muted">
             HTTP/HTTPS 联网请求共用此代理，可包含用户名和密码。Docker 中请填写容器能访问的代理地址。
           </p>
+          <ProviderNetworkTest mode={config.proxy_mode} proxy={proxy} disabled={busy} />
           <label>
             公开访问地址
             <input
@@ -480,10 +482,8 @@ export function MetadataSuggestions({
       >
         更新元数据
       </button>
-      <p role="status">
-        {result?.jobs[0] && statuses[result.jobs[0].status]}
-        {result?.jobs[0]?.warnings !== '[]' && result?.jobs[0] ? ' · 部分来源未返回完整资料' : ''}
-      </p>
+      <p role="status">{result?.jobs[0] && statuses[result.jobs[0].status]}</p>
+      {result?.jobs[0] && <JobDiagnostics job={result.jobs[0]} />}
       {result?.suggestions.map((s) => (
         <article className="suggestion-card" key={s.id}>
           <a href={s.source_url} target="_blank" rel="noreferrer">

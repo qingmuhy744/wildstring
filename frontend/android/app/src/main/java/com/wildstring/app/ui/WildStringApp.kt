@@ -75,6 +75,7 @@ internal val redColors = darkColorScheme(
 @Composable
 fun WildStringApp(model: MusicViewModel) {
     val state by model.state.collectAsStateWithLifecycle()
+    var servers by rememberSaveable { mutableStateOf(false) }
     val preferences by model.settings.state.collectAsStateWithLifecycle()
     val systemDark = isSystemInDarkTheme()
     val dark = !preferences.redCloth && when (preferences.appearance) { "light" -> false; "dark" -> true; else -> systemDark }
@@ -88,17 +89,19 @@ fun WildStringApp(model: MusicViewModel) {
         LocalTactileFeedback provides rememberTactileFeedback { model.settings.state.value.haptics }) {
         MaterialTheme(colorScheme = if (preferences.redCloth) redColors else if (dark) classicDarkColors else classicLightColors) {
             Surface(Modifier.fillMaxSize().testTag(if (preferences.redCloth) "appearance-red-cloth" else if (dark) "appearance-dark" else "appearance-light")) {
-                Crossfade(state.connected, animationSpec = tween(220), label = "connection") { connected ->
-                    if (!connected) ConnectionScreen(state, model::connect) else LibraryApp(model, state)
-                }
+                key(state.serverSelection) { Crossfade(state.connected, animationSpec = tween(220), label = "connection") { connected ->
+                    if (!connected) ConnectionScreen(state, model::connect) { servers = true } else LibraryApp(model, state)
+                } }
+                com.wildstring.app.update.UpdatePrompt()
+                if (servers) ServersScreen(model) { servers = false }
             }
         }
     }
 }
 
 @Composable
-fun ConnectionScreen(state: MusicState, connect: (String, String, String, Boolean) -> Unit) {
-    var server by rememberSaveable { mutableStateOf(state.server) }
+fun ConnectionScreen(state: MusicState, connect: (String, String, String, Boolean) -> Unit, manageServers: () -> Unit = {}) {
+    var server by rememberSaveable(state.serverSelection) { mutableStateOf(state.server) }
     var username by rememberSaveable { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var localHttp by rememberSaveable { mutableStateOf(state.localHttp) }
@@ -107,6 +110,7 @@ fun ConnectionScreen(state: MusicState, connect: (String, String, String, Boolea
             Icon(painterResource(R.drawable.ic_wildstring), null, Modifier.size(64.dp), tint = Color.Unspecified)
             Text("野弦", fontSize = 32.sp, fontWeight = FontWeight.Medium)
             Text("连接自己的音乐收藏", color = Muted)
+            TextButton(manageServers, Modifier.testTag("connection-servers")) { Icon(Icons.Default.Dns, null); Spacer(Modifier.width(8.dp)); Text("服务器 / 切换服务器") }
             OutlinedTextField(server, { server = it }, Modifier.fillMaxWidth(), label = { Text("服务器地址") }, placeholder = { Text("https://music.your-domain.com") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri), enabled = !state.connecting)
             OutlinedTextField(username, { username = it }, Modifier.fillMaxWidth(), label = { Text("账号") }, singleLine = true, enabled = !state.connecting)
             OutlinedTextField(password, { password = it }, Modifier.fillMaxWidth(), label = { Text("密码") }, visualTransformation = PasswordVisualTransformation(), singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password), enabled = !state.connecting)

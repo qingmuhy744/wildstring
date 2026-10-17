@@ -15,6 +15,7 @@ class MainActivity : ComponentActivity() {
     private val model: MusicViewModel by viewModels()
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        com.wildstring.app.update.AppUpdater.get(this).checkAutomatically()
         enableEdgeToEdge(statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
             navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT))
         setContent { WildStringApp(model) }

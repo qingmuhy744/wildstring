@@ -23,12 +23,14 @@ from wildstring.library.transcoding import Transcoding
 from wildstring.management import Management, management_router
 from wildstring.mobile_experience import experience_router
 from wildstring.providers import Providers
+from wildstring.request_privacy import CallbackPrivacy, install_callback_filter
 from wildstring.site_access import HostAllowlist, SiteAccess
 
 logger = logging.getLogger(__name__)
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
+    install_callback_filter()
     current = settings if settings is not None else Settings()
     database = Database(current.data_dir)
     auth = Auth(database, current)
@@ -120,5 +122,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.mount("/", StaticFiles(directory=current.web_dir, html=True), name="web")
 
     app.add_middleware(HostAllowlist, access=access)
+    app.add_middleware(CallbackPrivacy)
 
     return app

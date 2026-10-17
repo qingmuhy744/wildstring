@@ -15,41 +15,77 @@ import okhttp3.ResponseBody.Companion.toResponseBody
 
 @Singleton
 class ClientCache @Inject constructor(@ApplicationContext context: Context, private val session: SessionStore, private val settings: AppSettings) {
-    private val metadata = BoundedFileStore(File(context.cacheDir, "private-metadata-v1"))
-    private val artwork = BoundedFileStore(File(context.cacheDir, "private-artwork-v1"))
+    private val metadataRoot = File(context.cacheDir, "private-metadata-v2")
+    private val artworkRoot = File(context.cacheDir, "private-artwork-v2")
+    private var metadata = BoundedFileStore(File(metadataRoot, "unselected"))
+    private var artwork = BoundedFileStore(File(artworkRoot, "unselected"))
     private val prefs = context.getSharedPreferences("cache_owner", Context.MODE_PRIVATE)
-    @Volatile var catalogRevision: Long = prefs.getLong("catalog_revision", 0)
+    @Volatile var catalogRevision: Long = 0
         private set
     private fun scopedKey(profile: String, key: String) = if (key.startsWith("catalog:")) "$profile:$catalogRevision:$key" else "$profile:$key"
-    private var owner: String? = prefs.getString("scope", null)
+    private var owner: String? = null
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     init {
+        // Preserve the old single-server cache keys and original ownership token.
+        val previous = prefs.getString("scope", null)
+        listOf(File(context.cacheDir, "private-metadata-v1") to metadataRoot, File(context.cacheDir, "private-artwork-v1") to artworkRoot).forEach { (old, root) ->
+            if (old.exists()) {
+                if (previous != null && previous in session.retainedStorageScopes()) {
+                    val target = File(root, previous).apply { mkdirs() }
+                    old.listFiles()?.forEach { it.renameTo(File(target, it.name)) }
+                    prefs.edit().putLong("revision:$previous", prefs.getLong("catalog_revision", 0)).apply()
+                }
+                old.deleteRecursively()
+            }
+        }
         scope.launch { session.profiles.collectLatest { synchronized(this@ClientCache) { ensureOwner() } } }
+        scope.launch { session.retainedScopes.collectLatest { synchronized(this@ClientCache) { prune(); ensureOwner() } } }
         scope.launch { settings.state.collectLatest { trim() } }
     }
+    private fun prune() {
+        val keep = session.retainedStorageScopes()
+        listOf(metadataRoot, artworkRoot).forEach { root -> root.listFiles()?.filter { it.name !in keep }?.forEach { it.deleteRecursively() } }
+    }
     @Synchronized private fun ensureOwner(): String? {
-        val current = session.cacheScope()
+        val current = session.storageScope()
         if (owner != current) {
-            metadata.clear(); artwork.clear(); owner = current
-            prefs.edit().putString("scope", current).apply()
+            owner = current
+            metadata = BoundedFileStore(File(metadataRoot, current ?: "unselected"))
+            artwork = BoundedFileStore(File(artworkRoot, current ?: "unselected"))
+            catalogRevision = prefs.getLong("revision:$current", 0)
         }
-        return current
+        prune(); return current
     }
     @Synchronized fun read(key: String, cover: Boolean = false): CachedBlob? {
-        val profile = ensureOwner() ?: return null
-        val limit = if (cover) settings.state.value.artworkMb else settings.state.value.metadataMb
-        val saved = if (limit == 0) null else (if (cover) artwork else metadata).read(scopedKey(profile, key))
-        return saved.takeIf { session.cacheScope() == profile }
+        val token = session.cacheScope()
+        return session.withStorageScope(token) { profile ->
+            ensureOwner()
+            val limit = if (cover) settings.state.value.artworkMb else settings.state.value.metadataMb
+            if (limit == 0) null else (if (cover) artwork else metadata).read(scopedKey(profile, key))
+        }
     }
     @Synchronized fun put(key: String, bytes: ByteArray, profile: String?, cover: Boolean = false, revision: Long? = null) {
-        if (profile == null || ensureOwner() != profile || (revision != null && revision != catalogRevision)) return
-        val limit = if (cover) settings.state.value.artworkMb else settings.state.value.metadataMb
-        if (bytes.size <= 2 * 1024 * 1024) runCatching { (if (cover) artwork else metadata).put(scopedKey(profile, key), bytes, limit * 1024L * 1024) }
+        session.withStorageScope(profile) { storage ->
+            ensureOwner()
+            if (revision == null || revision == catalogRevision) {
+                val limit = if (cover) settings.state.value.artworkMb else settings.state.value.metadataMb
+                if (bytes.size <= 2 * 1024 * 1024) runCatching { (if (cover) artwork else metadata).put(scopedKey(storage, key), bytes, limit * 1024L * 1024) }
+            }
+        }
     }
-    @Synchronized fun clear() { metadata.clear(); artwork.clear() }
-    @Synchronized fun invalidateCatalog() { catalogRevision++; prefs.edit().putLong("catalog_revision", catalogRevision).apply() }
-    @Synchronized fun trim() { metadata.trim(settings.state.value.metadataMb * 1024L * 1024); artwork.trim(settings.state.value.artworkMb * 1024L * 1024) }
-    fun usage(): Pair<Long, Long> = metadata.size() to artwork.size()
+    @Synchronized fun clear(expected: String? = session.cacheScope()) {
+        session.withStorageScope(expected) { ensureOwner(); metadata.clear(); artwork.clear() }
+        ensureOwner()
+    }
+    @Synchronized fun invalidateCatalog(expected: String? = session.cacheScope()) {
+        session.withStorageScope(expected) { ensureOwner(); catalogRevision++; prefs.edit().putLong("revision:$owner", catalogRevision).apply() }
+    }
+    @Synchronized fun trim() {
+        session.withStorageScope(session.cacheScope()) { ensureOwner(); metadata.trim(settings.state.value.metadataMb * 1024L * 1024); artwork.trim(settings.state.value.artworkMb * 1024L * 1024) }
+        ensureOwner()
+    }
+    @Synchronized fun usage(): Pair<Long, Long> = session.withStorageScope(session.cacheScope()) { ensureOwner(); metadata.size() to artwork.size() } ?: (0L to 0L)
+
 }
 
 /** Covers use the same authenticated client; no cookie, login or error response is persisted. */
