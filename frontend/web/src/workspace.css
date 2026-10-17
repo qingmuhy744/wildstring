@@ -178,6 +178,32 @@
 .workspace-form .span-all {
   grid-column: 1/-1;
 }
+.workspace-form :is(input:not([type='checkbox']), select, textarea),
+.assistant-research :is(input:not([type='checkbox']), select, textarea) {
+  background: var(--workspace-bg);
+  color: var(--workspace-text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+.assistant-research > h2:not(:first-child) {
+  margin-top: 32px;
+}
+.assistant-research form {
+  display: grid;
+  gap: 16px;
+  margin: 18px 0;
+}
+.assistant-research form > button {
+  justify-self: start;
+}
+.assistant-research label {
+  line-height: 1.7;
+}
+.assistant-research .workspace-row p {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
 .workspace-form fieldset {
   border: 0;
   padding: 0;
@@ -314,6 +340,15 @@
 .workspace-session[aria-pressed='true'] {
   background: var(--workspace-selected);
 }
+.workspace-session-entry {
+  min-width: 0;
+  margin-bottom: 12px;
+}
+.workspace-session-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
 .workspace-diff {
   width: 100%;
   border-collapse: collapse;
@@ -356,9 +391,8 @@
     gap: 8px;
     overflow: auto;
   }
-  .workspace-session {
-    width: auto;
-    flex: 0 0 160px;
+  .workspace-session-entry {
+    flex: 0 0 180px;
   }
 }
 @media (max-width: 600px) {
@@ -573,4 +607,27 @@
     min-height: 32px;
     padding: 4px 0;
   }
+}
+.gain-dialog fieldset {
+  border: 0;
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+  padding: 0;
+}
+.gain-dialog label {
+  display: grid;
+  gap: 8px;
+}
+.gain-dialog label.check-label {
+  display: flex;
+}
+.gain-dialog input[type='number'],
+.gain-dialog select {
+  width: 100%;
+}
+.lyric-word {
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
 }

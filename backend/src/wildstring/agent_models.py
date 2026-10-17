@@ -49,8 +49,7 @@ class Evidence(Input):
                 or not parts.hostname
                 or parts.username
                 or parts.password
-                or parts.query
-                or parts.fragment
+                or any(ord(c) < 32 for c in value)
             ):
                 raise ValueError("invalid_evidence_url")
         return value
@@ -191,6 +190,11 @@ class Connection(Input):
     daily_call_budget: int = Field(default=100, ge=0, le=10000)
     enabled: bool = True
     version: int | None = Field(default=None, ge=1)
+    protocol: Literal["chat_completions", "responses"] = "chat_completions"
+    provider: Literal["generic", "openai", "deepseek", "qwen", "gemini"] = "generic"
+    reasoning_effort: Literal["auto", "none", "low", "medium", "high", "max", "xhigh"] = "auto"
+    max_output_tokens: int = Field(default=2048, ge=128, le=32768)
+    native_search: bool = False
 
     @field_validator("base_url")
     @classmethod
@@ -225,6 +229,10 @@ class ConversationCreate(Input):
     connection_id: str | None = Field(default=None, max_length=128)
 
 
+class ConversationRename(Input):
+    title: str = Field(min_length=1, max_length=200)
+
+
 class MessageCreate(Input):
     content: str = Field(min_length=1, max_length=8000)
     connection_id: str | None = Field(default=None, max_length=128)
@@ -233,3 +241,21 @@ class MessageCreate(Input):
 
 class AssistantPreferences(Input):
     retention_days: int = Field(default=30, ge=1, le=365)
+    context_summary: bool = True
+    long_term_memory: bool = True
+
+
+class SearchSettings(Input):
+    provider: Literal["deepseek", "tavily"] = "deepseek"
+    enabled: bool = False
+    daily_budget: int = Field(default=100, ge=0, le=10000)
+    api_key: SecretStr | None = None
+    clear_api_key: bool = False
+    version: int = Field(default=0, ge=0)
+
+    _safe_key = field_validator("api_key")(Connection.safe_key.__func__)
+
+
+class Memory(Input):
+    content: str = Field(min_length=1, max_length=1000)
+    version: int | None = Field(default=None, ge=1)

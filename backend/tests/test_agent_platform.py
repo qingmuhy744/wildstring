@@ -707,6 +707,9 @@ def test_suggestion_tools_use_existing_provider_pipeline_and_strip_urls(agent):
 
 def drop_agent_tables(connection):
     """Reconstruct the actual pre-17 layout, rather than changing only its marker."""
+    from migration_support import pre19
+
+    pre19(connection)
     for name in (
         "agent_messages",
         "agent_runs",
@@ -814,7 +817,7 @@ def test_real_v16_migration_preserves_library_people_accounts_and_credentials(ag
     monkeypatch.setattr(wildstring.agent_schema, "SCHEMA", schema)
     service.database.initialize()
     service.database.initialize()
-    assert snapshot() == original and SCHEMA_VERSION == 18
+    assert snapshot() == original and SCHEMA_VERSION == 20
     assert legacy_secret.read_text() == "synthetic-original-private-secret"
     assert service.database.check_ready()
 
@@ -911,6 +914,8 @@ def test_assistant_never_silently_chooses_paid_connection_and_can_switch_local(a
     local = post(client, "/conversations", {})
     result = post(client, f"/conversations/{local['id']}/messages", {"content": "查歌"})
     assert result["runs"][0]["status"] == "local_fallback" and not calls
+    assert "本次使用本地关键词检索，未调用模型。" in result["messages"][-1]["content"]
+    assert "AI 未配置" not in result["messages"][-1]["content"]
     result = post(
         client,
         f"/conversations/{local['id']}/messages",
@@ -966,7 +971,7 @@ def test_connection_capabilities_are_independently_verified_with_synthetic_input
     service.transport = model
     tested = post(client, f"/connections/{connection['id']}/test", {})
     assert tested["text"] and tested["tools"] and tested["structured"] and tested["tested_at"]
-    assert len(seen) == 3 and "真实艺人" not in json.dumps(seen, ensure_ascii=False)
+    assert len(seen) == 4 and "真实艺人" not in json.dumps(seen, ensure_ascii=False)
     saved = client.get(BASE + "/connections").json()["items"][0]
     assert saved["capabilities"] == tested
 

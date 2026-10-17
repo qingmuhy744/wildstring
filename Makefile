@@ -12,7 +12,7 @@ LOG_ARGS ?= -f --tail=100
 SCAN_ARGS ?=
 export UV_CACHE_DIR ?= $(CURDIR)/.cache/uv
 export PRE_COMMIT_HOME ?= $(CURDIR)/.cache/pre-commit
-RUN = $(UV) run --frozen --project backend
+RUN = $(UV) run --frozen --project backend --extra community-sources
 ANDROID = ./frontend/android/gradlew -p frontend/android --console=plain
 ANDROID_TEST_ARGS ?=
 DOCKER = $(COMPOSE) --project-directory "$(CURDIR)" --env-file .env -p "$(PROJECT)" -f deploy/compose.yaml
@@ -26,8 +26,14 @@ env: ## Create local .env and directories without overwriting settings
 	$(PYTHON) scripts/setup.py
 
 sync: ## Install locked Python and Web dependencies
-	$(UV) sync --locked --project backend
+	$(UV) sync --locked --project backend --extra community-sources
 	npm --prefix frontend/web ci
+
+.PHONY: source-plugins
+source-plugins: ## Package independently importable community source ZIPs
+	npm --prefix plugins/node-runtime ci --ignore-scripts
+	node scripts/build_source_runtimes.mjs
+	$(RUN) python scripts/package_source_plugins.py
 
 setup: env sync ## Set up dependencies and install the local Git hook
 	$(RUN) pre-commit install --install-hooks
@@ -129,7 +135,7 @@ test-transcoding-web: build-web ## Verify real AAC playback and seeking (require
 web-test-server: ## Internal: serve a disposable library for browser tests
 	$(RUN) python scripts/serve_web_tests.py
 
-ci: check test test-web test-large-web test-browse-web test-transcoding-web ## Run checks, backend tests, Web build and browser tests (install Chromium first)
+ci: check source-plugins test test-web test-large-web test-browse-web test-transcoding-web ## Run checks, backend tests, Web build and browser tests (install Chromium first)
 	$(UV) lock --check --project backend
 
 health: ## Check the locally configured API readiness
@@ -146,7 +152,7 @@ docker-up: docker-build ## Build and start the local container; wait for health
 
 docker-test: env ## Run all backend tests with the container FFmpeg
 	WILDSTRING_IMAGE=$(TEST_RUNTIME_IMAGE) $(DOCKER) build
-	docker build --target builder -f deploy/Dockerfile -t $(TEST_BUILDER_IMAGE) .
+	docker build --target builder -f deploy/Dockerfile --build-arg HTTP_PROXY="$(DOCKER_HTTP_PROXY)" --build-arg HTTPS_PROXY="$(DOCKER_HTTPS_PROXY)" -t $(TEST_BUILDER_IMAGE) .
 	WILDSTRING_TEST_RUNTIME_IMAGE=$(TEST_RUNTIME_IMAGE) WILDSTRING_TEST_BUILDER_IMAGE=$(TEST_BUILDER_IMAGE) WILDSTRING_TEST_IMAGE=$(TEST_IMAGE) $(DOCKER) -f deploy/compose.tests.yaml build tests
 	WILDSTRING_TEST_RUNTIME_IMAGE=$(TEST_RUNTIME_IMAGE) WILDSTRING_TEST_BUILDER_IMAGE=$(TEST_BUILDER_IMAGE) WILDSTRING_TEST_IMAGE=$(TEST_IMAGE) $(DOCKER) -f deploy/compose.tests.yaml run --rm --no-deps tests
 
@@ -187,3 +193,7 @@ test-agent: ## Verify controlled tools, drafts, notifications, inspection and th
 
 test-network: ## Verify probes and production requests share actual proxy and model clients
 	$(RUN) pytest -c backend/pyproject.toml backend/tests/test_outbound.py backend/tests/test_provider_network.py backend/tests/test_ai_config.py
+
+.PHONY: test-research
+test-research: ## Verify model protocols, live-search contracts, summaries and user-owned memories
+	$(RUN) pytest -c backend/pyproject.toml backend/tests/test_agent_research.py

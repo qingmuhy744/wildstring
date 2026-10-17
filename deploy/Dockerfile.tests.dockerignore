@@ -6,6 +6,8 @@
 !backend/src/**
 !backend/tests/
 !backend/tests/**
+!plugins/
+!plugins/**
 !tests/
 !tests/fixtures/
 !tests/fixtures/audio/

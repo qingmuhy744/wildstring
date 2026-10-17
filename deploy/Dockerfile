@@ -14,9 +14,9 @@ ENV UV_PYTHON_DOWNLOADS=never UV_LINK_MODE=copy
 WORKDIR /app
 RUN python -m pip install --no-cache-dir "uv==${UV_VERSION}"
 COPY backend/pyproject.toml backend/uv.lock ./
-RUN uv sync --locked --no-dev --no-install-project
+RUN uv sync --locked --no-dev --extra community-sources --no-install-project
 COPY backend/src/ ./src/
-RUN uv sync --locked --no-dev --no-editable
+RUN uv sync --locked --no-dev --extra community-sources --no-editable
 
 FROM ${PYTHON_IMAGE} AS runtime
 ENV PATH="/app/.venv/bin:$PATH" \
@@ -36,6 +36,8 @@ RUN apt-get update --error-on=any \
     && chown wildstring:wildstring /data
 COPY --from=builder /app/.venv /app/.venv
 COPY --from=web /web/dist /app/web
+COPY --from=web /usr/local/bin/node /usr/local/bin/node
+COPY --from=web /usr/local/LICENSE /usr/share/doc/node/LICENSE
 USER 10001:10001
 EXPOSE 8000
 HEALTHCHECK --interval=10s --timeout=6s --start-period=10s --retries=3 \

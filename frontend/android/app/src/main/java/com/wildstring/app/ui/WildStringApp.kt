@@ -339,6 +339,7 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
             }
         }
         SongAction("查看所属专辑", Icons.Default.Album, navigate = true) { openTrackAlbum(track) }
+        SongAction("响度均衡与手动调整", Icons.Default.VolumeUp) { feature = "gain"; featureTrack = track; actions = null }
         if (track.id == state.current?.id) SongAction("播放诊断", Icons.Default.Troubleshoot) { diagnostics = true; actions = null }
         HorizontalDivider(Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
         SongAction("下一首播放", Icons.AutoMirrored.Filled.PlaylistPlay, onClick = tactile { vm.addToQueue(track, true); actions = null })

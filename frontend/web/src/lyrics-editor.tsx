@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { api, time, type Lyrics, type Track } from './api';
 import type { Player } from './player';
+import { OnlineLyrics } from './source-plugins';
 
 type Line = Lyrics['lines'][number];
 interface Record {
@@ -470,7 +471,7 @@ export function LyricsEditor({
             </p>
           )}
           {notice && (
-            <p className="ai-status" role="status">
+            <p className="ai-status" role="status" aria-label="歌词编辑状态">
               {notice}
             </p>
           )}
@@ -525,6 +526,12 @@ export function LyricsEditor({
           </div>
         </>
       )}
+      <OnlineLyrics
+        trackId={track.id}
+        applied={() => {
+          void load();
+        }}
+      />
     </section>
   );
 }

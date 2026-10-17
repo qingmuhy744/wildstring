@@ -24,10 +24,18 @@ RESUMABLE = {
 
 
 class Automation:
-    def submit_task(self, actor, body, *, schedule_key=None):
+    def submit_task(self, actor, body, *, schedule_key=None, manual=False):
         actor.require("tasks:write")
         actor.require("library:read")
         parameters = body.model_dump()
+        # Only the authenticated UI route grants a one-task authorization. Tool and
+        # scheduled submissions cannot supply this internal field in Inspection.
+        manual_ai = manual and schedule_key is None and actor.credential_id is None
+        if body.use_ai:
+            if not body.connection_id:
+                raise HTTPException(422, "ai_connection_required")
+            configuration = self.connection_for(actor, body.connection_id, background=not manual_ai)
+            parameters["_manual_ai_authorized"] = manual_ai
         identities = body.track_ids
         if identities is None:
             identities = [
@@ -48,7 +56,7 @@ class Automation:
         identity, trace_id = uuid4().hex, current_trace()
         connection_version = None
         if body.use_ai and body.connection_id:
-            connection_version = self.connection_for(actor, body.connection_id)["version"]
+            connection_version = configuration["version"]
         with self.database.connect(write=True) as connection:
             connection.execute(
                 "INSERT OR IGNORE INTO agent_tasks(id,user_id,auth_version,credential_id,parameters,created_at,updated_at,trace_id,schedule_key,connection_version) VALUES (?,?,?,?,?,?,?,?,?,?)",
@@ -88,6 +96,7 @@ class Automation:
         }
         for key in ("parameters", "counts", "results"):
             result[key] = json.loads(result[key])
+        result["parameters"].pop("_manual_ai_authorized", None)
         return result
 
     def tasks(self, actor, limit=50, offset=0):
@@ -277,6 +286,11 @@ class Automation:
 
     def _execute_task(self, job):
         parameters = json.loads(job["parameters"])
+        background_ai = not (
+            parameters.get("_manual_ai_authorized") is True
+            and job["schedule_key"] is None
+            and job["credential_id"] is None
+        )
         results = json.loads(job["results"])
         counts = {"processed": 0, "issues": 0, "failed": 0, "skipped": 0, "calls": 0} | json.loads(
             job["counts"]
@@ -315,8 +329,8 @@ class Automation:
                 if not parameters.get("connection_id"):
                     raise HTTPException(403, "background_connection_required")
                 configuration = self.connection_for(actor, parameters["connection_id"])
-                if configuration["version"] != job["connection_version"] or not configuration.get(
-                    "background_allowed"
+                if configuration["version"] != job["connection_version"] or (
+                    background_ai and not configuration.get("background_allowed")
                 ):
                     raise HTTPException(403, "background_authorization_changed")
                 if parameters.get("max_calls", 0) <= counts["calls"]:
@@ -351,7 +365,7 @@ class Automation:
                     configuration,
                     [{"role": "user", "content": prompt}],
                     max_calls=min(parameters["max_calls"] - counts["calls"], 8),
-                    background=True,
+                    background=background_ai,
                     heartbeat=lambda iteration: self.checkpoint_task(
                         job,
                         len(identities),

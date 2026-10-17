@@ -9,7 +9,7 @@ from pathlib import Path
 from wildstring.library.albums import album_key
 from wildstring.provider_schema import SCHEMA as PROVIDER_SCHEMA
 
-SCHEMA_VERSION = 18
+SCHEMA_VERSION = 20
 TRANSCODING_SCHEMA = """
 BEGIN IMMEDIATE;
 CREATE TABLE transcoding_settings (
@@ -421,6 +421,14 @@ class Database:
                 from wildstring.recommendation_schema import SCHEMA as RECOMMENDATION_SCHEMA
 
                 connection.executescript(RECOMMENDATION_SCHEMA)
+            if current < 19:
+                from wildstring.research_schema import SCHEMA as RESEARCH_SCHEMA
+
+                connection.executescript(RESEARCH_SCHEMA)
+            if current < 20:
+                from wildstring.music_plugin_schema import SCHEMA as MUSIC_PLUGIN_SCHEMA
+
+                connection.executescript(MUSIC_PLUGIN_SCHEMA)
             connection.execute("PRAGMA journal_mode = WAL")
 
     def check_ready(self) -> bool:

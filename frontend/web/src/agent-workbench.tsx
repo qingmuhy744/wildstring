@@ -530,6 +530,10 @@ export function AgentTasks({
     use_ai: useAI,
     ...(useAI ? { connection_id: connection } : {}),
   };
+  const availableConnections = (connections.value?.items || []).filter(
+    (c) => c.enabled && (tab === 'tasks' || c.background_allowed),
+  );
+  const selectedConnectionAvailable = availableConnections.some((c) => c.id === connection);
   const item = detail.value;
   const stageName = (stage: string) =>
     (
@@ -585,6 +589,7 @@ export function AgentTasks({
             className="workspace-card"
             onSubmit={(e) => {
               e.preventDefault();
+              if (useAI && !selectedConnectionAvailable) return;
               void perform(
                 tab === 'tasks'
                   ? '/agent/tasks'
@@ -671,23 +676,30 @@ export function AgentTasks({
               {useAI && (
                 <>
                   <label>
-                    后台模型连接
+                    {tab === 'tasks' ? '本次巡检模型' : '定时巡检模型'}
                     <select
                       aria-label="巡检模型连接"
                       required
-                      value={connection}
+                      value={selectedConnectionAvailable ? connection : ''}
                       onChange={(e) => setConnection(e.target.value)}
                     >
-                      <option value="">选择已授权后台使用的连接</option>
-                      {connections.value?.items
-                        .filter((c) => c.enabled && c.background_allowed)
-                        .map((c) => (
-                          <option value={c.id} key={c.id}>
-                            {c.name} · {c.model}
-                          </option>
-                        ))}
+                      <option value="">请选择 AI 连接</option>
+                      {availableConnections.map((c) => (
+                        <option value={c.id} key={c.id}>
+                          {c.name} · {c.model}
+                        </option>
+                      ))}
                     </select>
                   </label>
+                  {!selectedConnectionAvailable && !connections.loading && (
+                    <p role="status">
+                      {availableConnections.length
+                        ? '请选择用于本次巡检的 AI 连接。'
+                        : tab === 'tasks'
+                          ? '没有可用的 AI 连接。请先在「AI 连接」添加并启用连接。'
+                          : '没有可用于定时巡检的连接。请在「AI 连接」添加或编辑连接，开启「允许自动巡检使用」。'}
+                    </p>
+                  )}
                   <label>
                     模型调用上限
                     <input
@@ -702,7 +714,10 @@ export function AgentTasks({
                 </>
               )}
               <div className="span-all workspace-inline">
-                <button className="primary" disabled={busy || (useAI && !connection)}>
+                <button
+                  className="primary"
+                  disabled={busy || (useAI && !selectedConnectionAvailable)}
+                >
                   {busy
                     ? '正在提交…'
                     : tab === 'tasks'
@@ -719,7 +734,11 @@ export function AgentTasks({
                   </button>
                 )}
                 <span className="muted">
-                  {useAI ? '按选定连接与预算执行，不自动批准或应用。' : '本地规则不调用模型。'}
+                  {useAI
+                    ? tab === 'tasks'
+                      ? '提交仅授权本次 AI 巡检，可能产生模型费用，受调用上限与每日预算约束。结果先生成草案。'
+                      : '定时巡检仅使用已授权自动使用的连接，受每日预算约束。结果先生成草案。'
+                    : '本地规则不调用模型。'}
                 </span>
               </div>
             </div>

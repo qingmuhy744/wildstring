@@ -1,0 +1,43 @@
+// The upstream reads anonymous state at module load; isolate it inside this plugin's state dir.
+const fs = require('fs');
+const path = require('path');
+const root = require('os').tmpdir();
+if (!fs.existsSync(path.join(root, 'anonymous_token')))
+  fs.writeFileSync(path.join(root, 'anonymous_token'), '');
+global.deviceId = 'WildStringSourcePlugin';
+console.log = console.info = console.warn = console.error = () => {};
+const request = require('netease-upstream/util/request');
+const methods = {
+  '/cloudsearch': require('netease-upstream/module/cloudsearch'),
+  '/song/detail': require('netease-upstream/module/song_detail'),
+  '/album': require('netease-upstream/module/album'),
+  '/lyric/new': require('netease-upstream/module/lyric_new'),
+};
+let input = '';
+process.stdin.setEncoding('utf8');
+process.stdin.on('data', (chunk) => {
+  input += chunk;
+  if (input.length > 100000) process.exit(1);
+});
+process.stdin.on('end', async () => {
+  try {
+    const data = JSON.parse(input);
+    const method = methods[data.path];
+    if (!method) throw Error('method');
+    const cookie = Object.fromEntries(
+      (data.cookie || '')
+        .split(';')
+        .filter((v) => v.includes('='))
+        .map((v) => {
+          const i = v.indexOf('=');
+          return [v.slice(0, i).trim(), v.slice(i + 1).trim()];
+        }),
+    );
+    const result = await method({ ...data.parameters, cookie, timeout: 12000 }, request);
+    process.stdout.write(JSON.stringify(result.body));
+    process.exit(0);
+  } catch {
+    process.stdout.write(JSON.stringify({ code: 502 }));
+    process.exit(0);
+  }
+});

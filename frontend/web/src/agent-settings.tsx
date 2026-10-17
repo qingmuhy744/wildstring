@@ -24,6 +24,11 @@ const empty = {
   background_allowed: false,
   daily_call_budget: 100,
   enabled: true,
+  protocol: 'chat_completions',
+  provider: 'generic',
+  reasoning_effort: 'auto',
+  max_output_tokens: 2048,
+  native_search: false,
 };
 export function AgentConnections({ user }: { user: User }) {
   const list = useModelConnections(),
@@ -58,6 +63,11 @@ export function AgentConnections({ user }: { user: User }) {
       background_allowed: item.background_allowed,
       daily_call_budget: item.daily_call_budget,
       enabled: item.enabled,
+      protocol: item.protocol || 'chat_completions',
+      provider: item.provider || 'generic',
+      reasoning_effort: item.reasoning_effort || 'auto',
+      max_output_tokens: item.max_output_tokens || 2048,
+      native_search: item.native_search || false,
     });
     setError('');
     setNotice('');
@@ -162,13 +172,18 @@ export function AgentConnections({ user }: { user: User }) {
                     {item.scope === 'personal' ? '仅本人' : item.shared ? '实例共享' : '管理员专用'}
                     {item.id === 'legacy' ? ' · 原有实例配置' : item.read_only ? ' · 仅可使用' : ''}
                     <br />
-                    {item.background_allowed ? '允许后台使用' : '仅交互使用'} · 每日最多{' '}
+                    {item.background_allowed ? '允许自动巡检' : '可手动使用'} · 每日最多{' '}
                     {item.daily_call_budget} 次
                     {item.daily_calls_remaining != null
                       ? ` · 今日剩余 ${item.daily_calls_remaining} 次`
                       : ''}
                     {item.my_usage?.calls != null ? ` · 我已用 ${item.my_usage.calls} 次` : ''}
                   </small>
+                  {item.id === 'legacy' && (
+                    <small>
+                      沿用服务端已有 AI 配置，可用于手动巡检。定时巡检请添加并授权新连接。
+                    </small>
+                  )}
                 </div>
                 <StateBadge state={item.enabled ? 'ready' : 'disabled'} />
                 <div className="workspace-actions">
@@ -198,6 +213,77 @@ export function AgentConnections({ user }: { user: User }) {
           <form onSubmit={(e) => void save(e)}>
             <h3>{editing ? '编辑模型连接' : '添加模型连接'}</h3>
             <div className="workspace-form">
+              <label>
+                API 协议
+                <select
+                  aria-label="API 协议"
+                  value={form.protocol}
+                  onChange={(e) =>
+                    setForm({ ...form, protocol: e.target.value, native_search: false })
+                  }
+                >
+                  <option value="chat_completions">Chat Completions（兼容接口）</option>
+                  <option value="responses">Responses</option>
+                </select>
+              </label>
+              <label>
+                供应商适配
+                <select
+                  aria-label="供应商适配"
+                  value={form.provider}
+                  onChange={(e) =>
+                    setForm({ ...form, provider: e.target.value, native_search: false })
+                  }
+                >
+                  {[
+                    ['generic', '通用兼容接口'],
+                    ['openai', 'OpenAI'],
+                    ['deepseek', 'DeepSeek'],
+                    ['qwen', '千问 / 百炼'],
+                    ['gemini', 'Gemini 兼容接口'],
+                  ].map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                推理强度
+                <select
+                  aria-label="推理强度"
+                  value={form.reasoning_effort}
+                  onChange={(e) => setForm({ ...form, reasoning_effort: e.target.value })}
+                >
+                  {['auto', 'none', 'low', 'medium', 'high', 'max', 'xhigh'].map((value) => (
+                    <option key={value} value={value}>
+                      {value === 'auto' ? '沿用模型默认' : value}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                单次输出 Token 上限
+                <input
+                  aria-label="单次输出 Token 上限"
+                  type="number"
+                  min="128"
+                  max="32768"
+                  value={form.max_output_tokens}
+                  onChange={(e) => setForm({ ...form, max_output_tokens: Number(e.target.value) })}
+                />
+              </label>
+              {form.protocol === 'responses' &&
+                ['openai', 'deepseek', 'qwen'].includes(form.provider) && (
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={form.native_search}
+                      onChange={(e) => setForm({ ...form, native_search: e.target.checked })}
+                    />
+                    使用模型原生联网搜索（按供应商计费）
+                  </label>
+                )}
               <label>
                 连接名称
                 <input
@@ -306,8 +392,9 @@ export function AgentConnections({ user }: { user: User }) {
                     checked={form.background_allowed}
                     onChange={(e) => setForm({ ...form, background_allowed: e.target.checked })}
                   />
-                  允许后台巡检使用
+                  允许自动巡检使用
                 </label>
+                <p className="muted">用于定时巡检等自动任务；手动开始无需开启。</p>
                 {user.role === 'admin' && form.scope === 'instance' && (
                   <label className="workspace-check">
                     <input
@@ -336,7 +423,7 @@ export function AgentConnections({ user }: { user: User }) {
                   </button>
                 )}
                 <small className="muted">
-                  检测能力最多发送 3 次合成请求，计入模型额度和每日预算；保存不会触发检测。
+                  检测能力最多发送 4 次合成请求，计入模型额度和每日预算；保存不会触发检测。
                 </small>
               </div>
             </div>
@@ -387,7 +474,9 @@ export function AgentConnections({ user }: { user: User }) {
 function Capabilities({ value }: { value: Record<string, unknown> }) {
   const names: Record<string, string> = {
     text: '文本响应',
-    structured: '结构化选歌',
+    structured: '合成 JSON 输出',
+    tools_roundtrip: '工具结果回传闭环',
+    native_search: '原生搜索',
     tools: '工具调用',
     tool_calling: '工具调用',
     checked_at: '检测时间',
@@ -621,11 +710,12 @@ export function AssistantPreferences() {
   }
   return prefs.unsupported ? null : (
     <section className="workspace-card" aria-label="助手历史设置">
-      <h2>助手历史</h2>
+      <h2>助手对话历史</h2>
+      <p className="muted">按对话最后更新时间清理聊天记录，已有草案、歌单和音乐保留。</p>
       <WorkspaceNotice error={error || prefs.error} notice={notice} />
       <div className="workspace-inline">
         <label>
-          对话保留（天）
+          助手对话保留天数
           <input
             aria-label="助手历史保留天数"
             type="number"

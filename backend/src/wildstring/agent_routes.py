@@ -10,17 +10,20 @@ from wildstring.agent_models import (
     AssistantPreferences,
     Connection,
     ConversationCreate,
+    ConversationRename,
     CredentialCreate,
     DraftCreate,
     DraftPatch,
     EndpointPolicy,
     Inspection,
+    Memory,
     MessageCreate,
     NotificationPreferences,
     NotificationRead,
     ReadAll,
     Retry,
     Schedule,
+    SearchSettings,
     TargetState,
     TelegramCreate,
     Verify,
@@ -63,6 +66,9 @@ def agent_router(service):
                 "inspections": True,
                 "schedules": True,
                 "assistant": True,
+                "research": True,
+                "context_summary": True,
+                "long_term_memory": True,
             },
             "role": actor.role,
         }
@@ -247,7 +253,7 @@ def agent_router(service):
 
     @router.post("/tasks")
     def submit(body: Inspection, actor: Annotated[object, Depends(session)]):
-        return service.submit_task(actor, body)
+        return service.submit_task(actor, body, manual=True)
 
     @router.get("/tasks/{identity}")
     def task(identity: str, actor: Annotated[object, Depends(session)]):
@@ -316,6 +322,50 @@ def agent_router(service):
     def test_connection(identity: str, actor: Annotated[object, Depends(session)]):
         return service.test_connection(actor, identity)
 
+    @router.get("/search-settings")
+    def search_settings(actor: Annotated[object, Depends(session)]):
+        return service.search_settings(actor)
+
+    @router.put("/search-settings")
+    def save_search_settings(body: SearchSettings, actor: Annotated[object, Depends(session)]):
+        return service.save_search_settings(actor, body)
+
+    @router.post("/search-settings/test")
+    def test_search(actor: Annotated[object, Depends(session)]):
+        settings = service.search_settings(actor)
+        sources = {}
+        return service.research_tool(
+            actor, settings, "search_web", {"query": "MusicBrainz music database"}, sources, None
+        )
+
+    @router.get("/memories")
+    def memories(actor: Annotated[object, Depends(session)]):
+        return page(service.memories(actor))
+
+    @router.post("/memories")
+    def create_memory(body: Memory, actor: Annotated[object, Depends(session)]):
+        return service.save_memory(actor, body)
+
+    @router.patch("/memories/{identity}")
+    def update_memory(identity: str, body: Memory, actor: Annotated[object, Depends(session)]):
+        return service.save_memory(actor, body, identity)
+
+    @router.delete("/memories/{identity}")
+    def delete_memory(identity: str, actor: Annotated[object, Depends(session)]):
+        return service.delete_memory(actor, identity)
+
+    @router.delete("/conversations/{identity}/summary")
+    def clear_summary(identity: str, actor: Annotated[object, Depends(session)]):
+        service.conversation(actor, identity)
+        with service.database.connect(write=True) as db:
+            db.execute("BEGIN IMMEDIATE")
+            if db.execute(
+                "SELECT 1 FROM agent_runs WHERE conversation_id=? AND status='running'", (identity,)
+            ).fetchone():
+                raise HTTPException(409, "conversation_busy")
+            db.execute("DELETE FROM agent_contexts WHERE conversation_id=?", (identity,))
+        return {"ok": True}
+
     @router.get("/assistant-preferences")
     def assistant_preferences(actor: Annotated[object, Depends(session)]):
         return service.assistant_preferences(actor)
@@ -345,6 +395,12 @@ def agent_router(service):
     @router.delete("/conversations/{identity}")
     def delete_conversation(identity: str, actor: Annotated[object, Depends(session)]):
         return service.delete_conversation(actor, identity)
+
+    @router.patch("/conversations/{identity}")
+    def rename_conversation(
+        identity: str, body: ConversationRename, actor: Annotated[object, Depends(session)]
+    ):
+        return service.rename_conversation(actor, identity, body)
 
     @router.delete("/conversations")
     def delete_conversations(actor: Annotated[object, Depends(session)]):

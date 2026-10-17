@@ -3,6 +3,7 @@ import type { User } from './api';
 import { AgentConnections, AssistantPreferences, ToolCredentials } from './agent-settings';
 import { TelegramSettings } from './telegram-settings';
 import { WorkspaceHeader } from './workspace-ui';
+import { ResearchSettings } from './assistant-research';
 export function AssistantSettings({ user }: { user: User }) {
   const [tab, setTab] = useState('connections');
   return (
@@ -18,6 +19,7 @@ export function AssistantSettings({ user }: { user: User }) {
           ['telegram', '通知与 Telegram'],
           ['credentials', 'MCP 工具凭据'],
           ['history', '对话历史'],
+          ['research', '联网与记忆'],
         ].map(([key, label]) => (
           <button key={key} aria-pressed={tab === key} onClick={() => setTab(key)}>
             {label}
@@ -28,6 +30,7 @@ export function AssistantSettings({ user }: { user: User }) {
       {tab === 'telegram' && <TelegramSettings />}
       {tab === 'credentials' && <ToolCredentials user={user} />}{' '}
       {tab === 'history' && <AssistantPreferences />}
+      {tab === 'research' && <ResearchSettings />}
     </section>
   );
 }

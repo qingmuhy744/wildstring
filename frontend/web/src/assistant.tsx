@@ -29,6 +29,10 @@ export function Assistant({
     [busy, setBusy] = useState(false),
     [error, setError] = useState(''),
     [notice, setNotice] = useState('');
+  const [historyAction, setHistoryAction] = useState<{
+    kind: 'rename' | 'delete';
+    session: Conversation;
+  } | null>(null);
   const request = useRef<AbortController | null>(null),
     sequence = useRef(0),
     messages = useRef<HTMLDivElement>(null);
@@ -52,15 +56,21 @@ export function Assistant({
     return () => controller.abort();
   }, [selected]);
   useEffect(() => {
+    let cancelled = false;
     const sync = () => {
       if (!document.hidden && selected && !busy)
         void api<Conversation>(`/agent/conversations/${selected}`)
-          .then(setConversation)
-          .catch((reason) => setError(errorText(reason)));
+          .then((value) => {
+            if (!cancelled) setConversation(value);
+          })
+          .catch((reason) => {
+            if (!cancelled) setError(errorText(reason));
+          });
     };
     document.addEventListener('visibilitychange', sync);
     window.addEventListener('online', sync);
     return () => {
+      cancelled = true;
       document.removeEventListener('visibilitychange', sync);
       window.removeEventListener('online', sync);
     };
@@ -115,17 +125,31 @@ export function Assistant({
       }
     }
   }
-  async function remove() {
-    if (!selected || busy || !confirm('删除这段对话？已保存的草案和歌单会保留。')) return;
+  async function changeHistory(title: string) {
+    if (!historyAction || busy) return;
+    const { session, kind } = historyAction;
     setBusy(true);
     setError('');
     try {
-      await api(`/agent/conversations/${selected}`, { method: 'DELETE' });
-      setSelected(null);
-      setConversation(null);
+      if (kind === 'rename') {
+        const changed = await api<Conversation>(`/agent/conversations/${session.id}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ title: title.trim() }),
+        });
+        setConversation((current) =>
+          current?.id === session.id ? { ...current, title: changed.title } : current,
+        );
+        setNotice('对话已改名。');
+      } else {
+        await api(`/agent/conversations/${session.id}`, { method: 'DELETE' });
+        if (selected === session.id) {
+          setSelected(null);
+          setConversation(null);
+        }
+        setNotice('对话已删除，已有草案和歌单保留。');
+      }
+      setHistoryAction(null);
       await sessions.reload();
-    } catch (reason) {
-      setError(errorText(reason));
     } finally {
       setBusy(false);
     }
@@ -174,15 +198,32 @@ export function Assistant({
               <h2>最近对话</h2>
               <div className="workspace-session-list">
                 {sessions.value?.items.map((session) => (
-                  <button
-                    className="workspace-session"
-                    key={session.id}
-                    aria-pressed={selected === session.id}
-                    disabled={busy}
-                    onClick={() => setSelected(session.id)}
-                  >
-                    {session.title}
-                  </button>
+                  <div className="workspace-session-entry" key={session.id}>
+                    <button
+                      className="workspace-session"
+                      aria-pressed={selected === session.id}
+                      disabled={busy}
+                      onClick={() => setSelected(session.id)}
+                    >
+                      {session.title}
+                    </button>
+                    <div className="workspace-session-actions">
+                      <button
+                        disabled={busy}
+                        aria-label={`改名：${session.title}`}
+                        onClick={() => setHistoryAction({ kind: 'rename', session })}
+                      >
+                        改名
+                      </button>
+                      <button
+                        disabled={busy}
+                        aria-label={`删除：${session.title}`}
+                        onClick={() => setHistoryAction({ kind: 'delete', session })}
+                      >
+                        删除
+                      </button>
+                    </div>
+                  </div>
                 ))}
                 {!sessions.value?.items.length && <p className="muted">从一首歌、一种心情开始。</p>}
               </div>
@@ -198,8 +239,11 @@ export function Assistant({
                 disabled={busy || connections.loading}
                 onManage={onConnections}
               />
-              {selected && (
-                <button disabled={busy} onClick={() => void remove()}>
+              {conversation && (
+                <button
+                  disabled={busy}
+                  onClick={() => setHistoryAction({ kind: 'delete', session: conversation })}
+                >
                   删除对话
                 </button>
               )}
@@ -212,6 +256,25 @@ export function Assistant({
                   : '之前选择的连接已不可用，请重新选择。'}
             </p>
             <div ref={messages} aria-live="polite">
+              {conversation?.context_summary && (
+                <details className="workspace-notice">
+                  <summary>已压缩较早对话 · 查看上下文摘要</summary>
+                  <p>{conversation.context_summary.summary}</p>
+                  <button
+                    disabled={busy}
+                    onClick={() => {
+                      if (confirm('清除本对话摘要？聊天记录保留，下次长对话可能重新摘要。'))
+                        void api(`/agent/conversations/${conversation.id}/summary`, {
+                          method: 'DELETE',
+                        })
+                          .then(() => setConversation({ ...conversation, context_summary: null }))
+                          .catch((reason) => setError(errorText(reason)));
+                    }}
+                  >
+                    清除摘要
+                  </button>
+                </details>
+              )}
               {!conversation?.messages?.length && (
                 <div className="workspace-empty">试试“找出许嵩的歌，先给我一份歌单草案”。</div>
               )}
@@ -221,12 +284,24 @@ export function Assistant({
                     {message.role === 'user' ? '你' : '野弦'} · {localDate(message.created_at)}
                   </small>
                   <p>{message.content}</p>
+                  {!!message.sources?.length && (
+                    <ul aria-label="联网来源">
+                      {message.sources.map((source) => (
+                        <li key={source.id}>
+                          <a href={source.url} target="_blank" rel="noopener noreferrer">
+                            {source.title}
+                          </a>
+                          {source.published_at && <small> · 来源日期 {source.published_at}</small>}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </article>
               ))}
               {conversation?.runs?.map((run) => (
                 <div className="workspace-run" key={run.id}>
                   {run.status === 'local_fallback' ? (
-                    <p className="workspace-notice">本次使用本地检索回退，未进行模型推理。</p>
+                    <p className="workspace-notice">本地关键词检索 · 未调用模型</p>
                   ) : (
                     <StateBadge state={run.status} />
                   )}
@@ -283,6 +358,84 @@ export function Assistant({
           </div>
         </div>
       )}
+      {historyAction && (
+        <ConversationActionDialog
+          action={historyAction}
+          onClose={() => setHistoryAction(null)}
+          onSubmit={changeHistory}
+        />
+      )}
     </section>
+  );
+}
+
+function ConversationActionDialog({
+  action,
+  onClose,
+  onSubmit,
+}: {
+  action: { kind: 'rename' | 'delete'; session: Conversation };
+  onClose: () => void;
+  onSubmit: (title: string) => Promise<void>;
+}) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  const [title, setTitle] = useState(action.session.title);
+  const [busy, setBusy] = useState(false),
+    [error, setError] = useState('');
+  const rename = action.kind === 'rename';
+  useEffect(() => {
+    const node = dialog.current;
+    node?.showModal();
+    return () => node?.close();
+  }, []);
+  return (
+    <dialog
+      ref={dialog}
+      className="playlist-editor"
+      aria-label={rename ? '对话改名' : '删除对话'}
+      onCancel={(event) => {
+        event.preventDefault();
+        if (!busy) onClose();
+      }}
+    >
+      <h2>{rename ? '对话改名' : '删除对话？'}</h2>
+      <form
+        className="account-form"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (busy || (rename && !title.trim())) return;
+          setBusy(true);
+          setError('');
+          void onSubmit(title)
+            .catch((reason) => setError(errorText(reason)))
+            .finally(() => setBusy(false));
+        }}
+      >
+        {rename ? (
+          <label>
+            对话名称
+            <input
+              autoFocus
+              required
+              maxLength={200}
+              value={title}
+              disabled={busy}
+              onChange={(event) => setTitle(event.target.value)}
+            />
+          </label>
+        ) : (
+          <p>删除「{action.session.title}」的对话历史，已有草案和歌单会保留。</p>
+        )}
+        {error && <p role="alert">{error}</p>}
+        <div className="workspace-actions">
+          <button type="button" disabled={busy} onClick={onClose}>
+            取消
+          </button>
+          <button className="primary" disabled={busy || (rename && !title.trim())}>
+            {busy ? '正在处理…' : rename ? '保存' : '删除'}
+          </button>
+        </div>
+      </form>
+    </dialog>
   );
 }

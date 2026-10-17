@@ -17,8 +17,10 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.google.gson.JsonObject
@@ -35,7 +37,7 @@ import java.time.format.DateTimeFormatter
     key(owner) {
         var tab by remember { mutableStateOf(initialTab) }
         var selected by remember { mutableStateOf<String?>(null) }
-        val tabs = listOf("chat" to "助手", "notifications" to "通知", "drafts" to "草案", "tasks" to "巡检", "connections" to "AI 连接", "channels" to "通知设置")
+        val tabs = listOf("chat" to "助手", "notifications" to "通知", "drafts" to "草案", "tasks" to "巡检", "connections" to "AI 连接", "research" to "联网与记忆", "channels" to "通知设置")
         Column(Modifier.fillMaxSize().testTag("agent-workspace")) {
             PrimaryScrollableTabRow(tabs.indexOfFirst { it.first == tab }.coerceAtLeast(0), edgePadding = 8.dp) {
                 tabs.forEach { (id, title) -> Tab(tab == id, { tab = id; selected = null }, text = { Text(title) }, modifier = Modifier.testTag("agent-tab-$id")) }
@@ -47,6 +49,7 @@ import java.time.format.DateTimeFormatter
                     "drafts" -> AgentDrafts(vm, selected)
                     "tasks" -> AgentTasks(vm, selected)
                     "connections" -> AgentConnections(vm)
+                    "research" -> AgentResearch(vm)
                     else -> AgentChannels(vm)
                 }
             }
@@ -167,9 +170,13 @@ private fun displayValue(value: com.google.gson.JsonElement?): String = when { v
 }
 
 @Composable private fun AgentChat(vm: MusicViewModel, openDraft: (String) -> Unit) {
+    val links = LocalUriHandler.current
+    var showSummary by remember { mutableStateOf(false) }
     var conversations by remember { mutableStateOf<List<JsonObject>>(emptyList()) }; var conversation by remember { mutableStateOf<JsonObject?>(null) }
     var connections by remember { mutableStateOf<List<JsonObject>>(emptyList()) }; var connection by remember { mutableStateOf<String?>(null) }
-    var input by remember { mutableStateOf("") }; var history by remember { mutableStateOf(false) }; var delete by remember { mutableStateOf(false) }
+    var input by remember { mutableStateOf("") }; var history by remember { mutableStateOf(false) }
+    var deleting by remember { mutableStateOf<JsonObject?>(null) }; var renaming by remember { mutableStateOf<JsonObject?>(null) }
+    var title by remember { mutableStateOf("") }; var historyMenu by remember { mutableStateOf<String?>(null) }
     val action = remember { FeatureAction() }; val scope = rememberCoroutineScope()
     LaunchedEffect(Unit) { action.run { connections = vm.agent.all("connections"); conversations = vm.agent.all("conversations") }; if (action.message == "已完成") action.message = null }
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
@@ -179,18 +186,24 @@ private fun displayValue(value: com.google.gson.JsonElement?): String = when { v
             Spacer(Modifier.weight(1f))
             if (conversation != null) {
                 IconButton({ scope.launch { action.run { conversation = vm.agent.request("conversations/${conversation!!.text("id")}"); action.message = null } } }, enabled = !action.busy) { Icon(Icons.Default.Refresh, "刷新当前对话") }
-                IconButton({ delete = true }, enabled = !action.busy) { Icon(Icons.Default.DeleteOutline, "删除当前对话") }
+                IconButton({ deleting = conversation; action.message = null }, enabled = !action.busy) { Icon(Icons.Default.DeleteOutline, "删除当前对话") }
             }
         }
         AgentConnectionChoice(connections, connection, !action.busy) { connection = it }
         LazyColumn(Modifier.weight(1f).fillMaxWidth().testTag("agent-messages"), verticalArrangement = Arrangement.spacedBy(12.dp), contentPadding = PaddingValues(vertical = 12.dp)) {
+            conversation?.get("context_summary")?.takeIf { it.isJsonObject }?.asJsonObject?.let { summary -> item {
+                TextButton({ showSummary = !showSummary }) { Text("已压缩较早对话 · 查看上下文摘要") }
+                if (showSummary) { Text(summary.text("summary"), style = MaterialTheme.typography.bodySmall); TextButton({ scope.launch { action.run { val id = conversation!!.text("id"); vm.agent.request("conversations/$id/summary", "DELETE"); conversation = vm.agent.request("conversations/$id") } } }, enabled = !action.busy) { Text("清除摘要") } }
+            } }
             if (conversation == null) item { AgentEmpty("试试“把我很久没听的收藏整理成歌单”。助手会先生成草案，等你确认。未配置 AI 时仍可本地找歌。") }
             items(conversation?.objects("messages") ?: emptyList(), key = { it.text("id") }) { message ->
-                AgentCard { Text(if (message.text("role") == "user") "你" else "野弦", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary); SelectionContainer { Text(message.text("content")) } }
+                AgentCard { Text(if (message.text("role") == "user") "你" else "野弦", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary); SelectionContainer { Text(message.text("content")) }; message.objects("sources").forEach { source ->
+                    source.text("url").takeIf { it.startsWith("https://") }?.let { url -> TextButton({ runCatching { links.openUri(url) }.onFailure { action.message = "无法打开来源。" } }) { Text("来源：${source.text("title")}") } }
+                } }
             }
             conversation?.objects("runs")?.forEach { run -> item(key = "run-${run.text("id")}") {
                 val fallback = run.text("status") == "local_fallback"
-                if (fallback) Text("AI 暂不可用，本次使用本地找歌。", style = MaterialTheme.typography.bodySmall)
+                if (fallback) Text("本地关键词检索 · 未调用模型", style = MaterialTheme.typography.bodySmall)
                 if (run.text("error_code").isNotBlank()) Text("状态：${run.text("status")} · ${run.text("error_code")}", style = MaterialTheme.typography.bodySmall)
                 run.getAsJsonArray("draft_ids")?.forEach { draft -> TextButton({ openDraft(draft.asString) }) { Text("查看生成的草案") } }
                 AgentTrace(run)
@@ -215,27 +228,53 @@ private fun displayValue(value: com.google.gson.JsonElement?): String = when { v
             }, enabled = !action.busy && input.isNotBlank(), modifier = Modifier.testTag("agent-chat-send")) { if (action.busy) CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp) else Icon(Icons.AutoMirrored.Filled.Send, "发送") }
         }
     }
-    if (history) AlertDialog(onDismissRequest = { history = false }, title = { Text("历史对话") }, text = {
-        LazyColumn(Modifier.heightIn(max = 400.dp)) {
+    if (history) AlertDialog(onDismissRequest = { if (!action.busy) history = false }, title = { Text("历史对话") }, text = {
+        LazyColumn(Modifier.heightIn(max = 400.dp).testTag("agent-history")) {
+            item { ActionStatus(action) }
             if (conversations.isEmpty()) item { AgentEmpty("暂无历史。") }
-            items(conversations, key = { it.text("id") }) { item -> ListItem(headlineContent = { Text(item.text("title")) }, modifier = Modifier.clickable { history = false; scope.launch { action.run { conversation = vm.agent.request("conversations/${item.text("id")}"); connection = conversation?.text("connection_id")?.takeIf { it.isNotBlank() } } } }) }
+            items(conversations, key = { it.text("id") }) { item ->
+                ListItem(headlineContent = { Text(item.text("title"), maxLines = 2, overflow = TextOverflow.Ellipsis) },
+                    modifier = Modifier.testTag("history-open-${item.text("id")}").clickable(enabled = !action.busy) { history = false; scope.launch { action.run { conversation = vm.agent.request("conversations/${item.text("id")}"); connection = conversation?.text("connection_id")?.takeIf { it.isNotBlank() } } } },
+                    trailingContent = { Box {
+                        IconButton({ historyMenu = item.text("id") }, enabled = !action.busy, modifier = Modifier.testTag("history-actions-${item.text("id")}")) { Icon(Icons.Default.MoreVert, "对话操作：${item.text("title")}") }
+                        DropdownMenu(historyMenu == item.text("id"), { historyMenu = null }) {
+                            DropdownMenuItem(text = { Text("改名") }, leadingIcon = { Icon(Icons.Default.Edit, null) }, onClick = { renaming = item; title = item.text("title"); historyMenu = null; action.message = null })
+                            DropdownMenuItem(text = { Text("删除") }, leadingIcon = { Icon(Icons.Default.DeleteOutline, null) }, onClick = { deleting = item; historyMenu = null; action.message = null })
+                        }
+                    } },
+                )
+            }
         }
-    }, confirmButton = { TextButton({ history = false }) { Text("关闭") } })
-    if (delete) AlertDialog(onDismissRequest = { delete = false }, title = { Text("删除当前对话？") }, text = { Text("删除服务端的对话历史，已有草案单独保留。") }, confirmButton = { TextButton({ scope.launch { action.run { vm.agent.request("conversations/${conversation!!.text("id")}", "DELETE"); conversation = null; conversations = vm.agent.all("conversations"); delete = false } } }) { Text("删除") } }, dismissButton = { TextButton({ delete = false }) { Text("取消") } })
+    }, confirmButton = { TextButton({ history = false }, enabled = !action.busy) { Text("关闭") } })
+    renaming?.let { item -> AlertDialog(onDismissRequest = { if (!action.busy) renaming = null }, title = { Text("对话改名") }, text = {
+        Column { OutlinedTextField(title, { title = it.take(200) }, label = { Text("对话名称") }, singleLine = true, enabled = !action.busy, modifier = Modifier.testTag("conversation-title")); ActionStatus(action) }
+    }, confirmButton = { TextButton({ scope.launch { action.run {
+        val changed = vm.agent.request("conversations/${item.text("id")}", "PATCH", jsonBody("title" to title.trim()))
+        conversations = conversations.map { if (it.text("id") == item.text("id")) changed else it }
+        if (conversation?.text("id") == item.text("id")) conversation = changed
+        renaming = null
+    } } }, enabled = !action.busy && title.isNotBlank()) { Text("保存") } }, dismissButton = { TextButton({ renaming = null }, enabled = !action.busy) { Text("取消") } }) }
+    deleting?.let { item -> AlertDialog(onDismissRequest = { if (!action.busy) deleting = null }, title = { Text("删除对话？") }, text = {
+        Column { Text("删除「${item.text("title")}」的对话历史，已有草案单独保留。"); ActionStatus(action) }
+    }, confirmButton = { TextButton({ scope.launch { action.run {
+        vm.agent.request("conversations/${item.text("id")}", "DELETE")
+        if (conversation?.text("id") == item.text("id")) conversation = null
+        conversations = conversations.filterNot { it.text("id") == item.text("id") }; deleting = null
+    } } }, enabled = !action.busy) { Text("删除") } }, dismissButton = { TextButton({ deleting = null }, enabled = !action.busy) { Text("取消") } }) }
 }
 
 /** Every AI entry point uses the same permission-filtered connection list; null is explicitly local. */
-@Composable internal fun AgentConnectionChoice(connections: List<JsonObject>, selected: String?, enabled: Boolean = true, choose: (String?) -> Unit) {
+@Composable internal fun AgentConnectionChoice(connections: List<JsonObject>, selected: String?, enabled: Boolean = true, emptyLabel: String = "本地找歌（不使用模型）", choose: (String?) -> Unit) {
     var open by remember { mutableStateOf(false) }
     val chosen = connections.firstOrNull { it.text("id") == selected }
     Column {
         Box {
             TextButton({ open = true }, enabled = enabled, modifier = Modifier.testTag("ai-connection-choice")) {
-                Text(if (selected == null) "本地找歌（不使用模型）" else chosen?.text("name") ?: "已选连接不可用")
+                Text(if (selected == null) emptyLabel else chosen?.text("name") ?: "已选连接不可用")
                 Icon(Icons.Default.ArrowDropDown, null)
             }
             DropdownMenu(open, { open = false }) {
-                DropdownMenuItem(text = { Text("本地找歌（不使用模型）") }, onClick = { choose(null); open = false })
+                DropdownMenuItem(text = { Text(emptyLabel) }, onClick = { choose(null); open = false })
                 connections.filter { it.flag("enabled") }.forEach { item ->
                     DropdownMenuItem(text = { Column {
                         Text("${item.text("name")} · ${item.text("model")}")
@@ -314,15 +353,24 @@ internal fun connectionBudget(connection: JsonObject): String {
     var timezone by remember { mutableStateOf(java.util.TimeZone.getDefault().id) }; var enabled by remember { mutableStateOf(false) }; var connections by remember { mutableStateOf<List<JsonObject>>(emptyList()) }
     val action = remember { FeatureAction() }; val scope = rememberCoroutineScope()
     LaunchedEffect(Unit) { action.run { connections = vm.agent.all("connections") }; if (action.message == "已完成") action.message = null }
+    val available = connections.filter { it.flag("enabled") && (!schedule || it.flag("background_allowed")) }
+    val selectedAvailable = available.any { it.text("id") == connection }
     AlertDialog(onDismissRequest = { if (!action.busy) dismiss() }, title = { Text(if (schedule) "定时巡检" else "开始曲库巡检") }, text = {
         Column(Modifier.heightIn(max = 500.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             if (schedule) OutlinedTextField(name, { name = it }, label = { Text("计划名称") }, singleLine = true)
             OutlinedTextField(maxTracks, { maxTracks = it.filter(Char::isDigit) }, label = { Text("最多检查歌曲数") }, singleLine = true)
-            Row(verticalAlignment = Alignment.CenterVertically) { Text("使用 AI 分析", Modifier.weight(1f)); Switch(ai, { ai = it }) }
+            Row(verticalAlignment = Alignment.CenterVertically) { Text("使用 AI 分析", Modifier.weight(1f)); Switch(ai, { ai = it }, modifier = Modifier.testTag("inspection-use-ai")) }
             if (ai) {
-                AgentConnectionChoice(connections.filter { it.flag("background_allowed") }, connection) { connection = it }
+                AgentConnectionChoice(available, connection, !action.busy, emptyLabel = "请选择 AI 连接") { connection = it }
+                if (!selectedAvailable && !action.busy) Text(
+                    if (available.isEmpty()) {
+                        if (schedule) "没有可用于定时巡检的连接。请在「AI 连接」添加或编辑连接，开启「允许自动巡检使用」。"
+                        else "没有可用的 AI 连接。请先在「AI 连接」添加并启用连接。"
+                    } else "请选择用于本次巡检的 AI 连接。",
+                    style = MaterialTheme.typography.bodySmall,
+                )
                 OutlinedTextField(maxCalls, { maxCalls = it.filter(Char::isDigit) }, label = { Text("最多模型调用次数") }, singleLine = true)
-                Text("仅使用已授权后台使用的连接，受每日预算约束。结果先生成草案。", style = MaterialTheme.typography.bodySmall)
+                Text(if (schedule) "定时巡检仅使用已授权自动使用的连接，受每日预算约束。结果先生成草案。" else "点击开始仅授权本次 AI 巡检，可能产生模型费用，受调用上限与每日预算约束。结果先生成草案。", style = MaterialTheme.typography.bodySmall)
             }
             if (schedule) {
                 OutlinedTextField(hours, { hours = it.filter(Char::isDigit) }, label = { Text("间隔小时（1–720）") }, singleLine = true)
@@ -336,7 +384,7 @@ internal fun connectionBudget(connection: JsonObject): String {
         val parameters = jsonBody("max_tracks" to (maxTracks.toIntOrNull() ?: 0), "use_ai" to ai, "max_calls" to if (ai) maxCalls.toIntOrNull() ?: 0 else 0, "connection_id" to if (ai) connection else null)
         if (schedule) vm.agent.request("schedules", "POST", jsonBody("name" to name, "enabled" to enabled, "interval_hours" to (hours.toIntOrNull() ?: 0), "timezone" to timezone, "parameters" to parameters)) else vm.agent.request("tasks", "POST", parameters)
         submitted(); dismiss(); vm.agent.refreshInbox()
-    } } }, enabled = !action.busy && (maxTracks.toIntOrNull() ?: 0) > 0 && (!ai || connection != null)) { Text(if (schedule) "保存计划" else "开始") } }, dismissButton = { TextButton(dismiss, enabled = !action.busy) { Text("取消") } })
+    } } }, enabled = !action.busy && (maxTracks.toIntOrNull() ?: 0) in 1..5000 && (!ai || (selectedAvailable && (maxCalls.toIntOrNull() ?: 0) in 1..100))) { Text(if (schedule) "保存计划" else "开始") } }, dismissButton = { TextButton(dismiss, enabled = !action.busy) { Text("取消") } })
 }
 @Composable private fun AgentScheduleCard(vm: MusicViewModel, initial: JsonObject, refresh: () -> Unit) {
     var schedule by remember(initial) { mutableStateOf(initial) }; var deleting by remember { mutableStateOf(false) }
@@ -364,6 +412,7 @@ internal fun connectionBudget(connection: JsonObject): String {
             Text(connection.text("name"), fontWeight = FontWeight.Medium); Text("${connection.text("model")} · ${if (connection.text("scope") == "instance") "实例连接" else "个人连接"}")
             Text(connection.text("base_url"), style = MaterialTheme.typography.bodySmall)
             Text("${if (connection.flag("enabled")) "已启用" else "未启用"} · 每日最多 ${connection.number("daily_call_budget")} 次", style = MaterialTheme.typography.bodySmall)
+            if (connection.text("id") == "legacy") Text("沿用服务端已有 AI 配置，可用于手动巡检。定时巡检请添加并授权新连接。", style = MaterialTheme.typography.bodySmall)
             connection.getAsJsonObject("capabilities")?.let { caps -> caps.entrySet().forEach { (name, value) -> Text("${fieldName(name)}：${displayValue(value)}", style = MaterialTheme.typography.labelSmall) } }
             Row {
                 TextButton({ scope.launch { action.run {
@@ -383,6 +432,11 @@ internal fun connectionBudget(connection: JsonObject): String {
 }
 
 @Composable private fun AgentConnectionForm(vm: MusicViewModel, original: JsonObject?, dismiss: () -> Unit, saved: () -> Unit) {
+    var protocol by remember { mutableStateOf(original?.text("protocol")?.ifBlank { "chat_completions" } ?: "chat_completions") }
+    var provider by remember { mutableStateOf(original?.text("provider")?.ifBlank { "generic" } ?: "generic") }
+    var effort by remember { mutableStateOf(original?.text("reasoning_effort")?.ifBlank { "auto" } ?: "auto") }
+    var outputLimit by remember { mutableStateOf((original?.number("max_output_tokens", 2048) ?: 2048).toString()) }
+    var nativeSearch by remember { mutableStateOf(original?.flag("native_search") ?: false) }
     var name by remember { mutableStateOf(original?.text("name") ?: "我的 AI") }; var base by remember { mutableStateOf(original?.text("base_url") ?: "") }
     var model by remember { mutableStateOf(original?.text("model") ?: "") }; var secret by remember { mutableStateOf("") }; var timeout by remember { mutableStateOf((original?.number("timeout") ?: 30).toString()) }
     var budget by remember { mutableStateOf((original?.number("daily_call_budget") ?: 100).toString()) }; var enabled by remember { mutableStateOf(original?.flag("enabled") ?: true) }
@@ -392,13 +446,19 @@ internal fun connectionBudget(connection: JsonObject): String {
     AlertDialog(onDismissRequest = { if (!action.busy) dismiss() }, title = { Text(if (original == null) "添加 AI 连接" else "编辑 AI 连接") }, text = {
         Column(Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             OutlinedTextField(name, { name = it }, label = { Text("名称") }, singleLine = true)
-            OutlinedTextField(base, { base = it }, label = { Text("Chat Completions 服务地址") }, singleLine = true)
+            ResearchChoice("API 协议", protocol, listOf("chat_completions" to "Chat Completions", "responses" to "Responses")) { protocol = it; nativeSearch = false }
+            ResearchChoice("供应商", provider, listOf("generic" to "通用兼容接口", "openai" to "OpenAI", "deepseek" to "DeepSeek", "qwen" to "千问 / 百炼", "gemini" to "Gemini 兼容接口")) { provider = it; nativeSearch = false }
+            OutlinedTextField(base, { base = it }, label = { Text("模型 API 服务地址") }, singleLine = true)
             OutlinedTextField(model, { model = it }, label = { Text("模型") }, singleLine = true)
             OutlinedTextField(secret, { secret = it }, label = { Text(if (original?.flag("has_api_key") == true) "API Key（留空保留）" else "API Key") }, singleLine = true, visualTransformation = PasswordVisualTransformation())
             OutlinedTextField(timeout, { timeout = it.filter(Char::isDigit) }, label = { Text("请求超时秒数") }, singleLine = true)
             OutlinedTextField(budget, { budget = it.filter(Char::isDigit) }, label = { Text("每日调用预算") }, singleLine = true)
+            ResearchChoice("推理强度", effort, listOf("auto" to "沿用模型默认", "none" to "none", "low" to "low", "medium" to "medium", "high" to "high", "max" to "max", "xhigh" to "xhigh")) { effort = it }
+            OutlinedTextField(outputLimit, { outputLimit = it.filter(Char::isDigit) }, label = { Text("单次输出 Token 上限") }, singleLine = true)
+            if (protocol == "responses" && provider in listOf("openai", "deepseek", "qwen")) { Row(verticalAlignment = Alignment.CenterVertically) { Text("模型原生联网搜索", Modifier.weight(1f)); Switch(nativeSearch, { nativeSearch = it }) }; Text("按供应商规则计费，单次模型请求可能多次搜索，不受独立搜索请求额度限制。", style = MaterialTheme.typography.bodySmall) }
             Row(verticalAlignment = Alignment.CenterVertically) { Text("启用连接", Modifier.weight(1f)); Switch(enabled, { enabled = it }) }
-            Row(verticalAlignment = Alignment.CenterVertically) { Text("允许后台巡检使用", Modifier.weight(1f)); Switch(background, { background = it }) }
+            Row(verticalAlignment = Alignment.CenterVertically) { Text("允许自动巡检使用", Modifier.weight(1f)); Switch(background, { background = it }) }
+            Text("用于定时巡检等自动任务；手动开始无需开启。", style = MaterialTheme.typography.bodySmall)
             if (admin && original == null) Row(verticalAlignment = Alignment.CenterVertically) { Text("实例连接", Modifier.weight(1f)); Switch(instance, { instance = it }) }
             if (admin && instance) Row(verticalAlignment = Alignment.CenterVertically) { Text("共享给其他用户", Modifier.weight(1f)); Switch(shared, { shared = it }) }
             Text("个人端点受管理员的域名策略约束，保存后可单独检测能力。检测会进行少量实际模型请求。", style = MaterialTheme.typography.bodySmall)
@@ -406,6 +466,7 @@ internal fun connectionBudget(connection: JsonObject): String {
         }
     }, confirmButton = { TextButton({ scope.launch { action.run {
         val body = jsonBody("name" to name, "base_url" to base.trim(), "model" to model.trim(), "timeout" to (timeout.toIntOrNull() ?: 0), "daily_call_budget" to (budget.toIntOrNull() ?: 0), "enabled" to enabled, "background_allowed" to background)
+        body.addProperty("protocol", protocol); body.addProperty("provider", provider); body.addProperty("reasoning_effort", effort); body.addProperty("max_output_tokens", outputLimit.toIntOrNull() ?: 0); body.addProperty("native_search", nativeSearch)
         if (original == null) body.addProperty("scope", if (instance) "instance" else "personal") else body.addProperty("version", original.number("version"))
         if (admin && instance) body.addProperty("shared", shared)
         if (secret.isNotBlank()) body.addProperty("api_key", secret)
@@ -454,7 +515,8 @@ internal fun connectionBudget(connection: JsonObject): String {
             if (delivery.text("status") in listOf("failed", "unknown", "retry_wait")) TextButton({ retry = delivery }, enabled = !action.busy) { Text("重试投递") }
         } }
         item { HorizontalDivider(); Text("助手历史", Modifier.padding(top = 12.dp), fontWeight = FontWeight.Medium)
-            OutlinedTextField(retention, { retention = it.filter(Char::isDigit) }, label = { Text("历史保留天数（1–365）") }, singleLine = true)
+            OutlinedTextField(retention, { retention = it.filter(Char::isDigit) }, label = { Text("助手对话保留天数（1–365）") }, singleLine = true)
+            Text("按对话最后更新时间清理聊天记录，已有草案、歌单和音乐保留。", style = MaterialTheme.typography.bodySmall)
             TextButton({ scope.launch { action.run { vm.agent.request("assistant-preferences", "PUT", jsonBody("retention_days" to (retention.toIntOrNull() ?: 0))) } } }, enabled = !action.busy && (retention.toIntOrNull() ?: 0) in 1..365) { Text("保存保留设置") }
         }
     }

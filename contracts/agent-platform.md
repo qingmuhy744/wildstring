@@ -34,12 +34,28 @@
 
 `GET /schedules`；`POST /schedules {name,enabled:false,interval_hours:24,timezone:Asia/Shanghai,parameters:{…任务参数}}`；`PATCH /schedules/{id}` 同字段加 version；`DELETE /schedules/{id}`。interval 1–720 小时，错过多周期只补一次，任务去重；timezone 校验 IANA，next_run_at 为 UTC。计划默认关闭，AI 后台需连接明确授权。
 
+已登录的 UI 通过 `POST /tasks` 显式选择 `use_ai=true`、连接及调用上限，授予本次任务使用该连接的权限，无需 `background_allowed`，可以选择只读的 `legacy` 实例连接。仅该入口在服务端持久记录单次授权，不增加客户端可写字段，也不开放配置编辑权限。定时计划及 `submit_inspection` 工具仍要求 `background_allowed=true`；恢复任务不提升原来的授权。所有模型请求继续检查连接版本、当前用户权限、每日额度及任务调用上限。旧任务没有单次授权记录时保留原限制。
+
 ## 连接与助手
 
 `GET /endpoint-policy` 管理员读取；`PUT /endpoint-policy {allowed_hosts:[域名/IP],allow_private:false}` 管理员设置个人连接允许的精确端点；私网需显式 allow_private 和主机允许。管理员自己的连接可以配置局域网。`GET /connections` 包含本人连接、显式共享实例连接和现有 legacy 连接（id=`legacy`，read_only=true）。`POST /connections {name,scope:personal|instance,base_url,model,api_key?,timeout:30,shared:false,background_allowed:false,daily_call_budget:100,enabled:true}`；`PATCH /connections/{id}` 同字段加 version；`DELETE /connections/{id}`；`POST /connections/{id}/test {}` 返回文本/工具能力及检测时间。仅管理员可创建 instance/shared。字段 `id,name,scope,base_url,model,timeout,shared,background_allowed,daily_call_budget,enabled,has_api_key,version,capabilities,created_at`。不返回密钥。
 
-`GET /conversations`；`POST /conversations {title?:"新对话",connection_id?:null}`（空或 `local` 为本地检索；不自动选择付费连接）；`GET /conversations/{id}` 包含 messages；`DELETE /conversations/{id}`；`POST /conversations/{id}/messages {content,connection_id?:null,max_calls:4}` 同步有界多轮（客户端先显示发送状态，断连后 GET 恢复）；省略 connection_id 才沿用会话连接，显式 null 或 `local` 切换为本地模式，绝不自动更换付费路径。响应完整 conversation，messages 含 `{id,role:user|assistant,content,created_at,run_id}`，runs 含 `{id,status,connection_id,error_code,tool_calls,draft_ids,trace_id}`。运行固定连接版本，最多 8 次模型调用，每次最多 8 个工具调用；只能调用读工具和创建草案，不能批准或应用。模型不可用时明确 local_fallback，本地找歌继续可用。`DELETE /conversations` 清除本人历史。`GET/PUT /assistant-preferences {retention_days:30}`，保留范围 1–365 天。
+`GET /conversations`；`POST /conversations {title?:"新对话",connection_id?:null}`（空或 `local` 为本地检索；不自动选择付费连接）；`GET /conversations/{id}` 包含 messages；`DELETE /conversations/{id}`；`POST /conversations/{id}/messages {content,connection_id?:null,max_calls:4}` 同步有界多轮（客户端先显示发送状态，断连后 GET 恢复）；省略 connection_id 才沿用会话连接，显式 null 或 `local` 切换为本地模式，绝不自动更换付费路径。响应完整 conversation，messages 含 `{id,role:user|assistant,content,created_at,run_id}`，runs 含 `{id,status,connection_id,error_code,tool_calls,draft_ids,trace_id}`。运行固定连接版本，最多 8 次模型调用，每次最多 8 个工具调用；只能调用读工具和创建草案，不能批准或应用。显式选择本地模式时标记 local_fallback；模型请求失败标记 failed，不自动更换连接，本地找歌仍可单独使用。`DELETE /conversations` 清除本人历史。`GET/PUT /assistant-preferences {retention_days:30}`，保留范围 1–365 天。
+
+`PATCH /conversations/{id} {title}` 修改本人对话名称，首尾空白会去除，长度 1–200；消息、所选连接和草案不变。对话列表提供改名和逐条删除，删除前需用户确认。删除正在生成回复的对话返回 `409 conversation_busy`；删除会清理该对话消息和运行记录，已有草案和业务对象独立保留。
+
+聊天使用最近 19 条历史消息及本次提问，系统指令独立保留；单轮工具结果只参与该轮模型循环。保留天数控制数据库清理，不代表全部历史都会送给模型。目前尚无自动摘要或跨对话长期记忆。0.4.1 在 max_calls 内预留最后一次调用直接生成回答（tool_choice=none），不追加付费调用；提供方忽略该要求时不再执行工具。聊天没有实时网页或库外新发行搜索工具，发现页的 Last.fm 收藏建议也不保证最新发行。
 
 ## 安全和运行边界
 
 共享曲库只有一份，个人对象全部用户隔离；角色和 enabled 在每个调用及后台批次重新检查。外部输出仅业务投影，无绝对路径、密钥、歌词或音频。模型/Telegram 明确启用后才调用。Telegram 已确认 sent 不重发；响应丢失记 unknown，不自动重试。真实服务验证与合成自动化结果分别记录。
+
+## 0.5.0 助手扩展
+
+模型连接增加可选 `protocol`、`provider`、`reasoning_effort`、`max_output_tokens`、`native_search`；未提交选项时保留原值。`GET/PUT /search-settings` 管理本人的独立检索连接，`POST /search-settings/test` 消耗一次检索请求（缓存命中除外）。密钥只接受写入，不回传。
+
+`GET/POST /memories` 与 `PATCH/DELETE /memories/{id}` 为本人显式记忆管理，修改使用版本校验；不开放为模型或 MCP 写工具。`assistant-preferences` 增加 `context_summary` 与 `long_term_memory`，旧客户端只提交保留天数不会重置开关。
+
+对话返回可选 `context_summary`，消息返回 `sources`；`DELETE /conversations/{id}/summary` 清除摘要，生成中拒绝操作。来源 URL 保留必要查询参数。来源数组表示检索取得的资料，不代表每条资料都支持全部回答。
+
+详细执行和验证边界见[助手联网与记忆](../docs/architecture/assistant-research.md)。

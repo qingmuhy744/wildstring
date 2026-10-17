@@ -180,8 +180,14 @@ class TrackAssets:
         if include_override:
             with self.repository.database.connect() as connection:
                 row = connection.execute(
-                    "SELECT text FROM track_lyrics WHERE track_id=?", (track_id,)
+                    "SELECT text,selected_candidate FROM track_lyrics WHERE track_id=?", (track_id,)
                 ).fetchone()
+                if row is not None and row["selected_candidate"]:
+                    from wildstring.library.online_lyrics import selected_lyrics
+
+                    selected = selected_lyrics(connection, row["selected_candidate"])
+                    if selected is not None:
+                        return selected
             if row is not None and row["text"] is not None:
                 return parse_lyrics(row["text"], "user")
         for path in self.candidates(relative, [relative.stem], (".lrc", ".lryc")):

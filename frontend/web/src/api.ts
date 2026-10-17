@@ -51,6 +51,20 @@ export class ApiError extends Error {
 }
 
 const messages: Record<string, string> = {
+  source_plugin_invalid_zip: '插件 ZIP 不符合格式，请检查包结构和 API 版本。',
+  source_plugin_zip_too_large: '插件 ZIP 超过 16 MiB。',
+  source_plugin_identity_conflict: '此 ZIP 的插件 ID 不同，请选择对应插件的升级包。',
+  source_plugin_version_conflict: '插件配置已变化，请刷新后重新操作。',
+  source_plugin_disable_first: '请先停用插件，再卸载。',
+  source_plugin_dependency_missing: '运行环境缺少插件依赖，请按插件说明配置。',
+  source_plugin_invalid_config: '请检查插件必填配置。',
+  source_plugins_disabled: '请先导入并启用提供歌词的数据源插件。',
+  source_plugin_timeout: '插件查询超时，请检查服务地址或稍后重试。',
+  source_plugin_auth_or_rejected: '上游拒绝请求，请检查插件服务和平台授权。',
+  source_plugin_worker_failed: '插件运行失败，请检查插件与运行环境的兼容性。',
+  playback_gain_version_conflict: '响度设置已在其他设备变化，请重新打开后保存。',
+  loudness_tool_missing: '服务端缺少 FFmpeg，请更新官方镜像或安装后重试。',
+
   draft_version_conflict: '草案已变化，请刷新并重新核对当前版本。',
   draft_not_approved: '请先核对并批准当前草案版本。',
   draft_not_found: '草案已不可用，请刷新列表。',
@@ -67,6 +81,18 @@ const messages: Record<string, string> = {
   verification_invalid: '验证码不正确或已过期，请重新发送后核对。',
   unknown_delivery_requires_acknowledgement: '请先核对 Telegram 中是否已收到消息，再确认重试。',
   scope_denied: '当前凭据没有此操作所需的权限。',
+  conversation_busy: '这段对话正在生成回复，请完成后再操作。',
+  search_provider_key_required: '请填写所选搜索服务的 API Key，再启用联网。',
+  search_settings_version_conflict: '搜索设置已在其他设备更新，请刷新后保存。',
+  search_settings_changed: '搜索配置已变化，本次检索已停止。',
+  search_daily_budget_exhausted: '今日搜索与读取请求已达到上限。',
+  search_run_budget_exhausted: '本轮搜索已达到上限，请根据已有来源回答。',
+  native_search_requires_deepseek_pro: 'DeepSeek 原生联网需要支持该功能的 Pro 模型。',
+  native_search_not_supported: '当前协议和供应商组合未配置原生搜索，请使用独立搜索服务。',
+  reasoning_effort_not_supported: '此模型档案不支持所选推理强度，请选择模型默认或支持的强度。',
+  ai_output_incomplete: '模型输出未完成，请适当提高输出 Token 上限或缩小问题范围。',
+  memory_limit_reached: '长期记忆已达 50 条，请先整理或删除旧条目。',
+  memory_version_conflict: '这条记忆已变化，请刷新后再修改。',
 
   album_not_found: '所属专辑已变化或不可用，请刷新曲库后重试。',
   playback_version_conflict: '共享进度已在其他设备更新，请先读取最新进度，再决定是否共享。',
@@ -176,8 +202,14 @@ export interface AlbumPage {
 }
 export interface Lyrics {
   kind: 'none' | 'plain' | 'synced';
-  source: 'sidecar_lrc' | 'embedded' | 'sidecar_text' | 'user' | null;
-  lines: { time_ms: number | null; text: string }[];
+  source: string | null;
+  source_url?: string;
+  layers?: Record<string, { time_ms: number | null; text: string }[]>;
+  lines: {
+    time_ms: number | null;
+    text: string;
+    words?: { start_ms: number; end_ms: number; text: string }[];
+  }[];
 }
 
 export interface Artist {

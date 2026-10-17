@@ -1,0 +1,12 @@
+{
+  "name": "wildstring-source-plugin-build",
+  "private": true,
+  "version": "1.0.0",
+  "engines": {
+    "node": ">=22.12"
+  },
+  "dependencies": {
+    "kugou-upstream": "https://codeload.github.com/MakcRe/KuGouMusicApi/tar.gz/ba3645f2c89e6b9d4fec82ff783c15287e4c5f43",
+    "netease-upstream": "https://codeload.github.com/NeteaseCloudMusicApiEnhanced/api-enhanced/tar.gz/19c7dad6db7d660954c7a615a686ff0acb030f91"
+  }
+}
