@@ -53,7 +53,7 @@ import kotlinx.coroutines.launch
             TextButton({ scope.launch { action.run {
                 val body = jsonBody("provider" to provider, "enabled" to enabled, "daily_budget" to (budget.toIntOrNull() ?: -1), "version" to (settings?.number("version") ?: 0), "clear_api_key" to clearKey)
                 if (secret.isNotBlank()) body.addProperty("api_key", secret)
-                vm.agent.request("search-settings", "PUT", body); secret = ""; clearKey = false; focus.clearFocus(); keyboard?.hide(); load()
+                vm.agent.request("search-settings", "PUT", body); load(); runCatching { focus.clearFocus(force = true); keyboard?.hide() }; secret = ""; clearKey = false
             } } }, enabled = !action.busy && settings != null) { Text("保存搜索设置") }
             TextButton({ scope.launch { action.run { val result = vm.agent.request("search-settings/test", "POST"); load(); action.message = "搜索服务已响应，取得 ${result.objects("sources").size} 个可用来源。" } } }, enabled = !action.busy && settings?.flag("enabled") == true) { Text("测试搜索（计入额度）") }
         }
@@ -73,7 +73,7 @@ import kotlinx.coroutines.launch
                     val body = jsonBody("content" to content)
                     if (current != null) body.addProperty("version", current.number("version"))
                     vm.agent.request(if (current == null) "memories" else "memories/${current.text("id")}", if (current == null) "POST" else "PATCH", body)
-                    content = ""; editing = null; focus.clearFocus(); keyboard?.hide(); memories = vm.agent.all("memories")
+                    memories = vm.agent.all("memories"); runCatching { focus.clearFocus(force = true); keyboard?.hide() }; content = ""; editing = null
                 } } }, enabled = !action.busy && content.isNotBlank(), modifier = Modifier.testTag("agent-memory-save")) { Text(if (editing == null) "保存长期记忆" else "更新记忆") }
                 if (editing != null) TextButton({ editing = null; content = "" }) { Text("取消编辑") }
             }

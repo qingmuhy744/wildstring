@@ -120,13 +120,21 @@ class AgentWorkspaceTest {
             compose.onNodeWithTag("agent-research").performScrollToNode(hasText("删除记忆"))
             compose.waitUntil(15_000) { compose.onAllNodes(hasText("优先原版专辑，保留发行年份") and !hasSetTextAction()).fetchSemanticsNodes().isNotEmpty() }
             compose.waitUntil(10_000) { compose.onAllNodes(hasText("删除记忆") and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
-            compose.onNodeWithText("优先原版专辑，保留发行年份").assertExists()
+            compose.onNode(hasText("优先原版专辑，保留发行年份") and !hasSetTextAction()).assertExists()
             capture("research-memory-phone.png")
             compose.onNodeWithText("删除记忆", substring = false).performScrollTo().assertIsEnabled().performClick()
             compose.waitUntil(5_000) { compose.onAllNodesWithTag("agent-memory-delete-confirm").fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithTag("agent-memory-delete-confirm").performClick()
             compose.waitUntil(15_000) { fixture.memoryContent.isEmpty() }
             assertTrue(fixture.requests.any { it.first == "PATCH /api/v1/agent/memories/memory-one" && it.second.number("version") >= 2 })
+        } catch (error: Throwable) {
+            println("Research fixture requests: ${fixture.requests.map { it.first }}")
+            runCatching {
+                compose.onNodeWithTag("agent-research").performScrollToIndex(0)
+                capture("research-failure-phone.png")
+                compose.onAllNodes(isRoot()).onLast().printToLog("ResearchFailure")
+            }
+            throw error
         } finally { compose.runOnIdle { vm.repository.session.invalidate() } } }
     }
     @Test fun historyRenameDeleteAndBusyFailurePreserveCurrentConversation() {
