@@ -1,0 +1,14 @@
+name: WildString security and quality
+
+queries:
+  - uses: security-and-quality
+
+paths-ignore:
+  - .cache
+  - artifacts
+  - data
+  - runtime
+  - "**/node_modules/**"
+  - "**/.venv/**"
+  - "**/build/**"
+  - frontend/web/dist

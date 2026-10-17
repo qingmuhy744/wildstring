@@ -47,7 +47,7 @@ dev-web: ## Run React at 127.0.0.1:18781 with an API proxy
 android-design: ## Preview the Android design at http://127.0.0.1:18782/android-v1.html
 	$(RUN) python -m http.server 18782 --bind 127.0.0.1 --directory docs/design
 
-.PHONY: android-check android-test android-assemble android-package android-ci android-connected-test android-locks android-release android-release-smoke
+.PHONY: android-check android-test android-assemble android-codeql android-package android-ci android-connected-test android-locks android-release android-release-smoke
 android-check: ## Run Android Lint (requires JDK 21 and Android SDK 36.1)
 	$(ANDROID) :app:lintDebug
 
@@ -56,6 +56,9 @@ android-test: ## Run Android unit tests
 
 android-assemble: ## Build an installable debug APK
 	$(ANDROID) :app:assembleDebug
+
+android-codeql: ## Compile Kotlin without incremental or build caches for CodeQL extraction
+	$(ANDROID) --no-daemon --no-build-cache --rerun-tasks -Pkotlin.incremental=false -Pkotlin.compiler.execution.strategy=in-process :app:assembleDebug
 
 android-package: android-assemble ## Copy APK and SHA256SUMS into artifacts/android
 	$(PYTHON) scripts/package_android.py
