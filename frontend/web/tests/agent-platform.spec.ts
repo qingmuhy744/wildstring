@@ -781,3 +781,60 @@ test('Telegram 草案与暂停订阅使用实际后端事件名', async ({ page 
   await page.getByRole('button', { name: '保存通知偏好', exact: true }).click();
   await expect.poll(() => submitted?.event_types).toEqual(['draft.pending', 'task.paused']);
 });
+
+test('通知补拉忙碌时合并恢复联网事件，完成后再拉取最新结果', async ({ page }) => {
+  await fixture(page);
+  let reads = 0,
+    blockNext = false,
+    latest = false,
+    release: (() => void) | undefined;
+  const notification = {
+    id: 'after-network',
+    event_id: 'event-after-network',
+    event_type: 'task.completed',
+    title: '恢复联网后的任务结果',
+    summary: '在上一轮响应截取后才产生。',
+    severity: 'info',
+    task_id: null,
+    draft_id: null,
+    trace_id: null,
+    created_at: now,
+    read_at: null,
+    version: 1,
+    detail_route: null,
+  };
+  await page.route('**/api/v1/agent/notifications?*', async (route) => {
+    reads++;
+    // Freeze the response snapshot before the next online event arrives.
+    const response = list(latest ? [notification] : [], {
+      next_cursor: latest ? 'cursor-2' : 'cursor-1',
+      high_watermark: latest ? 1 : 0,
+      unread_count: latest ? 1 : 0,
+    });
+    if (blockNext) {
+      blockNext = false;
+      await new Promise<void>((resolve) => {
+        release = resolve;
+      });
+    }
+    await route.fulfill({ json: response });
+  });
+  await login(page);
+  await section(page, '通知中心');
+  const panel = page.getByRole('region', { name: '通知中心', exact: true });
+  await expect(panel.getByRole('button', { name: '刷新', exact: true })).toBeEnabled();
+  blockNext = true;
+  await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+  await expect.poll(() => !!release).toBe(true);
+  const before = reads;
+  latest = true;
+  await page.evaluate(() => {
+    for (let i = 0; i < 5; i++) window.dispatchEvent(new Event('online'));
+  });
+  expect(reads).toBe(before);
+  release!();
+  await expect(panel.getByRole('heading', { name: notification.title, exact: true })).toBeVisible();
+  await expect(panel.getByRole('button', { name: '刷新', exact: true })).toBeEnabled();
+  expect(reads).toBe(before + 1);
+  await expect(panel.getByRole('button', { name: '未读 · 1', exact: true })).toBeVisible();
+});

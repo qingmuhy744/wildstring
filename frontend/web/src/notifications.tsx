@@ -21,15 +21,16 @@ export function useNotifications(userId: string) {
     request = useRef<AbortController | null>(null),
     mounted = useRef(true),
     account = useRef(userId),
-    unsupportedRef = useRef(false);
+    unsupportedRef = useRef(false),
+    queued = useRef<boolean | null>(null);
   const refresh = useCallback(async function pull(full = false): Promise<void> {
-    if (
-      document.hidden ||
-      !navigator.onLine ||
-      (unsupportedRef.current && !full) ||
-      request.current
-    )
+    if (document.hidden || !navigator.onLine || (unsupportedRef.current && !full)) return;
+    if (request.current) {
+      // A reconnect/read can happen after the in-flight snapshot was taken.
+      // Coalesce it into one follow-up instead of losing the newer signal.
+      queued.current = full || queued.current === true;
       return;
+    }
     const controller = new AbortController();
     request.current = controller;
     const owner = account.current;
@@ -118,7 +119,12 @@ export function useNotifications(userId: string) {
     } finally {
       if (request.current === controller) {
         request.current = null;
-        if (mounted.current) setBusy(false);
+        const followUp = queued.current;
+        queued.current = null;
+        if (mounted.current) {
+          setBusy(false);
+          if (followUp !== null && owner === account.current) void pull(followUp);
+        }
       }
     }
   }, []);
@@ -126,6 +132,7 @@ export function useNotifications(userId: string) {
     mounted.current = true;
     account.current = userId;
     cursor.current = null;
+    queued.current = null;
     unsupportedRef.current = false;
     setItems([]);
     setUnread(0);
@@ -133,14 +140,17 @@ export function useNotifications(userId: string) {
     setUnsupported(false);
     void refresh(true);
     const foreground = () => {
-      if (document.hidden) request.current?.abort();
-      else void refresh();
+      if (document.hidden) {
+        queued.current = null;
+        request.current?.abort();
+      } else void refresh();
     };
     document.addEventListener('visibilitychange', foreground);
     window.addEventListener('online', foreground);
     const timer = setInterval(() => void refresh(), 300000);
     return () => {
       mounted.current = false;
+      queued.current = null;
       request.current?.abort();
       request.current = null;
       clearInterval(timer);
