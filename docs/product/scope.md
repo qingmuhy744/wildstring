@@ -50,6 +50,8 @@
 
 第二批首个联网来源已选择 MusicBrainz，并确认加入 Last.fm 元数据与每用户的已听记录、正在播放同步，配套 CAA 补充缺失封面。管理员启用后，新导入自动生成联网建议；旧库手动批量查询；资料及封面均确认后应用。豆瓣登录提额尚未验证，不作为首期依赖。接入架构见 [联网来源与 Last.fm](../architecture/metadata-providers-and-lastfm.md)。文件标签与内部字段按 [Mp3tag / Picard 映射建议](../architecture/metadata-field-mapping.md)对齐；0.2.2 已实现基础字段、联网建议与每用户 Last.fm 同步；实际来源覆盖和真实 Last.fm 账号仍需核验，标签写回尚未实现，详见接入文档的实现状态。
 
+0.3.1 增加网页服务端网络检测、持久刷新批次及逐曲失败说明，修正 Last.fm 不透明会话密钥校验，补充回调日志脱敏与安全错误分类。Android 增加多个服务端配置、独立切换与退出，以及 GitHub Release 检查与确认安装；验证、发布和部署分别记录，见 [0.3.1 更新说明](../releases/v0.3.1.md) 与 [联网诊断与任务反馈](../architecture/provider-network-diagnostics.md)。
+
 ## 里程碑
 
 1. **M0 工程基座**：依赖锁、Make、hooks、测试、Docker、Actions；网页显示真实连接状态。

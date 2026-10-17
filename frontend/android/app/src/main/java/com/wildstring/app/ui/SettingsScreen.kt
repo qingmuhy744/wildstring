@@ -50,6 +50,8 @@ private val LocalSettingsFeedback = staticCompositionLocalOf<() -> Unit> { {} }
     var message by remember { mutableStateOf<String?>(null) }
     var clearing by remember { mutableStateOf(false) }
     var password by remember { mutableStateOf(false) }
+    var servers by remember { mutableStateOf(false) }
+    var logout by remember { mutableStateOf(false) }
     LaunchedEffect(preferences, clearing) { while (true) { usage = vm.cacheUsage(); delay(2_000) } }
     fun mb(bytes: Long) = "%.1f MB".format(bytes / 1048576.0)
     CompositionLocalProvider(LocalSettingsFeedback provides tactile {}) {
@@ -57,6 +59,7 @@ private val LocalSettingsFeedback = staticCompositionLocalOf<() -> Unit> { {} }
             SettingsGroup("账号") {
                 ListItem(headlineContent = { Text(state.account?.let { "${it.username} · ${if (it.role == "admin") "管理员" else "普通用户"}" } ?: "已连接") },
                     supportingContent = { Text(state.server) }, leadingContent = { Icon(Icons.Default.AccountCircle, null) })
+                SettingsAction("服务器 / 切换服务器", Icons.Default.Dns) { servers = true }
                 if (state.account != null) SettingsAction("修改密码", Icons.Default.Lock) { password = true }
             }
             SettingsGroup("Last.fm") { LastfmSettings(vm) }
@@ -93,13 +96,16 @@ private val LocalSettingsFeedback = staticCompositionLocalOf<() -> Unit> { {} }
             }
             message?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
             SettingsGroup("关于") {
+                com.wildstring.app.update.UpdateSettings()
                 ListItem(headlineContent = { Text("野弦") }, supportingContent = { Text("WildString · ${BuildConfig.VERSION_NAME}") },
                     leadingContent = { Icon(painterResource(R.drawable.ic_wildstring), null, Modifier.size(36.dp), tint = Color.Unspecified) })
-                SettingsAction("退出登录 / 更换服务器", Icons.AutoMirrored.Filled.Logout) { back(); vm.logout() }
+                SettingsAction("退出登录", Icons.AutoMirrored.Filled.Logout) { logout = true }
             }
             Spacer(Modifier.height(8.dp))
         }
     }
+    if (servers) ServersScreen(vm) { servers = false }
+    if (logout) AlertDialog(onDismissRequest = { logout = false }, title = { Text("退出当前服务器？") }, text = { Text("将清除当前服务器在本机的登录和私密缓存，其他服务器的登录保留。") }, confirmButton = { TextButton({ logout = false; back(); vm.logout() }) { Text("退出登录") } }, dismissButton = { TextButton({ logout = false }) { Text("取消") } })
     if (password) PasswordDialog(vm) { password = false }
 }
 

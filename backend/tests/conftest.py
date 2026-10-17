@@ -47,6 +47,8 @@ def restore_v7_account_layout(connection):
     """Reconstruct the actual historical layout before exercising an older migration."""
     connection.execute("DROP VIEW personal_tracks")
     for table in (
+        "provider_refresh_members",
+        "provider_refresh_batches",
         "metadata_suggestions",
         "provider_jobs",
         "provider_seen",

@@ -48,10 +48,14 @@ class Repository @Inject constructor(val session: SessionStore, val client: OkHt
         return (knownTracks[track.id] ?: track).copy(loved = track.loved).also { knownTracks[track.id] = it }
     }
     @Synchronized fun api(): Api {
-        val base = session.endpoint ?: throw IOException("请先连接服务器。")
-        if (cachedUrl != base.toString()) {
-            cachedApi = Retrofit.Builder().baseUrl(base).client(client).addConverterFactory(GsonConverterFactory.create(networkGson())).build().create(Api::class.java)
-            cachedUrl = base.toString()
+        val request = session.requestState() ?: throw IOException("请先连接服务器。")
+        val base = request.endpoint
+        val selection = request.selection
+        val key = "$base|$selection"
+        if (cachedUrl != key) {
+            val scoped = client.newBuilder().apply { interceptors().add(0, SelectionRequestInterceptor(selection) { session.requestState()?.selection }) }.build()
+            cachedApi = Retrofit.Builder().baseUrl(base).client(scoped).addConverterFactory(GsonConverterFactory.create(networkGson())).build().create(Api::class.java)
+            cachedUrl = key
         }
         return checkNotNull(cachedApi)
     }
@@ -74,16 +78,18 @@ class Repository @Inject constructor(val session: SessionStore, val client: OkHt
         val changed = session.bindAccount(account)
         if (changed) {
             knownTracks.clear()
-            withContext(Dispatchers.IO) { database.queue().clear(); cache.clear() }
+            val owner = session.cacheScope()
+            withContext(Dispatchers.IO) { if (owner == session.cacheScope()) { database.queue().clear(); cache.clear(owner) } }
         }
         return changed
     }
     suspend fun changePassword(current: String, next: String) {
         val owner = session.cacheScope() ?: throw IOException("登录已失效。")
-        val base = session.endpoint ?: throw IOException("尚未连接服务器。")
-        val cookie = session.read()?.substringBefore(';') ?: throw IOException("登录已失效。")
+        val request = session.requestState() ?: throw IOException("尚未连接服务器。")
+        val base = request.endpoint
+        val cookie = session.cookieFor(request)?.substringBefore(';') ?: throw IOException("登录已失效。")
         // A late password response must never clear cookies belonging to a newer login.
-        val isolated = Retrofit.Builder().baseUrl(base).client(client.newBuilder().cookieJar(CookieJar.NO_COOKIES).build())
+        val isolated = Retrofit.Builder().baseUrl(base).client(client.newBuilder().apply { interceptors().removeAll { it is ScopedSessionInterceptor }; interceptors().add(0, SelectionRequestInterceptor(request.selection) { session.requestState()?.selection }) }.cookieJar(CookieJar.NO_COOKIES).build())
             .addConverterFactory(GsonConverterFactory.create(networkGson())).build().create(Api::class.java)
         val response = isolated.changePassword(cookie, PasswordChange(current, next))
         if (owner != session.cacheScope() || base != session.endpoint) throw CancellationException("会话已变化。")
@@ -101,8 +107,10 @@ class Repository @Inject constructor(val session: SessionStore, val client: OkHt
         return api().tracks(target, query, limit = limit, offset = offset).let { page -> requireProfile(profile); page.copy(items = page.items.map { rememberTrack(it, snapshot) }) }
     }
     private fun requireProfile(profile: String?) { if (profile == null || session.cacheScope() != profile) throw CancellationException("会话已变化。") }
-    private suspend fun <T> saved(key: String, type: Class<T>): T? = withContext(Dispatchers.IO) {
-        cache.read(key)?.let { runCatching { gson.fromJson(String(it.bytes, Charsets.UTF_8), type) }.getOrNull() }
+    private suspend fun <T> saved(key: String, type: Class<T>): T? {
+        val owner = session.cacheScope() ?: return null
+        val result = withContext(Dispatchers.IO) { cache.read(key)?.let { runCatching { gson.fromJson(String(it.bytes, Charsets.UTF_8), type) }.getOrNull() } }
+        requireProfile(owner); return result
     }
     private suspend fun save(key: String, value: Any, profile: String?, revision: Long? = null) = withContext(Dispatchers.IO) { cache.put(key, gson.toJson(value).toByteArray(), profile, revision = revision) }
     suspend fun cachedCatalog(query: CatalogQuery): CatalogPage? = saved("catalog:${query.key}", CatalogPage::class.java)?.let { it.copy(tracks = it.tracks.map { track -> rememberTrack(track) }) }
@@ -152,7 +160,7 @@ class Repository @Inject constructor(val session: SessionStore, val client: OkHt
         val profile = session.cacheScope()
         val snapshot = favoriteClock.get()
         return try { api().track(url("api", "v1", "tracks", id)).let { requireProfile(profile); val merged = rememberTrack(it, snapshot); downloads.refreshTrack(merged); save("track:$id", merged, profile); requireProfile(profile); rememberTrack(merged, snapshot) } }
-        catch (error: HttpException) { if (error.code() in listOf(401, 403, 404)) downloads.remove(id); throw error }
+        catch (error: HttpException) { if (profile == session.cacheScope() && error.code() in listOf(401, 403, 404)) downloads.remove(id); throw error }
         catch (error: IOException) {
             if (error is javax.net.ssl.SSLException || session.cacheScope() != profile) throw error
             (downloads.track(id) ?: saved("track:$id", Track::class.java) ?: throw error).let { requireProfile(profile); rememberTrack(it) }
@@ -161,7 +169,7 @@ class Repository @Inject constructor(val session: SessionStore, val client: OkHt
     suspend fun cachedLyrics(id: String): Lyrics? = saved("lyrics:$id", Lyrics::class.java)
     suspend fun lyrics(id: String): Lyrics {
         val profile = session.cacheScope()
-        return api().lyrics(url("api", "v1", "tracks", id, "lyrics")).also { save("lyrics:$id", it, profile) }
+        return api().lyrics(url("api", "v1", "tracks", id, "lyrics")).also { requireProfile(profile); save("lyrics:$id", it, profile); requireProfile(profile) }
     }
     suspend fun favorite(track: Track): Track {
         val profile = session.cacheScope()
@@ -183,10 +191,9 @@ class Repository @Inject constructor(val session: SessionStore, val client: OkHt
         val target = url("api", "v1", "auth", "logout")
         val cookie = session.read()?.substringBefore(';')
         client.dispatcher.cancelAll()
-        session.invalidate(); knownTracks.clear(); database.queue().clear()
+        cache.clear(); session.invalidate(); knownTracks.clear(); database.queue().clear()
         withContext(Dispatchers.IO) {
-            cache.clear()
-            if (cookie != null) client.newBuilder().cookieJar(CookieJar.NO_COOKIES).build().newCall(
+            if (cookie != null) client.newBuilder().apply { interceptors().clear(); networkInterceptors().clear() }.cookieJar(CookieJar.NO_COOKIES).build().newCall(
                 Request.Builder().url(target).header("Cookie", cookie).post("".toRequestBody()).build()
             ).execute().close()
         }

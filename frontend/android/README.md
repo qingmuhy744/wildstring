@@ -2,7 +2,7 @@
 
 Kotlin / Compose / Media3 原生客户端，Android 8.0（API 26）起可安装。所有曲库、封面、歌词、收藏与歌单来自用户配置的野弦实例；生产 APK 没有内置演示曲库或测试音频。测试夹具只打包到独立的 androidTest APK。
 
-当前版本：0.3.0（versionCode 7）。本版合并了原未发布 0.2.3；正式安装包以 GitHub Releases 为准。
+当前版本：0.3.1（versionCode 8）。0.3.0 合并了原未发布 0.2.3；正式安装包以 GitHub Releases 为准。
 
 0.3.0 在设置中增加封面／黑胶／磁带选择，默认封面并记住本机选择。黑胶中心封面放大，手机横屏采用视觉与播放控制左右布局。长按视觉或歌词可查看正向大封面，点空白或返回关闭，播放继续。唱臂、唱片与双卷轴跟随实际播放状态，暂停、缓冲、后台及关闭系统动画时停转；三种样式共用音频和队列。播放背景延伸至系统栏，按钮保留安全间距，进度条使用主题配色。实现与验证状态见 [播放页样式](../../docs/product/player-styles-0.2.3.md)。
 
@@ -34,7 +34,7 @@ make android-locks              # 修改依赖后刷新锁与 SHA-256 校验元�
 
 `ANDROID_HOME` 指向本机 SDK，`JAVA_HOME` 指向 JDK；`local.properties` 只用于本机且不跟踪。Gradle Wrapper、版本目录与依赖校验资料入库，构建缓存、APK 和签名私钥不提交。
 
-`make android-ci` 的安装包位于 `artifacts/android/`，包含 `wildstring-<version>-debug.apk`（当前开发包为 `wildstring-0.3.0-debug.apk`）与 `SHA256SUMS`。GitHub 的 **Android APK** 工作流通过后，在该次运行的 **Artifacts → wildstring-android-debug** 下载并解压 ZIP 后安装 APK。原有 Python/Web/Docker CI 继续独立运行。
+`make android-ci` 的安装包位于 `artifacts/android/`，包含 `wildstring-<version>-debug.apk`（当前开发包为 `wildstring-0.3.1-debug.apk`）与 `SHA256SUMS`。GitHub 的 **Android APK** 工作流通过后，在该次运行的 **Artifacts → wildstring-android-debug** 下载并解压 ZIP 后安装 APK。原有 Python/Web/Docker CI 继续独立运行。
 
 CI 另启动一次性合成曲库，并通过 `ANDROID_TEST_ARGS=-Pandroid.testInstrumentationRunnerArguments.realBackend=http://10.0.2.2:19882/` 运行真实 API 集成。该参数只允许指向临时测试实例，使用固定的公开测试账号，会创建／删除测试歌单及修改测试曲目。不要指向个人服务器。
 
@@ -56,7 +56,7 @@ GitHub [Releases](https://github.com/qingmuhy744/wildstring/releases) 提供正�
 - 服务端默认回环监听，手机不能用自己的 `127.0.0.1` 访问另一台服务器。使用可达的 HTTPS 反向代理，客户端不会修改服务器监听或防火墙。
 - 普通接口、封面与媒体 Range 请求共用 CookieJar 和同源/路径校验；拒绝重定向。当前服务支持 `X-Wildstring-Client: android`；旧服务仅返回明确的 `client_header_required` 时，在同一地址使用已有 Web 标识重试，认证仍需有效 Cookie。
 - 密码只用于本次登录，不落盘。Cookie 由 Android Keystore 管理的 AES-GCM 密钥加密，应用禁止系统备份。401 清理会话并停止受保护播放。
-- Room 保存队列条目 ID/曲目 ID、顺序和位置。0.2.0 新增应用级曲库 / 歌词 / 封面 / 最近播放片段缓存，容量可在设置中调整或关闭，退出或切换服务器清理。0.3.0 另提供完整原音离线副本，未完成下载仍只具有片段缓存的能力；在线播放离线副本前核验权限与文件版本，退出／切换账号清理私密离线内容。策略与边界见 [Android 缓存](../../docs/architecture/android-cache.md)。
+- Room 保存队列条目 ID/曲目 ID、顺序和位置。0.2.0 新增应用级曲库 / 歌词 / 封面 / 最近播放片段缓存，容量可在设置中调整或关闭。0.3.0 另提供完整原音离线副本，未完成下载仍只具有片段缓存的能力；在线播放离线副本前核验权限与文件版本。0.3.1 按服务器隔离缓存及离线内容，切换保留各服内容，退出只清除当前服务器的私密内容，详见下方多服务器说明与 [Android 缓存](../../docs/architecture/android-cache.md)。
 - 进程重建后恢复到暂停状态；后台服务仍在时重新连接同一播放器。强制停止、厂商省电策略和断网尾段统计另按真机结果验收，不能以可构建 APK 代替这些验证。
 
 ## main 新功能适配（0.2.0）
@@ -68,3 +68,17 @@ GitHub [Releases](https://github.com/qingmuhy744/wildstring/releases) 提供正�
 - 旧服务仍可使用默认原音；AAC 与改密需要目标服务实际部署对应新接口。转码繁忙/失败可重试或切换原音。
 
 合成 FLAC、fragmented AAC 及偏移尾段只在测试 APK；生产 APK 不包含样本。适配验证见 CHANGELOG 和 PR 的实际结果；不以模拟器替代真机后台与全部格式验收。
+
+### 多服务器（0.3.1）
+
+设置中的“服务器 / 切换服务器”与“退出登录”分别操作。未登录页面也能管理服务器：添加、选择、修改名称或地址、删除。地址会规范化并去重，不接受内嵌账号、密码、查询参数；正式版继续使用 HTTPS。
+
+每个服务器分别保存加密会话、账号与私密缓存，切换后可继续使用该服务器之前的登录。切换会停止播放、清空当前播放队列、取消在途请求并暂停下载；不会把当前队列自动带到另一服务器。各服务器已完成的离线音乐与缓存分别保留，返回后可以继续使用，未完成下载需要手动继续。退出登录只清除当前服务器的会话与私密数据；删除配置或修改其地址也会清除该配置原有的本地数据，不改服务器上的音乐或账号。
+
+旧版单服务器配置首次启动时自动迁移，保留加密 Cookie、账号、原缓存归属与已有离线索引；播放数据库结构不变。实现分别使用持久文件归属和每次选择都会变化的请求归属，防止 A→B→A 后旧请求写回、改 Cookie 或串用账号。
+
+新增验证包括旧配置/密文与缓存迁移、独立账号和相同歌曲 ID 的完整离线隔离、存储选择的并发保护，以及两个实际 HTTP 测试服务的登录、管理、播放后切换、返回免登录与仅当前服务器退出。测试只使用一次性合成数据。
+
+### 应用更新（0.3.1）
+
+关于页面提供“检查更新”和 GitHub 仓库入口。正式版启动时最多每 12 小时自动检查一次 GitHub 最新稳定 Release，只提示更高版本，不自动下载。下载会验证官方发布资产、SHA-256、应用包名和签名；安装由 Android 系统再次确认，不会静默覆盖。更新检查使用独立网络客户端，不携带音乐服务器的 Cookie 或账号；调试包默认不自动联网检查。

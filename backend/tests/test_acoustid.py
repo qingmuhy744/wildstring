@@ -233,10 +233,14 @@ def test_manual_refresh_scopes_deduplicate_and_missing_mode_preserves_manual_val
             headers=HEADERS,
             json={"scope": "album", "id": track["album_id"]},
         )
-        assert result.json() == {"queued": 2, "already_active": 0, "total": 2}
-        assert client.post(
+        first = result.json()
+        assert len(first.pop("batch_id")) == 32
+        assert first == {"queued": 2, "already_active": 0, "total": 2}
+        second = client.post(
             "/api/v1/manage/providers/refresh", headers=HEADERS, json={"scope": "library"}
-        ).json() == {"queued": 1, "already_active": 2, "total": 3}
+        ).json()
+        assert len(second.pop("batch_id")) == 32
+        assert second == {"queued": 1, "already_active": 2, "total": 3}
         provider.step()
         provider.step()
         provider.step()

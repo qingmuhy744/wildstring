@@ -29,6 +29,7 @@ class OfflineDownloads @Inject constructor(@ApplicationContext private val conte
     private val gson = Gson()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var owner: String? = null
+    private var activation: String? = null
     private val mutable = MutableStateFlow<List<OfflineEntry>>(emptyList())
     val entries = mutable.asStateFlow()
     private var active: Call? = null
@@ -43,20 +44,37 @@ class OfflineDownloads @Inject constructor(@ApplicationContext private val conte
         set(value) { prefs.edit().putBoolean("wifi_only", value).apply() }
     init {
         synchronized(this) {
-            runCatching { gson.fromJson(File(root, "index.json").readText(), OfflineIndex::class.java) }.getOrNull()?.let { index ->
-                owner = index.owner
-                mutable.value = index.entries.map { if (it.state in listOf("queued", "downloading")) it.copy(state = "paused") else it }
+            // Old files already live in the owner's UUID directory; only move the index.
+            val old = File(root, "index.json")
+            runCatching { gson.fromJson(old.readText(), OfflineIndex::class.java) }.getOrNull()?.let { index ->
+                index.owner?.let { profile ->
+                    if (profile in session.retainedStorageScopes()) {
+                        val target = File(directory(profile), "index.json"); target.parentFile!!.mkdirs(); old.renameTo(target)
+                    }
+                }
             }
-            ensureOwner()
+            old.delete(); ensureOwner()
         }
         scope.launch { session.profiles.collect { synchronized(this@OfflineDownloads) { ensureOwner() } } }
+        scope.launch { session.retainedScopes.collect { synchronized(this@OfflineDownloads) { ensureOwner(); prune() } } }
+    }
+    private fun directory(profile: String) = File(root, UUID.nameUUIDFromBytes(profile.toByteArray()).toString())
+    private fun prune() {
+        val keep = session.retainedStorageScopes().map { directory(it).name }.toSet()
+        root.listFiles()?.filter { it.name !in keep }?.forEach { it.deleteRecursively() }
     }
     @Synchronized private fun ensureOwner(): String? {
-        val current = session.cacheScope()
-        if (current != owner) {
+        val snapshot = session.storageState()
+        val current = snapshot?.second
+        val token = snapshot?.first
+        if (current != owner || token != activation) {
             generation++; active?.cancel(); active = null; activeId = null
-            root.listFiles()?.forEach { it.deleteRecursively() }; mutable.value = emptyList(); owner = current
+            mutable.value = mutable.value.map { if (it.state in listOf("queued", "downloading")) it.copy(state = "paused") else it }
             persist()
+            owner = current; activation = token
+            val saved = current?.let { runCatching { gson.fromJson(File(directory(it), "index.json").readText(), OfflineIndex::class.java) }.getOrNull() }
+            mutable.value = saved?.takeIf { it.owner == current }?.entries.orEmpty().map { if (it.state in listOf("queued", "downloading")) it.copy(state = "paused") else it }
+            persist(); prune()
         }
         return current
     }
@@ -65,11 +83,13 @@ class OfflineDownloads @Inject constructor(@ApplicationContext private val conte
         return File(directory, UUID.nameUUIDFromBytes(id.toByteArray()).toString() + if (part) ".part" else ".audio")
     }
     @Synchronized private fun persist() {
-        val temp = File(root, "index.tmp")
+        val directory = owner?.let(::directory) ?: return
+        directory.mkdirs()
+        val temp = File(directory, "index.tmp")
         runCatching {
             temp.writeText(gson.toJson(OfflineIndex(owner, mutable.value)))
             java.io.RandomAccessFile(temp, "rw").use { it.fd.sync() }
-            check(temp.renameTo(File(root, "index.json")))
+            check(temp.renameTo(File(directory, "index.json")))
         }
     }
     @Synchronized private fun update(value: OfflineEntry) {
@@ -81,6 +101,7 @@ class OfflineDownloads @Inject constructor(@ApplicationContext private val conte
         }
         update(value)
     }
+    @Synchronized fun switchScope() { ensureOwner() }
     @Synchronized fun enqueue(tracks: List<Track>) {
         check(ensureOwner() != null) { "请先登录。" }
         require((tracks.map { it.id } + mutable.value.map { it.track.id }).distinct().size <= 5000) { "离线保存最多 5000 首。" }
@@ -172,9 +193,10 @@ class OfflineDownloads @Inject constructor(@ApplicationContext private val conte
             val start = synchronized(this@OfflineDownloads) {
                 val current = ensureOwner() ?: return@withContext
                 val entry = mutable.value.firstOrNull { it.state == "queued" } ?: return@withContext
-                Triple(current, generation, entry)
+                Triple(current, generation, entry) to (activation ?: return@withContext)
             }
-            val (profile, epoch, entry) = start
+            val (profile, epoch, entry) = start.first
+            val requestToken = start.second
             val id = entry.track.id
             if (!networkAllowed()) {
                 synchronized(this@OfflineDownloads) {
@@ -189,7 +211,7 @@ class OfflineDownloads @Inject constructor(@ApplicationContext private val conte
                 val target = base.newBuilder().addPathSegments("api/v1/tracks").addPathSegment(id).addPathSegment("stream").build()
                 var offset = if (!entry.etag.isNullOrBlank()) part.length() else 0L
                 if (offset == 0L) part.delete()
-                val request = Request.Builder().url(target).tag(RequestOwner::class.java, RequestOwner(profile)).header("Accept-Encoding", "identity").apply {
+                val request = Request.Builder().url(target).tag(RequestOwner::class.java, RequestOwner(requestToken)).header("Accept-Encoding", "identity").apply {
                     if (offset > 0) { header("Range", "bytes=$offset-"); header("If-Range", entry.etag!!) }
                 }.build()
                 val call = client.newCall(request)
@@ -239,7 +261,10 @@ class OfflineDownloads @Inject constructor(@ApplicationContext private val conte
                                 if (count < 0) break
                                 written += count
                                 if (written > MAX_FILE_BYTES || written + otherBytes > capacityGb * 1024L * 1024 * 1024 || root.usableSpace < RESERVE) throw IOException("离线空间不足。")
-                                output.write(bytes, 0, count)
+                                synchronized(this@OfflineDownloads) {
+                                    if (profile != ensureOwner() || epoch != generation || mutable.value.none { it.track.id == id && it.state == "downloading" }) throw CancellationException("下载已暂停。")
+                                    output.write(bytes, 0, count)
+                                }
                                 if (System.currentTimeMillis() - last > 500) {
                                     if (!networkAllowed()) {
                                         synchronized(this@OfflineDownloads) { updateCurrent(progress.copy(state = "paused", bytes = written, error = "等待 Wi-Fi；连接后点击继续。"), profile, epoch) }
@@ -267,7 +292,7 @@ class OfflineDownloads @Inject constructor(@ApplicationContext private val conte
                     }
                 }
                 if (error is CancellationException && !isActive) throw error
-            } finally { synchronized(this@OfflineDownloads) { if (activeId == id) { active = null; activeId = null } } }
+            } finally { synchronized(this@OfflineDownloads) { if (epoch == generation && activeId == id) { active = null; activeId = null } } }
         }
     }
     companion object { private const val MAX_FILE_BYTES = 2L * 1024 * 1024 * 1024; private const val RESERVE = 32L * 1024 * 1024 }

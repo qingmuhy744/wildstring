@@ -3,6 +3,7 @@
 import gzip
 import hashlib
 import json
+import logging
 import math
 import os
 import re
@@ -26,18 +27,26 @@ from urllib.request import (
 )
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from fastapi.responses import HTMLResponse, Response
 from filelock import FileLock, Timeout
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from wildstring.fingerprints import FingerprintError, calculate
 from wildstring.library.edits import MetadataEditor, MetadataUpdate, Overrides
+from wildstring.provider_network import (
+    NetworkTest,
+    network_error,
+    outbound_proxies,
+    test_network,
+    validate_proxy,
+)
 
 MB = "https://musicbrainz.org/ws/2/"
 FM = "https://ws.audioscrobbler.com/2.0/"
 ACOUSTID = "https://api.acoustid.org/v2/lookup"
-UA = "WildString/0.2.3 (https://github.com/qingmuhy744/wildstring)"
+UA = "WildString/0.3.1 (https://github.com/qingmuhy744/wildstring)"
+logger = logging.getLogger(__name__)
 
 
 def missing_fields(track, manual, fields):
@@ -91,6 +100,16 @@ def lastfm_signature(parameters, secret):
     return hashlib.md5(raw.encode(), usedforsecurity=False).hexdigest()
 
 
+def lastfm_failure(payload, method):
+    code = int(payload["error"])
+    if code == 6 and method == "track.getInfo" and payload.get("message") == "Track not found":
+        return ProviderError("lastfm_track_not_found", False)
+    return ProviderError(
+        "lastfm_reauthorize" if code == 9 else f"lastfm_error_{code}",
+        code in {8, 11, 16, 29},
+    )
+
+
 class Providers:
     def __init__(self, repository):
         self.repository, self.database = repository, repository.database
@@ -99,6 +118,7 @@ class Providers:
         self.exit = threading.Event()
         self.thread = None
         self.storage_identity = None
+        self.network_test_lock = threading.Lock()
         self.worker_lock = FileLock(
             str(self.directory / "worker.lock"), timeout=0, thread_local=False
         )
@@ -214,21 +234,10 @@ class Providers:
                     },
                 )
                 mode = self.settings()["proxy_mode"]
-                proxies = {}
-                if mode == "custom":
-                    proxy = self.secrets().get("proxy_url")
-                    if not proxy:
-                        raise ProviderError("proxy_not_configured", False)
-                    proxies = {"http": proxy, "https": proxy}
-                elif mode == "environment":
-                    env = getproxies_environment()
-                    proxies = {
-                        protocol: value
-                        for protocol in ("http", "https")
-                        if (value := env.get(protocol) or env.get("all"))
-                    }
-                    if any(urlsplit(value).scheme != "http" for value in proxies.values()):
-                        raise ProviderError("proxy_protocol_unsupported", False)
+                try:
+                    proxies = outbound_proxies(mode, self.secrets().get("proxy_url"))
+                except ValueError as error:
+                    raise ProviderError(str(error), False) from None
                 handler = ProxyHandler(proxies)
                 # Fixed official endpoints; redirect targets use an HTTPS allowlist.
                 with build_opener(handler, SafeRedirect()).open(req, timeout=15) as response:  # nosec B310
@@ -241,19 +250,36 @@ class Providers:
                 if url == ACOUSTID and result.get("status") != "ok":
                     raise ProviderError("acoustid_rejected", False)
                 if url == FM and "error" in result:
-                    code = int(result["error"])
-                    raise ProviderError(
-                        "lastfm_reauthorize" if code == 9 else f"lastfm_error_{code}",
-                        code in {8, 11, 16, 29},
-                    )
+                    raise lastfm_failure(result, parameters.get("method"))
                 return result
             except HTTPError as error:
+                # Last.fm can return structured API errors with a non-2xx status.
+                # Keep only the numeric code, never the raw message or signed request URL.
+                failure = None
+                try:
+                    if url == FM:
+                        payload = json.loads(error.read(2 * 1024 * 1024 + 1))
+                        failure = lastfm_failure(payload, parameters.get("method"))
+                except (ValueError, TypeError, KeyError):
+                    pass
+                except (URLError, TimeoutError, OSError) as failure:
+                    raise ProviderError(network_error(failure)) from None
+                finally:
+                    error.close()
+                if failure is not None:
+                    raise failure from None
                 raise ProviderError(
-                    "provider_not_found" if error.code == 404 else "provider_http_error",
+                    "provider_not_found"
+                    if error.code == 404
+                    else "proxy_auth_required"
+                    if error.code == 407
+                    else "provider_http_error",
                     error.code in {429, 500, 502, 503, 504},
                 ) from None
-            except (URLError, TimeoutError, OSError, ValueError) as error:
-                raise ProviderError() from error
+            except (URLError, TimeoutError, OSError) as error:
+                raise ProviderError(network_error(error)) from None
+            except ValueError:
+                raise ProviderError("provider_invalid_response") from None
 
     def cover_data(self, url):
         """Use the configured server proxy and the same image guards for preview and apply."""
@@ -314,15 +340,28 @@ class Providers:
             )
         return result
 
-    def enqueue(self, track_ids=None, *, scope=None, identity=None, mode="all", force=False):
+    def enqueue(
+        self,
+        track_ids=None,
+        *,
+        scope=None,
+        identity=None,
+        mode="all",
+        force=False,
+        track_batch=False,
+    ):
+        from wildstring.provider_batches import record_batch
+
         config = self.settings()
         if not config["enabled"]:
             raise HTTPException(409, "providers_disabled")
         ids = list(dict.fromkeys(track_ids or []))
+        library_id = self.repository.library_id(create=track_batch)
+        batch_id = None
         with self.database.connect(write=True) as connection:
             connection.execute("BEGIN IMMEDIATE")
-            sql = "SELECT t.id,m.version FROM track_metadata m JOIN tracks t ON t.id=m.track_id WHERE t.library_id=? AND t.status='available'"
-            parameters = [self.repository.library_id()]
+            sql = "SELECT t.id,t.title,m.version FROM track_metadata m JOIN tracks t ON t.id=m.track_id WHERE t.library_id=? AND t.status='available'"
+            parameters = [library_id]
             if scope == "album":
                 sql += " AND t.album_id=?"
                 parameters.append(identity)
@@ -331,7 +370,10 @@ class Providers:
                 parameters.append(identity)
             elif scope != "library":
                 if not ids:
-                    return {"queued": 0, "already_active": 0, "total": 0}
+                    result = {"queued": 0, "already_active": 0, "total": 0}
+                    if track_batch:
+                        result["batch_id"] = record_batch(connection, library_id, [])
+                    return result
                 sql += " AND t.id IN (" + ",".join("?" for _ in ids) + ")"
                 parameters.extend(ids)
             rows = connection.execute(sql, parameters).fetchall()
@@ -352,7 +394,12 @@ class Providers:
             connection.executemany(
                 "INSERT OR IGNORE INTO provider_seen VALUES (?)", [(row["id"],) for row in rows]
             )
-        return {"queued": added, "already_active": len(rows) - added, "total": len(rows)}
+            if track_batch:
+                batch_id = record_batch(connection, library_id, rows)
+        result = {"queued": added, "already_active": len(rows) - added, "total": len(rows)}
+        if batch_id is not None:
+            result["batch_id"] = batch_id
+        return result
 
     def identify(self, track, *, force=False):
         audio = calculate(self.repository, track["id"], self.exit)
@@ -548,9 +595,12 @@ class Providers:
                     )
                 )
             except (ProviderError, KeyError, TypeError, ValueError, AttributeError) as error:
-                warnings.append(
-                    error.code if isinstance(error, ProviderError) else "lastfm_invalid_response"
-                )
+                if not isinstance(error, ProviderError) or error.code != "lastfm_track_not_found":
+                    warnings.append(
+                        error.code
+                        if isinstance(error, ProviderError)
+                        else "lastfm_invalid_response"
+                    )
         output.sort(key=lambda item: config["priority"].index(item[0]))
         return output, warnings
 
@@ -865,6 +915,31 @@ class Providers:
         def read_settings(user: admin):
             return self.settings()
 
+        @router.post("/manage/providers/network-test", dependencies=mutation)
+        def network_test(user: admin, body: object = Body(...)):
+            try:
+                draft = NetworkTest.model_validate(body)
+                if draft.proxy_url is not None:
+                    validate_proxy(draft.proxy_url)
+            except (ValueError, ValidationError):
+                raise HTTPException(422, "invalid_proxy_settings") from None
+            if not self.network_test_lock.acquire(blocking=False):
+                raise HTTPException(409, "network_test_running")
+            try:
+                credentials = self.secrets()
+                proxy = draft.proxy_url or credentials.get("proxy_url")
+                try:
+                    result = test_network(draft.proxy_mode, proxy, credentials)
+                except ValueError as error:
+                    raise HTTPException(422, str(error)) from None
+                return Response(
+                    content=json.dumps(result),
+                    media_type="application/json",
+                    headers={"Cache-Control": "no-store"},
+                )
+            finally:
+                self.network_test_lock.release()
+
         @router.put("/manage/providers", dependencies=mutation)
         def save_settings(body: dict, user: admin):
             try:
@@ -893,17 +968,7 @@ class Providers:
                     raise HTTPException(422, "fingerprint_tool_missing")
             if body.proxy_url is not None:
                 try:
-                    proxy = urlsplit(body.proxy_url)
-                    if (
-                        proxy.scheme != "http"
-                        or not proxy.hostname
-                        or proxy.port is None
-                        or proxy.path not in {"", "/"}
-                        or proxy.query
-                        or proxy.fragment
-                        or any(c.isspace() for c in body.proxy_url)
-                    ):
-                        raise ValueError("invalid proxy")
+                    validate_proxy(body.proxy_url)
                 except ValueError:
                     raise HTTPException(422, "invalid_proxy_url") from None
                 credentials["proxy_url"] = body.proxy_url
@@ -964,8 +1029,20 @@ class Providers:
             if (body.scope == "library") != (body.id is None):
                 raise HTTPException(422, "invalid_refresh_scope")
             return self.enqueue(
-                scope=body.scope, identity=body.id, mode=body.mode, force=body.force
+                scope=body.scope,
+                identity=body.id,
+                mode=body.mode,
+                force=body.force,
+                track_batch=True,
             )
+
+        @router.get("/manage/providers/refresh/{batch_id}")
+        def refresh_progress(batch_id: str, user: admin, response: Response):
+            from wildstring.provider_batches import batch_progress
+
+            response.headers["Cache-Control"] = "private, no-store"
+            response.headers["Vary"] = "Cookie"
+            return batch_progress(self.repository, batch_id)
 
         @router.get("/manage/providers/jobs")
         def provider_jobs(user: admin):
@@ -1111,7 +1188,8 @@ class Providers:
             return self.user_status(user["id"])
 
         @router.post("/lastfm/authorize", dependencies=mutation)
-        def authorize(user: member):
+        def authorize(user: member, response: Response):
+            response.headers["Cache-Control"] = "no-store"
             config, credentials = self.settings(), self.secrets()
             if not config["enabled"] or not config["lastfm_configured"] or not config["public_url"]:
                 raise HTTPException(409, "lastfm_not_configured")
@@ -1153,8 +1231,12 @@ class Providers:
                     FM, {"method": "auth.getSession", "token": token}, signed=True
                 )["session"]
                 if (
-                    not isinstance(result.get("key"), str)
-                    or not re.fullmatch("[a-fA-F0-9]{32}", result["key"])
+                    not isinstance(result, dict)
+                    or not isinstance(result.get("key"), str)
+                    # Session keys are opaque credentials, not MD5 method signatures.
+                    or not 1 <= len(result["key"]) <= 256
+                    or not result["key"].isprintable()
+                    or any(char.isspace() for char in result["key"])
                     or not isinstance(result.get("name"), str)
                     or not 1 <= len(result["name"]) <= 200
                 ):
@@ -1183,7 +1265,9 @@ class Providers:
                     )
                 if previous:
                     self.secrets({previous[0]: None})
-            except (ProviderError, KeyError, TypeError, AttributeError):
+            except (ProviderError, KeyError, TypeError, AttributeError) as error:
+                code = error.code if isinstance(error, ProviderError) else "lastfm_invalid_session"
+                logger.warning("Last.fm authorization failed: %s", code)
                 raise HTTPException(502, "lastfm_auth_failed") from None
             finally:
                 with self.database.connect(write=True) as connection:

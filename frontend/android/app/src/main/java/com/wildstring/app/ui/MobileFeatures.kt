@@ -244,11 +244,21 @@ private fun DailyPanel(vm: MusicViewModel) {
 }
 
 private suspend fun saveRecommendations(vm: MusicViewModel, name: String, items: List<RecommendationItem>) {
-    val playlist = vm.repository.api().createPlaylist(PlaylistRequest(name.take(100)))
-    try { vm.repository.api().addTracks(vm.repository.url("api", "v1", "playlists", playlist.id, "tracks"), AddTracks(playlist.version, items.map { it.track.id })) }
-    catch (error: Exception) { runCatching { vm.repository.api().deletePlaylist(vm.repository.url("api", "v1", "playlists", playlist.id), playlist.version) }; throw error }
-    vm.load()
+    val owner = vm.repository.session.cacheScope() ?: throw CancellationException("登录已失效。")
+    fun requireOwner() { if (owner != vm.repository.session.cacheScope()) throw CancellationException("服务器或账号已变化。") }
+    val api = vm.repository.api()
+    val base = vm.repository.url("api", "v1", "playlists")
+    val playlist = api.createPlaylist(PlaylistRequest(name.take(100)))
+    requireOwner()
+    try { api.addTracks("$base/${playlist.id}/tracks", AddTracks(playlist.version, items.map { it.track.id })); requireOwner() }
+    catch (cancel: CancellationException) { throw cancel }
+    catch (error: Exception) {
+        if (owner == vm.repository.session.cacheScope()) runCatching { api.deletePlaylist("$base/${playlist.id}", playlist.version) }
+        throw error
+    }
+    requireOwner(); vm.load()
 }
+
 @Composable
 private fun AiPanel(vm: MusicViewModel) {
     val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current

@@ -43,7 +43,7 @@ fun Track.mediaItem(repository: Repository, entryId: String = UUID.randomUUID().
     MediaItem.Builder().setMediaId(entryId).setUri(repository.stream(id))
         .setMediaMetadata(MediaMetadata.Builder().setTitle(title).setArtist(artist).setAlbumTitle(album)
             .setArtworkUri(if (hasCover) Uri.parse(repository.cover(id)) else null)
-            .setExtras(Bundle().apply { putString("track_id", id); putLong("duration_ms", durationMs); putString("format", format); putString("original_stream", repository.originalStream(id)) }).build()).build()
+            .setExtras(Bundle().apply { putString("profile", repository.session.cacheScope()); putString("track_id", id); putLong("duration_ms", durationMs); putString("format", format); putString("original_stream", repository.originalStream(id)) }).build()).build()
 
 @OptIn(UnstableApi::class)
 @AndroidEntryPoint
@@ -64,6 +64,8 @@ class PlaybackService : MediaSessionService() {
     private var clock = ListeningClock()
     private var listeningStarted = System.currentTimeMillis() / 1000.0
     private var listeningId = UUID.randomUUID().toString()
+    private var listeningOwner: String? = null
+    private var queueOwner: String? = null
     private var listeningTrack: String? = null
     private var listeningEntry: String? = null
     private var sentMs = 0L
@@ -85,6 +87,12 @@ class PlaybackService : MediaSessionService() {
         session = MediaSession.Builder(this, player).setSessionActivity(activity)
             .setBitmapLoader(AuthenticatedBitmapLoader(repository.client, executor))
             .setCallback(object : MediaSession.Callback {
+                override fun onAddMediaItems(session: MediaSession, controller: MediaSession.ControllerInfo, mediaItems: List<MediaItem>): ListenableFuture<List<MediaItem>> {
+                    val owner = repository.session.cacheScope()
+                    return if (owner != null && mediaItems.all { it.mediaMetadata.extras?.getString("profile") == owner })
+                        com.google.common.util.concurrent.Futures.immediateFuture(mediaItems)
+                    else com.google.common.util.concurrent.Futures.immediateFailedFuture(SecurityException("服务器或账号已变化。"))
+                }
                 override fun onConnect(session: MediaSession, controller: MediaSession.ControllerInfo): MediaSession.ConnectionResult {
                     if (controller.uid == Process.myUid()) return super.onConnect(session, controller)
                     if (!controller.isTrusted) return MediaSession.ConnectionResult.reject()
@@ -107,6 +115,7 @@ class PlaybackService : MediaSessionService() {
                 listeningEntry = mediaItem?.mediaId
                 report()
                 clock = ListeningClock(); sentMs = 0; listeningId = UUID.randomUUID().toString(); listeningStarted = System.currentTimeMillis() / 1000.0
+                listeningOwner = mediaItem?.mediaMetadata?.extras?.getString("profile")
                 listeningTrack = mediaItem?.mediaMetadata?.extras?.getString("track_id")
                 clock.reset(SystemClock.elapsedRealtime(), player.currentPosition, player.isPlaying)
                 persist()
@@ -122,7 +131,7 @@ class PlaybackService : MediaSessionService() {
                 report(); persist()
             }
             override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
-                if (oldPosition.mediaItem?.mediaMetadata?.extras?.getString("track_id") == listeningTrack) {
+                if (oldPosition.mediaItem?.mediaMetadata?.extras?.getString("track_id") == listeningTrack && oldPosition.mediaItem?.mediaMetadata?.extras?.getString("profile") == listeningOwner) {
                     clock.sample(SystemClock.elapsedRealtime(), oldPosition.positionMs, false)
                     report()
                 }
@@ -130,6 +139,7 @@ class PlaybackService : MediaSessionService() {
                 persist()
             }
             override fun onTimelineChanged(timeline: androidx.media3.common.Timeline, reason: Int) {
+                if (player.mediaItemCount > 0) queueOwner = (0 until player.mediaItemCount).map { player.getMediaItemAt(it).mediaMetadata.extras?.getString("profile") }.distinct().singleOrNull()
                 queueEntries = (0 until player.mediaItemCount).map { index ->
                     val item = player.getMediaItemAt(index)
                     QueueEntry(item.mediaId, item.mediaMetadata.extras?.getString("track_id") ?: "", index)
@@ -148,7 +158,19 @@ class PlaybackService : MediaSessionService() {
         }
         scope.launch { resolver.changes.collect { player.refreshResolution() } }
         scope.launch { settings.state.map { it.aacBitrate }.distinctUntilChanged().drop(1).collect { player.quality(it) } }
-        scope.launch { repository.session.invalidations.collect {
+        scope.launch { repository.session.invalidations.collect { selection ->
+            // StateFlow/SharedFlow can resume Main.immediate inline while SessionStore holds its monitor.
+            yield()
+            if (selection != repository.session.requestState()?.selection.orEmpty()) return@collect
+            discardPlaybackOwner()
+            sleep.cancel(); player.stop(); player.clearMediaItems()
+            saveMutex.withLock { withContext(Dispatchers.IO) { repository.database.queue().clear() }; lastSavedQueue = null }
+        } }
+        scope.launch { repository.session.profiles.drop(1).collect { owner ->
+            yield()
+            if (owner != repository.session.cacheScope()) return@collect
+            if (owner != null && queueOwner == owner) return@collect
+            discardPlaybackOwner()
             sleep.cancel(); player.stop(); player.clearMediaItems()
             saveMutex.withLock { withContext(Dispatchers.IO) { repository.database.queue().clear() }; lastSavedQueue = null }
         } }
@@ -162,11 +184,16 @@ class PlaybackService : MediaSessionService() {
         scope.launch { try { restore() } finally { restoring = false; persist() } }
     }
 
+    private fun discardPlaybackOwner() {
+        listeningOwner = null; queueOwner = null; listeningTrack = null; listeningEntry = null
+        queueEntries = emptyList(); clock = ListeningClock(); sentMs = 0
+    }
     private fun completeFeedback() {
         val id = listeningTrack ?: return
+        val profile = listeningOwner ?: return
+        if (profile != repository.session.cacheScope()) return
         if (clock.totalMs < 5_000) return
         val event = RecommendationFeedback(eventId = listeningId, trackId = id, action = "complete")
-        val profile = repository.session.cacheScope()
         scope.launch {
             if (profile != repository.session.cacheScope()) return@launch
             runCatching { repository.api().recommendationFeedback(event, RequestOwner(profile)).close() }
@@ -174,13 +201,14 @@ class PlaybackService : MediaSessionService() {
     }
     private fun report() {
         val id = listeningTrack ?: return
+        val profile = listeningOwner ?: return
+        if (profile != repository.session.cacheScope()) return
         val value = clock.totalMs
         if (value <= sentMs) return
         val report = ListeningRequest(listeningId, id, value, listeningStarted, if (player.playbackState == Player.STATE_ENDED) "ended" else if (player.isPlaying) "playing" else "paused")
         sentMs = value
-        val profile = repository.session.cacheScope()
         scope.launch {
-            if (profile == null || profile != repository.session.cacheScope()) return@launch
+            if (profile != repository.session.cacheScope()) return@launch
             try { repository.api().listening(report, RequestOwner(profile)).close() }
             catch (error: CancellationException) { throw error }
             catch (_: Exception) { if (listeningId == report.sessionId) sentMs = 0 }
@@ -190,7 +218,8 @@ class PlaybackService : MediaSessionService() {
     private fun persist() {
         if (restoring) return
         val endpoint = repository.session.endpoint?.toString() ?: return
-        val profile = repository.session.cacheScope() ?: return
+        val profile = queueOwner ?: return
+        if (profile != repository.session.cacheScope()) return
         val entries = queueEntries
         val shared = SharedPlayback(trackIds = entries.map { it.trackId }, index = player.currentMediaItemIndex.coerceAtLeast(0),
             positionMs = player.currentPosition.coerceAtLeast(0), mode = if (player.shuffleModeEnabled) "shuffle" else when (player.repeatMode) {
