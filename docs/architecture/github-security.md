@@ -7,7 +7,7 @@
 | 能力 | 配置与范围 |
 | --- | --- |
 | CodeQL | `codeql.yml` 使用高级配置，分析 Python、JavaScript／TypeScript、Java／Kotlin 与 GitHub Actions；运行 `security-and-quality` 规则，覆盖扩展安全规则和可靠性、可维护性问题 |
-| Kotlin 提取 | `make android-codeql` 在 JDK 21、Android SDK 36.1 下实际编译 debug；关闭增量与构建缓存，避免编译缓存导致未提取 Kotlin |
+| Kotlin 提取 | `make android-codeql` 在 JDK 21、Android SDK 37 下实际编译 debug；关闭增量与构建缓存，避免编译缓存导致未提取 Kotlin |
 | 依赖审查 | 每个 PR 运行 `dependency-review.yml`；新引入高危及严重依赖漏洞时失败，不自动忽略已有告警或授权自动合并 |
 | Dependabot | 告警与自动安全更新在仓库设置启用；`dependabot.yml` 每周检查 uv、两处 npm、Gradle、Actions 和 Docker，常规更新分组后生成 PR |
 | Android 依赖图 | `dependency-submission.yml` 在主分支推送、每周和手动触发时解析 Gradle 传递依赖并提交 GitHub；PR 不执行带写权限的依赖提交 |
@@ -21,6 +21,16 @@ CodeQL 在主分支推送、PR、每周和手动触发时运行。工作流使�
 0.5.4 将酷狗／网易云需要的模块以可核验工作区维护，具体来源、归档和文件校验见各包`UPSTREAM.json`。依赖图记录实际使用的包名，Forge、PAC／FTP从安装图移除；`make ci`同时审计完整Web与插件npm锁文件。升级上游时运行`make source-providers-check`，核对生成器、兼容测试与许可证。
 
 Android工具链和内部测试平台的安全版本在`frontend/android/gradle/security-versions.properties`维护，应用至构建类路径与各工程配置；`make android-locks`分开解析调试与发布变体，避免新版Lint与Hilt生成文件并发冲突。固定版本仍需随上游及新公告复核，不等同于永久安全。
+
+## 依赖版本更新
+
+安全告警归零只表示当前依赖图没有未处理的已知漏洞告警。Dependabot 的常规版本更新仍会为新版本创建 PR，不能按 PR 数量判断当前版本是否存在漏洞。见 [GitHub 版本更新说明](https://docs.github.com/en/code-security/concepts/supply-chain-security/dependabot-version-updates)。
+
+按运行环境和实际回归决定是否升级。Node 固定为 `.nvmrc` 中的 22，`@types/node` 继续接收 22 系列更新，暂不自动提议跨主版本升级；升级 Node 运行时后再移除这一限定。其他依赖的大版本仍正常提议，安全扫描与依赖审查保持启用。
+
+Android 更新需同步 Gradle 锁文件与 SHA-256 校验元数据，并在严格校验模式下验证构建、Lint、JVM 和模拟器测试。社区插件更新还需维护生成器和 `UPSTREAM.json`：酷狗的 Pako 3 覆盖版本记录在生成器中，通过独立 zlib 生成的中英文 KRC 验证解码兼容性，不能只修改生成后的 `package.json`。
+
+兼容更新可合并为一次维护 PR；原机器人 PR 在变更合入后标记为已被替代。暂不采用的提案应说明具体兼容原因。合入依赖更新不自动修改已发布的 tag、安装包或家庭服务器部署。
 
 ## 套餐与计费边界
 

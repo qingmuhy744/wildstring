@@ -27,6 +27,7 @@ REPLACEMENTS = {
     "node-forge": "@wildstring/native-rsa",
     "pac-proxy-agent": "@wildstring/no-pac",
 }
+DEPENDENCY_OVERRIDES = {"kugou": {"pako": "^3.0.2"}}
 REQUIRE = re.compile(r"require\(['\"]([^'\"]+)['\"]\)")
 UNSUPPORTED = {"module/register_checktoken_v2.js", "module/register_checktoken_v3.js"}
 SURFACE = {
@@ -219,6 +220,8 @@ def subset(provider, raw):
             content = ("\n".join(line.rstrip() for line in source.splitlines()) + "\n").encode()
         output[relative] = content
     output["LICENSE"] = files["LICENSE"]
+    overrides = DEPENDENCY_OVERRIDES.get(provider, {})
+    dependencies.update(overrides)
     package = {
         "name": f"@wildstring/{provider}-metadata",
         "version": "1.0.0",
@@ -236,6 +239,8 @@ def subset(provider, raw):
         "unsupported_modules": sorted(UNSUPPORTED) if provider == "netease" else [],
         "files": {name: hashlib.sha256(data).hexdigest() for name, data in sorted(output.items())},
     }
+    if overrides:
+        provenance["dependency_overrides"] = overrides
     output["UPSTREAM.json"] = (json.dumps(provenance, indent=2) + "\n").encode()
     return output
 

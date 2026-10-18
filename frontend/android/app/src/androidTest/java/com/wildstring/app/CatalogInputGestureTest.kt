@@ -18,6 +18,8 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.unit.dp
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import com.wildstring.app.data.BrowseGroup
 import com.wildstring.app.ui.AlphabetRail
 import com.wildstring.app.ui.CatalogSearch
@@ -41,9 +43,11 @@ class CatalogInputGestureTest {
             CatalogSearch(query) { query = it; searches += it }
         } }
         compose.onNodeWithTag("catalog-search").performClick()
-        // This test is the IME. Do not let the emulator's Latin keyboard commit its buffer.
+        // Wait for the real IME lifecycle before this test takes over its connection.
+        // Compose idleness alone does not wait for the system keyboard to finish closing.
+        awaitKeyboard(inputView, visible = true)
         compose.runOnIdle { keyboard?.hide() }
-        compose.waitForIdle()
+        awaitKeyboard(inputView, visible = false)
         val connection = compose.runOnIdle { requireNotNull(inputView.onCreateInputConnection(EditorInfo())) }
         compose.runOnIdle { connection.setComposingText("xu", 1) }
         compose.onNodeWithTag("catalog-search").assertTextEquals("xu").assertIsFocused()
@@ -58,6 +62,14 @@ class CatalogInputGestureTest {
         compose.onNodeWithContentDescription("清空搜索").performClick()
         compose.onNodeWithTag("catalog-search").assert(SemanticsMatcher.expectValue(SemanticsProperties.EditableText, AnnotatedString(""))).assertIsFocused()
         compose.runOnIdle { assertEquals("", query) }
+    }
+
+    private fun awaitKeyboard(view: View, visible: Boolean) {
+        compose.waitUntil(10_000) {
+            compose.runOnIdle {
+                ViewCompat.getRootWindowInsets(view)?.isVisible(WindowInsetsCompat.Type.ime()) == visible
+            }
+        }
     }
 
     @Test fun imeSearchCommitsPendingCompositionAndEnglishStillSearches() {

@@ -11,6 +11,7 @@ import com.google.gson.JsonParser
 import com.wildstring.app.data.*
 import com.wildstring.app.ui.MusicViewModel
 import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
@@ -71,6 +72,9 @@ class MobileCompletionTest {
         val slowCatalog = AtomicBoolean(false)
         val aacDownloads = AtomicBoolean(false)
         val deletedPlaylist = AtomicBoolean(false)
+        val holdPlaylistDetails = AtomicBoolean(false)
+        val playlistDetailsRequested = CountDownLatch(1)
+        val releasePlaylistDetails = CountDownLatch(1)
         var snapshot = """{"version":0,"device_id":"","track_ids":[],"index":0,"position_ms":0,"mode":"sequential","updated_at":null}"""
         var lyrics = "第一句\n第二句"
         val audio = InstrumentationRegistry.getInstrumentation().context.assets.open("playback.mp3").use { it.readBytes() }
@@ -141,6 +145,10 @@ class MobileCompletionTest {
                     }
                     if (path.endsWith("/playlists")) return if (request.method == "POST") json(manual) else json("""{"items":[${if (deletedPlaylist.get()) "" else manual}],"total":${if (deletedPlaylist.get()) 0 else 1},"limit":${url.queryParameter("limit") ?: "50"},"offset":0}""").apply { if (slowCatalog.get()) setBodyDelay(1200, TimeUnit.MILLISECONDS) }
                     if (path.endsWith("/manual") || path.endsWith("/order")) {
+                        if (path.endsWith("/manual") && request.method == "GET" && holdPlaylistDetails.get()) {
+                            playlistDetailsRequested.countDown()
+                            if (!releasePlaylistDetails.await(20, TimeUnit.SECONDS)) return MockResponse().setResponseCode(504)
+                        }
                         if (request.method == "DELETE") deletedPlaylist.set(true)
                         if (request.method == "PUT") {
                             val body = JsonParser.parseString(request.body.readUtf8()).asJsonObject
@@ -155,7 +163,7 @@ class MobileCompletionTest {
             }
             server.start(java.net.InetAddress.getByName("127.0.0.1"), 0)
         }
-        override fun close() { server.close() }
+        override fun close() { releasePlaylistDetails.countDown(); server.close() }
     }
     private fun connect(fixture: Fixture): MusicViewModel {
         val vm = compose.runOnIdle { ViewModelProvider(compose.activity)[MusicViewModel::class.java] }
@@ -382,7 +390,14 @@ class MobileCompletionTest {
                 compose.waitUntil(10_000) { vm.state.value.playlists.isNotEmpty() && !vm.state.value.loading }
                 compose.onNodeWithText("测试歌单", useUnmergedTree = true).performTouchInput { longClick() }
                 compose.onNodeWithText("自动下载歌单").assertIsDisplayed()
+                fixture.holdPlaylistDetails.set(true)
                 compose.onNodeWithText("编辑歌单").performClick()
+                compose.waitUntil(10_000) { fixture.playlistDetailsRequested.count == 0L }
+                compose.onNodeWithText("歌单名称").assertIsNotEnabled()
+                fixture.releasePlaylistDetails.countDown()
+                compose.waitUntil(10_000) {
+                    compose.onAllNodes(hasText("歌单名称") and isEnabled()).fetchSemanticsNodes().isNotEmpty()
+                }
                 compose.onNodeWithText("歌单名称").performTextClearance()
                 compose.onNodeWithText("歌单名称").performTextInput("长按改名")
                 compose.onNodeWithText("保存歌单").performScrollTo().performClick()
@@ -397,7 +412,7 @@ class MobileCompletionTest {
                 compose.onNodeWithText("删除", useUnmergedTree = true).performClick()
                 compose.waitUntil(10_000) { fixture.deletedPlaylist.get() && vm.state.value.playlists.isEmpty() }
                 assertTrue(fixture.requests.any { it.startsWith("DELETE ") && it.contains("/playlists/manual") })
-            } finally { cleanup(vm) }
+            } finally { fixture.releasePlaylistDetails.countDown(); cleanup(vm) }
         }
     }
 
