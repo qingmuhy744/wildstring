@@ -14,16 +14,6 @@ on:
       - ".github/workflows/release.yml"
       - "Makefile"
   pull_request:
-    paths:
-      - "frontend/android/**"
-      - "backend/**"
-      - "scripts/serve_web_tests.py"
-      - "tests/fixtures/audio/**"
-      - "scripts/package_android.py"
-      - "scripts/smoke_android_release.py"
-      - ".github/workflows/android.yml"
-      - ".github/workflows/release.yml"
-      - "Makefile"
   workflow_dispatch:
   workflow_call:
 
