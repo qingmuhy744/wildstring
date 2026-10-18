@@ -9,6 +9,8 @@ import com.google.gson.JsonParser
 import com.wildstring.app.data.*
 import com.wildstring.app.ui.MusicViewModel
 import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.runBlocking
 import okhttp3.mockwebserver.Dispatcher
@@ -26,6 +28,7 @@ class AgentWorkspaceTest {
         val writes = AtomicInteger(); var status = "pending"; var version = 1; var read = false
         @Volatile var connections = "[]"
         @Volatile var tasks = "[]"
+        @Volatile var schedulesGate: CountDownLatch? = null
         @Volatile var history = "[]"
         @Volatile var rejectHistoryDelete = false
         @Volatile var memoryContent = ""
@@ -78,6 +81,10 @@ class AgentWorkspaceTest {
                 if (path == "/api/v1/agent/tasks" && request.method == "POST") return@synchronized json("""{"id":"task-one","status":"queued"}""")
                 if (path == "/api/v1/agent/tasks") return@synchronized json("""{"items":$tasks,"total":${JsonParser.parseString(tasks).asJsonArray.size()},"limit":100,"offset":0}""")
                 if (path == "/api/v1/agent/tasks/limited-task") return@synchronized json(JsonParser.parseString(tasks).asJsonArray[0].toString())
+                if (path == "/api/v1/agent/schedules" && request.method == "GET") {
+                    schedulesGate?.let { check(it.await(20, TimeUnit.SECONDS)) { "Schedules gate was not released" } }
+                    return@synchronized json("""{"items":[],"total":0,"limit":100,"offset":0}""")
+                }
                 if (path.startsWith("/api/v1/agent/")) return@synchronized json("""{"items":[],"total":0,"limit":100,"offset":0}""")
                 if (path.endsWith("/albums") || path.endsWith("/tracks")) return@synchronized json("""{"items":[],"total":0,"limit":50,"offset":0}""")
                 json("{}").setResponseCode(404)
@@ -233,14 +240,19 @@ class AgentWorkspaceTest {
     }
     @Test fun inspectionFailureAndSkippedAnalysisAreReadableWithoutAutomaticRetry() {
         val vm = vm()
+        val schedulesGate = CountDownLatch(1)
         Fixture().use { fixture -> try {
+            fixture.schedulesGate = schedulesGate
             fixture.tasks = """[{"id":"limited-task","status":"failed","stage":"completed","counts":{"processed":134,"issues":0,"failed":0,"calls":1},"error_code":"ai_output_limit","results":[],"created_at":"2026-10-18T00:00:00Z"}]"""
             connect(vm, fixture)
             compose.onNodeWithContentDescription("设置").performClick()
             compose.onNodeWithText("野弦助手 / 通知与草案").performScrollTo().performClick()
             compose.onNodeWithTag("agent-tab-tasks").performClick()
             compose.waitUntil(15_000) { compose.onAllNodesWithText("详情与恢复").fetchSemanticsNodes().isNotEmpty() }
-            compose.onNodeWithText("详情与恢复").performClick()
+            compose.onNodeWithText("详情与恢复").assertIsNotEnabled()
+            schedulesGate.countDown()
+            compose.waitUntil(15_000) { compose.onAllNodes(hasText("详情与恢复") and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithText("详情与恢复").performScrollTo().performClick()
             compose.waitUntil(15_000) { compose.onAllNodesWithText("阶段：处理结束，未全部完成").fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithText("阶段：处理结束，未全部完成").assertExists()
             compose.onNodeWithText("模型达到输出 Token 上限", substring = true).assertExists()
@@ -255,7 +267,7 @@ class AgentWorkspaceTest {
             compose.onNodeWithText("规则检查未发现待解释问题，本次未继续调用 AI。").assertExists()
             compose.onNodeWithText("恢复巡检").assertDoesNotExist()
             assertEquals(0, fixture.writes.get())
-        } finally { compose.runOnIdle { vm.settings.appearance("system"); vm.repository.session.invalidate() } } }
+        } finally { schedulesGate.countDown(); compose.runOnIdle { vm.settings.appearance("system"); vm.repository.session.invalidate() } } }
     }
     @Test fun mobileAssistantNotificationAndConcreteApprovalRoundTrip() {
         val vm = vm()
