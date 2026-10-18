@@ -79,9 +79,11 @@ class RecommendationExperienceTest {
         Fixture().use { fixture -> val vm = connect(fixture)
             try {
                 open("每日推荐")
-                compose.waitUntil(10_000) { compose.onAllNodesWithText("真实本库歌曲", substring = true).fetchSemanticsNodes().isNotEmpty() }
+                val more = hasTestTag("daily-more-local-a") and hasClickAction()
+                // The clickable row merges descendants; target the actual nested button.
+                compose.waitUntil(10_000) { compose.onAllNodes(more, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
                 compose.onNodeWithText("不感兴趣", substring = false).assertDoesNotExist()
-                compose.onNodeWithTag("daily-more-local-a").performClick()
+                compose.onNode(more, useUnmergedTree = true).performScrollTo().assertIsDisplayed().performClick()
                 compose.onNodeWithText("不感兴趣", substring = false).assertIsDisplayed()
                 InstrumentationRegistry.getInstrumentation().uiAutomation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK)
                 compose.onNodeWithText("推荐依据", substring = false).performClick()
