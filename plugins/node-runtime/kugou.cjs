@@ -1,11 +1,11 @@
 // Only metadata and lyrics endpoints are included in this provider-owned executable bundle.
-const request = require('kugou-upstream/util/request').createRequest;
+const request = require('@wildstring/kugou-metadata/util/request').createRequest;
 const { paced } = require('./rate.cjs');
 const methods = {
-  '/search': require('kugou-upstream/module/search'),
-  '/krm/audio': require('kugou-upstream/module/krm_audio'),
-  '/search/lyric': require('kugou-upstream/module/search_lyric'),
-  '/lyric': require('kugou-upstream/module/lyric'),
+  '/search': require('@wildstring/kugou-metadata/module/search'),
+  '/krm/audio': require('@wildstring/kugou-metadata/module/krm_audio'),
+  '/search/lyric': require('@wildstring/kugou-metadata/module/search_lyric'),
+  '/lyric': require('@wildstring/kugou-metadata/module/lyric'),
 };
 console.log = console.info = console.warn = console.error = () => {};
 let input = '';

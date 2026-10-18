@@ -1,6 +1,6 @@
 # 野弦 WildString
 
-0.5.3 更新：歌词补全与洗版支持专辑／全库后台慢扫、已扫记录、强制重扫、频率设置、锁定及批量确认恢复；补齐双语显示并修复安卓歌词切行。见[发布说明](docs/releases/v0.5.3.md)。
+0.5.4 更新：维护依赖安全版本，精简数据源插件依赖；助手回答支持 Markdown 排版、逐步显示和中断后的部分结果恢复。见[发布说明](docs/releases/v0.5.4.md)。
 
 0.5.2 更新：自定义头像、推荐临时歌单、紧凑对话菜单、角落通知与跨设备轻提示，整理导航并修复主题配色和面板滚动；新 AI 连接默认 8192 Token / low / 90 秒，Android 歌词默认 2 秒恢复跟随并可调整。见[发布说明](docs/releases/v0.5.2.md)。
 
@@ -52,7 +52,7 @@
 
 ## 本地开发
 
-准备 Git、[uv](https://docs.astral.sh/uv/)、Node 22.12+ 和 Make；容器运行需要 Docker Compose。
+准备 Git、[uv 0.13.1+](https://docs.astral.sh/uv/)、Node 22.12+ 和 Make；容器运行需要 Docker Compose。
 
 ```sh
 make setup         # 安装锁定依赖、创建 .env、安装 Git hook
@@ -143,6 +143,7 @@ tests/fixtures/   后续使用的合法测试样本
 | [KuGouMusicApi](https://github.com/MakcRe/KuGouMusicApi) | 酷狗插件内置的元数据与歌词接口模块 |
 | [NeteaseCloudMusicApiEnhanced](https://github.com/NeteaseCloudMusicApiEnhanced/api-enhanced) | 网易云插件内置的元数据与歌词接口模块，亦感谢其上游 NeteaseCloudMusicApi 的贡献者 |
 | [LDDC](https://github.com/chenmozhijin/LDDC) | QRC／KRC／YRC 歌词格式解析与逐字时间轴处理的参考 |
+| [commonmark-java](https://github.com/commonmark/commonmark-java)／[react-markdown](https://github.com/remarkjs/react-markdown) | Android 与网页助手回答的 Markdown 解析及渲染 |
 
 也感谢 [MusicBrainz](https://musicbrainz.org/)、[Cover Art Archive](https://coverartarchive.org/)、[AcoustID／Chromaprint](https://acoustid.org/)、[Last.fm](https://www.last.fm/api) 提供音乐资料、封面、音频指纹及收听记录服务，以及 [FFmpeg](https://ffmpeg.org/) 提供音频转换与响度分析能力。响度均衡与专辑／单曲调整的使用体验参考了 [foobar2000](https://www.foobar2000.org/) 的 ReplayGain 功能。
 

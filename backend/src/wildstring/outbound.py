@@ -103,6 +103,7 @@ def request_bytes(
     redirect=None,
     opener_factory=None,
     service="external",
+    consume=None,
 ):
     """Return (status, headers, bytes); HTTPError stays available to API parsers.
 
@@ -121,8 +122,8 @@ def request_bytes(
         opener = (opener_factory or build_opener)(ProxyHandler(proxies), redirect or NoRedirect())
         with opener.open(request, timeout=timeout) as response:  # nosec B310 -- validated schemes and explicit redirect policies
             status = response.status
-            raw = response.read(limit + 1)
-            if len(raw) > limit:
+            raw = consume(response, limit) if consume is not None else response.read(limit + 1)
+            if consume is None and len(raw) > limit:
                 raise OutboundError("response_too_large", status)
             return status, getattr(response, "headers", {}), raw
     except HTTPError as error:

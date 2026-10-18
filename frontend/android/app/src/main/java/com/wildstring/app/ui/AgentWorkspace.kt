@@ -27,6 +27,7 @@ import com.google.gson.JsonObject
 import com.wildstring.app.data.*
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -179,6 +180,19 @@ private fun displayValue(value: com.google.gson.JsonElement?): String = when { v
     var title by remember { mutableStateOf("") }; var historyMenu by remember { mutableStateOf<String?>(null) }
     val action = remember { FeatureAction() }; val scope = rememberCoroutineScope()
     LaunchedEffect(Unit) { action.run { connections = vm.agent.all("connections"); conversations = vm.agent.all("conversations") }; if (action.message == "已完成") action.message = null }
+    val running = conversation?.objects("runs")?.any { it.text("status") == "running" } == true
+    LaunchedEffect(conversation?.text("id"), action.busy, running) {
+        val id = conversation?.text("id") ?: return@LaunchedEffect
+        if (!action.busy && !running) return@LaunchedEffect
+        while (true) {
+            delay(650)
+            try {
+                val latest = vm.agent.request("conversations/$id")
+                if (conversation?.text("id") == id) conversation = latest
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { /* The send operation retains its diagnostic. */ }
+        }
+    }
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             TextButton({ scope.launch { action.run { conversations = vm.agent.all("conversations"); history = true; action.message = null } } }, enabled = !action.busy) { Icon(Icons.Default.History, null); Text("历史") }
@@ -197,11 +211,12 @@ private fun displayValue(value: com.google.gson.JsonElement?): String = when { v
             } }
             if (conversation == null) item { AgentEmpty("试试“把我很久没听的收藏整理成歌单”。助手会先生成草案，等你确认。未配置 AI 时仍可本地找歌。") }
             items(conversation?.objects("messages") ?: emptyList(), key = { it.text("id") }) { message ->
-                AgentCard { Text(if (message.text("role") == "user") "你" else "野弦", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary); SelectionContainer { Text(message.text("content")) }; message.objects("sources").forEach { source ->
+                AgentCard { Text(if (message.text("role") == "user") "你" else "野弦", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary); if (message.flag("partial")) Text("正在生成 · 内容尚未完成", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant); SelectionContainer { if (message.text("role") == "assistant") AssistantMarkdown(message.text("content")) else Text(message.text("content")) }; message.objects("sources").forEach { source ->
                     source.text("url").takeIf { it.startsWith("https://") }?.let { url -> TextButton({ runCatching { links.openUri(url) }.onFailure { action.message = "无法打开来源。" } }) { Text("来源：${source.text("title")}") } }
                 } }
             }
             conversation?.objects("runs")?.forEach { run -> item(key = "run-${run.text("id")}") {
+                if (run.text("status") == "running") Text(when (run.text("stage")) { "search" -> "正在检索联网来源…"; "tools" -> "正在查询曲库与处理工具结果…"; "writing" -> "正在生成回答…"; else -> "正在分析已有资料…" }, style = MaterialTheme.typography.bodySmall)
                 val fallback = run.text("status") == "local_fallback"
                 if (fallback) Text("本地关键词检索 · 未调用模型", style = MaterialTheme.typography.bodySmall)
                 if (run.text("error_code").isNotBlank()) Text("状态：${run.text("status")} · ${run.text("error_code")}", style = MaterialTheme.typography.bodySmall)
@@ -210,8 +225,11 @@ private fun displayValue(value: com.google.gson.JsonElement?): String = when { v
             } }
             item { ActionStatus(action) }
         }
+        conversation?.objects("runs")?.firstOrNull { it.text("status") == "running" }?.let { run ->
+            Text(when (run.text("stage")) { "search" -> "正在检索联网来源…"; "tools" -> "正在查询曲库与处理工具结果…"; "writing" -> "正在生成回答…"; else -> "正在分析已有资料…" }, Modifier.padding(vertical = 4.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
         Row(Modifier.fillMaxWidth().padding(bottom = 12.dp), verticalAlignment = Alignment.Bottom) {
-            OutlinedTextField(input, { input = it }, Modifier.weight(1f).testTag("agent-chat-input"), placeholder = { Text("聊聊你的音乐") }, maxLines = 4, enabled = !action.busy)
+            OutlinedTextField(input, { input = it }, Modifier.weight(1f).testTag("agent-chat-input"), placeholder = { Text("聊聊你的音乐") }, maxLines = 4, enabled = !action.busy && !running)
             IconButton({
                 val content = input.trim(); if (content.isNotEmpty()) scope.launch { action.run {
                     var current = conversation ?: vm.agent.request("conversations", "POST", jsonBody("connection_id" to connection)).also { conversation = it }
@@ -225,7 +243,7 @@ private fun displayValue(value: com.google.gson.JsonElement?): String = when { v
                         throw error
                     }
                 } }
-            }, enabled = !action.busy && input.isNotBlank(), modifier = Modifier.testTag("agent-chat-send")) { if (action.busy) CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp) else Icon(Icons.AutoMirrored.Filled.Send, "发送") }
+            }, enabled = !action.busy && !running && input.isNotBlank(), modifier = Modifier.testTag("agent-chat-send")) { if (action.busy) CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp) else Icon(Icons.AutoMirrored.Filled.Send, "发送") }
         }
     }
     if (history) AlertDialog(modifier = Modifier.testTag("agent-history-dialog"), onDismissRequest = { if (!action.busy) history = false }, title = { Text("历史对话") }, text = {
@@ -442,6 +460,7 @@ internal fun connectionBudget(connection: JsonObject): String {
     var effort by remember { mutableStateOf(if (original == null) "low" else original.text("reasoning_effort").ifBlank { "auto" }) }
     var outputLimit by remember { mutableStateOf((original?.number("max_output_tokens", 2048) ?: 8192).toString()) }
     var nativeSearch by remember { mutableStateOf(original?.flag("native_search") ?: false) }
+    var streamOutput by remember { mutableStateOf(original?.get("stream_output")?.asBoolean ?: true) }
     var name by remember { mutableStateOf(original?.text("name") ?: "我的 AI") }; var base by remember { mutableStateOf(original?.text("base_url") ?: "") }
     var model by remember { mutableStateOf(original?.text("model") ?: "") }; var secret by remember { mutableStateOf("") }; var timeout by remember { mutableStateOf((original?.number("timeout") ?: 90).toString()) }
     var budget by remember { mutableStateOf((original?.number("daily_call_budget") ?: 100).toString()) }; var enabled by remember { mutableStateOf(original?.flag("enabled") ?: true) }
@@ -461,6 +480,8 @@ internal fun connectionBudget(connection: JsonObject): String {
             ResearchChoice("推理强度", effort, listOf("auto" to "沿用模型默认", "none" to "none", "low" to "low", "medium" to "medium", "high" to "high", "max" to "max", "xhigh" to "xhigh")) { effort = it }
             OutlinedTextField(outputLimit, { outputLimit = it.filter(Char::isDigit) }, label = { Text("单次输出 Token 上限") }, singleLine = true)
             if (protocol == "responses" && provider in listOf("openai", "deepseek", "qwen")) { Row(verticalAlignment = Alignment.CenterVertically) { Text("模型原生联网搜索", Modifier.weight(1f)); Switch(nativeSearch, { nativeSearch = it }) }; Text("按供应商规则计费，单次模型请求可能多次搜索，不受独立搜索请求额度限制。", style = MaterialTheme.typography.bodySmall) }
+            Row(verticalAlignment = Alignment.CenterVertically) { Text("逐步显示回答", Modifier.weight(1f)); Switch(streamOutput, { streamOutput = it }) }
+            Text("兼容接口不支持流式响应时可关闭。", style = MaterialTheme.typography.bodySmall)
             Row(verticalAlignment = Alignment.CenterVertically) { Text("启用连接", Modifier.weight(1f)); Switch(enabled, { enabled = it }) }
             Row(verticalAlignment = Alignment.CenterVertically) { Text("允许自动巡检使用", Modifier.weight(1f)); Switch(background, { background = it }) }
             Text("用于定时巡检等自动任务；手动开始无需开启。", style = MaterialTheme.typography.bodySmall)
@@ -471,7 +492,7 @@ internal fun connectionBudget(connection: JsonObject): String {
         }
     }, confirmButton = { TextButton({ scope.launch { action.run {
         val body = jsonBody("name" to name, "base_url" to base.trim(), "model" to model.trim(), "timeout" to (timeout.toIntOrNull() ?: 0), "daily_call_budget" to (budget.toIntOrNull() ?: 0), "enabled" to enabled, "background_allowed" to background)
-        body.addProperty("protocol", protocol); body.addProperty("provider", provider); body.addProperty("reasoning_effort", effort); body.addProperty("max_output_tokens", outputLimit.toIntOrNull() ?: 0); body.addProperty("native_search", nativeSearch)
+        body.addProperty("protocol", protocol); body.addProperty("provider", provider); body.addProperty("reasoning_effort", effort); body.addProperty("max_output_tokens", outputLimit.toIntOrNull() ?: 0); body.addProperty("native_search", nativeSearch); body.addProperty("stream_output", streamOutput)
         if (original == null) body.addProperty("scope", if (instance) "instance" else "personal") else body.addProperty("version", original.number("version"))
         if (admin && instance) body.addProperty("shared", shared)
         if (secret.isNotBlank()) body.addProperty("api_key", secret)

@@ -2,6 +2,72 @@ import { section } from './helpers';
 import { expect, test, type Page } from '@playwright/test';
 import { login } from './helpers';
 
+test('回答逐步出现并渲染 Markdown，终态停止跟随且不加载外部图片', async ({ page }, info) => {
+  await login(page);
+  const answer = {
+    id: 'stream-answer',
+    role: 'assistant',
+    content: '',
+    partial: true,
+    created_at: '2026-10-18T08:00:00Z',
+  };
+  const run = {
+    id: 'stream-run',
+    status: 'running',
+    stage: 'model',
+    draft_ids: [],
+    tool_calls: 0,
+    error_code: null,
+    connection_id: null,
+  };
+  const conversation = {
+    id: 'stream-layout-fixture',
+    title: '逐步回答排版',
+    created_at: '2026-10-18T08:00:00Z',
+    connection_id: null,
+    messages: [answer],
+    runs: [run],
+  };
+  const external: string[] = [];
+  page.on('request', (request) => {
+    if (request.url().startsWith('https://example.com/')) external.push(request.url());
+  });
+  await page.route('**/api/v1/agent/conversations?*', (route) =>
+    route.fulfill({ json: { items: [conversation], total: 1, limit: 100, offset: 0 } }),
+  );
+  await page.route('**/api/v1/agent/conversations/stream-layout-fixture', (route) =>
+    route.fulfill({ json: conversation }),
+  );
+  await section(page, '音乐助手');
+  await page.getByRole('button', { name: '逐步回答排版', exact: true }).click();
+  await expect(page.getByText('正在分析已有资料…', { exact: true })).toBeVisible();
+  answer.content =
+    '## 比对结果\n\n你的曲库中，共有 **125 首曲目**。\n\n### 最大缺口\n\n- 第一首歌曲\n- 第二首歌曲';
+  run.stage = 'writing';
+  await expect(page.getByRole('heading', { name: '比对结果', exact: true })).toBeVisible();
+  await expect(page.locator('.assistant-markdown strong')).toHaveText('125 首曲目');
+  await expect(page.getByText('正在生成 · 内容尚未完成', { exact: true })).toBeVisible();
+  answer.content +=
+    '\n\n最新收到的正文\n\n[安全来源](https://example.com/releases)\n\n[危险链接](javascript:alert(1))\n\n![外部图片](https://example.com/tracker.jpg)\n\n<script>window.badMarkdown=true</script>';
+  await expect(page.getByText('最新收到的正文', { exact: true })).toBeVisible();
+  await expect(page.getByRole('link', { name: '安全来源' })).toHaveAttribute(
+    'rel',
+    'noopener noreferrer',
+  );
+  await expect(page.getByRole('link', { name: '危险链接' })).toHaveCount(0);
+  expect(external).toEqual([]);
+  run.status = 'succeeded';
+  answer.partial = false;
+  await expect(page.getByText('正在生成 · 内容尚未完成', { exact: true })).toHaveCount(0);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
+    true,
+  );
+  await page.screenshot({
+    path: `../../artifacts/054-verification/assistant-markdown-${info.project.name}.png`,
+    fullPage: true,
+  });
+});
+
 test('真实后端：搜索配置、长期记忆管理与摘要开关', async ({ page }, info) => {
   await login(page);
   await section(page, '助手设置');

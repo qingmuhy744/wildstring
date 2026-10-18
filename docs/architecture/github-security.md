@@ -18,6 +18,10 @@ CodeQL 在主分支推送、PR、每周和手动触发时运行。工作流使�
 
 社区插件上游使用固定提交的源码归档；GitHub 对这些归档的版本更新支持取决于包管理器，不能把 Dependabot 已启用等同于会自动跟踪上游最新提交。插件维护者继续负责更新提交、锁文件、格式适配和随包许可证。
 
+0.5.4 将酷狗／网易云需要的模块以可核验工作区维护，具体来源、归档和文件校验见各包`UPSTREAM.json`。依赖图记录实际使用的包名，Forge、PAC／FTP从安装图移除；`make ci`同时审计完整Web与插件npm锁文件。升级上游时运行`make source-providers-check`，核对生成器、兼容测试与许可证。
+
+Android工具链和内部测试平台的安全版本在`frontend/android/gradle/security-versions.properties`维护，应用至构建类路径与各工程配置；`make android-locks`分开解析调试与发布变体，避免新版Lint与Hilt生成文件并发冲突。固定版本仍需随上游及新公告复核，不等同于永久安全。
+
 ## 套餐与计费边界
 
 - 独立的 **GitHub Code Quality** 产品需要 GitHub Team／Enterprise Cloud；当前仓库 API 返回不可用。免费 CodeQL 的 `security-and-quality` 规则不等同于该产品的 AI 面板和覆盖率功能。见 [Code Quality 启用条件](https://docs.github.com/en/code-security/how-tos/maintain-quality-code/enable-code-quality)。

@@ -262,6 +262,7 @@ class Assistant:
             "reasoning_effort",
             "max_output_tokens",
             "native_search",
+            "stream_output",
         }
         defaults = {key: getattr(body, key) for key in option_keys}
         settings = (
@@ -381,6 +382,7 @@ class Assistant:
         background=False,
         on_call=None,
         timeout_limit=None,
+        on_delta=None,
     ):
         latest = self.connection_for(
             self.refresh_actor(actor), configuration["id"], background=background
@@ -397,7 +399,7 @@ class Assistant:
         )
         headers = {"Authorization": f"Bearer {key}"} if key else {}
         mode, proxy = self.network_policy()
-        from wildstring.outbound import json_request
+        from wildstring.outbound import OutboundError, json_request
 
         wire_config = configuration
         if background:
@@ -407,8 +409,33 @@ class Assistant:
                 "options": options(configuration) | {"native_search": False}
             }
         path, payload = model_payload(wire_config, messages, tools, tool_choice)
+
+        def preview(text):
+            if key and len(key) >= 8 and key in text:
+                raise OutboundError("ai_sensitive_response")
+            # Withhold a key-sized suffix so a secret split across SSE deltas cannot leak.
+            safe = text[: -len(key) + 1] if key and len(key) >= 8 else text
+            if on_delta is not None:
+                on_delta(safe[:16000])
+
         try:
-            response = (self.transport or json_request)(
+            transport = self.transport or json_request
+            extra = {}
+            from wildstring.model_protocol import options
+
+            if (
+                on_delta is not None
+                and self.transport is None
+                and options(configuration).get("stream_output", True)
+            ):
+                from wildstring.model_stream import stream_request
+
+                transport = stream_request
+                extra = {
+                    "on_text": preview,
+                    "protocol": options(configuration).get("protocol", "chat_completions"),
+                }
+            response = transport(
                 configuration["base_url"] + path,
                 payload=payload,
                 headers=headers,
@@ -418,6 +445,7 @@ class Assistant:
                 proxy_mode=mode,
                 proxy_url=proxy,
                 service="agent_model",
+                **extra,
             )
         except Exception as failure:
             with self.database.connect(write=True) as connection:
@@ -455,7 +483,10 @@ class Assistant:
                             (tokens, configuration["id"], actor.user_id, day),
                         )
         try:
-            return parse_model(configuration, response)
+            parsed = parse_model(configuration, response)
+            if on_delta is not None and isinstance(parsed.get("content"), str):
+                on_delta(parsed["content"][:16000])
+            return parsed
         except Exception as failure:
             code = getattr(failure, "code", "ai_invalid_response")
             self.log("agent.model.rejected", actor, error_code=code)
@@ -589,6 +620,7 @@ class Assistant:
         on_progress=None,
         finalize=False,
         deadline=None,
+        on_text=None,
     ):
         definitions = [
             item
@@ -658,6 +690,8 @@ class Assistant:
                         "content": "这是本次请求的最后一次模型调用，请直接回答，不再调用工具。只根据已有证据总结；不足以完成的部分明确说明原因和可行下一步，不编造新歌、来源或操作结果。已有草案仍需用户确认。",
                     }
                 )
+            if on_text is not None:
+                on_text({"stage": "model", "content": ""})
             message = self.model_request(
                 actor,
                 configuration,
@@ -667,6 +701,9 @@ class Assistant:
                 background=background,
                 on_call=on_call,
                 timeout_limit=remaining,
+                on_delta=(lambda text: on_text({"stage": "writing", "content": text}))
+                if on_text is not None
+                else None,
             )
             content = message.get("content")
             calls = message.get("tool_calls")
@@ -727,6 +764,14 @@ class Assistant:
                 except (ValueError, TypeError):
                     raise HTTPException(502, "ai_tool_arguments_invalid") from None
                 try:
+                    if on_text is not None:
+                        on_text(
+                            {
+                                "stage": "search"
+                                if name in {"search_web", "read_webpage"}
+                                else "tools"
+                            }
+                        )
                     if name in {"search_web", "read_webpage"}:
                         if web_requests >= 4:
                             raise HTTPException(429, "search_run_budget_exhausted")
@@ -821,13 +866,30 @@ class Assistant:
                 (identity,),
             ).fetchall()
         source_map = {item["message_id"]: json.loads(item["sources"]) for item in source_rows}
+        with self.chat_progress_lock:
+            progress = dict(self.chat_progress)
+        running = {run["id"] for run in runs if run["status"] == "running"}
+        streaming = {
+            run["id"] for run in runs if run["status"] == "running" and run["connection_id"]
+        }
         return dict(row) | {
             "context_summary": dict(summary) if summary else None,
             "messages": [
-                dict(message) | {"sources": source_map.get(message["id"], [])}
+                dict(message)
+                | {
+                    "sources": source_map.get(message["id"], []),
+                    "partial": message["role"] == "assistant" and message["run_id"] in streaming,
+                }
                 for message in messages
             ],
-            "runs": [dict(run) | {"draft_ids": json.loads(run["draft_ids"])} for run in runs],
+            "runs": [
+                dict(run)
+                | {
+                    "draft_ids": json.loads(run["draft_ids"]),
+                    "stage": progress.get(run["id"], "model") if run["id"] in running else None,
+                }
+                for run in runs
+            ],
         }
 
     def rename_conversation(self, actor, identity, body):
@@ -867,7 +929,7 @@ class Assistant:
         configuration = self.connection_for(actor, connection_id) if connection_id else None
         from wildstring.diagnostics import trace_id as current_trace
 
-        run_id, trace_id = uuid4().hex, current_trace()
+        run_id, message_id, trace_id = uuid4().hex, uuid4().hex, current_trace()
         import sqlite3
 
         try:
@@ -890,12 +952,35 @@ class Assistant:
                     (uuid4().hex, identity, "user", body.content, now(), run_id),
                 )
                 connection.execute(
+                    "INSERT INTO agent_messages VALUES (?,?,?,?,?,?)",
+                    (message_id, identity, "assistant", "", now(), run_id),
+                )
+                connection.execute(
                     "UPDATE agent_conversations SET connection_id=?,updated_at=? WHERE id=?",
                     (connection_id, now(), identity),
                 )
         except sqlite3.IntegrityError:
             raise HTTPException(409, "conversation_busy") from None
         result = {"content": "", "tool_calls": 0, "draft_ids": []}
+        partial, last_preview = "", 0.0
+
+        def progress(value):
+            nonlocal partial, last_preview
+            if "stage" in value:
+                with self.chat_progress_lock:
+                    self.chat_progress[run_id] = value["stage"]
+            if "content" not in value:
+                return
+            partial = value["content"][:16000]
+            tick = time.monotonic()
+            if tick - last_preview < 0.2 and partial:
+                return
+            with self.database.connect(write=True) as connection:
+                connection.execute(
+                    "UPDATE agent_messages SET content=? WHERE id=?", (partial, message_id)
+                )
+            last_preview = tick if partial else 0.0
+
         status, error = "succeeded", None
         try:
             if configuration:
@@ -914,6 +999,7 @@ class Assistant:
                         run_id=run_id,
                         finalize=True,
                         deadline=deadline,
+                        on_text=progress,
                     )
             else:
                 status = "local_fallback"
@@ -942,6 +1028,8 @@ class Assistant:
             result["content"] = "助手暂时不可用；可以继续使用本地搜索和播放。"
         with self.database.connect(write=True) as connection:
             if status == "failed":
+                if partial.strip() and error != "ai_sensitive_response":
+                    result["content"] = partial + "\n\n---\n\n" + result["content"]
                 progress = connection.execute(
                     "SELECT tool_calls,draft_ids FROM agent_runs WHERE id=?", (run_id,)
                 ).fetchone()
@@ -951,10 +1039,9 @@ class Assistant:
                 "UPDATE agent_runs SET status=?,error_code=?,tool_calls=?,draft_ids=?,updated_at=?,lease_until=NULL WHERE id=?",
                 (status, error, result["tool_calls"], encoded(result["draft_ids"]), now(), run_id),
             )
-            message_id = uuid4().hex
             connection.execute(
-                "INSERT INTO agent_messages VALUES (?,?,?,?,?,?)",
-                (message_id, identity, "assistant", result["content"], now(), run_id),
+                "UPDATE agent_messages SET content=? WHERE id=?",
+                (result["content"], message_id),
             )
             if result.get("sources"):
                 connection.execute(
@@ -965,6 +1052,8 @@ class Assistant:
                 "UPDATE agent_conversations SET updated_at=? WHERE id=?", (now(), identity)
             )
         self.log("agent.run.finished", actor, trace_id=trace_id, status=status, error_code=error)
+        with self.chat_progress_lock:
+            self.chat_progress.pop(run_id, None)
         return self.conversation(actor, identity)
 
     def cleanup_conversations(self):

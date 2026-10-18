@@ -850,6 +850,8 @@ class AgentPlatform(Core, Notifications, Automation, Assistant, Research):
         self.database = repository.database
         self.auth = auth
         self.transport = transport
+        self.chat_progress = {}
+        self.chat_progress_lock = threading.Lock()
         self.diagnostics = None
         self.stop_event = threading.Event()
         self.wake = threading.Event()

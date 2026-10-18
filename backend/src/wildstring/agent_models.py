@@ -195,6 +195,7 @@ class Connection(Input):
     reasoning_effort: Literal["auto", "none", "low", "medium", "high", "max", "xhigh"] = "low"
     max_output_tokens: int = Field(default=8192, ge=128, le=32768)
     native_search: bool = False
+    stream_output: bool = True
 
     @field_validator("base_url")
     @classmethod

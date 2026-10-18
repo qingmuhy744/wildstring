@@ -311,6 +311,69 @@
 .workspace-message small {
   color: var(--muted);
 }
+.assistant-markdown {
+  min-width: 0;
+  line-height: 1.75;
+  overflow-wrap: anywhere;
+}
+.workspace-message .assistant-markdown p {
+  white-space: normal;
+  margin: 0.65em 0;
+}
+.assistant-markdown > :first-child {
+  margin-top: 0.4em;
+}
+.assistant-markdown > :last-child {
+  margin-bottom: 0;
+}
+.assistant-markdown :is(h1, h2, h3, h4, h5, h6) {
+  font-size: 1.12em;
+  line-height: 1.5;
+  margin: 1.25em 0 0.5em;
+  letter-spacing: 0;
+}
+.assistant-markdown :is(ul, ol) {
+  padding-left: 1.5em;
+  margin: 0.6em 0;
+}
+.assistant-markdown li + li {
+  margin-top: 0.4em;
+}
+.assistant-markdown blockquote {
+  margin: 0.8em 0;
+  padding-left: 1em;
+  border-left: 3px solid var(--border);
+  color: var(--muted);
+}
+.assistant-markdown pre {
+  overflow-x: auto;
+  padding: 12px;
+  border-radius: 10px;
+  background: var(--surface);
+  font-size: 0.88em;
+}
+.assistant-markdown code {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.assistant-table {
+  overflow-x: auto;
+  max-width: 100%;
+}
+.assistant-table table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.92em;
+}
+.assistant-table :is(td, th) {
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  text-align: left;
+}
+.assistant-generating {
+  display: block;
+  margin-top: 6px;
+}
 .assistant-composer {
   display: flex;
   align-items: flex-end;
@@ -704,4 +767,10 @@
   background-clip: text;
   -webkit-background-clip: text;
   color: transparent;
+}
+
+.assistant-live-status {
+  color: var(--muted);
+  font-size: 0.88rem;
+  margin: 16px 0 0;
 }
