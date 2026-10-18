@@ -4176,3 +4176,11 @@ select {
 .lyric-scan-items .button-row button {
   white-space: normal;
 }
+.lyric-scan-header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding-block: 12px;
+  background: inherit;
+  border-bottom: 1px solid var(--border);
+}

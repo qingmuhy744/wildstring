@@ -541,16 +541,19 @@ export function LyricScanDialog({ albumId, onClose }: { albumId?: string; onClos
   return (
     <dialog
       ref={dialog}
-      className="editor-dialog lyric-scan-dialog"
+      className="metadata-refresh-dialog lyric-scan-dialog"
       aria-label={albumId ? '专辑歌词补全与洗版' : '歌词补全与洗版'}
       onCancel={(e) => {
         e.preventDefault();
         onClose();
       }}
     >
-      <button onClick={onClose} aria-label="关闭歌词扫描">
-        关闭
-      </button>
+      <header className="lyric-scan-header">
+        <strong>{albumId ? '专辑歌词补全与洗版' : '歌词补全与洗版'}</strong>
+        <button onClick={onClose} aria-label="关闭歌词扫描">
+          关闭
+        </button>
+      </header>
       <LyricScans albumId={albumId} />
     </dialog>
   );
