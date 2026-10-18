@@ -380,12 +380,16 @@
         toastTimer = setTimeout(() => { toast.hidden = true; }, 2200);
       }
       function openChoice(key) {
+        if (!Object.hasOwn(options, key)) return;
         const option = options[key];
         dialog.innerHTML = `<h3 id="choice-title">${option.title}</h3><div class="choices" role="radiogroup" aria-label="${option.title}">${option.choices.map(([id, label]) => `<button role="radio" aria-checked="${preferences[key] === id}" data-value="${id}"><span class="radio" aria-hidden="true"></span>${label}</button>`).join('')}</div><div class="dialog-footer"><button class="text-action" data-cancel>取消</button></div>`;
-        dialog.querySelectorAll('[data-value]').forEach(button => button.addEventListener('click', () => {
-          preferences[key] = button.dataset.value; dialog.close(); render();
-          content.querySelector(`[data-choice="${key}"]`)?.focus({ preventScroll: true });
-        }));
+        dialog.querySelectorAll('[data-value]').forEach((button, index) => {
+          const [value] = option.choices[index];
+          button.addEventListener('click', () => {
+            preferences[key] = value; dialog.close(); render();
+            content.querySelector(`[data-choice="${key}"]`)?.focus({ preventScroll: true });
+          });
+        });
         dialog.querySelector('[data-cancel]').addEventListener('click', () => dialog.close());
         dialog.showModal(); positionDialog();
       }
