@@ -1,6 +1,6 @@
 # 安全与质量维护
 
-当前修复分支的实现记录；合并、CodeQL 复扫、发布和部署分别验收。
+安全与质量维护的实现记录；合并、CodeQL 复扫、发布和部署分别验收。
 
 ## 模块依赖
 
@@ -15,8 +15,11 @@
 
 - Android 账户资料与登录会话均使用 Android Keystore 管理的 AES-GCM 密钥加密。启动时原子迁移各个已保存服务器的旧账户资料；清理或删除服务器时清除新旧字段，不轮换会话密钥。
 - 系统栏使用 AndroidX Core 1.17 的 `WindowCompat.enableEdgeToEdge`，媒体控制器连接使用 `onConnectAsync` 和包含控制器参数的构造器，保留自身、受信任外部控制器和不受信任控制器的权限边界。
+- Compose 仪器测试采用 `androidx.compose.ui.test.junit4.v2` 的规则工厂，使用 `StandardTestDispatcher` 排队执行组合协程；通过 `waitForIdle`、`runOnIdle` 和可观察的 UI 状态同步。旧 API 会在调用线程立即执行协程，迁移要求见 [Android 官方说明](https://developer.android.com/develop/ui/compose/testing/migrate-v2)。
 - Web 导航计数使用 `Map`，切换入口验证已知视图；设计预览中的设置值以 `textContent` 输出。跨标签偏好测试通过另一个标签修改存储，触发真实的 `storage` 事件。
 - 酷狗插件 1.1.2 的配置只保留元数据与歌词所需的公开平台参数，裁剪脚本同时更新来源哈希。独立导入的旧插件仍需升级 ZIP；本轮没有修改已部署插件。
+
+`apk` 是每个 PR 的必需检查，Android 工作流的 PR 触发不设置路径过滤；主分支推送仍按路径过滤。这样文档或预览页修复也能提供合并规则所需的检查结果。
 
 ## 必须保留的行为
 
