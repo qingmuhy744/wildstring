@@ -110,6 +110,7 @@ make docker-down     # 停止服务，保留数据卷
 ## CI/CD
 
 - `main` 提交和 PR：检查、测试、Web 构建与容器实测。
+- [Security and quality](https://github.com/qingmuhy744/wildstring/security)：CodeQL 安全与质量扫描、PR 依赖审查、Dependabot 更新、Android 依赖图及密钥保护；范围与套餐限制见 [GitHub 安全配置](docs/architecture/github-security.md)，漏洞请按 [安全政策](SECURITY.md) 私密报告。
 - 推送 `vX.Y.Z` 标签：完整检查、Android 功能测试与正式包安装检查通过后，发布 amd64/arm64 镜像到 `ghcr.io/qingmuhy744/wildstring`，自动创建包含签名 APK、Web ZIP、QQ／酷狗／网易云数据源插件 ZIP、公开签名指纹与 `SHA256SUMS` 的 GitHub Release。
 - 正式 Release 更新 `latest`；预发布保留独立版本标签。
 - Android [Kotlin/Compose/Media3 原生客户端](frontend/android/README.md) 已接入真实曲库、后台播放与手机/平板歌词布局。显示名称「野弦」，正式包名 `com.wildstring.app`；签名 APK 从 [Releases](https://github.com/qingmuhy744/wildstring/releases) 直接下载。`make android-ci` 和独立 **Android APK** 工作流继续提供开发用 debug 包。IPA 和桌面安装包后续交付。
