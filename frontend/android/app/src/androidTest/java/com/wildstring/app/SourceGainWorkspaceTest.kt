@@ -61,7 +61,7 @@ class SourceGainWorkspaceTest {
                         if (scanStatus == "completed") scanItemStatus = "ready"
                         json(scan())
                     }
-                    path == "/api/v1/manage/lyric-scans/scan-one/apply" -> { scanItemStatus = "applied"; json("""{"items":[{"id":"scan-item","status":"applied"}]}""") }
+                    path == "/api/v1/manage/lyric-scans/scan-one/apply" -> { scanItemStatus = "applied"; json("""{"items":[{"id":"scan-item","status":"applied"}]}""").setBodyDelay(350, java.util.concurrent.TimeUnit.MILLISECONDS) }
                     path == "/api/v1/manage/lyric-scan-items/scan-item/restore" -> { scanItemStatus = "restored"; json("{}") }
                     path == "/api/v1/tracks/song-one/playback-gain" -> {
                         if (request.method == "PUT") { if (body.text("scope") == "album") { assertEquals(albumVersion.toLong(), body.number("version")); album = body.get("gain_db").asDouble; albumVersion++ } else { assertEquals(trackVersion.toLong(), body.number("version")); track = body.get("gain_db").asDouble; trackVersion++ } }
@@ -158,10 +158,15 @@ class SourceGainWorkspaceTest {
             assertFalse(fixture.paths.any { it.endsWith("/scan-one/apply") })
             compose.onNodeWithText("确定", useUnmergedTree = true).performClick()
             compose.waitUntil(10_000) { fixture.scanItemStatus == "applied" }
+            // The server state changes before its response arrives; wait for the UI refresh.
+            compose.waitUntil(10_000) { compose.onAllNodesWithText("启用选中的歌词？").fetchSemanticsNodes().isEmpty() }
+            compose.onNodeWithTag("lyric-scans-panel").performScrollToNode(hasText("合成歌词歌曲"))
+            compose.waitUntil(10_000) { compose.onAllNodesWithText("已启用").fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithText("恢复洗版前歌词").performScrollTo().assertExists()
             capture("lyric-scans-native.png")
             compose.onNodeWithText("恢复洗版前歌词").performClick()
             compose.waitUntil(10_000) { fixture.scanItemStatus == "restored" }
+            compose.waitUntil(10_000) { compose.onAllNodesWithText("已恢复").fetchSemanticsNodes().isNotEmpty() }
         }
     }
     @Test fun uploadedAvatarDisplaysAndCanBeResetWithoutAcceptingAnotherAccountOwner() {
