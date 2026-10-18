@@ -1,5 +1,6 @@
 // Only metadata and lyrics endpoints are included in this provider-owned executable bundle.
 const request = require('kugou-upstream/util/request').createRequest;
+const { paced } = require('./rate.cjs');
 const methods = {
   '/search': require('kugou-upstream/module/search'),
   '/krm/audio': require('kugou-upstream/module/krm_audio'),
@@ -27,13 +28,13 @@ process.stdin.on('end', async () => {
           return [v.slice(0, i).trim(), v.slice(i + 1).trim()];
         }),
     );
-    const result = await method({ ...data.parameters, cookie }, (options) =>
+    const result = await method({ ...data.parameters, cookie }, paced(data, (options) =>
       request({ ...options, timeout: 12000 }),
-    );
+    ));
     process.stdout.write(JSON.stringify(result.body));
     process.exit(0);
-  } catch {
-    process.stdout.write(JSON.stringify({ error_code: 1 }));
+  } catch (error) {
+    process.stdout.write(JSON.stringify(error?.wildstring_error ? error : { error_code: 1 }));
     process.exit(0);
   }
 });

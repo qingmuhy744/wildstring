@@ -20,6 +20,7 @@ class Manifest:
     requires_modules: tuple = field(default_factory=tuple)
     cover_hosts: tuple = field(default_factory=tuple)
     requires_programs: tuple = field(default_factory=tuple)
+    request_pacing: bool = False
 
     def public(self):
         return asdict(self)

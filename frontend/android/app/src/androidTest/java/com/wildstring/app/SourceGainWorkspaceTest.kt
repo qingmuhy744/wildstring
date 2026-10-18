@@ -14,6 +14,7 @@ import com.wildstring.app.ui.MusicViewModel
 import com.wildstring.app.ui.PlaybackGainPanel
 import com.wildstring.app.ui.SourcePluginsPanel
 import com.wildstring.app.ui.AvatarSettings
+import com.wildstring.app.ui.FeatureDialog
 import kotlinx.coroutines.runBlocking
 import okhttp3.mockwebserver.*
 import org.junit.Assert.*
@@ -26,6 +27,9 @@ class SourceGainWorkspaceTest {
         val server = MockWebServer()
         val paths = java.util.concurrent.ConcurrentLinkedQueue<String>()
         @Volatile var album = 0.0; @Volatile var track = 0.0; @Volatile var enabled = false
+        @Volatile var scanStatus = ""; @Volatile var scanItemStatus = "queued"
+        var scanOptions = JsonObject()
+        fun scan() = """{"id":"scan-one","status":"$scanStatus","total":1,"created_at":1,"counts":{"$scanItemStatus":1},"cooldowns":[],"options":{"scope":"album","scope_id":"album-one"},"items":[{"id":"scan-item","track_id":"song-one","title":"合成歌词歌曲","status":"$scanItemStatus","baseline":{"label":"静态歌词"},"quality":{"label":"双语逐字动态"},"results":{}}]}"""
         var albumVersion = 0; var trackVersion = 0; var pluginVersion = 1
         @Volatile var avatar: ByteArray? = null
         fun avatarVersion() = avatar?.let { java.security.MessageDigest.getInstance("SHA-256").digest(it).joinToString("") { b -> "%02x".format(b) } }
@@ -45,6 +49,20 @@ class SourceGainWorkspaceTest {
                     path.endsWith("/auth/status") -> json("""{"configured":true,"authenticated":${request.getHeader("Cookie") != null},"user":{"id":"source-alice","username":"alice","role":"admin"}}""")
                     path.endsWith("/auth/login") -> json("{}").setHeader("Set-Cookie", "wildstring_session=source-alice; Path=/; Max-Age=3600")
                     path == "/api/v1/auth/avatar/info" -> json("""{"version":${avatarVersion()?.let { "\"$it\"" } ?: "null"}}""")
+                    path == "/api/v1/manage/lyric-scan-settings" -> json("""{"version":1,"default_profile":"low","low_seconds":10,"medium_seconds":5,"high_seconds":2}""")
+                    path == "/api/v1/manage/lyric-scans/preview" -> json("""{"total":1}""")
+                    path == "/api/v1/manage/lyric-scans" -> {
+                        if (request.method == "POST") { scanOptions = body; scanStatus = "running"; json(scan()) }
+                        else json("""{"items":[${if (scanStatus.isEmpty()) "" else scan()}]}""")
+                    }
+                    path == "/api/v1/manage/lyric-scans/scan-one" -> json(scan())
+                    path == "/api/v1/manage/lyric-scans/scan-one/control" -> {
+                        scanStatus = if (body.text("action") == "pause") "paused" else "completed"
+                        if (scanStatus == "completed") scanItemStatus = "ready"
+                        json(scan())
+                    }
+                    path == "/api/v1/manage/lyric-scans/scan-one/apply" -> { scanItemStatus = "applied"; json("""{"items":[{"id":"scan-item","status":"applied"}]}""") }
+                    path == "/api/v1/manage/lyric-scan-items/scan-item/restore" -> { scanItemStatus = "restored"; json("{}") }
                     path == "/api/v1/tracks/song-one/playback-gain" -> {
                         if (request.method == "PUT") { if (body.text("scope") == "album") { assertEquals(albumVersion.toLong(), body.number("version")); album = body.get("gain_db").asDouble; albumVersion++ } else { assertEquals(trackVersion.toLong(), body.number("version")); track = body.get("gain_db").asDouble; trackVersion++ } }
                         json(gain())
@@ -112,6 +130,38 @@ class SourceGainWorkspaceTest {
             compose.onNodeWithText("请求 -5.0 dB · 实际 -5.0 dB").performScrollTo().assertExists()
             capture("playback-gain-native.png")
             assertEquals(1,fixture.albumVersion); assertEquals(1,fixture.trackVersion)
+        }
+    }
+    @Test fun lyricScanSupportsCustomRatePauseConfirmationAndRestoreInAlbumScope() {
+        Fixture().use { fixture ->
+            val vm = connect(fixture)
+            compose.runOnUiThread { compose.activity.setContent { MaterialTheme { Surface { FeatureDialog(vm, "lyric-scans", albumId = "album-one") {} } } } }
+            compose.waitUntil(10_000) { compose.onAllNodesWithTag("lyric-rate-low").fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithTag("lyric-rate-low").performScrollTo().assertIsSelected()
+            compose.onNodeWithTag("lyric-rate-custom").performScrollTo().performClick()
+            compose.onNodeWithText("请求间隔（1–120秒）").performScrollTo().performTextReplacement("7")
+            compose.onNodeWithText("检查扫描范围").performScrollTo().performClick()
+            compose.waitUntil(10_000) { compose.onAllNodesWithText("开始后台扫描").fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithText("开始后台扫描").performScrollTo().performClick()
+            compose.waitUntil(10_000) { fixture.scanStatus == "running" }
+            assertEquals("album", fixture.scanOptions.text("scope")); assertEquals("album-one", fixture.scanOptions.text("scope_id"))
+            assertEquals("custom", fixture.scanOptions.text("rate_profile")); assertEquals(7, fixture.scanOptions.number("interval_seconds").toInt())
+            compose.waitUntil(10_000) { compose.onAllNodesWithText("暂停扫描").fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithText("暂停扫描").performScrollTo().performClick()
+            compose.waitUntil(10_000) { fixture.scanStatus == "paused" }
+            compose.waitUntil(10_000) { compose.onAllNodesWithText("继续扫描").fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithText("继续扫描").performScrollTo().performClick()
+            compose.waitUntil(10_000) { fixture.scanStatus == "completed" }
+            compose.waitUntil(10_000) { compose.onAllNodesWithText("可升级").fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithText("选择本页可升级").performScrollTo().performClick()
+            compose.onNodeWithText("确认选中（1）").performScrollTo().performClick()
+            assertFalse(fixture.paths.any { it.endsWith("/scan-one/apply") })
+            compose.onNodeWithText("确定", useUnmergedTree = true).performClick()
+            compose.waitUntil(10_000) { fixture.scanItemStatus == "applied" }
+            compose.onNodeWithText("恢复洗版前歌词").performScrollTo().assertExists()
+            capture("lyric-scans-native.png")
+            compose.onNodeWithText("恢复洗版前歌词").performClick()
+            compose.waitUntil(10_000) { fixture.scanItemStatus == "restored" }
         }
     }
     @Test fun uploadedAvatarDisplaysAndCanBeResetWithoutAcceptingAnotherAccountOwner() {

@@ -396,6 +396,8 @@ function LyricsPanel({ player }: { player: Player }) {
   const [follow, setFollow] = useState(true);
   const [coarse, setCoarse] = useState(() => matchMedia('(pointer: coarse)').matches);
   const [preview, setPreview] = useState<number | null>(null);
+  const [showTranslation, setShowTranslation] = useState(true);
+  const [showRomanization, setShowRomanization] = useState(false);
   const scroll = useRef<HTMLDivElement>(null);
   const lines = useRef<(HTMLButtonElement | null)[]>([]);
   useEffect(() => {
@@ -472,7 +474,7 @@ function LyricsPanel({ player }: { player: Player }) {
     const observer = new ResizeObserver(center);
     observer.observe(container);
     return () => observer.disconnect();
-  }, [active, follow, lyrics]);
+  }, [active, follow, lyrics, showTranslation, showRomanization]);
 
   const source =
     lyrics?.source === 'sidecar_lrc'
@@ -493,6 +495,24 @@ function LyricsPanel({ player }: { player: Player }) {
           </a>
         ) : (
           <span>{lyrics && lyrics.kind !== 'none' ? source : '歌词'}</span>
+        )}
+        {lyrics?.lines.some((line) => line.translation) && (
+          <button
+            className="text-button"
+            aria-pressed={showTranslation}
+            onClick={() => setShowTranslation((value) => !value)}
+          >
+            译文
+          </button>
+        )}
+        {lyrics?.lines.some((line) => line.romanization) && (
+          <button
+            className="text-button"
+            aria-pressed={showRomanization}
+            onClick={() => setShowRomanization((value) => !value)}
+          >
+            音译
+          </button>
         )}
         <button
           className="text-button"
@@ -540,7 +560,15 @@ function LyricsPanel({ player }: { player: Player }) {
               {lyrics.lines.map((line, index) => (
                 <li key={index}>
                   {line.time_ms === null ? (
-                    <p className="lyric-line">{line.text}</p>
+                    <p className="lyric-line">
+                      {line.text}
+                      {showTranslation && line.translation && (
+                        <span className="lyric-translation">{line.translation}</span>
+                      )}
+                      {showRomanization && line.romanization && (
+                        <span className="lyric-romanization">{line.romanization}</span>
+                      )}
+                    </p>
                   ) : (
                     <button
                       ref={(node) => {
@@ -592,6 +620,12 @@ function LyricsPanel({ player }: { player: Player }) {
                             );
                           })
                         : line.text || '♪'}
+                      {showTranslation && line.translation && (
+                        <span className="lyric-translation">{line.translation}</span>
+                      )}
+                      {showRomanization && line.romanization && (
+                        <span className="lyric-romanization">{line.romanization}</span>
+                      )}
                     </button>
                   )}
                 </li>

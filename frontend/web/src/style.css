@@ -1627,6 +1627,19 @@ a {
 .lyric-line:focus-visible {
   outline-offset: 3px;
 }
+.lyric-translation,
+.lyric-romanization {
+  display: block;
+  margin-top: 6px;
+  font-size: 0.6em;
+  font-weight: 400;
+  line-height: 1.6;
+  color: #f6e9ddad;
+}
+.lyrics-toolbar button[aria-pressed='true'] {
+  text-decoration: underline;
+  text-underline-offset: 5px;
+}
 .plain-lyrics {
   padding: 48px 0 !important;
   gap: 22px !important;
@@ -4079,4 +4092,87 @@ select {
 .sidebar-bottom {
   margin-top: 0;
   padding-top: 12px;
+}
+
+.lyric-scan-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+.lyric-scan-options label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.lyric-scan-options label.check {
+  flex-direction: row;
+  align-items: center;
+}
+.lyric-scan-options input[type='number'] {
+  width: 100%;
+}
+.lyric-scan-counts,
+.lyric-scan-history,
+.lyric-scans .button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-block: 12px;
+}
+.lyric-scan-counts span {
+  padding: 5px 10px;
+  border-radius: 20px;
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+.lyric-scan-history {
+  flex-direction: column;
+  align-items: stretch;
+}
+.lyric-scan-items {
+  list-style: none;
+  padding: 0;
+}
+.lyric-scan-items > li {
+  border-top: 1px solid var(--border);
+  padding-block: 16px;
+}
+.lyric-scan-item-heading {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: space-between;
+}
+.lyric-scan-item-heading label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.lyric-scan-item-heading strong {
+  overflow-wrap: anywhere;
+}
+.lyric-scan-confirm {
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+}
+.lyric-scan-dialog {
+  width: min(960px, 94vw);
+  max-height: 90dvh;
+  overflow-y: auto;
+}
+
+.lyric-scans input[type='checkbox'] {
+  width: 18px;
+  height: 18px;
+  min-width: 18px;
+  flex: 0 0 18px;
+  padding: 0;
+}
+.lyric-scan-item-heading label {
+  flex: 1;
+}
+.lyric-scan-items .button-row button {
+  white-space: normal;
 }

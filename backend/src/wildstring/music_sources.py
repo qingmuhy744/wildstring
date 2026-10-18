@@ -12,9 +12,9 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from wildstring.library.edits import Overrides
-from wildstring.library.lyric_edits import LyricsEditor, LyricsUpdate, lyric_text
+from wildstring.library.lyric_edits import LyricsEditor, lyric_text
 from wildstring.library.metadata import normalize
-from wildstring.library.online_lyrics import normalize_bundle
+from wildstring.library.online_lyrics import display_lyrics, normalize_bundle
 from wildstring.source_plugins import PluginError, registry
 
 
@@ -102,11 +102,17 @@ class PluginContext:
         self.manager, self.identity, self.configuration = manager, identity, configuration
         self.directory = manager.providers.directory
         self.deadline = deadline or time.monotonic() + 90
+        self.force = False
+        self.batch_id = None
+        self.interval_seconds = 5
 
 
 class MusicSources:
     def __init__(self, providers):
         self.providers, self.database = providers, providers.database
+        from wildstring.lyric_scans import LyricScans
+
+        self.scans = LyricScans(self)
 
     @property
     def plugins(self):
@@ -223,9 +229,16 @@ class MusicSources:
             )
         return next(value for value in self.catalog() if value["id"] == identity)
 
-    def candidates(self, track, identity):
+    def candidates(self, track, identity, *, force=False, batch_id=None, interval_seconds=5):
         configuration = self.settings(identity)
         context = PluginContext(self, identity, configuration)
+        context.force, context.batch_id, context.interval_seconds = (
+            force,
+            batch_id,
+            interval_seconds,
+        )
+        if batch_id:
+            context.deadline = time.monotonic() + max(180, interval_seconds * 12 + 120)
         plugin = self.plugins[identity]
         query = (track["title"] + " " + " ".join(track.get("artists", [])))[:200]
         candidates = plugin.search(context, query)
@@ -336,7 +349,7 @@ class MusicSources:
         try:
             with self.database.connect(write=True) as db:
                 db.execute(
-                    "DELETE FROM lyric_candidates WHERE track_id=? AND job_id NOT IN (SELECT id FROM lyric_lookup_jobs WHERE track_id=? ORDER BY created_at DESC LIMIT 5) AND id NOT IN (SELECT json_extract(selected_candidate,'$.id') FROM track_lyrics WHERE selected_candidate IS NOT NULL)",
+                    "DELETE FROM lyric_candidates WHERE track_id=? AND job_id NOT IN (SELECT id FROM lyric_lookup_jobs WHERE track_id=? ORDER BY created_at DESC LIMIT 5) AND id NOT IN (SELECT json_extract(selected_candidate,'$.id') FROM track_lyrics WHERE selected_candidate IS NOT NULL) AND id NOT IN (SELECT candidate_id FROM lyric_scan_items WHERE candidate_id IS NOT NULL) AND id NOT IN (SELECT json_extract(previous,'$.selected_candidate.id') FROM lyric_scan_items WHERE json_extract(previous,'$.selected_candidate.id') IS NOT NULL)",
                     (job["track_id"], job["track_id"]),
                 )
                 db.execute(
@@ -445,6 +458,7 @@ class MusicSources:
             value.pop("raw")
             for field in ("match", "normalized"):
                 value[field] = json.loads(value[field])
+            value["normalized"] = display_lyrics(value["normalized"])
             value["line_count"] = len(value["normalized"]["lines"])
             value["normalized"]["lines"] = value["normalized"]["lines"][:100]
             value["normalized"].pop("layers", None)
@@ -459,40 +473,72 @@ class MusicSources:
         )
         return {"items": rows, "jobs": jobs}
 
-    def apply(self, identity, body):
-        with self.database.connect() as db:
-            row = db.execute("SELECT * FROM lyric_candidates WHERE id=?", (identity,)).fetchone()
-        if row is None:
-            raise HTTPException(404, "lyric_candidate_not_found")
-        if row["lyrics_version"] != body.version or row["file_version"] != body.file_version:
-            raise HTTPException(409, "lyrics_version_conflict")
-        normalized = json.loads(row["normalized"])
-        for line in normalized["lines"]:
-            if line["time_ms"] is not None:
-                line["time_ms"] = max(0, line["time_ms"] + body.offset_ms)
-            if "end_ms" in line:
-                line["end_ms"] = max(0, line["end_ms"] + body.offset_ms)
-            for word in line.get("words", []):
-                word["start_ms"] = max(0, word["start_ms"] + body.offset_ms)
-                word["end_ms"] = max(0, word["end_ms"] + body.offset_ms)
+    def apply(self, identity, body, scan_item=None):
         editor = LyricsEditor(self.providers.repository)
-        saved = editor.save(
-            row["track_id"],
-            LyricsUpdate(
-                version=body.version, file_version=body.file_version, text=lyric_text(normalized)
-            ),
-        )
         with self.database.connect(write=True) as db:
-            changed = db.execute(
-                "UPDATE track_lyrics SET selected_candidate=? WHERE track_id=? AND version=?",
-                (
-                    json.dumps({"id": identity, "offset_ms": body.offset_ms}),
-                    row["track_id"],
-                    saved["version"],
-                ),
-            ).rowcount
-            if not changed:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT * FROM lyric_candidates WHERE id=?", (identity,)).fetchone()
+            if row is None:
+                raise HTTPException(404, "lyric_candidate_not_found")
+            _, file_version = editor.observed(row["track_id"])
+            previous = db.execute(
+                "SELECT * FROM track_lyrics WHERE track_id=?", (row["track_id"],)
+            ).fetchone()
+            current_version = previous["version"] if previous else 1
+            if (
+                row["lyrics_version"] != body.version
+                or row["file_version"] != body.file_version
+                or file_version != body.file_version
+                or current_version != body.version
+            ):
                 raise HTTPException(409, "lyrics_version_conflict")
+            if scan_item:
+                locked = db.execute(
+                    "SELECT locked FROM lyric_locks WHERE track_id=?", (row["track_id"],)
+                ).fetchone()
+                item = db.execute(
+                    "SELECT status,candidate_id,track_id,fingerprint FROM lyric_scan_items WHERE id=?",
+                    (scan_item,),
+                ).fetchone()
+                if locked and locked[0]:
+                    raise HTTPException(409, "lyrics_locked")
+                if (
+                    not item
+                    or item[0] != "ready"
+                    or item[1] != identity
+                    or item[2] != row["track_id"]
+                ):
+                    raise HTTPException(409, "lyric_scan_item_not_ready")
+                from wildstring.lyric_scans import signature
+
+                track = self.providers.repository.track(row["track_id"])
+                if not track or item[3] != signature(
+                    track, {"file_version": file_version, "version": current_version}
+                ):
+                    raise HTTPException(409, "lyrics_version_conflict")
+                snapshot = {
+                    "text": previous["text"] if previous else None,
+                    "selected_candidate": json.loads(previous["selected_candidate"])
+                    if previous and previous["selected_candidate"]
+                    else None,
+                }
+                db.execute(
+                    "UPDATE lyric_scan_items SET previous=?,applied_version=?,status='applied',updated_at=? WHERE id=?",
+                    (json.dumps(snapshot), current_version + 1, time.time(), scan_item),
+                )
+            normalized = json.loads(row["normalized"])
+            for line in normalized["lines"]:
+                if line["time_ms"] is not None:
+                    line["time_ms"] = max(0, line["time_ms"] + body.offset_ms)
+            db.execute(
+                "INSERT INTO track_lyrics(track_id,text,version,selected_candidate) VALUES (?,?,?,?) ON CONFLICT(track_id) DO UPDATE SET text=excluded.text,version=excluded.version,selected_candidate=excluded.selected_candidate",
+                (
+                    row["track_id"],
+                    lyric_text(normalized),
+                    current_version + 1,
+                    json.dumps({"id": identity, "offset_ms": body.offset_ms}),
+                ),
+            )
         return editor.read(row["track_id"])
 
     def router(self, auth):

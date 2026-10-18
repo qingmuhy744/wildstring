@@ -808,6 +808,7 @@ class Providers:
 
     def stop(self):
         self.exit.set()
+        self.sources.scans.stop()
         if self.thread:
             self.thread.join(timeout=20)
 
@@ -819,7 +820,7 @@ class Providers:
                         "UPDATE provider_jobs SET status='queued' WHERE status='running'"
                     )
                     connection.execute(
-                        "UPDATE lyric_lookup_jobs SET status='queued' WHERE status='running'"
+                        "UPDATE lyric_lookup_jobs SET status='queued' WHERE status='running' AND id NOT IN (SELECT job_id FROM lyric_scan_items WHERE job_id IS NOT NULL)"
                     )
                     connection.execute(
                         "UPDATE loudness_analysis SET status='queued' WHERE status='running'"
@@ -827,6 +828,7 @@ class Providers:
                     connection.execute(
                         "UPDATE lastfm_outbox SET status=CASE WHEN kind='now_playing' THEN 'cancelled' ELSE 'queued' END WHERE status='sending'"
                     )
+                self.sources.scans.start()
                 while not self.exit.wait(1):
                     try:
                         self.step()
