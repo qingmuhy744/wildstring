@@ -12,7 +12,6 @@ from wildstring.agent_models import Inspection
 from wildstring.agent_platform import encoded, future, validate
 from wildstring.library.repository import now
 
-TERMINAL = {"succeeded", "partial", "failed", "cancelled"}
 RESUMABLE = {
     "paused_authorization",
     "paused_budget",

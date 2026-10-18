@@ -782,7 +782,7 @@ export function AgentTasks({
                     {Object.entries(item.counts)
                       .map(
                         ([k, v]) =>
-                          `${({ processed: '已检查', total: '总计', issues: '问题', failed: '失败', drafts: '草案' } as Record<string, string>)[k] || k} ${v}`,
+                          `${({ processed: '已检查', total: '总计', issues: '本地问题', failed: '曲目失败', drafts: '草案', skipped: '跳过', calls: '模型调用' } as Record<string, string>)[k] || k} ${v}`,
                       )
                       .join(' · ')}
                   </p>

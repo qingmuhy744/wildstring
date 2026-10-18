@@ -338,7 +338,7 @@ internal fun connectionBudget(connection: JsonObject): String {
                         Text(result.getAsJsonArray("issues")?.joinToString(" · ") { issue -> mapOf("missing_album" to "缺少专辑", "missing_cover" to "缺少封面", "missing_lyrics" to "缺少歌词")[issue.asString] ?: issue.asString }.orEmpty(), style = MaterialTheme.typography.bodySmall)
                     }
                 }
-                AgentTrace(task); ActionStatus(action)
+                AgentTrace(task); if (action.message != "已完成") ActionStatus(action)
             }
         }, confirmButton = { Row {
             if (status in listOf("queued", "running", "retry_wait", "paused_authorization", "paused_budget")) TextButton({ scope.launch { action.run { selected = vm.agent.request("tasks/${task.text("id")}/cancel", "POST"); tasks = vm.agent.all("tasks") } } }, enabled = !action.busy) { Text("请求取消") }
@@ -349,7 +349,7 @@ internal fun connectionBudget(connection: JsonObject): String {
 }
 @Composable private fun AgentCounts(task: JsonObject) {
     task.getAsJsonObject("counts")?.entrySet()?.takeIf { it.isNotEmpty() }?.let { counts ->
-        Text(counts.joinToString(" · ") { (name, value) -> "${mapOf("processed" to "已检查", "checked" to "已检查", "total" to "总数", "issues" to "待处理", "drafts" to "草案", "failed" to "失败", "skipped" to "跳过")[name] ?: name} ${displayValue(value)}" }, style = MaterialTheme.typography.bodySmall)
+        Text(counts.joinToString(" · ") { (name, value) -> "${mapOf("processed" to "已检查", "checked" to "已检查", "total" to "总数", "issues" to "本地问题", "drafts" to "草案", "failed" to "曲目失败", "skipped" to "跳过", "calls" to "模型调用")[name] ?: name} ${displayValue(value)}" }, style = MaterialTheme.typography.bodySmall)
     }
 }
 @Composable private fun AgentInspectionForm(vm: MusicViewModel, schedule: Boolean, dismiss: () -> Unit, submitted: () -> Unit) {
