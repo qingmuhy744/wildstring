@@ -240,8 +240,8 @@ class AgentWorkspaceTest {
             compose.waitUntil(15_000) { compose.onAllNodesWithText("阶段：处理结束，未全部完成").fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithText("阶段：处理结束，未全部完成").assertExists()
             compose.onNodeWithText("模型达到输出 Token 上限", substring = true).assertExists()
-            compose.onNodeWithText("模型调用 1", substring = true).assertExists()
-            compose.onNodeWithText("已完成", substring = false).assertDoesNotExist()
+            compose.onNode(hasText("模型调用 1", substring = true) and hasAnyAncestor(hasTestTag("inspection-task-detail"))).assertExists()
+            compose.onNode(hasText("已完成", substring = false) and hasAnyAncestor(hasTestTag("inspection-task-detail"))).assertDoesNotExist()
             compose.onNodeWithText("恢复巡检").assertIsDisplayed()
             assertEquals(0, fixture.writes.get())
             capture("inspection-output-limit-phone.png")

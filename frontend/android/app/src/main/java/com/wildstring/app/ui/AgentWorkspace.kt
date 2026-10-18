@@ -326,7 +326,7 @@ internal fun connectionBudget(connection: JsonObject): String {
     selected?.let { task ->
         val status = task.text("status")
         AlertDialog(onDismissRequest = { selected = null }, title = { Text("巡检 · ${taskLabel(status)}") }, text = {
-            Column(Modifier.heightIn(max = 460.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(Modifier.testTag("inspection-task-detail").heightIn(max = 460.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text("阶段：${inspectionStage(task.text("stage"), status)}"); AgentCounts(task)
                 task.text("error_code").takeIf { it.isNotBlank() }?.let { Text(agentError(502, it, null), color = MaterialTheme.colorScheme.error) }
                 task.objects("results").forEach { result ->
