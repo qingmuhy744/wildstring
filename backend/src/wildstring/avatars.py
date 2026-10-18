@@ -35,7 +35,18 @@ def normalize(data):
 
 def router(auth):
     routes = APIRouter(prefix="/avatar")
-    session = Depends(auth.require_session)
+
+    def actor(request: Request):
+        user = auth.require_session(request)
+        for expected in (
+            request.headers.get("x-wildstring-account"),
+            request.query_params.get("account"),
+        ):
+            if expected is not None and expected != user["id"]:
+                raise HTTPException(409, "avatar_account_changed")
+        return user
+
+    session = Depends(actor)
     directory = auth.settings.data_dir / "avatars"
 
     def path(user):

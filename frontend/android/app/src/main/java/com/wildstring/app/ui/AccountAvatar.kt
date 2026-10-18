@@ -23,10 +23,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
+import okhttp3.HttpUrl.Companion.toHttpUrl
 
 @Composable internal fun AccountAvatar(vm: MusicViewModel, modifier: Modifier = Modifier) {
     val profiles by vm.repository.session.profiles.collectAsStateWithLifecycle()
     val owner = remember(profiles) { vm.repository.session.cacheScope() }
+    val accountId = remember(profiles) { vm.repository.session.account?.id }
     val revision by vm.settings.avatarRevision.collectAsStateWithLifecycle()
     var version by remember(owner) { mutableStateOf<String?>(null) }
     var failed by remember(owner, version) { mutableStateOf(false) }
@@ -38,8 +40,8 @@ import java.io.ByteArrayOutputStream
         } catch (error: CancellationException) { throw error } catch (_: Exception) { /* Older servers retain the default avatar. */ }
     }
     Surface(modifier.clip(CircleShape), shape = CircleShape, color = MaterialTheme.colorScheme.secondaryContainer) {
-        if (version != null && !failed) AsyncImage(
-            model = ImageRequest.Builder(LocalContext.current).data(vm.repository.url("api", "v1", "auth", "avatar") + "?v=$version").memoryCacheKey("$owner:avatar:$version").build(),
+        if (version != null && accountId != null && !failed) AsyncImage(
+            model = ImageRequest.Builder(LocalContext.current).data(vm.repository.url("api", "v1", "auth", "avatar").toHttpUrl().newBuilder().addQueryParameter("v", version).addQueryParameter("account", accountId).build()).memoryCacheKey("$owner:avatar:$version").build(),
             imageLoader = vm.imageLoader, contentDescription = "用户头像", contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize(), onError = { failed = true })
         else Icon(Icons.Default.Person, null, Modifier.padding(12.dp).fillMaxSize(), tint = MaterialTheme.colorScheme.onSecondaryContainer)
     }

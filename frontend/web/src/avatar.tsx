@@ -7,7 +7,10 @@ function useAvatar(user: User) {
     const controller = new AbortController();
     setVersion(null);
     const load = () =>
-      void api<{ version: string | null }>('/auth/avatar/info', { signal: controller.signal })
+      void api<{ version: string | null }>('/auth/avatar/info', {
+        signal: controller.signal,
+        headers: { 'X-Wildstring-Account': user.id },
+      })
         .then((value) => {
           if (!controller.signal.aborted)
             setVersion(
@@ -36,7 +39,7 @@ export function AccountAvatar({ user }: { user: User }) {
   return version && !failed ? (
     <img
       className="user-avatar"
-      src={`/api/v1/auth/avatar?v=${version}`}
+      src={`/api/v1/auth/avatar?v=${version}&account=${encodeURIComponent(user.id)}`}
       alt=""
       onError={() => setFailed(true)}
     />
@@ -108,10 +111,13 @@ export function AvatarEditor({
       await api(
         '/auth/avatar',
         remove
-          ? { method: 'DELETE' }
+          ? { method: 'DELETE', headers: { 'X-Wildstring-Account': user.id } }
           : {
               method: 'POST',
-              headers: { 'Content-Type': file!.type || 'application/octet-stream' },
+              headers: {
+                'Content-Type': file!.type || 'application/octet-stream',
+                'X-Wildstring-Account': user.id,
+              },
               body: file,
             },
       );

@@ -84,6 +84,9 @@ def test_avatar_persists_and_isolated_users_cannot_read_or_remove_each_others_pi
         )
         assert client.get(BASE + "/info").json() == {"version": None}
         assert client.get(BASE + "?user_id=admin").status_code == 404
+        assert client.get(BASE + "?account=admin").status_code == 409
+        stale = client.delete(BASE, headers=CLIENT | {"X-Wildstring-Account": "admin"})
+        assert stale.status_code == 409
         reset = client.delete(BASE, headers=CLIENT)
         assert reset.status_code == 204
         assert client.post(BASE, headers=CLIENT, content=picture("blue")).json() != first
