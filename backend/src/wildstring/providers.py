@@ -169,6 +169,14 @@ def lastfm_failure(payload, method):
     )
 
 
+def acoustid_failure(payload):
+    error = payload.get("error")
+    code = error.get("code") if isinstance(error, dict) else None
+    if type(code) is int and 0 <= code <= 999:
+        return ProviderError(f"acoustid_error_{code}", code in {5, 13, 14})
+    return ProviderError("acoustid_rejected", False)
+
+
 class Providers:
     def __init__(self, repository):
         self.repository, self.database = repository, repository.database
@@ -341,18 +349,22 @@ class Providers:
                 if not image and not isinstance(result, dict):
                     raise ProviderError("provider_invalid_response")
                 if url == ACOUSTID and result.get("status") != "ok":
-                    raise ProviderError("acoustid_rejected", False)
+                    raise acoustid_failure(result)
                 if url == FM and "error" in result:
                     raise lastfm_failure(result, parameters.get("method"))
                 return result
             except HTTPError as error:
-                # Last.fm can return structured API errors with a non-2xx status.
+                # Music APIs can return structured errors with a non-2xx status.
                 # Keep only the numeric code, never the raw message or signed request URL.
                 failure = None
                 try:
                     if url == FM:
                         payload = json.loads(error.read(2 * 1024 * 1024 + 1))
                         failure = lastfm_failure(payload, parameters.get("method"))
+                    elif url == ACOUSTID:
+                        payload = json.loads(error.read(2 * 1024 * 1024 + 1))
+                        if isinstance(payload, dict):
+                            failure = acoustid_failure(payload)
                 except (ValueError, TypeError, KeyError):
                     pass
                 except (URLError, TimeoutError, OSError) as failure:

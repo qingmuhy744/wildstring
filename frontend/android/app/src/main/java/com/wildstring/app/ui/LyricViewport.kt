@@ -29,15 +29,18 @@ import androidx.compose.ui.unit.sp
 import com.wildstring.app.data.Lyrics
 import com.wildstring.app.data.formatTime
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 import kotlin.math.abs
 
 /** Browsing only moves the viewport. The explicit preview button is the only seek action. */
 @Composable internal fun LyricViewport(lyrics: Lyrics, position: Long, onSeek: (Long) -> Unit,
-    onBlank: () -> Unit, modifier: Modifier = Modifier, onArtwork: () -> Unit = {}) {
+    onBlank: () -> Unit, modifier: Modifier = Modifier, onArtwork: () -> Unit = {}, followDelayMs: Long = 2_000) {
     val list = rememberLazyListState()
     val scope = rememberCoroutineScope()
     val feedback = LocalTactileFeedback.current
     var follow by remember(lyrics) { mutableStateOf(true) }
+    var dragging by remember(lyrics) { mutableStateOf(false) }
+    var interaction by remember(lyrics) { mutableIntStateOf(0) }
     val lines = lyrics.lines
     val active = if (lyrics.kind == "synced") lines.indexOfLast { (it.timeMs ?: Long.MAX_VALUE) <= position } else -1
     val candidate by remember {
@@ -54,7 +57,18 @@ import kotlin.math.abs
             list.animateScrollBy(item.offset + item.size / 2f - (layout.viewportStartOffset + layout.viewportEndOffset) / 2f)
         }
     }
-    LaunchedEffect(list) { list.interactionSource.interactions.collect { if (it is DragInteraction.Start) follow = false } }
+    LaunchedEffect(list, lyrics) { list.interactionSource.interactions.collect {
+        when (it) {
+            is DragInteraction.Start -> { dragging = true; follow = false; interaction++ }
+            is DragInteraction.Stop, is DragInteraction.Cancel -> { dragging = false; interaction++ }
+        }
+    } }
+    LaunchedEffect(follow, dragging, list.isScrollInProgress, interaction, lyrics, followDelayMs) {
+        if (!follow && !dragging && !list.isScrollInProgress && lyrics.kind == "synced") {
+            delay(followDelayMs.coerceAtLeast(1_000))
+            follow = true
+        }
+    }
     LaunchedEffect(active, follow, lyrics) { if (follow && active >= 0) centerLine(active) }
     BoxWithConstraints(modifier.testTag("lyrics-viewport").clipToBounds().pointerInput(onBlank, onArtwork) {
         detectTapGestures(onLongPress = { onArtwork() }, onTap = { onBlank() })
@@ -80,6 +94,7 @@ import kotlin.math.abs
                         if (line.timeMs != null) Modifier.combinedClickable(onClickLabel = "选择歌词时间",
                             onLongClickLabel = "查看大封面", onLongClick = onArtwork, hapticFeedbackEnabled = false, onClick = {
                             follow = false
+                            interaction++
                             scope.launch { centerLine(index) }
                         }) else Modifier),
                         fontSize = 22.sp, lineHeight = 34.sp, textAlign = TextAlign.Center,

@@ -56,6 +56,8 @@ const messages: Record<string, string> = {
   source_plugin_identity_conflict: '此 ZIP 的插件 ID 不同，请选择对应插件的升级包。',
   source_plugin_version_conflict: '插件配置已变化，请刷新后重新操作。',
   source_plugin_disable_first: '请先停用插件，再卸载。',
+  source_plugin_disabled: '请先启用并保存此插件，再测试。',
+  source_plugin_configuration_changed: '插件配置已变化，请刷新并保存后重新测试。',
   source_plugin_dependency_missing: '运行环境缺少插件依赖，请按插件说明配置。',
   source_plugin_invalid_config: '请检查插件必填配置。',
   source_plugins_disabled: '请先导入并启用提供歌词的数据源插件。',

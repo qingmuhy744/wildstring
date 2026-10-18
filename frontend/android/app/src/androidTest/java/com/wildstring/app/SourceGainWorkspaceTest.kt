@@ -40,6 +40,7 @@ class SourceGainWorkspaceTest {
                         json(gain())
                     }
                     path == "/api/v1/manage/source-plugins/fixture-source" -> { assertEquals(pluginVersion.toLong(), body.number("version")); enabled = body.flag("enabled"); pluginVersion++; json("{}").setBodyDelay(350, java.util.concurrent.TimeUnit.MILLISECONDS) }
+                    path == "/api/v1/manage/source-plugins/fixture-source/test" -> json("""{"detail":"source_plugin_configuration_changed"}""").setResponseCode(409)
                     path == "/api/v1/manage/source-plugins" -> json("""{"items":[{"id":"fixture-source","name":"合成来源插件","plugin_version":"1.0.0","version":$pluginVersion,"license":"GPL-3.0-only","upstream":"https://example.com/plugin","available":true,"enabled":$enabled,"metadata_enabled":true,"lyrics_enabled":true,"priority":50,"config":{},"settings":[]}]}""")
                     path.endsWith("/albums") || path.endsWith("/tracks") -> json("""{"items":[],"total":0,"limit":50,"offset":0}""")
                     else -> json("{}").setResponseCode(404)
@@ -70,10 +71,16 @@ class SourceGainWorkspaceTest {
             try { compose.waitUntil(20_000) { compose.onAllNodesWithText("合成来源插件").fetchSemanticsNodes().isNotEmpty() } }
             catch (error: Throwable) { println("Source fixture paths: ${fixture.paths}"); capture("source-plugin-failure.png"); compose.onAllNodes(isRoot()).onLast().printToLog("SourceFailure"); throw error }
             compose.onAllNodes(isToggleable()).onFirst().performClick()
+            compose.onNodeWithTag("plugin-test-fixture-source").performScrollTo().assertIsNotEnabled()
+            assertFalse(fixture.paths.any { it.endsWith("/fixture-source/test") })
             compose.onNodeWithText("保存 合成来源插件").performScrollTo().performClick()
             compose.waitUntil(10_000) { fixture.enabled }
             compose.waitUntil(20_000) { compose.onAllNodesWithText("插件设置已保存。").fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithText("插件设置已保存。").performScrollTo().assertExists()
+            compose.onNodeWithTag("plugin-test-fixture-source").performScrollTo().assertIsEnabled().performClick()
+            compose.waitUntil(10_000) { compose.onAllNodes(hasText("插件配置已变化", substring = true)).fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithTag("plugin-test-result-fixture-source").performScrollTo().assertIsDisplayed()
+            compose.onNodeWithTag("plugin-test-fixture-source").assertIsDisplayed()
             capture("source-plugins-native.png")
         }
     }

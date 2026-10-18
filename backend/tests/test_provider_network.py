@@ -14,7 +14,7 @@ from test_providers import HEADERS, enable
 
 from wildstring.library.scanner import scan_library
 from wildstring.provider_network import network_error
-from wildstring.providers import FM, ProviderError, lastfm_failure
+from wildstring.providers import ACOUSTID, FM, ProviderError, acoustid_failure, lastfm_failure
 from wildstring.request_privacy import RedactLastfmCallback
 
 
@@ -156,6 +156,45 @@ def test_network_draft_uses_all_fixed_services_without_saving(
 )
 def test_network_errors_are_safe_codes(error, code):
     assert network_error(error) == code
+
+
+@pytest.mark.parametrize("http_status", [200, 400])
+def test_acoustid_rejection_keeps_safe_code_and_never_retries_invalid_key(
+    settings, authenticated_client, monkeypatch, http_status
+):
+    with authenticated_client(settings) as client:
+        providers = client.app.state.providers
+        providers.stop()
+        providers.exit.clear()
+        enable(client, acoustid_api_key="synthetic-app-key", proxy_mode="direct")
+        calls = []
+        raw = b'{"status":"error","error":{"code":4,"message":"private-key-and-fingerprint"}}'
+
+        class Response(io.BytesIO):
+            status = 200
+
+        class Opener:
+            def open(self, request, **_):
+                calls.append(request)
+                if http_status == 400:
+                    raise HTTPError(request.full_url, 400, "private-key", {}, io.BytesIO(raw))
+                return Response(raw)
+
+        monkeypatch.setattr("wildstring.providers.build_opener", lambda *_: Opener())
+        with pytest.raises(ProviderError, match="^acoustid_error_4$") as caught:
+            providers.request(ACOUSTID, {"duration": 12, "fingerprint": "synthetic-fingerprint"})
+        assert len(calls) == 1
+        assert caught.value.transient is False
+        assert caught.value.http_status == (400 if http_status == 400 else None)
+        assert "private" not in str(caught.value)
+
+
+@pytest.mark.parametrize(
+    "code,transient", [(4, False), (5, True), (13, True), (14, True), (17, False)]
+)
+def test_acoustid_transient_codes_follow_upstream_meaning(code, transient):
+    assert acoustid_failure({"error": {"code": code}}).transient is transient
+    assert str(acoustid_failure({"error": {"code": "private-key"}})) == "acoustid_rejected"
 
 
 def test_network_errors_and_missing_credentials_are_independent(

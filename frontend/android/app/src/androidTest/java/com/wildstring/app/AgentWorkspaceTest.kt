@@ -101,7 +101,9 @@ class AgentWorkspaceTest {
             compose.onNodeWithTag("agent-tab-research").performScrollTo().performClick()
             compose.waitUntil(15_000) { fixture.requests.any { it.first == "GET /api/v1/agent/search-settings" } }
             compose.onNodeWithTag("agent-memory-input").performScrollTo().performTextInput("优先录音室版本")
-            compose.onNodeWithTag("agent-memory-save").performScrollTo().performClick()
+            compose.waitForIdle()
+            InstrumentationRegistry.getInstrumentation().uiAutomation.waitForIdle(500, 5_000)
+            compose.onNodeWithTag("agent-memory-save").performScrollTo().assertIsEnabled().performClick()
             compose.waitUntil(15_000) { fixture.memoryContent == "优先录音室版本" }
             // Flush focus/IME work before waiting on the follow-up network request.
             compose.waitForIdle()
@@ -115,7 +117,9 @@ class AgentWorkspaceTest {
             compose.onNodeWithTag("agent-memory-input").performClick()
             compose.waitForIdle()
             compose.onNodeWithTag("agent-memory-input").performTextReplacement("优先原版专辑，保留发行年份")
-            compose.onNodeWithTag("agent-memory-save").performScrollTo().performClick()
+            compose.waitForIdle()
+            InstrumentationRegistry.getInstrumentation().uiAutomation.waitForIdle(500, 5_000)
+            compose.onNodeWithTag("agent-memory-save").performScrollTo().assertIsEnabled().performClick()
             compose.waitUntil(15_000) { fixture.memoryContent.contains("保留发行年份") }
             compose.waitForIdle()
             InstrumentationRegistry.getInstrumentation().uiAutomation.waitForIdle(500, 5_000)
@@ -176,7 +180,7 @@ class AgentWorkspaceTest {
             compose.waitUntil(15_000) { compose.onAllNodesWithText("这段对话正在生成回复", substring = true).fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithText("删除", substring = false).performClick()
             compose.waitUntil(15_000) { compose.onAllNodesWithTag("history-open-history-a").fetchSemanticsNodes().isEmpty() }
-            compose.onNodeWithText("关闭", substring = false).performClick()
+            compose.onNode(hasText("关闭", substring = false) and hasAnyAncestor(hasTestTag("agent-history-dialog"))).performClick()
             compose.onNodeWithText("保留内容 b", substring = false).assertExists()
             compose.onNodeWithContentDescription("删除当前对话").performClick()
             compose.onNodeWithText("删除", substring = false).performClick()
@@ -273,7 +277,9 @@ class AgentWorkspaceTest {
             // Wait for the actual editor to leave its loading/disabled state.
             compose.waitUntil(15_000) { compose.onAllNodes(hasTestTag("agent-chat-input") and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithTag("agent-chat-input").performTextInput("整理很久没听的收藏")
-            compose.onNodeWithTag("agent-chat-send").performClick()
+            compose.waitForIdle()
+            InstrumentationRegistry.getInstrumentation().uiAutomation.waitForIdle(500, 5_000)
+            compose.onNodeWithTag("agent-chat-send").assertIsEnabled().performClick()
             compose.waitUntil(15_000) { compose.onAllNodesWithText("已整理为草案，请查看后确认。").fetchSemanticsNodes().isNotEmpty() }
             compose.activityRule.scenario.onActivity { activity -> androidx.core.view.WindowCompat.getInsetsController(activity.window, activity.window.decorView).hide(androidx.core.view.WindowInsetsCompat.Type.ime()) }
             capture("agent-chat-phone.png")

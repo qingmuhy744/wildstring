@@ -1,8 +1,6 @@
 @file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 package com.wildstring.app.ui
 
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -29,13 +27,18 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
 @Composable
-internal fun MobileShortcuts(admin: Boolean, unread: Int = 0, open: (String) -> Unit) {
-    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        listOf("daily" to "每日推荐", "ai" to "AI 找歌", "offline" to "离线保存", "statistics" to "收听统计", "devices" to "其他设备继续", "assistant" to "野弦助手", "notifications" to if (unread > 0) "通知 · $unread" else "通知", "external" to "发现新音乐", "rankings" to "收听排行").forEach { (route, title) ->
-            AssistChip({ open(route) }, label = { Text(title) })
+internal fun MobileShortcuts(discovery: Boolean = false, open: (String) -> Unit) {
+    val entries = if (discovery) listOf(Triple("daily", "每日推荐", Icons.Default.AutoAwesome), Triple("ai", "AI 找歌", Icons.Default.Search), Triple("external", "发现新音乐", Icons.Default.Explore))
+        else listOf(Triple("offline", "离线保存", Icons.Default.Download), Triple("statistics", "收听统计", Icons.Default.BarChart))
+    Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp).testTag(if (discovery) "discovery-shortcuts" else "personal-shortcuts"), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        entries.forEach { (route, title, icon) ->
+            FilledTonalButton({ open(route) }, Modifier.weight(1f), shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp), contentPadding = PaddingValues(vertical = 12.dp, horizontal = 4.dp)) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Icon(icon, null, Modifier.size(22.dp))
+                    Text(title, style = MaterialTheme.typography.labelMedium, maxLines = 1)
+                }
+            }
         }
-        if (admin) AssistChip({ open("management") }, label = { Text("曲库管理") })
-        if (admin) AssistChip({ open("source-plugins") }, label = { Text("数据源插件") })
     }
 }
 
@@ -44,6 +47,7 @@ internal fun FeatureDialog(vm: MusicViewModel, route: String, track: Track? = nu
     val account by vm.state.collectAsStateWithLifecycle()
     val title = when (route) {
         "assistant" -> "野弦助手"; "notifications" -> "通知与任务"
+        "connections" -> "模型连接"; "research" -> "联网与记忆"; "channels" -> "通知设置"
         "external" -> "发现新音乐"; "rankings" -> "收听排行"; "daily" -> "每日推荐"; "ai" -> "AI 找歌与歌单"; "offline" -> "离线保存"; "statistics" -> "收听统计"; "devices" -> "其他设备继续"
         "playlist" -> if (playlist == null) "新建歌单" else "编辑歌单"; "order" -> "歌单排序"; "multi" -> "多选加入歌单"
         "gain" -> "响度均衡与手动调整"; "source-plugins" -> "数据源 ZIP 插件"
@@ -73,6 +77,7 @@ internal fun FeatureDialog(vm: MusicViewModel, route: String, track: Track? = nu
                 Box(Modifier.weight(1f).fillMaxWidth()) {
                     when (route) {
                         "assistant", "notifications" -> AgentWorkspace(vm, if (route == "notifications") "notifications" else "chat")
+                        "connections", "research", "channels" -> AgentWorkspace(vm, route)
                         "daily" -> DailyPanel(vm)
                         "rankings" -> RankingsPanel(vm)
                         "external" -> ExternalMusicPanel(vm)
@@ -200,7 +205,7 @@ private fun DevicesPanel(vm: MusicViewModel) {
     LaunchedEffect(Unit) { action.run { remote = vm.repository.api().sharedPlayback() } }
     Column(Modifier.padding(24.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         ActionStatus(action)
-        Text("暂停时自动保存进度。跨设备接续方式可在设置中选择，默认弹窗询问；载入后保持暂停。")
+        Text("暂停时自动保存进度。默认以小提示提供其他设备的进度，载入后保持暂停；可在设置中调整。")
         remote?.let { saved ->
             Text(if (saved.trackIds.isEmpty()) "还没有共享播放记录" else "${saved.trackIds.size} 首 · 第 ${saved.index + 1} 首 · ${formatTime(saved.positionMs)}")
             if (saved.deviceId == device && saved.trackIds.isNotEmpty()) Text("这是本机最近同步的记录", style = MaterialTheme.typography.bodySmall)

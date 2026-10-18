@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { api, eventId, artist, time, type Playlist, type Track, type User } from './api';
 import { Cover } from './cover';
 import { FavoriteButton, type Favorites } from './favorites';
+import { RowMenu } from './row-menu';
 import type { Player } from './player';
 import { SyncModeControl } from './playback-sync';
 import { modeNames, QUEUE_LIMIT, type PlaybackMode } from './playback-state';
@@ -51,7 +52,36 @@ function Choices({
   return (
     <div className="discovery-list">
       {items.map(({ track, reason, source_ids }, index) => (
-        <article key={track.id} className="discovery-track">
+        <RowMenu
+          key={track.id}
+          label={track.title}
+          className={`discovery-track ${feedback ? 'daily-track' : ''} ${player.current?.id === track.id ? 'is-current' : ''}`}
+          actions={[
+            {
+              label: favorites.ids.has(track.id) ? '取消收藏' : '收藏',
+              icon: 'heart',
+              disabled: !favorites.ready || favorites.busy.has(track.id),
+              run: () => void favorites.toggle(track),
+            },
+            ...(feedback
+              ? [
+                  {
+                    label: '不感兴趣',
+                    icon: 'remove' as const,
+                    run: () => feedback(track.id, 'dismiss_track'),
+                  },
+                  {
+                    label: '少推荐此艺人',
+                    icon: 'artist' as const,
+                    run: () => feedback(track.id, 'less_artist'),
+                  },
+                ]
+              : []),
+          ]}
+        >
+          {feedback && (
+            <span className="daily-track-number">{String(index + 1).padStart(2, '0')}</span>
+          )}
           <Cover trackId={track.id} title={track.title} />
           <button
             className="track-title"
@@ -65,9 +95,12 @@ function Choices({
             aria-label={`播放 ${track.title}`}
           >
             <strong>{track.title}</strong>
-            <small>{artist(track)}</small>
-            <small>{explanation(reason)}</small>
-            {!!source_ids?.length && (
+            <small>
+              {artist(track)}
+              {feedback && track.album ? ` · ${track.album}` : ''}
+            </small>
+            {!feedback && <small>{explanation(reason)}</small>}
+            {!feedback && !!source_ids?.length && (
               <span className="recommendation-source-pills">
                 {source_ids.slice(0, 3).map((id) => (
                   <span key={id}>{recommendationSources[id] || id}</span>
@@ -75,7 +108,7 @@ function Choices({
               </span>
             )}
           </button>
-          <FavoriteButton track={track} favorites={favorites} />
+          {!feedback && <FavoriteButton track={track} favorites={favorites} />}
           {onChange && (
             <div className="candidate-actions">
               <button
@@ -109,16 +142,8 @@ function Choices({
             </div>
           )}
 
-          {feedback && (
-            <details className="recommendation-feedback">
-              <summary aria-label={`调整推荐 ${track.title}`}>⋯</summary>
-              <div>
-                <button onClick={() => feedback(track.id, 'dismiss_track')}>少推荐这首</button>
-                <button onClick={() => feedback(track.id, 'less_artist')}>少推荐此艺人</button>
-              </div>
-            </details>
-          )}
-        </article>
+          {feedback && <span className="daily-track-time">{time(track.duration_ms / 1000)}</span>}
+        </RowMenu>
       ))}
     </div>
   );
@@ -595,7 +620,7 @@ export function Devices({ player, user }: { player: Player; user: User }) {
     <section className="completion-page" aria-label="跨设备继续">
       <p className="eyebrow">TAKE YOUR MUSIC WITH YOU</p>
       <h1>换个地方，接着听。</h1>
-      <p className="muted">暂停时自动保存进度。默认发现其他设备的新记录时询问，载入后保持暂停。</p>
+      <p className="muted">暂停时自动保存进度。默认以小提示提供其他设备的进度，载入后保持暂停。</p>
       <SyncModeControl userId={user.id} />
       <div className="management-card">
         <h2>账号共享进度</h2>

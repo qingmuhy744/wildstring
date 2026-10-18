@@ -41,6 +41,8 @@ const reasons: Record<string, string> = {
   musicbrainz_invalid_response: 'MusicBrainz 返回的资料格式无效，请稍后重试。',
   acoustid_invalid_response: 'AcoustID 返回的识别结果无效，请稍后重试。',
   acoustid_rejected: 'AcoustID 拒绝识别请求，请检查已保存的应用 API Key。',
+  acoustid_error_4:
+    'AcoustID 应用密钥无效。请填写 Application API Key；账号页的 User API Key 不能用于识别。',
   fingerprint_source_unavailable: '无法读取音频，未能计算指纹，请检查托管曲库。',
   fingerprint_source_changed: '音频文件已变化，请重新扫描后更新资料。',
   fingerprint_tool_missing: '服务端缺少 Chromaprint 指纹工具，请更新镜像或安装工具。',
@@ -129,7 +131,7 @@ interface NetworkResult {
       name: string;
       status: 'ok' | 'error' | 'unverified';
       code: string;
-      elapsed_ms: number;
+      elapsed_ms?: number;
       http_status?: number;
       domain: string;
       scope: string;
@@ -258,6 +260,9 @@ export function ProviderNetworkTest({
                               credentials: '凭据验证',
                               image_download: '图片下载',
                               image_decode: '图片解码',
+                              image_download_decode: '图片下载与解码',
+                              local_fingerprint: '本机音频指纹计算',
+                              personal_authorization: '个人账号授权',
                               text: '文本响应',
                               structured: '结构化选歌',
                               tools: '工具调用',
@@ -268,12 +273,25 @@ export function ProviderNetworkTest({
                           {check.status === 'ok'
                             ? '已验证'
                             : check.status === 'unverified'
-                              ? '未验证'
+                              ? '本次未测试'
                               : '失败'}{' '}
-                          · {check.domain} · {Math.round(check.elapsed_ms)} ms
+                          · {check.name === 'local_fingerprint' ? '服务端本机' : check.domain}
+                          {Number.isFinite(check.elapsed_ms)
+                            ? ` · ${Math.max(0, Math.round(check.elapsed_ms!))} ms`
+                            : ''}
                           {check.http_status ? ` · HTTP ${check.http_status}` : ''}
                         </span>
-                        <small>{check.scope}</small>
+                        <small>
+                          {check.name === 'local_fingerprint'
+                            ? '本次网络检测未读取音频、未计算指纹；识别时由本机生成，无需额外密钥。'
+                            : (
+                                {
+                                  functional_api: '来源 API',
+                                  cover_download: '封面下载',
+                                  personal_account: '个人账号',
+                                } as Record<string, string>
+                              )[check.scope] || check.scope}
+                        </small>
                       </li>
                     ))}
                   </ul>

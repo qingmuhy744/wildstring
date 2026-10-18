@@ -449,3 +449,50 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
+.music-discovery .daily-track {
+  grid-template-columns: 28px 44px minmax(0, 1fr) auto 36px;
+  gap: 12px;
+  padding: 10px 6px;
+  border-radius: 10px;
+}
+.daily-track .cover {
+  width: 44px;
+  height: 44px;
+  border-radius: 7px;
+}
+.daily-track-number,
+.daily-track-time {
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.daily-track .track-title {
+  border: 0;
+  background: transparent;
+  padding: 4px 0;
+}
+.daily-track .track-title strong,
+.daily-track .track-title small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.daily-track.is-current .track-title strong {
+  color: var(--accent);
+}
+.daily-track:hover {
+  background: var(--workspace-selected);
+}
+@media (max-width: 600px) {
+  .music-discovery .daily-track {
+    grid-template-columns: 22px 40px minmax(0, 1fr) 32px;
+    gap: 10px;
+  }
+  .daily-track-time {
+    display: none;
+  }
+  .daily-track .cover {
+    width: 40px;
+    height: 40px;
+  }
+}

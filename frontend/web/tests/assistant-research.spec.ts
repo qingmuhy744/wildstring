@@ -1,15 +1,6 @@
+import { section } from './helpers';
 import { expect, test, type Page } from '@playwright/test';
 import { login } from './helpers';
-
-async function section(page: Page, name: string) {
-  if (await page.getByLabel('浏览方式', { exact: true }).isVisible())
-    await page.getByLabel('浏览方式', { exact: true }).selectOption({ label: name });
-  else
-    await page
-      .locator('.sidebar')
-      .getByRole('button', { name: new RegExp(`^${name}(?: |$)`) })
-      .click();
-}
 
 test('真实后端：搜索配置、长期记忆管理与摘要开关', async ({ page }, info) => {
   await login(page);

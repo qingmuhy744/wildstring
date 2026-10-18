@@ -36,10 +36,20 @@ test('ZIP 导入、配置、测试、升级及导出使用真实后端', async (
   await expect(plugin).toContainText('插件 1.0.0');
   await expect(plugin.getByLabel('启用此插件')).not.toBeChecked();
   await plugin.getByLabel('启用此插件').check();
+  await expect(
+    plugin.getByRole('button', { name: '测试 浏览器合成来源', exact: true }),
+  ).toBeDisabled();
+  await expect(plugin).toContainText('请先保存当前插件设置，再测试。');
   await plugin.getByRole('button', { name: '保存 浏览器合成来源', exact: true }).click();
   await expect(panel.getByRole('status').first()).toContainText('已保存');
   await plugin.getByRole('button', { name: '测试 浏览器合成来源', exact: true }).click();
-  await expect(panel.getByRole('status').first()).toContainText('已响应');
+  await expect(plugin.getByRole('status')).toContainText('已响应');
+  await expect(panel.getByRole('status').first()).toContainText('已保存');
+  await page.route('**/api/v1/manage/source-plugins/browser-source/test', (route) =>
+    route.fulfill({ status: 409, json: { detail: 'source_plugin_configuration_changed' } }),
+  );
+  await plugin.getByRole('button', { name: '测试 浏览器合成来源', exact: true }).click();
+  await expect(plugin.getByRole('status')).toContainText('配置已变化');
   const exported = await page.request.get('/api/v1/manage/source-plugins/browser-source/export');
   expect(await exported.body()).toEqual(zip);
   await page.screenshot({

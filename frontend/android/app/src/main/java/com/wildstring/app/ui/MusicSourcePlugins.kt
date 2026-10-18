@@ -10,6 +10,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
@@ -28,10 +29,16 @@ import java.io.ByteArrayOutputStream
     val action = remember { FeatureAction() }; val scope = rememberCoroutineScope()
     var plugins by remember { mutableStateOf<List<JsonObject>>(emptyList()) }
     var fields by remember { mutableStateOf<Map<String, Map<String, String>>>(emptyMap()) }
+    var savedPlugins by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+    var savedFields by remember { mutableStateOf<Map<String, Map<String, String>>>(emptyMap()) }
+    val tests = remember { mutableStateMapOf<String, FeatureAction>() }
+    val busy = action.busy || tests.values.any { it.busy }
     var upgrade by remember { mutableStateOf<JsonObject?>(null) }; var exporting by remember { mutableStateOf<JsonObject?>(null) }
     suspend fun load() {
         plugins = vm.repository.feature("manage/source-plugins").objects()
         fields = plugins.associate { it.text("id") to (it.getAsJsonObject("config")?.entrySet()?.associate { e -> e.key to e.value.asString } ?: emptyMap()) }
+        savedPlugins = plugins.associate { it.text("id") to it.toString() }
+        savedFields = fields
     }
     val importer = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) scope.launch { action.run {
@@ -65,14 +72,17 @@ import java.io.ByteArrayOutputStream
         Text("数据源 ZIP 插件", style = MaterialTheme.typography.titleLarge)
         Text("独立导入、配置和分享。插件运行 Python 代码，仅导入你信任的包。插件只提供候选，确认后才更新数据库。")
         ActionStatus(action)
-        Button({ upgrade = null; importer.launch(arrayOf("application/zip", "application/octet-stream")) }, enabled = !action.busy) { Text("导入数据源插件 ZIP") }
-        plugins.forEach { p ->
+        Button({ upgrade = null; importer.launch(arrayOf("application/zip", "application/octet-stream")) }, enabled = !busy) { Text("导入数据源插件 ZIP") }
+        plugins.forEach { p -> key(p.text("id")) {
+            val id = p.text("id")
+            val test = remember { FeatureAction().also { tests[id] = it } }
+            val dirty = savedPlugins[id] != p.toString() || savedFields[id] != fields[id]
             HorizontalDivider(); Text(p.text("name"), style = MaterialTheme.typography.titleMedium)
             Text("${p.text("license")} · 插件 ${p.text("plugin_version")} · 配置版本 ${p.number("version")}", style = MaterialTheme.typography.bodySmall)
             TextButton({ uriHandler.openUri(p.text("upstream")) }) { Text("查看上游项目") }
             if (!p.flag("available")) Text("运行环境缺少插件声明的依赖，请按插件说明或升级官方镜像。")
             listOf("enabled" to "启用插件", "metadata_enabled" to "提供元数据与封面", "lyrics_enabled" to "提供歌词").forEach { (key, label) ->
-                Row { Text(label, Modifier.weight(1f)); Switch(p.flag(key), { checked -> plugins = plugins.map { value -> if (value === p) value.deepCopy().apply { addProperty(key, checked) } else value } }, enabled = !action.busy) }
+                Row { Text(label, Modifier.weight(1f)); Switch(p.flag(key), { checked -> plugins = plugins.map { value -> if (value === p) value.deepCopy().apply { addProperty(key, checked) } else value } }, enabled = !busy) }
             }
             OutlinedTextField(p.number("priority").toString(), { text -> text.toIntOrNull()?.takeIf { it in 0..100 }?.let { number -> plugins = plugins.map { value -> if (value === p) value.deepCopy().apply { addProperty("priority", number) } else value } } }, label = { Text("来源优先级（0–100，越小越优先）") })
             p.objects("settings").forEach { field ->
@@ -83,18 +93,23 @@ import java.io.ByteArrayOutputStream
                 val config = JsonObject().apply { fields[p.text("id")]?.forEach { (key, value) -> addProperty(key, value) } }
                 vm.repository.feature("manage/source-plugins/${p.text("id")}", "PUT", jsonBody("version" to p.number("version"), "enabled" to p.flag("enabled"), "metadata_enabled" to p.flag("metadata_enabled"), "lyrics_enabled" to p.flag("lyrics_enabled"), "priority" to p.number("priority")).apply { add("config", config) })
                 load(); action.message = "插件设置已保存。"
-            } } }, enabled = !action.busy) { Text("保存 ${p.text("name")}") }
-            TextButton({ scope.launch { action.run { vm.repository.feature("manage/source-plugins/${p.text("id")}/test", "POST"); action.message = "插件已响应。" } } }, enabled = !action.busy && p.flag("enabled")) { Text("测试此插件") }
+            } } }, enabled = !busy) { Text("保存 ${p.text("name")}") }
+            TextButton({ scope.launch { test.run {
+                val result = vm.repository.feature("manage/source-plugins/$id/test", "POST")
+                test.message = "检索已响应 · 返回 ${result.number("count")} 条候选。"
+            } } }, enabled = !busy && !dirty && p.flag("enabled"), modifier = Modifier.testTag("plugin-test-$id")) { Text("测试此插件") }
+            if (dirty) Text("请先保存当前插件设置，再测试。", style = MaterialTheme.typography.bodySmall)
+            else Column(Modifier.testTag("plugin-test-result-$id")) { ActionStatus(test) }
             Row {
-                TextButton({ exporting = p; exporter.launch("wildstring-${p.text("id")}.zip") }, enabled = !action.busy) { Text("导出 ZIP") }
-                TextButton({ upgrade = p; importer.launch(arrayOf("application/zip", "application/octet-stream")) }, enabled = !action.busy) { Text("升级 ZIP") }
+                TextButton({ exporting = p; exporter.launch("wildstring-${p.text("id")}.zip") }, enabled = !busy) { Text("导出 ZIP") }
+                TextButton({ upgrade = p; importer.launch(arrayOf("application/zip", "application/octet-stream")) }, enabled = !busy) { Text("升级 ZIP") }
             }
             TextButton({ scope.launch { action.run {
                 val response = vm.repository.api().agentDelete(vm.repository.url("api", "v1", "manage", "source-plugins", p.text("id")) + "?version=${p.number("version")}", RequestOwner(vm.repository.session.cacheScope()!!))
                 if (!response.isSuccessful) throw AgentApiException(response.code(), "source_plugin_disable_first", null)
                 load(); action.message = "插件已卸载，历史候选保留。"
-            } } }, enabled = !action.busy && !p.flag("enabled")) { Text("卸载此插件") }
-        }
+            } } }, enabled = !busy && !p.flag("enabled")) { Text("卸载此插件") }
+        } }
         if (plugins.isEmpty()) Text("尚无插件，请导入本次 Release 提供的 QQ、酷狗或网易云 ZIP。")
     }
 }

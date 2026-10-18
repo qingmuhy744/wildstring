@@ -19,15 +19,15 @@ const empty = {
   model: '',
   api_key: '',
   clear_api_key: false,
-  timeout: 30,
+  timeout: 90,
   shared: false,
   background_allowed: false,
   daily_call_budget: 100,
   enabled: true,
   protocol: 'chat_completions',
   provider: 'generic',
-  reasoning_effort: 'auto',
-  max_output_tokens: 2048,
+  reasoning_effort: 'low',
+  max_output_tokens: 8192,
   native_search: false,
 };
 export function AgentConnections({ user }: { user: User }) {

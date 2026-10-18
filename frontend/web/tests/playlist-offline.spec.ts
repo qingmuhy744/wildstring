@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { login } from './helpers';
+import { login, section } from './helpers';
 const headers = { 'X-Wildstring-Client': 'web' };
 
 test('歌单右击和更多菜单可编辑删除，自动下载受网络设置控制并保留默认音质', async ({
@@ -25,8 +25,7 @@ test('歌单右击和更多菜单可编辑删除，自动下载受网络设置�
       requests.push(request.url());
   });
   async function view(value: string, name: string) {
-    if (info.project.name === 'mobile') await page.getByLabel('浏览方式').selectOption(value);
-    else await page.getByRole('complementary').getByRole('button', { name, exact: true }).click();
+    await section(page, name);
   }
   try {
     await view('playlists', '歌单');

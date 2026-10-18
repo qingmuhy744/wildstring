@@ -130,15 +130,19 @@ export function ProviderSettings() {
             <p role="status">服务端缺少指纹工具，请更新 Docker 镜像或安装 Chromaprint。</p>
           )}
           <label>
-            AcoustID API Key
+            AcoustID Application API Key
             <input
               type="password"
               autoComplete="new-password"
               value={acoustidKey}
               onChange={(e) => setAcoustidKey(e.target.value)}
-              placeholder={config.acoustid_configured ? '已配置，留空保留' : '应用 API Key'}
+              placeholder={config.acoustid_configured ? '已配置，留空保留' : 'Application API Key'}
             />
           </label>
+          <p className="muted">
+            请使用注册应用后获得的 Application API Key。账号页的 User API Key
+            用于提交指纹，不能用于查询识别。
+          </p>
           <ProviderPriority
             value={config.priority}
             onChange={(priority) => setConfig({ ...config, priority })}
@@ -220,7 +224,7 @@ export function ProviderSettings() {
         </a>{' '}
         ·{' '}
         <a href="https://acoustid.org/new-application" target="_blank" rel="noreferrer">
-          申请 AcoustID API Key
+          注册 AcoustID 应用并获取密钥
         </a>{' '}
         ·{' '}
         <a href="https://www.last.fm/api/account/create" target="_blank" rel="noreferrer">

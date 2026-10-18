@@ -178,6 +178,7 @@
 .workspace-form .span-all {
   grid-column: 1/-1;
 }
+.workspace-card :is(input:not([type='checkbox']):not([type='range']), select, textarea),
 .workspace-form :is(input:not([type='checkbox']), select, textarea),
 .assistant-research :is(input:not([type='checkbox']), select, textarea) {
   background: var(--workspace-bg);
@@ -341,13 +342,86 @@
   background: var(--workspace-selected);
 }
 .workspace-session-entry {
-  min-width: 0;
-  margin-bottom: 12px;
-}
-.workspace-session-actions {
   display: flex;
-  justify-content: flex-end;
-  gap: 6px;
+  align-items: center;
+  border-radius: 10px;
+  min-width: 0;
+  margin-bottom: 4px;
+}
+.workspace-session-entry:hover,
+.workspace-session-entry:focus-within,
+.workspace-session-entry:has([aria-pressed='true']) {
+  background: var(--workspace-selected);
+}
+.workspace-session-entry .workspace-session {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  padding: 12px;
+  border: 0;
+  background: transparent;
+  white-space: nowrap;
+}
+.row-menu-trigger {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  padding: 8px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+}
+.row-action-menu {
+  position: fixed;
+  z-index: 1600;
+  width: 216px;
+  padding: 6px;
+  box-sizing: border-box;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--workspace-panel);
+  color: var(--workspace-text);
+  box-shadow: 0 12px 40px #0003;
+}
+.row-action-menu button {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  text-align: left;
+  color: inherit;
+}
+.row-action-menu button:hover,
+.row-action-menu button:focus-visible {
+  background: var(--workspace-selected);
+}
+.row-action-menu .destructive {
+  color: var(--accent);
+}
+@media (hover: hover) {
+  .workspace-session-entry .row-menu-trigger {
+    opacity: 0;
+  }
+  .workspace-session-entry:hover .row-menu-trigger,
+  .workspace-session-entry:focus-within .row-menu-trigger,
+  .workspace-session-entry .row-menu-trigger[aria-expanded='true'] {
+    opacity: 1;
+  }
+}
+.workspace-inline label:has(input[type='number']) {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.workspace-inline input[type='number'] {
+  width: 86px;
+  min-height: 44px;
 }
 .workspace-diff {
   width: 100%;

@@ -808,6 +808,39 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
                 : view === 'listening'
                   ? '每一次认真听过，都有回响。'
                   : motto;
+  const nav = (target: View) => (
+    <button
+      key={target}
+      className={`nav-button ${view === target && !manageOpen ? 'nav-current' : ''}`}
+      onClick={() => switchView(target)}
+    >
+      <span aria-hidden="true">
+        {target === 'notifications' ? (
+          <Icon name="bell" />
+        ) : target === 'assistant' ? (
+          <Icon name="assistant" />
+        ) : target === 'drafts' ? (
+          <Icon name="draft" />
+        ) : target === 'tasks' ? (
+          <Icon name="task" />
+        ) : target === 'assistant-settings' ? (
+          <Icon name="settings" />
+        ) : (
+          icons[target]
+        )}
+      </span>
+      {labels[target]}
+      {target === 'notifications' && inbox.unread > 0 ? (
+        <small className="notification-count" aria-label={`${inbox.unread} 条未读通知`}>
+          {inbox.unread > 99 ? '99+' : inbox.unread}
+        </small>
+      ) : target === 'favorites' ? (
+        <small>{favorites.ids.size}</small>
+      ) : counts[target] !== undefined ? (
+        <small>{counts[target]}</small>
+      ) : null}
+    </button>
+  );
   const headingCover =
     album?.cover_track_id || selectedArtist?.cover_track_id || activePlaylist?.cover_track_id;
   return (
@@ -815,40 +848,26 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
       <div className="app-shell" inert={lyricsOpen} aria-hidden={lyricsOpen || undefined}>
         <aside className="sidebar">
           <Brand />
-          <p className="sidebar-label">你的音乐空间</p>
-          {(Object.keys(labels) as View[]).map((target) => (
-            <button
-              key={target}
-              className={`nav-button ${view === target && !manageOpen ? 'nav-current' : ''}`}
-              onClick={() => switchView(target)}
+          <nav aria-label="主导航" className="sidebar-navigation">
+            <p className="sidebar-group-label">曲库</p>
+            {(['tracks', 'albums', 'artists', 'playlists', 'favorites'] as View[]).map(nav)}
+            <p className="sidebar-group-label">发现</p>
+            {(['discover', 'assistant'] as View[]).map(nav)}
+            <details
+              className="sidebar-group"
+              open={['listening', 'offline', 'devices'].includes(view) || undefined}
             >
-              <span aria-hidden="true">
-                {target === 'notifications' ? (
-                  <Icon name="bell" />
-                ) : target === 'assistant' ? (
-                  <Icon name="assistant" />
-                ) : target === 'drafts' ? (
-                  <Icon name="draft" />
-                ) : target === 'tasks' ? (
-                  <Icon name="task" />
-                ) : target === 'assistant-settings' ? (
-                  <Icon name="settings" />
-                ) : (
-                  icons[target]
-                )}
-              </span>
-              {labels[target]}
-              {target === 'notifications' && inbox.unread > 0 ? (
-                <small className="notification-count" aria-label={`${inbox.unread} 条未读通知`}>
-                  {inbox.unread > 99 ? '99+' : inbox.unread}
-                </small>
-              ) : target === 'favorites' ? (
-                <small>{favorites.ids.size}</small>
-              ) : counts[target] !== undefined ? (
-                <small>{counts[target]}</small>
-              ) : null}
-            </button>
-          ))}
+              <summary>更多音乐</summary>
+              {(['listening', 'offline', 'devices'] as View[]).map(nav)}
+            </details>
+            <details
+              className="sidebar-group"
+              open={['drafts', 'tasks', 'assistant-settings'].includes(view) || undefined}
+            >
+              <summary>助手工具</summary>
+              {(['drafts', 'tasks', 'assistant-settings'] as View[]).map(nav)}
+            </details>
+          </nav>
           <button
             className={`nav-button ${queueOpen ? 'selected' : ''}`}
             onClick={() => {
@@ -876,11 +895,6 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
             </button>
             <ThemeControl />
             <span className="local-dot" /> 私人曲库 · 原音直放
-            <p>
-              音乐不设限，
-              <br />
-              自由有回响。
-            </p>
             <button className="text-button" onClick={logout}>
               退出登录 ↗
             </button>
@@ -953,6 +967,19 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
                 ↵
               </button>
             </form>
+            <button
+              className={`notification-entry icon-button ${view === 'notifications' ? 'selected' : ''}`}
+              aria-label="通知中心"
+              title={inbox.unread ? `${inbox.unread} 条未读通知` : '通知中心'}
+              onClick={() => switchView('notifications')}
+            >
+              <Icon name="bell" />
+              {inbox.unread > 0 && (
+                <span aria-hidden="true" className="notification-corner-count">
+                  {inbox.unread > 99 ? '99+' : inbox.unread}
+                </span>
+              )}
+            </button>
           </header>
           {view === 'discover' && (
             <Discover

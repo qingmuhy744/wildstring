@@ -1,15 +1,8 @@
+import { section } from './helpers';
 import { expect, test, type Page } from '@playwright/test';
 import { login } from './helpers';
 const now = '2026-10-17T09:00:00Z';
-async function section(page: Page, name: string) {
-  if (await page.getByLabel('浏览方式', { exact: true }).isVisible())
-    await page.getByLabel('浏览方式', { exact: true }).selectOption({ label: name });
-  else
-    await page
-      .locator('.sidebar')
-      .getByRole('button', { name: new RegExp(`^${name}(?: |$)`) })
-      .click();
-}
+
 const list = (items: unknown[], extra = {}) => ({
   items,
   total: items.length,
@@ -58,7 +51,8 @@ test('历史逐条改名和删除，失败保留对话，删除其他历史不�
   const panel = page.getByRole('region', { name: 'AI 音乐助手' });
   await panel.getByRole('button', { name: '另一段对话', exact: true }).click();
   await expect(panel).toContainText('保留内容 b');
-  await panel.getByRole('button', { name: '改名：旧名字', exact: true }).click();
+  await panel.getByRole('button', { name: '旧名字的更多操作', exact: true }).click();
+  await page.getByRole('menuitem', { name: '改名', exact: true }).click();
   const renameDialog = page.getByRole('dialog', { name: '对话改名', exact: true });
   await renameDialog.getByLabel('对话名称').fill('   ');
   await expect(renameDialog.getByRole('button', { name: '保存', exact: true })).toBeDisabled();
@@ -68,8 +62,9 @@ test('历史逐条改名和删除，失败保留对话，删除其他历史不�
   expect(renamed).toEqual({ title: '夜晚的摇滚歌单' });
   await expect(panel.getByRole('button', { name: '夜晚的摇滚歌单', exact: true })).toBeVisible();
   await expect(panel).toContainText('保留内容 b');
-  const remove = panel.getByRole('button', { name: '删除：夜晚的摇滚歌单', exact: true });
+  const remove = panel.getByRole('button', { name: '夜晚的摇滚歌单的更多操作', exact: true });
   await remove.click();
+  await page.getByRole('menuitem', { name: '删除', exact: true }).click();
   const deleteDialog = page.getByRole('dialog', { name: '删除对话', exact: true });
   await expect(deleteDialog).toContainText('已有草案和歌单会保留');
   await page.screenshot({
@@ -79,6 +74,7 @@ test('历史逐条改名和删除，失败保留对话，删除其他历史不�
   await deleteDialog.getByRole('button', { name: '取消', exact: true }).click();
   expect(deletes).toEqual([]);
   await remove.click();
+  await page.getByRole('menuitem', { name: '删除', exact: true }).click();
   await deleteDialog.getByRole('button', { name: '删除', exact: true }).click();
   await expect(deleteDialog.getByRole('alert')).toContainText('正在生成回复');
   await deleteDialog.getByRole('button', { name: '删除', exact: true }).click();

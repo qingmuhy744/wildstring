@@ -251,6 +251,11 @@ class Assistant:
             old_secret = previous["secret_ref"]
         else:
             identity = uuid4().hex
+        timeout = (
+            previous["timeout"]
+            if previous is not None and "timeout" not in body.model_fields_set
+            else body.timeout
+        )
         option_keys = {
             "protocol",
             "provider",
@@ -295,7 +300,7 @@ class Assistant:
                             body.scope,
                             body.base_url,
                             body.model,
-                            body.timeout,
+                            timeout,
                             secret,
                             body.shared,
                             body.background_allowed,
