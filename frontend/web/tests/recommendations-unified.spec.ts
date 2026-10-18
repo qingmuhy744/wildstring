@@ -1,16 +1,9 @@
+import { section } from './helpers';
 import { expect, test, type Page } from '@playwright/test';
 import { login, audio } from './helpers';
 const headers = { 'X-Wildstring-Client': 'web' };
 const localSources = ['personal', 'community', 'discovery', 'revisit'];
-async function section(page: Page, name: string) {
-  if (await page.getByLabel('浏览方式', { exact: true }).isVisible())
-    await page.getByLabel('浏览方式', { exact: true }).selectOption({ label: name });
-  else
-    await page
-      .locator('.sidebar')
-      .getByRole('button', { name: new RegExp(`^${name}(?: |$)`) })
-      .click();
-}
+
 async function fixture(page: Page) {
   await login(page);
   const tracks = (await (await page.request.get('/api/v1/tracks')).json()).items;

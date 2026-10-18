@@ -94,13 +94,26 @@ fun WildStringApp(model: MusicViewModel) {
                     if (!connected) ConnectionScreen(state, model::connect) { servers = true } else LibraryApp(model, state)
                 } }
                 com.wildstring.app.update.UpdatePrompt()
-                state.handoff?.let { saved ->
+                LaunchedEffect(state.playing, state.handoff?.version) {
+                    if (state.playing && state.handoff != null) model.dismissHandoff()
+                }
+                state.handoff?.takeIf { !state.playing }?.let { saved ->
                     val action = remember(saved.version) { FeatureAction() }; val scope = rememberCoroutineScope()
-                    AlertDialog(onDismissRequest = { if (!action.busy) model.dismissHandoff() },
-                        title = { Text("继续其他设备的播放？") },
-                        text = { Column { Text("${saved.trackIds.size} 首队列 · 第 ${saved.index + 1} 首 · ${formatTime(saved.positionMs)}。载入后保持暂停。"); ActionStatus(action) } },
-                        confirmButton = { TextButton({ scope.launch { action.run { model.acceptHandoff() } } }, enabled = !action.busy) { Text("载入进度") } },
-                        dismissButton = { TextButton(model::dismissHandoff, enabled = !action.busy) { Text("暂不") } })
+                    Box(Modifier.fillMaxSize().safeDrawingPadding().padding(horizontal = 16.dp).padding(bottom = 90.dp), contentAlignment = Alignment.BottomCenter) {
+                        Surface(Modifier.widthIn(max = 440.dp).fillMaxWidth().testTag("playback-handoff-notice"),
+                            shape = RoundedCornerShape(16.dp), tonalElevation = 6.dp, shadowElevation = 8.dp) {
+                            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text("其他设备有可接续的进度", style = MaterialTheme.typography.titleSmall)
+                                Text("${saved.trackIds.size} 首 · 第 ${saved.index + 1} 首 · ${formatTime(saved.positionMs)} · 载入后保持暂停",
+                                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                if (action.message != "已完成") ActionStatus(action)
+                                Row(Modifier.align(Alignment.End)) {
+                                    TextButton(model::dismissHandoff, enabled = !action.busy) { Text("暂不") }
+                                    TextButton({ scope.launch { action.run { model.acceptHandoff() } } }, enabled = !action.busy) { Text("载入进度") }
+                                }
+                            }
+                        }
+                    }
                 }
                 if (servers) ServersScreen(model) { servers = false }
             }
@@ -263,13 +276,13 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
                         val header: @Composable () -> Unit = {
                             Column(Modifier.fillMaxWidth()) {
                                 if (state.tab == "mine" && state.collection == null && state.kind != "recent") {
-                                    PersonalHeader(state, { vm.recent() }, compact = compact)
+                                    PersonalHeader(vm, state, { vm.recent() }, compact = compact)
+                                    MobileShortcuts { feature = it }
                                     Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                                         Text("我的歌单", style = MaterialTheme.typography.titleMedium)
                                         IconButton({ featurePlaylist = null; feature = "playlist" }) { Icon(Icons.Default.Add, "新建歌单") }
                                     }
                                 }
-                                if (state.tab == "mine" && state.collection == null) MobileShortcuts(state.account?.role == "admin", unread) { feature = it }
                                 if (state.kind == "artists" && state.collection == null) Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                     listOf("artist" to "艺人", "album_artist" to "专辑艺人", "vocalist" to "演唱", "lyricist" to "作词", "composer" to "作曲", "arranger" to "编曲").forEach { (key, name) -> FilterChip(state.role == key, { vm.role(key) }, label = { Text(name) }) }
                                 }
@@ -277,7 +290,7 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
                                     FilterChip(state.kind == "tracks", { vm.kind("tracks") }, label = { Text("歌曲") })
                                     FilterChip(state.kind == "albums", { vm.kind("albums") }, label = { Text("专辑") })
                                 }
-                                if (state.tab == "search" && state.kind == "discover") MobileShortcuts(false, unread) { feature = it }
+                                if (state.tab == "search" && state.kind == "discover") MobileShortcuts(discovery = true) { feature = it }
                                 state.error?.let { ErrorMessage(it, vm::load) }
                                 if (state.offline) Text("网络暂不可用 · 显示本机缓存", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
                                 if (state.kind == "tracks" || state.kind == "recent") CatalogToolbar(state,
@@ -329,8 +342,20 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
     if (sleepDialog) SleepDialog(vm) { sleepDialog = false }
     if (diagnostics) PlaybackDiagnosticsDialog(vm) { diagnostics = false }
     deletingPlaylist?.let { playlist -> AlertDialog(onDismissRequest = { if (!playlistAction.busy) deletingPlaylist = null }, title = { Text("删除歌单？") }, text = { Column { Text(playlist.name); ActionStatus(playlistAction) } }, confirmButton = { TextButton({ scope.launch { playlistAction.run { vm.deletePlaylist(playlist); deletingPlaylist = null } } }, enabled = !playlistAction.busy) { Text("删除") } }, dismissButton = { TextButton({ deletingPlaylist = null }, enabled = !playlistAction.busy) { Text("取消") } }) }
-    actions?.let { track -> ModalBottomSheet(onDismissRequest = { actions = null }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
-        Column(Modifier.fillMaxWidth().heightIn(max = 640.dp).verticalScroll(rememberScrollState())) {
+    actions?.let { track -> ModalBottomSheet(
+        onDismissRequest = { actions = null },
+        modifier = Modifier.testTag("song-actions-sheet"),
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        // Only the list consumes vertical flings; the sheet must not share their velocity.
+        sheetGesturesEnabled = false,
+        dragHandle = {
+            Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("歌曲操作", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+                IconButton({ actions = null }) { Icon(Icons.Default.Close, "关闭歌曲操作") }
+            }
+        },
+    ) {
+        Column(Modifier.fillMaxWidth().heightIn(max = 640.dp).testTag("song-actions-scroll").verticalScroll(rememberScrollState(), overscrollEffect = null)) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
             Cover(vm, track.id.takeIf { track.hasCover }, track.title, Modifier.size(48.dp))
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -576,12 +601,14 @@ private fun PlaybackControls(vm: MusicViewModel, state: MusicState, onQueue: () 
 
 @Composable
 private fun LyricsPanel(vm: MusicViewModel, state: MusicState, modifier: Modifier, onBlank: () -> Unit = {}, onArtwork: () -> Unit = {}) {
+    val preferences by vm.settings.state.collectAsStateWithLifecycle()
     Box(modifier, contentAlignment = Alignment.Center) {
         when {
             state.lyricsLoading -> if (delayed(state.lyricsLoading, 350)) CircularProgressIndicator()
             state.lyricsError != null -> Text(state.lyricsError, color = Muted)
             state.lyrics.lines.isEmpty() -> Text("暂无歌词", color = Muted)
-            else -> LyricViewport(state.lyrics, state.position, vm::seek, onBlank, Modifier.fillMaxSize(), onArtwork)
+            else -> LyricViewport(state.lyrics, state.position, vm::seek, onBlank, Modifier.fillMaxSize(), onArtwork,
+                followDelayMs = preferences.lyricFollowSeconds * 1_000L)
         }
     }
 }

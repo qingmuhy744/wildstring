@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { api } from './api';
 import type { AgentPage, Conversation } from './agent-api';
 import { ModelConnectionChoice, useModelConnections } from './model-connection';
+import { RowMenu } from './row-menu';
 import {
   DiagnosticId,
   errorText,
@@ -198,7 +199,25 @@ export function Assistant({
               <h2>最近对话</h2>
               <div className="workspace-session-list">
                 {sessions.value?.items.map((session) => (
-                  <div className="workspace-session-entry" key={session.id}>
+                  <RowMenu
+                    className="workspace-session-entry"
+                    key={session.id}
+                    label={session.title}
+                    disabled={busy}
+                    actions={[
+                      {
+                        label: '改名',
+                        icon: 'edit',
+                        run: () => setHistoryAction({ kind: 'rename', session }),
+                      },
+                      {
+                        label: '删除',
+                        icon: 'remove',
+                        danger: true,
+                        run: () => setHistoryAction({ kind: 'delete', session }),
+                      },
+                    ]}
+                  >
                     <button
                       className="workspace-session"
                       aria-pressed={selected === session.id}
@@ -207,23 +226,7 @@ export function Assistant({
                     >
                       {session.title}
                     </button>
-                    <div className="workspace-session-actions">
-                      <button
-                        disabled={busy}
-                        aria-label={`改名：${session.title}`}
-                        onClick={() => setHistoryAction({ kind: 'rename', session })}
-                      >
-                        改名
-                      </button>
-                      <button
-                        disabled={busy}
-                        aria-label={`删除：${session.title}`}
-                        onClick={() => setHistoryAction({ kind: 'delete', session })}
-                      >
-                        删除
-                      </button>
-                    </div>
-                  </div>
+                  </RowMenu>
                 ))}
                 {!sessions.value?.items.length && <p className="muted">从一首歌、一种心情开始。</p>}
               </div>

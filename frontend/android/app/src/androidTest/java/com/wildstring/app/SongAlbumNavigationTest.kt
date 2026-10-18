@@ -74,6 +74,17 @@ class SongAlbumNavigationTest {
                 compose.waitUntil(10_000) { vm.state.value.tracks.size == 1 && !vm.state.value.loading }
                 compose.onNodeWithContentDescription("第一首的操作").performClick()
                 compose.onNodeWithTag("song-action-离线保存").assertIsDisplayed()
+                val sheet = compose.onNodeWithTag("song-actions-sheet")
+                val sheetTop = sheet.fetchSemanticsNode().boundsInRoot.top
+                repeat(3) {
+                    compose.onNodeWithTag("song-actions-scroll").performTouchInput { swipeUp(durationMillis = 90) }
+                    compose.waitForIdle()
+                    assertEquals("The action sheet should not follow a list fling", sheetTop, sheet.fetchSemanticsNode().boundsInRoot.top, 1f)
+                    compose.onNodeWithTag("song-actions-scroll").performTouchInput { swipeDown(durationMillis = 90) }
+                    compose.waitForIdle()
+                    assertEquals(sheetTop, sheet.fetchSemanticsNode().boundsInRoot.top, 1f)
+                }
+                compose.onNodeWithTag("song-action-查看所属专辑").performScrollTo()
                 val labelPositions = listOf("查看所属专辑", "下一首播放", "加入播放队列").map {
                     compose.onNodeWithText(it, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot.left
                 }

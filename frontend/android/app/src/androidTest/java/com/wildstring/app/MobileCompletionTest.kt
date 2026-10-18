@@ -221,8 +221,13 @@ class MobileCompletionTest {
         Fixture().use { fixture -> val vm = connect(fixture)
             try {
                 compose.onNodeWithTag("nav-mine").performClick()
+                compose.onNodeWithTag("personal-shortcuts").assertIsDisplayed()
+                compose.onNodeWithText("每日推荐", substring = false).assertDoesNotExist()
+                compose.onNodeWithText("数据源插件", substring = false).assertDoesNotExist()
+                capture("mobile-mine-compact.png")
+                compose.onNodeWithTag("nav-search").performClick()
                 compose.onNodeWithText("每日推荐", substring = false).performClick()
-                compose.waitUntil(10_000) { compose.onAllNodesWithText("久未重听", substring = true).fetchSemanticsNodes().isNotEmpty() }
+                compose.waitUntil(10_000) { compose.onAllNodesWithTag("daily-track-completion-0").fetchSemanticsNodes().isNotEmpty() }
                 capture("mobile-daily.png")
                 compose.onNodeWithText("保存歌单").performClick()
                 compose.waitUntil(10_000) { fixture.mutations.any { it.first.endsWith("/playlists/manual/tracks") } }
@@ -236,17 +241,20 @@ class MobileCompletionTest {
                 try { compose.waitUntil(10_000) { fixture.mutations.count { it.first.endsWith("/playlists") } >= 2 } }
                 catch (error: Throwable) { capture("mobile-ui-failure.png"); compose.onRoot(useUnmergedTree = true).printToLog("MobileCompletionUI"); throw AssertionError("AI save requests=${fixture.requests.toList()} mutations=${fixture.mutations.toList()}", error) }
                 compose.onAllNodesWithContentDescription("返回").onLast().performClick()
+                compose.onNodeWithTag("nav-mine").performClick()
                 compose.onNodeWithContentDescription("新建歌单").performClick()
                 compose.onNodeWithText("歌单名称").performTextInput("手机规则歌单")
                 compose.onNode(isToggleable()).performClick()
                 compose.onNodeWithText("保存歌单").performScrollTo().performClick()
                 compose.waitUntil(10_000) { fixture.mutations.any { it.first.endsWith("/playlists") && it.second.contains("\"kind\":\"smart\"") } }
-                compose.onNodeWithText("曲库管理").performScrollTo().performClick()
+                compose.onNodeWithContentDescription("设置").performClick()
+                compose.onNodeWithText("曲库管理", substring = false).performScrollTo().performClick()
                 compose.waitUntil(10_000) { compose.onAllNodesWithText("曲库概览").fetchSemanticsNodes().isNotEmpty() }
                 compose.waitUntil(10_000) { compose.onAllNodes(hasText("导入音乐") and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
                 compose.onNodeWithText("导入音乐").performClick(); compose.onNodeWithText("开始", substring = false).performClick()
                 compose.waitUntil(10_000) { fixture.mutations.any { it.first.endsWith("/manage/jobs") } }
                 compose.onAllNodesWithContentDescription("返回").onLast().performClick()
+                compose.onNodeWithContentDescription("返回").performClick()
                 compose.runOnIdle { vm.openAlbum(Album("completion-album", "手机测试专辑", listOf("测试艺人"), 3, null)) }
                 compose.waitUntil(10_000) { compose.onAllNodesWithContentDescription("手机测试歌曲 0的操作").fetchSemanticsNodes().isNotEmpty() }
                 compose.onNodeWithContentDescription("手机测试歌曲 0的操作").performClick(); compose.onNodeWithText("编辑歌曲信息").performScrollTo().performClick()
@@ -413,7 +421,7 @@ class MobileCompletionTest {
                 compose.runOnIdle { vm.sharing.mode("ask") }
                 fixture.snapshot = """{"version":70,"device_id":"other-device","track_ids":["completion-0","completion-1"],"index":1,"position_ms":3000,"mode":"repeat_all","updated_at":"2026-10-17T00:00:00Z"}"""
                 runBlocking { withContext(Dispatchers.Main) { vm.checkSharedPlayback() } }
-                compose.onNodeWithText("继续其他设备的播放？").assertIsDisplayed()
+                compose.onNodeWithText("其他设备有可接续的进度").assertIsDisplayed()
                 compose.onNodeWithText("载入进度").performClick()
                 try { compose.waitUntil(10_000) { vm.state.value.handoff == null && vm.state.value.queue.size == 2 } }
                 catch (e: Throwable) {

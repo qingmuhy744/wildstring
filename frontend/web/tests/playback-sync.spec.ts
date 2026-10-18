@@ -32,8 +32,11 @@ test('默认询问，确认后暂停恢复，不回写；播放后暂停自动�
     position_ms: 3000,
   };
   await page.evaluate(() => window.dispatchEvent(new Event('focus')));
-  const dialog = page.getByRole('dialog', { name: '跨设备接续', exact: true });
+  const dialog = page.getByRole('region', { name: '跨设备接续', exact: true });
   await expect(dialog).toBeVisible();
+  await expect(page.locator('dialog[open]')).toHaveCount(0);
+  await page.getByRole('searchbox').fill('提示出现时仍能搜索');
+  await expect(page.getByRole('searchbox')).toBeFocused();
   expect(writes).toHaveLength(0);
   await dialog.getByRole('button', { name: '载入进度', exact: true }).click();
   await expect(dialog).toHaveCount(0);
@@ -66,7 +69,7 @@ test('接续可关闭或自动恢复，同一版本不重复弹窗', async ({ pa
   const tracks = (await (await page.request.get('/api/v1/tracks')).json()).items;
   state = { ...state, version: 20, track_ids: tracks.map((track: { id: string }) => track.id) };
   await page.evaluate(() => window.dispatchEvent(new Event('focus')));
-  const dialog = page.getByRole('dialog', { name: '跨设备接续', exact: true });
+  const dialog = page.getByRole('region', { name: '跨设备接续', exact: true });
   await expect(dialog).toBeVisible();
   await dialog.getByRole('button', { name: '暂不', exact: true }).click();
   state = { ...state, version: 21, position_ms: 1500 };
@@ -78,7 +81,10 @@ test('接续可关闭或自动恢复，同一版本不重复弹窗', async ({ pa
   await page.evaluate(() => window.dispatchEvent(new Event('focus')));
   await expect(dialog).toHaveCount(0);
   if (info.project.name === 'mobile') await page.getByLabel('浏览方式').selectOption('devices');
-  else await page.getByRole('button', { name: '跨设备继续', exact: true }).click();
+  else {
+    await page.locator('.sidebar').getByText('更多音乐', { exact: true }).click();
+    await page.getByRole('button', { name: '跨设备继续', exact: true }).click();
+  }
   const mode = page.getByLabel('跨设备接续方式', { exact: true });
   await expect(mode).toHaveValue('ask');
   await mode.selectOption('off');

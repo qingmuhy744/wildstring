@@ -1,17 +1,8 @@
+import { section } from './helpers';
 import { expect, test, type Page, type BrowserContext } from '@playwright/test';
 import { audio, login } from './helpers';
 const headers = { 'X-Wildstring-Client': 'web' };
-async function section(page: Page, label: string) {
-  if (await page.getByLabel('浏览方式', { exact: true }).isVisible())
-    await page.getByLabel('浏览方式', { exact: true }).selectOption({ label });
-  else
-    await page
-      .getByRole('button', {
-        name: label === '全部歌曲' ? /^全部歌曲(?: \d+)?$/ : label,
-        exact: label !== '全部歌曲',
-      })
-      .click();
-}
+
 async function allTracks(page: Page) {
   return (await (await page.request.get('/api/v1/tracks')).json()).items;
 }
@@ -374,10 +365,10 @@ test('并行推荐反馈失败只恢复失败曲目', async ({ page }) => {
       await route.fulfill({ status: 503, json: {} });
     } else await route.fulfill({ status: 204 });
   });
-  await panel.getByLabel(`调整推荐 ${titles[0]}`, { exact: true }).click();
-  await panel.getByRole('button', { name: '少推荐这首', exact: true }).click();
-  await panel.getByLabel(`调整推荐 ${titles[1]}`, { exact: true }).click();
-  await panel.getByRole('button', { name: '少推荐这首', exact: true }).click();
+  await panel.getByLabel(`${titles[0]}的更多操作`, { exact: true }).click();
+  await page.getByRole('menuitem', { name: '不感兴趣', exact: true }).click();
+  await panel.getByLabel(`${titles[1]}的更多操作`, { exact: true }).click();
+  await page.getByRole('menuitem', { name: '不感兴趣', exact: true }).click();
   release();
   await expect(panel.locator('.discovery-track')).toHaveCount(1);
   await expect(panel.locator('.discovery-track')).toContainText(titles[0]);

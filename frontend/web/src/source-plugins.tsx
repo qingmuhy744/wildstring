@@ -24,14 +24,60 @@ export function SourcePlugins() {
   const [busy, setBusy] = useState(false),
     [message, setMessage] = useState('');
   const [values, setValues] = useState<Record<string, Record<string, string>>>({});
+  const [saved, setSaved] = useState<Record<string, string>>({});
+  const [results, setResults] = useState<Record<string, string>>({});
   async function load() {
     const result = await api<{ items: Plugin[] }>('/manage/source-plugins');
     setPlugins(result.items);
     setValues(Object.fromEntries(result.items.map((p) => [p.id, p.config])));
+    setSaved(
+      Object.fromEntries(
+        result.items.map((p) => [
+          p.id,
+          JSON.stringify({
+            enabled: p.enabled,
+            metadata_enabled: p.metadata_enabled,
+            lyrics_enabled: p.lyrics_enabled,
+            priority: p.priority,
+            config: p.config,
+          }),
+        ]),
+      ),
+    );
   }
   useEffect(() => {
     void load().catch(() => setMessage('无法读取数据源插件。'));
   }, []);
+  function dirty(p: Plugin) {
+    return (
+      saved[p.id] !==
+      JSON.stringify({
+        enabled: p.enabled,
+        metadata_enabled: p.metadata_enabled,
+        lyrics_enabled: p.lyrics_enabled,
+        priority: p.priority,
+        config: values[p.id] || {},
+      })
+    );
+  }
+  async function testPlugin(p: Plugin) {
+    if (busy || dirty(p)) return;
+    setBusy(true);
+    setResults((prior) => ({ ...prior, [p.id]: '正在测试此插件…' }));
+    try {
+      const result = await api<{ count: number }>(`/manage/source-plugins/${p.id}/test`, {
+        method: 'POST',
+      });
+      setResults((prior) => ({ ...prior, [p.id]: `检索已响应 · 返回 ${result.count} 条候选。` }));
+    } catch (error) {
+      setResults((prior) => ({
+        ...prior,
+        [p.id]: error instanceof Error ? error.message : '插件测试未完成。',
+      }));
+    } finally {
+      setBusy(false);
+    }
+  }
   async function run(work: () => Promise<unknown>, success: string) {
     if (busy) return;
     setBusy(true);
@@ -166,17 +212,15 @@ export function SourcePlugins() {
             >
               保存 {p.name}
             </button>
-            <button
-              disabled={!p.enabled}
-              onClick={() =>
-                void run(
-                  () => api(`/manage/source-plugins/${p.id}/test`, { method: 'POST' }),
-                  '插件检索已响应。',
-                )
-              }
-            >
+            <button disabled={!p.enabled || dirty(p)} onClick={() => void testPlugin(p)}>
               测试 {p.name}
             </button>
+            {dirty(p) && <p className="muted">请先保存当前插件设置，再测试。</p>}
+            {results[p.id] && (
+              <p role="status" aria-live="polite" className="plugin-test-result">
+                {results[p.id]}
+              </p>
+            )}
             <a href={`/api/v1/manage/source-plugins/${p.id}/export`}>导出 ZIP</a>
             <label>
               升级插件 ZIP

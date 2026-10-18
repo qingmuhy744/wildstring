@@ -275,6 +275,9 @@ class Auth:
                 )
             return self.logout_response()
 
+        from wildstring.avatars import router as avatar_router
+
+        router.include_router(avatar_router(self))
         return router
 
     def users_router(self):

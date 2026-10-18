@@ -55,10 +55,12 @@ test('元数据来源可拖动或用键盘排序，保存后保留且密钥不�
     }
     await expect(list.locator('li').first()).toContainText('MusicBrainz');
     await page.getByRole('button', { name: '拖动 Last.fm 优先级', exact: true }).press('ArrowUp');
-    await page.getByLabel('AcoustID API Key', { exact: true }).fill('fixture-acoustid-key');
+    await page
+      .getByLabel('AcoustID Application API Key', { exact: true })
+      .fill('fixture-acoustid-key');
     await page.getByRole('button', { name: '保存联网设置', exact: true }).click();
     await expect(page.getByText('联网设置已保存。', { exact: true })).toBeVisible();
-    await expect(page.getByLabel('AcoustID API Key', { exact: true })).toHaveValue('');
+    await expect(page.getByLabel('AcoustID Application API Key', { exact: true })).toHaveValue('');
     const saved = await (await page.request.get('/api/v1/manage/providers')).json();
     expect(saved.priority).toEqual(['lastfm', 'musicbrainz']);
     expect(saved.acoustid_configured).toBe(true);

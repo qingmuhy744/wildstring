@@ -54,6 +54,7 @@ private val LocalSettingsFeedback = staticCompositionLocalOf<() -> Unit> { {} }
     var logout by remember { mutableStateOf(false) }
     var assistant by remember { mutableStateOf(false) }
     var diagnostics by remember { mutableStateOf(false) }
+    var feature by remember { mutableStateOf<String?>(null) }
     val inbox by vm.agent.inbox.collectAsStateWithLifecycle()
     LaunchedEffect(preferences, clearing) { while (true) { usage = vm.cacheUsage(); delay(2_000) } }
     fun mb(bytes: Long) = "%.1f MB".format(bytes / 1048576.0)
@@ -63,6 +64,7 @@ private val LocalSettingsFeedback = staticCompositionLocalOf<() -> Unit> { {} }
                 ListItem(headlineContent = { Text(state.account?.let { "${it.username} · ${if (it.role == "admin") "管理员" else "普通用户"}" } ?: "已连接") },
                     supportingContent = { Text(state.server) }, leadingContent = { Icon(Icons.Default.AccountCircle, null) })
                 SettingsAction("服务器 / 切换服务器", Icons.Default.Dns) { servers = true }
+                if (state.account != null) AvatarSettings(vm)
                 if (state.account != null) SettingsAction("修改密码", Icons.Default.Lock) { password = true }
             }
             SettingsGroup("Last.fm") { LastfmSettings(vm) }
@@ -70,16 +72,27 @@ private val LocalSettingsFeedback = staticCompositionLocalOf<() -> Unit> { {} }
                 SettingsAction("野弦助手 / 通知与草案", Icons.Default.AutoAwesome) { assistant = true }
                 Text(if (inbox.owner == vm.repository.session.cacheScope() && inbox.unread > 0) "${inbox.unread} 条未读通知" else "对话找歌、确认草案、曲库巡检与 AI 连接",
                     Modifier.padding(start = 16.dp, end = 16.dp, bottom = 16.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                SettingsAction("模型连接", Icons.Default.Hub) { feature = "connections" }
+                SettingsAction("联网与记忆", Icons.Default.TravelExplore) { feature = "research" }
+                SettingsAction("通知设置", Icons.Default.Notifications) { feature = "channels" }
+            }
+            if (state.account?.role == "admin") SettingsGroup("资料来源与维护") {
+                SettingsAction("曲库管理", Icons.Default.LibraryMusic) { feature = "management" }
+                SettingsAction("数据源插件", Icons.Default.Extension) { feature = "source-plugins" }
             }
             SettingsGroup("播放") {
                 SettingsAction("播放诊断", Icons.Default.Troubleshoot) { diagnostics = true }
+                SettingsAction("其他设备继续", Icons.Default.Devices) { feature = "devices" }
                 val syncMode by vm.sharing.mode.collectAsStateWithLifecycle()
-                SettingsChoice("跨设备接续", when(syncMode) { "off" -> "关闭"; "auto" -> "自动恢复"; else -> "弹窗询问" }, Icons.Default.Devices,
-                    listOf("off" to "关闭", "ask" to "弹窗询问（默认）", "auto" to "自动恢复"), syncMode,
+                SettingsChoice("跨设备接续", when(syncMode) { "off" -> "关闭"; "auto" -> "自动恢复"; else -> "轻提示" }, Icons.Default.Devices,
+                    listOf("off" to "关闭", "ask" to "轻提示（默认）", "auto" to "自动恢复"), syncMode,
                     "暂停时自动保存进度。发现其他设备的新记录时询问或恢复，载入后保持暂停。", vm::syncMode)
                 SettingsChoice("播放音质", if (preferences.aacBitrate == 0) "原音" else "AAC · ${preferences.aacBitrate} kbps", Icons.Default.GraphicEq,
                     com.wildstring.app.data.PlaybackRequest.bitrates.map { it to if (it == 0) "原音" else "AAC · $it kbps" }, preferences.aacBitrate,
                     "默认原音。选择 AAC 后，无损音源转码，有损音源直放。切换保留播放位置和暂停状态。", vm.settings::quality)
+                SettingsChoice("歌词恢复跟随", "${preferences.lyricFollowSeconds} 秒", Icons.Default.Lyrics,
+                    listOf(1, 2, 3, 5, 10).map { it to "$it 秒" }, preferences.lyricFollowSeconds,
+                    "滑动或点选歌词后，停止操作多久恢复当前歌词。滚动过程中不计时。", vm.settings::lyricFollowSeconds)
             }
             SettingsGroup("外观与触感") {
                 SettingsChoice("歌曲列表大小", preferences.songListSize.label, Icons.Default.FormatSize,
@@ -123,6 +136,7 @@ private val LocalSettingsFeedback = staticCompositionLocalOf<() -> Unit> { {} }
     if (servers) ServersScreen(vm) { servers = false }
     if (assistant) FeatureDialog(vm, "assistant") { assistant = false }
     if (diagnostics) PlaybackDiagnosticsDialog(vm) { diagnostics = false }
+    feature?.let { route -> FeatureDialog(vm, route) { feature = null } }
     if (logout) AlertDialog(onDismissRequest = { logout = false }, title = { Text("退出当前服务器？") }, text = { Text("将清除当前服务器在本机的登录和私密缓存，其他服务器的登录保留。") }, confirmButton = { TextButton({ logout = false; back(); vm.logout() }) { Text("退出登录") } }, dismissButton = { TextButton({ logout = false }) { Text("取消") } })
     if (password) PasswordDialog(vm) { password = false }
 }

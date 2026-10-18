@@ -11,6 +11,7 @@ import okhttp3.CookieJar
 import okhttp3.Request
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.MediaType.Companion.toMediaType
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -150,6 +151,16 @@ class Repository @Inject constructor(val session: SessionStore, val client: OkHt
             throw AgentApiException(response.code(), code, diagnosticId(response.headers()["X-Wildstring-Trace-Id"]))
         }
         return response.body() ?: com.google.gson.JsonObject()
+    }
+    suspend fun saveAvatar(bytes: ByteArray, owner: String) {
+        requireProfile(owner)
+        require(bytes.size <= 5 * 1024 * 1024) { "头像图片超过 5 MiB，请压缩后重试。" }
+        val response = api().uploadAvatar(url("api", "v1", "auth", "avatar"), bytes.toRequestBody("application/octet-stream".toMediaType()), RequestOwner(owner))
+        requireProfile(owner)
+        if (!response.isSuccessful) {
+            val code = response.errorBody()?.use { runCatching { gson.fromJson(it.string(), com.google.gson.JsonObject::class.java).text("detail") }.getOrDefault("") }.orEmpty()
+            throw AgentApiException(response.code(), code, diagnosticId(response.headers()["X-Wildstring-Trace-Id"]))
+        }
     }
     suspend fun cachedCatalog(query: CatalogQuery): CatalogPage? = saved("catalog:${query.key}", CatalogPage::class.java)?.let { it.copy(tracks = it.tracks.map { track -> rememberTrack(track) }) }
     private fun <T> Page<T>.checked(query: CatalogQuery): Page<T> {

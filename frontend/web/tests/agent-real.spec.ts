@@ -1,15 +1,7 @@
+import { section } from './helpers';
 import { expect, test, type Page } from '@playwright/test';
 import { login } from './helpers';
 const headers = { 'X-Wildstring-Client': 'web' };
-async function section(page: Page, name: string) {
-  if (await page.getByLabel('浏览方式', { exact: true }).isVisible())
-    await page.getByLabel('浏览方式', { exact: true }).selectOption({ label: name });
-  else
-    await page
-      .locator('.sidebar')
-      .getByRole('button', { name: new RegExp(`^${name}(?: |$)`) })
-      .click();
-}
 
 test('真实后端：草案确认后应用一次，歌单和通知可从网页补拉', async ({ page }, info) => {
   await login(page);

@@ -35,7 +35,7 @@ export function SyncModeControl({ userId }: { userId: string }) {
         }}
       >
         <option value="off">关闭</option>
-        <option value="ask">弹窗询问（默认）</option>
+        <option value="ask">轻提示（默认）</option>
         <option value="auto">自动恢复</option>
       </select>
     </label>
@@ -50,10 +50,6 @@ export function PlaybackSync({ player, userId }: { player: Player; userId: strin
     [error, setError] = useState('');
   const accept = useRef<(saved: SharedPlayback) => Promise<void>>(async () => {});
   const dismiss = useRef<(version: number) => void>(() => {});
-  const dialog = useRef<HTMLDialogElement>(null);
-  useEffect(() => {
-    if (offer) dialog.current?.showModal();
-  }, [offer]);
   useEffect(() => {
     const controller = new AbortController();
     const deviceKey = `wildstring:device:${userId}`;
@@ -208,6 +204,8 @@ export function PlaybackSync({ player, userId }: { player: Player; userId: strin
     const element = latest.current.audio.current;
     const play = () => {
       epoch++;
+      offered = 0;
+      setOffer(null);
       armed = true;
       publish(true);
     };
@@ -258,20 +256,12 @@ export function PlaybackSync({ player, userId }: { player: Player; userId: strin
     };
   }, [userId]);
   return offer ? (
-    <dialog
-      className="device-resume-dialog"
-      ref={dialog}
-      aria-label="跨设备接续"
-      onCancel={(event) => {
-        event.preventDefault();
-        if (!busy) dismiss.current(offer.version);
-      }}
-    >
-      <h2>继续其他设备的播放？</h2>
+    <aside className="device-resume-notice" role="region" aria-label="跨设备接续">
+      <strong>其他设备有可接续的进度</strong>
       <p>
         {offer.track_ids.length} 首队列 · 第 {offer.index + 1} 首 · {time(offer.position_ms / 1000)}
       </p>
-      <p className="muted">载入队列和进度后保持暂停。</p>
+      <small className="muted">载入后保持暂停</small>
       {error && (
         <p className="error" role="alert">
           {error}
@@ -285,6 +275,6 @@ export function PlaybackSync({ player, userId }: { player: Player; userId: strin
           {busy ? '正在载入…' : '载入进度'}
         </button>
       </footer>
-    </dialog>
+    </aside>
   ) : null;
 }

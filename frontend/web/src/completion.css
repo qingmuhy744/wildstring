@@ -437,21 +437,39 @@
 .offline-options > button {
   margin: 12px 0;
 }
-.device-resume-dialog {
-  width: min(440px, calc(100vw - 32px));
+.device-resume-notice {
+  position: fixed;
+  z-index: 900;
+  right: 20px;
+  bottom: calc(110px + env(safe-area-inset-bottom));
+  box-sizing: border-box;
+  width: min(380px, calc(100vw - 32px));
   border: 1px solid var(--border);
-  border-radius: 20px;
-  padding: 28px;
-  background: #22231f;
-  color: #eeeae2;
+  border-radius: 16px;
+  padding: 18px;
+  background: var(--workspace-panel);
+  color: var(--workspace-text);
+  box-shadow: 0 8px 36px #0003;
 }
-.device-resume-dialog::backdrop {
-  background: #0007;
-  backdrop-filter: blur(8px);
+.device-resume-notice strong {
+  font-size: 14px;
 }
-.device-resume-dialog footer {
+.device-resume-notice p {
+  font-size: 13px;
+  margin: 8px 0;
+}
+.device-resume-notice small {
+  font-size: 12px;
+}
+.device-resume-notice footer {
   display: flex;
   justify-content: flex-end;
-  gap: 12px;
-  margin-top: 24px;
+  gap: 8px;
+  margin-top: 12px;
+}
+@media (max-width: 600px) {
+  .device-resume-notice {
+    right: 16px;
+    bottom: calc(100px + env(safe-area-inset-bottom));
+  }
 }

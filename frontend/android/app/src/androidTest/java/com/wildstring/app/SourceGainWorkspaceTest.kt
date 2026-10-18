@@ -13,6 +13,8 @@ import com.wildstring.app.data.*
 import com.wildstring.app.ui.MusicViewModel
 import com.wildstring.app.ui.PlaybackGainPanel
 import com.wildstring.app.ui.SourcePluginsPanel
+import com.wildstring.app.ui.AvatarSettings
+import kotlinx.coroutines.runBlocking
 import okhttp3.mockwebserver.*
 import org.junit.Assert.*
 import org.junit.Rule
@@ -25,21 +27,30 @@ class SourceGainWorkspaceTest {
         val paths = java.util.concurrent.ConcurrentLinkedQueue<String>()
         @Volatile var album = 0.0; @Volatile var track = 0.0; @Volatile var enabled = false
         var albumVersion = 0; var trackVersion = 0; var pluginVersion = 1
+        @Volatile var avatar: ByteArray? = null
+        fun avatarVersion() = avatar?.let { java.security.MessageDigest.getInstance("SHA-256").digest(it).joinToString("") { b -> "%02x".format(b) } }
         fun json(text: String) = MockResponse().setHeader("Content-Type", "application/json").setBody(text)
         fun gain() = """{"track_id":"song-one","album_id":"album-one","factor":1,"requested_db":${album+track},"applied_db":${album+track},"limited":false,"peak_known":true,"settings":{"version":0,"mode":"off","preamp_db":0,"prevent_clipping":true},"album":{"version":$albumVersion,"gain_db":$album},"track":{"version":$trackVersion,"gain_db":$track},"analysis":{"status":"none","error":null}}"""
         init {
             server.dispatcher = object : Dispatcher() { override fun dispatch(request: RecordedRequest): MockResponse = synchronized(this@Fixture) {
                 val path = request.requestUrl!!.encodedPath
                 paths += request.method + " " + path
+                if (path == "/api/v1/auth/avatar") return@synchronized when (request.method) {
+                    "POST" -> { avatar = request.body.readByteArray(); json("""{"version":"${avatarVersion()}"}""") }
+                    "DELETE" -> { avatar = null; MockResponse().setResponseCode(204) }
+                    else -> avatar?.let { MockResponse().setHeader("Content-Type", "image/png").setBody(okio.Buffer().write(it)) } ?: json("{}").setResponseCode(404)
+                }
                 val body = request.body.readUtf8().takeIf { it.isNotBlank() }?.let { JsonParser.parseString(it).asJsonObject } ?: JsonObject()
                 when {
                     path.endsWith("/auth/status") -> json("""{"configured":true,"authenticated":${request.getHeader("Cookie") != null},"user":{"id":"source-alice","username":"alice","role":"admin"}}""")
                     path.endsWith("/auth/login") -> json("{}").setHeader("Set-Cookie", "wildstring_session=source-alice; Path=/; Max-Age=3600")
+                    path == "/api/v1/auth/avatar/info" -> json("""{"version":${avatarVersion()?.let { "\"$it\"" } ?: "null"}}""")
                     path == "/api/v1/tracks/song-one/playback-gain" -> {
                         if (request.method == "PUT") { if (body.text("scope") == "album") { assertEquals(albumVersion.toLong(), body.number("version")); album = body.get("gain_db").asDouble; albumVersion++ } else { assertEquals(trackVersion.toLong(), body.number("version")); track = body.get("gain_db").asDouble; trackVersion++ } }
                         json(gain())
                     }
                     path == "/api/v1/manage/source-plugins/fixture-source" -> { assertEquals(pluginVersion.toLong(), body.number("version")); enabled = body.flag("enabled"); pluginVersion++; json("{}").setBodyDelay(350, java.util.concurrent.TimeUnit.MILLISECONDS) }
+                    path == "/api/v1/manage/source-plugins/fixture-source/test" -> json("""{"detail":"source_plugin_configuration_changed"}""").setResponseCode(409)
                     path == "/api/v1/manage/source-plugins" -> json("""{"items":[{"id":"fixture-source","name":"合成来源插件","plugin_version":"1.0.0","version":$pluginVersion,"license":"GPL-3.0-only","upstream":"https://example.com/plugin","available":true,"enabled":$enabled,"metadata_enabled":true,"lyrics_enabled":true,"priority":50,"config":{},"settings":[]}]}""")
                     path.endsWith("/albums") || path.endsWith("/tracks") -> json("""{"items":[],"total":0,"limit":50,"offset":0}""")
                     else -> json("{}").setResponseCode(404)
@@ -70,10 +81,16 @@ class SourceGainWorkspaceTest {
             try { compose.waitUntil(20_000) { compose.onAllNodesWithText("合成来源插件").fetchSemanticsNodes().isNotEmpty() } }
             catch (error: Throwable) { println("Source fixture paths: ${fixture.paths}"); capture("source-plugin-failure.png"); compose.onAllNodes(isRoot()).onLast().printToLog("SourceFailure"); throw error }
             compose.onAllNodes(isToggleable()).onFirst().performClick()
+            compose.onNodeWithTag("plugin-test-fixture-source").performScrollTo().assertIsNotEnabled()
+            assertFalse(fixture.paths.any { it.endsWith("/fixture-source/test") })
             compose.onNodeWithText("保存 合成来源插件").performScrollTo().performClick()
             compose.waitUntil(10_000) { fixture.enabled }
             compose.waitUntil(20_000) { compose.onAllNodesWithText("插件设置已保存。").fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithText("插件设置已保存。").performScrollTo().assertExists()
+            compose.onNodeWithTag("plugin-test-fixture-source").performScrollTo().assertIsEnabled().performClick()
+            compose.waitUntil(10_000) { compose.onAllNodes(hasText("插件配置已变化", substring = true)).fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithTag("plugin-test-result-fixture-source").performScrollTo().assertIsDisplayed()
+            compose.onNodeWithTag("plugin-test-fixture-source").assertIsDisplayed()
             capture("source-plugins-native.png")
         }
     }
@@ -95,6 +112,30 @@ class SourceGainWorkspaceTest {
             compose.onNodeWithText("请求 -5.0 dB · 实际 -5.0 dB").performScrollTo().assertExists()
             capture("playback-gain-native.png")
             assertEquals(1,fixture.albumVersion); assertEquals(1,fixture.trackVersion)
+        }
+    }
+    @Test fun uploadedAvatarDisplaysAndCanBeResetWithoutAcceptingAnotherAccountOwner() {
+        Fixture().use { fixture ->
+            val vm = connect(fixture)
+            val bitmap = android.graphics.Bitmap.createBitmap(80, 40, android.graphics.Bitmap.Config.ARGB_8888)
+            bitmap.eraseColor(android.graphics.Color.rgb(69, 140, 145))
+            val output = java.io.ByteArrayOutputStream(); bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, output); bitmap.recycle()
+            val bytes = output.toByteArray()
+            runBlocking { vm.repository.saveAvatar(bytes, vm.repository.session.cacheScope()!!) }
+            compose.runOnUiThread { vm.settings.avatarChanged(); compose.activity.setContent { MaterialTheme { Surface { AvatarSettings(vm) } } } }
+            compose.waitUntil(10_000) { compose.onAllNodesWithContentDescription("用户头像").fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithText("选择头像").assertIsDisplayed()
+            capture("avatar-native.png")
+            compose.onNodeWithContentDescription("用户头像").assertIsDisplayed()
+            compose.onNodeWithText("恢复默认头像").performClick()
+            compose.waitUntil(10_000) { fixture.avatar == null && compose.onAllNodesWithText("已恢复默认头像。").fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithContentDescription("用户头像").assertDoesNotExist()
+            val calls = fixture.paths.count { it == "POST /api/v1/auth/avatar" }
+            runBlocking {
+                try { vm.repository.saveAvatar(bytes, "old-owner"); fail("A stale account owner must not upload") }
+                catch (_: kotlinx.coroutines.CancellationException) { }
+            }
+            assertEquals(calls, fixture.paths.count { it == "POST /api/v1/auth/avatar" })
         }
     }
 }

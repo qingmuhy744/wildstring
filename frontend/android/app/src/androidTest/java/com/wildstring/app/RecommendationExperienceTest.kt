@@ -67,7 +67,7 @@ class RecommendationExperienceTest {
         compose.waitUntil(20_000) { vm.state.value.connected && !vm.state.value.loading }
         return vm
     }
-    private fun open(name: String) { compose.onNodeWithTag("nav-mine").performClick(); compose.onNodeWithText(name, substring = false).performScrollTo().performClick() }
+    private fun open(name: String) { compose.onNodeWithTag("nav-search").performClick(); compose.onNodeWithText(name, substring = false).performClick() }
     private fun cleanup(vm: MusicViewModel) { compose.runOnIdle { vm.controller?.stop(); vm.controller?.clearMediaItems(); vm.repository.session.invalidate() } }
     private fun capture(name: String) {
         compose.waitForIdle(); val instrumentation = InstrumentationRegistry.getInstrumentation(); instrumentation.uiAutomation.waitForIdle(500, 5_000)
@@ -79,7 +79,12 @@ class RecommendationExperienceTest {
         Fixture().use { fixture -> val vm = connect(fixture)
             try {
                 open("每日推荐")
-                compose.waitUntil(10_000) { compose.onAllNodesWithText("很久没听的收藏", substring = true).fetchSemanticsNodes().isNotEmpty() }
+                compose.waitUntil(10_000) { compose.onAllNodesWithText("真实本库歌曲", substring = true).fetchSemanticsNodes().isNotEmpty() }
+                compose.onNodeWithText("不感兴趣", substring = false).assertDoesNotExist()
+                compose.onNodeWithTag("daily-more-local-a").performClick()
+                compose.onNodeWithText("不感兴趣", substring = false).assertIsDisplayed()
+                InstrumentationRegistry.getInstrumentation().uiAutomation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK)
+                compose.onNodeWithText("推荐依据", substring = false).performClick()
                 compose.onNodeWithText("AI：AI 预算不足，保留本地结果").assertExists()
                 compose.onNodeWithTag("recommendation-settings").performClick()
                 compose.onNodeWithTag("recommendation-source-community").performClick()
@@ -94,7 +99,7 @@ class RecommendationExperienceTest {
                 compose.onNodeWithText("大家常听", substring = false).performClick()
                 compose.waitUntil(10_000) { fixture.requests.any { it.first.contains("/rankings?") && it.first.contains("scope=community") } }
                 compose.onNodeWithText("所有用户的汇总收听排行，不展示其他账号信息。").assertExists()
-                compose.onNodeWithText("真实本库歌曲").performClick()
+                compose.onNode(hasText("真实本库歌曲") and hasAnyAncestor(hasTestTag("listening-rankings"))).performClick()
                 compose.waitUntil(10_000) { vm.state.value.current?.id == "local-a" }
                 capture("recommendation-rankings-phone.png")
             } finally { cleanup(vm) }

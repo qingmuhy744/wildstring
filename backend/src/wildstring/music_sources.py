@@ -566,6 +566,8 @@ class MusicSources:
         @router.post("/manage/source-plugins/{identity}/test", dependencies=mutation)
         def test(identity: str, user=admin):
             configuration = self.settings(identity)
+            if not configuration["enabled"]:
+                raise HTTPException(409, "source_plugin_disabled")
             context = PluginContext(self, identity, configuration, time.monotonic() + 25)
             try:
                 values = self.plugins[identity].search(context, "摇滚")
@@ -573,8 +575,21 @@ class MusicSources:
                     raise PluginError("source_plugin_invalid_response")
                 return {"ok": True, "count": min(3, len(values))}
             except Exception as error:
+                from wildstring.diagnostics import record_event
+
+                record_event(
+                    "source_plugin.test.finished",
+                    service=identity,
+                    operation="plugin_test",
+                    code=error.code
+                    if isinstance(error, PluginError)
+                    else "source_plugin_invalid_response",
+                )
                 raise HTTPException(
-                    502,
+                    409
+                    if isinstance(error, PluginError)
+                    and error.code == "source_plugin_configuration_changed"
+                    else 502,
                     error.code
                     if isinstance(error, PluginError)
                     else "source_plugin_invalid_response",

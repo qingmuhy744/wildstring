@@ -2,6 +2,8 @@
 package com.wildstring.app.ui
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -13,9 +15,11 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.google.gson.JsonObject
 import com.wildstring.app.data.*
@@ -55,6 +59,8 @@ internal fun recommendationIssue(code: String): String = when {
     var connectionsError by remember { mutableStateOf<String?>(null) }
     var settings by remember { mutableStateOf(false) }; var rankings by remember { mutableStateOf(false) }; var external by remember { mutableStateOf(false) }
     var rejected by remember { mutableStateOf(setOf<String>()) }
+    var evidence by remember { mutableStateOf(false) }
+    var trackMenu by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(Unit) {
         action.run {
             preferences = vm.repository.api().recommendationPreferences()
@@ -80,29 +86,41 @@ internal fun recommendationIssue(code: String): String = when {
                 Text("属于你的每日推荐", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
                 IconButton({ action.message = null; settings = true }, enabled = preferences != null, modifier = Modifier.testTag("recommendation-settings")) { Icon(Icons.Default.Tune, "推荐设置") }
             }
-            Text("依据你的偏好生成，其他用户的收听只使用汇总。", style = MaterialTheme.typography.bodySmall)
+            Text("${entries.size} 首 · 今日的临时歌单", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Row {
                 TextButton({ scope.launch { action.run { daily = vm.repository.agentApi().refreshDaily(); rejected = emptySet() } } }, enabled = !action.busy) { Text(if (action.busy) "正在生成…" else "换一批") }
                 TextButton({ rankings = true }) { Text("收听排行") }
                 TextButton({ external = true }) { Text("发现新音乐") }
             }
             ActionStatus(action)
-            daily?.let { RecommendationEvidence(it.sourceStatus, it.warnings, it.degraded, it.engine) }
+            TextButton({ evidence = !evidence }) { Text(if (evidence) "收起推荐依据" else "推荐依据") }
+            if (evidence) daily?.let { RecommendationEvidence(it.sourceStatus, it.warnings, it.degraded, it.engine) }
         }
         item { Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button({ vm.play(entries.map { it.track }); entries.firstOrNull()?.let { first -> scope.launch { runCatching { vm.repository.feedback(RecommendationFeedback(trackId = first.track.id, action = "accept")).close() } } } }, enabled = entries.isNotEmpty()) { Text("播放推荐") }
             TextButton({ scope.launch { action.run { saveRecommendations(vm, "每日推荐 ${daily?.date.orEmpty()}", entries); action.message = "已保存为歌单" } } }, enabled = !action.busy && entries.isNotEmpty()) { Text("保存歌单") }
         } }
         items(entries, key = { it.track.id }) { item ->
-            Column(Modifier.fillMaxWidth()) {
-                ListItem(headlineContent = { Text(item.track.title) }, supportingContent = { Column {
-                    Text(item.track.artist + " · " + item.reason)
-                    item.sourceIds.orEmpty().takeIf { it.isNotEmpty() }?.let { Text(it.joinToString(" / ", transform = ::recommendationSource), style = MaterialTheme.typography.labelSmall) }
-                } }, modifier = Modifier.clickable { vm.play(entries.map { it.track }, entries.indexOf(item)) })
-                Row {
-                    TextButton({ vm.favorite(item.track) }, enabled = item.track.id !in current.pendingFavorites) { Text(if (vm.repository.knownTracks[item.track.id]?.loved ?: item.track.loved) "已收藏" else "收藏") }
+            Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).testTag("daily-track-${item.track.id}")
+                .combinedClickable(onClick = { vm.play(entries.map { it.track }, entries.indexOf(item)) }, onLongClick = { trackMenu = item.track.id }),
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text((entries.indexOf(item) + 1).toString().padStart(2, '0'), Modifier.width(24.dp), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Cover(vm, item.track.id.takeIf { item.track.hasCover }, item.track.title, Modifier.size(44.dp).clip(RoundedCornerShape(8.dp)))
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(item.track.title, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyLarge)
+                    Text(listOfNotNull(item.track.artist, item.track.album?.takeIf(String::isNotBlank)).joinToString(" · "),
+                        maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Box {
+                    IconButton({ trackMenu = item.track.id }, Modifier.testTag("daily-more-${item.track.id}")) { Icon(Icons.Default.MoreVert, "${item.track.title}的更多操作") }
+                    DropdownMenu(trackMenu == item.track.id, { trackMenu = null }) {
+                    DropdownMenuItem(text = { Text(if (vm.repository.knownTracks[item.track.id]?.loved ?: item.track.loved) "取消收藏" else "收藏") },
+                        leadingIcon = { Icon(Icons.Default.FavoriteBorder, null) }, enabled = item.track.id !in current.pendingFavorites,
+                        onClick = { trackMenu = null; vm.favorite(item.track) })
                     listOf("dismiss_track" to "不感兴趣", "less_artist" to "少推荐此艺人").forEach { (key, name) ->
-                        TextButton({ scope.launch { action.run { vm.repository.feedback(RecommendationFeedback(trackId = item.track.id, action = key)).close(); rejected = rejected + item.track.id } } }, enabled = !action.busy) { Text(name) }
+                        DropdownMenuItem(text = { Text(name) }, leadingIcon = { Icon(if (key == "dismiss_track") Icons.Default.DoNotDisturb else Icons.Default.PersonOff, null) },
+                            onClick = { trackMenu = null; scope.launch { action.run { vm.repository.feedback(RecommendationFeedback(trackId = item.track.id, action = key)).close(); rejected = rejected + item.track.id } } }, enabled = !action.busy)
+                    }
                     }
                 }
             }

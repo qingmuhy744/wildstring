@@ -184,7 +184,7 @@ class Connection(Input):
     model: str = Field(min_length=1, max_length=200)
     api_key: SecretStr | None = None
     clear_api_key: bool = False
-    timeout: int = Field(default=30, ge=1, le=120)
+    timeout: int = Field(default=90, ge=1, le=120)
     shared: bool = False
     background_allowed: bool = False
     daily_call_budget: int = Field(default=100, ge=0, le=10000)
@@ -192,8 +192,8 @@ class Connection(Input):
     version: int | None = Field(default=None, ge=1)
     protocol: Literal["chat_completions", "responses"] = "chat_completions"
     provider: Literal["generic", "openai", "deepseek", "qwen", "gemini"] = "generic"
-    reasoning_effort: Literal["auto", "none", "low", "medium", "high", "max", "xhigh"] = "auto"
-    max_output_tokens: int = Field(default=2048, ge=128, le=32768)
+    reasoning_effort: Literal["auto", "none", "low", "medium", "high", "max", "xhigh"] = "low"
+    max_output_tokens: int = Field(default=8192, ge=128, le=32768)
     native_search: bool = False
 
     @field_validator("base_url")

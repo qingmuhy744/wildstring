@@ -11,7 +11,8 @@ import kotlinx.coroutines.flow.asStateFlow
 
 data class Preferences(val redCloth: Boolean = false, val redIcon: Boolean = false,
     val metadataMb: Int = 32, val artworkMb: Int = 64, val audioMb: Int = 256, val haptics: Boolean = true, val appearance: String = "system", val aacBitrate: Int = 0,
-    val playbackStyle: String = "cover", val songListSize: SongListSize = SongListSize.MEDIUM)
+    val playbackStyle: String = "cover", val songListSize: SongListSize = SongListSize.MEDIUM,
+    val lyricFollowSeconds: Int = 2)
 
 @Singleton
 class AppSettings @Inject constructor(@param:ApplicationContext private val context: Context) {
@@ -19,11 +20,20 @@ class AppSettings @Inject constructor(@param:ApplicationContext private val cont
     private val mutable = MutableStateFlow(Preferences(prefs.getBoolean("red_cloth", false), prefs.getBoolean("red_icon", false),
         prefs.getInt("metadata_mb", 32), prefs.getInt("artwork_mb", 64), prefs.getInt("audio_mb", 256), prefs.getBoolean("haptics", true), prefs.getString("appearance", "system") ?: "system", prefs.getInt("aac_bitrate", 0).takeIf { it in listOf(0, 128, 192, 256, 320) } ?: 0,
         prefs.getString("playback_style", "cover").takeIf { it in listOf("cover", "vinyl", "cassette") } ?: "cover",
-        SongListSize.fromStored(runCatching { prefs.getString("song_list_size", null) }.getOrNull())))
+        SongListSize.fromStored(runCatching { prefs.getString("song_list_size", null) }.getOrNull()),
+        prefs.getInt("lyric_follow_seconds", 2).takeIf { it in listOf(1, 2, 3, 5, 10) } ?: 2))
     val state = mutable.asStateFlow()
     private val gainMutable = MutableStateFlow(0L)
     val gainRevision = gainMutable.asStateFlow()
+    private val avatarMutable = MutableStateFlow(0L)
+    val avatarRevision = avatarMutable.asStateFlow()
+    fun avatarChanged() { avatarMutable.value += 1 }
     fun gainChanged() { gainMutable.value += 1 }
+    fun lyricFollowSeconds(seconds: Int) {
+        require(seconds in listOf(1, 2, 3, 5, 10))
+        prefs.edit().putInt("lyric_follow_seconds", seconds).apply()
+        mutable.value = mutable.value.copy(lyricFollowSeconds = seconds)
+    }
     fun songListSize(size: SongListSize) {
         prefs.edit().putString("song_list_size", size.key).apply(); mutable.value = mutable.value.copy(songListSize = size)
     }

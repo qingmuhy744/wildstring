@@ -228,7 +228,7 @@ private fun displayValue(value: com.google.gson.JsonElement?): String = when { v
             }, enabled = !action.busy && input.isNotBlank(), modifier = Modifier.testTag("agent-chat-send")) { if (action.busy) CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp) else Icon(Icons.AutoMirrored.Filled.Send, "发送") }
         }
     }
-    if (history) AlertDialog(onDismissRequest = { if (!action.busy) history = false }, title = { Text("历史对话") }, text = {
+    if (history) AlertDialog(modifier = Modifier.testTag("agent-history-dialog"), onDismissRequest = { if (!action.busy) history = false }, title = { Text("历史对话") }, text = {
         LazyColumn(Modifier.heightIn(max = 400.dp).testTag("agent-history")) {
             item { ActionStatus(action) }
             if (conversations.isEmpty()) item { AgentEmpty("暂无历史。") }
@@ -439,11 +439,11 @@ internal fun connectionBudget(connection: JsonObject): String {
 @Composable private fun AgentConnectionForm(vm: MusicViewModel, original: JsonObject?, dismiss: () -> Unit, saved: () -> Unit) {
     var protocol by remember { mutableStateOf(original?.text("protocol")?.ifBlank { "chat_completions" } ?: "chat_completions") }
     var provider by remember { mutableStateOf(original?.text("provider")?.ifBlank { "generic" } ?: "generic") }
-    var effort by remember { mutableStateOf(original?.text("reasoning_effort")?.ifBlank { "auto" } ?: "auto") }
-    var outputLimit by remember { mutableStateOf((original?.number("max_output_tokens", 2048) ?: 2048).toString()) }
+    var effort by remember { mutableStateOf(if (original == null) "low" else original.text("reasoning_effort").ifBlank { "auto" }) }
+    var outputLimit by remember { mutableStateOf((original?.number("max_output_tokens", 2048) ?: 8192).toString()) }
     var nativeSearch by remember { mutableStateOf(original?.flag("native_search") ?: false) }
     var name by remember { mutableStateOf(original?.text("name") ?: "我的 AI") }; var base by remember { mutableStateOf(original?.text("base_url") ?: "") }
-    var model by remember { mutableStateOf(original?.text("model") ?: "") }; var secret by remember { mutableStateOf("") }; var timeout by remember { mutableStateOf((original?.number("timeout") ?: 30).toString()) }
+    var model by remember { mutableStateOf(original?.text("model") ?: "") }; var secret by remember { mutableStateOf("") }; var timeout by remember { mutableStateOf((original?.number("timeout") ?: 90).toString()) }
     var budget by remember { mutableStateOf((original?.number("daily_call_budget") ?: 100).toString()) }; var enabled by remember { mutableStateOf(original?.flag("enabled") ?: true) }
     var background by remember { mutableStateOf(original?.flag("background_allowed") ?: false) }; var instance by remember { mutableStateOf(original?.text("scope") == "instance") }; var shared by remember { mutableStateOf(original?.flag("shared") ?: false) }
     val account by vm.state.collectAsStateWithLifecycle()

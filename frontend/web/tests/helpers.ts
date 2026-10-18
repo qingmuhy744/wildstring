@@ -1,5 +1,24 @@
 import { expect, type Page } from '@playwright/test';
 
+export async function section(page: Page, name: string) {
+  await expect(page.locator('.app-shell')).toBeVisible();
+  if (name === '通知中心') {
+    await page.getByRole('button', { name, exact: true }).click();
+    return;
+  }
+  if (await page.getByLabel('浏览方式', { exact: true }).isVisible()) {
+    await page.getByLabel('浏览方式', { exact: true }).selectOption({ label: name });
+    return;
+  }
+  const sidebar = page.locator('.sidebar');
+  const target = sidebar.getByRole('button', { name: new RegExp(`^${name}(?: |$)`) });
+  if (!(await target.isVisible())) {
+    const group = ['待确认草案', '巡检与任务', '助手设置'].includes(name) ? '助手工具' : '更多音乐';
+    await sidebar.getByText(group, { exact: true }).click();
+  }
+  await target.click();
+}
+
 export async function login(page: Page, options: { automaticSync?: boolean } = {}) {
   if (!options.automaticSync)
     await page.addInitScript(() => localStorage.setItem('wildstring:playback-sync:admin', 'off'));

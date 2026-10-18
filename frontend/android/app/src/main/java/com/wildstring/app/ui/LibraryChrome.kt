@@ -74,12 +74,10 @@ import androidx.compose.ui.unit.dp
         }))
 }
 
-@Composable internal fun PersonalHeader(state: MusicState, recent: () -> Unit, compact: Boolean = false) {
+@Composable internal fun PersonalHeader(vm: MusicViewModel, state: MusicState, recent: () -> Unit, compact: Boolean = false) {
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         if (!compact) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-            Surface(shape = CircleShape, color = MaterialTheme.colorScheme.secondaryContainer) {
-                Icon(Icons.Default.Person, null, Modifier.padding(14.dp).size(28.dp), tint = MaterialTheme.colorScheme.onSecondaryContainer)
-            }
+            AccountAvatar(vm, Modifier.size(56.dp))
             Column {
                 Text(state.account?.username ?: "我的音乐", style = MaterialTheme.typography.titleLarge)
                 Text("音乐，留在自己的收藏里", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)

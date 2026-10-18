@@ -63,6 +63,9 @@ def test_zip_lifecycle_worker_matching_and_lyrics(settings, authenticated_client
         assert imported.status_code == 200, imported.text
         value = imported.json()
         assert value["enabled"] is False and value["version"] == 1
+        disabled_test = client.post(BASE + "/fixture-source/test", headers=HEADERS)
+        assert disabled_test.status_code == 409
+        assert disabled_test.json()["detail"] == "source_plugin_disabled"
         assert client.get(BASE + "/fixture-source/export").content == source_zip
         assert client.post(BASE + "/import", headers=HEADERS, content=source_zip).status_code == 409
         saved = client.put(

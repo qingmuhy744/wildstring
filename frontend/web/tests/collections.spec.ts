@@ -337,7 +337,10 @@ test('实际收听累计、一次计数、暂停跳转不增加与收听视图',
   expect(after.listened_ms).toBe(heard.listened_ms);
   expect(after.play_count).toBe(heard.play_count);
   if (info.project.name === 'mobile') await page.getByLabel('浏览方式').selectOption('listening');
-  else await page.getByRole('button', { name: '收听记录', exact: true }).click();
+  else {
+    await page.locator('.sidebar').getByText('更多音乐', { exact: true }).click();
+    await page.getByRole('button', { name: '收听记录', exact: true }).click();
+  }
   await expect(page.getByRole('heading', { name: '那些反复响起的。', exact: true })).toBeVisible();
   await expect(page.getByRole('table')).toContainText('夜晚测试曲');
   await expect(page.getByLabel('收听统计')).toBeVisible();

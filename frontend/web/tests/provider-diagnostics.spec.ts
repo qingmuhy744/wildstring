@@ -21,6 +21,62 @@ async function refreshTrack(page: Page) {
   return dialog;
 }
 
+test('AcoustID 区分无效应用密钥和未测试本机指纹，缺少分项时延不显示 NaN', async ({
+  page,
+}, info) => {
+  await login(page);
+  let invalid = true;
+  await page.route('**/api/v1/manage/providers/network-test', (route) =>
+    route.fulfill({
+      json: {
+        proxy_mode: 'direct',
+        items: [
+          {
+            provider: 'acoustid',
+            status: invalid ? 'error' : 'ok',
+            elapsed_ms: 814,
+            code: invalid ? 'acoustid_error_4' : 'reachable',
+            http_status: invalid ? 400 : 200,
+            via_proxy: false,
+            checks: [
+              {
+                name: 'api',
+                status: invalid ? 'error' : 'ok',
+                code: invalid ? 'acoustid_error_4' : 'reachable',
+                domain: 'api.acoustid.org',
+                scope: 'functional_api',
+              },
+              {
+                name: 'local_fingerprint',
+                status: 'unverified',
+                code: 'unverified',
+                domain: 'api.acoustid.org',
+                scope: 'audio_recognition',
+              },
+            ],
+          },
+        ],
+      },
+    }),
+  );
+  await settings(page);
+  const panel = page.getByRole('region', { name: '联网来源网络检测', exact: true });
+  await panel.getByRole('button', { name: '检测网络', exact: true }).click();
+  await expect(panel).toContainText('应用密钥无效');
+  await expect(panel).toContainText('User API Key 不能用于识别');
+  invalid = false;
+  await panel.getByRole('button', { name: '检测网络', exact: true }).click();
+  await expect(panel).toContainText('HTTP 200');
+  await expect(panel).toContainText('本机音频指纹计算');
+  await expect(panel).toContainText('本次未测试');
+  await expect(panel).toContainText('无需额外密钥');
+  await expect(panel).not.toContainText('NaN');
+  await panel.scrollIntoViewIfNeeded();
+  await panel.screenshot({
+    path: `../../artifacts/052-verification/acoustid-${info.project.name}.png`,
+  });
+});
+
 test('网络检测使用代理草稿和已存密钥，先反馈不重复，不保存且失败可重试', async ({ page }, info) => {
   await login(page);
   const original = await (await page.request.get('/api/v1/manage/providers')).json();
@@ -78,7 +134,9 @@ test('网络检测使用代理草稿和已存密钥，先反馈不重复，不�
     .getByLabel('HTTP 代理地址', { exact: true })
     .fill('http://fixture:diagnostic-password@127.0.0.1:7890');
   await page.getByLabel('Last.fm API Key', { exact: true }).fill('unsaved-api-key');
-  await page.getByLabel('AcoustID API Key', { exact: true }).fill('unsaved-acoustid-key');
+  await page
+    .getByLabel('AcoustID Application API Key', { exact: true })
+    .fill('unsaved-acoustid-key');
   const panel = page.getByRole('region', { name: '联网来源网络检测', exact: true });
   await panel.getByRole('button', { name: '检测网络', exact: true }).click();
   await expect(panel.getByRole('button', { name: '正在检测网络…', exact: true })).toBeDisabled();

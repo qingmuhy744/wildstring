@@ -38,6 +38,51 @@ def connection(client, **options):
     )
 
 
+def test_multiple_connections_have_independent_settings_and_recommended_defaults(agent):
+    client, service = agent
+    first = connection(client, provider="deepseek", api_key="synthetic-first-key")
+    second = connection(
+        client,
+        name="备用连接",
+        model="alternate-fixture",
+        api_key="synthetic-second-key",
+        timeout=45,
+        reasoning_effort="none",
+        max_output_tokens=4096,
+    )
+    assert first["id"] != second["id"]
+    assert (first["timeout"], first["reasoning_effort"], first["max_output_tokens"]) == (
+        90,
+        "low",
+        8192,
+    )
+    _, payload = request({"model": first["model"], "options": first}, [])
+    assert payload["max_tokens"] == 8192 and payload["reasoning_effort"] == "low"
+    assert payload["thinking"] == {"type": "enabled"}
+    edited = client.patch(
+        BASE + "/connections/" + second["id"],
+        headers=HEADERS,
+        json={
+            "name": "备用已改名",
+            "base_url": second["base_url"],
+            "model": second["model"],
+            "version": second["version"],
+        },
+    )
+    assert edited.status_code == 200
+    assert edited.json()["timeout"] == 45
+    response = client.delete(BASE + "/connections/" + first["id"], headers=HEADERS)
+    assert response.status_code == 200
+    remaining = client.get(BASE + "/connections").json()["items"]
+    assert [item["id"] for item in remaining] == [second["id"]]
+    assert (
+        remaining[0]["timeout"],
+        remaining[0]["reasoning_effort"],
+        remaining[0]["max_output_tokens"],
+    ) == (45, "none", 4096)
+    assert "synthetic-second-key" not in json.dumps(remaining)
+
+
 def test_protocol_preserves_reasoning_and_response_items():
     config = {
         "model": "deepseek-flash",

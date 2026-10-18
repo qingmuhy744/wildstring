@@ -274,7 +274,7 @@ a {
   background: #1b1d18;
 }
 .sidebar .brand {
-  margin: 0 8px 52px;
+  margin: 0 8px 24px;
 }
 .sidebar-label {
   font-size: 10px;
@@ -3968,4 +3968,115 @@ select {
   background: #faf9f5;
   color: #30332a;
   border-color: #c9cbbd;
+}
+.sidebar-navigation {
+  min-width: 0;
+}
+.sidebar-group-label {
+  margin: 18px 12px 6px;
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+}
+.sidebar-group {
+  margin: 4px 0;
+}
+.sidebar-group > summary {
+  cursor: pointer;
+  padding: 11px 12px;
+  color: var(--muted);
+  font-size: 13px;
+  border-radius: 8px;
+}
+.sidebar-group > summary:hover {
+  background: var(--workspace-selected);
+}
+.sidebar-group .nav-button {
+  padding-left: 20px;
+}
+.sidebar-navigation .nav-button {
+  margin: 2px 0;
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+.notification-entry {
+  position: relative;
+  flex-shrink: 0;
+  width: 42px;
+  height: 42px;
+  border: 0;
+  background: transparent;
+}
+.notification-corner-count {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  padding: 2px 5px;
+  border-radius: 10px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 10px;
+}
+.user-avatar {
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  object-fit: cover;
+}
+.avatar-fallback {
+  display: inline-grid;
+  place-items: center;
+  background: var(--workspace-selected);
+  color: var(--workspace-text);
+}
+.account-entry .user-avatar {
+  width: 20px;
+  height: 20px;
+}
+.avatar-editor {
+  display: flex;
+  gap: 20px;
+  align-items: flex-start;
+  margin-bottom: 24px;
+}
+.avatar-preview .user-avatar {
+  width: 72px;
+  height: 72px;
+  font-size: 24px;
+}
+.avatar-controls {
+  flex: 1;
+  min-width: 0;
+}
+.avatar-controls label {
+  display: grid;
+  gap: 8px;
+}
+.avatar-controls input {
+  max-width: 100%;
+}
+.avatar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+.app-shell > .sidebar {
+  overflow: hidden;
+}
+.sidebar-navigation {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+.sidebar > .brand,
+.sidebar > .nav-button,
+.sidebar-bottom {
+  flex-shrink: 0;
+}
+.sidebar-bottom {
+  margin-top: 0;
+  padding-top: 12px;
 }

@@ -20,13 +20,39 @@ class LyricGestureTest {
     private val seeks = mutableListOf<Long>()
     private var toggles = 0
     private var previews = 0
-    private fun show(synced: Boolean = true) {
+    private fun show(synced: Boolean = true, followDelayMs: Long = 2_000) {
         val lyrics = Lyrics(if (synced) "synced" else "plain", (0..19).map {
             LyricLine(if (synced) it * 1000L else null, "测试歌词第 $it 行")
         })
         compose.setContent { MaterialTheme {
-            LyricViewport(lyrics, 0, { seeks += it }, { toggles++ }, Modifier.width(360.dp).height(400.dp), { previews++ })
+            LyricViewport(lyrics, 0, { seeks += it }, { toggles++ }, Modifier.width(360.dp).height(400.dp), { previews++ }, followDelayMs)
         } }
+    }
+
+    @Test fun idleReturnsToCurrentLyricsWithoutSeekingAndAnotherTapRestartsTheTimer() {
+        show()
+        compose.onNodeWithTag("lyric-line-0").performClick()
+        val first = android.os.SystemClock.elapsedRealtime()
+        compose.waitUntil(1_500) { android.os.SystemClock.elapsedRealtime() - first >= 1_000 }
+        compose.onNodeWithTag("lyric-seek-preview").assertExists()
+        compose.onNodeWithTag("lyric-line-0").performClick()
+        val second = android.os.SystemClock.elapsedRealtime()
+        compose.waitUntil(1_500) { android.os.SystemClock.elapsedRealtime() - second >= 1_000 }
+        compose.onNodeWithTag("lyric-seek-preview").assertExists()
+        compose.waitUntil(3_000) { compose.onAllNodesWithTag("lyric-seek-preview").fetchSemanticsNodes().isEmpty() }
+        compose.onNodeWithTag("lyric-seek-preview").assertDoesNotExist()
+        compose.runOnIdle { assertTrue(seeks.isEmpty()) }
+    }
+
+    @Test fun longerPreferenceKeepsTheSelectionBeyondTheDefaultDelay() {
+        show(followDelayMs = 5_000)
+        compose.onNodeWithTag("lyric-line-0").performClick()
+        val started = android.os.SystemClock.elapsedRealtime()
+        compose.waitUntil(3_000) { android.os.SystemClock.elapsedRealtime() - started >= 2_200 }
+        compose.onNodeWithTag("lyric-seek-preview").assertExists()
+        compose.waitUntil(4_500) { compose.onAllNodesWithTag("lyric-seek-preview").fetchSemanticsNodes().isEmpty() }
+        compose.onNodeWithTag("lyric-seek-preview").assertDoesNotExist()
+        compose.runOnIdle { assertTrue(seeks.isEmpty()) }
     }
 
     @Test fun scrollingPreviewsTimeAndOnlyTheConfirmButtonSeeks() {
