@@ -10,6 +10,7 @@ buildscript {
                 "com.google.crypto.tink" -> security.getProperty("tink")
                 "com.google.protobuf" -> if (requested.version?.startsWith("3.") == true) security.getProperty("protobuf3") else null
                 "org.apache.commons" -> if (requested.name == "commons-compress") security.getProperty("commons-compress") else null
+                "org.apache.httpcomponents" -> if (requested.name == "httpclient") security.getProperty("httpclient4") else null
                 "org.bitbucket.b_c" -> security.getProperty("jose4j")
                 "org.jdom" -> security.getProperty("jdom2")
                 "io.opentelemetry" -> if (requested.name in listOf("opentelemetry-api", "opentelemetry-context")) security.getProperty("opentelemetry") else null
@@ -40,6 +41,7 @@ allprojects {
                 "com.google.crypto.tink" -> security.getProperty("tink")
                 "com.google.protobuf" -> if (requested.version?.startsWith("3.") == true) security.getProperty("protobuf3") else null
                 "org.apache.commons" -> if (requested.name == "commons-compress") security.getProperty("commons-compress") else null
+                "org.apache.httpcomponents" -> if (requested.name == "httpclient") security.getProperty("httpclient4") else null
                 "org.bitbucket.b_c" -> security.getProperty("jose4j")
                 "org.jdom" -> security.getProperty("jdom2")
                 "io.opentelemetry" -> if (requested.name in listOf("opentelemetry-api", "opentelemetry-context")) security.getProperty("opentelemetry") else null
