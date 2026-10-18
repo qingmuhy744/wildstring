@@ -91,6 +91,10 @@ const messages: Record<string, string> = {
   native_search_not_supported: '当前协议和供应商组合未配置原生搜索，请使用独立搜索服务。',
   reasoning_effort_not_supported: '此模型档案不支持所选推理强度，请选择模型默认或支持的强度。',
   ai_output_incomplete: '模型输出未完成，请适当提高输出 Token 上限或缩小问题范围。',
+  ai_output_limit:
+    '模型达到输出 Token 上限，分析未完成。请在 AI 连接中提高上限或降低推理强度；旧连接请新建可配置连接。调整后再恢复，恢复可能产生费用。',
+  ai_content_filtered: '模型服务过滤了本次输出。请调整问题范围后再恢复，恢复可能产生费用。',
+  ai_response_failed: '模型服务未能完成本次响应，请检查服务状态后再恢复，恢复可能产生费用。',
   memory_limit_reached: '长期记忆已达 50 条，请先整理或删除旧条目。',
   memory_version_conflict: '这条记忆已变化，请刷新后再修改。',
 
@@ -146,6 +150,8 @@ const messages: Record<string, string> = {
   admin_setup_required: '请先在服务端设置管理员密码。',
   authentication_required: '登录已过期，请重新登录。',
 };
+
+export const errorCodeMessage = (code: string) => messages[code] || code;
 
 export async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
   const response = await fetch(`/api/v1${path}`, {

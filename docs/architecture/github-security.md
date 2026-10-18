@@ -27,3 +27,7 @@ CodeQL 在主分支推送、PR、每周和手动触发时运行。工作流使�
 ## 启用与验收
 
 工作流文件必须合入默认分支，定时扫描、Dependabot 版本更新与 Android 依赖提交才算正式生效。第一次扫描完成后核验 GitHub 上报的分析语言和提交，确认不是仅保存了 YAML；主分支合并规则应要求扫描及依赖审查通过，并阻止新引入的高危安全结果。告警是否为零和扫描是否成功分别核对，已有问题不得为追求绿色结果随意忽略。
+
+2026-10-18 已核验主分支 `0fcaa2d` 四种语言分析均成功上报，Android 依赖图提交成功；`security-and-quality` 分支规则已启用，要求原 CI、四项语言扫描与依赖审查，并阻止新增 high／critical 安全问题和 error 级代码问题。已有扫描及依赖告警保留待审查。
+
+本仓库使用高级工作流，默认设置 API 的 `state: not-configured` 仅表示没有启用默认设置，不能用于判断高级扫描是否运行。请查看 [CodeQL 运行记录](https://github.com/qingmuhy744/wildstring/actions/workflows/codeql.yml) 和 [Code scanning 告警](https://github.com/qingmuhy744/wildstring/security/code-scanning)。切换到默认设置会覆盖高级工作流，见 [GitHub 默认设置说明](https://docs.github.com/en/code-security/how-tos/find-and-fix-code-vulnerabilities/configure-code-scanning/configure-code-scanning)。

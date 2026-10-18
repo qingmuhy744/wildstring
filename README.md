@@ -1,6 +1,6 @@
 # 野弦 WildString
 
-0.5.0 更新：官方联网检索与记忆、独立 ZIP 数据源插件（QQ／酷狗／网易云）、逐字歌词、ReplayGain 与专辑／单曲手动增益。使用及验证边界见[发布说明](docs/releases/v0.5.0.md)。
+0.5.1 更新：巡检上下文与失败反馈修复，加入 GitHub 安全扫描及合并门禁。使用及验证边界见[发布说明](docs/releases/v0.5.1.md)。0.5.0 的联网与记忆、数据源插件、逐字歌词和响度功能继续保留。
 
 [![CI](https://github.com/qingmuhy744/wildstring/actions/workflows/ci.yml/badge.svg)](https://github.com/qingmuhy744/wildstring/actions/workflows/ci.yml)
 

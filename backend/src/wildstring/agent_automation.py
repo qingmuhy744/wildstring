@@ -3,6 +3,7 @@
 import json
 import threading
 import time
+from collections import Counter
 from uuid import uuid4
 
 from fastapi import HTTPException
@@ -21,6 +22,30 @@ RESUMABLE = {
     "cancelled",
     "retry_wait",
 }
+
+
+def inspection_evidence(results, counts):
+    """Explain exceptions across the whole inspection, without exporting clean tracks."""
+    affected = [
+        r for r in results if r.get("track_id") and (r.get("issues") or r.get("error_code"))
+    ]
+    issues = Counter(issue for r in affected for issue in r.get("issues", []))
+    items = []
+    for record in affected:
+        item = {key: record[key] for key in ("track_id", "metadata_version") if key in record}
+        item["title"] = str(record.get("title", ""))[:200]
+        item["issues"] = record.get("issues", [])[:20]
+        if record.get("error_code"):
+            item["error_code"] = str(record["error_code"])[:100]
+        if len(encoded(items + [item])) > 16000 or len(items) >= 20:
+            break
+        items.append(item)
+    return {
+        "counts": counts,
+        "issue_counts": dict(issues),
+        "affected": len(affected),
+        "items": items,
+    }
 
 
 class Automation:
@@ -227,10 +252,10 @@ class Automation:
         with self.database.connect(write=True) as connection:
             connection.execute("BEGIN IMMEDIATE")
             result = connection.execute(
-                "UPDATE agent_tasks SET status=?,stage=?,counts=?,error_code=?,lease_until=NULL,lease_token=NULL,updated_at=?,version=version+1 WHERE id=? AND lease_token=?",
+                "UPDATE agent_tasks SET status=?,stage=CASE WHEN ?='succeeded' THEN 'completed' ELSE stage END,counts=?,error_code=?,lease_until=NULL,lease_token=NULL,updated_at=?,version=version+1 WHERE id=? AND lease_token=?",
                 (
                     status,
-                    "completed" if status in TERMINAL else status,
+                    status,
                     encoded(counts),
                     error_code,
                     now(),
@@ -333,13 +358,31 @@ class Automation:
                     background_ai and not configuration.get("background_allowed")
                 ):
                     raise HTTPException(403, "background_authorization_changed")
+                self.check_task_continuation(job)
+                evidence = inspection_evidence(results, counts)
+                if not evidence["affected"] and not counts["failed"] and not counts["skipped"]:
+                    results.append(
+                        {
+                            "analysis": f"本地规则已检查 {counts['processed']} 首，未发现待解释的问题，已跳过本次 AI 分析。规则检查不能证明音乐元数据或发行归属完全正确；需要考证时，可在助手中指定歌曲并核对来源。",
+                            "draft_ids": [],
+                            "ai_skipped": True,
+                        }
+                    )
+                    self.checkpoint_task(
+                        job, len(identities), results, counts, stage="analysis_complete"
+                    )
+                    self.check_task_continuation(job)
+                    self.finish_task(job, "succeeded", counts)
+                    return
                 if parameters.get("max_calls", 0) <= counts["calls"]:
                     raise HTTPException(429, "agent_task_budget_exhausted")
                 self.checkpoint_task(job, len(identities), results, counts, stage="model_call")
                 # Explicit opt-in sends only a bounded projection, never local paths, audio or lyrics.
                 prompt = (
-                    "只解释这些实际规则巡检证据及可行的下一步；不要编造音乐事实或把缺失字段猜成已知。需要修改时仅生成待确认草案。\n"
-                    + encoded(results[:80])
+                    "只解释这些实际规则巡检证据及可行的下一步，按问题类型汇总，回答不超过600字，不逐曲重复正常项。"
+                    "统计覆盖整个巡检，items只是最多20首异常样本；未列出的歌曲不能视为已完成AI考证。"
+                    "不要编造音乐事实或把缺失字段猜成已知。需要修改时仅生成待确认草案。\n"
+                    + encoded(evidence)
                 )
 
                 def account_call():
@@ -376,6 +419,7 @@ class Automation:
                     on_call=account_call,
                     check_cancel=lambda: self.check_task_continuation(job),
                     on_progress=save_model_progress,
+                    finalize=True,
                 )
                 complete = {"analysis": outcome["content"], "draft_ids": outcome["draft_ids"]}
                 if len(results) == model_result_index:
