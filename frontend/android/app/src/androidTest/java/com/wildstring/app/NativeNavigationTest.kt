@@ -4,7 +4,7 @@ import android.content.ComponentName
 import android.graphics.Bitmap
 import android.os.ParcelFileDescriptor
 import androidx.compose.ui.test.*
-import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.ViewCompat
