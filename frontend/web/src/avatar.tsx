@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api, type User } from './api';
 
 function useAvatar(user: User) {
@@ -57,14 +57,46 @@ export function AvatarEditor({
   onBusy?: (value: boolean) => void;
 }) {
   const [file, setFile] = useState<File | null>(null),
-    [preview, setPreview] = useState('');
+    [previewReady, setPreviewReady] = useState(false);
+  const canvas = useRef<HTMLCanvasElement>(null);
   const [busy, setBusy] = useState(false),
     [message, setMessage] = useState('');
   useEffect(() => {
-    const url = file ? URL.createObjectURL(file) : '';
-    setPreview(url);
+    let cancelled = false;
+    setPreviewReady(false);
+    if (file)
+      void createImageBitmap(file)
+        .then((bitmap) => {
+          try {
+            const context = canvas.current?.getContext('2d');
+            if (cancelled || !context) return;
+            const edge = Math.min(bitmap.width, bitmap.height);
+            context.fillStyle = 'white';
+            context.fillRect(0, 0, 256, 256);
+            context.drawImage(
+              bitmap,
+              (bitmap.width - edge) / 2,
+              (bitmap.height - edge) / 2,
+              edge,
+              edge,
+              0,
+              0,
+              256,
+              256,
+            );
+            setPreviewReady(true);
+          } finally {
+            bitmap.close();
+          }
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setFile(null);
+            setMessage('无法预览此图片，请选择有效的 JPG、PNG 或 WebP。');
+          }
+        });
     return () => {
-      if (url) URL.revokeObjectURL(url);
+      cancelled = true;
     };
   }, [file]);
   async function save(remove = false) {
@@ -96,8 +128,15 @@ export function AvatarEditor({
   return (
     <section className="avatar-editor" aria-label="自定义头像">
       <div className="avatar-preview">
-        {preview ? (
-          <img className="user-avatar" src={preview} alt="头像预览" />
+        {file ? (
+          <canvas
+            ref={canvas}
+            className="user-avatar"
+            width={256}
+            height={256}
+            role="img"
+            aria-label="头像预览"
+          />
         ) : (
           <AccountAvatar user={user} />
         )}
@@ -125,7 +164,11 @@ export function AvatarEditor({
           JPG / PNG / WebP，最多 5 MiB；居中裁成方形，保存时移除图片附带信息。
         </small>
         <div className="avatar-actions">
-          <button type="button" disabled={busy || disabled || !file} onClick={() => void save()}>
+          <button
+            type="button"
+            disabled={busy || disabled || !file || !previewReady}
+            onClick={() => void save()}
+          >
             上传头像
           </button>
           <button type="button" disabled={busy || disabled} onClick={() => void save(true)}>

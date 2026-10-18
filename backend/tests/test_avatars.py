@@ -55,7 +55,8 @@ def test_avatar_rejects_invalid_or_large_upload_without_replacing_current(
         monkeypatch.setattr("wildstring.avatars.MAX_PIXELS", 100)
         assert client.post(BASE, headers=CLIENT, content=picture()).status_code == 422
         assert client.get(BASE).content == before
-        assert client.delete(BASE).status_code == 403
+        forbidden = client.delete(BASE)
+        assert forbidden.status_code == 403
 
 
 def test_avatar_persists_and_isolated_users_cannot_read_or_remove_each_others_picture(
@@ -83,12 +84,14 @@ def test_avatar_persists_and_isolated_users_cannot_read_or_remove_each_others_pi
         )
         assert client.get(BASE + "/info").json() == {"version": None}
         assert client.get(BASE + "?user_id=admin").status_code == 404
-        assert client.delete(BASE, headers=CLIENT).status_code == 204
+        reset = client.delete(BASE, headers=CLIENT)
+        assert reset.status_code == 204
         assert client.post(BASE, headers=CLIENT, content=picture("blue")).json() != first
     with authenticated_client(settings) as client:
         assert client.get(BASE + "/info").json() == first
         assert client.get(BASE).content == original
-        assert client.delete(BASE, headers=CLIENT).status_code == 204
+        reset = client.delete(BASE, headers=CLIENT)
+        assert reset.status_code == 204
         assert client.get(BASE).status_code == 404
         client.post("/api/v1/auth/logout", headers=CLIENT)
         assert client.get(BASE + "/info").status_code == 401

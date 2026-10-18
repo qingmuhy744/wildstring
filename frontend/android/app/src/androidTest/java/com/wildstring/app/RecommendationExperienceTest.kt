@@ -99,7 +99,7 @@ class RecommendationExperienceTest {
                 compose.onNodeWithText("大家常听", substring = false).performClick()
                 compose.waitUntil(10_000) { fixture.requests.any { it.first.contains("/rankings?") && it.first.contains("scope=community") } }
                 compose.onNodeWithText("所有用户的汇总收听排行，不展示其他账号信息。").assertExists()
-                compose.onNodeWithText("真实本库歌曲").performClick()
+                compose.onNode(hasText("真实本库歌曲") and hasAnyAncestor(hasTestTag("listening-rankings"))).performClick()
                 compose.waitUntil(10_000) { vm.state.value.current?.id == "local-a" }
                 capture("recommendation-rankings-phone.png")
             } finally { cleanup(vm) }

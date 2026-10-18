@@ -18,7 +18,7 @@ test('头像预览、上传、重新打开与恢复默认使用真实账号接�
     const editor = page.getByRole('region', { name: '自定义头像', exact: true });
     const choose = editor.getByLabel('选择头像', { exact: true });
     await choose.setInputFiles({ name: 'portrait.png', mimeType: 'image/png', buffer: photo });
-    await expect(editor.getByAltText('头像预览')).toBeVisible();
+    await expect(editor.getByRole('img', { name: '头像预览', exact: true })).toBeVisible();
     await editor.getByRole('button', { name: '上传头像', exact: true }).click();
     await expect(editor.getByRole('status')).toContainText('头像已保存');
     await expect(editor.locator('img')).toHaveAttribute(
