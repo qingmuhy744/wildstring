@@ -334,7 +334,7 @@ internal fun connectionBudget(connection: JsonObject): String {
         items(tasks, key = { it.text("id") }) { task -> AgentCard {
             Text("${taskLabel(task.text("status"))} · ${inspectionStage(task.text("stage"), task.text("status"))}", fontWeight = FontWeight.Medium)
             Text(localAgentTime(task.text("created_at")), style = MaterialTheme.typography.labelSmall); AgentCounts(task); AgentTrace(task)
-            TextButton({ scope.launch { action.run { selected = vm.agent.request("tasks/${task.text("id")}") } } }) { Text("详情与恢复") }
+            TextButton({ scope.launch { action.run { selected = vm.agent.request("tasks/${task.text("id")}") } } }, enabled = !action.busy) { Text("详情与恢复") }
         } }
         if (tasks.isEmpty() && !action.busy && action.message == null) item { AgentEmpty("还没有巡检任务。") }
         item { Row(verticalAlignment = Alignment.CenterVertically) { Text("定时巡检", Modifier.weight(1f), fontWeight = FontWeight.Medium); TextButton({ scheduling = true }) { Text("新建计划") } } }
