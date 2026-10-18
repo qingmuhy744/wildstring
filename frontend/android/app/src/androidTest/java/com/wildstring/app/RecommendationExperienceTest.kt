@@ -67,7 +67,7 @@ class RecommendationExperienceTest {
         compose.waitUntil(20_000) { vm.state.value.connected && !vm.state.value.loading }
         return vm
     }
-    private fun open(name: String) { compose.onNodeWithTag("nav-search").performClick(); compose.onNodeWithText(name, substring = false).performScrollTo().performClick() }
+    private fun open(name: String) { compose.onNodeWithTag("nav-search").performClick(); compose.onNodeWithText(name, substring = false).performClick() }
     private fun cleanup(vm: MusicViewModel) { compose.runOnIdle { vm.controller?.stop(); vm.controller?.clearMediaItems(); vm.repository.session.invalidate() } }
     private fun capture(name: String) {
         compose.waitForIdle(); val instrumentation = InstrumentationRegistry.getInstrumentation(); instrumentation.uiAutomation.waitForIdle(500, 5_000)

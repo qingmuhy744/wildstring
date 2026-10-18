@@ -421,7 +421,7 @@ class MobileCompletionTest {
                 compose.runOnIdle { vm.sharing.mode("ask") }
                 fixture.snapshot = """{"version":70,"device_id":"other-device","track_ids":["completion-0","completion-1"],"index":1,"position_ms":3000,"mode":"repeat_all","updated_at":"2026-10-17T00:00:00Z"}"""
                 runBlocking { withContext(Dispatchers.Main) { vm.checkSharedPlayback() } }
-                compose.onNodeWithText("继续其他设备的播放？").assertIsDisplayed()
+                compose.onNodeWithText("其他设备有可接续的进度").assertIsDisplayed()
                 compose.onNodeWithText("载入进度").performClick()
                 try { compose.waitUntil(10_000) { vm.state.value.handoff == null && vm.state.value.queue.size == 2 } }
                 catch (e: Throwable) {

@@ -4,6 +4,7 @@ import { LastfmAccount } from './providers';
 import { ThemeControl } from './theme';
 import { PlaybackStyleControl } from './playback-style';
 import { TrackListSizeControl } from './track-list-size';
+import { AvatarEditor } from './avatar';
 
 export function AccountDialog({ user, onClose }: { user: User; onClose: () => void }) {
   const dialog = useRef<HTMLDialogElement>(null);
@@ -64,6 +65,7 @@ export function AccountDialog({ user, onClose }: { user: User; onClose: () => vo
           ×
         </button>
       </div>
+      <AvatarEditor user={user} disabled={busy} onBusy={setBusy} />
       <ThemeControl />
       <PlaybackStyleControl />
       <TrackListSizeControl />

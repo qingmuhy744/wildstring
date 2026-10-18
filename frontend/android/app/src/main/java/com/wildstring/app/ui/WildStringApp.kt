@@ -276,7 +276,7 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
                         val header: @Composable () -> Unit = {
                             Column(Modifier.fillMaxWidth()) {
                                 if (state.tab == "mine" && state.collection == null && state.kind != "recent") {
-                                    PersonalHeader(state, { vm.recent() }, compact = compact)
+                                    PersonalHeader(vm, state, { vm.recent() }, compact = compact)
                                     MobileShortcuts { feature = it }
                                     Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                                         Text("我的歌单", style = MaterialTheme.typography.titleMedium)

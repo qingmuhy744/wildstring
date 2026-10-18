@@ -64,6 +64,7 @@ private val LocalSettingsFeedback = staticCompositionLocalOf<() -> Unit> { {} }
                 ListItem(headlineContent = { Text(state.account?.let { "${it.username} · ${if (it.role == "admin") "管理员" else "普通用户"}" } ?: "已连接") },
                     supportingContent = { Text(state.server) }, leadingContent = { Icon(Icons.Default.AccountCircle, null) })
                 SettingsAction("服务器 / 切换服务器", Icons.Default.Dns) { servers = true }
+                if (state.account != null) AvatarSettings(vm)
                 if (state.account != null) SettingsAction("修改密码", Icons.Default.Lock) { password = true }
             }
             SettingsGroup("Last.fm") { LastfmSettings(vm) }

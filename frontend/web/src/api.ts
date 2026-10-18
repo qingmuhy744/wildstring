@@ -51,6 +51,8 @@ export class ApiError extends Error {
 }
 
 const messages: Record<string, string> = {
+  invalid_avatar: '请选择有效的 JPG、PNG 或 WebP 图片，分辨率不超过 2500 万像素。',
+  avatar_too_large: '头像图片超过 5 MiB，请压缩后重试。',
   source_plugin_invalid_zip: '插件 ZIP 不符合格式，请检查包结构和 API 版本。',
   source_plugin_zip_too_large: '插件 ZIP 超过 16 MiB。',
   source_plugin_identity_conflict: '此 ZIP 的插件 ID 不同，请选择对应插件的升级包。',

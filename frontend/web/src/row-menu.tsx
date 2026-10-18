@@ -38,7 +38,9 @@ export function RowMenu({
   useEffect(() => {
     if (!position) return;
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    menu.current?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus();
+    menu.current
+      ?.querySelector<HTMLButtonElement>('button:not(:disabled)')
+      ?.focus({ preventScroll: true });
     const outside = (event: PointerEvent) => {
       if (
         !menu.current?.contains(event.target as Node) &&
@@ -66,12 +68,16 @@ export function RowMenu({
     document.addEventListener('pointerdown', outside);
     document.addEventListener('keydown', keyboard);
     window.addEventListener('resize', close);
-    window.addEventListener('scroll', close, true);
+    // Scroll events can finish after the trigger was brought into view. Close on
+    // a user's next scroll gesture rather than that pending programmatic scroll.
+    window.addEventListener('wheel', close, { passive: true });
+    window.addEventListener('touchmove', close, { passive: true });
     return () => {
       document.removeEventListener('pointerdown', outside);
       document.removeEventListener('keydown', keyboard);
       window.removeEventListener('resize', close);
-      window.removeEventListener('scroll', close, true);
+      window.removeEventListener('wheel', close);
+      window.removeEventListener('touchmove', close);
       if (previous?.isConnected) previous.focus({ preventScroll: true });
     };
   }, [position]);

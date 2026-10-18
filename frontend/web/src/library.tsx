@@ -25,6 +25,7 @@ import {
   type User,
 } from './api';
 import { Brand } from './brand';
+import { AccountAvatar } from './avatar';
 import { Cover } from './cover';
 import { useFavorites } from './favorites';
 import { useLibraryMotto } from './library-mottos';
@@ -891,7 +892,8 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
               </button>
             )}
             <button className="nav-button account-entry" onClick={() => setAccountOpen(true)}>
-              <span aria-hidden="true">◉</span>账号设置
+              <AccountAvatar user={user} />
+              账号设置
             </button>
             <ThemeControl />
             <span className="local-dot" /> 私人曲库 · 原音直放

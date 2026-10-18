@@ -25,6 +25,9 @@ class AppSettings @Inject constructor(@param:ApplicationContext private val cont
     val state = mutable.asStateFlow()
     private val gainMutable = MutableStateFlow(0L)
     val gainRevision = gainMutable.asStateFlow()
+    private val avatarMutable = MutableStateFlow(0L)
+    val avatarRevision = avatarMutable.asStateFlow()
+    fun avatarChanged() { avatarMutable.value += 1 }
     fun gainChanged() { gainMutable.value += 1 }
     fun lyricFollowSeconds(seconds: Int) {
         require(seconds in listOf(1, 2, 3, 5, 10))

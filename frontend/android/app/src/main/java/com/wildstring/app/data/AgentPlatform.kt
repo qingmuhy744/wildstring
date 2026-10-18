@@ -33,6 +33,8 @@ class AgentApiException(val status: Int, val code: String, val traceId: String?)
 internal fun diagnosticId(value: String?): String? = value?.takeIf { it.matches(Regex("[a-fA-F0-9]{16,64}")) }
 internal fun agentError(status: Int, code: String, traceId: String?): String {
     val description = when {
+        code == "invalid_avatar" -> "请选择有效的 JPG、PNG 或 WebP 图片，分辨率不超过 2500 万像素。"
+        code == "avatar_too_large" -> "头像图片超过 5 MiB，请压缩后重试。"
         code == "source_plugin_invalid_zip" -> "插件 ZIP 不符合格式，请检查包结构与 API 版本。"
         code == "source_plugin_identity_conflict" -> "此 ZIP 的插件 ID 不同，请选择对应插件的升级包。"
         code == "source_plugin_dependency_missing" -> "运行环境缺少插件依赖，请按插件说明配置。"

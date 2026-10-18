@@ -1,6 +1,7 @@
 import { expect, type Page } from '@playwright/test';
 
 export async function section(page: Page, name: string) {
+  await expect(page.locator('.app-shell')).toBeVisible();
   if (name === '通知中心') {
     await page.getByRole('button', { name, exact: true }).click();
     return;

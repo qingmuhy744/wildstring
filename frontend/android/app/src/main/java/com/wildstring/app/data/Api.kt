@@ -5,6 +5,7 @@ import com.google.gson.JsonObject
 import retrofit2.http.*
 
 interface Api {
+    @POST suspend fun uploadAvatar(@Url url: String, @Body body: okhttp3.RequestBody, @Tag owner: RequestOwner): retrofit2.Response<JsonObject>
     @GET suspend fun agentGet(@Url url: String, @Tag owner: RequestOwner? = null): retrofit2.Response<JsonObject>
     @POST suspend fun agentPost(@Url url: String, @Body body: JsonObject, @Tag policy: AgentRequestPolicy? = null, @Tag owner: RequestOwner? = null): retrofit2.Response<JsonObject>
     @PATCH suspend fun agentPatch(@Url url: String, @Body body: JsonObject): retrofit2.Response<JsonObject>
