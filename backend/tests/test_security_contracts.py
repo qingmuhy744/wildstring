@@ -3,6 +3,7 @@
 import os
 import subprocess
 import sys
+from contextlib import nullcontext
 from pathlib import Path
 
 import pytest
@@ -64,3 +65,40 @@ def test_failed_directory_walk_closes_all_parents(tmp_path, monkeypatch, opener)
     assert opened
     assert closed == list(reversed(opened))
     assert list(outside.iterdir()) == []
+
+
+@pytest.mark.skipif(os.open not in os.supports_dir_fd, reason="POSIX directory descriptors")
+@pytest.mark.parametrize("opener", [open_source, target_directory])
+@pytest.mark.parametrize("fail_body", [False, True])
+def test_completed_directory_walk_closes_all_parents(tmp_path, monkeypatch, opener, fail_body):
+    root = tmp_path / "root"
+    (root / "parent/nested").mkdir(parents=True)
+    (root / "parent/nested/song.flac").write_bytes(b"synthetic source")
+    opened, closed = [], []
+    real_open, real_close = os.open, os.close
+
+    def tracked_open(path, flags, *args, **kwargs):
+        descriptor = real_open(path, flags, *args, **kwargs)
+        if flags & os.O_DIRECTORY:
+            opened.append(descriptor)
+        return descriptor
+
+    def tracked_close(descriptor):
+        closed.append(descriptor)
+        real_close(descriptor)
+
+    monkeypatch.setattr(os, "supports_dir_fd", os.supports_dir_fd | {tracked_open})
+    monkeypatch.setattr(os, "open", tracked_open)
+    monkeypatch.setattr(os, "close", tracked_close)
+    expected = pytest.raises(RuntimeError, match="consumer failed") if fail_body else nullcontext()
+    with expected:
+        with opener(root, Path("parent/nested/song.flac")):
+            for descriptor in opened:
+                os.fstat(descriptor)
+            if fail_body:
+                raise RuntimeError("consumer failed")
+    assert len(opened) == 3
+    assert closed == list(reversed(opened))
+    for descriptor in opened:
+        with pytest.raises(OSError):
+            os.fstat(descriptor)
