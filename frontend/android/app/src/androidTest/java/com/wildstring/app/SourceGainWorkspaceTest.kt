@@ -33,6 +33,7 @@ class SourceGainWorkspaceTest {
         var albumVersion = 0; var trackVersion = 0; var pluginVersion = 1
         var gainSettings = JsonParser.parseString("""{"version":0,"mode":"off","preamp_db":0,"prevent_clipping":true}""").asJsonObject
         @Volatile var analysisStatus = "none"
+        @Volatile var cover = ByteArray(0)
         @Volatile var avatar: ByteArray? = null
         fun avatarVersion() = avatar?.let { java.security.MessageDigest.getInstance("SHA-256").digest(it).joinToString("") { b -> "%02x".format(b) } }
         fun json(text: String) = MockResponse().setHeader("Content-Type", "application/json").setBody(text)
@@ -41,6 +42,11 @@ class SourceGainWorkspaceTest {
             server.dispatcher = object : Dispatcher() { override fun dispatch(request: RecordedRequest): MockResponse = synchronized(this@Fixture) {
                 val path = request.requestUrl!!.encodedPath
                 paths += request.method + " " + path
+                if (path == "/api/v1/tracks/song-one/cover") {
+                    assertNotNull(request.getHeader("Cookie"))
+                    assertEquals("768", request.requestUrl!!.queryParameter("size"))
+                    return@synchronized MockResponse().setHeader("Content-Type", "image/jpeg").setBody(okio.Buffer().write(cover))
+                }
                 if (path == "/api/v1/auth/avatar") return@synchronized when (request.method) {
                     "POST" -> { avatar = request.body.readByteArray(); json("""{"version":"${avatarVersion()}"}""") }
                     "DELETE" -> { avatar = null; MockResponse().setResponseCode(204) }
@@ -139,6 +145,24 @@ class SourceGainWorkspaceTest {
             compose.onNodeWithText("请求 -5.0 dB · 实际 -5.0 dB").performScrollTo().assertExists()
             capture("playback-gain-native.png")
             assertEquals(1,fixture.albumVersion); assertEquals(1,fixture.trackVersion)
+        }
+    }
+    @Test fun coverDownloadReadsAuthenticatedImageAndRejectsInvalidOrOversizedResponses() {
+        Fixture().use { fixture ->
+            val vm = connect(fixture)
+            val bitmap = android.graphics.Bitmap.createBitmap(8, 8, android.graphics.Bitmap.Config.ARGB_8888)
+            val output = java.io.ByteArrayOutputStream()
+            bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 90, output); bitmap.recycle()
+            fixture.cover = output.toByteArray()
+            assertArrayEquals(fixture.cover, runBlocking { vm.repository.coverImage("song-one") })
+            listOf("invalid image".toByteArray(), ByteArray(4 * 1024 * 1024 + 1)).forEach { bytes ->
+                vm.repository.cache.clear()
+                fixture.cover = bytes
+                try { runBlocking { vm.repository.coverImage("song-one") }; fail("Invalid cover must not be saved") }
+                catch (_: java.io.IOException) { }
+            }
+            assertEquals(3, fixture.paths.count { it == "GET /api/v1/tracks/song-one/cover" })
+            assertFalse(fixture.paths.any { it == "PUT /api/v1/playback/state" })
         }
     }
     @Test fun automaticGainModePersistsWhenPanelIsReopened() {

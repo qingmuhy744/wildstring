@@ -29,6 +29,108 @@ REPLACEMENTS = {
 }
 REQUIRE = re.compile(r"require\(['\"]([^'\"]+)['\"]\)")
 UNSUPPORTED = {"module/register_checktoken_v2.js", "module/register_checktoken_v3.js"}
+SURFACE = {
+    "kugou": "Metadata only: no playback signKey, cloud-list mutation or behavior simulation",
+    "netease": "Metadata only: no neapi/xeapi, downloaded keys or filesystem token caches",
+}
+
+
+def cut(source, start, end, replacement=""):
+    """Pinned upstream markers must match before a provider adaptation is applied."""
+    assert source.count(start) == 1 and source.count(end) == 1
+    first, last = source.index(start), source.index(end)
+    assert first < last
+    return source[:first] + replacement + source[last:]
+
+
+def adapt(provider, relative, source):
+    if provider == "kugou":
+        if relative == "util/request.js":
+            source = source.split("/**\n * 创建并发送云歌单服务")[0]
+            source += "module.exports = { createRequest };\n"
+            source = cut(source, "// 酷狗云歌单服务", "/**\n * 创建并发送")
+            source = source.replace("signKey, ", "")
+            source = re.sub(
+                r"    if \(options\?\.encryptKey\) \{.*?\n    \}",
+                "    if (options.encryptKey) throw new Error('Unsupported plugin operation');",
+                source,
+                count=1,
+                flags=re.DOTALL,
+            )
+            source = source.replace(
+                "const { generateSimulate } = require('./generate_simulate');\n", ""
+            )
+            source = source.replace("const CryptoJS = require('crypto-js');\n", "")
+            source = source.replace(
+                "const { cryptoMd5, rsaEncrypt2, publicLiteRasKey, publicRasKey } = require('./crypto');\n",
+                "",
+            )
+            source = re.sub(
+                r"          const \{ edt, sid \} = generateSimulate\(.*?\n          if \(sid\) answer.body.sid = sid;\n",
+                "",
+                source,
+                flags=re.DOTALL,
+            )
+        elif relative == "util/helper.js":
+            source = re.sub(r"const signKey = .*?\n};\n", "", source, count=1, flags=re.DOTALL)
+            source = source.replace("  signKey,\n", "")
+        elif relative == "util/index.js":
+            source = "module.exports = { decodeLyrics: require('./util').decodeLyrics };\n"
+        elif relative == "util/crypto.js":
+            source = source.replace("if (opt?.key && opt?.key)", "if (opt?.key && opt?.iv)")
+        return source
+    if relative == "util/crypto.js":
+        source = source.split("const aesEcbEncrypt =")[0]
+        source = cut(source, "const xeapiStaticKey =", "const aesEncrypt =")
+        source = source.replace("const zstd = require('./zstd')\n", "")
+        source = source.replace("Math.round(Math.random() * 61)", "crypto.randomInt(62)")
+        source += "module.exports = { weapi, linuxapi, eapi, decrypt, aesEncrypt, aesDecrypt, eapiReqDecrypt, eapiResDecrypt }\n"
+    elif relative == "util/request.js":
+        source = cut(
+            source,
+            "// 预先读取匿名token并缓存",
+            "// 预先绑定常用函数和常量",
+            "const anonymous_token = ''\n\n",
+        )
+        source = cut(source, "// neapi 配置过期时", "// 预先定义osMap")
+        source = cut(
+            source,
+            "      case 'xeapi':",
+            "      case 'eapi':",
+            "      case 'xeapi':\n      case 'neapi':\n        throw new Error('Unsupported plugin operation')\n\n",
+        )
+        source = cut(source, "        // 空值同样要记下来", "        // debug:")
+        source = cut(
+            source,
+            "          if (use_xeapi) {",
+            "          } else if (use_e_r) {",
+            "          if (use_e_r) {\n",
+        )
+        source = source.replace("          } else if (use_e_r) {\n", "")
+        source = re.sub(
+            r"^const (?:fs|path|tmpPath|registerNeapikey|logger) = .*\n",
+            "",
+            source,
+            flags=re.MULTILINE,
+        )
+        source = re.sub(r"^const \{ loadNeapiKey \} = .*\n", "", source, flags=re.MULTILINE)
+        source = re.sub(
+            r"^const (?:XEAPI_DOMAIN|NEAPI_DOMAIN|stringify) = .*\n",
+            "",
+            source,
+            flags=re.MULTILINE,
+        )
+        source = re.sub(r"^let xeapiSession(?:Id|Key) = .*\n", "", source, flags=re.MULTILINE)
+        source = source.replace("  generateRandomChineseIP,\n", "")
+        source = source.replace("    const use_xeapi = crypto === 'xeapi'\n", "").replace(
+            "    const use_neapi = crypto === 'neapi'\n", ""
+        )
+        source = source.replace(
+            "      data: use_neapi\n        ? encryptData\n        : new URLSearchParams(encryptData).toString(),",
+            "      data: new URLSearchParams(encryptData).toString(),",
+        )
+        source = source.replace("if (use_e_r || use_xeapi || use_neapi)", "if (use_e_r)")
+    return source
 
 
 def normalized(path):
@@ -67,7 +169,7 @@ def subset(provider, raw):
             continue
         content = files[relative]
         if relative.endswith(".js"):
-            source = content.decode()
+            source = adapt(provider, relative, content.decode())
             for module in REQUIRE.findall(source):
                 if module.startswith("."):
                     base = normalized(PurePosixPath(relative).parent / module)
@@ -110,6 +212,7 @@ def subset(provider, raw):
         "source_whitespace": "trailing whitespace normalized",
         "upstream_version": original["version"],
         "adaptations": REPLACEMENTS,
+        "provider_surface": SURFACE[provider],
         "unsupported_modules": sorted(UNSUPPORTED) if provider == "netease" else [],
         "files": {name: hashlib.sha256(data).hexdigest() for name, data in sorted(output.items())},
     }
@@ -133,6 +236,15 @@ def main():
             cache.write_bytes(raw)
         output = subset(provider, cache.read_bytes())
         destination = PACKAGES / "vendor" / (provider + "-metadata")
+        previous = destination / "UPSTREAM.json"
+        if previous.exists():
+            owned = set(json.loads(previous.read_text())["files"]) | {"UPSTREAM.json"}
+            for name in owned - output.keys():
+                target = destination / name
+                if args.check and target.exists():
+                    raise ValueError("Obsolete provider source: " + name)
+                if not args.check:
+                    target.unlink(missing_ok=True)
         for name, data in output.items():
             target = destination / name
             if args.check:

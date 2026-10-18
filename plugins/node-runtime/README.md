@@ -19,6 +19,10 @@ Provider adaptations keep unused functionality out of the installed graph and ZI
 - `pac-proxy-agent` is replaced with **@wildstring/no-pac**. PAC remains unsupported;
   explicit HTTP(S) proxies continue through the providers' existing implementation.
   The PAC interpreter and its transitive FTP client are not installed.
+- Metadata subsets exclude playback URL signing, cloud-list mutations, simulated
+  behavior, neapi/xeapi and filesystem token/key caches. NetEase's active weapi
+  key generation uses `crypto.randomInt`; ordinary metadata, eapi and lyrics stay
+  compatible with their original wire formats.
 
 These adaptations belong to the provider packages. Review the required surface
 when changing upstream commits; unsupported operations must fail rather than silently

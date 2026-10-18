@@ -16,6 +16,7 @@ interface Api {
     @PUT suspend fun objectPut(@Url url: String, @Body body: JsonObject): JsonObject
     @POST suspend fun uploadPlugin(@Url url: String, @Body body: okhttp3.RequestBody, @Tag owner: RequestOwner? = null): retrofit2.Response<JsonObject>
     @Streaming @GET suspend fun downloadPlugin(@Url url: String, @Tag owner: RequestOwner? = null): ResponseBody
+    @Streaming @GET suspend fun coverImage(@Url url: String, @Tag owner: RequestOwner): ResponseBody
     @GET suspend fun playlist(@Url url: String): Playlist
     @PUT suspend fun updatePlaylist(@Url url: String, @Body body: PlaylistUpdate): Playlist
     @DELETE suspend fun deletePlaylist(@Url url: String, @Query("version") version: Int): retrofit2.Response<Unit>

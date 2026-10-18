@@ -9,7 +9,6 @@
     "@wildstring/no-pac": "1.0.0",
     "axios": "^1.20.0",
     "crypto-js": "^4.2.0",
-    "fzstd": "^0.1.1",
     "tunnel": "^0.0.6"
   }
 }

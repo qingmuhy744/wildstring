@@ -41,6 +41,7 @@ jobs:
           path: |
             artifacts/*.png
             artifacts/browser-tests/
+            artifacts/*-verification/
           if-no-files-found: ignore
           retention-days: 7
 

@@ -208,7 +208,7 @@ function cryptoAesEncrypt(data, opt) {
   });
 
   const hex = CryptoJS.enc.Hex.stringify(encrypted.ciphertext);
-  if (opt?.key && opt?.key) return hex;
+  if (opt?.key && opt?.iv) return hex;
   return { str: hex, key: tempKey };
 }
 

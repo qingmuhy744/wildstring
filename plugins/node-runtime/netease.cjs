@@ -1,9 +1,4 @@
-// The upstream reads anonymous state at module load; isolate it inside this plugin's state dir.
-const fs = require('fs');
-const path = require('path');
-const root = require('os').tmpdir();
-if (!fs.existsSync(path.join(root, 'anonymous_token')))
-  fs.writeFileSync(path.join(root, 'anonymous_token'), '');
+// Metadata uses explicit cookies only; the provider owns no filesystem token cache.
 global.deviceId = 'WildStringSourcePlugin';
 console.log = console.info = console.warn = console.error = () => {};
 const request = require('@wildstring/netease-metadata/util/request');

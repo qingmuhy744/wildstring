@@ -23,6 +23,7 @@ export interface Track {
   album: string | null;
   duration_ms: number;
   format: 'mp3' | 'flac' | 'm4a';
+  has_cover?: boolean;
   sample_rate: number | null;
   status: 'available' | 'missing' | 'unreadable';
   loved: boolean;

@@ -1154,6 +1154,16 @@ a {
   color: inherit;
   font-size: 32px;
 }
+.artwork-preview-download {
+  position: absolute;
+  top: max(12px, env(safe-area-inset-top));
+  right: max(64px, calc(env(safe-area-inset-right) + 56px));
+  padding: 8px 12px;
+  color: inherit;
+  border: 1px solid #eeeae266;
+  border-radius: 8px;
+  text-decoration: none;
+}
 .playback-visual,
 .lyric-scroll {
   -webkit-touch-callout: none;

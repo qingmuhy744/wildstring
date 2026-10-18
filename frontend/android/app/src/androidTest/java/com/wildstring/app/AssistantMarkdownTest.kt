@@ -30,7 +30,7 @@ class AssistantMarkdownTest {
         compose.runOnIdle { text.value += "\n\n最新收到的正文" }
         compose.onNodeWithText("最新收到的正文").assertExists()
         val instrumentation = InstrumentationRegistry.getInstrumentation()
-        val folder = java.io.File(instrumentation.targetContext.getExternalFilesDir(null), "verification")
+        val folder = InstrumentationRegistry.getArguments().getString("additionalTestOutputDir")?.let { java.io.File(it) } ?: java.io.File(instrumentation.targetContext.getExternalFilesDir(null), "verification")
         folder.mkdirs()
         instrumentation.uiAutomation.takeScreenshot()?.let { image ->
             java.io.File(folder, "assistant-markdown.png").outputStream().use { image.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }

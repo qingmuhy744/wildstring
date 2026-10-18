@@ -13,6 +13,7 @@
     "node-forge": "@wildstring/native-rsa",
     "pac-proxy-agent": "@wildstring/no-pac"
   },
+  "provider_surface": "Metadata only: no playback signKey, cloud-list mutation or behavior simulation",
   "unsupported_modules": [],
   "files": {
     "LICENSE": "1002dfdd55aac5e31b39e840c6db2f9f7c25924d1e61a11bbb33343d5d6d324f",
@@ -22,11 +23,10 @@
     "module/search_lyric.js": "816568dce64dd3cc8c52657ddcd12d30e3c0a59dd78049bb29bb707b531607e3",
     "package.json": "0245c83e12e2fb348dafe345708bede08c9599913286423b80897c733793ee69",
     "util/config.json": "d6d87820cb07b535462a4fa14f1c56aec76a2578b08c773f29c692d14f77c072",
-    "util/crypto.js": "85f1ba82e5042e8995d1003fdd3b885a8aeb6dd8f0335f854abb6fbb2d037f24",
-    "util/generate_simulate.js": "f2f2528b06ca77d48bbe2df8fb92e615e8e035f91789ec550492b0b797782874",
-    "util/helper.js": "c84e29216c97964f2f5840d0dea2e980cea2bc03de351f7d4033986d58fb922e",
-    "util/index.js": "c7fef6e8ea4507537ae72f1534a4c9eac3fbf4aa491e70d099baf4735e7f62cd",
-    "util/request.js": "a7ee5823aa8b8062574e579d5fb33baccda82d92975d305ce9061798e9a7dfd9",
+    "util/crypto.js": "46a1ed53b72456612982351424c189cb1282172ec944672a5a6bbba4d7081edb",
+    "util/helper.js": "0983e1e1bff119d5412bf696a46f99f36d9591a1fd3c49c8fa3123e25540545a",
+    "util/index.js": "ac639ec6b8e7eec005367f4ffba0b03e6b671653766739934220d907de00e63c",
+    "util/request.js": "70a250978b113ead15b224a26a38a9c9929a6c964b5baeef9d9877632feb6edd",
     "util/runtime.js": "2ff73992b93e1a734b83137d6f1690b5f804612cc43fa9fa39b7d37d88997c3b",
     "util/util.js": "7b1eea8927c62a9b668205fae7ded89f6eae40119aaab548e1731449ef76b0bd"
   }

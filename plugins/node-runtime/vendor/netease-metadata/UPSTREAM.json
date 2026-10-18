@@ -13,6 +13,7 @@
     "node-forge": "@wildstring/native-rsa",
     "pac-proxy-agent": "@wildstring/no-pac"
   },
+  "provider_surface": "Metadata only: no neapi/xeapi, downloaded keys or filesystem token caches",
   "unsupported_modules": [
     "module/register_checktoken_v2.js",
     "module/register_checktoken_v3.js"
@@ -24,17 +25,13 @@
     "module/lyric_new.js": "08a3613292d69ff8cb16b5b650543fc1465464488f97f1732b7e436bfc53ffd3",
     "module/register_checktoken_v2.js": "4c27747a01963e0cf63cb31a7bd2a3497d5aa8a4e3397fc01d36645b1b96fd94",
     "module/register_checktoken_v3.js": "4c27747a01963e0cf63cb31a7bd2a3497d5aa8a4e3397fc01d36645b1b96fd94",
-    "module/register_neapikey.js": "31a3af1a5b85a718b2e60253c7ca8cbb0df94bbba6f8c078f8bc7a22d3b3e6d9",
     "module/song_detail.js": "a85e79d888667b645301597a8c755fc468d62be0506fa94ca98e551bf4ee58a9",
-    "package.json": "056084abcf28fda9dc99ef4f4107135f111476b00c7e2f70d08f87c404a1a21a",
+    "package.json": "d12df3c3d5d701a5ef4ef6e745981a9e19e8848579bc7ea72199597a29fcd74b",
     "util/config.json": "25c30bd41a877b9992e870a457dedd02ac033041adcfb3ca3f9bdc7fdc288665",
-    "util/crypto.js": "8761b7103baf232268b92f2083b72a3878c2b942dba4522897a101c9bdab88c3",
+    "util/crypto.js": "f817642825970eabb8203042733c385faa586a71ce5d538bf78b68c5195536a9",
     "util/index.js": "296e985bc54c1f3756e2c0a5de7d08638c59bb9b72870bb6a4c3443162e6fa8d",
     "util/logger.js": "f1c1ff07eaf06822ca8fcf880f149555e982060198178e68a3bf682c43458363",
-    "util/neapiConfig.js": "63024133bcf55072281fc9cd4a158bb5060e4d03a65866aaefd9233041369005",
-    "util/neapiKey.js": "9c412748270c218c1e5d03352f99b40de7d73bc38b3be3bf78c3afb02cceb1df",
     "util/option.js": "2bdd9827630ea91e5bdb008b1652126c5d29c3bab59dc4cf25a87f1a19208224",
-    "util/request.js": "292daf9ff8cc5586a184632828e373ed2d2f4b4798d0898ed2819f5823d3bbcc",
-    "util/zstd.js": "b1e45365cba1247bb6b2786bfef659ea5d601f771032a3d34da95a61f2639825"
+    "util/request.js": "62d64389f1af2d33c0d0a64184b714dfc168b4638cadb31e546a69c23ac2aa9f"
   }
 }

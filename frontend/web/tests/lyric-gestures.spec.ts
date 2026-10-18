@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { audio, login } from './helpers';
+import { readFile } from 'node:fs/promises';
 
 test('长按动画或歌词查看大封面，松手不切换或跳转，返回保持原播放状态', async ({ page }, info) => {
   await page.addInitScript(() => localStorage.setItem('wildstring-playback-style', 'vinyl'));
@@ -38,6 +39,14 @@ test('长按动画或歌词查看大封面，松手不切换或跳转，返回�
     .poll(() => image.evaluate((node) => (node as HTMLImageElement).naturalWidth))
     .toBeGreaterThan(0);
   await expect(image).toHaveCSS('object-fit', 'contain');
+  const [download] = await Promise.all([
+    page.waitForEvent('download'),
+    preview.getByRole('link', { name: '下载封面', exact: true }).click(),
+  ]);
+  expect(download.suggestedFilename()).toBe('晴天测试曲-封面.jpg');
+  const bytes = await readFile((await download.path())!);
+  expect([...bytes.subarray(0, 2)]).toEqual([255, 216]);
+  await expect(preview).toBeVisible();
   expect(await audio(page)).toEqual(before);
   await preview.getByRole('button', { name: '关闭大封面' }).click();
   await expect(preview).toHaveCount(0);
