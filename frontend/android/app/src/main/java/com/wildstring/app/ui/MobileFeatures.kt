@@ -60,12 +60,8 @@ internal fun FeatureDialog(vm: MusicViewModel, route: String, track: Track? = nu
         // user's app theme afterwards so a system-light dialog cannot reset dark icons.
         LaunchedEffect(view, darkBars) {
             (view.parent as? androidx.compose.ui.window.DialogWindowProvider)?.window?.let { window ->
-                androidx.core.view.WindowCompat.setDecorFitsSystemWindows(window, false)
-                @Suppress("DEPRECATION")
-                window.statusBarColor = android.graphics.Color.TRANSPARENT
-                @Suppress("DEPRECATION")
-                window.navigationBarColor = android.graphics.Color.TRANSPARENT
-                if (android.os.Build.VERSION.SDK_INT >= 29) { window.isStatusBarContrastEnforced = false; window.isNavigationBarContrastEnforced = false }
+                androidx.core.view.WindowCompat.enableEdgeToEdge(window)
+                if (android.os.Build.VERSION.SDK_INT >= 29) window.isNavigationBarContrastEnforced = false
                 androidx.core.view.WindowCompat.getInsetsController(window, view).apply {
                     isAppearanceLightStatusBars = !darkBars; isAppearanceLightNavigationBars = !darkBars
                 }

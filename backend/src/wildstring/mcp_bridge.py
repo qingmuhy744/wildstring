@@ -98,7 +98,7 @@ class Bridge:
                 if isinstance(detail, str) and re.fullmatch(r"[a-z0-9_]{1,100}", detail):
                     code = detail
             except (ValueError, OSError, AttributeError):
-                pass
+                code = "tool_request_failed"
             finally:
                 error.close()
             raise BridgeError(code) from None

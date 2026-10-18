@@ -5,6 +5,7 @@ from uuid import uuid4
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 
+from wildstring.agent_common import SCOPES, tool_definitions
 from wildstring.agent_models import (
     Apply,
     AssistantPreferences,
@@ -29,7 +30,6 @@ from wildstring.agent_models import (
     Verify,
     Version,
 )
-from wildstring.agent_platform import SCOPES, tool_definitions
 
 
 def page(items, limit=100, offset=0):

@@ -12,7 +12,8 @@ from pydantic import ValidationError
 from wildstring.config import Settings
 from wildstring.database import Database
 from wildstring.library import importer
-from wildstring.library.importer import component, import_music
+from wildstring.library.import_files import component, target_directory
+from wildstring.library.importer import import_music
 from wildstring.library.repository import LibraryRepository
 from wildstring.library.scanner import ScanBusyError, scan_library
 
@@ -191,6 +192,6 @@ def test_fallback_directory_creation_does_not_follow_symlink(settings, tmp_path,
     (settings.library_dir / "linked").symlink_to(outside, target_is_directory=True)
     monkeypatch.setattr(importer.os, "supports_dir_fd", set())
     with pytest.raises(OSError):
-        with importer.target_directory(settings.library_dir, Path("linked/new/file.flac")):
+        with target_directory(settings.library_dir, Path("linked/new/file.flac")):
             pass
     assert not (outside / "new").exists()

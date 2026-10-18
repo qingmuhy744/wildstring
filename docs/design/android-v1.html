@@ -308,8 +308,8 @@
         nav.innerHTML = [['search', '发现'], ['library', '音乐'], ['mine', '我的']].map(([id, label]) => `<button data-nav="${id}" ${selected === id ? 'aria-current="page"' : ''}><span class="nav-icon">${icon(id)}</span><span>${label}</span></button>`).join('');
       }
       const settingRow = key => {
-        const option = options[key], value = option.choices.find(([id]) => id === preferences[key])[1];
-        return `<button class="list-entry" data-choice="${key}">${icon(option.icon)}<span class="row-text"><strong>${option.title}</strong><small>${value}${['metadata', 'artwork', 'audio'].includes(key) ? ' · 已用 0.0 MB' : ''}</small></span>${icon('chevron')}</button>`;
+        const option = options[key];
+        return `<button class="list-entry" data-choice="${key}">${icon(option.icon)}<span class="row-text"><strong>${option.title}</strong><small data-setting-value="${key}"></small></span>${icon('chevron')}</button>`;
       };
       const group = (title, body) => `<section class="settings-group"><h3>${title}</h3><div class="card">${body}</div></section>`;
       function settingsMarkup() {
@@ -328,6 +328,12 @@
           content.innerHTML = `${header('我的')}<div class="profile"><span class="avatar">${icon('mine')}</span><span class="row-text"><strong>预览账号</strong><small>音乐，留在自己的收藏里</small></span></div><div class="card"><button class="list-entry" data-action="recent">${icon('history')}<span class="row-text"><strong>最近听过</strong><small>继续上次的旋律</small></span>${icon('chevron')}</button></div><div class="section-title"><h3>歌单</h3></div><button class="list-entry" data-action="favorites">${icon('heart')}<span class="row-text"><strong>我喜欢</strong><small>${loved.size} 首</small></span>${icon('chevron')}</button><button class="list-entry" data-action="playlist">${icon('library')}<span class="row-text"><strong>傍晚散步</strong><small>示例歌单 · 3 首</small></span>${icon('chevron')}</button>`;
         } else if (section === 'settings') {
           content.innerHTML = settingsMarkup();
+          content.querySelectorAll('[data-setting-value]').forEach(node => {
+            const key = node.dataset.settingValue;
+            const option = options[key];
+            const selected = option?.choices.find(([id]) => id === preferences[key]);
+            node.textContent = (selected?.[1] || '') + (['metadata', 'artwork', 'audio'].includes(key) ? ' · 已用 0.0 MB' : '');
+          });
         } else if (section === 'player') {
           const t = tracks[current], isLyrics = playerView === 'lyrics' && !wide();
           content.innerHTML = `<header><button class="icon back" data-action="${isLyrics ? 'cover' : 'collapse'}" aria-label="${isLyrics ? '返回封面' : '收起播放器'}">${icon(isLyrics ? 'back' : 'down')}</button><span>正在播放 · ${t.album}</span><button class="icon" data-action="queue" aria-label="打开队列">${icon('queue')}</button></header><div class="player-body"><div class="playback-pane">${isLyrics ? lyricsMarkup() : `<button class="cover-trigger" data-action="lyrics" aria-label="查看全屏歌词">${art(t, 'hero')}</button>`}${playbackControls()}</div><div class="side-pane"><div class="pane-tabs"><button data-panel="lyrics" aria-pressed="${tabletPanel === 'lyrics'}">歌词</button><button data-panel="queue" aria-pressed="${tabletPanel === 'queue'}">队列 · ${queue.length}</button></div>${tabletPanel === 'lyrics' ? lyricsMarkup() : `<p class="hint" id="queue-help">拖动三横杠排序；键盘聚焦把手后用上下方向键移动。</p><div class="queue-list">${queueItems()}</div>`}</div></div>`;

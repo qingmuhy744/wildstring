@@ -356,7 +356,8 @@ def test_expiry_lru_disk_limit_restart_and_permission(settings, authenticated_cl
             headers=HEADERS,
         )
         assert client.get("/api/v1/manage/transcoding").status_code == 403
-        assert client.delete("/api/v1/manage/transcoding/cache", headers=HEADERS).status_code == 403
+        deletion_response = client.delete("/api/v1/manage/transcoding/cache", headers=HEADERS)
+        assert deletion_response.status_code == 403
 
 
 def test_progressive_reader_does_not_drop_final_write_after_temporary_eof(

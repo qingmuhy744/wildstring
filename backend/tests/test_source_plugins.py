@@ -108,14 +108,16 @@ def test_zip_lifecycle_worker_matching_and_lyrics(settings, authenticated_client
         assert playing["source"] == "fixture-source" and playing["offset_ms"] == 250
         assert playing["lines"][0]["words"][1]["start_ms"] == 1750
         assert playing["lines"][0]["translation"] == "Synthetic translation"
-        assert client.delete(BASE + "/fixture-source?version=2", headers=HEADERS).status_code == 409
+        deletion_response = client.delete(BASE + "/fixture-source?version=2", headers=HEADERS)
+        assert deletion_response.status_code == 409
         assert (
             client.put(
                 BASE + "/fixture-source", headers=HEADERS, json={"version": 2, "enabled": False}
             ).status_code
             == 200
         )
-        assert client.delete(BASE + "/fixture-source?version=3", headers=HEADERS).status_code == 200
+        deletion_response = client.delete(BASE + "/fixture-source?version=3", headers=HEADERS)
+        assert deletion_response.status_code == 200
         assert client.get(BASE).json()["items"] == []
 
 

@@ -14,13 +14,13 @@ from mutagen.mp3 import MP3
 from test_assets import image, put_picture
 from test_personal_library import music
 
-from wildstring.__main__ import RedactLastfmCallback
 from wildstring.database import Database
 from wildstring.library.assets import TrackAssets
 from wildstring.library.metadata import read_metadata
 from wildstring.library.repository import LibraryRepository
 from wildstring.library.scanner import scan_library
 from wildstring.providers import ProviderError, SafeRedirect, lastfm_signature
+from wildstring.request_privacy import RedactLastfmCallback
 
 HEADERS = {"X-Wildstring-Client": "web"}
 RECORDING = "12029af2-f6fb-4423-b145-5ee157714ed4"
@@ -316,7 +316,8 @@ def test_lastfm_auth_once_consent_queue_and_ignored_messages(settings, authentic
                 ).fetchone()[0]
                 == "failed"
             )
-        assert client.delete("/api/v1/lastfm", headers=HEADERS).status_code == 200
+        deletion_response = client.delete("/api/v1/lastfm", headers=HEADERS)
+        assert deletion_response.status_code == 200
         assert not client.get("/api/v1/lastfm").json()["connected"]
         assert "c" * 32 not in providers.secrets().values()
 

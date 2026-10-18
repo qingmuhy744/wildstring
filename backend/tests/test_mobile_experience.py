@@ -14,10 +14,10 @@ from fastapi.testclient import TestClient
 from test_personal_library import HEADERS, music
 from test_users import login, new_user
 
+from wildstring import recommendations
 from wildstring.database import Database
 from wildstring.library.scanner import scan_library
 from wildstring.main import create_app
-from wildstring.recommendations import Recommendations
 
 BASE = "/api/v1"
 
@@ -156,8 +156,8 @@ def test_daily_stable_refresh_diverse_and_default_no_network(
     def forbidden(*_args, **_kwargs):
         pytest.fail("Default recommendations must not contact model or metadata providers")
 
-    monkeypatch.setattr(Recommendations, "model_select", forbidden)
-    monkeypatch.setattr(Recommendations, "lastfm", forbidden)
+    monkeypatch.setattr(recommendations.Recommendations, "model_select", forbidden)
+    monkeypatch.setattr(recommendations.Recommendations, "lastfm", forbidden)
     with authenticated_client(settings) as client:
         first = client.get(BASE + "/recommendations/daily").json()
         assert len(first["items"]) == 20 and first["engine"] == "local"
@@ -191,8 +191,6 @@ def test_daily_stable_refresh_diverse_and_default_no_network(
 def test_empty_and_tiny_libraries_date_boundary_and_preferences_cas(
     settings, authenticated_client, monkeypatch
 ):
-    import wildstring.recommendations as module
-
     with authenticated_client(settings) as client:
         empty = client.get(BASE + "/recommendations/daily").json()
         assert empty["items"] == [] and client.get(BASE + "/recommendations/daily").json() == empty
@@ -227,7 +225,7 @@ def test_empty_and_tiny_libraries_date_boundary_and_preferences_cas(
         seed(settings, 1)
         tiny = client.post(BASE + "/recommendations/daily/refresh", headers=HEADERS).json()
         assert len(tiny["items"]) == 1 and tiny["engine"] == "local"
-        monkeypatch.setattr(module, "today", lambda: "2030-01-02")
+        monkeypatch.setattr(recommendations, "today", lambda: "2030-01-02")
         next_day = client.get(BASE + "/recommendations/daily").json()
         assert next_day["date"] == "2030-01-02" and next_day["id"] != tiny["id"]
 
@@ -310,7 +308,7 @@ def model_server():
                     json.dumps({"choices": [{"message": {"content": selection}}]}).encode()
                 )
             except BrokenPipeError:
-                pass
+                return
 
         def log_message(self, *_args):
             pass
@@ -621,7 +619,7 @@ def test_cross_library_ids_never_enter_snapshots_feedback_or_daily(
     other.mkdir()
     repository = LibraryRepository(Database(settings.data_dir), other)
     repository.library_id(create=True)
-    service = Recommendations(repository, Providers(repository))
+    service = recommendations.Recommendations(repository, Providers(repository))
     with pytest.raises(HTTPException) as conflict:
         put_state(repository, PlaybackState.model_validate(snapshot([{"id": identity}])))
     assert conflict.value.status_code == 422
@@ -702,7 +700,7 @@ def test_simultaneous_daily_requests_generate_once_and_report_busy(
 
     seed(settings, 3)
     repository = LibraryRepository(Database(settings.data_dir), settings.library_dir)
-    service = Recommendations(repository, Providers(repository))
+    service = recommendations.Recommendations(repository, Providers(repository))
     service.save_preferences(repository, Preferences(version=1, use_ai=True))
     entered, release = threading.Event(), threading.Event()
     calls = []
@@ -713,7 +711,7 @@ def test_simultaneous_daily_requests_generate_once_and_report_busy(
         assert release.wait(timeout=8)
         return {"items": candidates[:2], "mode": "ai"}
 
-    monkeypatch.setattr(Recommendations, "model_select", blocked)
+    monkeypatch.setattr(recommendations.Recommendations, "model_select", blocked)
     with ThreadPoolExecutor(max_workers=2) as executor:
         first = executor.submit(service.daily, repository)
         assert entered.wait(timeout=4)

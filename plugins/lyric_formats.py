@@ -98,5 +98,6 @@ def normalize_bundle(raw, source):
                             for index, line in enumerate(result["lines"])
                         ]
             except (ValueError, KeyError, TypeError):
-                pass
+                # Keep the valid original and any separately provided language layers.
+                return result
     return result

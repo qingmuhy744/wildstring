@@ -122,12 +122,17 @@ class PlaybackService : MediaSessionService() {
                         com.google.common.util.concurrent.Futures.immediateFuture(mediaItems)
                     else com.google.common.util.concurrent.Futures.immediateFailedFuture(SecurityException("服务器或账号已变化。"))
                 }
-                override fun onConnect(session: MediaSession, controller: MediaSession.ControllerInfo): MediaSession.ConnectionResult {
-                    if (controller.uid == Process.myUid()) return super.onConnect(session, controller)
-                    if (!controller.isTrusted) return MediaSession.ConnectionResult.reject()
-                    val commands = MediaSession.ConnectionResult.DEFAULT_PLAYER_COMMANDS.buildUpon()
-                        .remove(Player.COMMAND_SET_MEDIA_ITEM).remove(Player.COMMAND_CHANGE_MEDIA_ITEMS).build()
-                    return MediaSession.ConnectionResult.AcceptedResultBuilder(session).setAvailablePlayerCommands(commands).build()
+                override fun onConnectAsync(session: MediaSession, controller: MediaSession.ControllerInfo): ListenableFuture<MediaSession.ConnectionResult> {
+                    val result = if (controller.uid == Process.myUid()) {
+                        MediaSession.ConnectionResult.AcceptedResultBuilder(session, controller).build()
+                    } else if (!controller.isTrusted) {
+                        MediaSession.ConnectionResult.reject()
+                    } else {
+                        val commands = MediaSession.ConnectionResult.DEFAULT_PLAYER_COMMANDS.buildUpon()
+                            .remove(Player.COMMAND_SET_MEDIA_ITEM).remove(Player.COMMAND_CHANGE_MEDIA_ITEMS).build()
+                        MediaSession.ConnectionResult.AcceptedResultBuilder(session, controller).setAvailablePlayerCommands(commands).build()
+                    }
+                    return com.google.common.util.concurrent.Futures.immediateFuture(result)
                 }
             }).build()
         val platform = android.media.session.MediaController(this, checkNotNull(session).platformToken)

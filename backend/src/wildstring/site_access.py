@@ -134,7 +134,7 @@ class HostAllowlist:
                         raise ValueError("Invalid port")
                     allowed = normalize_host(parsed.hostname or "") in settings["hosts"]
                 except (ValueError, UnicodeError):
-                    pass
+                    allowed = False
             if not allowed:
                 await JSONResponse({"detail": "host_not_allowed"}, status_code=400)(
                     scope, receive, send

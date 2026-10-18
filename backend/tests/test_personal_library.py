@@ -128,12 +128,10 @@ def test_default_favorites_persist_and_share_track_state(settings, authenticated
         assert client.put(url, headers=HEADERS, json={"loved": True}).status_code == 200
         favorite_tracks = client.get(f"/api/v1/playlists/{default['id']}/tracks").json()["items"]
         assert len(favorite_tracks) == 1 and favorite_tracks[0]["loved"] is True
-        assert (
-            client.delete(
-                f"/api/v1/playlists/{default['id']}?version=1", headers=HEADERS
-            ).status_code
-            == 409
+        deletion_response = client.delete(
+            f"/api/v1/playlists/{default['id']}?version=1", headers=HEADERS
         )
+        assert deletion_response.status_code == 409
         assert (
             client.post(
                 f"/api/v1/playlists/{default['id']}/tracks",
@@ -200,12 +198,10 @@ def test_manual_playlist_atomic_add_order_move_remove_and_versions(settings, aut
         )
         assert response.status_code == 200
         assert [t["id"] for t in client.get(endpoint + "/tracks").json()["items"]] == ids[:2]
-        assert (
-            client.delete(
-                endpoint + "/tracks/" + ids[0] + "?version=5", headers=HEADERS
-            ).status_code
-            == 200
+        deletion_response = client.delete(
+            endpoint + "/tracks/" + ids[0] + "?version=5", headers=HEADERS
         )
+        assert deletion_response.status_code == 200
         assert client.get(endpoint + "/tracks?limit=1").json()["total"] == 1
         assert (
             client.put(
@@ -214,7 +210,8 @@ def test_manual_playlist_atomic_add_order_move_remove_and_versions(settings, aut
             == 200
         )
         assert client.get(endpoint).json()["name"] == "新名字"
-        assert client.delete(endpoint + "?version=7", headers=HEADERS).status_code == 204
+        deletion_response = client.delete(endpoint + "?version=7", headers=HEADERS)
+        assert deletion_response.status_code == 204
         assert client.get(endpoint).status_code == 404
 
 

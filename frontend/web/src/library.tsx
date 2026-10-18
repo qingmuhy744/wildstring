@@ -208,7 +208,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
     [lyricsOpen, setLyricsOpen] = useState(false);
   const [notice, setNotice] = useState('');
   const [navigation, setNavigation] = useState<CatalogLocation[]>([]);
-  const [counts, setCounts] = useState<Partial<Record<View, number>>>({});
+  const [counts, setCounts] = useState<ReadonlyMap<View, number>>(() => new Map());
   const [editor, setEditor] = useState<{ initial: Playlist | null; track: Track | null } | null>(
     null,
   );
@@ -367,7 +367,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
   useEffect(() => {
     if (visible && !query && !album && !selectedArtist && !activePlaylist)
       setCounts((current) =>
-        current[view] === visible.total ? current : { ...current, [view]: visible.total },
+        current.get(view) === visible.total ? current : new Map(current).set(view, visible.total),
       );
   }, [visible?.total, view, query, album?.id, selectedArtist?.id, activePlaylist?.id]);
   const listRoot = useRef<HTMLDivElement>(null);
@@ -510,6 +510,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
     setError('');
   }
   function switchView(target: View, resetHistory = true) {
+    if (!Object.hasOwn(labels, target)) return;
     collectionRequest.current?.abort();
     collectionRequest.current = null;
     setCollectionBusy(false);
@@ -839,8 +840,8 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
         </small>
       ) : target === 'favorites' ? (
         <small>{favorites.ids.size}</small>
-      ) : counts[target] !== undefined ? (
-        <small>{counts[target]}</small>
+      ) : counts.has(target) ? (
+        <small>{counts.get(target)}</small>
       ) : null}
     </button>
   );

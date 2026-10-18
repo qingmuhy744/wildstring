@@ -127,7 +127,7 @@ def finish(client, scans, identity):
         result = client.get(BASE + "/" + identity).json()
         if result["status"] == "completed":
             return result
-    pytest.fail(str(result))
+    raise AssertionError(str(result))
 
 
 def prepare(settings, monkeypatch):

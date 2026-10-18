@@ -17,19 +17,19 @@ class BoundedFileStore(private val directory: File, private val clock: () -> Lon
             if (path.length() !in 8..(2 * 1024 * 1024L + 8)) { path.delete(); return null }
             val data = DataInputStream(path.inputStream()).use { input -> val time = input.readLong(); CachedBlob(input.readBytes(), time) }
             // Reading also updates recency, independently of the stored freshness timestamp.
-            path.setLastModified(clock())
+            check(path.setLastModified(clock())) { "Cannot update cache recency" }
             data
         }.getOrElse { path.delete(); null }
     }
     @Synchronized fun put(key: String, bytes: ByteArray, maxBytes: Long) {
         if (maxBytes <= 0 || bytes.size + 8 > maxBytes) { trim(maxBytes); return }
-        directory.mkdirs()
+        check(directory.isDirectory || directory.mkdirs()) { "Cannot create cache directory" }
         val target = file(key)
         val temporary = File(directory, target.name + ".tmp")
         try {
             DataOutputStream(temporary.outputStream()).use { it.writeLong(clock()); it.write(bytes) }
             check(temporary.renameTo(target))
-            target.setLastModified(clock())
+            check(target.setLastModified(clock())) { "Cannot set cache recency" }
         } finally { temporary.delete() }
         trim(maxBytes)
     }

@@ -47,6 +47,7 @@ android {
 kotlin { compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17) } }
 ksp { arg("room.schemaLocation", "$projectDir/schemas") }
 dependencies {
+    implementation(libs.core)
     implementation(libs.commonmark)
     implementation(libs.commonmark.tables)
     implementation(platform(libs.compose.bom))

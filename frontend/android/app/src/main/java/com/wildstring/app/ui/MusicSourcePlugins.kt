@@ -121,7 +121,7 @@ import java.io.ByteArrayOutputStream
     suspend fun load() { result = vm.repository.feature("manage/tracks/${track.id}/online-lyrics") }
     LaunchedEffect(track.id) { action.run { load() }; if (action.message == "已完成") action.message = null }
     val running = result?.objects("jobs")?.any { it.text("status") in listOf("queued", "running") } == true
-    LaunchedEffect(running, track.id) { while (running) { delay(2000); load() } }
+    LaunchedEffect(running, track.id) { while (result?.objects("jobs")?.any { it.text("status") in listOf("queued", "running") } == true) { delay(2000); load() } }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         HorizontalDivider(); Text("联网歌词候选", style = MaterialTheme.typography.titleMedium)
         Text("先核对版本、歌手和时长。歌词来源可与元数据不同，确认后才替换数据库歌词。", style = MaterialTheme.typography.bodySmall)

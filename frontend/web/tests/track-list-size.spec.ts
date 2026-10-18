@@ -163,10 +163,14 @@ test('字号复用于专辑、艺人和歌单歌曲，专辑网格及全屏播�
   const player = page.getByRole('dialog', { name: '全屏播放', exact: true });
   const visual = await player.locator('.playback-visual').boundingBox();
   const playback = await audio(page);
-  await page.evaluate(
-    (key) => window.dispatchEvent(new StorageEvent('storage', { key, newValue: 'small' })),
-    KEY,
-  );
+  // Exercise an actual cross-tab storage event instead of synthesizing one.
+  const preferencesTab = await page.context().newPage();
+  try {
+    await preferencesTab.goto(page.url());
+    await preferencesTab.evaluate((key) => localStorage.setItem(key, 'small'), KEY);
+  } finally {
+    await preferencesTab.close();
+  }
   const afterVisual = (await player.locator('.playback-visual').boundingBox())!;
   expect(afterVisual.width).toBeCloseTo(visual!.width, 1);
   expect(afterVisual.height).toBeCloseTo(visual!.height, 1);

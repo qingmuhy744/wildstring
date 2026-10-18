@@ -9,6 +9,7 @@ import json
 import socket
 import ssl
 import time
+from contextlib import suppress
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import (
@@ -190,12 +191,12 @@ def json_request(
     except HTTPError as error:
         if error_payload:
             try:
-                raw = error.read(limit + 1)
-                result = json.loads(raw) if len(raw) <= limit else None
-                if isinstance(result, dict) and result.get("error_code") == error.code:
-                    return result
-            except (OSError, ValueError, UnicodeError, RecursionError):
-                pass
+                # Only a bounded, well-formed provider error may replace our generic error.
+                with suppress(OSError, ValueError, UnicodeError, RecursionError):
+                    raw = error.read(limit + 1)
+                    result = json.loads(raw) if len(raw) <= limit else None
+                    if isinstance(result, dict) and result.get("error_code") == error.code:
+                        return result
             finally:
                 error.close()
         retry = error.headers.get("Retry-After") if error.headers else None

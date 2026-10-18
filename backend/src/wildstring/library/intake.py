@@ -16,6 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from wildstring.library.conversion import convert
 from wildstring.library.cue import parse_cue
 from wildstring.library.edits import FIELDS, Overrides, apply_effective
+from wildstring.library.import_files import copy_exclusive, digest, organized_path, target_digest
 from wildstring.library.metadata import SUPPORTED_SUFFIXES, read_metadata
 from wildstring.library.scanner import SourceChangedError, fingerprint, open_source
 
@@ -286,8 +287,6 @@ class Intake:
         item = self.item(item_id)
         if not self.public(item)["can_approve"]:
             raise HTTPException(409, "intake_not_reviewable")
-        from wildstring.library.importer import target_digest
-
         if target_digest(self.root, Path(item["staged"])) != item["staged_sha256"]:
             raise HTTPException(409, "intake_snapshot_changed")
         try:
@@ -361,8 +360,6 @@ class Intake:
         return found[0] if found else (None, [], None)
 
     def stage(self, importer, item, relative):
-        from wildstring.library.importer import copy_exclusive, target_digest
-
         if item["staged"] is not None:
             staged = Path(item["staged"])
             if target_digest(self.root, staged) != item["staged_sha256"]:
@@ -390,8 +387,6 @@ class Intake:
                 raise ValueError("insufficient_storage")
 
     def process(self, importer, relative, automatic=False):
-        from wildstring.library.importer import digest, organized_path, target_digest
-
         # Existing manifests retain the established source-change/managed-edit semantics.
         if importer.manifest(relative) is not None:
             target = importer.import_track(relative)

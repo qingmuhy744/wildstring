@@ -14,6 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from wildstring.library.lyric_edits import LyricsEditor
 from wildstring.library.online_lyrics import normalize_bundle
 from wildstring.lyric_quality import improves, matched, quality, rank, reaches
+from wildstring.source_models import LyricChoice
 from wildstring.source_plugins import PluginError
 
 
@@ -678,8 +679,6 @@ class LyricScans:
             )
 
     def apply(self, identity, item_ids):
-        from wildstring.music_sources import LyricChoice
-
         output = []
         with self.database.connect() as db:
             self.batch(identity, db)

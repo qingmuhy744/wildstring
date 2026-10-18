@@ -141,7 +141,7 @@ class Transcoding:
                     if not cached:
                         path.unlink(missing_ok=True)
             except Timeout:
-                pass
+                continue
         self.thread = threading.Thread(
             target=self.housekeep, name="wildstring-transcode-cache", daemon=True
         )

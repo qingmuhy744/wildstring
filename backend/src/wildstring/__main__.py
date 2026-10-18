@@ -3,7 +3,6 @@
 import uvicorn
 
 from wildstring.config import Settings
-from wildstring.request_privacy import RedactLastfmCallback as RedactLastfmCallback
 from wildstring.request_privacy import install_callback_filter
 
 
