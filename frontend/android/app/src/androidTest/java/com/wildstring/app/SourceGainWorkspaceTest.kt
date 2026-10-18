@@ -175,6 +175,7 @@ class SourceGainWorkspaceTest {
             compose.onNodeWithTag("lyric-rate-low").performScrollTo().assertIsSelected()
             compose.onNodeWithTag("lyric-rate-custom").performScrollTo().performClick()
             compose.onNodeWithText("请求间隔（1–120秒）").performScrollTo().performTextReplacement("7")
+            compose.onNodeWithText("请求间隔（1–120秒）").performImeAction()
             compose.onNodeWithText("检查扫描范围").performScrollTo().performClick()
             try { compose.waitUntil(10_000) { compose.onAllNodesWithText("开始后台扫描").fetchSemanticsNodes().isNotEmpty() } }
             catch (error: Throwable) { println("Lyric fixture paths: ${fixture.paths}"); capture("lyric-scan-failure.png"); compose.onAllNodes(isRoot()).onLast().printToLog("LyricFailure"); throw error }

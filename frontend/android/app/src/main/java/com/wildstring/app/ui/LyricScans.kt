@@ -7,11 +7,15 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
@@ -25,6 +29,7 @@ private val lyricLevels = listOf("无歌词", "静态歌词", "逐行动态", "�
 private val lyricStates = mapOf("running" to "扫描中", "queued" to "等待", "paused" to "已暂停", "completed" to "扫描结束", "cancelled" to "已取消", "ready" to "可升级", "review" to "待核对", "no_match" to "未匹配", "failed" to "失败", "locked" to "已锁定", "skipped_goal" to "已满足目标", "skipped_scanned" to "已扫跳过", "stale" to "歌曲已变化", "applied" to "已启用", "restored" to "已恢复")
 
 @Composable internal fun LyricScansPanel(vm: MusicViewModel, albumId: String? = null) {
+    val focus = LocalFocusManager.current; val keyboard = LocalSoftwareKeyboardController.current
     val scope = rememberCoroutineScope(); val action = remember { FeatureAction() }
     val list = rememberLazyListState()
     var goal by remember { mutableIntStateOf(5) }; var mode by remember { mutableStateOf("upgrade") }
@@ -78,7 +83,7 @@ private val lyricStates = mapOf("running" to "扫描中", "queued" to "等待", 
                         FilterChip(profile == key, { profile = key }, { Text(label + if (key == "custom") "" else " ${defaults?.number(key + "_seconds")}秒") }, enabled = !action.busy, modifier = Modifier.testTag("lyric-rate-$key"))
                     }
                 }
-                if (profile == "custom") OutlinedTextField(interval, { interval = it }, label = { Text("请求间隔（1–120秒）") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), enabled = !action.busy)
+                if (profile == "custom") OutlinedTextField(interval, { interval = it }, label = { Text("请求间隔（1–120秒）") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done), keyboardActions = KeyboardActions(onDone = { focus.clearFocus(); keyboard?.hide() }), enabled = !action.busy)
                 Text("后台默认低频；每来源串行、不突发放量。双语逐字指原文逐字高亮、译文同步显示。", style = MaterialTheme.typography.bodySmall)
                 Row(verticalAlignment = Alignment.CenterVertically) { Checkbox(force, { force = it }, enabled = !action.busy); Text("强制重扫已查记录和缓存") }
                 ActionStatus(action)
