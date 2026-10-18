@@ -2,7 +2,7 @@
 
 更新日期：2026-10-18。
 
-当前修复分支进行[安全与质量维护](../architecture/security-quality-maintenance.md)：解除服务循环依赖、补充资源关闭与错误处理、加密 Android 账户资料、更新兼容 API，并裁剪酷狗插件无用凭据。代码改动、本地验证、GitHub 复扫及发布部署分别核验。
+0.5.5 完成[安全与质量维护](../architecture/security-quality-maintenance.md)：解除服务循环依赖、补充资源关闭与错误处理、加密 Android 账户资料、更新兼容 API，并裁剪酷狗插件无用凭据；修复巡检详情在加载期间丢失点击。完整主分支 CI、Android 72 项模拟器回归和 CodeQL 复扫已通过，发布产物与部署仍分别核验，见[0.5.5 发布说明](../releases/v0.5.5.md)。
 
 0.5.4 分支升级依赖和 Android 工具链，精简数据源插件，并增加助手 Markdown 排版及流式正文预览；实现与验收边界见[0.5.4 发布说明](../releases/v0.5.4.md)。发布及 home 部署分别核验。
 
