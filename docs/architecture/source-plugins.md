@@ -82,6 +82,8 @@ class Plugin:
 
 0.5.3参考插件版本为1.1.0，QQ SDK仍锁定0.8.2。可选manifest字段 `request_pacing: true` 声明所有物理请求使用运行时门控；未声明时宿主仅控制调用间隔。后台扫描、设置及兼容边界见[歌词补全与洗版](../product/lyric-scans.md)。
 
+0.5.4参考ZIP为1.1.1。酷狗／网易云使用各自的最小元数据工作区，适配、上游归档哈希、来源文件与许可证在`plugins/node-runtime/vendor`；生成及核验入口为`make source-providers-check`，说明见[插件运行依赖](../../plugins/node-runtime/README.md)。不再安装Forge、PAC解释器及FTP依赖，显式HTTP(S)代理继续支持。
+
 ## 插件上下文与运行边界
 
 - `context.data["config"]`：本插件非敏感配置；`context.data["secrets"]`：本插件凭据。

@@ -1,18 +1,13 @@
-// The upstream reads anonymous state at module load; isolate it inside this plugin's state dir.
-const fs = require('fs');
-const path = require('path');
-const root = require('os').tmpdir();
-if (!fs.existsSync(path.join(root, 'anonymous_token')))
-  fs.writeFileSync(path.join(root, 'anonymous_token'), '');
+// Metadata uses explicit cookies only; the provider owns no filesystem token cache.
 global.deviceId = 'WildStringSourcePlugin';
 console.log = console.info = console.warn = console.error = () => {};
-const request = require('netease-upstream/util/request');
+const request = require('@wildstring/netease-metadata/util/request');
 const { paced } = require('./rate.cjs');
 const methods = {
-  '/cloudsearch': require('netease-upstream/module/cloudsearch'),
-  '/song/detail': require('netease-upstream/module/song_detail'),
-  '/album': require('netease-upstream/module/album'),
-  '/lyric/new': require('netease-upstream/module/lyric_new'),
+  '/cloudsearch': require('@wildstring/netease-metadata/module/cloudsearch'),
+  '/song/detail': require('@wildstring/netease-metadata/module/song_detail'),
+  '/album': require('@wildstring/netease-metadata/module/album'),
+  '/lyric/new': require('@wildstring/netease-metadata/module/lyric_new'),
 };
 let input = '';
 process.stdin.setEncoding('utf8');

@@ -1,0 +1,37 @@
+{
+  "url": "https://codeload.github.com/NeteaseCloudMusicApiEnhanced/api-enhanced/tar.gz/19c7dad6db7d660954c7a615a686ff0acb030f91",
+  "sha256": "cea2f085fe7c3b1185e75b6dcc587250dc2812aad5463944a2fba6ba0a1f0b92",
+  "modules": [
+    "cloudsearch",
+    "song_detail",
+    "album",
+    "lyric_new"
+  ],
+  "source_whitespace": "trailing whitespace normalized",
+  "upstream_version": "4.41.1",
+  "adaptations": {
+    "node-forge": "@wildstring/native-rsa",
+    "pac-proxy-agent": "@wildstring/no-pac"
+  },
+  "provider_surface": "Metadata only: no neapi/xeapi, downloaded keys or filesystem token caches",
+  "unsupported_modules": [
+    "module/register_checktoken_v2.js",
+    "module/register_checktoken_v3.js"
+  ],
+  "files": {
+    "LICENSE": "e463bb821c363e6182f16ec1bf24405af3315b4adc72fc1402232fa98b9a0b12",
+    "module/album.js": "c7a2981784dcfd5f56196f3df3697545238f975c04956a9488bcfd2a328336af",
+    "module/cloudsearch.js": "2c831a3a86413c2747b92970041387fcdb934aba5aabf9a6c2f91816ade80657",
+    "module/lyric_new.js": "08a3613292d69ff8cb16b5b650543fc1465464488f97f1732b7e436bfc53ffd3",
+    "module/register_checktoken_v2.js": "4c27747a01963e0cf63cb31a7bd2a3497d5aa8a4e3397fc01d36645b1b96fd94",
+    "module/register_checktoken_v3.js": "4c27747a01963e0cf63cb31a7bd2a3497d5aa8a4e3397fc01d36645b1b96fd94",
+    "module/song_detail.js": "a85e79d888667b645301597a8c755fc468d62be0506fa94ca98e551bf4ee58a9",
+    "package.json": "d12df3c3d5d701a5ef4ef6e745981a9e19e8848579bc7ea72199597a29fcd74b",
+    "util/config.json": "25c30bd41a877b9992e870a457dedd02ac033041adcfb3ca3f9bdc7fdc288665",
+    "util/crypto.js": "f817642825970eabb8203042733c385faa586a71ce5d538bf78b68c5195536a9",
+    "util/index.js": "296e985bc54c1f3756e2c0a5de7d08638c59bb9b72870bb6a4c3443162e6fa8d",
+    "util/logger.js": "f1c1ff07eaf06822ca8fcf880f149555e982060198178e68a3bf682c43458363",
+    "util/option.js": "2bdd9827630ea91e5bdb008b1652126c5d29c3bab59dc4cf25a87f1a19208224",
+    "util/request.js": "62d64389f1af2d33c0d0a64184b714dfc168b4638cadb31e546a69c23ac2aa9f"
+  }
+}

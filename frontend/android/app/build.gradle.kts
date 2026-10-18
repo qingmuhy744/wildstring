@@ -1,20 +1,19 @@
 plugins {
     alias(libs.plugins.android.application)
-    alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.hilt)
     alias(libs.plugins.ksp)
 }
 android {
     namespace = "com.wildstring.app"
-    compileSdk { version = release(36) { minorApiLevel = 1 } }
+    compileSdk = 37
     buildToolsVersion = "36.1.0"
     defaultConfig {
         applicationId = "com.wildstring.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 17
-        versionName = "0.5.3"
+        versionCode = 18
+        versionName = "0.5.4"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     val signingValues = listOf("ANDROID_KEYSTORE_PATH", "ANDROID_KEYSTORE_PASSWORD", "ANDROID_KEY_ALIAS", "ANDROID_KEY_PASSWORD")
@@ -48,6 +47,8 @@ android {
 kotlin { compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17) } }
 ksp { arg("room.schemaLocation", "$projectDir/schemas") }
 dependencies {
+    implementation(libs.commonmark)
+    implementation(libs.commonmark.tables)
     implementation(platform(libs.compose.bom))
     implementation(libs.compose.ui)
     implementation(libs.compose.material)

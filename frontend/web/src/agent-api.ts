@@ -83,6 +83,7 @@ export interface AgentConnection {
   reasoning_effort?: string;
   max_output_tokens?: number;
   native_search?: boolean;
+  stream_output?: boolean;
   id: string;
   name: string;
   scope: 'personal' | 'instance';
@@ -103,6 +104,7 @@ export interface AgentConnection {
   read_only?: boolean;
 }
 export interface ConversationMessage {
+  partial?: boolean;
   sources?: {
     id: string;
     title: string;
@@ -117,6 +119,7 @@ export interface ConversationMessage {
   run_id?: string;
 }
 export interface AgentRun {
+  stage?: string | null;
   id: string;
   status: string;
   connection_id: string | null;

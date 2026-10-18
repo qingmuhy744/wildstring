@@ -29,6 +29,7 @@ const empty = {
   reasoning_effort: 'low',
   max_output_tokens: 8192,
   native_search: false,
+  stream_output: true,
 };
 export function AgentConnections({ user }: { user: User }) {
   const list = useModelConnections(),
@@ -68,6 +69,7 @@ export function AgentConnections({ user }: { user: User }) {
       reasoning_effort: item.reasoning_effort || 'auto',
       max_output_tokens: item.max_output_tokens || 2048,
       native_search: item.native_search || false,
+      stream_output: item.stream_output !== false,
     });
     setError('');
     setNotice('');
@@ -272,6 +274,14 @@ export function AgentConnections({ user }: { user: User }) {
                   value={form.max_output_tokens}
                   onChange={(e) => setForm({ ...form, max_output_tokens: Number(e.target.value) })}
                 />
+              </label>
+              <label className="checkbox-label">
+                <input
+                  type="checkbox"
+                  checked={form.stream_output}
+                  onChange={(e) => setForm({ ...form, stream_output: e.target.checked })}
+                />
+                逐步显示回答（兼容接口不支持时可关闭）
               </label>
               {form.protocol === 'responses' &&
                 ['openai', 'deepseek', 'qwen'].includes(form.provider) && (

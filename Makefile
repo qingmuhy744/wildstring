@@ -29,9 +29,13 @@ sync: ## Install locked Python and Web dependencies
 	$(UV) sync --locked --project backend --extra community-sources
 	npm --prefix frontend/web ci
 
-.PHONY: source-plugins
+.PHONY: source-plugins source-providers-check
+source-providers-check: ## Verify provider subsets against integrity-pinned upstream archives
+	$(RUN) python scripts/vendor_source_providers.py --check
+
 source-plugins: ## Package independently importable community source ZIPs
 	npm --prefix plugins/node-runtime ci --ignore-scripts
+	npm --prefix plugins/node-runtime test
 	node scripts/build_source_runtimes.mjs
 	$(RUN) python scripts/package_source_plugins.py
 
@@ -48,7 +52,7 @@ android-design: ## Preview the Android design at http://127.0.0.1:18782/android-
 	$(RUN) python -m http.server 18782 --bind 127.0.0.1 --directory docs/design
 
 .PHONY: android-check android-test android-assemble android-codeql android-package android-ci android-connected-test android-locks android-release android-release-smoke
-android-check: ## Run Android Lint (requires JDK 21 and Android SDK 36.1)
+android-check: ## Run Android Lint (requires JDK 21 and Android SDK 37)
 	$(ANDROID) :app:lintDebug
 
 android-test: ## Run Android unit tests
@@ -81,7 +85,8 @@ android-connected-test: ## Run native UI/playback tests on a connected emulator/
 	$(ANDROID) :app:connectedDebugAndroidTest $(ANDROID_TEST_ARGS)
 
 android-locks: ## Refresh Android dependency locks and SHA-256 verification metadata
-	$(ANDROID) :app:assembleDebug :app:testDebugUnitTest :app:lintDebug :app:assembleDebugAndroidTest :app:assembleRelease :app:lintRelease --write-locks --write-verification-metadata sha256
+	$(ANDROID) :app:assembleDebug :app:testDebugUnitTest :app:lintDebug :app:assembleDebugAndroidTest --write-locks --write-verification-metadata sha256
+	$(ANDROID) :app:assembleRelease :app:lintRelease --write-locks --write-verification-metadata sha256
 
 scan: env ## Rescan the managed library; use SCAN_ARGS=--full to refresh all tags
 	$(RUN) python -m wildstring.scan $(SCAN_ARGS)
@@ -138,7 +143,12 @@ test-transcoding-web: build-web ## Verify real AAC playback and seeking (require
 web-test-server: ## Internal: serve a disposable library for browser tests
 	$(RUN) python scripts/serve_web_tests.py
 
-ci: check source-plugins test test-web test-large-web test-browse-web test-transcoding-web ## Run checks, backend tests, Web build and browser tests (install Chromium first)
+.PHONY: dependency-audit
+dependency-audit: ## Audit complete Web and provider npm lockfiles, including build dependencies
+	npm --prefix frontend/web audit --audit-level=low
+	npm --prefix plugins/node-runtime audit --audit-level=low
+
+ci: check source-plugins dependency-audit test test-web test-large-web test-browse-web test-transcoding-web ## Run checks, backend tests, Web build and browser tests (install Chromium first)
 	$(UV) lock --check --project backend
 
 health: ## Check the locally configured API readiness

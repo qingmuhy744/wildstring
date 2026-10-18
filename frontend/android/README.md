@@ -24,7 +24,7 @@ Kotlin / Compose / Media3 原生客户端，Android 8.0（API 26）起可安装�
 
 ## 构建
 
-准备 JDK 21、Android SDK `platforms;android-36.1` 与 `build-tools;36.1.0`。在仓库根目录执行：
+准备 JDK 21、Android SDK `platforms;android-37` 与 `build-tools;36.1.0`。在仓库根目录执行：
 
 ```sh
 make android-ci                 # Android Lint、单元测试、debug APK 与校验和

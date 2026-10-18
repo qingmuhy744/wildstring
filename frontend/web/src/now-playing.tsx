@@ -373,6 +373,15 @@ export function NowPlaying({
             if (event.target === event.currentTarget) setArtwork(false);
           }}
         >
+          {current.has_cover && (
+            <a
+              className="artwork-preview-download"
+              href={coverUrl(current.id, 768)}
+              download={`${current.title.replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_').slice(0, 100) || 'WildString'}-封面.jpg`}
+            >
+              下载封面
+            </a>
+          )}
           <button
             autoFocus
             className="artwork-preview-close"

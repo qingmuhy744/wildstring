@@ -3,6 +3,7 @@ import { api } from './api';
 import type { AgentPage, Conversation } from './agent-api';
 import { ModelConnectionChoice, useModelConnections } from './model-connection';
 import { RowMenu } from './row-menu';
+import { AssistantMarkdown } from './assistant-markdown';
 import {
   DiagnosticId,
   errorText,
@@ -83,8 +84,45 @@ export function Assistant({
     },
     [],
   );
+  const running = conversation?.runs?.some((run) => run.status === 'running') || false;
+  useEffect(() => {
+    if (!selected || (!busy && !running)) return;
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout>;
+    let active: AbortController | null = null;
+    const refresh = async () => {
+      if (!document.hidden) {
+        active = new AbortController();
+        try {
+          const value = await api<Conversation>(`/agent/conversations/${selected}`, {
+            signal: active.signal,
+          });
+          if (!stopped)
+            setConversation((current) => {
+              if (current?.id !== value.id) return current;
+              if ((value.messages?.length || 0) < (current.messages?.length || 0)) return current;
+              const stale = value.runs?.some(
+                (run) =>
+                  run.status === 'running' &&
+                  current.runs?.some((saved) => saved.id === run.id && saved.status !== 'running'),
+              );
+              return stale ? current : value;
+            });
+        } catch {
+          /* Sending keeps its own diagnostic and can recover saved progress. */
+        }
+      }
+      if (!stopped) timer = setTimeout(refresh, 650);
+    };
+    timer = setTimeout(refresh, 300);
+    return () => {
+      stopped = true;
+      clearTimeout(timer);
+      active?.abort();
+    };
+  }, [selected, busy, running]);
   async function send() {
-    if (busy || !content.trim()) return;
+    if (busy || running || !content.trim()) return;
     const text = content.trim(),
       epoch = ++sequence.current;
     setBusy(true);
@@ -258,7 +296,7 @@ export function Assistant({
                   ? '当前使用本地曲库检索，不会调用外部模型。'
                   : '之前选择的连接已不可用，请重新选择。'}
             </p>
-            <div ref={messages} aria-live="polite">
+            <div ref={messages} aria-busy={running}>
               {conversation?.context_summary && (
                 <details className="workspace-notice">
                   <summary>已压缩较早对话 · 查看上下文摘要</summary>
@@ -286,7 +324,14 @@ export function Assistant({
                   <small>
                     {message.role === 'user' ? '你' : '野弦'} · {localDate(message.created_at)}
                   </small>
-                  <p>{message.content}</p>
+                  {message.partial && (
+                    <small className="assistant-generating">正在生成 · 内容尚未完成</small>
+                  )}
+                  {message.role === 'assistant' ? (
+                    <AssistantMarkdown content={message.content} />
+                  ) : (
+                    <p>{message.content}</p>
+                  )}
                   {!!message.sources?.length && (
                     <ul aria-label="联网来源">
                       {message.sources.map((source) => (
@@ -320,6 +365,20 @@ export function Assistant({
                 </div>
               ))}
             </div>
+            {running && (
+              <p className="assistant-live-status" role="status">
+                {
+                  (
+                    {
+                      model: '正在分析已有资料…',
+                      search: '正在检索联网来源…',
+                      tools: '正在查询曲库与处理工具结果…',
+                      writing: '正在生成回答…',
+                    } as Record<string, string>
+                  )[conversation?.runs?.find((run) => run.status === 'running')?.stage || 'model']
+                }
+              </p>
+            )}
             <form
               className="assistant-composer"
               onSubmit={(e) => {
@@ -335,7 +394,7 @@ export function Assistant({
                   required
                   maxLength={8000}
                   value={content}
-                  disabled={busy}
+                  disabled={busy || running}
                   onChange={(e) => setContent(e.target.value)}
                   onFocus={(event) => {
                     if (matchMedia('(max-width: 600px)').matches)
@@ -353,7 +412,7 @@ export function Assistant({
                   }}
                 />
               </label>
-              <button className="primary" disabled={busy || !content.trim()}>
+              <button className="primary" disabled={busy || running || !content.trim()}>
                 {busy ? '正在处理…' : '发送'}
               </button>
             </form>

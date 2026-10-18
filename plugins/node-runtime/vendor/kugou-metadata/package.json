@@ -1,0 +1,14 @@
+{
+  "name": "@wildstring/kugou-metadata",
+  "version": "1.0.0",
+  "private": true,
+  "license": "MIT",
+  "description": "Reviewed upstream metadata subset; see UPSTREAM.json",
+  "dependencies": {
+    "@wildstring/native-rsa": "1.0.0",
+    "axios": "^1.1.3",
+    "big-integer": "^1.6.52",
+    "crypto-js": "^4.2.0",
+    "pako": "^2.1.0"
+  }
+}

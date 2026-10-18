@@ -9,7 +9,7 @@ COPY frontend/web/ ./
 RUN npm run build
 
 FROM ${PYTHON_IMAGE} AS builder
-ARG UV_VERSION=0.9.18
+ARG UV_VERSION=0.13.1
 ENV UV_PYTHON_DOWNLOADS=never UV_LINK_MODE=copy
 WORKDIR /app
 RUN python -m pip install --no-cache-dir "uv==${UV_VERSION}"

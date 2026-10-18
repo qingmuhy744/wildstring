@@ -16,10 +16,10 @@ import com.google.gson.JsonObject
 import com.wildstring.app.data.*
 import kotlinx.coroutines.launch
 
-@Composable internal fun ResearchChoice(label: String, value: String, choices: List<Pair<String, String>>, changed: (String) -> Unit) {
+@Composable internal fun ResearchChoice(label: String, value: String, choices: List<Pair<String, String>>, enabled: Boolean = true, changed: (String) -> Unit) {
     var expanded by remember { mutableStateOf(false) }
     Box {
-        OutlinedButton({ expanded = true }) { Text("$label：${choices.firstOrNull { it.first == value }?.second ?: value}") }
+        OutlinedButton({ expanded = true }, enabled = enabled) { Text("$label：${choices.firstOrNull { it.first == value }?.second ?: value}") }
         DropdownMenu(expanded, { expanded = false }) { choices.forEach { (id, title) -> DropdownMenuItem(text = { Text(title) }, onClick = { changed(id); expanded = false }) } }
     }
 }

@@ -264,6 +264,7 @@ class NativePlaybackTest {
         // Android window focus. Send Back only once that actual window is active.
         waitForDialogWindow("artwork")
         compose.onNodeWithTag("artwork-preview").assertIsDisplayed()
+        compose.onNodeWithContentDescription("下载封面").assertIsDisplayed()
     }
 
     private fun exercisePlayback() {

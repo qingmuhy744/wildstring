@@ -31,14 +31,22 @@ class SourceGainWorkspaceTest {
         var scanOptions = JsonObject()
         fun scan() = """{"id":"scan-one","status":"$scanStatus","total":1,"created_at":1,"counts":{"$scanItemStatus":1},"cooldowns":[],"options":{"scope":"album","scope_id":"album-one"},"items":[{"id":"scan-item","track_id":"song-one","title":"合成歌词歌曲","status":"$scanItemStatus","baseline":{"label":"静态歌词"},"quality":{"label":"双语逐字动态"},"results":{}}]}"""
         var albumVersion = 0; var trackVersion = 0; var pluginVersion = 1
+        var gainSettings = JsonParser.parseString("""{"version":0,"mode":"off","preamp_db":0,"prevent_clipping":true}""").asJsonObject
+        @Volatile var analysisStatus = "none"
+        @Volatile var cover = ByteArray(0)
         @Volatile var avatar: ByteArray? = null
         fun avatarVersion() = avatar?.let { java.security.MessageDigest.getInstance("SHA-256").digest(it).joinToString("") { b -> "%02x".format(b) } }
         fun json(text: String) = MockResponse().setHeader("Content-Type", "application/json").setBody(text)
-        fun gain() = """{"track_id":"song-one","album_id":"album-one","factor":1,"requested_db":${album+track},"applied_db":${album+track},"limited":false,"peak_known":true,"settings":{"version":0,"mode":"off","preamp_db":0,"prevent_clipping":true},"album":{"version":$albumVersion,"gain_db":$album},"track":{"version":$trackVersion,"gain_db":$track},"analysis":{"status":"none","error":null}}"""
+        fun gain() = """{"track_id":"song-one","album_id":"album-one","factor":1,"requested_db":${album+track},"applied_db":${album+track},"limited":false,"peak_known":true,"settings":$gainSettings,"album":{"version":$albumVersion,"gain_db":$album},"track":{"version":$trackVersion,"gain_db":$track},"analysis":{"status":"$analysisStatus","error":null}}"""
         init {
             server.dispatcher = object : Dispatcher() { override fun dispatch(request: RecordedRequest): MockResponse = synchronized(this@Fixture) {
                 val path = request.requestUrl!!.encodedPath
                 paths += request.method + " " + path
+                if (path == "/api/v1/tracks/song-one/cover") {
+                    assertNotNull(request.getHeader("Cookie"))
+                    assertEquals("768", request.requestUrl!!.queryParameter("size"))
+                    return@synchronized MockResponse().setHeader("Content-Type", "image/jpeg").setBody(okio.Buffer().write(cover))
+                }
                 if (path == "/api/v1/auth/avatar") return@synchronized when (request.method) {
                     "POST" -> { avatar = request.body.readByteArray(); json("""{"version":"${avatarVersion()}"}""") }
                     "DELETE" -> { avatar = null; MockResponse().setResponseCode(204) }
@@ -51,6 +59,13 @@ class SourceGainWorkspaceTest {
                     path == "/api/v1/auth/avatar/info" -> json("""{"version":${avatarVersion()?.let { "\"$it\"" } ?: "null"}}""")
                     path == "/api/v1/manage/lyric-scan-settings" -> json("""{"version":1,"default_profile":"low","low_seconds":10,"medium_seconds":5,"high_seconds":2}""")
                     path == "/api/v1/manage/lyric-scans/preview" -> json("""{"total":1}""")
+                    path == "/api/v1/playback/gain-settings" -> {
+                        if (request.method == "PUT") {
+                            assertEquals(gainSettings.number("version"), body.number("version"))
+                            gainSettings = body.deepCopy().apply { addProperty("version", body.number("version") + 1) }
+                        }
+                        json(gainSettings.toString())
+                    }
                     path == "/api/v1/manage/lyric-scans" -> {
                         if (request.method == "POST") { scanOptions = body; scanStatus = "running"; json(scan()) }
                         else json("""{"items":[${if (scanStatus.isEmpty()) "" else scan()}]}""")
@@ -132,6 +147,50 @@ class SourceGainWorkspaceTest {
             assertEquals(1,fixture.albumVersion); assertEquals(1,fixture.trackVersion)
         }
     }
+    @Test fun coverDownloadReadsAuthenticatedImageAndRejectsInvalidOrOversizedResponses() {
+        Fixture().use { fixture ->
+            val vm = connect(fixture)
+            val bitmap = android.graphics.Bitmap.createBitmap(8, 8, android.graphics.Bitmap.Config.ARGB_8888)
+            val output = java.io.ByteArrayOutputStream()
+            bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 90, output); bitmap.recycle()
+            fixture.cover = output.toByteArray()
+            assertArrayEquals(fixture.cover, runBlocking { vm.repository.coverImage("song-one") })
+            listOf("invalid image".toByteArray(), ByteArray(4 * 1024 * 1024 + 1)).forEach { bytes ->
+                vm.repository.cache.clear()
+                fixture.cover = bytes
+                try { runBlocking { vm.repository.coverImage("song-one") }; fail("Invalid cover must not be saved") }
+                catch (_: java.io.IOException) { }
+            }
+            assertEquals(3, fixture.paths.count { it == "GET /api/v1/tracks/song-one/cover" })
+            assertFalse(fixture.paths.any { it == "PUT /api/v1/playback/state" })
+        }
+    }
+    @Test fun automaticGainModePersistsWhenPanelIsReopened() {
+        Fixture().use { fixture ->
+            val vm = connect(fixture)
+            val track = Track("song-one", "合成摇滚", listOf("合成乐队"), "合成专辑", 12000, albumId = "album-one")
+            val generation = androidx.compose.runtime.mutableIntStateOf(0)
+            compose.runOnUiThread { compose.activity.setContent { MaterialTheme { Surface {
+                androidx.compose.runtime.key(generation.intValue) { PlaybackGainPanel(vm, track) }
+            } } } }
+            compose.waitUntil(10_000) { compose.onAllNodes(hasText("保存均衡设置") and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithText("自动响度均衡：关闭").performClick()
+            compose.onNodeWithText("单曲 ReplayGain", useUnmergedTree = true).performClick()
+            compose.waitUntil(10_000) { compose.onAllNodesWithText("自动响度模式已保存。").fetchSemanticsNodes().isNotEmpty() }
+            assertEquals("track", fixture.gainSettings.text("mode"))
+            fixture.analysisStatus = "running"
+            compose.runOnIdle { generation.intValue++ }
+            compose.waitUntil(10_000) { compose.onAllNodesWithText("自动响度均衡：单曲 ReplayGain").fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithText("自动响度均衡：单曲 ReplayGain").assertIsDisplayed()
+            compose.onNodeWithText("均衡前级 dB（-12 至 12）").performTextReplacement("3")
+            val reads = fixture.paths.count { it == "GET /api/v1/tracks/song-one/playback-gain" }
+            compose.waitUntil(10_000) { fixture.paths.count { it == "GET /api/v1/tracks/song-one/playback-gain" } > reads }
+            compose.onNodeWithText("均衡前级 dB（-12 至 12）").assertTextContains("3")
+            compose.onNodeWithText("保存均衡设置").performScrollTo().performClick()
+            compose.waitUntil(10_000) { fixture.gainSettings.get("preamp_db").asDouble == 3.0 }
+            assertEquals("track", fixture.gainSettings.text("mode"))
+        }
+    }
     @Test fun lyricScanSupportsCustomRatePauseConfirmationAndRestoreInAlbumScope() {
         Fixture().use { fixture ->
             val vm = connect(fixture)
@@ -140,8 +199,10 @@ class SourceGainWorkspaceTest {
             compose.onNodeWithTag("lyric-rate-low").performScrollTo().assertIsSelected()
             compose.onNodeWithTag("lyric-rate-custom").performScrollTo().performClick()
             compose.onNodeWithText("请求间隔（1–120秒）").performScrollTo().performTextReplacement("7")
+            compose.onNodeWithText("请求间隔（1–120秒）").performImeAction()
             compose.onNodeWithText("检查扫描范围").performScrollTo().performClick()
-            compose.waitUntil(10_000) { compose.onAllNodesWithText("开始后台扫描").fetchSemanticsNodes().isNotEmpty() }
+            try { compose.waitUntil(10_000) { compose.onAllNodesWithText("开始后台扫描").fetchSemanticsNodes().isNotEmpty() } }
+            catch (error: Throwable) { println("Lyric fixture paths: ${fixture.paths}"); capture("lyric-scan-failure.png"); compose.onAllNodes(isRoot()).onLast().printToLog("LyricFailure"); throw error }
             compose.onNodeWithText("开始后台扫描").performScrollTo().performClick()
             compose.waitUntil(10_000) { fixture.scanStatus == "running" }
             assertEquals("album", fixture.scanOptions.text("scope")); assertEquals("album-one", fixture.scanOptions.text("scope_id"))

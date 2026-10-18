@@ -84,6 +84,25 @@ class Repository @Inject constructor(val session: SessionStore, val client: OkHt
         return builder.build().toString()
     }
     fun cover(id: String): String = url("api", "v1", "tracks", id, "cover") + "?size=768"
+    suspend fun coverImage(id: String): ByteArray = withContext(Dispatchers.IO) {
+        val owner = session.cacheScope(); requireProfile(owner)
+        val bytes = api().coverImage(cover(id), RequestOwner(owner!!)).use { body ->
+            body.byteStream().use { input ->
+                val output = java.io.ByteArrayOutputStream()
+                val buffer = ByteArray(8192)
+                while (true) {
+                    val count = input.read(buffer)
+                    if (count < 0) break
+                    if (output.size() + count > 4 * 1024 * 1024) throw IOException("封面图片过大。")
+                    output.write(buffer, 0, count)
+                }
+                output.toByteArray()
+            }
+        }
+        requireProfile(owner)
+        if (bytes.size < 3 || bytes[0] != 0xff.toByte() || bytes[1] != 0xd8.toByte()) throw IOException("封面图片不可用。")
+        bytes
+    }
     fun originalStream(id: String): String = url("api", "v1", "tracks", id, "stream")
     fun stream(id: String): String = PlaybackRequest.url(originalStream(id), if (downloads.file(id) != null) 0 else settings.state.value.aacBitrate)
     suspend fun status(): AuthStatus {
