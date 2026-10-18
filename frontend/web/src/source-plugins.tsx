@@ -7,6 +7,7 @@ type Plugin = {
   version: number;
   plugin_version: string;
   available: boolean;
+  request_pacing?: boolean;
   enabled: boolean;
   metadata_enabled: boolean;
   lyrics_enabled: boolean;
@@ -284,7 +285,13 @@ type LyricCandidate = {
   };
   normalized: {
     kind: string;
-    lines: { text: string; time_ms: number | null; words?: unknown[] }[];
+    lines: {
+      text: string;
+      time_ms: number | null;
+      words?: unknown[];
+      translation?: string;
+      romanization?: string;
+    }[];
     format: string;
     layers?: Record<string, unknown[]>;
   };
@@ -390,7 +397,9 @@ export function OnlineLyrics({ trackId, applied }: { trackId: string; applied: (
               .slice(0, 100)
               .map(
                 (line) =>
-                  `${line.time_ms === null ? '' : (line.time_ms / 1000).toFixed(2)} ${line.text}`,
+                  `${line.time_ms === null ? '' : (line.time_ms / 1000).toFixed(2)} ${line.text}` +
+                  (line.translation ? `\n${line.translation}` : '') +
+                  (line.romanization ? `\n${line.romanization}` : ''),
               )
               .join('\n')}
           </pre>
@@ -419,7 +428,9 @@ export function OnlineLyrics({ trackId, applied }: { trackId: string; applied: (
                 });
                 setSelected(null);
                 applied();
-                window.dispatchEvent(new Event('wildstring:lyrics-updated'));
+                window.dispatchEvent(
+                  new CustomEvent('wildstring:lyrics-updated', { detail: trackId }),
+                );
                 setMessage('已保存选中的歌词，音乐文件未修改。');
               })
             }

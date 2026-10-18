@@ -70,6 +70,7 @@ def inspect_package(data):
         if (
             type(manifest.api_version) is not int
             or manifest.api_version != 1
+            or type(manifest.request_pacing) is not bool
             or not re.fullmatch(r"[a-z][a-z0-9_-]{1,40}", manifest.id)
             or not re.fullmatch(r"\d+\.\d+\.\d+(?:[-+][a-zA-Z0-9.-]+)?", manifest.version)
             or not 1 <= len(manifest.name) <= 150
@@ -190,6 +191,18 @@ def install(manager, data, expected_version=None, expected_id=None):
 
 
 def execute(plugin, context, method, value):
+    from filelock import FileLock, Timeout
+
+    directory = context.directory / "plugin-state"
+    directory.mkdir(parents=True, exist_ok=True)
+    try:
+        with FileLock(str(directory / (plugin.manifest.id + ".request.lock")), timeout=2):
+            return execute_serial(plugin, context, method, value)
+    except Timeout:
+        raise PluginError("source_plugin_busy") from None
+
+
+def execute_serial(plugin, context, method, value):
     context.manager.current(context.identity, context.configuration["version"])
     cache_key = hashlib.sha256(
         json.dumps(
@@ -201,7 +214,7 @@ def execute(plugin, context, method, value):
             "SELECT payload FROM provider_cache WHERE provider=? AND cache_key=? AND expires_at>?",
             ("plugin:" + plugin.manifest.id, cache_key, time.time()),
         ).fetchone()
-    if cached:
+    if cached and not context.force:
         return json.loads(cached[0])
     config = context.manager.providers.settings()
     secrets = {
@@ -221,8 +234,22 @@ def execute(plugin, context, method, value):
         "proxy_mode": config["proxy_mode"],
         "proxy_url": context.manager.providers.secrets().get("proxy_url"),
         "directory": str((context.directory / "plugin-state" / plugin.manifest.id).resolve()),
+        "rate": {
+            "database": str(context.manager.database.path.resolve()),
+            "plugin_id": plugin.manifest.id,
+            "interval_seconds": context.interval_seconds,
+            "batch_id": context.batch_id,
+        },
     }
-    remaining = min(60, context.deadline - time.monotonic())
+    if not plugin.manifest.request_pacing:
+        from wildstring.plugin_rate import wait
+
+        wait(payload["rate"], context.deadline)
+        payload["rate"] = None
+    remaining = min(
+        60 if not context.batch_id else 50 + context.interval_seconds * 8,
+        context.deadline - time.monotonic(),
+    )
     if remaining <= 0:
         raise PluginError("source_plugin_timeout")
     with TemporaryFile() as source, TemporaryFile() as output:
@@ -256,7 +283,17 @@ def execute(plugin, context, method, value):
                 },
             )
             try:
-                process.wait(timeout=remaining)
+                end = time.monotonic() + remaining
+                while process.poll() is None:
+                    if context.batch_id and context.manager.scans.exit.is_set():
+                        raise PluginError("lyric_scan_paused")
+                    budget = end - time.monotonic()
+                    if budget <= 0:
+                        raise subprocess.TimeoutExpired("plugin_worker", remaining)
+                    try:
+                        process.wait(timeout=min(0.25, budget))
+                    except subprocess.TimeoutExpired:
+                        continue
             finally:
                 if os.name == "posix":
                     with suppress(ProcessLookupError):

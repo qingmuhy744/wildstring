@@ -7,6 +7,7 @@ if (!fs.existsSync(path.join(root, 'anonymous_token')))
 global.deviceId = 'WildStringSourcePlugin';
 console.log = console.info = console.warn = console.error = () => {};
 const request = require('netease-upstream/util/request');
+const { paced } = require('./rate.cjs');
 const methods = {
   '/cloudsearch': require('netease-upstream/module/cloudsearch'),
   '/song/detail': require('netease-upstream/module/song_detail'),
@@ -33,11 +34,11 @@ process.stdin.on('end', async () => {
           return [v.slice(0, i).trim(), v.slice(i + 1).trim()];
         }),
     );
-    const result = await method({ ...data.parameters, cookie, timeout: 12000 }, request);
+    const result = await method({ ...data.parameters, cookie, timeout: 12000 }, paced(data, request));
     process.stdout.write(JSON.stringify(result.body));
     process.exit(0);
-  } catch {
-    process.stdout.write(JSON.stringify({ code: 502 }));
+  } catch (error) {
+    process.stdout.write(JSON.stringify(error?.wildstring_error ? error : { code: 502 }));
     process.exit(0);
   }
 });

@@ -48,6 +48,7 @@ def pre19(connection):
 
 
 def pre20(connection):
+    pre21(connection)
     for table in (
         "source_plugin_packages",
         "source_plugin_settings",
@@ -61,3 +62,15 @@ def pre20(connection):
     columns = {row[1] for row in connection.execute("PRAGMA table_info(track_lyrics)")}
     if "selected_candidate" in columns:
         connection.execute("ALTER TABLE track_lyrics DROP COLUMN selected_candidate")
+
+
+def pre21(connection):
+    for table in (
+        "lyric_scan_items",
+        "lyric_scan_batches",
+        "lyric_scan_coverage",
+        "lyric_locks",
+        "plugin_request_gates",
+        "lyric_scan_settings",
+    ):
+        connection.execute("DROP TABLE IF EXISTS " + table)

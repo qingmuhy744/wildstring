@@ -78,6 +78,7 @@ private val LocalSettingsFeedback = staticCompositionLocalOf<() -> Unit> { {} }
             }
             if (state.account?.role == "admin") SettingsGroup("资料来源与维护") {
                 SettingsAction("曲库管理", Icons.Default.LibraryMusic) { feature = "management" }
+                SettingsAction("歌词补全与洗版", Icons.Default.Lyrics) { feature = "lyric-scans" }
                 SettingsAction("数据源插件", Icons.Default.Extension) { feature = "source-plugins" }
             }
             SettingsGroup("播放") {

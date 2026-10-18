@@ -116,6 +116,8 @@ class LyricLine(BaseModel):
     text: str
     end_ms: int | None = None
     words: list[LyricWord] | None = None
+    translation: str | None = None
+    romanization: str | None = None
 
 
 class Lyrics(BaseModel):

@@ -38,6 +38,7 @@ import { QueuePanel } from './queue-panel';
 import { Management } from './management';
 import { MetadataEditor } from './metadata-editor';
 import { MetadataRefreshDialog, type RefreshTarget } from './metadata-refresh';
+import { LyricScanDialog } from './lyric-scans';
 import { AccountDialog } from './accounts';
 import { ThemeControl } from './theme';
 import { TrackList } from './track-list';
@@ -186,6 +187,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
   }, [manageOpen]);
   const refreshLibrary = useCallback(() => setRevision((value) => value + 1), []);
   const [album, setAlbum] = useState<Album | null>(null);
+  const [lyricScanAlbum, setLyricScanAlbum] = useState<string | null>(null);
   const [selectedArtist, setSelectedArtist] = useState<Artist | null>(null);
   const [artistRole, setArtistRole] = useState('');
   const [artistView, setArtistView] = useState<'tracks' | 'albums'>('tracks');
@@ -1197,6 +1199,16 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
                           <button
                             onClick={(event) => {
                               event.currentTarget.closest('details')?.removeAttribute('open');
+                              setLyricScanAlbum(album.id);
+                            }}
+                          >
+                            歌词补全与洗版
+                          </button>
+                        )}
+                        {album && isAdmin && (
+                          <button
+                            onClick={(event) => {
+                              event.currentTarget.closest('details')?.removeAttribute('open');
                               setMetadataRefresh({
                                 scope: 'album',
                                 id: album.id,
@@ -1539,6 +1551,9 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
           onOpenAlbum={(track) => void openTrackAlbum(track)}
           statusMessage={notice}
         />
+      )}
+      {lyricScanAlbum && (
+        <LyricScanDialog albumId={lyricScanAlbum} onClose={() => setLyricScanAlbum(null)} />
       )}
       {metadataRefresh && (
         <MetadataRefreshDialog target={metadataRefresh} onClose={() => setMetadataRefresh(null)} />

@@ -78,6 +78,7 @@ import java.io.ByteArrayOutputStream
             val test = remember { FeatureAction().also { tests[id] = it } }
             val dirty = savedPlugins[id] != p.toString() || savedFields[id] != fields[id]
             HorizontalDivider(); Text(p.text("name"), style = MaterialTheme.typography.titleMedium)
+            Text(if (p.flag("request_pacing")) "逐请求限速" else "调用级限速 · 升级插件可支持逐请求控制", style = MaterialTheme.typography.bodySmall)
             Text("${p.text("license")} · 插件 ${p.text("plugin_version")} · 配置版本 ${p.number("version")}", style = MaterialTheme.typography.bodySmall)
             TextButton({ uriHandler.openUri(p.text("upstream")) }) { Text("查看上游项目") }
             if (!p.flag("available")) Text("运行环境缺少插件声明的依赖，请按插件说明或升级官方镜像。")
@@ -137,7 +138,9 @@ import java.io.ByteArrayOutputStream
     }
     selected?.let { candidate -> AlertDialog(onDismissRequest = { if (!action.busy) selected = null }, title = { Text("核对并使用歌词？") }, text = {
         Column(Modifier.heightIn(max = 400.dp).verticalScroll(rememberScrollState())) {
-            Text(candidate.getAsJsonObject("normalized").objects("lines").take(100).joinToString("\n") { it.text("text") })
+            Text(candidate.getAsJsonObject("normalized").objects("lines").take(100).joinToString("\n\n") { line ->
+                listOf("text", "translation", "romanization").map { line.text(it) }.filter { it.isNotBlank() }.joinToString("\n")
+            })
             OutlinedTextField(offset, { offset = it }, label = { Text("偏移毫秒（正值延后，±60000）") })
             ActionStatus(action)
         }

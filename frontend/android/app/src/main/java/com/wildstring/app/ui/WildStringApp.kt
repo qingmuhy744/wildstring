@@ -171,6 +171,7 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
     var sleepDialog by remember { mutableStateOf(false) }
     var diagnostics by remember { mutableStateOf(false) }
     var refreshAlbum by remember { mutableStateOf<String?>(null) }
+    var lyricScanAlbum by remember { mutableStateOf<String?>(null) }
     var deletingPlaylist by remember { mutableStateOf<Playlist?>(null) }
     var playlistActions by remember { mutableStateOf<Playlist?>(null) }
     val playlistAction = remember { FeatureAction() }
@@ -262,6 +263,7 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
                     contentWindowInsets = WindowInsets(0, 0, 0, 0),
                     topBar = { CatalogTopBar(state, vm::back, { vm.load() }, { settings = true }, compact = true, unread = unread,
                         notifications = { feature = "notifications" },
+                        albumLyrics = if (state.account?.role == "admin" && (state.collection == "albums" || state.albumFilter != null)) ({ lyricScanAlbum = state.albumFilter ?: state.collectionId }) else null,
                         albumRefresh = if (state.account?.role == "admin" && (state.collection == "albums" || state.albumFilter != null))
                             ({ refreshAlbum = state.albumFilter ?: state.collectionId }) else null) },
                     bottomBar = { Column {
@@ -338,6 +340,7 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
         }
         Spacer(Modifier.height(24.dp))
     } }
+    lyricScanAlbum?.let { albumId -> FeatureDialog(vm, "lyric-scans", albumId = albumId) { lyricScanAlbum = null } }
     refreshAlbum?.let { albumId -> MetadataRefreshPrompt(vm, "album", albumId) { refreshAlbum = null } }
     if (sleepDialog) SleepDialog(vm) { sleepDialog = false }
     if (diagnostics) PlaybackDiagnosticsDialog(vm) { diagnostics = false }

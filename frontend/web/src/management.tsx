@@ -1,5 +1,6 @@
 import { SystemDiagnostics } from './system-diagnostics';
 import { ProviderSettings } from './providers';
+import { LyricScanEntry } from './lyric-scans';
 import { UsersPanel } from './accounts';
 import { TranscodingSettings } from './transcoding-settings';
 import { HostSettings } from './host-settings';
@@ -510,6 +511,7 @@ export function Management({
             )}
             {tab === 'settings' && (
               <>
+                <LyricScanEntry />
                 <ProviderSettings />
                 <section className="management-card">
                   <h2>AI 模型连接</h2>

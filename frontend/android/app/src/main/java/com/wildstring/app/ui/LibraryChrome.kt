@@ -20,7 +20,7 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 
 @Composable internal fun CatalogTopBar(state: MusicState, back: () -> Unit, refresh: () -> Unit, settings: () -> Unit, compact: Boolean = false, albumRefresh: (() -> Unit)? = null,
-    unread: Int = 0, notifications: (() -> Unit)? = null) {
+    unread: Int = 0, notifications: (() -> Unit)? = null, albumLyrics: (() -> Unit)? = null) {
     var menu by remember { mutableStateOf(false) }
     val title: @Composable () -> Unit = { Text(state.title, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis) }
     val actions: @Composable RowScope.() -> Unit = {
@@ -31,6 +31,7 @@ import androidx.compose.ui.unit.dp
         Box {
             IconButton({ menu = true }) { Icon(Icons.Default.MoreVert, "更多选项") }
             DropdownMenu(menu, { menu = false }) {
+                albumLyrics?.let { open -> DropdownMenuItem(text = { Text("歌词补全与洗版") }, leadingIcon = { Icon(Icons.Default.Lyrics, null) }, onClick = { menu = false; open() }) }
                 albumRefresh?.let { update -> DropdownMenuItem(text = { Text("更新专辑元数据") }, leadingIcon = { Icon(Icons.Default.Edit, null) }, onClick = { menu = false; update() }) }
                 DropdownMenuItem(text = { Text("刷新曲库") }, leadingIcon = { Icon(Icons.Default.Refresh, null) }, onClick = { menu = false; refresh() })
             }

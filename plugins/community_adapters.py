@@ -9,6 +9,7 @@ import importlib.util
 import json
 import os
 import subprocess
+import sys
 from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urlencode, urlsplit
@@ -33,7 +34,7 @@ def bridge(context, path, parameters):
     environment = dict(os.environ)
     environment["TMPDIR"] = str(context.directory)
     mode = context.data["proxy_mode"]
-    proxy = context.data.get("proxy_url") if mode == "manual" else None
+    proxy = context.data.get("proxy_url") if mode in {"manual", "custom"} else None
     if mode != "environment":
         for key in (
             "HTTP_PROXY",
@@ -54,10 +55,14 @@ def bridge(context, path, parameters):
                 "path": path,
                 "parameters": parameters,
                 "cookie": context.data["secrets"].get("cookie") or "",
+                "rate": context.data.get("rate"),
+                "rate_command": [sys.executable, "-I", "-m", "wildstring.plugin_rate"],
             }
         ).encode(),
         capture_output=True,
-        timeout=35,
+        timeout=max(35, (context.data.get("rate") or {}).get("interval_seconds", 5) * 6 + 25)
+        if (context.data.get("rate") or {}).get("batch_id")
+        else 35,
         check=False,
         cwd=context.directory,
         env=environment,
@@ -66,6 +71,19 @@ def bridge(context, path, parameters):
         raise PluginError("source_plugin_worker_failed")
     try:
         value = json.loads(result.stdout)
+        if isinstance(value, dict) and value.get("wildstring_error"):
+            code = value["wildstring_error"]
+            raise PluginError(
+                code
+                if code
+                in {
+                    "lyric_scan_paused",
+                    "source_plugin_rate_limited",
+                    "source_plugin_auth_or_rejected",
+                    "source_plugin_timeout",
+                }
+                else "source_plugin_unavailable"
+            )
         if (
             not isinstance(value, dict)
             or value.get("code") not in (None, 0, 200)
@@ -108,10 +126,12 @@ class QQTransport:
 
         class Response:
             status_code = 200
-            cookies = {}
-            headers = {}
             content = json.dumps(result).encode()
             text = content.decode()
+
+            def __init__(self):
+                self.cookies = {}
+                self.headers = {}
 
             def json(self):
                 return result
@@ -133,7 +153,8 @@ class QQPlugin:
         "QQ 音乐 / QQMusicApi",
         "https://github.com/L-1124/QQMusicApi",
         "GPL-3.0-only",
-        version="0.8.2",
+        version="1.1.0",
+        request_pacing=True,
         requires_modules=("qqmusic_api",),
         cover_hosts=("gtimg.cn",),
     )
@@ -217,6 +238,8 @@ class NeteasePlugin:
         "网易云音乐 / API Enhanced",
         "https://github.com/NeteaseCloudMusicApiEnhanced/api-enhanced",
         "GPL-3.0-only",
+        version="1.1.0",
+        request_pacing=True,
         settings=BRIDGE_SETTINGS,
         cover_hosts=("music.126.net",),
         requires_programs=("node",),
@@ -279,6 +302,8 @@ class KuGouPlugin:
         "酷狗音乐 / KuGouMusicApi",
         "https://github.com/MakcRe/KuGouMusicApi",
         "GPL-3.0-only",
+        version="1.1.0",
+        request_pacing=True,
         settings=BRIDGE_SETTINGS,
         cover_hosts=("kugou.com",),
         requires_programs=("node",),

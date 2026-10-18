@@ -138,9 +138,9 @@ class Repository @Inject constructor(val session: SessionStore, val client: OkHt
         requireProfile(owner); save("playback-gain:$id", value, owner); return value
     }
     suspend fun cachedPlaybackGain(id: String): com.google.gson.JsonObject? = saved("playback-gain:$id", com.google.gson.JsonObject::class.java)
-    suspend fun feature(path: String, method: String = "GET", body: com.google.gson.JsonObject = com.google.gson.JsonObject()): com.google.gson.JsonObject {
+    suspend fun feature(path: String, method: String = "GET", body: com.google.gson.JsonObject = com.google.gson.JsonObject(), query: Map<String, String> = emptyMap()): com.google.gson.JsonObject {
         val owner = session.cacheScope(); requireProfile(owner)
-        val target = url("api", "v1", *path.split('/').toTypedArray())
+        val target = url("api", "v1", *path.split('/').toTypedArray()).toHttpUrl().newBuilder().apply { query.forEach { (key, value) -> addQueryParameter(key, value) } }.build().toString()
         val response = when (method) {
             "POST" -> api().agentPost(target, body, if (path.endsWith("/test")) AgentRequestPolicy() else null, RequestOwner(owner!!)); "PUT" -> api().agentPut(target, body, RequestOwner(owner!!))
             "DELETE" -> api().agentDelete(target, RequestOwner(owner!!)); else -> api().agentGet(target, RequestOwner(owner!!))

@@ -220,6 +220,8 @@ export interface Lyrics {
     time_ms: number | null;
     text: string;
     words?: { start_ms: number; end_ms: number; text: string }[];
+    translation?: string;
+    romanization?: string;
   }[];
 }
 

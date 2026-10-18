@@ -132,6 +132,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(platform.router())
     app.include_router(providers.router(auth))
     app.include_router(providers.sources.router(auth))
+    app.include_router(providers.sources.scans.router(auth))
     app.include_router(providers.loudness.router(auth))
     app.include_router(library_router(repository, auth, transcoding))
     app.include_router(transcoding.router(auth))

@@ -1,8 +1,49 @@
 """Retained selected lyrics; community codecs live inside independently importable ZIPs."""
 
 import json
+from bisect import bisect_left
 
 from wildstring.library.lyrics import MAX_LINES, MAX_TEXT_BYTES, parse_lyrics
+
+
+def display_lyrics(value):
+    """Pair timed language layers for both clients without changing stored originals.
+
+    LRC centisecond rounding can differ slightly from word-timed line starts.
+    Match the nearest start within 250 ms; never carry a previous translation
+    through an instrumental gap or align unrelated rows by their array index.
+    """
+    lines = [dict(line) for line in value["lines"]]
+    timed = sorted(
+        (line["time_ms"], index)
+        for index, line in enumerate(lines)
+        if line.get("time_ms") is not None
+    )
+    starts = [at for at, _ in timed]
+    for field in ("translation", "romanization"):
+        grouped = {}
+        for line in lines:
+            line.pop(field, None)
+        for extra in value.get("layers", {}).get(field, []):
+            at, text = extra.get("time_ms"), extra["text"].strip()
+            if at is None or not text or not timed:
+                continue
+            position = bisect_left(starts, at)
+            nearest = min(
+                timed[max(0, position - 1) : position + 1],
+                key=lambda item: abs(item[0] - at),
+            )
+            if abs(nearest[0] - at) > 250:
+                continue
+            index = nearest[1]
+            if text == lines[index]["text"].strip():
+                continue
+            texts = grouped.setdefault(index, [])
+            if text not in texts:
+                texts.append(text)
+        for index, texts in grouped.items():
+            lines[index][field] = "\n".join(texts)
+    return value | {"lines": lines}
 
 
 def normalize_bundle(raw, source):
@@ -73,9 +114,13 @@ def selected_lyrics(connection, selection):
         ).fetchone()
         if not row:
             return None
-        result = json.loads(row["normalized"])
+        # Pair before a negative offset can clamp distinct early starts to zero.
+        result = display_lyrics(json.loads(row["normalized"]))
         offset = selection.get("offset_ms", 0)
-        for line in result["lines"]:
+        all_lines = list(result["lines"])
+        for layer in result.get("layers", {}).values():
+            all_lines.extend(layer)
+        for line in all_lines:
             if line["time_ms"] is not None:
                 line["time_ms"] = max(0, line["time_ms"] + offset)
             if "end_ms" in line:
@@ -83,10 +128,6 @@ def selected_lyrics(connection, selection):
             for word in line.get("words", []):
                 word["start_ms"] = max(0, word["start_ms"] + offset)
                 word["end_ms"] = max(0, word["end_ms"] + offset)
-        for layer in result.get("layers", {}).values():
-            for line in layer:
-                if line["time_ms"] is not None:
-                    line["time_ms"] = max(0, line["time_ms"] + offset)
         return result | {
             "source_id": row["source_id"],
             "source_url": row["source_url"],

@@ -20,6 +20,7 @@ MANIFEST = {
     "version": "1.0.0",
     "license": "GPL-3.0-only",
     "upstream": "https://example.com/fixture",
+    "request_pacing": True,
     "settings": [{"key": "cookie", "type": "secret", "label": "Cookie"}],
 }
 ADAPTER = """
@@ -29,7 +30,7 @@ class Plugin:
     def metadata(self, context, candidate):
         return {"id": candidate["id"], "release_id": "synthetic-release", "title": "摇滚", "artists": ["合成乐队"], "duration_ms": 12000, "fields": {"title": "摇滚", "artists": ["合成乐队"], "album": "录音室专辑"}, "source_url": "https://example.com/release?edition=studio"}
     def lyrics(self, context, candidate):
-        return {"format": "qrc", "original": '<Lyric_1 LyricType="1" LyricContent="[1000,2000]摇(1000,500)滚(1500,1500)"/>', "normalized": {"format": "qrc", "kind": "synced", "lines": [{"time_ms": 1000, "end_ms": 3000, "text": "摇滚", "words": [{"start_ms": 1000, "end_ms": 1500, "text": "摇"}, {"start_ms": 1500, "end_ms": 3000, "text": "滚"}]}]}}
+        return {"format": "qrc", "original": '<Lyric_1 LyricType="1" LyricContent="[1000,2000]摇(1000,500)滚(1500,1500)"/>', "normalized": {"format": "qrc", "kind": "synced", "layers": {"translation": [{"time_ms": 1000, "text": "Synthetic translation"}]}, "lines": [{"time_ms": 1000, "end_ms": 3000, "text": "摇滚", "words": [{"start_ms": 1000, "end_ms": 1500, "text": "摇"}, {"start_ms": 1500, "end_ms": 3000, "text": "滚"}]}]}}
 """
 
 
@@ -92,6 +93,7 @@ def test_zip_lifecycle_worker_matching_and_lyrics(settings, authenticated_client
         assert result["jobs"][0]["status"] == "completed", result
         candidate = result["items"][0]
         assert candidate["normalized"]["lines"][0]["words"][1]["start_ms"] == 1500
+        assert candidate["normalized"]["lines"][0]["translation"] == "Synthetic translation"
         editor = client.get(f"/api/v1/manage/tracks/{track['id']}/lyrics").json()
         choice = {
             "version": editor["version"],
@@ -105,6 +107,7 @@ def test_zip_lifecycle_worker_matching_and_lyrics(settings, authenticated_client
         playing = client.get(f"/api/v1/tracks/{track['id']}/lyrics").json()
         assert playing["source"] == "fixture-source" and playing["offset_ms"] == 250
         assert playing["lines"][0]["words"][1]["start_ms"] == 1750
+        assert playing["lines"][0]["translation"] == "Synthetic translation"
         assert client.delete(BASE + "/fixture-source?version=2", headers=HEADERS).status_code == 409
         assert (
             client.put(

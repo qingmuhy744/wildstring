@@ -9,6 +9,7 @@ import json
 import sys
 import time
 from pathlib import Path
+from urllib.error import HTTPError
 from urllib.parse import urlencode
 from urllib.request import Request
 
@@ -21,9 +22,14 @@ class Context:
         self.data = data
         self.directory = Path(data["directory"])
         self.directory.mkdir(parents=True, exist_ok=True)
-        self.deadline = time.monotonic() + 50
+        self.deadline = time.monotonic() + (
+            max(50, (data.get("rate") or {}).get("interval_seconds", 5) * 6 + 30)
+            if (data.get("rate") or {}).get("batch_id")
+            else 50
+        )
 
     def http(self, url, *, payload=None, headers=None):
+        self.throttle()
         remaining = min(12, self.deadline - time.monotonic())
         if remaining <= 0:
             raise PluginError("source_plugin_timeout")
@@ -52,6 +58,11 @@ class Context:
         ):
             raise PluginError("source_plugin_auth_or_rejected")
         return result
+
+    def throttle(self):
+        from wildstring.plugin_rate import wait
+
+        wait(self.data.get("rate"), self.deadline)
 
     def bridge(self, path, parameters):
         cookie = self.data["secrets"].get("cookie")
@@ -92,6 +103,27 @@ def main():
         if len(json.dumps(result).encode()) > 2 * 1024 * 1024:
             result = {"error": "source_plugin_response_too_large"}
     except Exception as error:
+        if isinstance(error, HTTPError):
+            if error.code == 429:
+                code = "source_plugin_rate_limited"
+                try:
+                    delay = max(60, min(86400, int(error.headers.get("Retry-After", "900"))))
+                except (ValueError, TypeError):
+                    delay = 900
+                from wildstring.plugin_rate import cooldown
+
+                cooldown(data.get("rate"), delay)
+            else:
+                code = (
+                    "source_plugin_auth_or_rejected"
+                    if error.code in {401, 403}
+                    else "source_plugin_http_error"
+                )
+            error = PluginError(code)
+        elif isinstance(error, PluginError) and error.code == "source_plugin_rate_limited":
+            from wildstring.plugin_rate import cooldown
+
+            cooldown(data.get("rate"))
         result = {
             "error": error.code
             if isinstance(error, PluginError | OutboundError)

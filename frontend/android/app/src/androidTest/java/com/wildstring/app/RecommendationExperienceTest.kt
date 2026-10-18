@@ -65,9 +65,20 @@ class RecommendationExperienceTest {
         val address = fixture.server.url("/").newBuilder().host("127.0.0.1").build().toString()
         compose.runOnIdle { vm.repository.session.invalidate(); vm.settings.appearance("light"); vm.sharing.mode("off"); vm.connect(address, "alice", "synthetic-password", true) }
         compose.waitUntil(20_000) { vm.state.value.connected && !vm.state.value.loading }
+        // Login dismisses a separate window; state can be connected before touch focus returns.
+        compose.waitUntil(10_000) {
+            var focused = false
+            InstrumentationRegistry.getInstrumentation().runOnMainSync { focused = compose.activity.hasWindowFocus() }
+            focused
+        }
         return vm
     }
-    private fun open(name: String) { compose.onNodeWithTag("nav-search").performClick(); compose.onNodeWithText(name, substring = false).performClick() }
+    private fun open(name: String) {
+        compose.onNodeWithTag("nav-search").assertIsDisplayed().performClick()
+        val entry = hasText(name, substring = false) and hasClickAction()
+        compose.waitUntil(10_000) { compose.onAllNodes(entry).fetchSemanticsNodes().isNotEmpty() }
+        compose.onNode(entry).assertIsDisplayed().performClick()
+    }
     private fun cleanup(vm: MusicViewModel) { compose.runOnIdle { vm.controller?.stop(); vm.controller?.clearMediaItems(); vm.repository.session.invalidate() } }
     private fun capture(name: String) {
         compose.waitForIdle(); val instrumentation = InstrumentationRegistry.getInstrumentation(); instrumentation.uiAutomation.waitForIdle(500, 5_000)
@@ -79,9 +90,11 @@ class RecommendationExperienceTest {
         Fixture().use { fixture -> val vm = connect(fixture)
             try {
                 open("每日推荐")
-                compose.waitUntil(10_000) { compose.onAllNodesWithText("真实本库歌曲", substring = true).fetchSemanticsNodes().isNotEmpty() }
+                val more = hasTestTag("daily-more-local-a") and hasClickAction()
+                // The clickable row merges descendants; target the actual nested button.
+                compose.waitUntil(10_000) { compose.onAllNodes(more, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
                 compose.onNodeWithText("不感兴趣", substring = false).assertDoesNotExist()
-                compose.onNodeWithTag("daily-more-local-a").performClick()
+                compose.onNode(more, useUnmergedTree = true).performScrollTo().assertIsDisplayed().performClick()
                 compose.onNodeWithText("不感兴趣", substring = false).assertIsDisplayed()
                 InstrumentationRegistry.getInstrumentation().uiAutomation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK)
                 compose.onNodeWithText("推荐依据", substring = false).performClick()
