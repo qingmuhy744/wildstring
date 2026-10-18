@@ -594,12 +594,10 @@ def test_saved_connection_revocation_falls_back_but_explicit_invalid_ids_still_f
             cached_day = client.get(BASE + "/recommendations/daily").json()
             save(client, connection_id=chosen["id"])
             if failure == "deleted":
-                assert (
-                    admin.delete(
-                        BASE + "/agent/connections/" + chosen["id"], headers=HEADERS
-                    ).status_code
-                    == 200
+                deletion_response = admin.delete(
+                    BASE + "/agent/connections/" + chosen["id"], headers=HEADERS
                 )
+                assert deletion_response.status_code == 200
             elif failure == "endpoint_policy":
                 assert (
                     admin.put(

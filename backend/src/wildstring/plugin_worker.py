@@ -8,6 +8,7 @@ import importlib.util
 import json
 import sys
 import time
+from contextlib import suppress
 from pathlib import Path
 from urllib.error import HTTPError
 from urllib.parse import urlencode
@@ -73,14 +74,12 @@ class Context:
 
 
 def main():
-    try:
+    # Windows lacks resource; subprocess lifetime and response limits still apply.
+    with suppress(ImportError):
         import resource
 
         resource.setrlimit(resource.RLIMIT_FSIZE, (8 * 1024 * 1024, 8 * 1024 * 1024))
         resource.setrlimit(resource.RLIMIT_CPU, (45, 45))
-    except ImportError:
-        pass
-    result = {"error": "source_plugin_worker_failed"}
     try:
         data = json.loads(sys.stdin.buffer.read(2 * 1024 * 1024 + 1))
         root = Path(data["path"])

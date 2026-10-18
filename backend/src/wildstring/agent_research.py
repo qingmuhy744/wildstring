@@ -4,13 +4,14 @@ import hashlib
 import ipaddress
 import json
 import time
+from contextlib import suppress
 from datetime import UTC, datetime
 from urllib.parse import urlsplit
 from uuid import uuid4
 
 from fastapi import HTTPException
 
-from wildstring.agent_platform import encoded
+from wildstring.agent_common import encoded
 from wildstring.library.repository import now
 from wildstring.outbound import OutboundError, json_request
 
@@ -36,10 +37,11 @@ def public_url(value):
         ):
             return None
         try:
-            if not ipaddress.ip_address(host).is_global:
-                return None
+            address = ipaddress.ip_address(host)
         except ValueError:
-            pass
+            address = None  # Hostnames are resolved and checked by the outbound client.
+        if address is not None and not address.is_global:
+            return None
         return value
     except ValueError:
         return None
@@ -374,7 +376,8 @@ class Research:
                 ],
             }
             used = 1
-            try:
+            # Summary generation is optional; retained messages remain the fallback.
+            with suppress(HTTPException):
                 message = self.model_request(
                     actor,
                     configuration,
@@ -397,8 +400,6 @@ class Research:
                             (conversation["id"], summary["through_id"], summary["summary"], now()),
                         )
                     history = history[-8:]
-            except HTTPException:
-                pass
         messages = []
         if summary and pref.get("context_summary", True):
             messages.append(

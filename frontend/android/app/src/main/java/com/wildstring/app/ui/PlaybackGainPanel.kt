@@ -26,7 +26,7 @@ import kotlinx.coroutines.launch
     }
     LaunchedEffect(track.id) { action.run { load() }; if (action.message == "已完成") action.message = null }
     val scanning = record?.getAsJsonObject("analysis")?.text("status") in listOf("queued", "running")
-    LaunchedEffect(scanning, track.id) { while (scanning) { delay(2000); load(false); vm.settings.gainChanged() } }
+    LaunchedEffect(scanning, track.id) { while (record?.getAsJsonObject("analysis")?.text("status") in listOf("queued", "running")) { delay(2000); load(false); vm.settings.gainChanged() } }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(track.title, style = MaterialTheme.typography.titleLarge)
         Text("自动响度均衡、专辑整体增减与单曲微调分别控制，按账号保存；专辑与单曲手动值叠加，不改写音频。")

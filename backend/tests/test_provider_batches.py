@@ -9,11 +9,11 @@ from test_personal_library import music
 from test_providers import HEADERS, RECORDING, enable
 from test_users import login, new_user
 
+from wildstring import provider_batches
 from wildstring.database import SCHEMA_VERSION, Database
 from wildstring.library.repository import LibraryRepository
 from wildstring.library.scanner import scan_library
 from wildstring.main import create_app
-from wildstring.provider_batches import STATUSES, batch_progress
 from wildstring.providers import Providers
 
 BASE = "/api/v1/manage/providers"
@@ -80,7 +80,7 @@ def test_batches_are_isolated_track_all_thirty_members_and_reuse_active_jobs(
         assert progress(client, shared)["items"][0]["id"] == member["id"]
         with Database(settings.data_dir).connect(write=True) as connection:
             for index, item in enumerate(initial["items"]):
-                status = STATUSES[index % len(STATUSES)]
+                status = provider_batches.STATUSES[index % len(provider_batches.STATUSES)]
                 connection.execute(
                     "UPDATE provider_jobs SET status=?,error=?,warnings=? WHERE id=?",
                     (
@@ -91,8 +91,12 @@ def test_batches_are_isolated_track_all_thirty_members_and_reuse_active_jobs(
                     ),
                 )
         first_state = progress(client, first)
-        assert first_state["total"] == sum(first_state[status] for status in STATUSES) == 30
-        assert all(first_state[status] == 5 for status in STATUSES)
+        assert (
+            first_state["total"]
+            == sum(first_state[status] for status in provider_batches.STATUSES)
+            == 30
+        )
+        assert all(first_state[status] == 5 for status in provider_batches.STATUSES)
         assert len(first_state["items"]) == 30
         assert {item["track_id"] for item in first_state["items"]} == {
             track["id"] for track in tracks if track["album_id"] == target["album_id"]
@@ -184,7 +188,7 @@ def test_unknown_batch_and_ordinary_accounts_and_other_libraries_are_rejected(
         repository = LibraryRepository(Database(settings.data_dir), other)
         repository.library_id(create=True)
         with pytest.raises(HTTPException) as error:
-            batch_progress(repository, batch["batch_id"])
+            provider_batches.batch_progress(repository, batch["batch_id"])
         assert error.value.status_code == 404
 
 
@@ -196,7 +200,7 @@ def test_empty_batches_and_bounded_items_keep_full_aggregate(
         batch = refresh(client)
         state = progress(client, batch)
         assert state["total"] == 0 and state["items"] == [] and state["truncated"] is False
-        assert sum(state[status] for status in STATUSES) == 0
+        assert sum(state[status] for status in provider_batches.STATUSES) == 0
         seed(settings, 25)
         batch = refresh(client)
         monkeypatch.setattr("wildstring.provider_batches.ITEM_LIMIT", 20)
@@ -254,7 +258,7 @@ def test_schema14_upgrade_preserves_existing_jobs_and_repeated_start_keeps_batch
     batch = Providers(repository).enqueue(scope="library", track_batch=True)
     assert batch["already_active"] == 2 and batch["queued"] == 0
     database.initialize()
-    assert batch_progress(repository, batch["batch_id"])["total"] == 2
+    assert provider_batches.batch_progress(repository, batch["batch_id"])["total"] == 2
 
 
 def test_concurrent_refreshes_share_one_actual_job_set(settings, authenticated_client):
@@ -283,12 +287,10 @@ def test_concurrent_refreshes_share_one_actual_job_set(settings, authenticated_c
 def test_batch_record_failure_rolls_back_queue_and_membership_together(
     settings, authenticated_client, monkeypatch
 ):
-    import wildstring.provider_batches as module
-
     seed(settings, 2)
     with authenticated_client(settings) as client:
         service = stopped(client)
-        original = module.record_batch
+        original = provider_batches.record_batch
         tables = (
             "provider_jobs",
             "provider_seen",
@@ -305,7 +307,7 @@ def test_batch_record_failure_rolls_back_queue_and_membership_together(
             original(*args)
             raise RuntimeError("simulated batch failure")
 
-        monkeypatch.setattr(module, "record_batch", fail_after_record)
+        monkeypatch.setattr(provider_batches, "record_batch", fail_after_record)
         with pytest.raises(RuntimeError, match="simulated batch failure"):
             service.enqueue(scope="library", track_batch=True)
         with Database(settings.data_dir).connect() as connection:
@@ -314,5 +316,5 @@ def test_batch_record_failure_rolls_back_queue_and_membership_together(
                     connection.execute(f"SELECT count(*) FROM {table}").fetchone()[0]
                     == before[table]
                 )
-        monkeypatch.setattr(module, "record_batch", original)
+        monkeypatch.setattr(provider_batches, "record_batch", original)
         assert service.enqueue(scope="library", track_batch=True)["queued"] == 2

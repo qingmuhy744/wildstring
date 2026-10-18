@@ -23,6 +23,16 @@ class SourceChangedError(Exception):
 
 
 @contextmanager
+def open_directory(path, *, dir_fd=None):
+    """Own each directory descriptor explicitly, including failed nested opens."""
+    descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=dir_fd)
+    try:
+        yield descriptor
+    finally:
+        os.close(descriptor)
+
+
+@contextmanager
 def open_source(root: Path, relative: Path):
     """Open only regular files, without following symlinks on POSIX hosts."""
     if (
@@ -33,12 +43,9 @@ def open_source(root: Path, relative: Path):
         raise OSError("Invalid library path")
     if os.open in os.supports_dir_fd:
         with ExitStack() as stack:
-            directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
-            directory = os.open(root, directory_flags)
-            stack.callback(os.close, directory)
+            directory = stack.enter_context(open_directory(root))
             for part in relative.parts[:-1]:
-                directory = os.open(part, directory_flags, dir_fd=directory)
-                stack.callback(os.close, directory)
+                directory = stack.enter_context(open_directory(part, dir_fd=directory))
             descriptor = os.open(
                 relative.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory
             )

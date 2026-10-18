@@ -9,15 +9,7 @@ from urllib.request import proxy_bypass
 from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
-from wildstring.outbound import (
-    network_error as network_error,
-)
-from wildstring.outbound import (
-    outbound_proxies as outbound_proxies,
-)
-from wildstring.outbound import (
-    validate_proxy as validate_proxy,
-)
+from wildstring.outbound import outbound_proxies
 
 # MusicBrainz's CAA API documentation uses this public release. No private
 # titles, fingerprints or original audio are sent by a connectivity check.

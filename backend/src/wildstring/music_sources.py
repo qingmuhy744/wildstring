@@ -15,6 +15,8 @@ from wildstring.library.edits import Overrides
 from wildstring.library.lyric_edits import LyricsEditor, lyric_text
 from wildstring.library.metadata import normalize
 from wildstring.library.online_lyrics import display_lyrics, normalize_bundle
+from wildstring.lyric_scans import LyricScans
+from wildstring.source_models import LyricChoice
 from wildstring.source_plugins import PluginError, registry
 
 
@@ -27,13 +29,6 @@ class PluginSettings(BaseModel):
     priority: int = Field(default=50, ge=0, le=100)
     config: dict[str, str] = Field(default_factory=dict, max_length=20)
     clear_secrets: list[str] = Field(default_factory=list, max_length=10)
-
-
-class LyricChoice(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-    version: int = Field(ge=1)
-    file_version: str = Field(pattern=r"^[0-9a-f]{64}$")
-    offset_ms: int = Field(default=0, ge=-60_000, le=60_000)
 
 
 def matching(track, candidate):
@@ -110,8 +105,6 @@ class PluginContext:
 class MusicSources:
     def __init__(self, providers):
         self.providers, self.database = providers, providers.database
-        from wildstring.lyric_scans import LyricScans
-
         self.scans = LyricScans(self)
 
     @property

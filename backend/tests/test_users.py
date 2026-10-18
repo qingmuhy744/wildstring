@@ -99,12 +99,10 @@ def test_roles_and_private_collections_in_every_track_view(settings, authenticat
             assert lists[0]["id"] != admin.get("/api/v1/playlists").json()["items"][0]["id"]
             assert user.get(f"/api/v1/playlists/{private['id']}").status_code == 404
             assert user.get(f"/api/v1/playlists/{private['id']}/tracks").status_code == 404
-            assert (
-                user.delete(
-                    f"/api/v1/playlists/{private['id']}?version=1", headers=HEADERS
-                ).status_code
-                == 404
+            deletion_response = user.delete(
+                f"/api/v1/playlists/{private['id']}?version=1", headers=HEADERS
             )
+            assert deletion_response.status_code == 404
             assert user.post("/api/v1/listening", headers=HEADERS, json=report).status_code == 409
             assert (
                 user.put(

@@ -61,7 +61,7 @@ class Management:
         try:
             self.worker_lock.acquire()
         except Timeout:
-            pass
+            logger.info("Library worker lock is held; waiting for the current owner")
         self.thread = Thread(target=self.work, name="wildstring-library-worker", daemon=True)
         self.thread.start()
 

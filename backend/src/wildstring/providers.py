@@ -34,12 +34,10 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 from wildstring.diagnostics import record_event, trace_context
 from wildstring.fingerprints import FingerprintError, calculate
 from wildstring.library.edits import MetadataEditor, MetadataUpdate, Overrides
-from wildstring.outbound import OutboundError, request_bytes
+from wildstring.outbound import OutboundError, network_error, request_bytes, validate_proxy
 from wildstring.provider_network import (
     NetworkTest,
-    network_error,
     test_network,
-    validate_proxy,
 )
 from wildstring.provider_tasks import (
     RETENTION_DAYS,
@@ -80,7 +78,7 @@ def plugin_cover(value, hosts=()):
                 + ("?" + parsed.query if parsed.query else "")
             )
     except ValueError:
-        pass
+        return None
     return None
 
 
@@ -155,7 +153,8 @@ def lastfm_signature(parameters, secret):
         )
         + secret
     )
-    # Last.fm's protocol requires MD5, not used for password storage or security primitives.
+    # Last.fm requires MD5 for api_sig. Keep this legacy protocol isolated;
+    # do not reuse it for password storage or general-purpose authentication.
     return hashlib.md5(raw.encode(), usedforsecurity=False).hexdigest()
 
 
@@ -366,7 +365,7 @@ class Providers:
                         if isinstance(payload, dict):
                             failure = acoustid_failure(payload)
                 except (ValueError, TypeError, KeyError):
-                    pass
+                    failure = None
                 except (URLError, TimeoutError, OSError) as failure:
                     raise ProviderError(network_error(failure)) from None
                 finally:

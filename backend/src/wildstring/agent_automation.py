@@ -8,8 +8,8 @@ from uuid import uuid4
 
 from fastapi import HTTPException
 
+from wildstring.agent_common import encoded, future, validate
 from wildstring.agent_models import Inspection
-from wildstring.agent_platform import encoded, future, validate
 from wildstring.library.repository import now
 
 RESUMABLE = {
@@ -55,6 +55,7 @@ class Automation:
         # Only the authenticated UI route grants a one-task authorization. Tool and
         # scheduled submissions cannot supply this internal field in Inspection.
         manual_ai = manual and schedule_key is None and actor.credential_id is None
+        configuration = None
         if body.use_ai:
             if not body.connection_id:
                 raise HTTPException(422, "ai_connection_required")
@@ -78,9 +79,7 @@ class Automation:
         from wildstring.diagnostics import trace_id as current_trace
 
         identity, trace_id = uuid4().hex, current_trace()
-        connection_version = None
-        if body.use_ai and body.connection_id:
-            connection_version = configuration["version"]
+        connection_version = configuration["version"] if configuration is not None else None
         with self.database.connect(write=True) as connection:
             connection.execute(
                 "INSERT OR IGNORE INTO agent_tasks(id,user_id,auth_version,credential_id,parameters,created_at,updated_at,trace_id,schedule_key,connection_version) VALUES (?,?,?,?,?,?,?,?,?,?)",

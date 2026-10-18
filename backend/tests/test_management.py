@@ -22,12 +22,13 @@ from wildstring.management import JobRequest, Management
 
 def wait_for(callback, predicate, timeout=5):
     deadline = time.monotonic() + timeout
+    result = None
     while time.monotonic() < deadline:
         result = callback()
         if predicate(result):
             return result
         time.sleep(0.02)
-    pytest.fail(f"Condition did not become true: {result}")
+    raise AssertionError(f"Condition did not become true: {result}")
 
 
 def metadata_url(track):

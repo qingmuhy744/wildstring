@@ -92,6 +92,7 @@ test('歌曲、专辑、曲库手动更新先反馈再入队，保持当前音�
   await login(page);
   await page.getByRole('button', { name: '播放 晴天测试曲', exact: true }).click();
   await page.getByRole('button', { name: '暂停', exact: true }).click();
+  await expect.poll(async () => (await audio(page)).duration).toBeGreaterThan(0);
   const before = await audio(page);
   const submitted: Record<string, unknown>[] = [];
   let release: (() => void) | undefined;

@@ -9,7 +9,8 @@ from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from test_personal_library import HEADERS, music
 
-from wildstring.agent_platform import AgentPlatform, digest
+from wildstring.agent_common import digest
+from wildstring.agent_platform import AgentPlatform
 from wildstring.auth import Auth
 from wildstring.database import Database
 from wildstring.library.repository import LibraryRepository
@@ -113,9 +114,8 @@ def test_credential_scopes_cookie_approval_revocation_and_projection(agent):
         == 401
     )
     client.cookies.update(cookies)
-    assert (
-        client.delete(BASE + "/credentials/" + credential["id"], headers=HEADERS).status_code == 200
-    )
+    deletion_response = client.delete(BASE + "/credentials/" + credential["id"], headers=HEADERS)
+    assert deletion_response.status_code == 200
     assert (
         client.post(BASE + "/tools/search_tracks", headers=token_headers, json={}).status_code
         == 401
@@ -318,7 +318,6 @@ def test_telegram_verification_outbox_unknown_and_no_secret_response(agent):
     code = captured[-1].split("：")[1].split("\n")[0]
     verified = post(client, f"/telegram-targets/{target['id']}/verify", {"code": code})
     assert verified["verified"] and verified["enabled"]
-    post(client, "/notification-preferences", {}) if False else None
     response = client.put(
         BASE + "/notification-preferences", json={"telegram_enabled": True}, headers=HEADERS
     )

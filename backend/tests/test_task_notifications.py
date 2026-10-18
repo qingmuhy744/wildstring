@@ -63,11 +63,14 @@ def test_legacy_result_and_event_rollback_together(settings, authenticated_clien
         service = Service()
         service.platform = platform
         job = {"id": uuid4().hex, "kind": "scan"}
-        with pytest.raises(RuntimeError):
+
+        def rollback():
             with platform.database.connect(write=True) as connection:
                 connection.execute("BEGIN IMMEDIATE")
                 management_result(service, connection, job, "completed")
                 raise RuntimeError("rollback fixture")
+
+        pytest.raises(RuntimeError, rollback).match("rollback fixture")
         assert client.get("/api/v1/agent/notifications").json()["total"] == 0
 
 

@@ -34,7 +34,8 @@ class ServerSessionTest {
         original.bindAccount(Account("old-account", "legacy", "user"))
         val owner = original.storageScope()!!; val id = original.activeServerId!!
         val ciphertext = prefs.getString("server:$id:session_ciphertext", null)!!
-        val account = prefs.getString("server:$id:account", null)!!
+        // Reproduce the old format independently of the current encrypted writer.
+        val account = """{"id":"old-account","username":"legacy","role":"user","enabled":true,"version":1}"""
         prefs.edit().clear().putString("server", "http://127.0.0.1:1234/").putBoolean("local_http", true)
             .putString("session_ciphertext", ciphertext).putString("cache_profile", owner).putString("account", account).commit()
         BoundedFileStore(File(context.cacheDir, "private-metadata-v1")).put("$owner:lyrics:old", "legacy lyrics".toByteArray(), 1024)

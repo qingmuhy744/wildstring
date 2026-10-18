@@ -61,6 +61,7 @@ def adapt(provider, relative, source):
                 "const { generateSimulate } = require('./generate_simulate');\n", ""
             )
             source = source.replace("const CryptoJS = require('crypto-js');\n", "")
+            source = re.sub(r"^    const webglHash = .*\n", "", source, flags=re.MULTILINE)
             source = source.replace(
                 "const { cryptoMd5, rsaEncrypt2, publicLiteRasKey, publicRasKey } = require('./crypto');\n",
                 "",
@@ -75,7 +76,12 @@ def adapt(provider, relative, source):
             source = re.sub(r"const signKey = .*?\n};\n", "", source, count=1, flags=re.DOTALL)
             source = source.replace("  signKey,\n", "")
         elif relative == "util/index.js":
-            source = "module.exports = { decodeLyrics: require('./util').decodeLyrics };\n"
+            source = (
+                "const { appid, clientver } = require('./config.json');\n"
+                "module.exports = { appid, clientver, decodeLyrics: require('./util').decodeLyrics };\n"
+            )
+        elif relative == "util/util.js":
+            source = source.replace("}\n\nmodule.exports =", "};\n\nmodule.exports =")
         elif relative == "util/crypto.js":
             source = source.replace("if (opt?.key && opt?.key)", "if (opt?.key && opt?.iv)")
         return source
@@ -168,6 +174,20 @@ def subset(provider, raw):
             )
             continue
         content = files[relative]
+        if provider == "kugou" and relative == "util/config.json":
+            # Metadata and lyric requests need only these public platform identifiers.
+            # Do not redistribute unused upstream WeChat/QQ identities or secrets.
+            platform = json.loads(content)
+            content = (
+                json.dumps(
+                    {
+                        key: platform[key]
+                        for key in ("appid", "clientver", "liteAppid", "liteClientver")
+                    },
+                    indent=2,
+                )
+                + "\n"
+            ).encode()
         if relative.endswith(".js"):
             source = adapt(provider, relative, content.decode())
             for module in REQUIRE.findall(source):

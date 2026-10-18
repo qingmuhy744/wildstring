@@ -13,7 +13,7 @@ from test_personal_library import music
 from test_providers import HEADERS, enable
 
 from wildstring.library.scanner import scan_library
-from wildstring.provider_network import network_error
+from wildstring.outbound import network_error
 from wildstring.providers import ACOUSTID, FM, ProviderError, acoustid_failure, lastfm_failure
 from wildstring.request_privacy import RedactLastfmCallback
 

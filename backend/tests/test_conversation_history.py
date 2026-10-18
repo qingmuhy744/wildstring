@@ -46,7 +46,8 @@ def test_delete_history_blocks_running_reply_and_keeps_other_history_and_drafts(
     assert client.get(BASE + path).json()["messages"] == result["messages"]
     with service.database.connect(write=True) as db:
         db.execute("UPDATE agent_runs SET status='succeeded' WHERE id=?", (run["id"],))
-    assert client.delete(BASE + path, headers=HEADERS).status_code == 200
+    deletion_response = client.delete(BASE + path, headers=HEADERS)
+    assert deletion_response.status_code == 200
     assert client.get(BASE + path).status_code == 404
     assert client.get(BASE + "/conversations/" + other["id"]).status_code == 200
     assert client.get(BASE + "/drafts/" + draft["id"]).json()["status"] == "pending"

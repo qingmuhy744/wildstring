@@ -62,6 +62,15 @@ class SessionStore @Inject constructor(@ApplicationContext context: Context) : C
             check(edit.commit())
             check(prefs.edit().remove("server").remove("local_http").remove("session_ciphertext").remove("cache_profile").remove("account").commit())
         }
+        // Migrate every retained server atomically before exposing account profiles.
+        val accounts = prefs.edit()
+        records().forEach { server ->
+            prefs.getString(field("account", server.id), null)?.let { legacy ->
+                accounts.putString(field("account_ciphertext", server.id), encrypt(legacy))
+                    .remove(field("account", server.id))
+            }
+        }
+        check(accounts.commit())
         publish()
     }
     @Synchronized private fun publish() {
@@ -90,14 +99,19 @@ class SessionStore @Inject constructor(@ApplicationContext context: Context) : C
         if (!prefs.contains(field("cache_profile"))) check(prefs.edit().putString(field("cache_profile"), UUID.randomUUID().toString()).commit())
         if (profile.value == null) publish(); return profile.value
     }
-    val account: Account? get() = prefs.getString(field("account"), null)?.let { runCatching { gson.fromJson(it, Account::class.java) }.getOrNull() }
-    fun accountFor(id: String): Account? = prefs.getString(field("account", id), null)?.let { runCatching { gson.fromJson(it, Account::class.java) }.getOrNull() }
+    private fun readAccount(id: String?): Account? = prefs.getString(field("account_ciphertext", id), null)?.let {
+        runCatching { gson.fromJson(decrypt(it), Account::class.java) }.getOrNull()
+    }
+    val account: Account? get() = readAccount(activeServerId)
+    fun accountFor(id: String): Account? = readAccount(id)
     fun hasSession(id: String): Boolean = prefs.contains(field("session_ciphertext", id))
     @Synchronized fun bindAccount(account: Account?): Boolean {
         val changed = this.account?.id?.let { it != account?.id } == true
         val edit = prefs.edit()
         if (changed) { edit.putString(field("cache_profile"), UUID.randomUUID().toString()); generation = UUID.randomUUID().toString() }
-        if (account == null) edit.remove(field("account")) else edit.putString(field("account"), gson.toJson(account))
+        edit.remove(field("account"))
+        if (account == null) edit.remove(field("account_ciphertext"))
+        else edit.putString(field("account_ciphertext"), encrypt(gson.toJson(account)))
         check(edit.commit()); publish(); return changed
     }
     val localHttp: Boolean get() = BuildConfig.DEBUG && records().firstOrNull { it.id == activeServerId }?.allowLocalHttp == true
@@ -111,7 +125,7 @@ class SessionStore @Inject constructor(@ApplicationContext context: Context) : C
         val value = ServerConfiguration(existing?.id ?: UUID.randomUUID().toString(), base, name.trim(), BuildConfig.DEBUG && allowLocalHttp)
         val edit = prefs.edit().putString("servers_v1", gson.toJson(if (existing == null) records + value else records.map { if (it.id == id) value else it }))
         if (existing != null && existing.url != base) {
-            listOf("session_ciphertext", "cache_profile", "account").forEach { edit.remove(field(it, existing.id)) }
+            listOf("session_ciphertext", "cache_profile", "account", "account_ciphertext").forEach { edit.remove(field(it, existing.id)) }
             if (id == activeServerId) { validUntil = 0; generation = UUID.randomUUID().toString() }
         }
         check(edit.commit()); publish(); return value
@@ -124,7 +138,7 @@ class SessionStore @Inject constructor(@ApplicationContext context: Context) : C
     }
     @Synchronized fun removeServer(id: String) {
         val edit = prefs.edit().putString("servers_v1", gson.toJson(records().filterNot { it.id == id }))
-        listOf("session_ciphertext", "cache_profile", "account").forEach { edit.remove(field(it, id)) }
+        listOf("session_ciphertext", "cache_profile", "account", "account_ciphertext").forEach { edit.remove(field(it, id)) }
         if (activeServerId == id) { edit.remove("active_server"); generation = UUID.randomUUID().toString(); validUntil = 0 }
         check(edit.commit()); publish()
     }
@@ -150,27 +164,34 @@ class SessionStore @Inject constructor(@ApplicationContext context: Context) : C
                 .setBlockModes(KeyProperties.BLOCK_MODE_GCM).setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE).build())
         }.generateKey()
     }
+    private fun encrypt(value: String): String {
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(Cipher.ENCRYPT_MODE, key())
+        val iv = Base64.encodeToString(cipher.iv, Base64.NO_WRAP)
+        val data = Base64.encodeToString(cipher.doFinal(value.toByteArray(Charsets.UTF_8)), Base64.NO_WRAP)
+        return "$iv:$data"
+    }
+    private fun decrypt(value: String): String {
+        val parts = value.split(":")
+        require(parts.size == 2)
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(128, Base64.decode(parts[0], Base64.NO_WRAP)))
+        return String(cipher.doFinal(Base64.decode(parts[1], Base64.NO_WRAP)), Charsets.UTF_8)
+    }
     @Synchronized override fun read(): String? {
         val value = prefs.getString(field("session_ciphertext"), null) ?: return null
-        return runCatching {
-            val parts = value.split(":"); val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-            cipher.init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(128, Base64.decode(parts[0], Base64.NO_WRAP)))
-            String(cipher.doFinal(Base64.decode(parts[1], Base64.NO_WRAP)), Charsets.UTF_8)
-        }.getOrElse { write(null); null }
+        return runCatching { decrypt(value) }.getOrElse { write(null); null }
     }
     @Synchronized override fun write(value: String?) {
         val edit = prefs.edit()
         if (value == null) {
-            edit.remove(field("session_ciphertext")).remove(field("cache_profile")).remove(field("account"))
+            edit.remove(field("session_ciphertext")).remove(field("cache_profile")).remove(field("account")).remove(field("account_ciphertext"))
             generation = UUID.randomUUID().toString(); validUntil = 0
         } else {
             check(activeServerId != null) { "请先选择服务器。" }
             if (!prefs.contains(field("cache_profile"))) edit.putString(field("cache_profile"), UUID.randomUUID().toString())
             validUntil = endpoint?.let { Cookie.parse(it, value)?.expiresAt } ?: 0
-            val cipher = Cipher.getInstance("AES/GCM/NoPadding"); cipher.init(Cipher.ENCRYPT_MODE, key())
-            val iv = Base64.encodeToString(cipher.iv, Base64.NO_WRAP)
-            val data = Base64.encodeToString(cipher.doFinal(value.toByteArray(Charsets.UTF_8)), Base64.NO_WRAP)
-            edit.putString(field("session_ciphertext"), "$iv:$data")
+            edit.putString(field("session_ciphertext"), encrypt(value))
         }
         check(edit.commit()); publish()
     }

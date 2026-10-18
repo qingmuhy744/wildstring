@@ -13,7 +13,8 @@ from uuid import uuid4
 
 from fastapi import HTTPException
 
-from wildstring.agent_platform import encoded, future, tool_definitions
+from wildstring.agent_common import encoded, future, tool_definitions
+from wildstring.agent_research import SEARCH_TOOLS, public_url
 from wildstring.ai_config import AIService
 from wildstring.library.repository import now
 from wildstring.model_protocol import continuation
@@ -638,8 +639,6 @@ class Assistant:
             }
             for item in definitions
         ]
-        from wildstring.agent_research import SEARCH_TOOLS, public_url
-
         search = self.search_settings(actor)
         # Background inspections retain their existing authorization and scope.
         web_allowed = (
