@@ -77,6 +77,7 @@ class LyricScans:
         self.sources, self.database = sources, sources.database
         self.exit = threading.Event()
         self.thread = None
+        self.lifecycle_lock = threading.Lock()
 
     def settings(self, body=None):
         with self.database.connect(write=body is not None) as db:
@@ -99,16 +100,22 @@ class LyricScans:
         return row
 
     def start(self):
-        self.exit.clear()
-        with self.database.connect(write=True) as db:
-            db.execute("UPDATE lyric_scan_items SET status='queued' WHERE status='running'")
-        self.thread = threading.Thread(target=self.run, daemon=True, name="lyric-scans")
-        self.thread.start()
+        with self.lifecycle_lock:
+            if self.sources.providers.exit.is_set() or (self.thread and self.thread.is_alive()):
+                return
+            self.exit.clear()
+            with self.database.connect(write=True) as db:
+                db.execute("UPDATE lyric_scan_items SET status='queued' WHERE status='running'")
+            thread = threading.Thread(target=self.run, daemon=True, name="lyric-scans")
+            thread.start()
+            self.thread = thread
 
     def stop(self):
-        self.exit.set()
-        if self.thread:
-            self.thread.join(timeout=2)
+        with self.lifecycle_lock:
+            self.exit.set()
+            thread = self.thread
+        if thread:
+            thread.join(timeout=2)
 
     def run(self):
         while not self.exit.wait(0.5):

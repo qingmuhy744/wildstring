@@ -4,6 +4,7 @@ import io
 import json
 import shutil
 import subprocess
+import threading
 import time
 from pathlib import Path
 from zipfile import ZipFile
@@ -15,6 +16,7 @@ from test_providers import HEADERS
 from test_source_plugins import MANIFEST
 
 from wildstring.database import Database
+from wildstring.library.repository import LibraryRepository
 from wildstring.library.scanner import scan_library
 from wildstring.lyric_quality import improves, quality, reaches
 from wildstring.plugin_rate import permit
@@ -22,6 +24,68 @@ from wildstring.providers import Providers
 from wildstring.source_plugins import PluginError
 
 BASE = "/api/v1/manage/lyric-scans"
+
+
+def test_stop_during_worker_start_finishes_without_leaking_a_thread(tmp_path, monkeypatch):
+    database = Database(tmp_path)
+    database.initialize()
+    providers = Providers(LibraryRepository(database, tmp_path / "library"))
+    scans = providers.sources.scans
+    thread_type = threading.Thread
+    starting, release, stopping = threading.Event(), threading.Event(), threading.Event()
+    failures = []
+
+    class SlowStart(thread_type):
+        def start(self):
+            starting.set()
+            assert release.wait(2)
+            super().start()
+
+    monkeypatch.setattr(threading, "Thread", SlowStart)
+
+    def start():
+        try:
+            scans.start()
+        except Exception as error:
+            failures.append(error)
+
+    def stop():
+        stopping.set()
+        try:
+            providers.stop()
+        except Exception as error:
+            failures.append(error)
+
+    starter, stopper = thread_type(target=start), thread_type(target=stop)
+    starter.start()
+    try:
+        assert starting.wait(2)
+        stopper.start()
+        assert stopping.wait(2)
+        stopper.join(timeout=0.05)
+    finally:
+        release.set()
+        starter.join(timeout=3)
+        if stopper.ident is not None:
+            stopper.join(timeout=3)
+        scans.stop()
+    assert not failures
+    assert not starter.is_alive() and not stopper.is_alive()
+    assert scans.exit.is_set() and not scans.thread.is_alive()
+
+
+def test_late_worker_start_after_provider_stop_does_not_restart_it(tmp_path):
+    database = Database(tmp_path)
+    database.initialize()
+    providers = Providers(LibraryRepository(database, tmp_path / "library"))
+    providers.stop()
+    scans = providers.sources.scans
+    try:
+        scans.start()
+        assert scans.thread is None
+        assert scans.exit.is_set()
+    finally:
+        scans.stop()
 
 
 def setup(settings, client):

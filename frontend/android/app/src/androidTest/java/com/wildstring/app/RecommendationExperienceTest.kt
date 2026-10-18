@@ -65,9 +65,20 @@ class RecommendationExperienceTest {
         val address = fixture.server.url("/").newBuilder().host("127.0.0.1").build().toString()
         compose.runOnIdle { vm.repository.session.invalidate(); vm.settings.appearance("light"); vm.sharing.mode("off"); vm.connect(address, "alice", "synthetic-password", true) }
         compose.waitUntil(20_000) { vm.state.value.connected && !vm.state.value.loading }
+        // Login dismisses a separate window; state can be connected before touch focus returns.
+        compose.waitUntil(10_000) {
+            var focused = false
+            InstrumentationRegistry.getInstrumentation().runOnMainSync { focused = compose.activity.hasWindowFocus() }
+            focused
+        }
         return vm
     }
-    private fun open(name: String) { compose.onNodeWithTag("nav-search").performClick(); compose.onNodeWithText(name, substring = false).performClick() }
+    private fun open(name: String) {
+        compose.onNodeWithTag("nav-search").assertIsDisplayed().performClick()
+        val entry = hasText(name, substring = false) and hasClickAction()
+        compose.waitUntil(10_000) { compose.onAllNodes(entry).fetchSemanticsNodes().isNotEmpty() }
+        compose.onNode(entry).assertIsDisplayed().performClick()
+    }
     private fun cleanup(vm: MusicViewModel) { compose.runOnIdle { vm.controller?.stop(); vm.controller?.clearMediaItems(); vm.repository.session.invalidate() } }
     private fun capture(name: String) {
         compose.waitForIdle(); val instrumentation = InstrumentationRegistry.getInstrumentation(); instrumentation.uiAutomation.waitForIdle(500, 5_000)

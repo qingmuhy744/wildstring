@@ -857,6 +857,7 @@ class Providers:
                 code="provider_storage_unavailable",
             )
         finally:
+            self.sources.scans.stop()
             self.worker_lock.release()
 
     def step(self):
