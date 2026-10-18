@@ -90,6 +90,8 @@ class RecommendationExperienceTest {
         Fixture().use { fixture -> val vm = connect(fixture)
             try {
                 open("每日推荐")
+                compose.waitUntil(10_000) { compose.onAllNodesWithText("1 首 · 今日的临时歌单").fetchSemanticsNodes().isNotEmpty() }
+                compose.onNodeWithTag("daily-recommendations").performScrollToNode(hasTestTag("daily-track-local-a"))
                 val more = hasTestTag("daily-more-local-a") and hasClickAction()
                 // The clickable row merges descendants; target the actual nested button.
                 compose.waitUntil(10_000) { compose.onAllNodes(more, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
@@ -97,10 +99,11 @@ class RecommendationExperienceTest {
                 compose.onNode(more, useUnmergedTree = true).performScrollTo().assertIsDisplayed().performClick()
                 compose.onNodeWithText("不感兴趣", substring = false).assertIsDisplayed()
                 InstrumentationRegistry.getInstrumentation().uiAutomation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK)
+                compose.onNodeWithTag("daily-recommendations").performScrollToIndex(0)
                 compose.onNodeWithText("推荐依据", substring = false).performClick()
                 compose.onNodeWithText("AI：AI 预算不足，保留本地结果").assertExists()
                 compose.onNodeWithTag("recommendation-settings").performClick()
-                compose.onNodeWithTag("recommendation-source-community").performClick()
+                compose.onNodeWithTag("recommendation-source-community").performScrollTo().assertIsOn().performClick().assertIsOff()
                 compose.onNodeWithTag("ai-connection-choice").performScrollTo().performClick()
                 compose.onNodeWithText("我的模型 · synthetic-one").performClick()
                 compose.onNodeWithText("保存偏好").performClick()
@@ -115,6 +118,9 @@ class RecommendationExperienceTest {
                 compose.onNode(hasText("真实本库歌曲") and hasAnyAncestor(hasTestTag("listening-rankings"))).performClick()
                 compose.waitUntil(10_000) { vm.state.value.current?.id == "local-a" }
                 capture("recommendation-rankings-phone.png")
+            } catch (error: Exception) {
+                capture("recommendation-daily-failure.png")
+                throw error
             } finally { cleanup(vm) }
         }
     }
