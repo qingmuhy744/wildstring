@@ -689,6 +689,37 @@ test('通知游标过期自动完整补拉，隐藏页面停止定时请求，�
   await expect.poll(() => reads).toBeGreaterThan(after);
 });
 
+test('巡检模型超限展示原因和失败阶段，历史 completed 不误示成功', async ({ page }, info) => {
+  await fixture(page);
+  const task = {
+    id: 'limited-task',
+    status: 'failed',
+    stage: 'completed',
+    parameters: { use_ai: true },
+    counts: { processed: 134, issues: 0, failed: 0, skipped: 0, calls: 1 },
+    error_code: 'ai_output_limit',
+    created_at: now,
+    updated_at: now,
+    version: 1,
+    results: [{ track_id: 'fixture', title: '合成测试曲', issues: [] }],
+  };
+  await page.route('**/api/v1/agent/tasks?*', (r) => r.fulfill({ json: list([task]) }));
+  await page.route('**/api/v1/agent/tasks/limited-task', (r) => r.fulfill({ json: task }));
+  await login(page);
+  await section(page, '巡检与任务');
+  await page.getByRole('button', { name: '查看任务', exact: true }).click();
+  const detail = page.getByRole('article', { name: '巡检任务详情' });
+  await expect(detail).toContainText('处理结束，未全部完成');
+  await expect(detail).toContainText('模型达到输出 Token 上限');
+  await expect(detail).toContainText('降低推理强度');
+  await expect(detail.getByRole('button', { name: '从进度恢复', exact: true })).toBeVisible();
+  await expect(detail).not.toContainText('ai_output_limit');
+  await page.screenshot({
+    path: `../../artifacts/051-verification/inspection-${info.project.name}.png`,
+    fullPage: true,
+  });
+});
+
 test('AI 巡检混合结果与草案入口可显示，旧计划编辑保留范围与版本', async ({ page }) => {
   await fixture(page);
   let changed: any = null;

@@ -45,6 +45,9 @@ internal fun agentError(status: Int, code: String, traceId: String?): String {
         code == "search_daily_budget_exhausted" -> "今日搜索与读取请求已达到上限。"
         code == "native_search_requires_deepseek_pro" -> "DeepSeek 原生联网需要支持该功能的 Pro 模型。"
         code == "ai_output_incomplete" -> "模型输出未完成，请提高输出 Token 上限或缩小问题范围。"
+        code == "ai_output_limit" -> "模型达到输出 Token 上限，分析未完成。请在 AI 连接中提高上限或降低推理强度；旧连接请新建可配置连接。调整后再恢复，恢复可能产生费用。"
+        code == "ai_content_filtered" -> "模型服务过滤了本次输出。请调整问题范围后再恢复，恢复可能产生费用。"
+        code == "ai_response_failed" -> "模型服务未能完成本次响应，请检查服务状态后再恢复，恢复可能产生费用。"
         code == "memory_limit_reached" -> "长期记忆已达 50 条，请先整理旧条目。"
         status == 401 -> "登录已失效，请重新登录。"
         status == 403 -> "当前账号没有这项操作的权限。"
@@ -61,6 +64,15 @@ internal fun agentError(status: Int, code: String, traceId: String?): String {
         else -> "操作未完成，请刷新状态后重试（$status）。"
     }
     return description + diagnosticId(traceId)?.let { "\n诊断编号：$it" }.orEmpty()
+}
+
+internal fun inspectionStage(stage: String, status: String): String = when (stage) {
+    "completed" -> if (status == "succeeded") "处理结束" else "处理结束，未全部完成"
+    "rules" -> "检查本地信息"
+    "model_call" -> "AI 分析依据"
+    "analysis_complete" -> "分析完成"
+    "queued" -> "等待开始"
+    else -> "检查已暂停"
 }
 
 data class AgentInboxState(val owner: String? = null, val items: List<JsonObject> = emptyList(), val unread: Int = 0,

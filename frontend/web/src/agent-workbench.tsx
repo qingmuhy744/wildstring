@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { api, eventId, type User, type Track } from './api';
+import { api, errorCodeMessage, eventId, type User, type Track } from './api';
 import type { AgentConnection, AgentDraft, AgentPage, AgentSchedule, AgentTask } from './agent-api';
 import {
   DiagnosticId,
@@ -535,18 +535,20 @@ export function AgentTasks({
   );
   const selectedConnectionAvailable = availableConnections.some((c) => c.id === connection);
   const item = detail.value;
-  const stageName = (stage: string) =>
-    (
-      ({
-        rules: '检查本地信息',
-        model_call: '正在分析依据',
-        analysis_complete: '分析完成',
-        completed: '处理结束',
-        queued: '等待开始',
-        paused_authorization: '等待重新授权',
-        paused_budget: '等待预算调整',
-      }) as Record<string, string>
-    )[stage] || '检查中';
+  const stageName = (stage: string, status: string) =>
+    stage === 'completed' && status !== 'succeeded'
+      ? '处理结束，未全部完成'
+      : (
+          {
+            rules: '检查本地信息',
+            model_call: '正在分析依据',
+            analysis_complete: '分析完成',
+            completed: '处理结束',
+            queued: '等待开始',
+            paused_authorization: '等待重新授权',
+            paused_budget: '等待预算调整',
+          } as Record<string, string>
+        )[stage] || '检查中';
   return (
     <section className="workspace-page" aria-label="巡检与任务">
       <WorkspaceHeader
@@ -751,7 +753,7 @@ export function AgentTasks({
                     <div className="workspace-row-main">
                       <strong>{task.parameters.use_ai ? 'AI 辅助巡检' : '曲库规则巡检'}</strong>
                       <small>
-                        {localDate(task.created_at)} · {stageName(task.stage)}
+                        {localDate(task.created_at)} · {stageName(task.stage, task.status)}
                       </small>
                     </div>
                     <StateBadge state={task.status} />
@@ -771,7 +773,7 @@ export function AgentTasks({
                     <div>
                       <h2>巡检结果</h2>
                       <small>
-                        任务 {item.id} · {stageName(item.stage)}
+                        任务 {item.id} · {stageName(item.stage, item.status)}
                       </small>
                     </div>
                     <StateBadge state={item.status} />
@@ -780,11 +782,11 @@ export function AgentTasks({
                     {Object.entries(item.counts)
                       .map(
                         ([k, v]) =>
-                          `${({ processed: '已检查', total: '总计', issues: '问题', failed: '失败', drafts: '草案' } as Record<string, string>)[k] || k} ${v}`,
+                          `${({ processed: '已检查', total: '总计', issues: '本地问题', failed: '曲目失败', drafts: '草案', skipped: '跳过', calls: '模型调用' } as Record<string, string>)[k] || k} ${v}`,
                       )
                       .join(' · ')}
                   </p>
-                  {item.error_code && <p role="status">{item.error_code}</p>}
+                  {item.error_code && <p role="status">{errorCodeMessage(item.error_code)}</p>}
                   <DiagnosticId id={item.trace_id} />
                   <div className="workspace-actions">
                     {['queued', 'running', 'retry_wait'].includes(item.status) && (
@@ -828,7 +830,11 @@ export function AgentTasks({
                     <div className="workspace-row" key={result.track_id || `analysis-${index}`}>
                       <div className="workspace-row-main">
                         <strong>
-                          {result.analysis ? 'AI 分析结果' : result.title || '无法读取的歌曲'}
+                          {result.analysis
+                            ? result.ai_skipped
+                              ? '规则检查说明'
+                              : 'AI 分析结果'
+                            : result.title || '无法读取的歌曲'}
                         </strong>
                         {result.analysis ? (
                           <p>{result.analysis}</p>

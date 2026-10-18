@@ -78,13 +78,32 @@ def parse(config, response):
         if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
             raise OutboundError("ai_invalid_response")
         choice = choices[0]
-        if choice.get("finish_reason") in {"length", "content_filter"}:
-            raise OutboundError("ai_output_incomplete")
+        reason = choice.get("finish_reason")
+        if reason in {"length", "content_filter", "insufficient_system_resource", "aborted"}:
+            raise OutboundError(
+                "ai_output_limit"
+                if reason == "length"
+                else "ai_content_filtered"
+                if reason == "content_filter"
+                else "ai_response_failed"
+            )
         message = choice.get("message")
         if not isinstance(message, dict):
             raise OutboundError("ai_invalid_response")
         return message
-    if response.get("status") in {"failed", "incomplete", "cancelled", "in_progress", "queued"}:
+    status = response.get("status")
+    if status == "incomplete":
+        reason = (response.get("incomplete_details") or {}).get("reason")
+        raise OutboundError(
+            "ai_output_limit"
+            if reason == "max_output_tokens"
+            else "ai_content_filtered"
+            if reason == "content_filter"
+            else "ai_output_incomplete"
+        )
+    if status in {"failed", "cancelled"}:
+        raise OutboundError("ai_response_failed")
+    if status in {"in_progress", "queued"}:
         raise OutboundError("ai_output_incomplete")
     output = response.get("output")
     if not isinstance(output, list) or not all(isinstance(item, dict) for item in output):

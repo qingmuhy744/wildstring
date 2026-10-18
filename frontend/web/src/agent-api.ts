@@ -43,6 +43,7 @@ export interface AgentTask {
     metadata_version?: number;
     error_code?: string;
     analysis?: string;
+    ai_skipped?: boolean;
     draft_ids?: string[];
   }[];
 }

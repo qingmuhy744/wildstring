@@ -6,6 +6,13 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class AgentContractsTest {
+    @Test fun inspectionFailureExplainsItsStageAndRecovery() {
+        assertEquals("AI 分析依据", inspectionStage("model_call", "failed"))
+        assertEquals("处理结束，未全部完成", inspectionStage("completed", "failed"))
+        assertTrue(agentError(502, "ai_output_limit", null).contains("降低推理强度"))
+        assertTrue(agentError(502, "ai_content_filtered", null).contains("过滤"))
+        assertFalse(agentError(502, "ai_content_filtered", null).contains("Token"))
+    }
     private fun notice(id: String, version: Int = 1, read: String? = null, at: String = "2026-10-17T12:00:00Z") = JsonParser.parseString(
         """{"id":"$id","version":$version,"created_at":"$at","read_at":${read?.let { "\"$it\"" } ?: "null"}}""").asJsonObject
     @Test fun replayKeepsOneLatestVersionAndReadingDoesNotMarkRead() {

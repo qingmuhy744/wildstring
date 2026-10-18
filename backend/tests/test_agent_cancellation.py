@@ -22,7 +22,7 @@ def pending_ai_task(client, service):
     task = post(
         client,
         "/tasks",
-        {"track_ids": [], "use_ai": True, "connection_id": connection["id"], "max_calls": 3},
+        {"use_ai": True, "connection_id": connection["id"], "max_calls": 3},
     )
     job = service.claim_task()
     assert job["id"] == task["id"]
@@ -79,7 +79,7 @@ def test_cancel_during_model_request_skips_returned_tools_and_next_paid_request(
     assert result["status"] == "cancelled"
     assert len(calls) == result["counts"]["calls"] == 1
     assert service.drafts(actor)["total"] == 0
-    assert result["results"] == []
+    assert len(result["results"]) == 1 and "track_id" in result["results"][0]
 
 
 def test_cancel_after_read_tool_stops_the_next_model_request(agent, monkeypatch):
@@ -106,7 +106,7 @@ def test_cancel_after_read_tool_stops_the_next_model_request(agent, monkeypatch)
     assert result["status"] == "cancelled"
     assert executed == ["search_tracks"] and len(calls) == 1
     assert result["counts"]["calls"] == 1
-    assert result["results"][0]["partial"] is True
+    assert result["results"][-1]["partial"] is True
 
 
 def test_cancel_between_tools_preserves_created_draft_and_its_checkpoint(agent, monkeypatch):
@@ -144,8 +144,8 @@ def test_cancel_between_tools_preserves_created_draft_and_its_checkpoint(agent, 
     assert result["status"] == "cancelled"
     assert len(calls) == 1 and executed == ["create_draft"]
     assert drafts["total"] == 1 and drafts["items"][0]["status"] == "pending"
-    assert result["results"][0]["draft_ids"] == [drafts["items"][0]["id"]]
-    assert result["results"][0]["partial"] is True
+    assert result["results"][-1]["draft_ids"] == [drafts["items"][0]["id"]]
+    assert result["results"][-1]["partial"] is True
     with service.database.connect() as connection:
         assert connection.execute("SELECT count(*) FROM agent_audit").fetchone()[0] == 0
 
@@ -184,6 +184,6 @@ def test_success_replaces_partial_tool_checkpoint_without_duplicate_results(agen
     service.execute_task(job)
     result = service.task(actor, task["id"])
     assert result["status"] == "succeeded" and len(calls) == 2
-    assert len(result["results"]) == 1
-    assert result["results"][0]["analysis"] == "Finished using actual tool results."
-    assert "partial" not in result["results"][0]
+    assert len(result["results"]) == 2
+    assert result["results"][-1]["analysis"] == "Finished using actual tool results."
+    assert "partial" not in result["results"][-1]

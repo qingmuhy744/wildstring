@@ -452,7 +452,9 @@ class Assistant:
         try:
             return parse_model(configuration, response)
         except Exception as failure:
-            raise HTTPException(502, getattr(failure, "code", "ai_invalid_response")) from None
+            code = getattr(failure, "code", "ai_invalid_response")
+            self.log("agent.model.rejected", actor, error_code=code)
+            raise HTTPException(502, code) from None
 
     def test_connection(self, actor, identity):
         configuration = self.connection_for(actor, identity)

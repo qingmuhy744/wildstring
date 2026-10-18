@@ -2,7 +2,7 @@
 
 Kotlin / Compose / Media3 原生客户端，Android 8.0（API 26）起可安装。所有曲库、封面、歌词、收藏与歌单来自用户配置的野弦实例；生产 APK 没有内置演示曲库或测试音频。测试夹具只打包到独立的 androidTest APK。
 
-当前源码版本：0.4.0（versionCode 12）。0.3.0 合并了原未发布 0.2.3；正式安装包以 GitHub Releases 为准。
+当前源码版本：0.5.1（versionCode 15）。巡检失败原因与阶段显示修复见 [0.5.1 发布说明](../../docs/releases/v0.5.1.md)；正式安装包以 GitHub Releases 为准。
 
 0.3.0 在设置中增加封面／黑胶／磁带选择，默认封面并记住本机选择。黑胶中心封面放大，手机横屏采用视觉与播放控制左右布局。长按视觉或歌词可查看正向大封面，点空白或返回关闭，播放继续。唱臂、唱片与双卷轴跟随实际播放状态，暂停、缓冲、后台及关闭系统动画时停转；三种样式共用音频和队列。播放背景延伸至系统栏，按钮保留安全间距，进度条使用主题配色。实现与验证状态见 [播放页样式](../../docs/product/player-styles-0.2.3.md)。
 
@@ -34,7 +34,7 @@ make android-locks              # 修改依赖后刷新锁与 SHA-256 校验元�
 
 `ANDROID_HOME` 指向本机 SDK，`JAVA_HOME` 指向 JDK；`local.properties` 只用于本机且不跟踪。Gradle Wrapper、版本目录与依赖校验资料入库，构建缓存、APK 和签名私钥不提交。
 
-`make android-ci` 的安装包位于 `artifacts/android/`，包含 `wildstring-<version>-debug.apk`（当前开发包为 `wildstring-0.4.0-debug.apk`）与 `SHA256SUMS`。GitHub 的 **Android APK** 工作流通过后，在该次运行的 **Artifacts → wildstring-android-debug** 下载并解压 ZIP 后安装 APK。原有 Python/Web/Docker CI 继续独立运行。
+`make android-ci` 的安装包位于 `artifacts/android/`，包含 `wildstring-<version>-debug.apk`（当前开发包为 `wildstring-0.5.1-debug.apk`）与 `SHA256SUMS`。GitHub 的 **Android APK** 工作流通过后，在该次运行的 **Artifacts → wildstring-android-debug** 下载并解压 ZIP 后安装 APK。原有 Python/Web/Docker CI 继续独立运行。
 
 CI 另启动一次性合成曲库，并通过 `ANDROID_TEST_ARGS=-Pandroid.testInstrumentationRunnerArguments.realBackend=http://10.0.2.2:19882/` 运行真实 API 集成。该参数只允许指向临时测试实例，使用固定的公开测试账号，会创建／删除测试歌单及修改测试曲目。不要指向个人服务器。
 
