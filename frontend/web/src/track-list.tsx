@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef } from 'react';
+import { Fragment, useLayoutEffect, useRef } from 'react';
 import { artist, listeningTime, time, type TrackPage } from './api';
 import { TrackActions, type TrackOperations } from './track-actions';
 import { Cover } from './cover';
@@ -16,6 +16,7 @@ export function TrackList({
   showStats = false,
   statsSort = 'last_played_at',
   albumTracks = false,
+  groupDiscs = false,
   onPlay,
 }: {
   page: TrackPage;
@@ -26,6 +27,7 @@ export function TrackList({
   showStats?: boolean;
   statsSort?: string;
   albumTracks?: boolean;
+  groupDiscs?: boolean;
   onPlay?: (track: TrackPage['items'][number]) => void;
 }) {
   const listSize = useTrackListSize();
@@ -67,6 +69,10 @@ export function TrackList({
     ).find((row) => row.dataset.browseId === previous.id);
     if (row) window.scrollBy(0, row.getBoundingClientRect().top - previous.top);
   }, [listSize]);
+  const multiDisc = (page.discs?.length || 0) > 1;
+  const boundaries = new Map(
+    groupDiscs && multiDisc ? page.discs?.map((disc) => [disc.offset, disc]) : [],
+  );
   return (
     <div
       className={`track-list ${albumTracks ? 'album-tracks' : ''}`}
@@ -90,74 +96,92 @@ export function TrackList({
         </span>
       </div>
       {page.items.map((track, i) => (
-        <div
-          className={`track-row ${player.current?.id === track.id ? 'current' : ''}`}
-          role="row"
-          aria-current={player.current?.id === track.id ? 'true' : undefined}
-          key={track.id}
-          data-browse-id={track.id}
-        >
-          <span role="cell" className="track-number">
-            {player.current?.id === track.id ? (
-              <PlaybackIndicator playing={player.playing} buffering={player.buffering} />
-            ) : (
-              String(
-                albumTracks ? track.track_number || page.offset + i + 1 : page.offset + i + 1,
-              ).padStart(2, '0')
-            )}
-          </span>
-          <div role="cell" className="track-identity">
-            {!albumTracks && (
-              <Cover
-                key={`${track.id}-${revision}`}
-                trackId={track.id}
-                title={track.album || track.title}
+        <Fragment key={track.id}>
+          {boundaries.has(page.offset + i) &&
+            (() => {
+              const disc = boundaries.get(page.offset + i)!;
+              return (
+                <div className="disc-heading" role="row" aria-label={`Disc ${disc.number}`}>
+                  <div role="cell" className="disc-heading-content">
+                    <strong>DISC {String(disc.number).padStart(2, '0')}</strong>
+                    <small>{disc.track_count} 首</small>
+                    <span className="disc-rule" />
+                  </div>
+                </div>
+              );
+            })()}
+          <div
+            className={`track-row ${player.current?.id === track.id ? 'current' : ''}`}
+            role="row"
+            aria-current={player.current?.id === track.id ? 'true' : undefined}
+            key={track.id}
+            data-browse-id={track.id}
+          >
+            <span role="cell" className="track-number">
+              {player.current?.id === track.id ? (
+                <PlaybackIndicator playing={player.playing} buffering={player.buffering} />
+              ) : (
+                String(
+                  albumTracks ? track.track_number || page.offset + i + 1 : page.offset + i + 1,
+                ).padStart(2, '0')
+              )}
+            </span>
+            <div role="cell" className="track-identity">
+              {!albumTracks && (
+                <Cover
+                  key={`${track.id}-${revision}`}
+                  trackId={track.id}
+                  title={track.album || track.title}
+                />
+              )}
+              <button
+                className="track-title"
+                onClick={() => (onPlay ? onPlay(track) : player.start(page.items, i))}
+                aria-label={`播放 ${track.title}`}
+              >
+                <strong>{track.title}</strong>
+                <small>
+                  {albumTracks && multiDisc && !groupDiscs && (
+                    <span className="disc-chip">Disc {track.disc_number || 1}</span>
+                  )}
+                  {artist(track)}
+                  {showStats && (
+                    <span className="track-stat">
+                      {' '}
+                      ·{' '}
+                      {statsSort === 'play_count'
+                        ? `${track.play_count} 次播放`
+                        : statsSort === 'listened_ms'
+                          ? `已听 ${listeningTime(track.listened_ms)}`
+                          : track.last_played_at
+                            ? `${new Date(track.last_played_at).toLocaleDateString()} 听过`
+                            : '还未播放'}
+                    </span>
+                  )}
+                </small>
+              </button>
+            </div>
+            <span className="album-column ellipsis" role="cell" title={track.album || ''}>
+              {operations.onOpenAlbum && track.album_id ? (
+                <AlbumLink track={track} onOpen={operations.onOpenAlbum} />
+              ) : (
+                track.album || '未知专辑'
+              )}
+            </span>
+            <span className="quality-column" role="cell">
+              <span className="format">{track.format.toUpperCase()}</span>
+            </span>
+            <time role="cell">{time(track.duration_ms / 1000)}</time>
+            <span role="cell">
+              <TrackActions
+                track={track}
+                player={player}
+                operations={operations}
+                onNotice={onNotice}
               />
-            )}
-            <button
-              className="track-title"
-              onClick={() => (onPlay ? onPlay(track) : player.start(page.items, i))}
-              aria-label={`播放 ${track.title}`}
-            >
-              <strong>{track.title}</strong>
-              <small>
-                {artist(track)}
-                {showStats && (
-                  <span className="track-stat">
-                    {' '}
-                    ·{' '}
-                    {statsSort === 'play_count'
-                      ? `${track.play_count} 次播放`
-                      : statsSort === 'listened_ms'
-                        ? `已听 ${listeningTime(track.listened_ms)}`
-                        : track.last_played_at
-                          ? `${new Date(track.last_played_at).toLocaleDateString()} 听过`
-                          : '还未播放'}
-                  </span>
-                )}
-              </small>
-            </button>
+            </span>
           </div>
-          <span className="album-column ellipsis" role="cell" title={track.album || ''}>
-            {operations.onOpenAlbum && track.album_id ? (
-              <AlbumLink track={track} onOpen={operations.onOpenAlbum} />
-            ) : (
-              track.album || '未知专辑'
-            )}
-          </span>
-          <span className="quality-column" role="cell">
-            <span className="format">{track.format.toUpperCase()}</span>
-          </span>
-          <time role="cell">{time(track.duration_ms / 1000)}</time>
-          <span role="cell">
-            <TrackActions
-              track={track}
-              player={player}
-              operations={operations}
-              onNotice={onNotice}
-            />
-          </span>
-        </div>
+        </Fragment>
       ))}
     </div>
   );

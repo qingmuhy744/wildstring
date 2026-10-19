@@ -9,7 +9,7 @@ from tempfile import TemporaryDirectory
 
 import uvicorn
 from mutagen.flac import FLAC
-from mutagen.id3 import APIC, TALB, TIT2, TPE1, TPE2, TRCK, USLT
+from mutagen.id3 import APIC, TALB, TIT2, TPE1, TPE2, TPOS, TRCK, USLT
 from mutagen.mp3 import MP3
 from PIL import Image
 from pydantic import SecretStr
@@ -126,6 +126,18 @@ def main() -> None:
                 audio["TPE1"] = TPE1(encoding=3, text=[artist])
                 audio["TPE2"] = TPE2(encoding=3, text=[artist])
                 audio["TRCK"] = TRCK(encoding=3, text=[str(number)])
+                audio.save()
+        if os.environ.get("WILDSTRING_TEST_DISC_LIBRARY") == "1":
+            for index, title in enumerate(("Zeta", "Beta", "Gamma", "Alpha", "Delta", "Echo")):
+                path = music / f"disc-{index}.mp3"
+                shutil.copyfile(ROOT / "tests/fixtures/audio/playback.mp3", path)
+                audio = MP3(path)
+                audio["TIT2"] = TIT2(encoding=3, text=[title])
+                audio["TALB"] = TALB(encoding=3, text=["分碟排序专辑"])
+                audio["TPE1"] = TPE1(encoding=3, text=["测试艺人"])
+                audio["TPE2"] = TPE2(encoding=3, text=["测试艺人"])
+                audio["TRCK"] = TRCK(encoding=3, text=[str(index % 3 + 1)])
+                audio["TPOS"] = TPOS(encoding=3, text=[str(index // 3 + 1)])
                 audio.save()
         source = root / "source"
         source.mkdir()

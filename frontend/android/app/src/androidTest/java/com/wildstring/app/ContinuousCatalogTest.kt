@@ -35,6 +35,7 @@ class ContinuousCatalogTest {
     private val requests = CopyOnWriteArrayList<String>()
     private val failRange = AtomicBoolean(false)
     private val failAlbum = AtomicBoolean(false)
+    private val multiDisc = AtomicBoolean(false)
 
     private fun fixture(server: MockWebServer) {
         val login = AtomicBoolean(false)
@@ -58,7 +59,17 @@ class ContinuousCatalogTest {
                         val counts = mapOf("0–9" to 10, "A" to 100, "M" to 50, "Z" to 90, "#" to 7)
                         json(BrowseIndex(url.queryParameter("kind")!!, 257, keys.map { BrowseGroup(it, starts[it], counts[it] ?: 0) }))
                     }
-                    path == "/api/v1/albums/album-v/tracks" -> if (failAlbum.get()) MockResponse().setResponseCode(503) else page(albumSongs)
+                    path == "/api/v1/albums/album-v/tracks" -> if (failAlbum.get()) MockResponse().setResponseCode(503) else {
+                        val order = url.queryParameter("order") ?: "asc"
+                        val sort = url.queryParameter("sort") ?: "title"
+                        val members = if (multiDisc.get()) albumSongs.mapIndexed { index, track -> track.copy(trackNumber = index % 6 + 1, discNumber = index / 6 + 1) } else albumSongs
+                        val sorted = if (sort == "name") members.sortedBy { it.title } else members
+                        val offset = url.queryParameter("offset")?.toIntOrNull() ?: 0
+                        val limit = url.queryParameter("limit")?.toIntOrNull() ?: 50
+                        val items = if (order == "desc") sorted.reversed() else sorted
+                        val numbers = if (order == "desc") listOf(2, 1) else listOf(1, 2)
+                        json(Page(items.drop(offset).take(limit), 12, limit, offset, if (multiDisc.get()) numbers.mapIndexed { index, number -> DiscSummary(number, 6, 72000, index * 6) } else listOf(DiscSummary(1, 12, 144000, 0))))
+                    }
                     path == "/api/v1/tracks" || path.matches(Regex("/api/v1/artists/[^/]+/tracks")) -> {
                         if (failRange.get() && url.queryParameter("offset") == "150") MockResponse().setResponseCode(503) else page(songs)
                     }
@@ -77,11 +88,15 @@ class ContinuousCatalogTest {
     private fun connect(server: MockWebServer): MusicViewModel {
         val vm = compose.runOnIdle { ViewModelProvider(compose.activity)[MusicViewModel::class.java] }
         val address = server.url("/").toString()
-        compose.runOnIdle { vm.settings.quality(0); vm.settings.appearance("light"); vm.settings.songListSize(SongListSize.MEDIUM); vm.connect(address, "listener", "test-password-original", true) }
-        compose.waitUntil(15_000) { vm.state.value.account?.id == "browse-user" && !vm.state.value.loading }
+        val connection = compose.runOnIdle { vm.settings.quality(0); vm.settings.appearance("light"); vm.settings.songListSize(SongListSize.MEDIUM); vm.connect(address, "listener", "test-password-original", true) }
+        compose.waitUntil(15_000) { connection.isCompleted && vm.state.value.account?.id == "browse-user" && vm.state.value.server == address && !vm.state.value.loading }
+        compose.runOnIdle { listOf("tracks", "albums", "artist-tracks", "artist-albums", "album-tracks", "recent").forEach { context -> vm.settings.catalogSort(vm.repository.session.cacheScope(), context, defaultCatalogSort(context)) } }
         return vm
     }
-    private fun ready(vm: MusicViewModel) = compose.waitUntil(15_000) { !vm.state.value.loading && vm.state.value.total == 257 && vm.state.value.browseIndex != null }
+    private fun ready(vm: MusicViewModel) {
+        try { compose.waitUntil(15_000) { !vm.state.value.loading && vm.state.value.total == 257 && vm.state.value.browseIndex != null } }
+        catch (error: AssertionError) { throw AssertionError("Catalog state: ${vm.state.value.let { listOf(it.kind, it.collection, it.sort, it.order, it.total, it.error) }}; requests=${requests.takeLast(5)}", error) }
+    }
     private fun capture(name: String) {
         compose.waitForIdle()
         val instrumentation = InstrumentationRegistry.getInstrumentation()
@@ -148,7 +163,7 @@ class ContinuousCatalogTest {
                 assertEquals("last_played_at", vm.state.value.sort)
                 assertTrue(requests.last { it.startsWith("/api/v1/tracks?") && it.contains("played_only=true") }.contains("sort=last_played_at"))
                 compose.onNodeWithTag("catalog-sort").performClick()
-                compose.onNodeWithText("名称").performClick()
+                compose.onNodeWithText("歌曲名称").performClick()
                 compose.waitUntil(10_000) { !vm.state.value.loading && vm.state.value.sort == "title" }
                 val recentRequest = requests.last { it.startsWith("/api/v1/tracks?") && it.contains("played_only=true") }
                 assertTrue(recentRequest.contains("sort=title"))
@@ -329,5 +344,33 @@ class ContinuousCatalogTest {
 
     private fun hasTestTagPrefix(prefix: String) = SemanticsMatcher("tag starts with $prefix") {
         it.config.getOrNull(androidx.compose.ui.semantics.SemanticsProperties.TestTag)?.startsWith(prefix) == true
+    }
+
+    @Test fun multiDiscTitlesRemainVisualAndSortingMatchesThePlaybackQueue() {
+        multiDisc.set(true)
+        MockWebServer().use { server ->
+            fixture(server); val vm = connect(server)
+            try {
+                compose.runOnIdle { vm.openAlbum(Album("album-v", "双碟专辑", listOf("演唱者"), 12, null)); vm.sort("track_number") }
+                compose.waitUntil(10_000) { !vm.state.value.loading && vm.state.value.discs.size == 2 }
+                compose.onNodeWithTag("disc-heading-1").assertIsDisplayed()
+                capture("disc-title-android.png")
+                compose.onNodeWithTag("catalog-list").performScrollToIndex(7)
+                compose.onNodeWithTag("disc-heading-2").assertIsDisplayed()
+                compose.runOnIdle { vm.playCollection("album-song-6") }
+                compose.waitUntil(10_000) { vm.state.value.queue.size == 12 && vm.state.value.current?.id == "album-song-6" }
+                compose.runOnIdle { vm.controller!!.seekToNextMediaItem() }
+                compose.waitUntil(10_000) { vm.state.value.current?.id == "album-song-7" }
+                assertEquals(listOf("album-song-6", "album-song-7"), vm.state.value.queue.drop(5).take(2).map { it.trackId })
+                compose.runOnIdle { vm.sort("name"); vm.toggleSortOrder() }
+                compose.waitUntil(10_000) { !vm.state.value.loading && vm.state.value.sort == "name" && vm.state.value.order == "desc" }
+                compose.onNodeWithTag("disc-heading-1").assertDoesNotExist()
+                compose.onNodeWithTag("disc-heading-2").assertDoesNotExist()
+                assertEquals(CatalogSort("name", "desc"), vm.settings.catalogSort(vm.repository.session.cacheScope(), "album-tracks"))
+                assertTrue(requests.last { it.startsWith("/api/v1/albums/album-v/tracks?") }.contains("order=desc"))
+                compose.runOnIdle { vm.playCollection() }
+                compose.waitUntil(10_000) { vm.state.value.current?.id == albumSongs.sortedByDescending { it.title }.first().id }
+            } finally { compose.runOnIdle { vm.controller?.pause(); vm.sort("track_number") } }
+        }
     }
 }

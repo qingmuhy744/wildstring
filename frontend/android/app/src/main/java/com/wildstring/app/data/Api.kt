@@ -46,8 +46,8 @@ interface Api {
     @POST("api/v1/auth/password") suspend fun changePassword(@Header("Cookie") cookie: String, @Body body: PasswordChange): retrofit2.Response<Unit>
     @GET suspend fun tracks(@Url url: String, @Query("q") query: String, @Query("limit") limit: Int = 50, @Query("offset") offset: Int = 0): Page<Track>
     @GET suspend fun track(@Url url: String): Track
-    @GET("api/v1/albums") suspend fun albums(@Query("q") query: String, @Query("limit") limit: Int = 50, @Query("offset") offset: Int = 0): Page<Album>
-    @GET suspend fun artistAlbums(@Url url: String, @Query("q") query: String, @Query("limit") limit: Int = 50, @Query("offset") offset: Int = 0, @Query("role") role: String = "artist"): Page<Album>
+    @GET("api/v1/albums") suspend fun albums(@Query("q") query: String, @Query("limit") limit: Int = 50, @Query("offset") offset: Int = 0, @Query("sort") sort: String = "title", @Query("order") order: String = "asc"): Page<Album>
+    @GET suspend fun artistAlbums(@Url url: String, @Query("q") query: String, @Query("limit") limit: Int = 50, @Query("offset") offset: Int = 0, @Query("role") role: String = "artist", @Query("sort") sort: String = "title", @Query("order") order: String = "asc"): Page<Album>
     @GET("api/v1/artists") suspend fun artists(@Query("q") query: String, @Query("limit") limit: Int = 50, @Query("offset") offset: Int = 0, @Query("role") role: String = "artist"): Page<Artist>
     @GET("api/v1/browse-index") suspend fun browseIndex(@Query("kind") kind: String, @Query("q") query: String,
         @Query("artist_id") artistId: String? = null, @Query("role") role: String? = null,

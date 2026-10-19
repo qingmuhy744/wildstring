@@ -1,8 +1,8 @@
 # MVP 范围
 
-更新日期：2026-10-19。
+更新日期：2026-10-20。
 
-当前修复分支增加 [歌词草案空值闪退、处理记录与近期暂停接续](lyrics-preview-and-handoff.md)，schema23；完整检查、发布与部署分别核验。
+0.5.10 增加 [曲库排序与多碟小标题](catalog-sorting-and-discs.md)，并修复 [歌词草案空值闪退、处理记录与近期暂停接续](lyrics-preview-and-handoff.md)，schema23；实现和本地验证见 [0.5.10 发布说明](../releases/v0.5.10.md)，发布与部署分别核验。
 
 0.5.9 增加[用户选择整理方式](agent-application-policy.md)：审核模式一键接受并应用，或按账号和草案类型授权自动应用；MCP 凭据仍受独立 scope 限制。实现与验证见 [0.5.9 发布说明](../releases/v0.5.9.md)。
 

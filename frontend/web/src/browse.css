@@ -382,3 +382,58 @@
     grid-template-columns: 24px minmax(0, 1fr) 35px 92px;
   }
 }
+
+.catalog-sort-control {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.catalog-sort-control select {
+  max-width: 150px;
+}
+.catalog-sort-control button {
+  white-space: nowrap;
+}
+.disc-heading {
+  padding: 18px 0 4px;
+}
+.disc-heading-content {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 24px;
+  color: var(--muted);
+}
+.disc-heading strong {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  white-space: nowrap;
+}
+.disc-rule {
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+.disc-heading small {
+  white-space: nowrap;
+  font-size: 10px;
+  opacity: 0.7;
+}
+.disc-chip {
+  font-size: 10px;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 4px;
+  margin-right: 6px;
+  white-space: nowrap;
+}
+@media (max-width: 760px) {
+  .disc-heading {
+    padding-top: 14px;
+  }
+  .catalog-sort-control select {
+    max-width: 130px;
+  }
+}

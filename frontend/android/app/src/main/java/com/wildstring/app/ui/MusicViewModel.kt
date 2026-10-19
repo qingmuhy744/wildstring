@@ -36,7 +36,7 @@ data class MusicState(
     val entryId: String? = null, val repeatMode: Int = Player.REPEAT_MODE_OFF, val shuffle: Boolean = false,
     val playbackError: String? = null, val lyrics: Lyrics = Lyrics(), val lyricsLoading: Boolean = false,
     val lyricsError: String? = null, val offline: Boolean = false, val hasContent: Boolean = false,
-    val role: String = "artist", val sort: String = "title", val albumFilter: String? = null, val collecting: Boolean = false,
+    val discs: List<DiscSummary> = emptyList(), val order: String = "asc", val role: String = "artist", val sort: String = "title", val albumFilter: String? = null, val collecting: Boolean = false,
     val contentKey: String = "", val canGoBack: Boolean = false, val navigationDepth: Int = 0,
     val window: CatalogWindow = CatalogWindow(), val rangeLoading: Set<Int> = emptySet(),
     val rangeErrors: Map<Int, String> = emptyMap(), val browseIndex: BrowseIndex? = null,
@@ -91,13 +91,13 @@ class MusicViewModel @Inject constructor(
     private val pages = object : LinkedHashMap<String, CatalogPage>(24, .75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, CatalogPage>?) = size > 24
     }
-    private fun query() = mutable.value.let { CatalogQuery(it.tab, it.kind, it.title, it.query, it.offset, it.collection, it.collectionId, it.activePlaylist, it.role, it.sort, it.albumFilter) }
+    private fun query() = mutable.value.let { CatalogQuery(it.tab, it.kind, it.title, it.query, it.offset, it.collection, it.collectionId, it.activePlaylist, it.role, it.sort, it.albumFilter, it.order) }
     private fun MusicState.withPage(page: CatalogPage) = copy(tracks = page.tracks.map { track -> track.copy(loved = optimisticFavorites[track.id] ?: repository.knownTracks[track.id]?.loved ?: track.loved) }, albums = page.albums, artists = page.artists,
-        playlists = page.playlists, total = page.total, hasContent = true)
+        playlists = page.playlists, total = page.total, discs = page.discs.orEmpty(), hasContent = true)
     private fun MusicState.withWindow(value: CatalogWindow): MusicState {
         val ordered = value.pages.toSortedMap().values
         return withPage(CatalogPage(tracks = ordered.flatMap { it.tracks }, albums = ordered.flatMap { it.albums },
-            artists = ordered.flatMap { it.artists }, playlists = ordered.flatMap { it.playlists }, total = value.total)).copy(window = value)
+            artists = ordered.flatMap { it.artists }, playlists = ordered.flatMap { it.playlists }, total = value.total, discs = ordered.firstOrNull()?.discs)).copy(window = value)
     }
     private fun cancelRanges() { rangeJobs.values.forEach { it.cancel() }; rangeJobs.clear() }
     suspend fun cacheUsage(): Triple<Long, Long, Long> = withContext(Dispatchers.IO) { val (metadata, art) = repository.cache.usage(); Triple(metadata, art, audioCache.bytes()) }
@@ -328,11 +328,13 @@ class MusicViewModel @Inject constructor(
         show(CatalogQuery(tab = "library", kind = "albums", title = "曲库"))
     }
     private fun show(target: CatalogQuery, delayMs: Long = 0) {
-        val target = target.copy(offset = 0)
+        val context = catalogSortContext(target.kind, target.collection, target.albumFilter)
+        val preference = context?.let { settings.catalogSort(repository.session.cacheScope(), it) }
+        val target = target.copy(offset = 0, sort = preference?.sort ?: target.sort, order = preference?.order ?: target.order)
         val savedWindow = windows[target.key] ?: pages[target.key]?.let { CatalogWindow(mapOf(0 to it)) }
         mutable.update { current ->
             val next = current.copy(tab = target.tab, kind = target.kind, title = target.title, query = target.query, offset = target.offset,
-                collection = target.collection, collectionId = target.collectionId, activePlaylist = target.playlist, role = target.role, sort = target.sort, albumFilter = target.albumFilter,
+                collection = target.collection, collectionId = target.collectionId, activePlaylist = target.playlist, role = target.role, sort = target.sort, order = target.order, albumFilter = target.albumFilter, discs = emptyList(),
                 contentKey = target.key, canGoBack = history[target.tab]?.isNotEmpty() == true,
                 navigationDepth = history[target.tab]?.size ?: 0, error = null,
                 window = CatalogWindow(), rangeLoading = emptySet(), rangeErrors = emptyMap(), browseIndex = browseIndices[target.key],
@@ -348,7 +350,18 @@ class MusicViewModel @Inject constructor(
     }
     fun kind(kind: String) { if (kind != mutable.value.kind) show(query().copy(kind = kind, offset = 0, sort = "title")) }
     fun role(value: String) { show(query().copy(role = value, offset = 0)) }
-    fun sort(value: String) { show(query().copy(sort = value, offset = 0)) }
+    fun sort(value: String) {
+        val current = query()
+        val context = catalogSortContext(current.kind, current.collection, current.albumFilter) ?: return
+        settings.catalogSort(repository.session.cacheScope(), context, CatalogSort(value, if (value in listOf("title", "name", "track_number", "artist")) "asc" else "desc"))
+        show(current)
+    }
+    fun toggleSortOrder() {
+        val current = query()
+        val context = catalogSortContext(current.kind, current.collection, current.albumFilter) ?: return
+        settings.catalogSort(repository.session.cacheScope(), context, CatalogSort(current.sort, if (current.order == "asc") "desc" else "asc"))
+        show(current)
+    }
     fun search(query: String) {
         show(this.query().copy(kind = if (query.isBlank()) "discover" else "tracks", query = query.take(256), offset = 0,
             title = "发现", collection = null, collectionId = null, playlist = null), 300)
@@ -373,9 +386,10 @@ class MusicViewModel @Inject constructor(
                     return@launch
                 }
                 // Open the whole album, clearing any artist/playlist/search constraints.
+                val preference = settings.catalogSort(owner, "album-tracks")
                 val destination = query().copy(kind = "tracks", collection = "albums", collectionId = id,
                     title = current.album ?: "未知专辑", query = "", offset = 0, playlist = null,
-                    albumFilter = null, sort = "title")
+                    albumFilter = null, sort = preference.sort, order = preference.order)
                 // Resolve the first page before dismissing the player. A failed lookup leaves it visible.
                 val first = repository.catalog(destination)
                 requireOwner(owner)

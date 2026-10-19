@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react';
-import { api } from './api';
+import { api, type DiscSummary } from './api';
 
 export interface BrowsePage<T> {
+  discs?: DiscSummary[];
   items: T[];
   total: number;
   limit: number;

@@ -2,7 +2,9 @@ package com.wildstring.app.data
 
 import com.google.gson.annotations.SerializedName
 
-data class Page<T>(val items: List<T>, val total: Int, val limit: Int, val offset: Int)
+data class DiscSummary(val number: Int, @SerializedName("track_count") val trackCount: Int,
+    @SerializedName("duration_ms") val durationMs: Long, val offset: Int)
+data class Page<T>(val items: List<T>, val total: Int, val limit: Int, val offset: Int, val discs: List<DiscSummary>? = null)
 data class Account(val id: String, val username: String, val role: String, val enabled: Boolean = true, val version: Int = 1)
 data class AuthStatus(val configured: Boolean, val authenticated: Boolean, val user: Account? = null)
 data class PasswordChange(@SerializedName("current_password") val currentPassword: String, @SerializedName("new_password") val newPassword: String)

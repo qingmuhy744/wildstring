@@ -12,6 +12,7 @@ from wildstring.library.artists import ARTIST_CREDITS, ARTIST_SUMMARY, configure
 from wildstring.library.browsing import BROWSE_KEYS, BrowseKind, configure_browse_queries
 from wildstring.library.edits import observe
 from wildstring.library.metadata import Metadata, normalize
+from wildstring.library.sorting import album_order, track_order
 
 COUNTERS = ("visited", "added", "updated", "unchanged", "errors", "missing", "skipped")
 
@@ -26,7 +27,13 @@ TRACK_SELECTION = """SELECT * FROM personal_tracks
         (SELECT track_id FROM artist_credits WHERE artist_id = :artist_id))"""
 ALBUM_SELECTION = """SELECT album_id AS id,
     min(COALESCE(NULLIF(album, ''), '未命名专辑')) AS title,
-    count(*) AS track_count, sum(duration_ms) AS duration_ms FROM tracks
+    count(*) AS track_count, sum(duration_ms) AS duration_ms,
+    min(added_at) AS added_at,
+    min(NULLIF(json_extract(extra, '$.release_date'), '')) AS release_date,
+    COALESCE(min(CASE WHEN album_artists != '[]'
+        THEN browse_sort(json_extract(album_artists, '$[0]')) END),
+        min(browse_sort(COALESCE(json_extract(artists, '$[0]'), '')))) AS sort_artist
+    FROM tracks
     WHERE library_id = :library_id AND status = 'available'
     AND (:artist_id IS NULL OR id IN
         (SELECT track_id FROM artist_credits WHERE artist_id = :artist_id))
@@ -198,6 +205,7 @@ class LibraryRepository:
         artist_id: str | None = None,
         played_only: bool = False,
         sort: str = "title",
+        order: str | None = None,
         role: str | None = None,
     ) -> dict:
         query = normalize(q).replace("\\", "\\\\").replace("%", r"\%").replace("_", r"\_")
@@ -222,15 +230,34 @@ class LibraryRepository:
             rows = connection.execute(
                 ARTIST_CREDITS
                 + TRACK_SELECTION
-                + """ ORDER BY CASE WHEN :sort = 'play_count' THEN play_count END DESC,
-                CASE WHEN :sort = 'listened_ms' THEN listened_ms END DESC,
-                CASE WHEN :sort = 'last_played_at' THEN last_played_at END DESC,
-                CASE WHEN :album_id IS NOT NULL THEN COALESCE(disc_number, 1) END,
-                CASE WHEN :album_id IS NOT NULL THEN COALESCE(track_number, 2147483647) END,
-                browse_sort(title), id LIMIT :limit OFFSET :offset""",
+                + " ORDER BY "
+                + track_order(sort, order, album=album_id is not None)
+                + " LIMIT :limit OFFSET :offset",
                 parameters,
             ).fetchall()
+            discs = []
+            if album_id is not None:
+                # All matching tracks, not just the loaded page; headers remain
+                # accurate across page boundaries and contributor filters.
+                summaries = connection.execute(
+                    "".join(
+                        (
+                            ARTIST_CREDITS,
+                            "SELECT COALESCE(disc_number, 1) AS number, "
+                            "count(*) AS track_count, sum(duration_ms) AS duration_ms FROM (",
+                            TRACK_SELECTION,
+                            ") GROUP BY COALESCE(disc_number, 1) ORDER BY number",
+                        )
+                    ),
+                    parameters,
+                ).fetchall()
+                ordered = list(reversed(summaries)) if order == "desc" else summaries
+                cursor = 0
+                for summary in ordered:
+                    discs.append(dict(summary) | {"offset": cursor})
+                    cursor += summary["track_count"]
         return {
+            "discs": discs,
             "items": [self.public_track(dict(row)) for row in rows],
             "total": total,
             "limit": limit,
@@ -255,6 +282,7 @@ class LibraryRepository:
 
     def _album(self, connection, row) -> dict:
         result = dict(row)
+        result.pop("sort_artist", None)
         members = connection.execute(
             """SELECT id, artists, album_artists FROM tracks
             WHERE library_id = ? AND album_id = ? AND status = 'available'
@@ -283,6 +311,8 @@ class LibraryRepository:
         *,
         artist_id: str | None = None,
         role: str | None = None,
+        sort: str = "title",
+        order: str | None = None,
     ) -> dict:
         query = normalize(q).replace("\\", "\\\\").replace("%", r"\%").replace("_", r"\_")
         parameters = {
@@ -306,7 +336,7 @@ class LibraryRepository:
                         ARTIST_CREDITS,
                         "SELECT * FROM (",
                         ALBUM_SELECTION,
-                        ") ORDER BY browse_sort(title), id LIMIT :limit OFFSET :offset",
+                        ") ORDER BY " + album_order(sort, order) + " LIMIT :limit OFFSET :offset",
                     )
                 ),
                 parameters,

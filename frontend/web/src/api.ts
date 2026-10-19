@@ -33,7 +33,15 @@ export interface Track {
   added_at: string;
 }
 
+export interface DiscSummary {
+  number: number;
+  track_count: number;
+  duration_ms: number;
+  offset: number;
+}
+
 export interface TrackPage {
+  discs?: DiscSummary[];
   items: Track[];
   total: number;
   limit: number;

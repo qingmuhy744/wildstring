@@ -297,8 +297,12 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
                                 if (state.tab == "search" && state.kind == "discover") MobileShortcuts(discovery = true) { feature = it }
                                 state.error?.let { ErrorMessage(it, vm::load) }
                                 if (state.offline) Text("网络暂不可用 · 显示本机缓存", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
+                                if (state.kind == "albums") Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Text("${state.total} 张专辑", Modifier.weight(1f), color = Muted, style = MaterialTheme.typography.labelMedium)
+                                    CatalogSortControls(state, vm::sort, vm::toggleSortOrder)
+                                }
                                 if (state.kind == "tracks" || state.kind == "recent") CatalogToolbar(state,
-                                    play = tactile { vm.playCollection { playerReturnDepth = -1; expanded = true; lyrics = false; queue = false } }, sort = vm::sort,
+                                    play = tactile { vm.playCollection { playerReturnDepth = -1; expanded = true; lyrics = false; queue = false } }, sort = vm::sort, reverse = vm::toggleSortOrder,
                                     multi = { feature = "multi" }, download = { vm.downloadCollection() },
                                     edit = { featurePlaylist = state.activePlaylist; feature = "playlist" },
                                     order = { featurePlaylist = state.activePlaylist; feature = "order" },
@@ -450,7 +454,7 @@ internal fun TrackRow(vm: MusicViewModel, track: Track, state: MusicState, index
         .padding(horizontal = 16.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         if (album) Box(Modifier.width(30.dp), contentAlignment = Alignment.Center) {
             if (current) PlaybackIndicator(state.playing, state.buffering)
-            else Text(if ((track.discNumber ?: 1) > 1 && track.trackNumber != null) "${track.discNumber}-${track.trackNumber}" else track.trackNumber?.toString() ?: (index + 1).toString(), color = Muted, style = MaterialTheme.typography.bodySmall, fontSize = size.artistSp.sp, lineHeight = size.artistLineSp.sp)
+            else Text(track.trackNumber?.toString()?.padStart(2, '0') ?: "—", color = Muted, style = MaterialTheme.typography.bodySmall, fontSize = size.artistSp.sp, lineHeight = size.artistLineSp.sp)
         } else Box(Modifier.size(size.coverDp.dp).clip(RoundedCornerShape(10.dp)).testTag("track-cover-$index"), contentAlignment = Alignment.Center) {
             Cover(vm, track.id.takeIf { track.hasCover }, track.title, Modifier.fillMaxSize())
             if (current) {
@@ -460,7 +464,7 @@ internal fun TrackRow(vm: MusicViewModel, track: Track, state: MusicState, index
         }
         Column(Modifier.weight(1f).padding(start = 14.dp)) {
             Text(track.title, Modifier.testTag("track-title-$index"), color = if (current) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.bodyLarge, fontSize = size.titleSp.sp, lineHeight = size.titleLineSp.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(listOfNotNull(track.artist, metric).joinToString(" · "), Modifier.testTag("track-subtitle-$index"), color = Muted,
+            Text(listOfNotNull(if (album && state.discs.size > 1 && state.sort !in listOf("title", "track_number")) "Disc ${track.discNumber ?: 1}" else null, track.artist, metric).joinToString(" · "), Modifier.testTag("track-subtitle-$index"), color = Muted,
                 style = MaterialTheme.typography.bodySmall, fontSize = size.artistSp.sp, lineHeight = size.artistLineSp.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         IconButton(actions, Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp).testTag("track-action-$index")) { Icon(Icons.Default.MoreVert, "${track.title}的操作") }
@@ -468,27 +472,15 @@ internal fun TrackRow(vm: MusicViewModel, track: Track, state: MusicState, index
 }
 
 @Composable
-private fun CatalogToolbar(state: MusicState, play: () -> Unit, sort: (String) -> Unit, multi: () -> Unit,
+private fun CatalogToolbar(state: MusicState, play: () -> Unit, sort: (String) -> Unit, reverse: () -> Unit, multi: () -> Unit,
     download: () -> Unit, edit: () -> Unit, order: () -> Unit, delete: () -> Unit) {
-    var sorting by remember { mutableStateOf(false) }
     var more by remember { mutableStateOf(false) }
-    val sorts = listOf("title" to if (state.collection == "albums" || state.albumFilter != null) "曲目顺序" else "名称",
-        "play_count" to "播放次数", "listened_ms" to "收听时长", "last_played_at" to "最近听过")
     Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 4.dp, bottom = 4.dp).testTag("catalog-toolbar"), verticalAlignment = Alignment.CenterVertically) {
         FilledTonalButton(play, enabled = state.total > 0 && !state.collecting, contentPadding = PaddingValues(horizontal = 14.dp)) {
             Icon(Icons.Default.PlayArrow, null, Modifier.size(18.dp)); Spacer(Modifier.width(4.dp)); Text(if (state.collecting) "准备中…" else "播放全部")
         }
         Text("${state.total} 首", Modifier.padding(start = 8.dp).weight(1f), style = MaterialTheme.typography.labelMedium, color = Muted)
-        if (state.collection != "playlists") Box {
-            TextButton({ sorting = true }, Modifier.testTag("catalog-sort"), contentPadding = PaddingValues(horizontal = 6.dp)) {
-                Text(sorts.firstOrNull { it.first == state.sort }?.second ?: "名称", style = MaterialTheme.typography.labelLarge)
-                Icon(Icons.Default.ArrowDropDown, null, Modifier.size(18.dp))
-            }
-            DropdownMenu(sorting, { sorting = false }) { sorts.forEach { (key, name) ->
-                DropdownMenuItem(text = { Text(name) }, onClick = { sorting = false; sort(key) },
-                    trailingIcon = { if (state.sort == key) Icon(Icons.Default.Check, null) })
-            } }
-        }
+        if (state.collection != "playlists") CatalogSortControls(state, sort, reverse)
         Box {
             IconButton({ more = true }) { Icon(Icons.Default.MoreVert, "列表操作") }
             DropdownMenu(more, { more = false }) {
