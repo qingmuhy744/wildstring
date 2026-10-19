@@ -11,19 +11,22 @@ public final class WildstringAudioResourceLoader: NSObject, AVAssetResourceLoade
     public static let scheme = "wildstring-audio"
 
     private let fetcher: AudioRangeFetcher
+    private let cache: AudioDiskCache?
     private let lock = NSLock()
     nonisolated(unsafe) private var tasks: [ObjectIdentifier: Task<Void, Never>] = [:]
 
     public init(
         server: ServerAddress,
         cookieHeader: @escaping @Sendable () async -> String?,
-        configuration: URLSessionConfiguration? = nil
+        configuration: URLSessionConfiguration? = nil,
+        cache: AudioDiskCache? = nil
     ) {
         self.fetcher = AudioRangeFetcher(
             server: server,
             cookieHeader: cookieHeader,
             configuration: configuration
         )
+        self.cache = cache
         super.init()
     }
 
@@ -89,10 +92,26 @@ public final class WildstringAudioResourceLoader: NSObject, AVAssetResourceLoade
         defer { lock.withLock { _ = tasks.removeValue(forKey: key) } }
         do {
             if let dataRequest = loadingRequest.dataRequest {
+                let offset = dataRequest.requestedOffset
+                let length = Int64(dataRequest.requestedLength)
+                if let cached = await cache?.cachedChunk(key: path, offset: offset, length: length)
+                {
+                    if Task.isCancelled { return }
+                    if let info = loadingRequest.contentInformationRequest {
+                        Self.fill(
+                            info,
+                            totalLength: cached.totalLength,
+                            contentType: cached.contentType
+                        )
+                    }
+                    dataRequest.respond(with: cached.data)
+                    loadingRequest.finishLoading()
+                    return
+                }
                 let chunk = try await fetcher.fetch(
                     path: path,
-                    offset: dataRequest.requestedOffset,
-                    length: Int64(dataRequest.requestedLength)
+                    offset: offset,
+                    length: length
                 )
                 if Task.isCancelled { return }
                 if let info = loadingRequest.contentInformationRequest {
@@ -104,6 +123,13 @@ public final class WildstringAudioResourceLoader: NSObject, AVAssetResourceLoade
                 }
                 dataRequest.respond(with: chunk.data)
                 loadingRequest.finishLoading()
+                try? await cache?.store(
+                    key: path,
+                    offset: offset,
+                    data: chunk.data,
+                    totalLength: chunk.totalLength,
+                    contentType: chunk.contentType
+                )
             } else if let info = loadingRequest.contentInformationRequest {
                 let probe = try await fetcher.probe(path: path)
                 if Task.isCancelled { return }

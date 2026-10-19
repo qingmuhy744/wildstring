@@ -46,6 +46,8 @@ public final class PlaybackService {
     @ObservationIgnored private let store: any QueueStore
     @ObservationIgnored private let persistence: PersistenceQueue
     @ObservationIgnored private let resourceLoader: WildstringAudioResourceLoader
+    @ObservationIgnored private let fragmentCache: AudioDiskCache?
+    @ObservationIgnored private let offlineLookup: @Sendable (String) -> URL?
     @ObservationIgnored private var itemObservations: [NSKeyValueObservation] = []
     @ObservationIgnored private var timeControlObservation: NSKeyValueObservation?
     @ObservationIgnored private var timeObserverToken: Any?
@@ -57,15 +59,20 @@ public final class PlaybackService {
     public init(
         server: ServerAddress,
         store: any QueueStore,
-        cookieHeader: @escaping @Sendable () async -> String?
+        cookieHeader: @escaping @Sendable () async -> String?,
+        fragmentCache: AudioDiskCache? = nil,
+        offlineLookup: @escaping @Sendable (String) -> URL? = { _ in nil }
     ) {
         self.server = server
         self.store = store
         self.persistence = PersistenceQueue(store: store)
         self.player = AVPlayer()
+        self.fragmentCache = fragmentCache
+        self.offlineLookup = offlineLookup
         self.resourceLoader = WildstringAudioResourceLoader(
             server: server,
-            cookieHeader: cookieHeader
+            cookieHeader: cookieHeader,
+            cache: fragmentCache
         )
     }
 
@@ -161,6 +168,23 @@ public final class PlaybackService {
         await persistence.flush()
     }
 
+    // MARK: - Fragment cache management
+
+    public func fragmentCacheStats() async -> AudioDiskCache.Stats? {
+        guard let fragmentCache else { return nil }
+        return await fragmentCache.stats()
+    }
+
+    public func setFragmentCacheLimit(_ bytes: Int64) {
+        guard let fragmentCache else { return }
+        Task { await fragmentCache.setLimit(bytes) }
+    }
+
+    public func clearFragmentCache() async {
+        guard let fragmentCache else { return }
+        try? await fragmentCache.clear()
+    }
+
     // MARK: - Internals
 
     private func move(by delta: Int) {
@@ -180,10 +204,20 @@ public final class PlaybackService {
             return
         }
         configureSystemPlaybackIfNeeded()
-        let asset = AVURLAsset(
-            url: WildstringAudioResourceLoader.assetURL(server: server, path: item.streamPath)
-        )
-        asset.resourceLoader.setDelegate(resourceLoader, queue: .main)
+        let asset: AVURLAsset
+        if let offline = offlineLookup(item.trackID),
+            FileManager.default.fileExists(atPath: offline.path)
+        {
+            asset = AVURLAsset(url: offline)
+        } else {
+            asset = AVURLAsset(
+                url: WildstringAudioResourceLoader.assetURL(
+                    server: server,
+                    path: item.streamPath
+                )
+            )
+            asset.resourceLoader.setDelegate(resourceLoader, queue: .main)
+        }
         let playerItem = AVPlayerItem(asset: asset)
         player.replaceCurrentItem(with: playerItem)
         observe(playerItem: playerItem)
