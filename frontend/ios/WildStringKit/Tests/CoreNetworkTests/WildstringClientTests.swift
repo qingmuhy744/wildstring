@@ -344,4 +344,186 @@ struct StubbedHTTPTests {
             #expect(!lyrics.isSynced)
         }
     }
+
+    @Suite("PersonalLibrary")
+    struct PersonalLibrarySuite {
+        private func makeClient() throws -> WildstringClient {
+            WildstringClient(
+                server: try ServerAddress(input: "music.example.com"),
+                store: InMemorySessionStore(),
+                configuration: StubURLProtocol.configuration()
+            )
+        }
+
+        @Test func playlistsDecodePage() async throws {
+            StubURLProtocol.respond { request in
+                #expect(request.url?.path == "/api/v1/playlists")
+                #expect(request.url?.query == "limit=100&offset=0")
+                return .json(
+                    status: 200,
+                    body: """
+                        {"items":[{"id":"p1","name":"♥ 我喜欢","kind":"favorites","version":1,"created_at":1.0,"updated_at":2.0,"track_count":2,"duration_ms":20000,"cover_track_id":"t1","definition":null}],"total":1,"limit":100,"offset":0}
+                        """
+                )
+            }
+            let page = try await makeClient().playlists()
+            let playlist = try #require(page.items.first)
+            #expect(playlist.name == "♥ 我喜欢")
+            #expect(playlist.isFavorites)
+            #expect(!playlist.isEditable)
+            #expect(playlist.trackCount == 2)
+        }
+
+        @Test func playlistTracksDecodePage() async throws {
+            StubURLProtocol.respond { request in
+                #expect(request.url?.path == "/api/v1/playlists/p1/tracks")
+                #expect(request.url?.query == "limit=200&offset=0")
+                return .json(status: 200, body: #"{"items":[],"total":0,"limit":200,"offset":0}"#)
+            }
+            _ = try await makeClient().playlistTracks(playlistID: "p1")
+        }
+
+        @Test func favoriteIDsDecode() async throws {
+            StubURLProtocol.respond { request in
+                #expect(request.url?.path == "/api/v1/favorites/ids")
+                return .json(status: 200, body: #"{"ids":["t1","t2"]}"#)
+            }
+            let ids = try await makeClient().favoriteIDs()
+            #expect(ids == ["t1", "t2"])
+        }
+
+        @Test func setFavoriteSendsLovedFlag() async throws {
+            StubURLProtocol.respond { request in
+                #expect(request.httpMethod == "PUT")
+                #expect(request.url?.path == "/api/v1/tracks/t1/favorite")
+                let body = try #require(StubURLProtocol.bodyData(of: request))
+                let json = try #require(
+                    try JSONSerialization.jsonObject(with: body) as? [String: Bool]
+                )
+                #expect(json["loved"] == true)
+                return .json(status: 200, body: #"{"loved":true}"#)
+            }
+            try await makeClient().setFavorite(trackID: "t1", loved: true)
+        }
+
+        @Test func createPlaylistSendsNameAndKind() async throws {
+            StubURLProtocol.respond { request in
+                #expect(request.httpMethod == "POST")
+                #expect(request.url?.path == "/api/v1/playlists")
+                let body = try #require(StubURLProtocol.bodyData(of: request))
+                let json = try #require(
+                    try JSONSerialization.jsonObject(with: body) as? [String: String]
+                )
+                #expect(json["name"] == "通勤")
+                #expect(json["kind"] == "manual")
+                return .json(
+                    status: 201,
+                    body: """
+                        {"id":"p2","name":"通勤","kind":"manual","version":1,"track_count":0,"duration_ms":0,"cover_track_id":"","definition":null}
+                        """
+                )
+            }
+            let created = try await makeClient().createPlaylist(name: "通勤")
+            #expect(created.id == "p2")
+            #expect(created.isEditable)
+        }
+
+        @Test func addTracksSendsVersionAndIDs() async throws {
+            StubURLProtocol.respond { request in
+                #expect(request.httpMethod == "POST")
+                #expect(request.url?.path == "/api/v1/playlists/p2/tracks")
+                let body = try #require(StubURLProtocol.bodyData(of: request))
+                let json = try #require(
+                    try JSONSerialization.jsonObject(with: body) as? [String: Any]
+                )
+                #expect(json["version"] as? Int == 3)
+                #expect(json["track_ids"] as? [String] == ["t1", "t2"])
+                return .empty(status: 204)
+            }
+            try await makeClient().addTracks(playlistID: "p2", trackIDs: ["t1", "t2"], version: 3)
+        }
+
+        @Test func removeTrackUsesQueryVersion() async throws {
+            StubURLProtocol.respond { request in
+                #expect(request.httpMethod == "DELETE")
+                #expect(request.url?.path == "/api/v1/playlists/p2/tracks/t1")
+                #expect(request.url?.query == "version=4")
+                return .empty(status: 204)
+            }
+            try await makeClient().removeTrack(playlistID: "p2", trackID: "t1", version: 4)
+        }
+
+        @Test func deletePlaylistUsesQueryVersion() async throws {
+            StubURLProtocol.respond { request in
+                #expect(request.httpMethod == "DELETE")
+                #expect(request.url?.path == "/api/v1/playlists/p2")
+                #expect(request.url?.query == "version=5")
+                return .empty(status: 204)
+            }
+            try await makeClient().deletePlaylist(playlistID: "p2", version: 5)
+        }
+
+        @Test func renamePlaylistSendsVersionAndKind() async throws {
+            StubURLProtocol.respond { request in
+                #expect(request.httpMethod == "PUT")
+                #expect(request.url?.path == "/api/v1/playlists/p2")
+                let body = try #require(StubURLProtocol.bodyData(of: request))
+                let json = try #require(
+                    try JSONSerialization.jsonObject(with: body) as? [String: Any]
+                )
+                #expect(json["name"] as? String == "改名")
+                #expect(json["version"] as? Int == 2)
+                #expect(json["kind"] as? String == "manual")
+                return .json(
+                    status: 200,
+                    body: """
+                        {"id":"p2","name":"改名","kind":"manual","version":3,"track_count":0,"duration_ms":0,"cover_track_id":"","definition":null}
+                        """
+                )
+            }
+            let updated = try await makeClient().renamePlaylist(
+                id: "p2",
+                name: "改名",
+                version: 2,
+                kind: "manual"
+            )
+            #expect(updated.name == "改名")
+            #expect(updated.version == 3)
+        }
+
+        @Test func versionConflictSurfacesStableCode() async throws {
+            StubURLProtocol.respond { _ in
+                .json(status: 409, body: #"{"detail":"playlist_version_conflict"}"#)
+            }
+            await #expect(throws: APIError(statusCode: 409, code: "playlist_version_conflict")) {
+                try await makeClient().addTracks(playlistID: "p2", trackIDs: ["t1"], version: 1)
+            }
+        }
+
+        @Test func dailyRecommendationsDecode() async throws {
+            StubURLProtocol.respond { request in
+                #expect(request.url?.path == "/api/v1/recommendations/daily")
+                return .json(
+                    status: 200,
+                    body: """
+                        {"id":"r1","date":"2026-10-19","engine":"local","degraded":false,"items":[{"track":{"id":"t1","title":"歌","artists":["人"],"album":"集","duration_ms":1000,"has_cover":false,"play_count":0,"listened_ms":0,"last_played_at":null,"loved":false,"format":"mp3","status":"available","album_id":"a1","track_number":1,"disc_number":1},"reason":"常听","source_ids":[]}]}
+                        """
+                )
+            }
+            let daily = try await makeClient().dailyRecommendations()
+            #expect(daily.items.count == 1)
+            #expect(daily.items.first?.track.title == "歌")
+            #expect(daily.items.first?.reason == "常听")
+        }
+
+        @Test func refreshDailyUsesRefreshEndpoint() async throws {
+            StubURLProtocol.respond { request in
+                #expect(request.httpMethod == "POST")
+                #expect(request.url?.path == "/api/v1/recommendations/daily/refresh")
+                return .json(status: 200, body: #"{"id":"r2","date":"2026-10-19","items":[]}"#)
+            }
+            let daily = try await makeClient().refreshDailyRecommendations()
+            #expect(daily.id == "r2")
+        }
+    }
 }

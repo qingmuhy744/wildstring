@@ -119,6 +119,7 @@ public final class WildstringClient: Sendable {
         var body: Data?
         var contentType: String?
         var queryItems: [URLQueryItem] = []
+        var timeout: TimeInterval?
         var clientHeader = "ios"
         var clearsSessionOnUnauthorized = true
     }
@@ -162,7 +163,7 @@ public final class WildstringClient: Sendable {
         var urlRequest = URLRequest(url: url)
         urlRequest.httpMethod = request.method
         urlRequest.httpBody = request.body
-        urlRequest.timeoutInterval = 20
+        urlRequest.timeoutInterval = request.timeout ?? 20
         urlRequest.setValue("application/json", forHTTPHeaderField: "Accept")
         if let contentType = request.contentType {
             urlRequest.setValue(contentType, forHTTPHeaderField: "Content-Type")
