@@ -4,20 +4,30 @@ import SwiftUI
 struct WildStringApp: App {
     var body: some Scene {
         WindowGroup {
-            PlaceholderRootView()
+            RootView()
         }
     }
 }
 
-struct PlaceholderRootView: View {
+@MainActor
+struct RootView: View {
+    @State private var model = ConnectionModel()
+
     var body: some View {
-        NavigationStack {
-            ContentUnavailableView {
-                Label("野弦", systemImage: "music.note")
-            } description: {
-                Text("iOS 客户端骨架已就位，连接页与曲库待实现。")
+        Group {
+            switch model.phase {
+            case .loading:
+                ProgressView("正在连接…")
+            case .connect:
+                ConnectionView(model: model)
+            case .connected(let server, let username):
+                ConnectedView(server: server, username: username) {
+                    Task { await model.logout() }
+                }
             }
-            .navigationTitle("野弦")
+        }
+        .task {
+            await model.restore()
         }
     }
 }
