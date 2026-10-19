@@ -75,28 +75,7 @@ def agent_router(service):
 
     @router.get("/tools")
     def tools(actor: Annotated[object, Depends(transport_actor)]):
-        return {
-            "tools": [
-                {
-                    "name": tool["name"],
-                    "description": tool["description"],
-                    "inputSchema": tool["input_schema"],
-                    "annotations": {
-                        "readOnlyHint": tool["read_only"],
-                        "destructiveHint": False,
-                        "idempotentHint": tool["read_only"] or tool["name"] == "apply_draft",
-                        "openWorldHint": tool["name"]
-                        in {
-                            "request_metadata_refresh",
-                            "test_external_services",
-                            "submit_inspection",
-                        },
-                    },
-                }
-                for tool in tool_definitions()
-                if tool["scope"] in actor.scopes
-            ]
-        }
+        return {"tools": service.tool_catalog(actor)}
 
     @router.post("/tools/{name}")
     def tool(

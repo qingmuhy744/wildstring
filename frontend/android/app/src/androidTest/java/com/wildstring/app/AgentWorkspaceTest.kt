@@ -34,9 +34,13 @@ class AgentWorkspaceTest {
         @Volatile var rejectHistoryDelete = false
         @Volatile var memoryContent = ""
         var memoryVersion = 1; var searchEnabled = false
+        var replacementDraft: JsonObject? = null
         val trace = "b".repeat(32)
         fun json(body: String) = MockResponse().setHeader("Content-Type", "application/json").setHeader("X-Wildstring-Trace-Id", trace).setBody(body)
-        fun draft() = """{"id":"draft-one","kind":"playlist","title":"久未听的收藏","payload":{"name":"重新听见","track_ids":["song-a","song-b"]},"before":{"name":"原歌单"},"evidence":[{"source":"library","summary":"从本人收藏挑选"}],"status":"$status","version":$version,"created_at":"2026-10-17T12:00:00Z","trace_id":"$trace"}"""
+        fun draft(): String {
+            replacementDraft?.let { value -> value.addProperty("status", status); value.addProperty("version", version); return value.toString() }
+            return """{"id":"draft-one","kind":"playlist","title":"久未听的收藏","payload":{"name":"重新听见","track_ids":["song-a","song-b"]},"before":{"name":"原歌单"},"evidence":[{"source":"library","summary":"从本人收藏挑选"}],"status":"$status","version":$version,"created_at":"2026-10-17T12:00:00Z","trace_id":"$trace"}"""
+        }
         init {
             server.dispatcher = object : Dispatcher() { override fun dispatch(request: RecordedRequest): MockResponse = synchronized(this@Fixture) {
                 val path = request.requestUrl!!.encodedPath
@@ -326,6 +330,24 @@ class AgentWorkspaceTest {
             assertEquals(1, fixture.requests.count { it.first.endsWith("/draft-one/apply") })
             capture("agent-draft-phone.png")
         } finally { compose.runOnIdle { vm.settings.appearance("system"); vm.repository.session.invalidate() } } }
+    }
+    @Test fun lyricProposalShowsQualityAndExcerptsBeforeHumanApproval() {
+        val vm = vm()
+        Fixture().use { fixture -> try {
+            fixture.replacementDraft = JsonParser.parseString("""{"id":"draft-one","kind":"lyrics","title":"选用双语逐字歌词","payload":{"candidate_id":"candidate-one","version":1,"file_version":"${"a".repeat(64)}","offset_ms":250},"before":{"track_id":"song-a","title":"合成歌曲甲","provider":"合成来源","current_quality":{"label":"静态歌词"},"candidate_quality":{"label":"双语逐字动态"},"match":{"score":0.99},"current_lines":[{"text":"原歌词预览"}],"candidate_lines":[{"text":"Synthetic lyric","translation":"合成译文"}]},"evidence":[],"status":"pending","version":1,"trace_id":"${fixture.trace}"}""").asJsonObject
+            connect(vm, fixture)
+            compose.onNodeWithContentDescription("设置").performClick()
+            compose.onNodeWithText("野弦助手 / 通知与草案").performScrollTo().performClick()
+            compose.onNodeWithTag("agent-tab-drafts").performClick()
+            compose.waitUntil(15_000) { compose.onAllNodesWithTag("draft-open-draft-one").fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithTag("draft-open-draft-one").performClick()
+            compose.waitUntil(15_000) { compose.onAllNodesWithText("静态歌词 → 双语逐字动态").fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithText("Synthetic lyric / 合成译文").assertExists()
+            compose.onNodeWithText("同步偏移：250 ms").assertExists()
+            assertEquals("pending", fixture.status)
+            assertEquals(0, fixture.requests.count { it.first.endsWith("/draft-one/apply") })
+            capture("mcp-lyric-proposal-phone.png")
+        } finally { compose.runOnIdle { vm.repository.session.invalidate() } } }
     }
     private fun capture(name: String, dark: Boolean = false) {
         compose.waitForIdle()

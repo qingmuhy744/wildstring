@@ -76,6 +76,7 @@ class MobileCompletionTest {
         val playlistDetailsRequested = CountDownLatch(1)
         val releasePlaylistDetails = CountDownLatch(1)
         var snapshot = """{"version":0,"device_id":"","track_ids":[],"index":0,"position_ms":0,"mode":"sequential","updated_at":null}"""
+        var importSettings = """{"version":1,"enabled":false,"interval_seconds":60,"stable_seconds":120,"download_policy":{"wait_for_album":true,"partial_suffixes":[".part",".tmp"]}}"""
         var lyrics = "第一句\n第二句"
         val audio = InstrumentationRegistry.getInstrumentation().context.assets.open("playback.mp3").use { it.readBytes() }
         fun track(index: Int) = """{"id":"completion-$index","title":"手机测试歌曲 $index","artists":["测试艺人"],"album":"手机测试专辑","duration_ms":12000,"has_cover":false,"loved":false,"format":"mp3","status":"available","play_count":2,"listened_ms":6000,"last_played_at":"2026-10-17T00:00:00Z"}"""
@@ -90,6 +91,10 @@ class MobileCompletionTest {
                     if (path.endsWith("/auth/status")) { val authenticated = request.getHeader("Cookie")?.contains("wildstring_session=completion") == true; return json("""{"configured":true,"authenticated":$authenticated,"user":${if (authenticated) user else "null"}}""") }
                     if (path.endsWith("/auth/login")) return json(user).setHeader("Set-Cookie", "wildstring_session=completion; Path=/; Max-Age=3600; HttpOnly")
                     if (request.method in listOf("POST", "PUT", "DELETE")) mutations += path to request.body.clone().readUtf8()
+                    if (path.endsWith("/manage/intake/settings")) {
+                        if (request.method == "PUT") { val value = JsonParser.parseString(request.body.readUtf8()).asJsonObject; value.addProperty("version", value.get("version").asInt + 1); importSettings = value.toString() }
+                        return json(importSettings)
+                    }
                     if (path.endsWith("/auth/logout")) return MockResponse().setResponseCode(204)
                     if (path.endsWith("/playback/state")) {
                         if (request.method == "PUT") { val body = JsonParser.parseString(request.body.readUtf8()).asJsonObject; assertFalse(body.has("updated_at")); if (body["version"].asInt != JsonParser.parseString(snapshot).asJsonObject["version"].asInt) return json("""{"detail":"playback_version_conflict"}""").setResponseCode(409); body.addProperty("version", body["version"].asInt + 1); body.addProperty("updated_at", "2026-10-17T00:00:00Z"); snapshot = body.toString() }
@@ -221,6 +226,28 @@ class MobileCompletionTest {
                 fixture.disconnected.set(false); fixture.headCode.set(403)
                 try { downloads.playableFile(vm.repository.originalStream(track.id)); fail("Revoked content must fail") } catch (_: OfflineAccessException) { }
                 assertNull(downloads.file(track.id)); assertTrue(downloads.entries.value.isEmpty())
+            } finally { cleanup(vm) }
+        }
+    }
+
+    @Test fun downloadCompletionPolicyCanBeConfiguredFromManagement() {
+        Fixture().use { fixture -> val vm = connect(fixture)
+            try {
+                compose.onNodeWithContentDescription("设置").performClick()
+                compose.onNodeWithText("曲库管理", substring = false).performScrollTo().performClick()
+                compose.waitUntil(10_000) { compose.onAllNodesWithText("下载完成与自动导入设置").fetchSemanticsNodes().isNotEmpty() }
+                compose.onNodeWithText("下载完成与自动导入设置").performScrollTo().performClick()
+                compose.onNodeWithText("检查间隔（15–86400 秒）").performTextReplacement("30")
+                compose.onNodeWithText("稳定期（5–86400 秒）").performTextReplacement("10")
+                compose.onNodeWithText("下载后缀，空格或逗号分隔").performTextReplacement(".part, .uploading")
+                compose.onNodeWithText("保存设置").performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnClick) { click -> assertTrue(click()) }
+                compose.waitUntil(10_000) { fixture.mutations.any { it.first.endsWith("/manage/intake/settings") } }
+                val value = JsonParser.parseString(fixture.mutations.last { it.first.endsWith("/manage/intake/settings") }.second).asJsonObject
+                assertEquals(30, value.get("interval_seconds").asInt)
+                assertEquals(10, value.get("stable_seconds").asInt)
+                assertEquals(".uploading", value.getAsJsonObject("download_policy").getAsJsonArray("partial_suffixes")[1].asString)
+                assertEquals(1, value.get("version").asInt)
+                capture("download-policy-phone.png")
             } finally { cleanup(vm) }
         }
     }

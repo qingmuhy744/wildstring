@@ -521,6 +521,9 @@ function Capabilities({ value }: { value: Record<string, unknown> }) {
 }
 const scopes: Record<string, string> = {
   'library:read': '读取共享曲库',
+  'library:manage': '管理导入、歌词和分析（管理员）',
+  'personal:write': '修改我的响度设置与调整',
+  'web:search': '使用我的联网检索与预算（需读取曲库权限）',
   'personal:read': '读取我的歌单与历史',
   'drafts:write': '创建和修改草案',
   'drafts:apply': '应用已批准草案',
@@ -577,7 +580,8 @@ export function ToolCredentials({ user }: { user: User }) {
     <section className="workspace-card" aria-label="MCP 工具凭据">
       <h2>MCP 与外部工具</h2>
       <p className="muted">
-        为 Codex 等工具生成独立凭据，按需选择最小权限。工具不能批准草案，也不能读取模型密钥。
+        为 Codex 等工具生成独立凭据，按需选择最小权限。原生 HTTP MCP 地址为本站 /mcp，使用 Bearer
+        凭据；也可继续使用 stdio 桥接。工具不能批准草案，也不能读取模型密钥。
       </p>
       <WorkspaceNotice error={error || list.error} notice={notice} unavailable={list.unsupported} />
       {!list.unsupported && (
@@ -628,7 +632,11 @@ export function ToolCredentials({ user }: { user: User }) {
                 <legend>允许的操作</legend>
                 <div className="workspace-check-grid">
                   {Object.entries(scopes)
-                    .filter(([key]) => user.role === 'admin' || key !== 'diagnostics:read')
+                    .filter(
+                      ([key]) =>
+                        user.role === 'admin' ||
+                        !['diagnostics:read', 'library:manage'].includes(key),
+                    )
                     .map(([key, label]) => (
                       <label className="workspace-check" key={key}>
                         <input

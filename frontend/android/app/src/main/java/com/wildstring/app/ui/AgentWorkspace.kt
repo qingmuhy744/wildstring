@@ -135,7 +135,7 @@ private fun displayValue(value: com.google.gson.JsonElement?): String = when { v
     val action = remember { FeatureAction() }; val scope = rememberCoroutineScope()
     val payload = draft.getAsJsonObject("payload") ?: JsonObject()
     val before = draft.getAsJsonObject("before") ?: JsonObject()
-    val changes = if (draft.text("kind") == "metadata") payload.getAsJsonObject("overrides") ?: JsonObject() else payload
+    val changes = if (draft.text("kind") in listOf("metadata", "intake")) payload.getAsJsonObject("overrides") ?: JsonObject() else payload
     LaunchedEffect(draft.text("id"), draft.number("version")) {
         val ids = payload.getAsJsonArray("track_ids")?.map { it.asString } ?: listOfNotNull(payload.text("track_id").takeIf { it.isNotBlank() })
         val names = linkedMapOf<String, String>()
@@ -146,14 +146,25 @@ private fun displayValue(value: com.google.gson.JsonElement?): String = when { v
         Column(Modifier.heightIn(max = 500.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(draftLabel(draft.text("status")), color = MaterialTheme.colorScheme.primary)
             if (draft.text("kind") == "metadata") Text("歌曲：${tracks[payload.text("track_id")] ?: payload.text("track_id")}")
-            changes.entrySet().filter { it.key !in listOf("track_id", "metadata_version", "playlist_id", "playlist_version") }.forEach { (field, value) ->
+            if (draft.text("kind") == "intake") Text("导入来源：${before.text("source_path")}。应用后安排复制到托管曲库，保留导入源。")
+            if (draft.text("kind") == "lyrics") {
+                Text("歌曲：${before.text("title")} · ${before.text("provider")}")
+                Text("${before.getAsJsonObject("current_quality")?.text("label")} → ${before.getAsJsonObject("candidate_quality")?.text("label")}")
+                Text("同步偏移：${payload.number("offset_ms")} ms")
+                Text("匹配依据：${before.text("match")}", style = MaterialTheme.typography.bodySmall)
+                Text("当前歌词预览", fontWeight = FontWeight.Medium)
+                before.objects("current_lines").forEach { Text(it.text("text"), style = MaterialTheme.typography.bodySmall) }
+                Text("候选歌词预览", fontWeight = FontWeight.Medium)
+                before.objects("candidate_lines").forEach { Text(listOf(it.text("text"), it.text("translation")).filter { v -> v.isNotBlank() }.joinToString(" / "), style = MaterialTheme.typography.bodySmall) }
+            }
+            changes.entrySet().filter { draft.text("kind") != "lyrics" && it.key !in listOf("track_id", "metadata_version", "playlist_id", "playlist_version", "file_version", "candidate_id") }.forEach { (field, value) ->
                 Text(fieldName(field), fontWeight = FontWeight.Medium)
                 if (field == "track_ids") {
                     value.asJsonArray.forEachIndexed { index, id -> Text("${index + 1}. ${tracks[id.asString] ?: id.asString}", style = MaterialTheme.typography.bodySmall) }
                 } else Text("${displayValue(before.get(field))} → ${displayValue(value)}", style = MaterialTheme.typography.bodyMedium)
             }
             draft.objects("evidence").forEach { evidence -> Text("${evidence.text("source")} · ${evidence.text("summary")}", style = MaterialTheme.typography.bodySmall); evidence.text("url").takeIf { it.isNotBlank() }?.let { SelectionContainer { Text(it, style = MaterialTheme.typography.labelSmall) } } }
-            Text("版本 ${draft.number("version")} · 只更新应用内资料，不写回音乐文件。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("版本 ${draft.number("version")} · 导入仅复制；资料与歌词更新保存在应用内，不写回音乐文件。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             AgentTrace(draft); ActionStatus(action)
         }
     }, confirmButton = {

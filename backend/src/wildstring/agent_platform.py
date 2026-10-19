@@ -21,6 +21,8 @@ from wildstring.agent_common import (
 from wildstring.agent_diagnostics import DEFINITIONS as DIAGNOSTIC_TOOLS
 from wildstring.agent_diagnostics import execute as execute_diagnostic
 from wildstring.agent_models import SCOPES, DraftCreate, PlaylistPayload
+from wildstring.agent_music_models import ADMIN_TOOLS, NETWORK_TOOLS
+from wildstring.agent_music_models import DEFINITIONS as MUSIC_TOOLS
 from wildstring.agent_notifications import Notifications
 from wildstring.agent_research import Research
 from wildstring.library.edits import MetadataEditor, MetadataUpdate
@@ -29,6 +31,37 @@ from wildstring.library.repository import now
 
 
 class Core:
+    @staticmethod
+    def tool_catalog(actor):
+        return [
+            {
+                "name": tool["name"],
+                "description": tool["description"],
+                "inputSchema": tool["input_schema"],
+                "annotations": {
+                    "readOnlyHint": tool["read_only"],
+                    "destructiveHint": False,
+                    "idempotentHint": tool["read_only"] or tool["name"] == "apply_draft",
+                    "openWorldHint": tool["name"]
+                    in NETWORK_TOOLS
+                    | {
+                        "request_metadata_refresh",
+                        "test_external_services",
+                        "submit_inspection",
+                    },
+                },
+            }
+            for tool in tool_definitions()
+            if tool["scope"] in actor.scopes
+            and (
+                actor.role == "admin"
+                or tool["name"]
+                not in ADMIN_TOOLS | {"get_metadata_suggestions", "request_metadata_refresh"}
+                and tool["scope"] != "diagnostics:read"
+            )
+            and (tool["scope"] != "web:search" or "library:read" in actor.scopes)
+        ]
+
     def actor(self, request, *, session_only=False):
         authorization = request.headers.get("authorization", "")
         if authorization and not session_only:
@@ -122,7 +155,9 @@ class Core:
         }
 
     def create_credential(self, actor, body):
-        if "diagnostics:read" in body.scopes and actor.role != "admin":
+        if {"diagnostics:read", "library:manage"}.intersection(
+            body.scopes
+        ) and actor.role != "admin":
             raise HTTPException(403, "admin_required")
         identity, token = uuid4().hex, "ws_" + secrets.token_urlsafe(32)
         with self.database.connect(write=True) as connection:
@@ -231,6 +266,10 @@ class Core:
 
     def check_draft_payload(self, actor, kind, payload):
         repository = self.repository_for(actor)
+        if kind in {"intake", "lyrics"}:
+            from wildstring.agent_music_drafts import check
+
+            return check(self, actor, kind, payload)
         if kind == "playlist":
             body = validate(PlaylistPayload, payload)
             if len(body.track_ids) != len(set(body.track_ids)):
@@ -381,7 +420,7 @@ class Core:
         with self.database.connect(write=True) as connection:
             connection.execute("BEGIN IMMEDIATE")
             record = self.draft(actor, identity, connection)
-            if record["kind"] == "metadata" and actor.role != "admin":
+            if record["kind"] != "playlist" and actor.role != "admin":
                 raise HTTPException(403, "admin_required")
             if record["version"] != version or record["status"] == "applied":
                 raise HTTPException(409, "draft_version_conflict")
@@ -403,7 +442,7 @@ class Core:
             with self.database.connect(write=True) as connection:
                 connection.execute("BEGIN IMMEDIATE")
                 record = self.draft(actor, identity, connection)
-                if record["kind"] == "metadata" and actor.role != "admin":
+                if record["kind"] != "playlist" and actor.role != "admin":
                     raise HTTPException(403, "admin_required")
                 raw = connection.execute(
                     "SELECT * FROM agent_drafts WHERE id=?", (identity,)
@@ -422,6 +461,10 @@ class Core:
                 payload = record["payload"]
                 if record["kind"] == "playlist":
                     result = self.apply_playlist(connection, actor, payload)
+                elif record["kind"] in {"intake", "lyrics"}:
+                    from wildstring.agent_music_drafts import apply
+
+                    result = apply(self, actor, connection, record["kind"], payload)
                 else:
                     existing = connection.execute(
                         "SELECT overrides FROM track_metadata WHERE track_id=?",
@@ -445,7 +488,7 @@ class Core:
                         "track_id": payload["track_id"],
                         "metadata_version": update.version + 1,
                     }
-                object_id = result.get("playlist_id", result.get("track_id"))
+                object_id = result.get("playlist_id", result.get("track_id", result.get("item_id")))
                 connection.execute(
                     "INSERT INTO agent_audit VALUES (?,?,?,?,?,?,?)",
                     (
@@ -511,6 +554,13 @@ class Core:
         return {"playlist_id": identity}
 
     def execute_tool(self, actor, name, arguments):
+        actor = self.refresh_actor(actor)
+        if name in MUSIC_TOOLS:
+            from wildstring.agent_music_tools import execute
+
+            if not isinstance(arguments, dict) or len(encoded(arguments).encode()) > 100000:
+                raise HTTPException(422, "agent_invalid_input")
+            return execute(self, actor, name, arguments)
         if name not in TOOLS:
             raise HTTPException(404, "agent_tool_not_found")
         _, scope, _, properties = TOOLS[name]

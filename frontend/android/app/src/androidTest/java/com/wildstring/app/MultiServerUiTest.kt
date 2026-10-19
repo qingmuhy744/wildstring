@@ -29,8 +29,16 @@ class MultiServerUiTest {
         compose.onAllNodes(hasSetTextAction())[1].performTextReplacement(user)
         compose.onAllNodes(hasSetTextAction())[2].performTextReplacement("public-test-password")
         compose.activityRule.scenario.onActivity { activity -> WindowCompat.getInsetsController(activity.window, activity.window.decorView).hide(WindowInsetsCompat.Type.ime()) }
-        compose.onNode(isToggleable()).apply { if (fetchSemanticsNode().config[androidx.compose.ui.semantics.SemanticsProperties.ToggleableState] != androidx.compose.ui.state.ToggleableState.On) performClick() }
-        compose.onNodeWithText("连接并登录").performScrollTo().performClick()
+        // IME resizing moves physical tap targets on fresh emulators. This
+        // fixture tests server isolation; invoke enabled controls semantically.
+        compose.onNode(isToggleable()).apply {
+            if (fetchSemanticsNode().config[androidx.compose.ui.semantics.SemanticsProperties.ToggleableState] != androidx.compose.ui.state.ToggleableState.On)
+                performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnClick) { click -> assertTrue(click()) }
+            assertIsOn()
+        }
+        compose.waitUntil(10000) { compose.onAllNodes(hasText("连接并登录") and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText("连接并登录").assertIsEnabled()
+            .performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnClick) { click -> assertTrue(click()) }
     }
     private fun manager() {
         compose.onNodeWithContentDescription("设置").performClick()
@@ -79,7 +87,8 @@ class MultiServerUiTest {
                 compose.waitUntil(15000) { vm.state.value.account?.username == "甲" && vm.state.value.connected }
                 val aId = vm.repository.session.activeServerId!!
                 compose.waitUntil(15000) { !vm.state.value.loading && compose.onAllNodesWithText("甲 的歌曲", useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
-                compose.onNodeWithText("甲 的歌曲", useUnmergedTree = true).performClick()
+                compose.onNode(hasText("甲 的歌曲") and hasClickAction())
+                    .performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnClick) { click -> assertTrue(click()) }
                 compose.waitUntil(15000) { compose.runOnIdle { vm.controller?.isPlaying == true && vm.controller!!.currentPosition >= 1200 } }
                 android.util.Log.i("MultiServerStage", "A is playing, share snapshot")
                 runBlocking { vm.sharing.publish(SharedPlayback(trackIds = listOf("same-track")), claim = true) }
@@ -146,7 +155,10 @@ class MultiServerUiTest {
                 compose.waitUntil(10000) { !vm.state.value.connected && !vm.repository.session.hasSession(bId) }
                 assertNull(vm.repository.session.read())
                 compose.onNodeWithText("连接并登录").assertExists()
-            } catch (failure: Throwable) { android.util.Log.e("MultiServerStage", "Failure before cleanup", failure); throw failure } finally { compose.runOnIdle { vm.repository.session.invalidate(); vm.deleteServer(vm.repository.session.activeServerId.orEmpty()) } }
+            } catch (failure: Throwable) {
+                android.util.Log.e("MultiServerStage", "Failure before cleanup: connected=${vm.state.value.connected}, connecting=${vm.state.value.connecting}, error=${vm.state.value.error}; A paths=${aRequests.map { it.requestUrl!!.encodedPath }}; B paths=${bRequests.map { it.requestUrl!!.encodedPath }}", failure)
+                throw failure
+            } finally { compose.runOnIdle { vm.repository.session.invalidate(); vm.deleteServer(vm.repository.session.activeServerId.orEmpty()) } }
         } }
     }
 }

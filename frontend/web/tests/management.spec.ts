@@ -167,8 +167,13 @@ test('自动导入设置、待整理快照、冲突反馈与手机布局', async
     await page.getByLabel('自动发现并导入新音乐', { exact: true }).check();
     await page.getByLabel('检查间隔（秒）', { exact: true }).fill('15');
     await page.getByLabel('等待文件稳定（秒）', { exact: true }).fill('5');
+    await page.getByLabel('同专辑有下载标记时整张等待（含 CD / Disc 子目录）').uncheck();
+    await page.getByLabel('下载中文件／目录后缀（空格或逗号分隔）').fill('.part, .uploading');
     await page.getByRole('button', { name: '保存自动导入设置', exact: true }).click();
     await expect(page.getByText('自动导入设置已保存。', { exact: true })).toBeVisible();
+    const policy = (await (await page.request.get('/api/v1/manage/intake/settings')).json())
+      .download_policy;
+    expect(policy).toEqual({ wait_for_album: false, partial_suffixes: ['.part', '.uploading'] });
     const response = await (await page.request.get('/api/v1/manage/intake/items?limit=100')).json();
     const item = response.items.find(
       (value: { source_path: string }) => value.source_path === `待整理-${info.project.name}.mp3`,

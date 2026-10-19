@@ -84,7 +84,7 @@ TOOLS = {
         {"track_ids": "array", "limit": "integer"},
     ),
     "create_draft": (
-        "生成待站内确认的歌单或元数据草案，不修改曲库",
+        "生成待站内确认的歌单、元数据、导入整理或歌词选用草案；共享曲库操作需要管理员，不直接应用",
         "drafts:write",
         False,
         {"kind": "string", "title": "string", "payload": "object", "evidence": "array"},
@@ -140,6 +140,8 @@ TOOLS.update(
 
 
 def tool_definitions():
+    from wildstring.agent_tool_schemas import describe
+
     required = {
         "get_track": ["track_id"],
         "get_metadata_suggestions": ["track_id"],
@@ -153,30 +155,44 @@ def tool_definitions():
         "get_operation_trace": ["trace_id"],
         "get_task_diagnostics": ["task_id"],
     }
+    from wildstring.agent_music_models import DEFINITIONS as MUSIC_TOOLS
+
     return [
         {
             "name": name,
             "description": desc,
             "scope": scope,
             "read_only": readonly,
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    key: {
-                        "type": value,
-                        **(
-                            {"items": {"type": "string"}}
-                            if value == "array" and key == "track_ids"
-                            else {"items": {"type": "object"}}
-                            if value == "array"
-                            else {}
-                        ),
-                    }
-                    for key, value in properties.items()
+            "input_schema": describe(
+                name,
+                {
+                    "type": "object",
+                    "properties": {
+                        key: {
+                            "type": value,
+                            **(
+                                {"items": {"type": "string"}}
+                                if value == "array" and key == "track_ids"
+                                else {"items": {"type": "object"}}
+                                if value == "array"
+                                else {}
+                            ),
+                        }
+                        for key, value in properties.items()
+                    },
+                    "required": required.get(name, []),
+                    "additionalProperties": False,
                 },
-                "required": required.get(name, []),
-                "additionalProperties": False,
-            },
+            ),
         }
         for name, (desc, scope, readonly, properties) in TOOLS.items()
+    ] + [
+        {
+            "name": name,
+            "description": desc,
+            "scope": scope,
+            "read_only": readonly,
+            "input_schema": model.model_json_schema(),
+        }
+        for name, (desc, scope, readonly, model) in MUSIC_TOOLS.items()
     ]
