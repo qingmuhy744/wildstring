@@ -12,6 +12,7 @@ struct SearchView: View {
     @State private var isSearching = false
     @State private var hasSearched = false
     @State private var errorMessage: String?
+    @State private var showingAssistant = false
 
     var body: some View {
         NavigationStack {
@@ -57,14 +58,35 @@ struct SearchView: View {
                 }
             }
             .navigationTitle("搜索")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        showingAssistant = true
+                    } label: {
+                        Label("AI 找歌", systemImage: "sparkles")
+                    }
+                }
+            }
+            .sheet(isPresented: $showingAssistant) {
+                AssistantView(client: client)
+            }
             .searchable(text: $query, prompt: "歌曲、艺人或专辑")
             .task(id: query) { await runSearch() }
+            .task { await openAssistantForDemoIfNeeded() }
             .miniPlayer(playback, client: client)
         }
     }
 
-    private func runSearch() async {
-        let text = query.trimmingCharacters(in: .whitespaces)
+    private func openAssistantForDemoIfNeeded() async {
+        #if DEBUG
+            guard ProcessInfo.processInfo.environment["WILDSTRING_DEMO_OPEN_ASSISTANT"] == "1"
+            else { return }
+            try? await Task.sleep(for: .seconds(1))
+            showingAssistant = true
+        #endif
+    }
+
+    private func runSearch() async {        let text = query.trimmingCharacters(in: .whitespaces)
         guard !text.isEmpty else {
             tracks = []
             hasSearched = false
