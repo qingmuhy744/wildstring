@@ -1362,43 +1362,15 @@ class Providers:
 
         @router.post("/manage/providers/suggestions/{identity}/cover", dependencies=mutation)
         def apply_cover(identity: str, body: CoverApply, user: admin):
-            with self.database.connect() as connection:
-                row = connection.execute(
-                    "SELECT * FROM metadata_suggestions WHERE id=?", (identity,)
-                ).fetchone()
-            if row is None or not row["cover_url"] or row["status"] == "ignored":
-                raise HTTPException(404, "suggestion_not_found")
-            if row["metadata_version"] != body.version:
-                raise HTTPException(409, "metadata_version_conflict")
-            data, _ = self.cover_data(row["cover_url"])
-            key = hashlib.sha256(data).hexdigest()
-            folder = self.database.path.parent / "artwork"
-            folder.mkdir(exist_ok=True)
-            with NamedTemporaryFile(dir=folder, delete=False) as stream:
-                temporary = Path(stream.name)
-                try:
-                    stream.write(data)
-                    stream.flush()
-                    os.fsync(stream.fileno())
-                    temporary.replace(folder / key)
-                finally:
-                    temporary.unlink(missing_ok=True)
+            from wildstring.library.artwork import CoverSelection, CoverSelections
+
+            selections = CoverSelections(self)
+            payload, _ = selections.prepare(
+                CoverSelection(suggestion_id=identity, metadata_version=body.version)
+            )
             with self.database.connect(write=True) as connection:
                 connection.execute("BEGIN IMMEDIATE")
-                current = connection.execute(
-                    "SELECT version FROM track_metadata WHERE track_id=?", (row["track_id"],)
-                ).fetchone()
-                if current is None or current[0] != body.version:
-                    raise HTTPException(409, "metadata_version_conflict")
-                connection.execute(
-                    "INSERT INTO artwork_choices(track_id,filename,source_url,mode) VALUES (?,?,?,'chosen') ON CONFLICT(track_id) DO UPDATE SET filename=excluded.filename,source_url=excluded.source_url,mode='chosen',version=artwork_choices.version+1",
-                    (row["track_id"], key, row["cover_url"]),
-                )
-                connection.execute("UPDATE tracks SET has_cover=1 WHERE id=?", (row["track_id"],))
-                connection.execute(
-                    "UPDATE track_metadata SET version=version+1 WHERE track_id=?",
-                    (row["track_id"],),
-                )
+                selections.save_in_transaction(connection, CoverSelection.model_validate(payload))
             return {"applied": True}
 
         @router.get("/lastfm")

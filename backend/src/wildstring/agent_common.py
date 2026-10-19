@@ -77,14 +77,8 @@ TOOLS = {
         True,
         {"kind": "string", "limit": "integer", "offset": "integer"},
     ),
-    "inspect_library": (
-        "有界只读本地元数据巡检",
-        "library:read",
-        True,
-        {"track_ids": "array", "limit": "integer"},
-    ),
     "create_draft": (
-        "生成待站内确认的歌单、元数据、导入整理或歌词选用草案；共享曲库操作需要管理员，不直接应用",
+        "生成待站内确认的歌单、元数据、专辑批量修改、封面、导入整理或歌词选用草案；共享曲库操作需要管理员，不直接应用",
         "drafts:write",
         False,
         {"kind": "string", "title": "string", "payload": "object", "evidence": "array"},
@@ -105,6 +99,7 @@ TOOLS = {
             "max_tracks": "integer",
             "max_calls": "integer",
             "use_ai": "boolean",
+            "rules": "array",
             "connection_id": "string",
         },
     ),

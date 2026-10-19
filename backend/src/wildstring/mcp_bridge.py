@@ -21,6 +21,7 @@ from mcp.server.stdio import stdio_server
 from mcp.types import (
     CallToolResult,
     GetPromptResult,
+    ImageContent,
     ListPromptsResult,
     ListResourcesResult,
     ListToolsResult,
@@ -104,10 +105,19 @@ class BridgeProtocol(ABC):
                 result = await asyncio.to_thread(
                     self.request, "/tools/" + params.name, params.arguments or {}, _context
                 )
-                return CallToolResult(
-                    content=[TextContent(type="text", text=json.dumps(result, ensure_ascii=False))],
-                    structured_content=result,
+                content = []
+                if params.name == "get_cover_preview":
+                    result = {**result, "result": dict(result["result"])}
+                    picture = result["result"].pop("image")
+                    content.append(
+                        ImageContent(
+                            type="image", data=picture["data"], mime_type=picture["mime_type"]
+                        )
+                    )
+                content.insert(
+                    0, TextContent(type="text", text=json.dumps(result, ensure_ascii=False))
                 )
+                return CallToolResult(content=content, structured_content=result)
             except BridgeError as error:
                 return CallToolResult(
                     content=[TextContent(type="text", text=str(error))], is_error=True
@@ -150,7 +160,7 @@ class BridgeProtocol(ABC):
                         role="user",
                         content=TextContent(
                             type="text",
-                            text="Inspect a bounded set of my library for missing album/cover/lyrics metadata. Use the tools to collect evidence, report uncertainty and create drafts for any supported changes. Wait for my approval in WildString before applying. "
+                            text="Inspect a bounded set of my library for missing metadata, numbering conflicts, same-title versions and possible split multi-disc releases. Use get_inspection_rules and paginated inspect_library; use get_album_tracks for versioned batches and get_cover_candidates/get_cover_preview before a cover draft. Use the tools to collect evidence, report uncertainty and create drafts for any supported changes. Wait for my approval in WildString before applying. "
                             + USAGE,
                         ),
                     )

@@ -349,6 +349,40 @@ class AgentWorkspaceTest {
             capture("mcp-lyric-proposal-phone.png")
         } finally { compose.runOnIdle { vm.repository.session.invalidate() } } }
     }
+    @Test fun albumBatchShowsPerTrackDifferencesBeforeConfirmation() {
+        val vm = vm()
+        Fixture().use { fixture -> try {
+            fixture.replacementDraft = JsonParser.parseString("""{"id":"draft-one","kind":"metadata_batch","title":"专辑批量核对","payload":{"items":[{"track_id":"song-a","metadata_version":2,"overrides":{"track_number":9}},{"track_id":"song-b","metadata_version":3,"overrides":{"track_number":10}}]},"before":{"items":[{"track_id":"song-a","title":"合成歌曲甲","effective":{"track_number":8}},{"track_id":"song-b","title":"合成歌曲乙","effective":{"track_number":9}}]},"evidence":[],"status":"pending","version":1,"trace_id":"${fixture.trace}"}""").asJsonObject
+            connect(vm, fixture)
+            compose.onNodeWithContentDescription("设置").performClick()
+            compose.onNodeWithText("野弦助手 / 通知与草案").performScrollTo().performClick()
+            compose.onNodeWithTag("agent-tab-drafts").performClick()
+            compose.waitUntil(15_000) { compose.onAllNodesWithTag("draft-open-draft-one").fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithTag("draft-open-draft-one").performClick()
+            compose.waitUntil(15_000) { compose.onAllNodesWithText("2 首歌曲 · 整批应用", substring = true).fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithText("曲号：8 → 9").assertExists()
+            compose.onNodeWithText("曲号：9 → 10").assertExists()
+            assertEquals("pending", fixture.status)
+            assertEquals(0, fixture.requests.count { it.first.endsWith("/draft-one/apply") })
+            capture("mcp-batch-proposal-phone.png")
+        } finally { compose.runOnIdle { vm.repository.session.invalidate() } } }
+    }
+    @Test fun coverWithoutVisibleSnapshotCannotBeApproved() {
+        val vm = vm()
+        Fixture().use { fixture -> try {
+            fixture.replacementDraft = JsonParser.parseString("""{"id":"draft-one","kind":"cover","title":"封面核对","payload":{"suggestion_id":"candidate","metadata_version":1,"image_sha256":"${"a".repeat(64)}"},"before":{"title":"合成歌曲甲","provider":"合成来源"},"evidence":[],"status":"pending","version":1,"trace_id":"${fixture.trace}"}""").asJsonObject
+            connect(vm, fixture)
+            compose.onNodeWithContentDescription("设置").performClick()
+            compose.onNodeWithText("野弦助手 / 通知与草案").performScrollTo().performClick()
+            compose.onNodeWithTag("agent-tab-drafts").performClick()
+            compose.waitUntil(15_000) { compose.onAllNodesWithTag("draft-open-draft-one").fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithTag("draft-open-draft-one").performClick()
+            compose.waitUntil(15_000) { fixture.requests.any { it.first.endsWith("/draft-one/cover-preview") } }
+            compose.onNodeWithContentDescription("草案封面快照").assertExists()
+            compose.onNodeWithTag("draft-confirm").assertIsNotEnabled()
+            assertEquals(0, fixture.requests.count { it.first.endsWith("/draft-one/approve") })
+        } finally { compose.runOnIdle { vm.repository.session.invalidate() } } }
+    }
     private fun capture(name: String, dark: Boolean = false) {
         compose.waitForIdle()
         val instrumentation = InstrumentationRegistry.getInstrumentation()

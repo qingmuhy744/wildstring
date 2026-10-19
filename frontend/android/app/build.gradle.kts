@@ -12,8 +12,8 @@ android {
         applicationId = "com.wildstring.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 21
-        versionName = "0.5.7"
+        versionCode = 22
+        versionName = "0.5.8"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     val signingValues = listOf("ANDROID_KEYSTORE_PATH", "ANDROID_KEYSTORE_PASSWORD", "ANDROID_KEY_ALIAS", "ANDROID_KEY_PASSWORD")

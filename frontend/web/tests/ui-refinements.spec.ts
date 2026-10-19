@@ -77,3 +77,24 @@ test('推荐用临时歌单展示，更多菜单支持右键与偏好反馈', as
   expect(dismissed).toBe(true);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
+
+test('迟到的设置回读不会覆盖已输入的保留天数', async ({ page }) => {
+  let release: (() => void) | undefined;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route('**/api/v1/agent/assistant-preferences', async (route) => {
+    await gate;
+    return route.fulfill({
+      json: { retention_days: 30, context_summary: true, long_term_memory: true },
+    });
+  });
+  await login(page);
+  await section(page, '助手设置');
+  await page.getByRole('button', { name: '对话历史', exact: true }).click();
+  const input = page.getByLabel('助手历史保留天数');
+  await input.fill('21');
+  release!();
+  await expect(page.getByRole('button', { name: '保存保留时间', exact: true })).toBeEnabled();
+  await expect(input).toHaveValue('21');
+});

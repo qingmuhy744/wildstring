@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { api, type User } from './api';
 import { AISettings } from './ai-settings';
 import { useModelConnections } from './model-connection';
@@ -703,12 +703,13 @@ export function ToolCredentials({ user }: { user: User }) {
 }
 export function AssistantPreferences() {
   const prefs = useWorkspaceResource<{ retention_days: number }>('/agent/assistant-preferences');
+  const edited = useRef(false);
   const [days, setDays] = useState(30),
     [busy, setBusy] = useState(false),
     [error, setError] = useState(''),
     [notice, setNotice] = useState('');
   useEffect(() => {
-    if (prefs.value) setDays(prefs.value.retention_days);
+    if (prefs.value && !edited.current) setDays(prefs.value.retention_days);
   }, [prefs.value]);
   async function act(clear = false) {
     if (clear && !confirm('清除所有助手对话？草案和已保存的歌单会保留。')) return;
@@ -719,6 +720,10 @@ export function AssistantPreferences() {
         method: clear ? 'DELETE' : 'PUT',
         ...(clear ? {} : { body: JSON.stringify({ retention_days: days }) }),
       });
+      if (!clear) {
+        edited.current = false;
+        void prefs.reload();
+      }
       setNotice(clear ? '助手对话已清除。' : '对话保留时间已保存。');
     } catch (reason) {
       setError(errorText(reason));
@@ -740,7 +745,11 @@ export function AssistantPreferences() {
             min={1}
             max={365}
             value={days}
-            onChange={(e) => setDays(Number(e.target.value))}
+            disabled={busy}
+            onChange={(e) => {
+              edited.current = true;
+              setDays(Number(e.target.value));
+            }}
           />
         </label>
         <button
