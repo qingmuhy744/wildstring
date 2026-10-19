@@ -774,3 +774,9 @@
   font-size: 0.88rem;
   margin: 16px 0 0;
 }
+
+.workspace-diff pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: inherit;
+}

@@ -14,6 +14,9 @@ SCOPES = (
     "tasks:write",
     "diagnostics:read",
     "notifications:read",
+    "library:manage",
+    "personal:write",
+    "web:search",
 )
 
 
@@ -23,7 +26,7 @@ class Input(BaseModel):
 
 class CredentialCreate(Input):
     name: str = Field(min_length=1, max_length=100)
-    scopes: list[str] = Field(min_length=1, max_length=7)
+    scopes: list[str] = Field(min_length=1, max_length=len(SCOPES))
     expires_in_days: int = Field(default=30, ge=1, le=365)
 
     @field_validator("scopes")
@@ -56,7 +59,7 @@ class Evidence(Input):
 
 
 class DraftCreate(Input):
-    kind: Literal["playlist", "metadata"]
+    kind: Literal["playlist", "metadata", "intake", "lyrics"]
     title: str = Field(min_length=1, max_length=200)
     payload: dict
     evidence: list[Evidence] = Field(default_factory=list, max_length=20)

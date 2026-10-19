@@ -15,6 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from wildstring.library.conversion import convert
 from wildstring.library.cue import parse_cue
+from wildstring.library.download_policy import DownloadPolicy, partial, pending
 from wildstring.library.edits import FIELDS, Overrides, apply_effective
 from wildstring.library.import_files import copy_exclusive, digest, organized_path, target_digest
 from wildstring.library.metadata import SUPPORTED_SUFFIXES, read_metadata
@@ -30,6 +31,7 @@ class IntakeSettings(BaseModel):
     enabled: bool
     interval_seconds: int = Field(ge=15, le=86400)
     stable_seconds: int = Field(ge=5, le=86400)
+    download_policy: DownloadPolicy | None = None
 
 
 class IntakeApproval(BaseModel):
@@ -57,28 +59,38 @@ class Intake:
     def preferences(self):
         with self.database.connect() as connection:
             row = connection.execute(
-                "SELECT enabled,interval_seconds,stable_seconds,version FROM intake_settings WHERE library_id=?",
+                "SELECT enabled,interval_seconds,stable_seconds,version,download_policy FROM intake_settings WHERE library_id=?",
                 (self.repository.library_id(),),
             ).fetchone()
-        return (
+        result = (
             {**dict(row), "enabled": bool(row["enabled"])}
             if row
             else {"enabled": False, "interval_seconds": 60, "stable_seconds": 120, "version": 1}
         )
+        result["download_policy"] = DownloadPolicy.model_validate(
+            json.loads(result.get("download_policy", "{}"))
+        ).model_dump()
+        return result
 
     def configure(self, body):
         library_id = self.repository.library_id(create=True)
+        policy = (
+            body.download_policy.model_dump()
+            if body.download_policy
+            else self.preferences()["download_policy"]
+        )
         with self.database.connect(write=True) as connection:
             connection.execute("BEGIN IMMEDIATE")
             connection.execute(
                 "INSERT OR IGNORE INTO intake_settings(library_id) VALUES (?)", (library_id,)
             )
             result = connection.execute(
-                "UPDATE intake_settings SET enabled=?,interval_seconds=?,stable_seconds=?,version=version+1 WHERE library_id=? AND version=?",
+                "UPDATE intake_settings SET enabled=?,interval_seconds=?,stable_seconds=?,download_policy=?,version=version+1 WHERE library_id=? AND version=?",
                 (
                     body.enabled,
                     body.interval_seconds,
                     body.stable_seconds,
+                    json.dumps(policy),
                     library_id,
                     body.version,
                 ),
@@ -87,12 +99,14 @@ class Intake:
                 raise HTTPException(409, "settings_version_conflict")
         return self.preferences()
 
-    def item(self, item_id):
-        with self.database.connect() as connection:
-            row = connection.execute(
-                "SELECT * FROM intake_items WHERE id=? AND library_id=?",
-                (item_id, self.repository.library_id()),
-            ).fetchone()
+    def item(self, item_id, connection=None):
+        if connection is None:
+            with self.database.connect() as connection:
+                return self.item(item_id, connection)
+        row = connection.execute(
+            "SELECT * FROM intake_items WHERE id=? AND library_id=?",
+            (item_id, self.repository.library_id()),
+        ).fetchone()
         if row is None:
             raise HTTPException(404, "intake_not_found")
         result = dict(row)
@@ -139,6 +153,7 @@ class Intake:
         }
 
     def paths(self):
+        policy = self.preferences()["download_policy"]
         for directory, folders, files in os.walk(
             self.settings.music_dir,
             followlinks=False,
@@ -147,7 +162,9 @@ class Intake:
             folders[:] = sorted(
                 name
                 for name in folders
-                if not (Path(directory) / name).is_symlink() and not name.startswith(".")
+                if not (Path(directory) / name).is_symlink()
+                and not name.startswith(".")
+                and not partial(name, policy)
             )
             for name in sorted(files):
                 path = Path(directory) / name
@@ -155,6 +172,7 @@ class Intake:
                     path.suffix.lower() in INPUT_SUFFIXES
                     and not path.is_symlink()
                     and not name.startswith(".")
+                    and not partial(name, policy)
                 ):
                     yield path.relative_to(self.settings.music_dir)
 
@@ -230,15 +248,52 @@ class Intake:
                         ),
                     )
         item = self.item(item_id)
+        policy = self.preferences()["download_policy"]
+        directory, markers = pending(self.settings.music_dir, relative, policy)
+        marker_signature = json.dumps(markers, ensure_ascii=False)
+        with self.database.connect(write=True) as connection:
+            previous = connection.execute(
+                "SELECT signature,changed_at FROM intake_download_state WHERE library_id=? AND source_root=? AND directory=?",
+                (
+                    self.repository.library_id(),
+                    str(self.settings.music_dir),
+                    str(directory.relative_to(self.settings.music_dir)),
+                ),
+            ).fetchone()
+            changed_at = (
+                previous["changed_at"]
+                if previous and previous["signature"] == marker_signature
+                else 0
+                if previous is None and not markers
+                else stamp
+            )
+            if previous is None or previous["signature"] != marker_signature:
+                connection.execute(
+                    "INSERT INTO intake_download_state VALUES (?,?,?,?,?) ON CONFLICT(library_id,source_root,directory) DO UPDATE SET signature=excluded.signature,changed_at=excluded.changed_at",
+                    (
+                        self.repository.library_id(),
+                        str(self.settings.music_dir),
+                        str(directory.relative_to(self.settings.music_dir)),
+                        marker_signature,
+                        changed_at,
+                    ),
+                )
+        if markers and item["state"] in {"ready", "waiting"}:
+            self.update(item_id, state="waiting", issues=["download_incomplete"])
+            return self.item(item_id)
         if item["state"] == "failed" and not automatic:
             self.update(item_id, state="ready")
             item = self.item(item_id)
         if item["state"] == "waiting" and (
-            not automatic or stamp - item["changed_at"] >= self.preferences()["stable_seconds"]
+            not automatic
+            or stamp - max(item["changed_at"], changed_at) >= self.preferences()["stable_seconds"]
         ):
-            self.update(item_id, state="ready")
+            self.update(item_id, state="ready", issues=[])
             item = self.item(item_id)
-        return item
+        return item | {
+            "download_waiting": bool(markers)
+            or bool(automatic and stamp - changed_at < self.preferences()["stable_seconds"])
+        }
 
     def update(self, item_id, **fields):
         allowed = {"state", "metadata", "issues", "staged", "staged_sha256", "overrides", "outputs"}
@@ -269,7 +324,10 @@ class Intake:
             next(entries, None)
         for row in approved:
             try:
-                if self.observe(Path(row["source_path"]), True)["state"] in {"approved", "retry"}:
+                if (item := self.observe(Path(row["source_path"]), True))["state"] in {
+                    "approved",
+                    "retry",
+                } and not item.get("download_waiting"):
                     return True
             except FileNotFoundError:
                 self.update(row["id"], state="failed", issues=["source_missing"])
@@ -283,8 +341,15 @@ class Intake:
                 logger.warning("An import file is unreadable")
         return ready
 
-    def approve(self, item_id, body):
-        item = self.item(item_id)
+    def approval(self, item, body):
+        if item["version"] != body.version:
+            raise HTTPException(409, "metadata_version_conflict")
+        policy = self.preferences()["download_policy"]
+        if (
+            any(partial(name, policy) for name in Path(item["source_path"]).parts)
+            or pending(self.settings.music_dir, Path(item["source_path"]), policy)[1]
+        ):
+            raise HTTPException(409, "download_incomplete")
         if not self.public(item)["can_approve"]:
             raise HTTPException(409, "intake_not_reviewable")
         if target_digest(self.root, Path(item["staged"])) != item["staged_sha256"]:
@@ -306,20 +371,28 @@ class Intake:
             raise HTTPException(422, "intake_metadata_incomplete")
         if "album_artist_ambiguous" in item["issues"] and not effective.get("album_artists"):
             raise HTTPException(422, "intake_album_artist_required")
-        with self.database.connect(write=True) as connection:
-            result = connection.execute(
-                "UPDATE intake_items SET state='approved',overrides=?,version=version+1,updated_at=? WHERE id=? AND library_id=? AND version=? AND state='review'",
-                (
-                    json.dumps(overrides, ensure_ascii=False),
-                    time.time(),
-                    item_id,
-                    self.repository.library_id(),
-                    body.version,
-                ),
-            )
-            if not result.rowcount:
-                raise HTTPException(409, "metadata_version_conflict")
-        return self.public(self.item(item_id))
+        return overrides
+
+    def approve(self, item_id, body, connection=None):
+        if connection is None:
+            with self.database.connect(write=True) as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                return self.approve(item_id, body, connection)
+        item = self.item(item_id, connection)
+        overrides = self.approval(item, body)
+        result = connection.execute(
+            "UPDATE intake_items SET state='approved',overrides=?,version=version+1,updated_at=? WHERE id=? AND library_id=? AND version=? AND state='review'",
+            (
+                json.dumps(overrides, ensure_ascii=False),
+                time.time(),
+                item_id,
+                self.repository.library_id(),
+                body.version,
+            ),
+        )
+        if not result.rowcount:
+            raise HTTPException(409, "metadata_version_conflict")
+        return self.public(self.item(item_id, connection))
 
     def ignore(self, item_id, version):
         with self.database.connect(write=True) as connection:
@@ -387,6 +460,10 @@ class Intake:
                 raise ValueError("insufficient_storage")
 
     def process(self, importer, relative, automatic=False):
+        policy = self.preferences()["download_policy"]
+        if any(partial(name, policy) for name in relative.parts):
+            importer.counts["skipped"] += 1
+            return
         # Existing manifests retain the established source-change/managed-edit semantics.
         if importer.manifest(relative) is not None:
             target = importer.import_track(relative)
@@ -403,6 +480,9 @@ class Intake:
                 )
             return
         item = self.observe(relative, automatic)
+        if item.get("download_waiting"):
+            importer.counts["waiting"] += 1
+            return
         if item["state"] in {"waiting", "review", "ignored", "failed", "conflict"}:
             importer.counts[
                 "skipped"
@@ -497,6 +577,9 @@ class Intake:
                 return
             if self.signature(relative) != item["signature"]:
                 raise SourceChangedError
+            if pending(self.settings.music_dir, relative, policy)[1]:
+                importer.counts["waiting"] += 1
+                return
             if not image and relative.suffix.lower() != ".wav" and item["state"] != "approved":
                 planned = organized_path(
                     replace(
@@ -563,6 +646,11 @@ class Intake:
                                 )
                                 importer.counts["review"] += 1
                                 return
+                    if pending(self.settings.music_dir, relative, policy)[1]:
+                        importer.counts["waiting"] += 1
+                        return
+                    if self.signature(relative) != item["signature"]:
+                        raise SourceChangedError
                     published = []
                     for output in outputs:
                         target = prepared.import_track(output.relative_to(temporary))

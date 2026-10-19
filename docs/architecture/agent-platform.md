@@ -2,7 +2,7 @@
 
 0.5.0 的联网检索、协议适配、摘要与记忆见[助手联网与记忆](assistant-research.md)。
 
-0.4.0 使用现有 Python／FastAPI、React、Android、SQLite。业务工具和批准逻辑位于服务端；内置助手使用有界 Chat Completions 工具循环，MCP 使用官方 Python SDK 2.3.0 的 stdio 传输。首版没有引入额外 Agent 框架，后续可在不改变业务权限、草案和持久任务的前提下评估 Pydantic AI。
+0.4.0 使用现有 Python／FastAPI、React、Android、SQLite。业务工具和批准逻辑位于服务端；内置助手使用有界 Chat Completions 工具循环，MCP 首版使用官方 Python SDK 2.3.0 的 stdio 传输；0.5.7 开发分支增加同一 SDK 的 Streamable HTTP，见下文。首版没有引入额外 Agent 框架，后续可在不改变业务权限、草案和持久任务的前提下评估 Pydantic AI。
 
 接口与字段见 [Agent 平台契约](../../contracts/agent-platform.md)，产品计划见 [完整开发计划](../product/agent-mcp-observability-notifications-plan.md)。文档中的计划验收与本版实际记录分别查看；正式版本、自动化和真实设备验证见 [0.4.0 发布说明](../releases/v0.4.0.md)。
 
@@ -31,9 +31,19 @@ make test-agent      # 合成曲库、权限、草案、任务、通知与真实
 make test-network    # 正式请求／探测共用代理的真实 HTTP 夹具
 ```
 
-Codex 配置见 [不含秘密的示例](../../deploy/mcp.codex.toml.example)。替换绝对项目路径，将配置表合入个人 Codex 配置，让 URL／令牌通过 `env_vars` 传入，再在客户端重新载入 MCP。此配置依据 [OpenAI 官方 MCP 文档](https://learn.chatgpt.com/docs/extend/mcp)；本地启动进程与远端工具 API 是两层，不能把野弦首页 URL 当作直接的 HTTP MCP 端点。
+Codex 配置见 [不含秘密的示例](../../deploy/mcp.codex.toml.example)。替换绝对项目路径，将配置表合入个人 Codex 配置，让 URL／令牌通过 `env_vars` 传入，再在客户端重新载入 MCP。此配置依据 [OpenAI 官方 MCP 文档](https://learn.chatgpt.com/docs/extend/mcp)；本地启动进程与远端工具 API 是两层，不能把野弦首页 URL 当作 MCP 端点；0.5.7 原生 HTTP 使用独立的 `/mcp` 路径。
 
 可使用的流程包括检索歌曲、检查缺项、读取与提交来源查询、生成有证据的歌单／元数据草案、应用已批准草案、检查任务及通知、按诊断编号查询日志。管理员诊断工具只接受固定参数和固定服务目标，不提供 Shell、SQL、任意 URL 或文件路径入口。
+
+### 0.5.7 原生 HTTP 与整理工具
+
+支持 Streamable HTTP 和自定义 Bearer 头的客户端可直接配置 `https://你的域名/mcp`，Authorization 使用站内创建的独立受限凭据。反向代理保留该路径和协议头。没有新增 OAuth 授权发现或动态客户端注册；必须依赖 OAuth 的客户端不能据此视为已适配，仍可使用原 stdio 桥接路线。
+
+原有 20 个工具保持名称，增加 28 个业务工具；完整 Schema 可从工具目录读取，分页统一最多 100 条。旧凭据不自动扩大权限，新增 `library:manage`、`personal:write`、`web:search` 在网页工具凭据页单独勾选。管理员可观察只读导入源、提出待整理修正、提交限速歌词查询／扫描和响度分析；个人响度和检索预算只属于当前用户。
+
+导入修正使用 `create_draft(kind="intake", payload={item_id,version,overrides})`；歌词选用使用 `create_draft(kind="lyrics", payload={candidate_id,version,file_version,offset_ms})`。Web／Android 展示具体差异或歌词质量、来源、预览，批准后再应用。MCP 没有批准工具；来源、版本或草案变化后必须重新核对。联网只读取本人近期搜索返回的 source_id，不能给任意 URL；正文视为不可信资料。
+
+验证与版本边界见 [0.5.7 发布说明](../releases/v0.5.7.md)。
 
 ## 网络与日志
 

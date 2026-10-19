@@ -72,7 +72,7 @@ class Bridge:
         _ = parts.port
         self.url, self.token = url.rstrip("/"), token
 
-    def request(self, path, payload=None):
+    def request(self, path, payload=None, context=None):
         request = Request(
             self.url + "/api/v1/agent" + path,
             data=json.dumps(payload, ensure_ascii=False).encode() if payload is not None else None,
@@ -107,8 +107,8 @@ class Bridge:
                 error.code if isinstance(error, OutboundError) else "invalid_server_response"
             ) from None
 
-    def catalog(self):
-        result = self.request("/tools")
+    def catalog(self, context=None):
+        result = self.request("/tools", context=context)
         tools = result.get("tools", result.get("items", []))
         if not isinstance(tools, list) or len(tools) > 100:
             raise BridgeError("invalid_tool_catalog")
@@ -116,7 +116,7 @@ class Bridge:
 
     def server(self):
         async def list_tools(_context, _params):
-            catalog = await asyncio.to_thread(self.catalog)
+            catalog = await asyncio.to_thread(self.catalog, _context)
             return ListToolsResult(
                 tools=[
                     Tool(
@@ -145,13 +145,13 @@ class Bridge:
 
         async def call_tool(_context, params):
             try:
-                catalog = await asyncio.to_thread(self.catalog)
+                catalog = await asyncio.to_thread(self.catalog, _context)
                 if not re.fullmatch(r"[a-z_]{1,80}", params.name) or not any(
                     item["name"] == params.name for item in catalog
                 ):
                     raise BridgeError("unknown_or_forbidden_tool")
                 result = await asyncio.to_thread(
-                    self.request, "/tools/" + params.name, params.arguments or {}
+                    self.request, "/tools/" + params.name, params.arguments or {}, _context
                 )
                 return CallToolResult(
                     content=[TextContent(type="text", text=json.dumps(result, ensure_ascii=False))],

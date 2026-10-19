@@ -68,3 +68,18 @@ def matched(candidate):
         and difference is not None
         and difference <= 2500
     )
+
+
+def preview(value, limit=20):
+    """Small evidence excerpts for agents; keep full word timelines in storage."""
+    lines = display_lyrics(value)["lines"] if "layers" in value else value["lines"]
+    return [
+        {key: line[key] for key in ("time_ms", "end_ms") if key in line}
+        | {
+            key: str(line[key])[:1000]
+            for key in ("text", "translation", "romanization")
+            if key in line
+        }
+        | {"word_count": len(line.get("words", []))}
+        for line in lines[:limit]
+    ]

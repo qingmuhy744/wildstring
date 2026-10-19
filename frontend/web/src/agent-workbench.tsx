@@ -158,8 +158,15 @@ function DraftDetail({
         <div>
           <h2>{draft.title}</h2>
           <small>
-            {draft.kind === 'playlist' ? '歌单草案' : '歌曲信息草案'} · 版本 {draft.version} ·{' '}
-            {localDate(draft.updated_at)}
+            {
+              {
+                playlist: '歌单草案',
+                metadata: '歌曲信息草案',
+                intake: '导入整理草案',
+                lyrics: '歌词选用草案',
+              }[draft.kind]
+            }{' '}
+            · 版本 {draft.version} · {localDate(draft.updated_at)}
           </small>
         </div>
         <StateBadge state={draft.status} />
@@ -233,6 +240,36 @@ function DraftDetail({
               ))}
           </ol>
         </>
+      ) : draft.kind === 'lyrics' ? (
+        <div>
+          <p>歌曲：{String(draft.before?.title || draft.before?.track_id || '')}</p>
+          <p>
+            来源：{String(draft.before?.provider || '')} · 偏移{' '}
+            {Number(draft.payload.offset_ms || 0)} ms
+          </p>
+          <p>
+            当前：{String((draft.before?.current_quality as { label?: string })?.label || '')} →
+            候选：{String((draft.before?.candidate_quality as { label?: string })?.label || '')}
+          </p>
+          <p>匹配依据：{JSON.stringify(draft.before?.match)}</p>
+          <div className="workspace-diff">
+            <strong>当前歌词预览</strong>
+            <pre>
+              {((draft.before?.current_lines as { text: string }[]) || [])
+                .map((line) => line.text)
+                .join('\n')}
+            </pre>
+            <strong>候选歌词预览</strong>
+            <pre>
+              {((draft.before?.candidate_lines as { text: string; translation?: string }[]) || [])
+                .map((line) => [line.text, line.translation].filter(Boolean).join(' / '))
+                .join('\n')}
+            </pre>
+          </div>
+          <p className="muted">
+            请核对版本、时间轴和歌词内容。批准后应用此候选，保留原始格式和双语时间轴。
+          </p>
+        </div>
       ) : (
         <table className="workspace-diff">
           <thead>
@@ -271,6 +308,12 @@ function DraftDetail({
           </tbody>
         </table>
       )}
+      {draft.kind === 'intake' && (
+        <p className="muted">
+          来源：{String(draft.before?.source_path || '')}
+          。应用后安排复制到托管曲库，导入源保持不变。
+        </p>
+      )}
       <h3>来源与依据</h3>
       {draft.evidence.length ? (
         <ul className="draft-evidence">
@@ -303,7 +346,10 @@ function DraftDetail({
             </>
           ) : (
             <>
-              <button disabled={busy || !permitted} onClick={() => setEditing(true)}>
+              <button
+                disabled={busy || !permitted || draft.kind === 'lyrics'}
+                onClick={() => setEditing(true)}
+              >
                 修改草案
               </button>
               {draft.status === 'pending' && (
@@ -425,7 +471,15 @@ export function Drafts({
               <div className="workspace-row-main">
                 <strong>{draft.title}</strong>
                 <small>
-                  {draft.kind === 'playlist' ? '歌单' : '歌曲信息'} · {localDate(draft.updated_at)}
+                  {
+                    {
+                      playlist: '歌单',
+                      metadata: '歌曲信息',
+                      intake: '导入整理',
+                      lyrics: '歌词选用',
+                    }[draft.kind]
+                  }{' '}
+                  · {localDate(draft.updated_at)}
                 </small>
               </div>
               <StateBadge state={draft.status} />

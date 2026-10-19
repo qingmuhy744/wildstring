@@ -9,7 +9,7 @@ from pathlib import Path
 from wildstring.library.albums import album_key
 from wildstring.provider_schema import SCHEMA as PROVIDER_SCHEMA
 
-SCHEMA_VERSION = 21
+SCHEMA_VERSION = 22
 TRANSCODING_SCHEMA = """
 BEGIN IMMEDIATE;
 CREATE TABLE transcoding_settings (
@@ -433,6 +433,10 @@ class Database:
                 from wildstring.lyric_scan_schema import SCHEMA as LYRIC_SCAN_SCHEMA
 
                 connection.executescript(LYRIC_SCAN_SCHEMA)
+            if current < 22:
+                from wildstring.library.download_policy import SCHEMA as DOWNLOAD_SCHEMA
+
+                connection.executescript(DOWNLOAD_SCHEMA)
             connection.execute("PRAGMA journal_mode = WAL")
 
     def check_ready(self) -> bool:

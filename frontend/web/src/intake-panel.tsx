@@ -6,6 +6,7 @@ type Preferences = {
   interval_seconds: number;
   stable_seconds: number;
   version: number;
+  download_policy?: { wait_for_album: boolean; partial_suffixes: string[] };
 };
 type Metadata = {
   title?: string;
@@ -27,6 +28,7 @@ type Item = {
 };
 type Items = { items: Item[]; total: number; limit: number; offset: number };
 const labels: Record<string, string> = {
+  download_incomplete: '同专辑仍有下载标记，等待下载完成',
   release_collision: '目标路径已有不同文件，需要核对发行版本',
   cue_release_collision: '分轨目标已有其他版本，需要核对 CUE 发行信息',
   intake_snapshot_changed: '暂存副本发生变化，请重新检查',
@@ -67,6 +69,7 @@ const labels: Record<string, string> = {
 };
 export function IntakePanel() {
   const [preferences, setPreferences] = useState<Preferences | null>(null);
+  const [suffixText, setSuffixText] = useState('');
   const [items, setItems] = useState<Items | null>(null);
   const [offset, setOffset] = useState(0),
     [tick, setTick] = useState(0);
@@ -78,7 +81,10 @@ export function IntakePanel() {
   useEffect(() => {
     const controller = new AbortController();
     api<Preferences>('/manage/intake/settings', { signal: controller.signal })
-      .then(setPreferences)
+      .then((value) => {
+        setPreferences(value);
+        setSuffixText(value.download_policy?.partial_suffixes.join(', ') || '');
+      })
       .catch((reason) => {
         if (!controller.signal.aborted) setError(reason.message);
       });
@@ -183,7 +189,17 @@ export function IntakePanel() {
               setPreferences(
                 await api<Preferences>('/manage/intake/settings', {
                   method: 'PUT',
-                  body: JSON.stringify(preferences),
+                  body: JSON.stringify({
+                    ...preferences,
+                    ...(preferences.download_policy
+                      ? {
+                          download_policy: {
+                            ...preferences.download_policy,
+                            partial_suffixes: suffixText.split(/[,\s]+/).filter(Boolean),
+                          },
+                        }
+                      : {}),
+                  }),
                 }),
               );
               setNotice('自动导入设置已保存。');
@@ -235,6 +251,42 @@ export function IntakePanel() {
                 }
               />
             </label>
+            {preferences?.download_policy && (
+              <>
+                <label className="management-checkbox">
+                  <input
+                    type="checkbox"
+                    checked={preferences.download_policy.wait_for_album}
+                    onChange={(event) =>
+                      setPreferences((value) =>
+                        value?.download_policy
+                          ? {
+                              ...value,
+                              download_policy: {
+                                ...value.download_policy,
+                                wait_for_album: event.target.checked,
+                              },
+                            }
+                          : value,
+                      )
+                    }
+                  />
+                  同专辑有下载标记时整张等待（含 CD / Disc 子目录）
+                </label>
+                <label>
+                  下载中文件／目录后缀（空格或逗号分隔）
+                  <input
+                    required
+                    value={suffixText}
+                    maxLength={300}
+                    onChange={(event) => setSuffixText(event.target.value)}
+                  />
+                </label>
+                <p className="muted">
+                  建议下载器把未完成任务放在独立目录，完成后移入导入源。仅靠文件短时间不变，无法判断整个下载任务已完成。导入只复制，原件可继续做种。
+                </p>
+              </>
+            )}
             <button className="primary">保存自动导入设置</button>
           </fieldset>
         </form>

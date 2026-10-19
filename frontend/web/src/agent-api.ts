@@ -11,7 +11,7 @@ export interface Evidence {
 }
 export interface AgentDraft {
   id: string;
-  kind: 'playlist' | 'metadata';
+  kind: 'playlist' | 'metadata' | 'intake' | 'lyrics';
   title: string;
   payload: Record<string, unknown>;
   evidence: Evidence[];

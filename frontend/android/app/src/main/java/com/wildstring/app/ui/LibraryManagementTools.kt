@@ -193,6 +193,7 @@ internal fun ManagementPanel(vm: MusicViewModel) {
     var selected by remember { mutableStateOf<JsonObject?>(null) }; var confirmJob by remember { mutableStateOf<String?>(null) }
     var pendingOffset by remember { mutableIntStateOf(0) }
     var jobOffset by remember { mutableIntStateOf(0) }
+    var editImport by remember { mutableStateOf(false) }
     suspend fun load() {
         overview = vm.repository.api().objectGet(vm.repository.url("api", "v1", "manage", "overview"))
         jobs = vm.repository.api().objectGet(vm.repository.url("api", "v1", "manage", "jobs") + "?limit=20&offset=$jobOffset")
@@ -209,12 +210,13 @@ internal fun ManagementPanel(vm: MusicViewModel) {
             Switch(options.get("enabled")?.asBoolean == true, { enabled -> scope.launch { action.run { automatic = vm.repository.api().objectPut(vm.repository.url("api", "v1", "manage", "intake", "settings"), obj("version" to options.get("version"), "enabled" to enabled, "interval_seconds" to options.get("interval_seconds"), "stable_seconds" to options.get("stable_seconds"))); action.message = "自动发现设置已保存" } } }, enabled = !action.busy)
             Text("自动发现导入源", Modifier.padding(start = 12.dp))
         } }
+        if (automatic?.has("download_policy") == true) TextButton({ editImport = true }) { Text("下载完成与自动导入设置") }
         ActionStatus(action)
         Text("待整理", style = MaterialTheme.typography.titleLarge)
         intake?.getAsJsonArray("items")?.forEach { node -> val item = node.asJsonObject
             Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp)) {
                 Text(item.text("source_path")); Text(statusName(item.text("state")), style = MaterialTheme.typography.bodySmall)
-                Text(item.getAsJsonArray("issues")?.joinToString("、") { it.asString }.orEmpty(), style = MaterialTheme.typography.bodySmall)
+                Text(item.getAsJsonArray("issues")?.joinToString("、") { if (it.asString == "download_incomplete") "同专辑仍有下载标记，等待下载完成" else it.asString }.orEmpty(), style = MaterialTheme.typography.bodySmall)
                 Row {
                     if (item.get("can_approve")?.asBoolean == true) TextButton({ selected = item }) { Text("补充并确认") }
                     if (item.text("state") == "failed") TextButton({ scope.launch { action.run { vm.repository.api().objectPost(vm.repository.url("api", "v1", "manage", "intake", "items", item.text("id"), "retry"), obj("version" to item.get("version"))); load() } } }, enabled = !action.busy) { Text("重试") }
@@ -242,6 +244,7 @@ internal fun ManagementPanel(vm: MusicViewModel) {
         }
     }
     confirmJob?.let { kind -> AlertDialog(onDismissRequest = { confirmJob = null }, title = { Text(if (kind == "import") "导入服务端音乐？" else "扫描托管曲库？") }, text = { Text(if (kind == "import") "从服务器配置的导入源复制新音乐，原文件保持不变。" else "重新读取托管音乐的文件信息，保留人工修正。") }, confirmButton = { TextButton({ scope.launch { action.run { vm.repository.api().objectPost(vm.repository.url("api", "v1", "manage", "jobs"), obj("kind" to kind, "full" to false)); confirmJob = null; load(); action.message = "任务已提交，可以继续听歌" } } }, enabled = !action.busy) { Text("开始") } }, dismissButton = { TextButton({ confirmJob = null }) { Text("取消") } }) }
+    if (editImport) automatic?.let { options -> ImportSettingsDialog(vm, options, { editImport = false }) { result -> automatic = result; editImport = false } }
     selected?.let { item -> IntakeApprovalDialog(vm, item, { selected = null }) { scope.launch { action.run { load() } } } }
 }
 
@@ -280,4 +283,30 @@ internal fun MetadataRefreshPrompt(vm: MusicViewModel, scopeName: String, id: St
         val result = vm.repository.api().objectPost(vm.repository.url("api", "v1", "manage", "providers", "refresh"), obj("scope" to scopeName, "id" to id, "mode" to if (missing) "missing" else "all", "force" to force))
         action.message = "已排队 ${result.text("queued")} 首"; vm.notify(action.message!!); dismiss()
     } } }, enabled = !action.busy) { Text(if (action.busy) "正在提交…" else "开始更新") } }, dismissButton = { TextButton(dismiss, enabled = !action.busy) { Text("取消") } })
+}
+
+@Composable
+private fun ImportSettingsDialog(vm: MusicViewModel, initial: JsonObject, dismiss: () -> Unit, saved: (JsonObject) -> Unit) {
+    var interval by remember { mutableStateOf(initial.text("interval_seconds")) }
+    var stable by remember { mutableStateOf(initial.text("stable_seconds")) }
+    val policy = initial.getAsJsonObject("download_policy")
+    var waitAlbum by remember { mutableStateOf(policy.get("wait_for_album").asBoolean) }
+    var suffixes by remember { mutableStateOf(policy.getAsJsonArray("partial_suffixes").joinToString(", ") { it.asString }) }
+    val action = remember { FeatureAction() }; val scope = rememberCoroutineScope()
+    AlertDialog(onDismissRequest = { if (!action.busy) dismiss() }, title = { Text("下载完成与自动导入") }, text = {
+        Column(Modifier.heightIn(max = 480.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            OutlinedTextField(interval, { interval = it }, label = { Text("检查间隔（15–86400 秒）") })
+            OutlinedTextField(stable, { stable = it }, label = { Text("稳定期（5–86400 秒）") })
+            Row(verticalAlignment = Alignment.CenterVertically) { Checkbox(waitAlbum, { waitAlbum = it }); Text("同专辑有下载标记时整张等待") }
+            OutlinedTextField(suffixes, { suffixes = it }, label = { Text("下载后缀，空格或逗号分隔") })
+            Text("建议下载器使用独立未完成目录，完成后移入导入源。导入只复制，原件可继续做种。", style = MaterialTheme.typography.bodySmall)
+            ActionStatus(action)
+        }
+    }, confirmButton = { TextButton({ scope.launch { action.run {
+        val check = interval.toIntOrNull(); val duration = stable.toIntOrNull()
+        require(check != null && check in 15..86400 && duration != null && duration in 5..86400) { "请检查时间范围" }
+        val endings = JsonArray().apply { suffixes.split(Regex("[,\\s]+" )).filter { it.isNotBlank() }.forEach { add(it) } }
+        val body = initial.deepCopy().apply { addProperty("interval_seconds", check); addProperty("stable_seconds", duration); add("download_policy", obj("wait_for_album" to waitAlbum, "partial_suffixes" to endings)) }
+        saved(vm.repository.api().objectPut(vm.repository.url("api", "v1", "manage", "intake", "settings"), body))
+    } } }, enabled = !action.busy) { Text("保存设置") } }, dismissButton = { TextButton(dismiss, enabled = !action.busy) { Text("取消") } })
 }
