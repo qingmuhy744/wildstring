@@ -3,7 +3,7 @@
 from typing import Annotated
 from uuid import uuid4
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, Response
 
 from wildstring.agent_common import SCOPES, tool_definitions
 from wildstring.agent_models import (
@@ -124,13 +124,36 @@ def agent_router(service):
     def draft(identity: str, actor: Annotated[object, Depends(session)]):
         return service.draft(actor, identity)
 
+    @router.get("/drafts/{identity}/cover-preview")
+    def draft_cover(identity: str, actor: Annotated[object, Depends(session)]):
+        from wildstring.library.artwork import CoverSelections
+
+        actor.require("library:manage", admin=True)
+        record = service.draft(actor, identity)
+        if record["kind"] != "cover":
+            raise HTTPException(404, "cover_draft_not_found")
+        _, thumbnail = CoverSelections(service.providers).image(
+            record["payload"].get("image_sha256")
+        )
+        return Response(
+            thumbnail,
+            media_type="image/jpeg",
+            headers={
+                "Cache-Control": "private, no-store",
+                "Vary": "Cookie",
+                "X-Content-Type-Options": "nosniff",
+            },
+        )
+
     @router.patch("/drafts/{identity}")
     def patch_draft(identity: str, body: DraftPatch, actor: Annotated[object, Depends(session)]):
         return service.patch_draft(actor, identity, body)
 
     @router.post("/drafts/{identity}/approve")
     def approve(identity: str, body: Version, actor: Annotated[object, Depends(session)]):
-        return service.approve_draft(actor, identity, body.version)
+        return service.approve_draft(
+            actor, identity, body.version, preview_digest=body.preview_digest
+        )
 
     @router.post("/drafts/{identity}/reject")
     def reject(identity: str, body: Version, actor: Annotated[object, Depends(session)]):

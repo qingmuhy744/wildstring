@@ -321,6 +321,9 @@ class Automation:
         try:
             actor = self.validate_task_actor(job)
             identities = parameters["track_ids"]
+            from wildstring.library.inspection import InspectionIndex
+
+            inspection_index = InspectionIndex(self.repository_for(actor))
             started = time.monotonic()
             for index in range(job["checkpoint"], len(identities)):
                 if time.monotonic() - started > 1800:
@@ -335,7 +338,9 @@ class Automation:
                     return
                 identity = identities[index]
                 try:
-                    record = self.inspect(actor, [identity], 1)["items"][0]
+                    record = self.inspect(
+                        actor, [identity], 1, rules=parameters.get("rules"), index=inspection_index
+                    )["items"][0]
                     if record["metadata_version"] != parameters.get("metadata_versions", {}).get(
                         identity
                     ):

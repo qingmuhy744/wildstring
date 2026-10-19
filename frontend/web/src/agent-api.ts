@@ -11,7 +11,7 @@ export interface Evidence {
 }
 export interface AgentDraft {
   id: string;
-  kind: 'playlist' | 'metadata' | 'intake' | 'lyrics';
+  kind: 'playlist' | 'metadata' | 'intake' | 'lyrics' | 'cover' | 'metadata_batch';
   title: string;
   payload: Record<string, unknown>;
   evidence: Evidence[];
@@ -19,6 +19,7 @@ export interface AgentDraft {
   status: 'pending' | 'approved' | 'applied' | 'rejected';
   version: number;
   approved_version: number | null;
+  preview_digest?: string;
   created_at: string;
   updated_at: string;
   result: Record<string, unknown> | null;
@@ -40,6 +41,7 @@ export interface AgentTask {
     track_id?: string;
     title?: string;
     issues?: string[];
+    findings?: { code: string; summary: string; severity: string }[];
     metadata_version?: number;
     error_code?: string;
     analysis?: string;

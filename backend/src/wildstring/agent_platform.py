@@ -48,6 +48,7 @@ class Core:
                         "request_metadata_refresh",
                         "test_external_services",
                         "submit_inspection",
+                        "create_draft",
                     },
                 },
             }
@@ -234,38 +235,64 @@ class Core:
         except HTTPException:
             return False
 
-    def inspect(self, actor, identities=None, limit=100):
+    def inspect(
+        self, actor, identities=None, limit=100, *, offset=0, album_id=None, rules=None, index=None
+    ):
+        from wildstring.library.inspection import RULES, InspectionIndex
+
         actor.require("library:read")
+        if rules is not None and (not isinstance(rules, list) or set(rules) - RULES.keys()):
+            raise HTTPException(422, "agent_invalid_input")
+        repository = self.repository_for(actor)
         if identities is None:
-            identities = [
-                track["id"] for track in self.repository_for(actor).tracks(limit=limit)["items"]
-            ]
-        if not isinstance(identities, list) or len(identities) > 5000 or not 1 <= limit <= 5000:
+            page = repository.tracks(limit=limit, offset=offset, album_id=album_id)
+            identities = [track["id"] for track in page["items"]]
+            total = page["total"]
+        else:
+            if (
+                not isinstance(identities, list)
+                or len(identities) > 5000
+                or len(set(identities)) != len(identities)
+            ):
+                raise HTTPException(422, "inspection_limit")
+            total = len(identities)
+            identities = identities[offset : offset + limit]
+        if not 1 <= limit <= 5000:
             raise HTTPException(422, "inspection_limit")
+        index = index or InspectionIndex(repository)
         results = []
-        for identity in identities[:limit]:
+        for identity in identities:
             track = self.get_track(actor, identity)
-            issues = []
-            if not track.get("album"):
-                issues.append("missing_album")
-            if not track.get("has_cover"):
-                issues.append("missing_cover")
-            if not track.get("has_lyrics"):
-                issues.append("missing_lyrics")
-            if not track.get("artists"):
-                issues.append("missing_artist")
+            if album_id is not None and track.get("album_id") != album_id:
+                raise HTTPException(422, "inspection_album_mismatch")
+            findings = index.findings(track, track["has_lyrics"])
+            if rules is not None:
+                findings = [finding for finding in findings if finding["code"] in rules]
             results.append(
                 {
                     "track_id": identity,
                     "title": track["title"],
                     "metadata_version": track["metadata_version"],
-                    "issues": issues,
+                    "issues": [finding["code"] for finding in findings],
+                    "findings": findings,
                 }
             )
-        return {"items": results, "total": len(results)}
+        return {
+            "items": results,
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+            "has_more": offset + len(results) < total,
+            "grouping_complete": not index.truncated,
+            "note": "结构与缺失检查仅供核对；纯音乐无歌词可能正常，同名歌曲不代表重复音频。",
+        }
 
     def check_draft_payload(self, actor, kind, payload):
         repository = self.repository_for(actor)
+        if kind in {"cover", "metadata_batch"}:
+            from wildstring.agent_curation import check
+
+            return check(self, actor, kind, payload)
         if kind in {"intake", "lyrics"}:
             from wildstring.agent_music_drafts import check
 
@@ -318,6 +345,8 @@ class Core:
 
     def create_draft(self, actor, body, trace_id=None):
         actor.require("drafts:write")
+        if body.kind == "cover" and set(body.payload) - {"suggestion_id", "metadata_version"}:
+            raise HTTPException(422, "cover_snapshot_server_owned")
         payload, before = self.check_draft_payload(actor, body.kind, body.payload)
         from wildstring.diagnostics import trace_id as current_trace
 
@@ -372,6 +401,8 @@ class Core:
         for key in ("payload", "evidence", "result"):
             result[key] = json.loads(result[key]) if result[key] else None
         result["before"] = json.loads(row["before_values"])
+        if result["kind"] in {"cover", "metadata_batch"}:
+            result["preview_digest"] = digest(encoded(result["payload"]))
         return result
 
     def drafts(self, actor, limit=50, offset=0, status=None):
@@ -390,6 +421,13 @@ class Core:
     def patch_draft(self, actor, identity, body):
         actor.require("drafts:write")
         existing = self.draft(actor, identity)
+        if (
+            existing["kind"] == "cover"
+            and body.payload is not None
+            and set(body.payload) - {"suggestion_id", "metadata_version"}
+            and body.payload != existing["payload"]
+        ):
+            raise HTTPException(422, "cover_snapshot_server_owned")
         payload, before = self.check_draft_payload(
             actor,
             existing["kind"],
@@ -415,13 +453,19 @@ class Core:
             )
         return self.draft(actor, identity)
 
-    def approve_draft(self, actor, identity, version, *, reject=False):
+    def approve_draft(self, actor, identity, version, *, reject=False, preview_digest=None):
         actor.require("drafts:write")
         with self.database.connect(write=True) as connection:
             connection.execute("BEGIN IMMEDIATE")
             record = self.draft(actor, identity, connection)
             if record["kind"] != "playlist" and actor.role != "admin":
                 raise HTTPException(403, "admin_required")
+            if (
+                not reject
+                and record["kind"] in {"cover", "metadata_batch"}
+                and preview_digest != record["preview_digest"]
+            ):
+                raise HTTPException(409, "draft_preview_required")
             if record["version"] != version or record["status"] == "applied":
                 raise HTTPException(409, "draft_version_conflict")
             connection.execute(
@@ -461,6 +505,10 @@ class Core:
                 payload = record["payload"]
                 if record["kind"] == "playlist":
                     result = self.apply_playlist(connection, actor, payload)
+                elif record["kind"] in {"cover", "metadata_batch"}:
+                    from wildstring.agent_curation import apply
+
+                    result = apply(self, actor, connection, record["kind"], payload)
                 elif record["kind"] in {"intake", "lyrics"}:
                     from wildstring.agent_music_drafts import apply
 
@@ -488,19 +536,22 @@ class Core:
                         "track_id": payload["track_id"],
                         "metadata_version": update.version + 1,
                     }
-                object_id = result.get("playlist_id", result.get("track_id", result.get("item_id")))
-                connection.execute(
-                    "INSERT INTO agent_audit VALUES (?,?,?,?,?,?,?)",
-                    (
-                        uuid4().hex,
-                        actor.user_id,
-                        identity,
-                        "apply",
-                        object_id,
-                        record["trace_id"],
-                        now(),
-                    ),
-                )
+                object_ids = result.get("track_ids") or [
+                    result.get("playlist_id", result.get("track_id", result.get("item_id")))
+                ]
+                for object_id in object_ids:
+                    connection.execute(
+                        "INSERT INTO agent_audit VALUES (?,?,?,?,?,?,?)",
+                        (
+                            uuid4().hex,
+                            actor.user_id,
+                            identity,
+                            "apply",
+                            object_id,
+                            record["trace_id"],
+                            now(),
+                        ),
+                    )
                 connection.execute(
                     "UPDATE agent_drafts SET status='applied',result=?,idempotency_key=?,updated_at=? WHERE id=?",
                     (encoded(result), body.idempotency_key, now(), identity),
@@ -623,8 +674,7 @@ class Core:
             identity = arguments.get("track_id")
             if not isinstance(identity, str) or repository.track(identity) is None:
                 raise HTTPException(404, "track_not_found")
-            from urllib.parse import urlsplit, urlunsplit
-
+            from wildstring.agent_sources import evidence_url
             from wildstring.library.edits import FIELDS
 
             with self.database.connect() as connection:
@@ -634,15 +684,7 @@ class Core:
                 ).fetchall()
             result = []
             for row in rows:
-                parts = urlsplit(row["source_url"])
-                source_url = (
-                    urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))
-                    if parts.scheme == "https"
-                    and parts.hostname
-                    and not parts.username
-                    and not parts.password
-                    else None
-                )
+                source_url = evidence_url(row["source_url"])
                 fields = json.loads(row["fields"])
                 result.append(
                     {

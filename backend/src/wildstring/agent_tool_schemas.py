@@ -2,8 +2,10 @@
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from wildstring.agent_curation import MetadataBatch
 from wildstring.agent_models import Evidence, PlaylistPayload
 from wildstring.agent_music_models import IntakePayload, LyricsPayload
+from wildstring.library.artwork import CoverProposal
 from wildstring.library.edits import Overrides
 
 
@@ -40,6 +42,10 @@ def describe(name, schema):
             )
         elif key == "idempotency_key":
             value.update(minLength=8, maxLength=128, pattern=r"^[A-Za-z0-9_.:-]+$")
+        elif key == "rules":
+            from wildstring.library.inspection import RULES
+
+            value.update(maxItems=30, items={"type": "string", "enum": list(RULES)})
         elif key == "track_ids":
             value.update(maxItems=100 if name == "request_metadata_refresh" else 5000)
             value["items"].update(minLength=1, maxLength=128)
@@ -56,7 +62,14 @@ def describe(name, schema):
         playlist = model_schema(PlaylistPayload)
         metadata = model_schema(MetadataPayload)
         evidence = model_schema(Evidence)
-        properties["kind"]["enum"] = ["playlist", "metadata", "intake", "lyrics"]
+        properties["kind"]["enum"] = [
+            "playlist",
+            "metadata",
+            "intake",
+            "lyrics",
+            "cover",
+            "metadata_batch",
+        ]
         properties["title"].update(minLength=1, maxLength=200)
         properties["evidence"] = {"type": "array", "maxItems": 20, "items": evidence}
         schema["oneOf"] = [
@@ -67,6 +80,8 @@ def describe(name, schema):
             for kind, payload in (
                 ("playlist", playlist),
                 ("metadata", metadata),
+                ("metadata_batch", model_schema(MetadataBatch)),
+                ("cover", model_schema(CoverProposal)),
                 ("intake", model_schema(IntakePayload)),
                 ("lyrics", model_schema(LyricsPayload)),
             )

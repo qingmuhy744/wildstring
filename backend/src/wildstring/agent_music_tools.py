@@ -8,6 +8,7 @@ from fastapi import HTTPException
 from wildstring.agent_common import validate
 from wildstring.agent_diagnostics import legacy_task
 from wildstring.agent_music_models import ADMIN_TOOLS, DEFINITIONS
+from wildstring.library.edits import MetadataEditor
 from wildstring.library.lyric_edits import LyricsEditor
 from wildstring.library.online_lyrics import display_lyrics
 from wildstring.lyric_quality import preview, quality
@@ -18,6 +19,32 @@ def execute(service, actor, name, arguments):
     _, scope, _, model = DEFINITIONS[name]
     actor.require(scope, admin=name in ADMIN_TOOLS)
     body = validate(model, arguments)
+    if name == "get_inspection_rules":
+        from wildstring.library.inspection import catalog
+
+        return catalog()
+    if name == "inspect_library":
+        values = body.model_dump()
+        identities = values.pop("track_ids")
+        return service.inspect(actor, identities, **values)
+    if name == "get_album_tracks":
+        repository = service.repository_for(actor)
+        album = repository.album(body.album_id)
+        if album is None:
+            raise HTTPException(404, "album_not_found")
+        result = repository.tracks(album_id=body.album_id, limit=body.limit, offset=body.offset)
+        editor = MetadataEditor(repository)
+        result["items"] = [
+            service.projection(track)
+            | {
+                "metadata_version": (record := editor.read(track["id"]))["version"],
+                "metadata": {key: record[key] for key in ("effective", "overrides")},
+            }
+            for track in result["items"]
+        ]
+        return result | {"album": album}
+    if name in {"get_cover_candidates", "get_cover_preview"}:
+        return cover_tool(service, name, body)
     if name == "list_drafts":
         return service.drafts(actor, **body.model_dump())
     if name == "list_tasks":
@@ -186,3 +213,48 @@ def web_tool(service, actor, name, body):
     return service.research_tool(
         actor, settings, name, body.model_dump(), {source["id"]: source}, None
     ) | {"untrusted_content": True}
+
+
+def cover_tool(service, name, body):
+    from wildstring.agent_sources import evidence_url
+    from wildstring.library.artwork import CoverSelections
+
+    selections = CoverSelections(service.providers)
+    if name == "get_cover_preview":
+        import base64
+
+        with service.database.connect() as db:
+            row = selections.candidate(db, body.suggestion_id)
+        _, thumbnail = service.providers.cover_data(row["cover_url"])
+        return {
+            "suggestion_id": row["id"],
+            "metadata_version": row["current_version"],
+            "image": {"mime_type": "image/jpeg", "data": base64.b64encode(thumbnail).decode()},
+        }
+    MetadataEditor(service.repository).read(body.track_id)
+    import json
+
+    with service.database.connect() as db:
+        rows = db.execute(
+            "SELECT s.*,m.version AS current_version FROM metadata_suggestions s "
+            "JOIN track_metadata m ON m.track_id=s.track_id WHERE s.track_id=? AND s.cover_url IS NOT NULL "
+            "AND s.status!='ignored' ORDER BY s.created_at DESC LIMIT 30",
+            (body.track_id,),
+        ).fetchall()
+    return {
+        "items": [
+            {
+                "id": row["id"],
+                "track_id": row["track_id"],
+                "provider": row["provider"],
+                "source_url": evidence_url(row["source_url"]),
+                "metadata_version": row["metadata_version"],
+                "current_metadata_version": row["current_version"],
+                "stale": row["metadata_version"] != row["current_version"],
+                "fields": json.loads(row["fields"]),
+                "match": json.loads(row["match"]),
+            }
+            for row in rows
+        ],
+        "total": len(rows),
+    }

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { CurationDraftPreview } from './curation-drafts';
 import { api, errorCodeMessage, eventId, type User, type Track } from './api';
 import type { AgentConnection, AgentDraft, AgentPage, AgentSchedule, AgentTask } from './agent-api';
 import {
@@ -33,9 +34,17 @@ const format = (v: unknown) =>
 const issues: Record<string, string> = {
   missing_album: '缺少专辑',
   missing_cover: '缺少封面',
-  missing_lyrics: '缺少歌词',
+  missing_lyrics: '未读到歌词（纯音乐可能正常）',
   missing_artist: '缺少艺人',
   missing_title: '缺少歌名',
+  missing_track_number: '曲序待核对',
+  track_number_conflict: '同碟曲序重复',
+  track_number_out_of_range: '曲序超过总曲数',
+  disc_number_out_of_range: '碟号超过总碟数',
+  missing_disc_number: '多碟专辑缺少碟号',
+  same_title_versions: '同名歌曲版本待核对',
+  possible_duplicate_recording: '同名且时长接近，需核对音频',
+  possible_multidisc_split: '多碟专辑可能被拆分',
   metadata_conflict: '信息可能冲突',
   object_version_changed: '歌曲信息已变化，本项已跳过',
 };
@@ -54,6 +63,7 @@ function DraftDetail({
   const [busy, setBusy] = useState(false),
     [error, setError] = useState(''),
     [editing, setEditing] = useState(false),
+    [coverReady, setCoverReady] = useState(false),
     [name, setName] = useState(draft.title),
     [values, setValues] = useState<Record<string, string>>({}),
     [tracks, setTracks] = useState<Track[]>([]);
@@ -74,6 +84,7 @@ function DraftDetail({
       ),
     );
     setEditing(false);
+    setCoverReady(false);
     setError('');
     idempotency.current = eventId();
   }, [draft.id, draft.version]);
@@ -136,6 +147,9 @@ function DraftDetail({
           method: kind === 'edit' ? 'PATCH' : 'POST',
           body: JSON.stringify({
             version: draft.version,
+            ...(kind === 'approve' && draft.preview_digest
+              ? { preview_digest: draft.preview_digest }
+              : {}),
             ...(kind === 'apply' ? { idempotency_key: idempotency.current } : {}),
             ...(kind === 'edit'
               ? { payload, title: draft.kind === 'playlist' ? name : draft.title }
@@ -164,6 +178,8 @@ function DraftDetail({
                 metadata: '歌曲信息草案',
                 intake: '导入整理草案',
                 lyrics: '歌词选用草案',
+                cover: '封面选用草案',
+                metadata_batch: '专辑批量修改草案',
               }[draft.kind]
             }{' '}
             · 版本 {draft.version} · {localDate(draft.updated_at)}
@@ -240,6 +256,13 @@ function DraftDetail({
               ))}
           </ol>
         </>
+      ) : draft.kind === 'cover' || draft.kind === 'metadata_batch' ? (
+        <CurationDraftPreview
+          key={`${draft.id}:${draft.version}`}
+          draft={draft}
+          fields={fields}
+          onPreviewReady={setCoverReady}
+        />
       ) : draft.kind === 'lyrics' ? (
         <div>
           <p>歌曲：{String(draft.before?.title || draft.before?.track_id || '')}</p>
@@ -347,7 +370,9 @@ function DraftDetail({
           ) : (
             <>
               <button
-                disabled={busy || !permitted || draft.kind === 'lyrics'}
+                disabled={
+                  busy || !permitted || ['lyrics', 'cover', 'metadata_batch'].includes(draft.kind)
+                }
                 onClick={() => setEditing(true)}
               >
                 修改草案
@@ -355,7 +380,7 @@ function DraftDetail({
               {draft.status === 'pending' && (
                 <button
                   className="primary"
-                  disabled={busy || !permitted}
+                  disabled={busy || !permitted || (draft.kind === 'cover' && !coverReady)}
                   onClick={() => void action('approve')}
                 >
                   批准当前版本
@@ -364,7 +389,7 @@ function DraftDetail({
               {draft.status === 'approved' && (
                 <button
                   className="primary"
-                  disabled={busy || !permitted}
+                  disabled={busy || !permitted || (draft.kind === 'cover' && !coverReady)}
                   onClick={() => void action('apply')}
                 >
                   {busy ? '应用中…' : '应用已批准草案'}
@@ -477,6 +502,8 @@ export function Drafts({
                       metadata: '歌曲信息',
                       intake: '导入整理',
                       lyrics: '歌词选用',
+                      cover: '封面选用',
+                      metadata_batch: '专辑批量修改',
                     }[draft.kind]
                   }{' '}
                   · {localDate(draft.updated_at)}
@@ -901,6 +928,11 @@ export function AgentTasks({
                                   .join(' · ') || '未发现规则问题'}
                           </small>
                         )}
+                        {result.findings?.map((finding) => (
+                          <p className="muted" key={finding.code}>
+                            {finding.summary}
+                          </p>
+                        ))}
                         {result.draft_ids?.map((id) => (
                           <button key={id} onClick={() => onDraft?.(id)}>
                             查看待确认草案

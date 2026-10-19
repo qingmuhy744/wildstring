@@ -66,3 +66,16 @@ Telegram 默认关闭。用户输入 Bot Token、目标和可选 Topic，点击�
 默认关闭新计划、后台 AI 与 Telegram；播放、浏览和本地找歌不依赖模型。MCP token 在服务端只存摘要；模型和 Bot 秘密独立保存在权限受限的服务端目录，不进入数据库响应、诊断包、镜像或公开附件。
 
 物理 ColorOS、用户自选模型、私人 Telegram 目标和自托管网络的联调结果应单独记录；合成测试与模拟器通过不代表这些真实条件已验证。
+
+
+### 0.5.8 封面、专辑批量与规则巡检
+
+工具共 52 个，按凭据权限裁剪；新增 `get_album_tracks`、`get_inspection_rules`、`get_cover_candidates`、`get_cover_preview`。原有 `inspect_library` 增加 offset、album_id 和 rules，可分页；同名版本／曲序关系使用服务端曲库上下文而非当前页。结构上下文最多一万首，达到上限时返回 `inspection_context_limited` 和 grouping_complete=false，不静默声称已完整检查。规则仅提示字段与结构证据，无歌词可能是纯音乐，同名与接近时长不等于重复录音。
+
+封面流程：先按 track_id 读取已有候选，再按 suggestion_id 预览，最后生成 `create_draft(kind="cover", payload={"suggestion_id":"...","metadata_version":1})`。预览复用服务端代理、可信图片域名和图片解码限制；MCP 直接返回 ImageContent。创建草案时保存实际图片的内容快照，Web／Android 从本人草案的受保护端点读取这份图片。批准后应用同一内容哈希，禁止上游更新后偷偷换图；候选、元数据版本或快照变化则拒绝应用。客户端不能注入或替换服务端快照字段。现有网页直接采用封面的接口也复用同一服务。
+
+批量流程：通过 `get_album_tracks(album_id,limit,offset)` 获取每曲 metadata_version 与当前值。生成 `kind="metadata_batch"`，payload.items 逐曲包含 track_id、metadata_version、overrides，最多500首；payload.album_ids 可包含至多20个专辑，此时要求 items 恰好覆盖这些专辑的全部可用曲目。范围或任一版本变化都拒绝整批应用。显式 items 可用于指定歌曲的批量修正；不凭专辑名猜测歌曲。保存时合并原有人工覆盖，整批事务写入并逐曲审计，幂等重试不会重复应用。多碟归并仍需核对真实发行版本并明确指定专辑艺人，不自动合并。
+
+上述两类草案需要管理员的 library:manage、drafts:write，应用另需 drafts:apply；MCP 仍不能批准。旧凭据和旧草案保持原语义。新草案请使用0.5.8客户端预览；批准时提交该草案当前 payload 的 preview_digest，旧客户端缺少此确认摘要会收到 draft_preview_required，不能在没有图片或逐曲差异的界面盲目确认。纯规则与读取候选不调用模型；get_cover_preview 和创建封面草案会读取公开图片，新增巡检默认不调用外部来源。
+
+网易云证据链接保留白名单 id 参数，酷狗保留公开 hash 片段；其他查询参数和凭据均不透传。数据库仍为schema22，无新迁移。验证结果见[0.5.8发布说明](../releases/v0.5.8.md)。

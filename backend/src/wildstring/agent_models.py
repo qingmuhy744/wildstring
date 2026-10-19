@@ -6,6 +6,8 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 
+from wildstring.library.inspection import Rule
+
 SCOPES = (
     "library:read",
     "personal:read",
@@ -59,7 +61,7 @@ class Evidence(Input):
 
 
 class DraftCreate(Input):
-    kind: Literal["playlist", "metadata", "intake", "lyrics"]
+    kind: Literal["playlist", "metadata", "intake", "lyrics", "cover", "metadata_batch"]
     title: str = Field(min_length=1, max_length=200)
     payload: dict
     evidence: list[Evidence] = Field(default_factory=list, max_length=20)
@@ -74,6 +76,7 @@ class DraftPatch(Input):
 
 class Version(Input):
     version: int = Field(ge=1)
+    preview_digest: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
 
 
 class Apply(Version):
@@ -88,6 +91,7 @@ class PlaylistPayload(Input):
 
 
 class Inspection(Input):
+    rules: list[Rule] | None = Field(default=None, max_length=30)
     track_ids: list[str] | None = Field(default=None, max_length=5000)
     max_tracks: int = Field(default=500, ge=1, le=5000)
     max_calls: int = Field(default=0, ge=0, le=100)

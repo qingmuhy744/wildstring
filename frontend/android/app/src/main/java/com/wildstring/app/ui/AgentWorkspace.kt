@@ -126,10 +126,11 @@ private fun localAgentTime(value: String): String = runCatching { Instant.parse(
     selected?.let { current -> AgentDraftDetail(vm, current, { selected = null }) { updated -> selected = updated; drafts = drafts.map { if (it.text("id") == updated.text("id")) updated else it } } }
 }
 
-private fun fieldName(key: String) = mapOf("title" to "歌名", "artists" to "艺人", "album" to "专辑", "album_artists" to "专辑艺人", "track_number" to "曲号", "disc_number" to "碟号", "genre" to "流派", "date" to "日期", "lyricists" to "作词", "composers" to "作曲", "arrangers" to "编曲", "name" to "歌单名", "track_ids" to "歌曲")[key] ?: key
-private fun displayValue(value: com.google.gson.JsonElement?): String = when { value == null || value.isJsonNull -> "未设置"; value.isJsonPrimitive -> value.asString; value.isJsonArray -> value.asJsonArray.joinToString(" / ") { displayValue(it) }; else -> value.toString() }
+internal fun fieldName(key: String) = mapOf("title" to "歌名", "artists" to "艺人", "album" to "专辑", "album_artists" to "专辑艺人", "track_number" to "曲号", "disc_number" to "碟号", "genre" to "流派", "date" to "日期", "lyricists" to "作词", "composers" to "作曲", "arrangers" to "编曲", "name" to "歌单名", "track_ids" to "歌曲")[key] ?: key
+internal fun displayValue(value: com.google.gson.JsonElement?): String = when { value == null || value.isJsonNull -> "未设置"; value.isJsonPrimitive -> value.asString; value.isJsonArray -> value.asJsonArray.joinToString(" / ") { displayValue(it) }; else -> value.toString() }
 @Composable private fun AgentDraftDetail(vm: MusicViewModel, initial: JsonObject, dismiss: () -> Unit, updated: (JsonObject) -> Unit) {
     var draft by remember(initial.text("id"), initial.number("version")) { mutableStateOf(initial) }
+    var coverReady by remember(draft.text("id"), draft.number("version")) { mutableStateOf(false) }
     var confirm by remember { mutableStateOf<String?>(null) }
     var tracks by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
     val action = remember { FeatureAction() }; val scope = rememberCoroutineScope()
@@ -157,7 +158,8 @@ private fun displayValue(value: com.google.gson.JsonElement?): String = when { v
                 Text("候选歌词预览", fontWeight = FontWeight.Medium)
                 before.objects("candidate_lines").forEach { Text(listOf(it.text("text"), it.text("translation")).filter { v -> v.isNotBlank() }.joinToString(" / "), style = MaterialTheme.typography.bodySmall) }
             }
-            changes.entrySet().filter { draft.text("kind") != "lyrics" && it.key !in listOf("track_id", "metadata_version", "playlist_id", "playlist_version", "file_version", "candidate_id") }.forEach { (field, value) ->
+            if (draft.text("kind") in listOf("cover", "metadata_batch")) CurationDraftPreview(vm, draft) { coverReady = it }
+            changes.entrySet().filter { draft.text("kind") !in listOf("lyrics", "cover", "metadata_batch") && it.key !in listOf("track_id", "metadata_version", "playlist_id", "playlist_version", "file_version", "candidate_id") }.forEach { (field, value) ->
                 Text(fieldName(field), fontWeight = FontWeight.Medium)
                 if (field == "track_ids") {
                     value.asJsonArray.forEachIndexed { index, id -> Text("${index + 1}. ${tracks[id.asString] ?: id.asString}", style = MaterialTheme.typography.bodySmall) }
@@ -168,13 +170,14 @@ private fun displayValue(value: com.google.gson.JsonElement?): String = when { v
             AgentTrace(draft); ActionStatus(action)
         }
     }, confirmButton = {
-        if (draft.text("status") in listOf("pending", "approved")) TextButton({ confirm = if (draft.text("status") == "pending") "approve" else "apply" }, enabled = !action.busy, modifier = Modifier.testTag("draft-confirm")) { Text(if (draft.text("status") == "pending") "批准此版本" else "应用已批准草案") }
+        if (draft.text("status") in listOf("pending", "approved")) TextButton({ confirm = if (draft.text("status") == "pending") "approve" else "apply" }, enabled = !action.busy && (draft.text("kind") != "cover" || coverReady), modifier = Modifier.testTag("draft-confirm")) { Text(if (draft.text("status") == "pending") "批准此版本" else "应用已批准草案") }
     }, dismissButton = { Row { if (draft.text("status") in listOf("pending", "approved")) TextButton({ confirm = "reject" }, enabled = !action.busy) { Text("拒绝") }; TextButton(dismiss, enabled = !action.busy) { Text("关闭") } } })
     confirm?.let { operation ->
         AlertDialog(onDismissRequest = { if (!action.busy) confirm = null }, title = { Text(when (operation) { "approve" -> "批准当前差异？"; "apply" -> "应用这个版本？"; else -> "拒绝这份草案？" }) },
             text = { Text("${draft.text("title")} · 版本 ${draft.number("version")}" + if (operation == "approve") "。批准后仍需点击应用。" else "。服务器会再次校验版本与权限。") },
             confirmButton = { TextButton({ scope.launch { action.run {
                 val body = jsonBody("version" to draft.number("version"))
+                if (operation == "approve" && draft.text("preview_digest").isNotBlank()) body.addProperty("preview_digest", draft.text("preview_digest"))
                 if (operation == "apply") body.addProperty("idempotency_key", "android-${draft.text("id")}-${draft.number("version")}")
                 draft = vm.agent.request("drafts/${draft.text("id")}/$operation", "POST", body); updated(draft); confirm = null; vm.agent.refreshInbox()
             } } }, enabled = !action.busy, modifier = Modifier.testTag("draft-confirm-$operation")) { Text("确认") } }, dismissButton = { TextButton({ confirm = null }, enabled = !action.busy) { Text("取消") } })
@@ -364,7 +367,8 @@ internal fun connectionBudget(connection: JsonObject): String {
                         Text(result.text("analysis"))
                     } else {
                         Text(result.text("title"), fontWeight = FontWeight.Medium)
-                        Text(result.getAsJsonArray("issues")?.joinToString(" · ") { issue -> mapOf("missing_album" to "缺少专辑", "missing_cover" to "缺少封面", "missing_lyrics" to "缺少歌词")[issue.asString] ?: issue.asString }.orEmpty(), style = MaterialTheme.typography.bodySmall)
+                        result.objects("findings").forEach { finding -> Text(finding.text("summary"), style = MaterialTheme.typography.bodySmall) }
+                        Text(result.getAsJsonArray("issues")?.joinToString(" · ") { issue -> mapOf("missing_album" to "缺少专辑", "missing_cover" to "缺少封面", "missing_lyrics" to "未读到歌词（纯音乐可能正常）", "missing_track_number" to "曲序待核对", "track_number_conflict" to "同碟曲序重复", "track_number_out_of_range" to "曲序超过总曲数", "disc_number_out_of_range" to "碟号超过总碟数", "missing_disc_number" to "多碟专辑缺少碟号", "same_title_versions" to "同名歌曲版本待核对", "possible_duplicate_recording" to "同名且时长接近，需核对音频", "possible_multidisc_split" to "多碟专辑可能被拆分")[issue.asString] ?: issue.asString }.orEmpty(), style = MaterialTheme.typography.bodySmall)
                     }
                 }
                 AgentTrace(task); if (action.message != "已完成") ActionStatus(action)

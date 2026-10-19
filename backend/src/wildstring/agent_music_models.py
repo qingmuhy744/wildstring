@@ -6,6 +6,7 @@ from pydantic import Field
 
 from wildstring.agent_models import Input
 from wildstring.library.edits import Overrides
+from wildstring.library.inspection import Rule
 from wildstring.library.intake import IntakeSettings
 from wildstring.loudness import GainAdjustment, GainSettings
 from wildstring.lyric_scans import ScanOptions, ScanSettings
@@ -78,8 +79,52 @@ class Source(Input):
     source_id: Identifier
 
 
+class AlbumPage(Page):
+    album_id: Identifier
+
+
+class CoverCandidate(Input):
+    suggestion_id: Identifier
+
+
+class InspectPage(Page):
+    track_ids: list[Identifier] | None = Field(default=None, max_length=5000)
+    album_id: Identifier | None = None
+    rules: list[Rule] | None = Field(default=None, max_length=30)
+
+
 # (description, required capability, read-only hint, validated input model)
 DEFINITIONS = {
+    "get_album_tracks": (
+        "按真实专辑ID分页读取曲目、字段和元数据版本，供批量草案使用",
+        "library:read",
+        True,
+        AlbumPage,
+    ),
+    "get_inspection_rules": (
+        "读取本地巡检规则、证据边界和严重程度，不调用模型",
+        "library:read",
+        True,
+        Empty,
+    ),
+    "inspect_library": (
+        "分页本地巡检：缺失字段、曲序冲突、同名版本和多碟分组；不判定音乐事实",
+        "library:read",
+        True,
+        InspectPage,
+    ),
+    "get_cover_candidates": (
+        "管理员读取已有封面候选与匹配依据，不发起来源查询",
+        "library:manage",
+        True,
+        Track,
+    ),
+    "get_cover_preview": (
+        "管理员经服务端安全代理读取候选封面缩略图，不应用；MCP返回图片",
+        "library:manage",
+        True,
+        CoverCandidate,
+    ),
     "list_drafts": ("分页读取本人草案，可按状态过滤", "drafts:write", True, DraftPage),
     "list_tasks": ("分页读取本人巡检任务", "tasks:write", True, Page),
     "resume_task": (
@@ -211,4 +256,10 @@ DEFINITIONS = {
 }
 
 ADMIN_TOOLS = {name for name, value in DEFINITIONS.items() if value[1] == "library:manage"}
-NETWORK_TOOLS = {"search_web", "read_webpage", "request_lyrics_lookup", "submit_lyric_scan"}
+NETWORK_TOOLS = {
+    "get_cover_preview",
+    "search_web",
+    "read_webpage",
+    "request_lyrics_lookup",
+    "submit_lyric_scan",
+}
