@@ -291,6 +291,10 @@ public final class PlaybackService {
         persistProgress()
     }
 
+    private func prefetchLeadingBytes(of item: Item) {
+        resourceLoader.prefetch(path: item.streamPath)
+    }
+
     private func startCurrent(autoplay: Bool, startAt: Double) {
         guard let item = currentItem else {
             player.replaceCurrentItem(with: nil)
@@ -319,6 +323,7 @@ public final class PlaybackService {
             }
             return
         }
+        prefetchLeadingBytes(of: item)
         buildAsset(
             url: WildstringAudioResourceLoader.assetURL(server: server, path: item.streamPath),
             isTranscode: false,
@@ -353,6 +358,7 @@ public final class PlaybackService {
                     startAt: 0
                 )
             } else {
+                prefetchLeadingBytes(of: item)
                 buildAsset(
                     url: WildstringAudioResourceLoader.assetURL(
                         server: server,
@@ -371,6 +377,7 @@ public final class PlaybackService {
         } catch {
             guard currentItem?.id == item.id else { return }
             errorMessage = "转码暂不可用，已回退原音"
+            prefetchLeadingBytes(of: item)
             buildAsset(
                 url: WildstringAudioResourceLoader.assetURL(server: server, path: item.streamPath),
                 isTranscode: false,

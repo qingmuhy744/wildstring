@@ -86,15 +86,22 @@ public struct AudioRangeFetcher: Sendable {
         let detail: String
     }
 
-    /// Streams a non-seekable response (AAC transcode) chunk by chunk.
-    /// `onChunk` returns false to stop consuming (cancellation).
+    /// Streams a response chunk by chunk so the player can start before the
+    /// whole range has been received (used for startup and AAC transcodes).
+    /// `onChunk` returns false to stop consuming (cancellation). `range` nil
+    /// requests the stream from the start (non-seekable sources).
     public func stream(
         path: String,
+        range: String? = nil,
+        onResponse: @Sendable (HTTPURLResponse) -> Void = { _ in },
         onChunk: @Sendable (Data) async throws -> Bool
     ) async throws {
         var request = URLRequest(url: server.appending(path: path))
         request.timeoutInterval = 60
         request.setValue("*/*", forHTTPHeaderField: "Accept")
+        if let range {
+            request.setValue(range, forHTTPHeaderField: "Range")
+        }
         if let cookie = await cookieHeader() {
             request.setValue(cookie, forHTTPHeaderField: "Cookie")
         }
@@ -105,6 +112,7 @@ public struct AudioRangeFetcher: Sendable {
         guard (200..<300).contains(http.statusCode) else {
             throw APIError(statusCode: http.statusCode, code: "http_\(http.statusCode)")
         }
+        onResponse(http)
         var buffer = Data()
         buffer.reserveCapacity(64 * 1024)
         for try await byte in bytes {

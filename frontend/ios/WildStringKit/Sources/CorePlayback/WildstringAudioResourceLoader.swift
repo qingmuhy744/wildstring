@@ -14,6 +14,11 @@ public final class WildstringAudioResourceLoader: NSObject, AVAssetResourceLoade
     private let cache: AudioDiskCache?
     private let lock = NSLock()
     nonisolated(unsafe) private var tasks: [ObjectIdentifier: Task<Void, Never>] = [:]
+    nonisolated(unsafe) private var prefetchTask: Task<Void, Never>?
+
+    /// Requests larger than this are streamed incrementally instead of being
+    /// buffered in full before the first byte reaches the player.
+    private static let streamingThreshold: Int64 = 256 * 1024
 
     public init(
         server: ServerAddress,
@@ -117,6 +122,16 @@ public final class WildstringAudioResourceLoader: NSObject, AVAssetResourceLoade
                     loadingRequest.finishLoading()
                     return
                 }
+                if length > Self.streamingThreshold {
+                    try await serveStream(
+                        loadingRequest,
+                        dataRequest: dataRequest,
+                        path: path,
+                        start: offset,
+                        length: length
+                    )
+                    return
+                }
                 let chunk = try await fetcher.fetch(
                     path: path,
                     offset: offset,
@@ -155,6 +170,63 @@ public final class WildstringAudioResourceLoader: NSObject, AVAssetResourceLoade
             if Task.isCancelled { return }
             loadingRequest.finishLoading(with: error)
         }
+    }
+
+    /// Warms the connection and caches the leading bytes before the player asks,
+    /// cutting the startup round trips (sniff, first range) to cache hits.
+    public func prefetch(path: String, bytes: Int64 = 512 * 1024) {
+        prefetchTask?.cancel()
+        let fetcher = self.fetcher
+        let cache = self.cache
+        prefetchTask = Task {
+            guard let chunk = try? await fetcher.fetch(path: path, offset: 0, length: bytes),
+                !Task.isCancelled
+            else { return }
+            try? await cache?.store(
+                key: path,
+                offset: 0,
+                data: chunk.data,
+                totalLength: chunk.totalLength,
+                contentType: chunk.contentType
+            )
+        }
+    }
+
+    /// Streams a large range response incrementally so playback can start on
+    /// the first chunks instead of waiting for the whole range.
+    private func serveStream(
+        _ loadingRequest: AVAssetResourceLoadingRequest,
+        dataRequest: AVAssetResourceLoadingDataRequest,
+        path: String,
+        start: Int64,
+        length: Int64
+    ) async throws {
+        let sent = CounterBox()
+        try await fetcher.stream(
+            path: path,
+            range: start > 0 ? "bytes=\(start)-" : nil,
+            onResponse: { response in
+                if let info = loadingRequest.contentInformationRequest {
+                    Self.fill(
+                        info,
+                        totalLength: AudioRangeFetcher.totalLength(of: response),
+                        contentType: response.value(forHTTPHeaderField: "Content-Type")
+                    )
+                }
+            }
+        ) { chunk in
+            if Task.isCancelled { return false }
+            var data = chunk
+            if length != Int64.max, sent.value + Int64(data.count) > length {
+                data = data.prefix(Int(length - sent.value))
+            }
+            guard !data.isEmpty else { return false }
+            dataRequest.respond(with: data)
+            sent.value += Int64(data.count)
+            return sent.value < length
+        }
+        if Task.isCancelled { return }
+        loadingRequest.finishLoading()
     }
 
     /// Serves an AAC transcode: a non-seekable progressive stream that is
@@ -201,4 +273,8 @@ private struct Unchecked<T>: @unchecked Sendable {
     init(_ value: T) {
         self.value = value
     }
+}
+
+private final class CounterBox: @unchecked Sendable {
+    var value: Int64 = 0
 }
