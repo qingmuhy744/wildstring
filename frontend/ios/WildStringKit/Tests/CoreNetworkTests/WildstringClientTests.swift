@@ -526,4 +526,112 @@ struct StubbedHTTPTests {
             #expect(daily.id == "r2")
         }
     }
+
+    @Suite("Agent")
+    struct AgentSuite {
+        private func makeClient() throws -> WildstringClient {
+            WildstringClient(
+                server: try ServerAddress(input: "music.example.com"),
+                store: InMemorySessionStore(),
+                configuration: StubURLProtocol.configuration()
+            )
+        }
+
+        @Test func draftsDecodeList() async throws {
+            StubURLProtocol.respond { request in
+                #expect(request.url?.path == "/api/v1/agent/drafts")
+                #expect(request.url?.query == "limit=50&offset=0")
+                return .json(
+                    status: 200,
+                    body: """
+                        {"items":[{"id":"d1","kind":"playlist","title":"晚安歌单","payload":{"name":"晚安歌单","track_ids":["t1","t2"]},"evidence":[{"source":"assistant","summary":"按安静氛围挑选","url":null}],"status":"pending","version":1,"approved_version":null,"result":null}],"total":1,"limit":50,"offset":0}
+                        """
+                )
+            }
+            let page = try await makeClient().drafts()
+            let draft = try #require(page.items.first)
+            #expect(draft.title == "晚安歌单")
+            #expect(draft.isPending)
+            #expect(draft.payload?.trackIds == ["t1", "t2"])
+            #expect(draft.evidence.first?.summary == "按安静氛围挑选")
+        }
+
+        @Test func approveDraftSendsVersion() async throws {
+            StubURLProtocol.respond { request in
+                #expect(request.httpMethod == "POST")
+                #expect(request.url?.path == "/api/v1/agent/drafts/d1/approve")
+                let body = try #require(StubURLProtocol.bodyData(of: request))
+                let json = try #require(
+                    try JSONSerialization.jsonObject(with: body) as? [String: Int]
+                )
+                #expect(json["version"] == 1)
+                return .json(
+                    status: 200,
+                    body: """
+                        {"id":"d1","kind":"playlist","title":"晚安歌单","status":"approved","version":1,"approved_version":1,"payload":{"name":"晚安歌单","track_ids":["t1"]},"evidence":[],"result":null}
+                        """
+                )
+            }
+            let draft = try await makeClient().approveDraft(id: "d1", version: 1)
+            #expect(draft.status == "approved")
+        }
+
+        @Test func applyDraftSendsIdempotencyKey() async throws {
+            StubURLProtocol.respond { request in
+                #expect(request.httpMethod == "POST")
+                #expect(request.url?.path == "/api/v1/agent/drafts/d1/apply")
+                let body = try #require(StubURLProtocol.bodyData(of: request))
+                let json = try #require(
+                    try JSONSerialization.jsonObject(with: body) as? [String: Any]
+                )
+                #expect(json["version"] as? Int == 1)
+                #expect((json["idempotency_key"] as? String)?.hasPrefix("ios-") == true)
+                return .json(
+                    status: 200,
+                    body: """
+                        {"id":"d1","kind":"playlist","title":"晚安歌单","status":"applied","version":1,"payload":null,"evidence":[],"result":{"playlist_id":"p9"}}
+                        """
+                )
+            }
+            let draft = try await makeClient().applyDraft(id: "d1", version: 1)
+            #expect(draft.status == "applied")
+            #expect(draft.result?.playlistId == "p9")
+        }
+
+        @Test func sendMessageDecodesConversation() async throws {
+            StubURLProtocol.respond { request in
+                #expect(request.httpMethod == "POST")
+                #expect(request.url?.path == "/api/v1/agent/conversations/c1/messages")
+                let body = try #require(StubURLProtocol.bodyData(of: request))
+                let json = try #require(
+                    try JSONSerialization.jsonObject(with: body) as? [String: Any]
+                )
+                #expect(json["content"] as? String == "帮我找安静的钢琴曲")
+                return .json(
+                    status: 200,
+                    body: """
+                        {"id":"c1","title":"找一个歌单","messages":[{"id":"m1","role":"user","content":"帮我找安静的钢琴曲","partial":false},{"id":"m2","role":"assistant","content":"本次使用本地关键词检索，未调用模型。","partial":false}]}
+                        """
+                )
+            }
+            let detail = try await makeClient().sendMessage(
+                conversationID: "c1",
+                content: "帮我找安静的钢琴曲"
+            )
+            #expect(detail.messages.count == 2)
+            #expect(detail.messages.first?.isUser == true)
+            #expect(detail.messages.last?.content.contains("本地关键词检索") == true)
+        }
+
+        @Test func createConversationDecodesDetail() async throws {
+            StubURLProtocol.respond { request in
+                #expect(request.httpMethod == "POST")
+                #expect(request.url?.path == "/api/v1/agent/conversations")
+                return .json(status: 200, body: #"{"id":"c2","title":"新对话","messages":[]}"#)
+            }
+            let detail = try await makeClient().createConversation()
+            #expect(detail.id == "c2")
+            #expect(detail.messages.isEmpty)
+        }
+    }
 }
