@@ -94,6 +94,11 @@ public final class WildstringClient: Sendable {
         (try? await cookies.headerValue()) != nil
     }
 
+    /// Cookie header value for auxiliary requests such as AVPlayer asset loading.
+    public func cookieHeaderValue() async -> String? {
+        try? await cookies.headerValue()
+    }
+
     public func clearSession() async {
         try? await cookies.clear()
     }

@@ -145,4 +145,22 @@ struct WildstringClientTests {
         let hasSession = await client.storedSessionExists()
         #expect(!hasSession)
     }
+
+    @Test func exposesCookieHeaderForAuxiliaryRequests() async throws {
+        let store = InMemorySessionStore()
+        try store.saveSession(
+            StoredSession(cookies: [
+                StoredCookie(
+                    name: "wildstring_session",
+                    value: "token-xyz",
+                    domain: "music.example.com",
+                    path: "/"
+                ),
+            ]),
+            origin: origin
+        )
+        let client = try makeClient(store: store)
+        let header = await client.cookieHeaderValue()
+        #expect(header == "wildstring_session=token-xyz")
+    }
 }
