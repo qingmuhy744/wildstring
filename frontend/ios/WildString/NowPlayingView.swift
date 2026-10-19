@@ -9,6 +9,7 @@ struct NowPlayingView: View {
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.horizontalSizeClass) private var sizeClass
+    @Environment(FavoritesModel.self) private var favorites
     @State private var showLyrics: Bool
     @State private var scrubTime: Double?
 
@@ -94,15 +95,29 @@ struct NowPlayingView: View {
                         }
                     }
                     .padding(.top, 8)
-                VStack(spacing: 4) {
+                VStack(spacing: 6) {
                     Text(item.title)
                         .font(.title3.bold())
                         .multilineTextAlignment(.center)
                         .lineLimit(2)
-                    Text(item.artist)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                    HStack(spacing: 12) {
+                        Text(item.artist)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                        Button {
+                            Task { await favorites.toggle(item.trackID) }
+                        } label: {
+                            Image(
+                                systemName: favorites.isFavorite(item.trackID)
+                                    ? "heart.fill" : "heart"
+                            )
+                            .foregroundStyle(
+                                favorites.isFavorite(item.trackID) ? Color.pink : Color.secondary
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
                 progressSection
             } else {

@@ -19,16 +19,18 @@ struct AlbumDetailView: View {
                     emptyTitle: "没有曲目",
                     emptyIcon: "music.note"
                 ) { track in
-                    Button {
-                        playTracks(loader.items, startingAt: track, using: playback)
-                    } label: {
-                        TrackRow(
-                            client: client,
-                            track: track,
-                            isCurrent: playback.currentItem?.trackID == track.id
-                        )
+                    TrackActionRow(client: client, track: track) {
+                        Button {
+                            playTracks(loader.items, startingAt: track, using: playback)
+                        } label: {
+                            TrackRow(
+                                client: client,
+                                track: track,
+                                isCurrent: playback.currentItem?.trackID == track.id
+                            )
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
                 }
             } else {
                 ProgressView()
@@ -129,16 +131,18 @@ struct ArtistDetailView: View {
                     emptyTitle: "没有歌曲",
                     emptyIcon: "music.note"
                 ) { track in
-                    Button {
-                        playTracks(songsLoader.items, startingAt: track, using: playback)
-                    } label: {
-                        TrackRow(
-                            client: client,
-                            track: track,
-                            isCurrent: playback.currentItem?.trackID == track.id
-                        )
+                    TrackActionRow(client: client, track: track) {
+                        Button {
+                            playTracks(songsLoader.items, startingAt: track, using: playback)
+                        } label: {
+                            TrackRow(
+                                client: client,
+                                track: track,
+                                isCurrent: playback.currentItem?.trackID == track.id
+                            )
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
                 }
             } else {
                 ProgressView()

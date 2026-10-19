@@ -17,16 +17,18 @@ struct SearchView: View {
         NavigationStack {
             List {
                 ForEach(tracks) { track in
-                    Button {
-                        playTracks(tracks, startingAt: track, using: playback)
-                    } label: {
-                        TrackRow(
-                            client: client,
-                            track: track,
-                            isCurrent: playback.currentItem?.trackID == track.id
-                        )
+                    TrackActionRow(client: client, track: track) {
+                        Button {
+                            playTracks(tracks, startingAt: track, using: playback)
+                        } label: {
+                            TrackRow(
+                                client: client,
+                                track: track,
+                                isCurrent: playback.currentItem?.trackID == track.id
+                            )
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
                 }
                 if isSearching {
                     HStack {

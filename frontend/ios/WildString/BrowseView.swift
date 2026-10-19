@@ -59,16 +59,18 @@ struct BrowseView: View {
                     emptyTitle: "曲库为空",
                     emptyIcon: "music.note.list"
                 ) { track in
-                    Button {
-                        playTracks(songsLoader.items, startingAt: track, using: playback)
-                    } label: {
-                        TrackRow(
-                            client: client,
-                            track: track,
-                            isCurrent: playback.currentItem?.trackID == track.id
-                        )
+                    TrackActionRow(client: client, track: track) {
+                        Button {
+                            playTracks(songsLoader.items, startingAt: track, using: playback)
+                        } label: {
+                            TrackRow(
+                                client: client,
+                                track: track,
+                                isCurrent: playback.currentItem?.trackID == track.id
+                            )
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
                 }
             } else {
                 ProgressView()

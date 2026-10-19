@@ -21,6 +21,7 @@ final class ConnectionModel {
 
     private(set) var client: WildstringClient?
     private(set) var playback: PlaybackService?
+    private(set) var favorites: FavoritesModel?
     let demoAutoPlay: Bool
 
     private let store: any SessionStore
@@ -122,6 +123,7 @@ final class ConnectionModel {
         defer { isBusy = false }
         playback?.shutdown()
         playback = nil
+        favorites = nil
         if let client {
             try? await client.logout()
         }
@@ -147,6 +149,7 @@ final class ConnectionModel {
         )
         await playback.restore()
         self.playback = playback
+        self.favorites = FavoritesModel(client: client)
         phase = .connected(server: address.description, username: username)
     }
 

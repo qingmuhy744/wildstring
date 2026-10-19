@@ -21,10 +21,13 @@ struct RootView: View {
             case .connect:
                 ConnectionView(model: model)
             case .connected(let server, let username):
-                if let client = model.client, let playback = model.playback {
+                if let client = model.client, let playback = model.playback,
+                    let favorites = model.favorites
+                {
                     MainTabView(
                         client: client,
                         playback: playback,
+                        favorites: favorites,
                         server: server,
                         username: username,
                         autoPlayFirst: model.demoAutoPlay,
