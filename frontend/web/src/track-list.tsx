@@ -5,6 +5,7 @@ import { Cover } from './cover';
 import type { Player } from './player';
 import { AlbumLink } from './album-link';
 import { beforeTrackListSizeChange, useTrackListSize } from './track-list-size';
+import { PlaybackIndicator } from './playback-indicator';
 
 export function TrackList({
   page,
@@ -92,15 +93,18 @@ export function TrackList({
         <div
           className={`track-row ${player.current?.id === track.id ? 'current' : ''}`}
           role="row"
+          aria-current={player.current?.id === track.id ? 'true' : undefined}
           key={track.id}
           data-browse-id={track.id}
         >
           <span role="cell" className="track-number">
-            {player.current?.id === track.id && player.playing
-              ? '♫'
-              : String(
-                  albumTracks ? track.track_number || page.offset + i + 1 : page.offset + i + 1,
-                ).padStart(2, '0')}
+            {player.current?.id === track.id ? (
+              <PlaybackIndicator playing={player.playing} buffering={player.buffering} />
+            ) : (
+              String(
+                albumTracks ? track.track_number || page.offset + i + 1 : page.offset + i + 1,
+              ).padStart(2, '0')
+            )}
           </span>
           <div role="cell" className="track-identity">
             {!albumTracks && (

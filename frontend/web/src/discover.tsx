@@ -11,6 +11,7 @@ import { ModelConnectionChoice, useModelConnections } from './model-connection';
 import { RecommendationPreferencesForm, RecommendationSources } from './recommendation-preferences';
 import { ListeningRankings } from './listening-rankings';
 import { ExternalRecommendations } from './external-recommendations';
+import { PlaybackIndicator } from './playback-indicator';
 import {
   recommendationSources,
   type DailyRecommendation,
@@ -80,11 +81,18 @@ function Choices({
           ]}
         >
           {feedback && (
-            <span className="daily-track-number">{String(index + 1).padStart(2, '0')}</span>
+            <span className="daily-track-number">
+              {player.current?.id === track.id ? (
+                <PlaybackIndicator playing={player.playing} buffering={player.buffering} />
+              ) : (
+                String(index + 1).padStart(2, '0')
+              )}
+            </span>
           )}
           <Cover trackId={track.id} title={track.title} />
           <button
             className="track-title"
+            aria-current={player.current?.id === track.id ? 'true' : undefined}
             onClick={() => {
               player.start(
                 items.map((i) => i.track),
@@ -94,7 +102,12 @@ function Choices({
             }}
             aria-label={`播放 ${track.title}`}
           >
-            <strong>{track.title}</strong>
+            <strong>
+              {!feedback && player.current?.id === track.id && (
+                <PlaybackIndicator playing={player.playing} buffering={player.buffering} />
+              )}
+              {track.title}
+            </strong>
             <small>
               {artist(track)}
               {feedback && track.album ? ` · ${track.album}` : ''}

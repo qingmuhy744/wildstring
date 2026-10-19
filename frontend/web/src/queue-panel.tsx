@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { artist } from './api';
 import type { Player } from './player';
+import { PlaybackIndicator } from './playback-indicator';
 
 type Drag = {
   pointer: number;
@@ -126,6 +127,7 @@ export function QueuePanel({
           {player.queue.map((track, i) => (
             <li
               key={`${track.id}-${i}`}
+              aria-current={i === player.index ? 'true' : undefined}
               className={[
                 i === player.index ? 'selected' : '',
                 preview?.from === i ? 'is-dragging' : '',
@@ -205,7 +207,13 @@ export function QueuePanel({
                   <path d="M5 7h14M5 12h14M5 17h14" strokeWidth="1.6" strokeLinecap="round" />
                 </svg>
               </button>
-              <span className="queue-index">{i === player.index ? '♫' : i + 1}</span>
+              <span className="queue-index">
+                {i === player.index ? (
+                  <PlaybackIndicator playing={player.playing} buffering={player.buffering} />
+                ) : (
+                  i + 1
+                )}
+              </span>
               <button className="track-title" onClick={() => player.start(player.queue, i)}>
                 <strong>{track.title}</strong>
                 <small>{artist(track)}</small>
