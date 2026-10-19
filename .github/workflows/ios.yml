@@ -33,5 +33,7 @@ jobs:
           persist-credentials: false
       - name: Install XcodeGen
         run: brew install xcodegen
+      - name: Test core package
+        run: make ios-test
       - name: Build for the simulator
         run: make ios-build

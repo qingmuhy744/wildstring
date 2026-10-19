@@ -21,6 +21,30 @@ xcodebuild -project WildString.xcodeproj -scheme WildString \
 
 `WildString.xcodeproj` 由 `project.yml` 生成，不入库；改工程结构请改 `project.yml` 后重新生成。
 
+## 测试
+
+```sh
+make ios-test
+```
+
+核心逻辑与单元测试在 `WildStringKit` 包（Swift Testing，`swift test` 可在 macOS 直接跑）；Keychain 与界面行为在模拟器/真机运行时验证。
+
+## 集成测试（可选）
+
+对着一次性本地实例跑真实 HTTP 登录、会话与登出：
+
+```sh
+# 终端 1：启动一次性实例（临时数据目录，不影响本机运行数据）
+WILDSTRING_ENVIRONMENT=test WILDSTRING_DATA_DIR="$(mktemp -d)" \
+WILDSTRING_ADMIN_PASSWORD=fixture-admin-password WILDSTRING_PORT=18799 \
+uv run --frozen --project backend python -m wildstring
+
+# 终端 2
+WILDSTRING_INTEGRATION_URL=http://127.0.0.1:18799 \
+WILDSTRING_INTEGRATION_PASSWORD=fixture-admin-password \
+make ios-test
+```
+
 ## 真机安装（无开发者账号）
 
 当前 Apple 开发者账号未过审，不做商店分发。真机验证用 Xcode 的免费个人团队自动签名：

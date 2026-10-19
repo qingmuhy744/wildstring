@@ -88,9 +88,12 @@ android-locks: ## Refresh Android dependency locks and SHA-256 verification meta
 	$(ANDROID) :app:assembleDebug :app:testDebugUnitTest :app:lintDebug :app:assembleDebugAndroidTest --write-locks --write-verification-metadata sha256
 	$(ANDROID) :app:assembleRelease :app:lintRelease --write-locks --write-verification-metadata sha256
 
-.PHONY: ios-gen ios-build
+.PHONY: ios-gen ios-test ios-build
 ios-gen: ## Generate the iOS Xcode project from frontend/ios/project.yml (requires XcodeGen)
 	cd frontend/ios && xcodegen generate
+
+ios-test: ## Run the iOS core package unit tests
+	swift test --package-path frontend/ios/WildStringKit
 
 ios-build: ios-gen ## Build the iOS app for the simulator
 	xcodebuild -project frontend/ios/WildString.xcodeproj -scheme WildString -destination 'generic/platform=iOS Simulator' build
