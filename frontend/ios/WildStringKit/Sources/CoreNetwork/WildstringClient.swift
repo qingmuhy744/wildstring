@@ -113,11 +113,12 @@ public final class WildstringClient: Sendable {
         return configuration
     }
 
-    private struct Request {
+    struct Request {
         var method: String
         var path: String
         var body: Data?
         var contentType: String?
+        var queryItems: [URLQueryItem] = []
         var clientHeader = "ios"
         var clearsSessionOnUnauthorized = true
     }
@@ -126,7 +127,7 @@ public final class WildstringClient: Sendable {
         let detail: String
     }
 
-    private func perform(_ request: Request) async throws -> Data {
+    func perform(_ request: Request) async throws -> Data {
         var attempt = request
         while true {
             let (data, response) = try await send(attempt)
@@ -151,7 +152,14 @@ public final class WildstringClient: Sendable {
     }
 
     private func send(_ request: Request) async throws -> (Data, HTTPURLResponse) {
-        var urlRequest = URLRequest(url: server.appending(path: request.path))
+        var url = server.appending(path: request.path)
+        if !request.queryItems.isEmpty,
+            var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+        {
+            components.queryItems = request.queryItems
+            if let built = components.url { url = built }
+        }
+        var urlRequest = URLRequest(url: url)
         urlRequest.httpMethod = request.method
         urlRequest.httpBody = request.body
         urlRequest.timeoutInterval = 20
