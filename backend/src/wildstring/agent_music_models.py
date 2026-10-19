@@ -5,11 +5,23 @@ from typing import Annotated, Literal
 from pydantic import Field
 
 from wildstring.agent_models import Input
+from wildstring.library.edits import Overrides
 from wildstring.library.intake import IntakeSettings
 from wildstring.loudness import GainAdjustment, GainSettings
 from wildstring.lyric_scans import ScanOptions, ScanSettings
+from wildstring.source_models import LyricChoice
 
 Identifier = Annotated[str, Field(min_length=1, max_length=128)]
+
+
+class IntakePayload(Input):
+    item_id: Identifier
+    version: int = Field(ge=1)
+    overrides: Overrides
+
+
+class LyricsPayload(LyricChoice):
+    candidate_id: Identifier
 
 
 class Empty(Input):

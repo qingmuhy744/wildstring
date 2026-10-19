@@ -11,10 +11,10 @@ from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
-from wildstring.mcp_bridge import Bridge, BridgeError
+from wildstring.mcp_bridge import BridgeError, BridgeProtocol
 
 
-class LocalBridge(Bridge):
+class LocalBridge(BridgeProtocol):
     """Reuse the stdio contract, keeping request identity out of shared state."""
 
     def __init__(self, platform):

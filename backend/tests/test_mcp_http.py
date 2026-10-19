@@ -83,10 +83,8 @@ def test_native_http_initialization_discovery_draft_gate_and_revocation(
             },
         ).json()["result"]
         assert denied["isError"] and "draft_approval_required" in denied["content"][0]["text"]
-        assert (
-            api.delete("/api/v1/agent/credentials/" + saved["id"], headers=HEADERS).status_code
-            == 200
-        )
+        revoked = api.delete("/api/v1/agent/credentials/" + saved["id"], headers=HEADERS)
+        assert revoked.status_code == 200
         assert rpc(api, token, "tools/list").status_code == 401
 
 

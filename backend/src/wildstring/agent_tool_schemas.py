@@ -3,7 +3,7 @@
 from pydantic import BaseModel, ConfigDict, Field
 
 from wildstring.agent_models import Evidence, PlaylistPayload
-from wildstring.agent_music_drafts import IntakePayload, LyricsPayload
+from wildstring.agent_music_models import IntakePayload, LyricsPayload
 from wildstring.library.edits import Overrides
 
 

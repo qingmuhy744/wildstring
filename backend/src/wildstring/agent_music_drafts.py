@@ -1,20 +1,7 @@
 """Versioned proposals for intake metadata and exact lyric candidates."""
 
-from pydantic import Field
-
-from wildstring.agent_models import Input
-from wildstring.library.edits import Overrides
+from wildstring.agent_music_models import IntakePayload, LyricsPayload
 from wildstring.source_models import LyricChoice
-
-
-class IntakePayload(Input):
-    item_id: str = Field(min_length=1, max_length=128)
-    version: int = Field(ge=1)
-    overrides: Overrides
-
-
-class LyricsPayload(LyricChoice):
-    candidate_id: str = Field(min_length=1, max_length=128)
 
 
 def check(service, actor, kind, payload):
