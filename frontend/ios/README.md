@@ -53,6 +53,14 @@ make ios-test
 2. 直接 Run 安装；
 3. 免费签名有效期 7 天，过期后在 Xcode 重新 Run 即可。
 
+`make ios-gen` / `make ios-build` 会重新生成 `WildString.xcodeproj`，Xcode 里选的 Team 会被重建覆盖。想让它跨重新生成保留，把 Team 放进仓库根目录的未跟踪文件 `.env.ios-local`（已被 gitignore）：
+
+```sh
+echo "IOS_DEVELOPMENT_TEAM=你的TeamID" > ../.env.ios-local
+```
+
+Team 只保存在本地，不会提交；`.env.ios-local` 不存在时生成空 Team。
+
 ## 现状
 
 I0–I9 全部批次已完成本地验证（模拟器运行、缓存与下载文件核验、截图记录）：骨架、连接与登录、播放闭环、曲库（含拼音字母定位）、播放页与歌词、收藏/歌单/每日推荐、缓存与离线、AI 助手与草案批准、管理员编辑工具、外观（主题/播放页样式/列表大小/触感）与歌单拖动排序。实施批次见 [iOS 第一版](../../docs/product/ios-v1.md#实施与验收顺序)。
