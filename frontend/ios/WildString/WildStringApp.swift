@@ -22,7 +22,7 @@ struct RootView: View {
                 ConnectionView(model: model)
             case .connected(let server, let username):
                 if let client = model.client, let playback = model.playback {
-                    LibraryView(
+                    MainTabView(
                         client: client,
                         playback: playback,
                         server: server,

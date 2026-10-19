@@ -59,3 +59,36 @@ struct MiniPlayerBar: View {
         return String(format: "%d:%02d", total / 60, total % 60)
     }
 }
+
+/// Adds the mini player (and playback errors) above the tab bar of a screen.
+struct MiniPlayerInset: ViewModifier {
+    let playback: PlaybackService
+
+    func body(content: Content) -> some View {
+        content.safeAreaInset(edge: .bottom) {
+            VStack(spacing: 0) {
+                if let message = playback.errorMessage {
+                    HStack(spacing: 8) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                        Text(message)
+                            .lineLimit(2)
+                        Spacer(minLength: 0)
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 6)
+                    .frame(maxWidth: .infinity)
+                    .background(.bar)
+                }
+                MiniPlayerBar(playback: playback)
+            }
+        }
+    }
+}
+
+extension View {
+    func miniPlayer(_ playback: PlaybackService) -> some View {
+        modifier(MiniPlayerInset(playback: playback))
+    }
+}
