@@ -168,6 +168,8 @@ test('播放标识在每日推荐中跟随切歌并在缓冲、后台和暂停�
   await expect(current.locator('.track-title strong')).toHaveText(second);
   await expect(current.locator('.track-title')).toHaveAttribute('aria-current', 'true');
   await paused(page);
+  // A delayed waiting event must not turn a paused track back into buffering.
+  await page.evaluate(() => document.querySelector('audio')!.dispatchEvent(new Event('waiting')));
   await expect(current.getByRole('img', { name: '已暂停', exact: true })).toBeVisible();
   await expect(page.locator('.toast')).toBeHidden();
   await current.scrollIntoViewIfNeeded();
