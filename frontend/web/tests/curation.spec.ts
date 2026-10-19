@@ -29,6 +29,7 @@ test('真实批量草案逐曲展示差异，批准不写入，应用保存整�
   });
   expect(response.ok()).toBe(true);
   const draft = await response.json();
+  expect(draft.before.items).toHaveLength(2);
   try {
     await section(page, '待确认草案');
     await page.getByRole('button', { name: '查看草案 专辑逐曲核对', exact: true }).click();

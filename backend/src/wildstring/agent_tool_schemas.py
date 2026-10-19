@@ -2,7 +2,7 @@
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from wildstring.agent_curation import MetadataBatch
+from wildstring.agent_curation_models import MetadataBatch
 from wildstring.agent_models import Evidence, PlaylistPayload
 from wildstring.agent_music_models import IntakePayload, LyricsPayload
 from wildstring.library.artwork import CoverProposal

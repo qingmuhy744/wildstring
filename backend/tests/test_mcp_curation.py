@@ -328,12 +328,6 @@ def test_inspection_rules_use_whole_library_context_and_keep_lyrics_absence_info
         inspected = result(api, token, "inspect_library", {"limit": 1})
         assert inspected["total"] == 4 and inspected["has_more"]
         assert result(api, token, "inspect_library", {"offset": 4})["items"] == []
-        split = result(
-            api,
-            token,
-            "inspect_library",
-            {"track_ids": [all_tracks[0]["id"]], "rules": ["possible_multidisc_split"]},
-        )
         # Explicit selection still sees related discs outside its page.
         live_id = next(t["id"] for t in all_tracks if t["album"] == "Live set")
         split = result(
