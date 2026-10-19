@@ -358,7 +358,7 @@ export function Assistant({
                   <div className="workspace-actions">
                     {run.draft_ids.map((id) => (
                       <button key={id} onClick={() => onDraft(id)}>
-                        查看待确认草案
+                        查看草案与应用结果
                       </button>
                     ))}
                   </div>

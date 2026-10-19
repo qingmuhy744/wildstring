@@ -199,7 +199,7 @@ test('通知跨页、已读补拉、快照批量已读与待确认跳转', async
   });
 });
 
-test('草案批准和应用分离，网络重试沿用幂等键且保留诊断编号', async ({ page }) => {
+test('草案接受即应用，网络重试沿用幂等键且保留诊断编号', async ({ page }) => {
   await fixture(page);
   let draft: any = {
     id: 'playlist-draft',
@@ -219,11 +219,9 @@ test('草案批准和应用分离，网络重试沿用幂等键且保留诊断�
   await page.route('**/api/v1/agent/drafts?*', (r) => r.fulfill({ json: list([draft]) }));
   await page.route('**/api/v1/agent/drafts/playlist-draft/approve', (r) => {
     approves++;
-    expect(r.request().postDataJSON()).toEqual({ version: 2 });
-    draft = { ...draft, status: 'approved', version: 3, approved_version: 3 };
-    return r.fulfill({ json: draft });
+    return r.abort();
   });
-  await page.route('**/api/v1/agent/drafts/playlist-draft/apply', (r) => {
+  await page.route('**/api/v1/agent/drafts/playlist-draft/accept', (r) => {
     applies.push(r.request().postDataJSON());
     if (applies.length === 1)
       return r.fulfill({
@@ -237,13 +235,10 @@ test('草案批准和应用分离，网络重试沿用幂等键且保留诊断�
   await login(page);
   await section(page, '待确认草案');
   await page.getByRole('button', { name: '查看草案 待确认歌单', exact: true }).click();
-  await page.getByRole('button', { name: '批准当前版本', exact: true }).click();
-  await expect(page.getByRole('button', { name: '应用已批准草案', exact: true })).toBeVisible();
-  expect(approves).toBe(1);
-  expect(applies).toHaveLength(0);
-  await page.getByRole('button', { name: '应用已批准草案', exact: true }).click();
+  await page.getByRole('button', { name: '接受并应用', exact: true }).click();
+  expect(approves).toBe(0);
   await expect(page.getByRole('alert')).toContainText('trace-apply-040');
-  await page.getByRole('button', { name: '应用已批准草案', exact: true }).click();
+  await page.getByRole('button', { name: '接受并应用', exact: true }).click();
   await expect(page.getByRole('article', { name: '草案详情' })).toContainText('歌单已保存');
   expect(applies[1].idempotency_key).toBe(applies[0].idempotency_key);
 });
@@ -325,7 +320,7 @@ test('多轮助手保留中文组合输入，失败不丢草稿，回退与草�
   await expect(page.getByRole('region', { name: 'AI 音乐助手' })).toContainText(
     '本地关键词检索 · 未调用模型',
   );
-  await expect(page.getByRole('button', { name: '查看待确认草案' })).toBeVisible();
+  await expect(page.getByRole('button', { name: '查看草案与应用结果' })).toBeVisible();
   await expect(box).toHaveValue('');
   await page.screenshot({
     path: `../../artifacts/agent-chat-${info.project.name}.png`,
@@ -758,7 +753,7 @@ test('AI 巡检混合结果与草案入口可显示，旧计划编辑保留范�
   await expect(page.getByRole('article', { name: '巡检任务详情' })).toContainText(
     '依据缺失专辑生成草案',
   );
-  await expect(page.getByRole('button', { name: '查看待确认草案', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: '查看草案与应用结果', exact: true })).toBeVisible();
   await page.getByRole('button', { name: '定时巡检', exact: true }).click();
   await page.getByRole('button', { name: '编辑计划', exact: true }).click();
   await page.getByLabel('计划名称', { exact: true }).fill('已调整的范围巡检');
@@ -786,7 +781,7 @@ test('工作台视觉验收：前台入口、通知与错误草案在浅色深�
     trace_id: 'trace-visual-040',
   };
   await page.route('**/api/v1/agent/drafts?*', (r) => r.fulfill({ json: list([draft]) }));
-  await page.route('**/api/v1/agent/drafts/visual/approve', (r) =>
+  await page.route('**/api/v1/agent/drafts/visual/accept', (r) =>
     r.fulfill({
       status: 409,
       headers: { 'X-Wildstring-Trace-Id': 'trace-visual-conflict-040' },
@@ -847,7 +842,7 @@ test('工作台视觉验收：前台入口、通知与错误草案在浅色深�
     });
     await section(page, '待确认草案');
     await page.getByRole('button', { name: '查看草案 把明天留给摇滚', exact: true }).click();
-    await page.getByRole('button', { name: '批准当前版本', exact: true }).click();
+    await page.getByRole('button', { name: '接受并应用', exact: true }).click();
     await expect(page.getByRole('alert')).toContainText('trace-visual-conflict-040');
     await page.screenshot({
       path: `../../artifacts/agent-review-${info.project.name}-${color}.png`,
@@ -985,4 +980,41 @@ test('通知补拉忙碌时合并恢复联网事件，完成后再拉取最新�
   await expect(panel.getByRole('button', { name: '刷新', exact: true })).toBeEnabled();
   expect(reads).toBe(before + 1);
   await expect(panel.getByRole('button', { name: '未读 · 1', exact: true })).toBeVisible();
+});
+
+test('整理方式由用户选择、按类型授权并保存，重新打开仍保留', async ({ page }, info) => {
+  await fixture(page);
+  let policy = {
+    mode: 'manual',
+    kinds: ['playlist', 'metadata', 'cover'],
+    version: 1,
+    allowed_kinds: ['playlist', 'metadata', 'cover'],
+  };
+  await page.route('**/api/v1/agent/application-policy', (route) => {
+    if (route.request().method() === 'PUT') {
+      const value = route.request().postDataJSON();
+      expect(value.version).toBe(policy.version);
+      policy = { ...policy, ...value, version: policy.version + 1 };
+    }
+    return route.fulfill({ json: policy });
+  });
+  await login(page);
+  await section(page, '助手设置');
+  await page.getByRole('button', { name: '整理方式', exact: true }).click();
+  const panel = page.getByRole('region', { name: '自动整理设置' });
+  await panel.getByLabel('应用方式', { exact: true }).selectOption('automatic');
+  await panel.getByRole('checkbox', { name: '封面', exact: true }).uncheck();
+  await panel.getByRole('button', { name: '保存整理方式', exact: true }).click();
+  await expect(panel.getByRole('status')).toContainText('整理方式已保存');
+  expect(policy.kinds).toEqual(['playlist', 'metadata']);
+  await page.reload();
+  await section(page, '助手设置');
+  await page.getByRole('button', { name: '整理方式', exact: true }).click();
+  await expect(panel.getByLabel('应用方式', { exact: true })).toHaveValue('automatic');
+  await expect(panel.getByRole('checkbox', { name: '封面', exact: true })).not.toBeChecked();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({
+    path: `../../artifacts/application-policy-${info.project.name}.png`,
+    fullPage: true,
+  });
 });

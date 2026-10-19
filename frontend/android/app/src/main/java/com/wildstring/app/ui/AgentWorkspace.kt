@@ -116,7 +116,7 @@ private fun localAgentTime(value: String): String = runCatching { Instant.parse(
     suspend fun load() { drafts = vm.agent.all("drafts"); selectedId?.let { id -> selected = drafts.firstOrNull { it.text("id") == id } ?: vm.agent.request("drafts/$id") } }
     LaunchedEffect(Unit) { action.run { load() }; if (action.message == "已完成") action.message = null }
     LazyColumn(Modifier.fillMaxSize().testTag("agent-drafts"), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        item { Row(verticalAlignment = Alignment.CenterVertically) { Text("确认后才会修改", Modifier.weight(1f), fontWeight = FontWeight.Medium); IconButton({ scope.launch { action.run { load() } } }, enabled = !action.busy) { Icon(Icons.Default.Refresh, "刷新草案") } }; ActionStatus(action) }
+        item { Row(verticalAlignment = Alignment.CenterVertically) { Text("草案与应用记录", Modifier.weight(1f), fontWeight = FontWeight.Medium); IconButton({ scope.launch { action.run { load() } } }, enabled = !action.busy) { Icon(Icons.Default.Refresh, "刷新草案") } }; ActionStatus(action) }
         if (!action.busy && drafts.isEmpty() && action.message == null) item { AgentEmpty("暂时没有草案。可让助手或 MCP 先整理候选。") }
         items(drafts, key = { it.text("id") }) { draft ->
             AgentCard { Text(draft.text("title"), fontWeight = FontWeight.SemiBold); Text(draftLabel(draft.text("status")), color = MaterialTheme.colorScheme.primary); AgentTrace(draft)
@@ -146,6 +146,7 @@ internal fun displayValue(value: com.google.gson.JsonElement?): String = when { 
     AlertDialog(onDismissRequest = { if (!action.busy) dismiss() }, title = { Text(draft.text("title")) }, text = {
         Column(Modifier.heightIn(max = 500.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(draftLabel(draft.text("status")), color = MaterialTheme.colorScheme.primary)
+            if (draft.getAsJsonObject("result")?.text("application_mode") == "automatic") Text("按你的自动整理设置应用。", style = MaterialTheme.typography.bodySmall)
             if (draft.text("kind") == "metadata") Text("歌曲：${tracks[payload.text("track_id")] ?: payload.text("track_id")}")
             if (draft.text("kind") == "intake") Text("导入来源：${before.text("source_path")}。应用后安排复制到托管曲库，保留导入源。")
             if (draft.text("kind") == "lyrics") {
@@ -167,21 +168,23 @@ internal fun displayValue(value: com.google.gson.JsonElement?): String = when { 
             }
             draft.objects("evidence").forEach { evidence -> Text("${evidence.text("source")} · ${evidence.text("summary")}", style = MaterialTheme.typography.bodySmall); evidence.text("url").takeIf { it.isNotBlank() }?.let { SelectionContainer { Text(it, style = MaterialTheme.typography.labelSmall) } } }
             Text("版本 ${draft.number("version")} · 导入仅复制；资料与歌词更新保存在应用内，不写回音乐文件。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            draft.getAsJsonObject("result")?.text("automatic_error")?.takeIf { it.isNotBlank() }?.let { Text("自动应用未完成：${agentError(409, it, null)}。草案已保留。", color = MaterialTheme.colorScheme.error) }
             AgentTrace(draft); ActionStatus(action)
         }
     }, confirmButton = {
-        if (draft.text("status") in listOf("pending", "approved")) TextButton({ confirm = if (draft.text("status") == "pending") "approve" else "apply" }, enabled = !action.busy && (draft.text("kind") != "cover" || coverReady), modifier = Modifier.testTag("draft-confirm")) { Text(if (draft.text("status") == "pending") "批准此版本" else "应用已批准草案") }
+        if (draft.text("status") in listOf("pending", "approved")) TextButton({ scope.launch { action.run {
+            val body = jsonBody("version" to draft.number("version"), "idempotency_key" to "android-${draft.text("id")}-${draft.number("version")}")
+            if (draft.text("preview_digest").isNotBlank()) body.addProperty("preview_digest", draft.text("preview_digest"))
+            draft = vm.agent.request("drafts/${draft.text("id")}/accept", "POST", body); updated(draft); vm.agent.refreshInbox()
+        } } }, enabled = !action.busy && ((draft.text("kind") != "cover" && payload.text("cover_draft_id").isBlank()) || coverReady), modifier = Modifier.testTag("draft-confirm")) { Text("接受并应用") }
     }, dismissButton = { Row { if (draft.text("status") in listOf("pending", "approved")) TextButton({ confirm = "reject" }, enabled = !action.busy) { Text("拒绝") }; TextButton(dismiss, enabled = !action.busy) { Text("关闭") } } })
-    confirm?.let { operation ->
-        AlertDialog(onDismissRequest = { if (!action.busy) confirm = null }, title = { Text(when (operation) { "approve" -> "批准当前差异？"; "apply" -> "应用这个版本？"; else -> "拒绝这份草案？" }) },
-            text = { Text("${draft.text("title")} · 版本 ${draft.number("version")}" + if (operation == "approve") "。批准后仍需点击应用。" else "。服务器会再次校验版本与权限。") },
-            confirmButton = { TextButton({ scope.launch { action.run {
-                val body = jsonBody("version" to draft.number("version"))
-                if (operation == "approve" && draft.text("preview_digest").isNotBlank()) body.addProperty("preview_digest", draft.text("preview_digest"))
-                if (operation == "apply") body.addProperty("idempotency_key", "android-${draft.text("id")}-${draft.number("version")}")
-                draft = vm.agent.request("drafts/${draft.text("id")}/$operation", "POST", body); updated(draft); confirm = null; vm.agent.refreshInbox()
-            } } }, enabled = !action.busy, modifier = Modifier.testTag("draft-confirm-$operation")) { Text("确认") } }, dismissButton = { TextButton({ confirm = null }, enabled = !action.busy) { Text("取消") } })
-    }
+    if (confirm != null) AlertDialog(onDismissRequest = { if (!action.busy) confirm = null }, title = { Text("拒绝这份草案？") },
+        text = { Text(draft.text("title")); ActionStatus(action) },
+        confirmButton = { TextButton({ scope.launch { action.run {
+            draft = vm.agent.request("drafts/${draft.text("id")}/reject", "POST", jsonBody("version" to draft.number("version")))
+            updated(draft); confirm = null; vm.agent.refreshInbox()
+        } } }, enabled = !action.busy, modifier = Modifier.testTag("draft-confirm-reject")) { Text("确认拒绝") } },
+        dismissButton = { TextButton({ confirm = null }, enabled = !action.busy) { Text("取消") } })
 }
 
 @Composable private fun AgentChat(vm: MusicViewModel, openDraft: (String) -> Unit) {
@@ -223,7 +226,7 @@ internal fun displayValue(value: com.google.gson.JsonElement?): String = when { 
                 TextButton({ showSummary = !showSummary }) { Text("已压缩较早对话 · 查看上下文摘要") }
                 if (showSummary) { Text(summary.text("summary"), style = MaterialTheme.typography.bodySmall); TextButton({ scope.launch { action.run { val id = conversation!!.text("id"); vm.agent.request("conversations/$id/summary", "DELETE"); conversation = vm.agent.request("conversations/$id") } } }, enabled = !action.busy) { Text("清除摘要") } }
             } }
-            if (conversation == null) item { AgentEmpty("试试“把我很久没听的收藏整理成歌单”。助手会先生成草案，等你确认。未配置 AI 时仍可本地找歌。") }
+            if (conversation == null) item { AgentEmpty("试试“把我很久没听的收藏整理成歌单”。助手会按你的整理方式生成草案或应用。未配置 AI 时仍可本地找歌。") }
             items(conversation?.objects("messages") ?: emptyList(), key = { it.text("id") }) { message ->
                 AgentCard { Text(if (message.text("role") == "user") "你" else "野弦", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary); if (message.flag("partial")) Text("正在生成 · 内容尚未完成", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant); SelectionContainer { if (message.text("role") == "assistant") AssistantMarkdown(message.text("content")) else Text(message.text("content")) }; message.objects("sources").forEach { source ->
                     source.text("url").takeIf { it.startsWith("https://") }?.let { url -> TextButton({ runCatching { links.openUri(url) }.onFailure { action.message = "无法打开来源。" } }) { Text("来源：${source.text("title")}") } }
@@ -408,14 +411,14 @@ internal fun connectionBudget(connection: JsonObject): String {
                     style = MaterialTheme.typography.bodySmall,
                 )
                 OutlinedTextField(maxCalls, { maxCalls = it.filter(Char::isDigit) }, label = { Text("最多模型调用次数") }, singleLine = true)
-                Text(if (schedule) "定时巡检仅使用已授权自动使用的连接，受每日预算约束。结果先生成草案。" else "点击开始仅授权本次 AI 巡检，可能产生模型费用，受调用上限与每日预算约束。结果先生成草案。", style = MaterialTheme.typography.bodySmall)
+                Text(if (schedule) "定时巡检仅使用已授权自动使用的连接，受每日预算约束。结果按整理设置审核或应用。" else "点击开始仅授权本次 AI 巡检，可能产生模型费用，受调用上限与每日预算约束。结果按整理设置审核或应用。", style = MaterialTheme.typography.bodySmall)
             }
             if (schedule) {
                 OutlinedTextField(hours, { hours = it.filter(Char::isDigit) }, label = { Text("间隔小时（1–720）") }, singleLine = true)
                 OutlinedTextField(timezone, { timezone = it }, label = { Text("时区") }, singleLine = true)
                 Row(verticalAlignment = Alignment.CenterVertically) { Text("启用计划", Modifier.weight(1f)); Switch(enabled, { enabled = it }) }
             }
-            Text("检查和草案不会改动音乐文件；应用仍需你批准。", style = MaterialTheme.typography.bodySmall)
+            Text("应用方式由你的整理设置决定；检查不会改动音乐文件。", style = MaterialTheme.typography.bodySmall)
             ActionStatus(action)
         }
     }, confirmButton = { TextButton({ scope.launch { action.run {
@@ -444,6 +447,10 @@ internal fun connectionBudget(connection: JsonObject): String {
     suspend fun load() { connections = vm.agent.all("connections") }
     LaunchedEffect(Unit) { action.run { load() }; if (action.message == "已完成") action.message = null }
     LazyColumn(Modifier.fillMaxSize().testTag("agent-connections"), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        item { var expanded by remember { mutableStateOf(false) }; AgentCard {
+            TextButton({ expanded = !expanded }) { Text(if (expanded) "收起整理方式" else "整理方式") }
+            if (expanded) AgentApplicationPolicy(vm)
+        } }
         item { Row(verticalAlignment = Alignment.CenterVertically) { Text("你的模型连接", Modifier.weight(1f), fontWeight = FontWeight.Medium); TextButton({ creating = true }) { Text("添加连接") }; IconButton({ scope.launch { action.run { load() } } }, enabled = !action.busy) { Icon(Icons.Default.Refresh, "刷新连接") } }; ActionStatus(action) }
         item { Text("个人连接仅本人使用；共享实例连接由管理员授权。密钥只保存在服务端。", style = MaterialTheme.typography.bodySmall) }
         items(connections, key = { it.text("id") }) { connection -> AgentCard {

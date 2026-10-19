@@ -8,6 +8,7 @@ from uuid import uuid4
 from fastapi import HTTPException
 
 from wildstring.agent_ai import Assistant
+from wildstring.agent_application import Application
 from wildstring.agent_automation import Automation
 from wildstring.agent_common import (
     TOOLS,
@@ -25,6 +26,7 @@ from wildstring.agent_music_models import ADMIN_TOOLS, NETWORK_TOOLS
 from wildstring.agent_music_models import DEFINITIONS as MUSIC_TOOLS
 from wildstring.agent_notifications import Notifications
 from wildstring.agent_research import Research
+from wildstring.agent_review import Review
 from wildstring.library.edits import MetadataEditor, MetadataUpdate
 from wildstring.library.playlists import PlaylistStore
 from wildstring.library.repository import now
@@ -343,9 +345,24 @@ class Core:
             "overrides": body.overrides.model_dump(exclude_unset=True),
         }, record["effective"]
 
-    def create_draft(self, actor, body, trace_id=None):
+    def create_draft(
+        self,
+        actor,
+        body,
+        trace_id=None,
+        *,
+        auto_apply=True,
+        application_key=None,
+        notify_pending=True,
+    ):
         actor.require("drafts:write")
-        if body.kind == "cover" and set(body.payload) - {"suggestion_id", "metadata_version"}:
+        if body.kind == "cover" and set(body.payload) - {
+            "suggestion_id",
+            "metadata_version",
+            "targets",
+        }:
+            raise HTTPException(422, "cover_snapshot_server_owned")
+        if body.kind == "metadata_batch" and "cover_snapshot" in body.payload:
             raise HTTPException(422, "cover_snapshot_server_owned")
         payload, before = self.check_draft_payload(actor, body.kind, body.payload)
         from wildstring.diagnostics import trace_id as current_trace
@@ -355,7 +372,7 @@ class Core:
         with self.database.connect(write=True) as connection:
             connection.execute("BEGIN IMMEDIATE")
             connection.execute(
-                "INSERT INTO agent_drafts(id,user_id,library_id,kind,title,payload,evidence,before_values,created_at,updated_at,trace_id) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO agent_drafts(id,user_id,library_id,kind,title,payload,evidence,before_values,created_at,updated_at,trace_id,idempotency_key) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     identity,
                     actor.user_id,
@@ -368,19 +385,29 @@ class Core:
                     now(),
                     now(),
                     trace_id,
+                    application_key,
                 ),
             )
-            self.emit(
-                connection,
-                actor.user_id,
-                "draft.pending",
-                f"draft:{identity}:1",
-                "草案待确认",
-                body.title,
-                draft_id=identity,
-                trace_id=trace_id,
-            )
-        return self.draft(actor, identity)
+        result = (
+            self.maybe_apply_created_draft(actor, identity)
+            if auto_apply
+            else self.draft(actor, identity)
+        )
+        if result["status"] == "pending" and notify_pending:
+            with self.database.connect(write=True) as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                if self.draft(actor, identity, connection)["status"] == "pending":
+                    self.emit(
+                        connection,
+                        actor.user_id,
+                        "draft.pending",
+                        f"draft:{identity}:1",
+                        "草案待确认",
+                        body.title,
+                        draft_id=identity,
+                        trace_id=trace_id,
+                    )
+        return result
 
     def draft(self, actor, identity, connection=None):
         if connection is None:
@@ -424,7 +451,14 @@ class Core:
         if (
             existing["kind"] == "cover"
             and body.payload is not None
-            and set(body.payload) - {"suggestion_id", "metadata_version"}
+            and set(body.payload) - {"suggestion_id", "metadata_version", "targets"}
+            and body.payload != existing["payload"]
+        ):
+            raise HTTPException(422, "cover_snapshot_server_owned")
+        if (
+            existing["kind"] == "metadata_batch"
+            and body.payload is not None
+            and "cover_snapshot" in body.payload
             and body.payload != existing["payload"]
         ):
             raise HTTPException(422, "cover_snapshot_server_owned")
@@ -439,7 +473,7 @@ class Core:
             if existing["status"] == "applied" or existing["version"] != body.version:
                 raise HTTPException(409, "draft_version_conflict")
             connection.execute(
-                "UPDATE agent_drafts SET payload=?,before_values=?,title=?,evidence=?,version=version+1,status='pending',approved_version=NULL,approved_by=NULL,updated_at=? WHERE id=?",
+                "UPDATE agent_drafts SET payload=?,before_values=?,title=?,evidence=?,version=version+1,status='pending',approved_version=NULL,approved_by=NULL,result=NULL,updated_at=? WHERE id=?",
                 (
                     encoded(payload),
                     encoded(before),
@@ -480,28 +514,46 @@ class Core:
             )
         return self.draft(actor, identity)
 
-    def apply_draft(self, actor, identity, body):
+    def apply_draft(self, actor, identity, body, *, accept=False):
+        actor = self.refresh_actor(actor)
         actor.require("drafts:apply")
         try:
             with self.database.connect(write=True) as connection:
                 connection.execute("BEGIN IMMEDIATE")
+                self.check_application_actor(actor, connection)
                 record = self.draft(actor, identity, connection)
                 if record["kind"] != "playlist" and actor.role != "admin":
                     raise HTTPException(403, "admin_required")
                 raw = connection.execute(
                     "SELECT * FROM agent_drafts WHERE id=?", (identity,)
                 ).fetchone()
+                if body.version != record["version"]:
+                    raise HTTPException(409, "draft_version_conflict")
                 if record["status"] == "applied":
                     if raw["idempotency_key"] != body.idempotency_key:
                         raise HTTPException(409, "draft_already_applied")
                     return record
-                if (
+                automatic = not accept and self.automatic_application_allowed(
+                    actor, record, connection
+                )
+                if accept or automatic:
+                    if record["status"] not in {"pending", "approved"}:
+                        raise HTTPException(409, "draft_approval_required")
+                    if (
+                        accept
+                        and record["kind"] in {"cover", "metadata_batch"}
+                        and body.preview_digest != record["preview_digest"]
+                    ):
+                        raise HTTPException(409, "draft_preview_required")
+                    connection.execute(
+                        "UPDATE agent_drafts SET status='approved',approved_version=?,approved_by=? WHERE id=?",
+                        (record["version"], actor.user_id, identity),
+                    )
+                elif (
                     record["status"] != "approved"
                     or record["approved_version"] != record["version"]
                 ):
                     raise HTTPException(409, "draft_approval_required")
-                if body.version != record["version"]:
-                    raise HTTPException(409, "draft_version_conflict")
                 payload = record["payload"]
                 if record["kind"] == "playlist":
                     result = self.apply_playlist(connection, actor, payload)
@@ -536,6 +588,9 @@ class Core:
                         "track_id": payload["track_id"],
                         "metadata_version": update.version + 1,
                     }
+                result["application_mode"] = "automatic" if automatic else "manual"
+                if automatic:
+                    result["policy_version"] = self.application_policy(actor, connection)["version"]
                 object_ids = result.get("track_ids") or [
                     result.get("playlist_id", result.get("track_id", result.get("item_id")))
                 ]
@@ -743,6 +798,11 @@ class Core:
             return tracks
         if name == "inspect_library":
             return self.inspect(actor, arguments.get("track_ids"), limit)
+        if name == "get_application_policy":
+            actor.require("drafts:write")
+            if arguments:
+                raise HTTPException(422, "agent_invalid_input")
+            return self.application_policy(actor)
         if name == "create_draft":
             return self.create_draft(actor, validate(DraftCreate, arguments))
         if name == "get_draft":
@@ -767,7 +827,7 @@ class Core:
         return self.notifications(actor, limit=limit, offset=offset)
 
 
-class AgentPlatform(Core, Notifications, Automation, Assistant, Research):
+class AgentPlatform(Core, Application, Review, Notifications, Automation, Assistant, Research):
     def __init__(self, repository, auth, transport=None):
         import threading
 

@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 import { login, section } from './helpers';
 
 for (const kind of ['intake', 'lyrics']) {
-  test(`MCP ${kind} 草案展示具体差异、来源且批准后再应用`, async ({ page }, info) => {
+  test(`MCP ${kind} 草案展示具体差异、来源且接受即应用`, async ({ page }, info) => {
     await login(page);
     let status = 'pending';
     let applications = 0;
@@ -54,8 +54,7 @@ for (const kind of ['intake', 'lyrics']) {
     }
     await page.route('**/api/v1/agent/drafts**', async (route) => {
       const path = new URL(route.request().url()).pathname;
-      if (path.endsWith('/approve')) status = 'approved';
-      if (path.endsWith('/apply')) {
+      if (path.endsWith('/accept')) {
         applications++;
         status = 'applied';
       }
@@ -71,9 +70,6 @@ for (const kind of ['intake', 'lyrics']) {
     await expect(detail).toContainText(kind === 'intake' ? 'Rock/CD01/01.flac' : '双语逐字动态');
     await expect(detail).toContainText(kind === 'intake' ? '合成专辑' : '合成译文');
     expect(applications).toBe(0);
-    await detail.getByRole('button', { name: '批准当前版本', exact: true }).click();
-    await expect(detail.getByRole('button', { name: '应用已批准草案', exact: true })).toBeVisible();
-    expect(applications).toBe(0);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
       true,
     );
@@ -81,7 +77,7 @@ for (const kind of ['intake', 'lyrics']) {
       path: `../../artifacts/mcp-${kind}-${info.project.name}.png`,
       fullPage: true,
     });
-    await detail.getByRole('button', { name: '应用已批准草案', exact: true }).click();
+    await detail.getByRole('button', { name: '接受并应用', exact: true }).click();
     await expect(detail).toContainText('此版本已应用');
     expect(applications).toBe(1);
   });

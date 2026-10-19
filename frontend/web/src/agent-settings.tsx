@@ -526,7 +526,7 @@ const scopes: Record<string, string> = {
   'web:search': '使用我的联网检索与预算（需读取曲库权限）',
   'personal:read': '读取我的歌单与历史',
   'drafts:write': '创建和修改草案',
-  'drafts:apply': '应用已批准草案',
+  'drafts:apply': '应用草案（遵循我的整理方式）',
   'tasks:write': '提交和管理巡检',
   'diagnostics:read': '读取系统诊断（管理员）',
   'notifications:read': '读取我的通知',

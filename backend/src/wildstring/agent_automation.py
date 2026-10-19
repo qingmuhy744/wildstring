@@ -1,4 +1,4 @@
-"""SQLite leases and incremental read-only inspection; approved changes are never automatic."""
+"""SQLite leases and incremental read-only inspection; application follows user-owned policy."""
 
 import json
 import threading
@@ -384,7 +384,7 @@ class Automation:
                 prompt = (
                     "只解释这些实际规则巡检证据及可行的下一步，按问题类型汇总，回答不超过600字，不逐曲重复正常项。"
                     "统计覆盖整个巡检，items只是最多20首异常样本；未列出的歌曲不能视为已完成AI考证。"
-                    "不要编造音乐事实或把缺失字段猜成已知。需要修改时仅生成待确认草案。\n"
+                    "不要编造音乐事实或把缺失字段猜成已知。需要修改时通过 create_draft，是否应用以返回 status 为准。\n"
                     + encoded(evidence)
                 )
 
@@ -396,7 +396,7 @@ class Automation:
 
                 def save_model_progress(progress):
                     summary = {
-                        "analysis": f"已完成 {progress['tool_calls']} 次受控工具调用，已有草案仍需站内确认。",
+                        "analysis": f"已完成 {progress['tool_calls']} 次受控工具调用，请查看草案及实际应用状态。",
                         "draft_ids": progress["draft_ids"],
                         "partial": True,
                     }

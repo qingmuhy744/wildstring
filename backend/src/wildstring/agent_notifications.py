@@ -24,9 +24,12 @@ class Notifications:
         return json.loads(row[0]) if row else NotificationPreferences().model_dump()
 
     def set_preferences(self, actor, body):
-        current = self.preferences(actor)
-        current.update(body.model_dump())
         with self.database.connect(write=True) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                "SELECT value FROM agent_preferences WHERE user_id=?", (actor.user_id,)
+            ).fetchone()
+            current = (json.loads(row[0]) if row else {}) | body.model_dump()
             connection.execute(
                 "INSERT INTO agent_preferences VALUES (?,?) ON CONFLICT(user_id) DO UPDATE SET value=excluded.value",
                 (actor.user_id, encoded(current)),
@@ -477,7 +480,10 @@ class Notifications:
             if event["task_id"]:
                 text += f"\n任务：{event['task_id']}"
             if event["draft_id"]:
-                text += f"\n草案：{event['draft_id']}（请在站内查看并确认）"
+                hint = (
+                    "请在站内查看并确认" if event["kind"] == "draft.pending" else "请在站内查看结果"
+                )
+                text += f"\n草案：{event['draft_id']}（{hint}）"
             public_url = connection.execute(
                 "SELECT public_url FROM provider_settings WHERE id=1"
             ).fetchone()[0]

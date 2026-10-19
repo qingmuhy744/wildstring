@@ -104,7 +104,9 @@ def test_official_stdio_discovery_call_resource_prompt_and_revocation():
                 arbitrary = await client.call_tool("delete_files", {})
                 assert arbitrary.is_error
                 usage = await client.read_resource("wildstring://usage")
-                assert "human approves" in usage.contents[0].text
+                assert "manual mode requires" in usage.contents[0].text
+                assert "automatic mode applies only" in usage.contents[0].text
+                assert "Tools cannot change" in usage.contents[0].text
                 prompts = await client.list_prompts()
                 assert prompts.prompts[0].name == "inspect-library"
                 prompt = await client.get_prompt("inspect-library")
