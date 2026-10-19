@@ -49,7 +49,7 @@ internal val playbackStyles = listOf("cover" to "封面", "vinyl" to "黑胶", "
     companion object { val Saver = Saver<PlaybackRotation, Float>({ it.angle }, { PlaybackRotation(it) }) }
 }
 
-@Composable private fun motionAllowed(): Boolean {
+@Composable internal fun playbackMotionAllowed(): Boolean {
     val context = LocalContext.current
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     var foreground by remember(lifecycle) { mutableStateOf(lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) }
@@ -71,7 +71,7 @@ internal val playbackStyles = listOf("cover" to "封面", "vinyl" to "黑胶", "
 
 @Composable internal fun PlaybackVisual(vm: MusicViewModel, track: Track, style: String, playing: Boolean,
     visible: Boolean, progress: Float, phase: PlaybackRotation, modifier: Modifier, onArtwork: () -> Unit, onLyrics: () -> Unit) {
-    val moving = playing && visible && style != "cover" && motionAllowed()
+    val moving = playing && visible && style != "cover" && playbackMotionAllowed()
     LaunchedEffect(moving) {
         if (!moving) return@LaunchedEffect
         var previous = 0L

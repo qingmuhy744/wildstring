@@ -2,6 +2,7 @@
 package com.wildstring.app.ui
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.*
@@ -18,6 +19,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -101,13 +104,20 @@ internal fun recommendationIssue(code: String): String = when {
             TextButton({ scope.launch { action.run { saveRecommendations(vm, "每日推荐 ${daily?.date.orEmpty()}", entries); action.message = "已保存为歌单" } } }, enabled = !action.busy && entries.isNotEmpty()) { Text("保存歌单") }
         } }
         items(entries, key = { it.track.id }) { item ->
+            val active = current.current?.id == item.track.id
             Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).testTag("daily-track-${item.track.id}")
+                .clip(RoundedCornerShape(10.dp))
+                .background(if (active) MaterialTheme.colorScheme.primary.copy(alpha = .08f) else androidx.compose.ui.graphics.Color.Transparent)
+                .semantics { selected = active }
                 .combinedClickable(onClick = { vm.play(entries.map { it.track }, entries.indexOf(item)) }, onLongClick = { trackMenu = item.track.id }),
                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text((entries.indexOf(item) + 1).toString().padStart(2, '0'), Modifier.width(24.dp), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Box(Modifier.width(24.dp), contentAlignment = Alignment.Center) {
+                    if (active) PlaybackIndicator(current.playing, current.buffering)
+                    else Text((entries.indexOf(item) + 1).toString().padStart(2, '0'), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
                 Cover(vm, item.track.id.takeIf { item.track.hasCover }, item.track.title, Modifier.size(44.dp).clip(RoundedCornerShape(8.dp)))
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(item.track.title, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyLarge)
+                    Text(item.track.title, color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyLarge)
                     Text(listOfNotNull(item.track.artist, item.track.album?.takeIf(String::isNotBlank)).joinToString(" · "),
                         maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }

@@ -1,0 +1,65 @@
+.playback-indicator {
+  display: inline-flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 2px;
+  width: 18px;
+  height: 18px;
+  padding-block: 2px;
+  box-sizing: border-box;
+  flex-shrink: 0;
+  color: var(--accent);
+  vertical-align: middle;
+}
+.playback-indicator > span {
+  width: 3px;
+  height: 6px;
+  border-radius: 2px;
+  background: currentColor;
+  transform-origin: center bottom;
+}
+.playback-indicator[data-state='playing'] > span:nth-child(1) {
+  height: 10px;
+}
+.playback-indicator[data-state='playing'] > span:nth-child(2) {
+  height: 14px;
+}
+.playback-indicator[data-state='playing'] > span:nth-child(3) {
+  height: 12px;
+}
+.playback-indicator[data-animate='true'] > span {
+  animation: playback-meter 1.1s ease-in-out infinite alternate;
+}
+.playback-indicator[data-animate='true'] > span:nth-child(2) {
+  animation-duration: 0.8s;
+  animation-delay: -0.4s;
+}
+.playback-indicator[data-animate='true'] > span:nth-child(3) {
+  animation-duration: 1.3s;
+  animation-delay: -0.8s;
+}
+@keyframes playback-meter {
+  0% {
+    transform: scaleY(0.35);
+  }
+  55% {
+    transform: scaleY(1);
+  }
+  100% {
+    transform: scaleY(0.6);
+  }
+}
+.track-list .track-row.current,
+.music-discovery .daily-track.is-current {
+  background: var(--workspace-selected);
+  box-shadow: inset 3px 0 var(--accent);
+  border-radius: 8px;
+}
+.discovery-track .track-title strong > .playback-indicator {
+  margin-right: 7px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .playback-indicator[data-animate='true'] > span {
+    animation: none;
+  }
+}

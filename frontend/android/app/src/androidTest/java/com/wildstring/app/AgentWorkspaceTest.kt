@@ -29,6 +29,7 @@ class AgentWorkspaceTest {
         @Volatile var connections = "[]"
         @Volatile var tasks = "[]"
         @Volatile var schedulesGate: CountDownLatch? = null
+        @Volatile var draftActionResponseDelayMs = 0L
         @Volatile var history = "[]"
         @Volatile var rejectHistoryDelete = false
         @Volatile var memoryContent = ""
@@ -74,8 +75,8 @@ class AgentWorkspaceTest {
                 if (path == "/api/v1/agent/conversations" && request.method == "POST") return@synchronized json("""{"id":"conversation-one","title":"新对话","messages":[],"runs":[]}""")
                 if (path.endsWith("/conversation-one/messages")) return@synchronized json("""{"id":"conversation-one","messages":[{"id":"message-user","role":"user","content":"${body.text("content")}"},{"id":"message-ai","role":"assistant","content":"已整理为草案，请查看后确认。"}],"runs":[{"id":"run-one","status":"succeeded","draft_ids":["draft-one"],"trace_id":"$trace"}]}""")
                 if (path == "/api/v1/agent/drafts") return@synchronized json("""{"items":[${draft()}],"total":1,"limit":100,"offset":0}""")
-                if (path.endsWith("/draft-one/approve")) { assertEquals(version.toLong(), body.number("version")); status = "approved"; version++; return@synchronized json(draft()) }
-                if (path.endsWith("/draft-one/apply")) { assertEquals("approved", status); assertEquals(version.toLong(), body.number("version")); assertTrue(body.text("idempotency_key").isNotBlank()); status = "applied"; version++; return@synchronized json(draft()) }
+                if (path.endsWith("/draft-one/approve")) { assertEquals(version.toLong(), body.number("version")); status = "approved"; version++; return@synchronized json(draft()).setBodyDelay(draftActionResponseDelayMs, TimeUnit.MILLISECONDS) }
+                if (path.endsWith("/draft-one/apply")) { assertEquals("approved", status); assertEquals(version.toLong(), body.number("version")); assertTrue(body.text("idempotency_key").isNotBlank()); status = "applied"; version++; return@synchronized json(draft()).setBodyDelay(draftActionResponseDelayMs, TimeUnit.MILLISECONDS) }
                 if (path.endsWith("/draft-one")) return@synchronized json(draft())
                 if (path.endsWith("/song-a") || path.endsWith("/song-b")) return@synchronized json("""{"id":"${path.substringAfterLast('/')}","title":"${if (path.endsWith("song-a")) "合成歌曲甲" else "合成歌曲乙"}","artists":["合成艺人"],"duration_ms":12000,"format":"mp3"}""")
                 if (path == "/api/v1/agent/tasks" && request.method == "POST") return@synchronized json("""{"id":"task-one","status":"queued"}""")
@@ -272,6 +273,7 @@ class AgentWorkspaceTest {
     @Test fun mobileAssistantNotificationAndConcreteApprovalRoundTrip() {
         val vm = vm()
         Fixture().use { fixture -> try {
+            fixture.draftActionResponseDelayMs = 350
             connect(vm, fixture)
             compose.onNodeWithContentDescription("设置").performClick()
             compose.onNodeWithText("野弦助手 / 通知与草案").performScrollTo().performClick()
@@ -308,11 +310,18 @@ class AgentWorkspaceTest {
             assertEquals("pending", fixture.status)
             compose.onNodeWithTag("draft-confirm").performClick()
             compose.onNodeWithTag("draft-confirm-approve").performClick()
-            compose.waitUntil(15_000) { fixture.status == "approved" }
+            // The server mutates before its delayed HTTP body reaches the app.
+            // Wait for the visible result and the next action to become usable.
+            compose.waitUntil(15_000) {
+                compose.onAllNodesWithText("已批准，尚未应用").fetchSemanticsNodes().isNotEmpty() &&
+                    compose.onAllNodes(hasTestTag("draft-confirm") and isEnabled()).fetchSemanticsNodes().isNotEmpty()
+            }
+            assertEquals("approved", fixture.status)
             compose.onAllNodesWithText("已批准，尚未应用").onFirst().assertExists()
             compose.onNodeWithTag("draft-confirm").performClick()
             compose.onNodeWithTag("draft-confirm-apply").performClick()
-            compose.waitUntil(15_000) { fixture.status == "applied" }
+            compose.waitUntil(15_000) { compose.onAllNodesWithText("已应用").fetchSemanticsNodes().isNotEmpty() }
+            assertEquals("applied", fixture.status)
             compose.onAllNodesWithText("已应用").onFirst().assertExists()
             assertEquals(1, fixture.requests.count { it.first.endsWith("/draft-one/apply") })
             capture("agent-draft-phone.png")

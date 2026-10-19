@@ -35,6 +35,7 @@ import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -49,7 +50,7 @@ internal fun QueuePanel(vm: MusicViewModel, state: MusicState, modifier: Modifie
     QueueList(state.queue, state.entryId, modifier,
         onPlay = { feedback(TactileKind.Tap); vm.playQueue(it.index) },
         onRemove = { feedback(TactileKind.Tap); vm.removeQueue(it.index) },
-        onMove = vm::moveQueue, onHaptic = feedback)
+        onMove = vm::moveQueue, onHaptic = feedback, playing = state.playing, buffering = state.buffering)
 }
 
 /** Only the handle starts a reorder; the rest of the row keeps ordinary tap/scroll behavior. */
@@ -58,6 +59,7 @@ internal fun QueueList(
     rows: List<QueueRow>, currentEntry: String?, modifier: Modifier = Modifier,
     onPlay: (QueueRow) -> Unit, onRemove: (QueueRow) -> Unit,
     onMove: (String, Int) -> Unit, onHaptic: (TactileKind) -> Unit, allowRemove: Boolean = true, title: String = "播放队列 · ${rows.size}",
+    playing: Boolean = false, buffering: Boolean = false,
 ) {
     val list = rememberLazyListState()
     val drag = remember(list) { QueueDragState(list) }
@@ -148,11 +150,16 @@ internal fun QueueList(
                             shape = RoundedCornerShape(12.dp)
                         }
                         .clip(RoundedCornerShape(12.dp))
-                        .background(if (active) MaterialTheme.colorScheme.surfaceContainerHigh else androidx.compose.ui.graphics.Color.Transparent)
+                        .background(if (active) MaterialTheme.colorScheme.surfaceContainerHigh else if (row.entryId == currentEntry) MaterialTheme.colorScheme.primary.copy(alpha = .08f) else androidx.compose.ui.graphics.Color.Transparent)
+                        .semantics { selected = row.entryId == currentEntry }
                         .testTag("queue-row-${row.entryId}"),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Column(Modifier.weight(1f).clickable(enabled = drag.entryId == null) { onPlay(row) }.padding(vertical = 12.dp, horizontal = 16.dp)) {
+                    Box(Modifier.padding(start = 12.dp).width(28.dp), contentAlignment = Alignment.Center) {
+                        if (row.entryId == currentEntry) PlaybackIndicator(playing, buffering)
+                        else Text((index + 1).toString(), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
+                    }
+                    Column(Modifier.weight(1f).clickable(enabled = drag.entryId == null) { onPlay(row) }.padding(vertical = 12.dp, horizontal = 8.dp)) {
                         Text(row.title, color = if (row.entryId == currentEntry) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Text(row.artist, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }

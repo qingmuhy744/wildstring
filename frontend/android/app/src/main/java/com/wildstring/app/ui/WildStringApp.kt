@@ -43,6 +43,8 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.KeyboardType
@@ -433,6 +435,7 @@ internal fun Cover(vm: MusicViewModel, id: String?, title: String, modifier: Mod
 }
 @Composable
 internal fun TrackRow(vm: MusicViewModel, track: Track, state: MusicState, index: Int, play: () -> Unit, actions: () -> Unit) {
+    val current = state.current?.id == track.id
     val album = state.collection == "albums" || state.albumFilter != null
     val size = LocalSongListSize.current
     val metric = when (state.sort) {
@@ -441,13 +444,22 @@ internal fun TrackRow(vm: MusicViewModel, track: Track, state: MusicState, index
         "last_played_at" -> track.lastPlayedAt?.take(10)
         else -> null
     }
-    Row(Modifier.fillMaxWidth().heightIn(min = size.rowDp.dp).testTag("catalog-item-$index").clickable(onClick = tactile(play))
+    Row(Modifier.fillMaxWidth().heightIn(min = size.rowDp.dp).testTag("catalog-item-$index")
+        .background(if (current) MaterialTheme.colorScheme.primary.copy(alpha = .08f) else Color.Transparent)
+        .semantics { selected = current }.clickable(onClick = tactile(play))
         .padding(horizontal = 16.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         if (album) Box(Modifier.width(30.dp), contentAlignment = Alignment.Center) {
-            Text(if ((track.discNumber ?: 1) > 1 && track.trackNumber != null) "${track.discNumber}-${track.trackNumber}" else track.trackNumber?.toString() ?: (index + 1).toString(), color = Muted, style = MaterialTheme.typography.bodySmall, fontSize = size.artistSp.sp, lineHeight = size.artistLineSp.sp)
-        } else Cover(vm, track.id.takeIf { track.hasCover }, track.title, Modifier.size(size.coverDp.dp).testTag("track-cover-$index"))
+            if (current) PlaybackIndicator(state.playing, state.buffering)
+            else Text(if ((track.discNumber ?: 1) > 1 && track.trackNumber != null) "${track.discNumber}-${track.trackNumber}" else track.trackNumber?.toString() ?: (index + 1).toString(), color = Muted, style = MaterialTheme.typography.bodySmall, fontSize = size.artistSp.sp, lineHeight = size.artistLineSp.sp)
+        } else Box(Modifier.size(size.coverDp.dp).clip(RoundedCornerShape(10.dp)).testTag("track-cover-$index"), contentAlignment = Alignment.Center) {
+            Cover(vm, track.id.takeIf { track.hasCover }, track.title, Modifier.fillMaxSize())
+            if (current) {
+                Box(Modifier.matchParentSize().background(Color.Black.copy(alpha = .46f)))
+                PlaybackIndicator(state.playing, state.buffering, color = Color.White)
+            }
+        }
         Column(Modifier.weight(1f).padding(start = 14.dp)) {
-            Text(track.title, Modifier.testTag("track-title-$index"), style = MaterialTheme.typography.bodyLarge, fontSize = size.titleSp.sp, lineHeight = size.titleLineSp.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(track.title, Modifier.testTag("track-title-$index"), color = if (current) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.bodyLarge, fontSize = size.titleSp.sp, lineHeight = size.titleLineSp.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(listOfNotNull(track.artist, metric).joinToString(" · "), Modifier.testTag("track-subtitle-$index"), color = Muted,
                 style = MaterialTheme.typography.bodySmall, fontSize = size.artistSp.sp, lineHeight = size.artistLineSp.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
