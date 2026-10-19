@@ -7,7 +7,7 @@ public struct Playlist: Decodable, Equatable, Hashable, Sendable, Identifiable {
     public let version: Int
     public let trackCount: Int
     public let durationMs: Int64
-    public let coverTrackId: String
+    public let coverTrackId: String?
 
     enum CodingKeys: String, CodingKey {
         case id, name, kind, version
