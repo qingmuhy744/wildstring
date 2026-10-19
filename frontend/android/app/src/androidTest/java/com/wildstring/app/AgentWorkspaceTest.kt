@@ -1,6 +1,7 @@
 package com.wildstring.app
 
 import androidx.compose.ui.test.*
+import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.lifecycle.ViewModelProvider
 import androidx.test.platform.app.InstrumentationRegistry
@@ -52,7 +53,7 @@ class AgentWorkspaceTest {
                 if (path.endsWith("/auth/login")) return@synchronized json("{}").setHeader("Set-Cookie", "wildstring_session=agent-alice; Path=/; Max-Age=3600")
                 if (path == "/api/v1/agent/application-policy") {
                     if (request.method == "PUT") { assertEquals(applicationVersion.toLong(), body.number("version")); applicationMode = body.text("mode"); applicationKinds = body.getAsJsonArray("kinds").map { it.asString }.toSet(); applicationVersion++ }
-                    return@synchronized json(jsonBody("mode" to applicationMode, "kinds" to jsonStrings(applicationKinds.toList()), "version" to applicationVersion, "allowed_kinds" to jsonStrings(listOf("playlist", "cover"))).toString())
+                    return@synchronized json(jsonBody("mode" to applicationMode, "kinds" to jsonStrings(applicationKinds.toList()), "version" to applicationVersion, "allowed_kinds" to jsonStrings(listOf("playlist", "cover"))).toString()).setBodyDelay(500, java.util.concurrent.TimeUnit.MILLISECONDS)
                 }
                 if (path == "/api/v1/agent/search-settings") {
                     if (request.method == "PUT") searchEnabled = body.flag("enabled")
@@ -124,7 +125,7 @@ class AgentWorkspaceTest {
             assertEquals("automatic", fixture.applicationMode); assertEquals(setOf("playlist"), fixture.applicationKinds)
             compose.onNodeWithText("收起整理方式").performScrollTo().performClick()
             compose.onNodeWithText("整理方式").performScrollTo().performClick()
-            compose.waitUntil(15_000) { fixture.requests.count { it.first == "GET /api/v1/agent/application-policy" } >= 2 }
+            compose.waitUntil(15_000) { compose.onAllNodesWithTag("application-mode-automatic").fetchSemanticsNodes().any { it.config.getOrNull(androidx.compose.ui.semantics.SemanticsProperties.Selected) == true } }
             compose.onNodeWithTag("application-mode-automatic").performScrollTo().assertIsSelected()
             compose.onNodeWithTag("application-kind-cover").performScrollTo().assertIsOff()
             capture("agent-application-policy-phone.png")
