@@ -95,7 +95,6 @@ public final class WildstringAudioResourceLoader: NSObject, AVAssetResourceLoade
                     length: Int64(dataRequest.requestedLength)
                 )
                 if Task.isCancelled { return }
-                dataRequest.respond(with: chunk.data)
                 if let info = loadingRequest.contentInformationRequest {
                     Self.fill(
                         info,
@@ -103,6 +102,7 @@ public final class WildstringAudioResourceLoader: NSObject, AVAssetResourceLoade
                         contentType: chunk.contentType
                     )
                 }
+                dataRequest.respond(with: chunk.data)
                 loadingRequest.finishLoading()
             } else if let info = loadingRequest.contentInformationRequest {
                 let probe = try await fetcher.probe(path: path)
@@ -127,11 +127,12 @@ public final class WildstringAudioResourceLoader: NSObject, AVAssetResourceLoade
         totalLength: Int64?,
         contentType: String?
     ) {
+        let mime = contentType ?? "application/octet-stream"
         info.isByteRangeAccessSupported = true
         if let totalLength, totalLength > 0 {
             info.contentLength = totalLength
         }
-        info.contentType = uti(forMimeType: contentType ?? "application/octet-stream")
+        info.contentType = uti(forMimeType: mime)
     }
 }
 
