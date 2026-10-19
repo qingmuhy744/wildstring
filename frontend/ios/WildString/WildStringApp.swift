@@ -21,8 +21,17 @@ struct RootView: View {
             case .connect:
                 ConnectionView(model: model)
             case .connected(let server, let username):
-                ConnectedView(server: server, username: username) {
-                    Task { await model.logout() }
+                if let client = model.client, let playback = model.playback {
+                    LibraryView(
+                        client: client,
+                        playback: playback,
+                        server: server,
+                        username: username,
+                        autoPlayFirst: model.demoAutoPlay,
+                        onLogout: { Task { await model.logout() } }
+                    )
+                } else {
+                    ProgressView()
                 }
             }
         }

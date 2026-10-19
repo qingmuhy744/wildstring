@@ -20,6 +20,8 @@ targets:
     dependencies:
       - package: WildStringKit
         product: CoreNetwork
+      - package: WildStringKit
+        product: CorePlayback
     info:
       path: WildString/Info.plist
       properties:

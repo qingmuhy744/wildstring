@@ -1,4 +1,5 @@
 import CoreNetwork
+import CorePlayback
 import Foundation
 import Observation
 
@@ -18,9 +19,13 @@ final class ConnectionModel {
     var isBusy = false
     var errorMessage: String?
 
+    private(set) var client: WildstringClient?
+    private(set) var playback: PlaybackService?
+    let demoAutoPlay: Bool
+
     private let store: any SessionStore
     private let defaults: UserDefaults
-    private var client: WildstringClient?
+    private let queueStore: any QueueStore
 
     private static let lastServerKey = "lastServerAddress"
 
@@ -30,6 +35,16 @@ final class ConnectionModel {
     ) {
         self.store = store
         self.defaults = defaults
+        if let queueStore = try? SwiftDataQueueStore.makeDefault() {
+            self.queueStore = queueStore
+        } else {
+            self.queueStore = InMemoryQueueStore()
+        }
+        #if DEBUG
+            demoAutoPlay = ProcessInfo.processInfo.environment["WILDSTRING_DEMO_AUTOPLAY"] == "1"
+        #else
+            demoAutoPlay = false
+        #endif
     }
 
     var canSubmit: Bool {
@@ -40,6 +55,24 @@ final class ConnectionModel {
 
     func restore() async {
         guard case .loading = phase else { return }
+        #if DEBUG
+            if let demo = ProcessInfo.processInfo.environment["WILDSTRING_DEMO_SERVER"],
+                !demo.isEmpty
+            {
+                serverText = demo
+                username =
+                    ProcessInfo.processInfo.environment["WILDSTRING_DEMO_USER"] ?? "admin"
+                password =
+                    ProcessInfo.processInfo.environment["WILDSTRING_DEMO_PASSWORD"] ?? ""
+                errorMessage = nil
+                if !password.isEmpty {
+                    await login()
+                } else {
+                    phase = .connect
+                }
+                return
+            }
+        #endif
         guard let saved = defaults.string(forKey: Self.lastServerKey),
             let address = try? makeAddress(saved)
         else {
@@ -55,13 +88,12 @@ final class ConnectionModel {
         do {
             let status = try await client.authStatus()
             if status.authenticated, let user = status.user {
-                self.client = client
-                phase = .connected(server: address.description, username: user.username)
+                await activate(client: client, address: address, username: user.username)
                 return
             }
             await client.clearSession()
         } catch {
-            // Keep the saved address prefilled; the connect screen explains failures on demand.
+            // Keep the saved address prefilled; explain failures when the user retries.
         }
         phase = .connect
     }
@@ -75,11 +107,10 @@ final class ConnectionModel {
             let address = try makeAddress(serverText)
             let client = WildstringClient(server: address, store: store)
             let user = try await client.login(username: username, password: password)
-            self.client = client
             serverText = address.description
             defaults.set(address.description, forKey: Self.lastServerKey)
             password = ""
-            phase = .connected(server: address.description, username: user.username)
+            await activate(client: client, address: address, username: user.username)
         } catch {
             errorMessage = Self.message(for: error)
         }
@@ -89,6 +120,8 @@ final class ConnectionModel {
         guard !isBusy else { return }
         isBusy = true
         defer { isBusy = false }
+        playback?.shutdown()
+        playback = nil
         if let client {
             try? await client.logout()
         }
@@ -97,6 +130,24 @@ final class ConnectionModel {
         password = ""
         errorMessage = nil
         phase = .connect
+    }
+
+    private func activate(
+        client: WildstringClient,
+        address: ServerAddress,
+        username: String
+    ) async {
+        self.client = client
+        let playback = PlaybackService(
+            server: address,
+            store: queueStore,
+            cookieHeader: { [weak client] in
+                await client?.cookieHeaderValue()
+            }
+        )
+        await playback.restore()
+        self.playback = playback
+        phase = .connected(server: address.description, username: username)
     }
 
     private func makeAddress(_ raw: String) throws -> ServerAddress {
