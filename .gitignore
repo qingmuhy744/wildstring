@@ -32,3 +32,9 @@ local.properties
 *.keystore
 *.apk
 *.aab
+
+# iOS
+frontend/ios/*.xcodeproj
+frontend/ios/DerivedData/
+frontend/ios/.build/
+xcuserdata/
