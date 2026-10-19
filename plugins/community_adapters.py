@@ -302,7 +302,7 @@ class KuGouPlugin:
         "酷狗音乐 / KuGouMusicApi",
         "https://github.com/MakcRe/KuGouMusicApi",
         "GPL-3.0-only",
-        version="1.1.2",
+        version="1.1.3",
         request_pacing=True,
         settings=BRIDGE_SETTINGS,
         cover_hosts=("kugou.com",),

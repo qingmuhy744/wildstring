@@ -21,6 +21,11 @@ updates:
       time: "04:15"
       timezone: Asia/Shanghai
     open-pull-requests-limit: 5
+    # Keep Node declarations aligned with the Node 22 runtime in .nvmrc and Docker.
+    # Revisit this exception when upgrading the runtime itself.
+    ignore:
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
     groups:
       npm-minor-patch:
         update-types: [minor, patch]
