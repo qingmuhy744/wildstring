@@ -83,6 +83,19 @@ class Apply(Version):
     idempotency_key: str = Field(min_length=8, max_length=128, pattern=r"^[A-Za-z0-9_.:-]+$")
 
 
+class ApplicationPolicy(Input):
+    mode: Literal["manual", "automatic"] = "manual"
+    kinds: list[Literal["playlist", "metadata", "metadata_batch", "cover", "lyrics", "intake"]] = (
+        Field(max_length=6)
+    )
+    version: int = Field(ge=1)
+
+    @field_validator("kinds")
+    @classmethod
+    def unique_kinds(cls, value):
+        return list(dict.fromkeys(value))
+
+
 class PlaylistPayload(Input):
     name: str = Field(min_length=1, max_length=100)
     track_ids: list[str] = Field(max_length=5000)

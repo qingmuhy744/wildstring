@@ -69,6 +69,19 @@ export function CurationDraftPreview({
   );
   return (
     <div className="batch-draft-preview">
+      {typeof draft.payload.cover_draft_id === 'string' && (
+        <CurationDraftPreview
+          draft={{
+            ...draft,
+            id: draft.payload.cover_draft_id,
+            kind: 'cover',
+            payload: draft.payload.cover_snapshot as Record<string, unknown>,
+            before: draft.before?.cover as Record<string, unknown>,
+          }}
+          fields={fields}
+          onPreviewReady={onPreviewReady}
+        />
+      )}
       <p>{items.length} 首歌曲 · 整批应用，任一版本冲突时整批保留原值。</p>
       {items.map((item) => (
         <details key={item.track_id} open={items.length <= 20}>

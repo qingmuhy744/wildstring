@@ -7,6 +7,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, Res
 
 from wildstring.agent_common import SCOPES, tool_definitions
 from wildstring.agent_models import (
+    ApplicationPolicy,
     Apply,
     AssistantPreferences,
     Connection,
@@ -30,6 +31,7 @@ from wildstring.agent_models import (
     Verify,
     Version,
 )
+from wildstring.agent_review import ReviewAccept
 
 
 def page(items, limit=100, offset=0):
@@ -61,6 +63,8 @@ def agent_router(service):
             "tools": tool_definitions(),
             "features": {
                 "drafts": True,
+                "draft_accept_and_apply": True,
+                "automatic_application": True,
                 "notifications": True,
                 "telegram": True,
                 "inspections": True,
@@ -107,6 +111,44 @@ def agent_router(service):
     def revoke_credential(identity: str, actor: Annotated[object, Depends(session)]):
         return service.revoke_credential(actor, identity)
 
+    @router.get("/application-policy")
+    def application_policy(actor: Annotated[object, Depends(session)]):
+        return service.application_policy(actor)
+
+    @router.put("/application-policy")
+    def save_application_policy(
+        body: ApplicationPolicy, actor: Annotated[object, Depends(session)]
+    ):
+        return service.save_application_policy(actor, body)
+
+    @router.get("/metadata-review/albums")
+    def review_albums(
+        actor: Annotated[object, Depends(session)],
+        limit: int = Query(100, ge=1, le=100),
+        offset: int = Query(0, ge=0, le=1000000),
+    ):
+        return service.review_albums(actor, limit, offset)
+
+    @router.get("/metadata-review")
+    def metadata_review(
+        actor: Annotated[object, Depends(session)],
+        album_id: str | None = Query(None, max_length=128),
+        track_id: str | None = Query(None, max_length=128),
+        limit: int = Query(100, ge=1, le=500),
+        offset: int = Query(0, ge=0, le=1000000),
+    ):
+        return service.review_page(actor, album_id, track_id, limit, offset)
+
+    @router.post("/metadata-review/accept")
+    def accept_review(body: ReviewAccept, actor: Annotated[object, Depends(session)]):
+        return service.accept_metadata_review(actor, body)
+
+    @router.post("/metadata-review/cover")
+    def review_cover(body: DraftCreate, actor: Annotated[object, Depends(session)]):
+        if body.kind != "cover":
+            raise HTTPException(422, "cover_required")
+        return service.create_draft(actor, body, auto_apply=False, notify_pending=False)
+
     @router.get("/drafts")
     def drafts(
         actor: Annotated[object, Depends(session)],
@@ -148,6 +190,10 @@ def agent_router(service):
     @router.patch("/drafts/{identity}")
     def patch_draft(identity: str, body: DraftPatch, actor: Annotated[object, Depends(session)]):
         return service.patch_draft(actor, identity, body)
+
+    @router.post("/drafts/{identity}/accept")
+    def accept(identity: str, body: Apply, actor: Annotated[object, Depends(session)]):
+        return service.accept_draft(actor, identity, body)
 
     @router.post("/drafts/{identity}/approve")
     def approve(identity: str, body: Version, actor: Annotated[object, Depends(session)]):

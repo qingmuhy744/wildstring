@@ -34,6 +34,7 @@ class AgentWorkspaceTest {
         @Volatile var rejectHistoryDelete = false
         @Volatile var memoryContent = ""
         var memoryVersion = 1; var searchEnabled = false
+        var applicationMode = "manual"; var applicationVersion = 1; var applicationKinds = setOf("playlist", "cover")
         var replacementDraft: JsonObject? = null
         val trace = "b".repeat(32)
         fun json(body: String) = MockResponse().setHeader("Content-Type", "application/json").setHeader("X-Wildstring-Trace-Id", trace).setBody(body)
@@ -49,6 +50,10 @@ class AgentWorkspaceTest {
                 if (request.method != "GET" && path.contains("/agent/")) writes.incrementAndGet()
                 if (path.endsWith("/auth/status")) return@synchronized json("""{"configured":true,"authenticated":${request.getHeader("Cookie") != null},"user":{"id":"agent-alice","username":"alice","role":"admin"}}""")
                 if (path.endsWith("/auth/login")) return@synchronized json("{}").setHeader("Set-Cookie", "wildstring_session=agent-alice; Path=/; Max-Age=3600")
+                if (path == "/api/v1/agent/application-policy") {
+                    if (request.method == "PUT") { assertEquals(applicationVersion.toLong(), body.number("version")); applicationMode = body.text("mode"); applicationKinds = body.getAsJsonArray("kinds").map { it.asString }.toSet(); applicationVersion++ }
+                    return@synchronized json(jsonBody("mode" to applicationMode, "kinds" to jsonStrings(applicationKinds.toList()), "version" to applicationVersion, "allowed_kinds" to jsonStrings(listOf("playlist", "cover"))).toString())
+                }
                 if (path == "/api/v1/agent/search-settings") {
                     if (request.method == "PUT") searchEnabled = body.flag("enabled")
                     return@synchronized json("""{"provider":"deepseek","enabled":$searchEnabled,"daily_budget":10,"version":1,"has_api_key":false,"requests_today":0}""")
@@ -79,8 +84,7 @@ class AgentWorkspaceTest {
                 if (path == "/api/v1/agent/conversations" && request.method == "POST") return@synchronized json("""{"id":"conversation-one","title":"新对话","messages":[],"runs":[]}""")
                 if (path.endsWith("/conversation-one/messages")) return@synchronized json("""{"id":"conversation-one","messages":[{"id":"message-user","role":"user","content":"${body.text("content")}"},{"id":"message-ai","role":"assistant","content":"已整理为草案，请查看后确认。"}],"runs":[{"id":"run-one","status":"succeeded","draft_ids":["draft-one"],"trace_id":"$trace"}]}""")
                 if (path == "/api/v1/agent/drafts") return@synchronized json("""{"items":[${draft()}],"total":1,"limit":100,"offset":0}""")
-                if (path.endsWith("/draft-one/approve")) { assertEquals(version.toLong(), body.number("version")); status = "approved"; version++; return@synchronized json(draft()).setBodyDelay(draftActionResponseDelayMs, TimeUnit.MILLISECONDS) }
-                if (path.endsWith("/draft-one/apply")) { assertEquals("approved", status); assertEquals(version.toLong(), body.number("version")); assertTrue(body.text("idempotency_key").isNotBlank()); status = "applied"; version++; return@synchronized json(draft()).setBodyDelay(draftActionResponseDelayMs, TimeUnit.MILLISECONDS) }
+                if (path.endsWith("/draft-one/accept")) { assertEquals(version.toLong(), body.number("version")); assertTrue(body.text("idempotency_key").isNotBlank()); status = "applied"; return@synchronized json(draft()).setBodyDelay(draftActionResponseDelayMs, TimeUnit.MILLISECONDS) }
                 if (path.endsWith("/draft-one")) return@synchronized json(draft())
                 if (path.endsWith("/song-a") || path.endsWith("/song-b")) return@synchronized json("""{"id":"${path.substringAfterLast('/')}","title":"${if (path.endsWith("song-a")) "合成歌曲甲" else "合成歌曲乙"}","artists":["合成艺人"],"duration_ms":12000,"format":"mp3"}""")
                 if (path == "/api/v1/agent/tasks" && request.method == "POST") return@synchronized json("""{"id":"task-one","status":"queued"}""")
@@ -103,6 +107,28 @@ class AgentWorkspaceTest {
         val address = fixture.server.url("/").newBuilder().host("127.0.0.1").build().toString()
         val login = compose.runOnIdle { vm.connect(address, "alice", "synthetic-password", true) }
         compose.waitUntil(20_000) { login.isCompleted && vm.state.value.connected && !vm.state.value.connecting }
+    }
+    @Test fun applicationPolicyCanBeSelectedAndReadBack() {
+        val vm = vm()
+        Fixture().use { fixture -> try {
+            connect(vm, fixture)
+            compose.onNodeWithContentDescription("设置").performClick()
+            compose.onNodeWithText("野弦助手 / 通知与草案").performScrollTo().performClick()
+            compose.onNodeWithTag("agent-tab-connections").performScrollTo().performClick()
+            compose.onNodeWithText("整理方式").performScrollTo().performClick()
+            compose.waitUntil(15_000) { compose.onAllNodesWithTag("application-mode-automatic").fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithTag("application-mode-automatic").performScrollTo().performClick()
+            compose.onNodeWithTag("application-kind-cover").performScrollTo().performClick()
+            compose.onNodeWithText("保存整理方式").performScrollTo().performClick()
+            compose.waitUntil(15_000) { fixture.applicationVersion == 2 }
+            assertEquals("automatic", fixture.applicationMode); assertEquals(setOf("playlist"), fixture.applicationKinds)
+            compose.onNodeWithText("收起整理方式").performScrollTo().performClick()
+            compose.onNodeWithText("整理方式").performScrollTo().performClick()
+            compose.waitUntil(15_000) { fixture.requests.count { it.first == "GET /api/v1/agent/application-policy" } >= 2 }
+            compose.onNodeWithTag("application-mode-automatic").performScrollTo().assertIsSelected()
+            compose.onNodeWithTag("application-kind-cover").performScrollTo().assertIsOff()
+            capture("agent-application-policy-phone.png")
+        } finally { compose.runOnIdle { vm.repository.session.invalidate() } } }
     }
     @Test fun researchSettingsAndExplicitMemoryCanBeSavedEditedAndDeleted() {
         val vm = vm()
@@ -313,21 +339,10 @@ class AgentWorkspaceTest {
             compose.onNodeWithText("从本人收藏挑选", substring = true).assertExists()
             assertEquals("pending", fixture.status)
             compose.onNodeWithTag("draft-confirm").performClick()
-            compose.onNodeWithTag("draft-confirm-approve").performClick()
-            // The server mutates before its delayed HTTP body reaches the app.
-            // Wait for the visible result and the next action to become usable.
-            compose.waitUntil(15_000) {
-                compose.onAllNodesWithText("已批准，尚未应用").fetchSemanticsNodes().isNotEmpty() &&
-                    compose.onAllNodes(hasTestTag("draft-confirm") and isEnabled()).fetchSemanticsNodes().isNotEmpty()
-            }
-            assertEquals("approved", fixture.status)
-            compose.onAllNodesWithText("已批准，尚未应用").onFirst().assertExists()
-            compose.onNodeWithTag("draft-confirm").performClick()
-            compose.onNodeWithTag("draft-confirm-apply").performClick()
             compose.waitUntil(15_000) { compose.onAllNodesWithText("已应用").fetchSemanticsNodes().isNotEmpty() }
             assertEquals("applied", fixture.status)
             compose.onAllNodesWithText("已应用").onFirst().assertExists()
-            assertEquals(1, fixture.requests.count { it.first.endsWith("/draft-one/apply") })
+            assertEquals(1, fixture.requests.count { it.first.endsWith("/draft-one/accept") })
             capture("agent-draft-phone.png")
         } finally { compose.runOnIdle { vm.settings.appearance("system"); vm.repository.session.invalidate() } } }
     }
@@ -345,7 +360,7 @@ class AgentWorkspaceTest {
             compose.onNodeWithText("Synthetic lyric / 合成译文").assertExists()
             compose.onNodeWithText("同步偏移：250 ms").assertExists()
             assertEquals("pending", fixture.status)
-            assertEquals(0, fixture.requests.count { it.first.endsWith("/draft-one/apply") })
+            assertEquals(0, fixture.requests.count { it.first.endsWith("/draft-one/accept") })
             capture("mcp-lyric-proposal-phone.png")
         } finally { compose.runOnIdle { vm.repository.session.invalidate() } } }
     }
@@ -363,7 +378,7 @@ class AgentWorkspaceTest {
             compose.onNodeWithText("曲号：8 → 9").assertExists()
             compose.onNodeWithText("曲号：9 → 10").assertExists()
             assertEquals("pending", fixture.status)
-            assertEquals(0, fixture.requests.count { it.first.endsWith("/draft-one/apply") })
+            assertEquals(0, fixture.requests.count { it.first.endsWith("/draft-one/accept") })
             capture("mcp-batch-proposal-phone.png")
         } finally { compose.runOnIdle { vm.repository.session.invalidate() } } }
     }

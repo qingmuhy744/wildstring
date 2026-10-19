@@ -12,10 +12,17 @@ from pydantic import BaseModel, ConfigDict, Field
 from wildstring.library.assets import MAX_COVER_BYTES, TrackAssets
 
 
+class CoverTarget(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    track_id: str = Field(min_length=1, max_length=128)
+    metadata_version: int = Field(ge=1)
+
+
 class CoverProposal(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     suggestion_id: str = Field(min_length=1, max_length=128)
     metadata_version: int = Field(ge=1)
+    targets: list[CoverTarget] | None = Field(default=None, min_length=1, max_length=500)
 
 
 class CoverSelection(CoverProposal):
@@ -94,6 +101,37 @@ class CoverSelections:
             raise HTTPException(409, "cover_snapshot_unavailable")
         return data, thumbnail
 
+    def targets(self, connection, body, source):
+        targets = body.targets or [
+            CoverTarget(track_id=source["track_id"], metadata_version=body.metadata_version)
+        ]
+        identities = [t.track_id for t in targets]
+        if len(set(identities)) != len(identities) or source["track_id"] not in identities:
+            raise HTTPException(422, "invalid_cover_targets")
+        album = connection.execute(
+            "SELECT album_id FROM tracks WHERE id=?", (source["track_id"],)
+        ).fetchone()[0]
+        records = []
+        for item in targets:
+            row = connection.execute(
+                "SELECT t.id,t.title,t.has_cover,t.album_id,m.version,a.filename FROM tracks t JOIN track_metadata m ON m.track_id=t.id LEFT JOIN artwork_choices a ON a.track_id=t.id WHERE t.id=? AND t.library_id=? AND t.status='available'",
+                (item.track_id, self.repository.library_id()),
+            ).fetchone()
+            if row is None or row["album_id"] != album:
+                raise HTTPException(409, "album_membership_changed")
+            if row["version"] != item.metadata_version:
+                raise HTTPException(409, "metadata_version_conflict")
+            records.append(
+                {
+                    "track_id": row["id"],
+                    "title": row["title"],
+                    "metadata_version": row["version"],
+                    "has_cover": bool(row["has_cover"]),
+                    "current_image_sha256": row["filename"],
+                }
+            )
+        return targets, records
+
     def prepare(self, body):
         with self.database.connect() as connection:
             row = self.candidate(connection, body.suggestion_id, body.metadata_version)
@@ -116,6 +154,7 @@ class CoverSelections:
             latest = self.candidate(connection, body.suggestion_id, body.metadata_version)
             if self.key(latest) != candidate_key:
                 raise HTTPException(409, "cover_candidate_changed")
+            _, targets_before = self.targets(connection, body, latest)
             old = connection.execute(
                 "SELECT filename FROM artwork_choices WHERE track_id=?", (row["track_id"],)
             ).fetchone()
@@ -124,6 +163,11 @@ class CoverSelections:
             "metadata_version": body.metadata_version,
             "image_sha256": image_sha256,
             "candidate_key": candidate_key,
+            **(
+                {"targets": [target.model_dump() for target in body.targets]}
+                if body.targets is not None
+                else {}
+            ),
         }, {
             "track_id": row["track_id"],
             "title": row["title"],
@@ -133,25 +177,38 @@ class CoverSelections:
             "source_url": row["source_url"],
             "match": json.loads(row["match"]),
             "fields": json.loads(row["fields"]),
+            "items": targets_before,
         }
 
-    def save_in_transaction(self, connection, body):
+    def validate_in_transaction(self, connection, body):
         row = self.candidate(connection, body.suggestion_id, body.metadata_version)
         if self.key(row) != body.candidate_key:
             raise HTTPException(409, "cover_candidate_changed")
         self.image(body.image_sha256)
-        connection.execute(
-            "INSERT INTO artwork_choices(track_id,filename,source_url,mode) VALUES (?,?,?,'chosen') "
-            "ON CONFLICT(track_id) DO UPDATE SET filename=excluded.filename,source_url=excluded.source_url,"
-            "mode='chosen',version=artwork_choices.version+1",
-            (row["track_id"], body.image_sha256, row["cover_url"]),
-        )
-        connection.execute("UPDATE tracks SET has_cover=1 WHERE id=?", (row["track_id"],))
-        connection.execute(
-            "UPDATE track_metadata SET version=version+1 WHERE track_id=?", (row["track_id"],)
-        )
+        targets, _ = self.targets(connection, body, row)
+        return row, targets
+
+    def save_in_transaction(self, connection, body):
+        row, targets = self.validate_in_transaction(connection, body)
+        return self.persist_in_transaction(connection, body, row, targets)
+
+    def persist_in_transaction(self, connection, body, row, targets, metadata_changed=frozenset()):
+        for target in targets:
+            connection.execute(
+                "INSERT INTO artwork_choices(track_id,filename,source_url,mode) VALUES (?,?,?,'chosen') "
+                "ON CONFLICT(track_id) DO UPDATE SET filename=excluded.filename,source_url=excluded.source_url,"
+                "mode='chosen',version=artwork_choices.version+1",
+                (target.track_id, body.image_sha256, row["cover_url"]),
+            )
+            connection.execute("UPDATE tracks SET has_cover=1 WHERE id=?", (target.track_id,))
+            if target.track_id not in metadata_changed:
+                connection.execute(
+                    "UPDATE track_metadata SET version=version+1 WHERE track_id=?",
+                    (target.track_id,),
+                )
         return {
             "track_id": row["track_id"],
             "metadata_version": body.metadata_version + 1,
             "image_sha256": body.image_sha256,
+            "track_ids": [target.track_id for target in targets],
         }

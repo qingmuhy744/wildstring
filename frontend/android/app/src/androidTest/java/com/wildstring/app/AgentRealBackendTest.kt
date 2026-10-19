@@ -34,10 +34,8 @@ class AgentRealBackendTest {
             val pendingNotice = agent.inbox.value.items.first { it.text("draft_id") == id }
             assertTrue(pendingNotice.text("read_at").isBlank())
             agent.refreshInbox(); assertTrue(agent.inbox.value.items.first { it.text("id") == pendingNotice.text("id") }.text("read_at").isBlank())
-            val approved = agent.request("drafts/$id/approve", "POST", jsonBody("version" to draft.number("version")))
-            assertEquals("approved", approved.text("status"))
-            val body = jsonBody("version" to approved.number("version"), "idempotency_key" to "android-real-$id")
-            val applied = agent.request("drafts/$id/apply", "POST", body)
+            val body = jsonBody("version" to draft.number("version"), "idempotency_key" to "android-real-$id")
+            val applied = agent.request("drafts/$id/accept", "POST", body)
             assertEquals("applied", applied.text("status")); playlistId = applied.getAsJsonObject("result").text("playlist_id")
             val repeated = agent.request("drafts/$id/apply", "POST", body)
             assertEquals(playlistId, repeated.getAsJsonObject("result").text("playlist_id"))

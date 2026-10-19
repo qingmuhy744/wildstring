@@ -9,6 +9,7 @@ import { api, type Track, type TrackPage } from './api';
 import { Pagination } from './track-list';
 import { IntakePanel } from './intake-panel';
 import { MetadataJobs } from './metadata-tasks';
+import { MetadataReviewDialog } from './metadata-review';
 
 type Directory = {
   path: string;
@@ -146,6 +147,7 @@ export function Management({
   const [tab, setTab] = useState<
     'overview' | 'tracks' | 'jobs' | 'intake' | 'settings' | 'users' | 'diagnostics'
   >('overview');
+  const [reviewOpen, setReviewOpen] = useState(false);
   const finished = useRef<string | null>(null);
   const [overview, setOverview] = useState<Overview | null>(null),
     [jobs, setJobs] = useState<Jobs | null>(null),
@@ -247,6 +249,9 @@ export function Management({
   const active = !!overview?.active_job;
   return (
     <main className="library management">
+      {reviewOpen && (
+        <MetadataReviewDialog onClose={() => setReviewOpen(false)} onApplied={onChanged} />
+      )}
       <header className="management-header">
         <div>
           <span className="eyebrow">BEHIND THE MUSIC</span>
@@ -314,6 +319,7 @@ export function Management({
                   <span className="eyebrow">YOUR LIBRARY</span>
                   <h2>{overview.preferences.name}</h2>
                   <button onClick={onRefresh}>更新曲库元数据</button>
+                  <button onClick={() => setReviewOpen(true)}>批量核对资料</button>
                   <div className="library-locations">
                     {(
                       [

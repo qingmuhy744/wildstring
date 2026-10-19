@@ -80,6 +80,15 @@ class MobileCompletionTest {
         var lyrics = "第一句\n第二句"
         val audio = InstrumentationRegistry.getInstrumentation().context.assets.open("playback.mp3").use { it.readBytes() }
         fun track(index: Int) = """{"id":"completion-$index","title":"手机测试歌曲 $index","artists":["测试艺人"],"album":"手机测试专辑","duration_ms":12000,"has_cover":false,"loved":false,"format":"mp3","status":"available","play_count":2,"listened_ms":6000,"last_played_at":"2026-10-17T00:00:00Z"}"""
+        fun reviewPage(): String {
+            val rows = com.google.gson.JsonArray()
+            (0..1).forEach { n ->
+                val row = JsonParser.parseString("""{"id":"completion-$n","title":"手机测试歌曲 $n","album":"手机测试专辑","album_id":"review-album","artists":["测试艺人"],"has_cover":false,"metadata_version":1,"current":{"title":"手机测试歌曲 $n","album":"人工专辑"},"original":{"title":"原始","album":"文件专辑"},"overrides":{"album":"人工专辑"},"suggestions":[]}""").asJsonObject
+                if (!applied.get()) row.add("suggestions", JsonParser.parseString("""[{"id":"pending-$n","metadata_version":1,"provider":"musicbrainz","fields":{"title":"建议标题","album":"建议专辑"},"candidate_digest":"${"a".repeat(64)}","cover_url":"https://coverartarchive.org/candidate.jpg","match":{}},{"id":"stale-$n","metadata_version":0,"provider":"lastfm","fields":{"title":"过期建议"},"candidate_digest":"${"b".repeat(64)}","match":{}}]"""))
+                rows.add(row)
+            }
+            return JsonParser.parseString("""{"album_id":"review-album","provider_names":{"musicbrainz":"MusicBrainz","lastfm":"Last.fm"},"limit":500,"offset":0,"total":2}""").asJsonObject.apply { add("items", rows) }.toString()
+        }
         var manual = """{"id":"manual","name":"测试歌单","kind":"manual","version":1,"track_count":3,"cover_track_id":null}"""
         init {
             server.dispatcher = object : Dispatcher() {
@@ -106,6 +115,9 @@ class MobileCompletionTest {
                     if (path.endsWith("/recommendations/feedback") || path.endsWith("/listening")) return json("{}")
                     if (path.endsWith("/listening/summary")) return json("""{"play_count":8,"listened_ms":120000,"tracks_played":3,"favorites":1}""")
                     if (path.endsWith("/lastfm")) return json("""{"configured":false,"connected":false,"scrobble":false,"now_playing":false,"version":1}""")
+                    if (path.endsWith("/agent/metadata-review/albums")) return json("""{"items":[{"id":"review-album","title":"手机测试专辑","artists":["测试艺人"],"count":2}],"total":1}""")
+                    if (path.endsWith("/agent/metadata-review/accept")) { applied.set(true); return json("""{"status":"applied","draft":{"id":"receipt"}}""") }
+                    if (path.endsWith("/agent/metadata-review")) return json(reviewPage())
                     if (path.contains("/manage/")) return when {
                         path.endsWith("/overview") -> json("""{"counts":{"tracks":3,"size_bytes":1000},"albums":1,"artists":1}""")
                         path.endsWith("/intake/settings") -> json("""{"version":1,"enabled":false,"interval_seconds":60,"stable_seconds":120}""")
@@ -348,17 +360,19 @@ class MobileCompletionTest {
                 fixture.showSuggestions.set(true)
                 compose.onNodeWithContentDescription("手机测试歌曲 0的操作").performClick()
                 compose.onNodeWithText("更新元数据与建议").performScrollTo().performClick()
-                compose.waitUntil(10_000) { compose.onAllNodesWithText("歌曲名称：建议标题").fetchSemanticsNodes().isNotEmpty() }
-                compose.onNodeWithText("歌曲名称：不应再次显示的建议").assertDoesNotExist()
-                compose.onNodeWithText("歌曲信息已变化，请重新查询。").assertExists()
-                compose.waitUntil(10_000) { compose.onAllNodes(isToggleable() and hasAnySibling(hasText("歌曲名称：建议标题")) and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
-                compose.onNode(isToggleable() and hasAnySibling(hasText("歌曲名称：建议标题"))).performClick()
-                compose.onAllNodes(hasText("应用选中信息") and isEnabled()).onFirst().performScrollTo().performClick()
-                compose.onNodeWithText("确认应用").performClick()
+                compose.waitUntil(10_000) { compose.onAllNodesWithTag("metadata-review").fetchSemanticsNodes().isNotEmpty() }
+                compose.onNodeWithTag("review-scroll").performScrollToNode(hasTestTag("review-field-title"))
+                compose.onNodeWithTag("review-field-title").assertIsOn()
+                compose.onNodeWithTag("review-field-album").performScrollTo().assertIsOff()
+                compose.onAllNodesWithText("当前值").onFirst().assertExists()
+                compose.onAllNodesWithText("建议值").onFirst().assertExists()
+                compose.onNodeWithText("建议标题").performScrollTo().assertExists()
+                capture("metadata-review-native.png")
+                compose.onNodeWithText("接受选中项").performClick()
                 compose.waitUntil(10_000) { fixture.applied.get() }
-                val apply = JsonParser.parseString(fixture.mutations.last { it.first.endsWith("/apply") }.second).asJsonObject
-                assertEquals(1, apply["version"].asInt); assertEquals("title", apply.getAsJsonArray("fields")[0].asString)
-                compose.waitUntil(10_000) { fixture.requests.any { it.contains("/suggestions/pending/cover-preview") } }
+                val apply = JsonParser.parseString(fixture.mutations.last { it.first.endsWith("/metadata-review/accept") }.second).asJsonObject
+                assertEquals(2, apply.getAsJsonArray("items").size())
+                apply.getAsJsonArray("items").forEach { item -> assertEquals("title", item.asJsonObject.getAsJsonArray("fields").single().asString) }
             } finally { cleanup(vm) }
         }
     }

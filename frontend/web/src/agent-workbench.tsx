@@ -112,7 +112,7 @@ function DraftDetail({
     }
     return () => controller.abort();
   }, [draft.id, draft.version]);
-  async function action(kind: 'approve' | 'apply' | 'reject' | 'edit') {
+  async function action(kind: 'accept' | 'reject' | 'edit') {
     if (busy) return;
     setBusy(true);
     setError('');
@@ -147,10 +147,10 @@ function DraftDetail({
           method: kind === 'edit' ? 'PATCH' : 'POST',
           body: JSON.stringify({
             version: draft.version,
-            ...(kind === 'approve' && draft.preview_digest
+            ...(kind === 'accept' && draft.preview_digest
               ? { preview_digest: draft.preview_digest }
               : {}),
-            ...(kind === 'apply' ? { idempotency_key: idempotency.current } : {}),
+            ...(kind === 'accept' ? { idempotency_key: idempotency.current } : {}),
             ...(kind === 'edit'
               ? { payload, title: draft.kind === 'playlist' ? name : draft.title }
               : {}),
@@ -158,7 +158,7 @@ function DraftDetail({
         },
       );
       onUpdated(result);
-      if (kind === 'apply') onApplied();
+      if (result.status === 'applied') onApplied();
     } catch (reason) {
       setError(errorText(reason));
     } finally {
@@ -190,10 +190,12 @@ function DraftDetail({
       <WorkspaceNotice error={error} />
       <p className="muted">
         {draft.status === 'applied'
-          ? '此版本已应用。'
+          ? draft.result?.application_mode === 'automatic'
+            ? '此版本已应用。按你的自动整理设置执行。'
+            : '此版本已应用。'
           : draft.status === 'approved'
-            ? '当前版本已批准，仍需点击应用才会修改。'
-            : '核对具体内容和来源后再批准；批准不会自动应用。'}
+            ? '此为旧版已批准草案，点击接受即可完成应用。'
+            : '核对具体内容和来源后，点击接受即可直接应用。'}
       </p>
       {draft.kind === 'playlist' ? (
         <>
@@ -290,7 +292,7 @@ function DraftDetail({
             </pre>
           </div>
           <p className="muted">
-            请核对版本、时间轴和歌词内容。批准后应用此候选，保留原始格式和双语时间轴。
+            请核对版本、时间轴和歌词内容。接受后应用此候选，保留原始格式和双语时间轴。
           </p>
         </div>
       ) : (
@@ -377,24 +379,17 @@ function DraftDetail({
               >
                 修改草案
               </button>
-              {draft.status === 'pending' && (
-                <button
-                  className="primary"
-                  disabled={busy || !permitted || (draft.kind === 'cover' && !coverReady)}
-                  onClick={() => void action('approve')}
-                >
-                  批准当前版本
-                </button>
-              )}
-              {draft.status === 'approved' && (
-                <button
-                  className="primary"
-                  disabled={busy || !permitted || (draft.kind === 'cover' && !coverReady)}
-                  onClick={() => void action('apply')}
-                >
-                  {busy ? '应用中…' : '应用已批准草案'}
-                </button>
-              )}
+              <button
+                className="primary"
+                disabled={
+                  busy ||
+                  !permitted ||
+                  ((draft.kind === 'cover' || !!draft.payload.cover_draft_id) && !coverReady)
+                }
+                onClick={() => void action('accept')}
+              >
+                {busy ? '应用中…' : '接受并应用'}
+              </button>
               <button disabled={busy} onClick={() => void action('reject')}>
                 拒绝草案
               </button>
@@ -403,7 +398,13 @@ function DraftDetail({
         </div>
       )}
       {!permitted && <p className="muted">共享歌曲信息的修改需要管理员。</p>}
-      {draft.result && (
+      {Boolean(draft.result?.automatic_error) && (
+        <p role="alert">
+          自动应用未完成：{errorCodeMessage(String(draft.result?.automatic_error))}
+          。草案已保留供核对。
+        </p>
+      )}
+      {draft.result && draft.status === 'applied' && (
         <p role="status">
           应用结果：
           {draft.result.playlist_id
@@ -445,9 +446,9 @@ export function Drafts({
   return (
     <section className="workspace-page" aria-label="草案工作台">
       <WorkspaceHeader
-        eyebrow="REVIEW BEFORE CHANGE"
-        title="好想法，先看一眼。"
-        description="所有修改先成为草案。核对、批准、应用，各自留下记录。"
+        eyebrow="YOUR CHOICES, YOUR CONTROL"
+        title="整理结果，由你掌控。"
+        description="审核模式下接受即应用；自动整理按授权类型执行，并保留差异与结果。"
       >
         <RefreshWorkspace busy={list.loading} onClick={() => void list.reload()} />
       </WorkspaceHeader>
@@ -935,7 +936,7 @@ export function AgentTasks({
                         ))}
                         {result.draft_ids?.map((id) => (
                           <button key={id} onClick={() => onDraft?.(id)}>
-                            查看待确认草案
+                            查看草案与应用结果
                           </button>
                         ))}
                       </div>

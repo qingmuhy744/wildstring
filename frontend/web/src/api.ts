@@ -71,6 +71,7 @@ const messages: Record<string, string> = {
   playback_gain_version_conflict: '响度设置已在其他设备变化，请重新打开后保存。',
   loudness_tool_missing: '服务端缺少 FFmpeg，请更新官方镜像或安装后重试。',
 
+  application_policy_version_conflict: '整理设置已在其他设备更新，请重新读取后保存。',
   draft_version_conflict: '草案已变化，请刷新并重新核对当前版本。',
   draft_not_approved: '请先核对并批准当前草案版本。',
   draft_not_found: '草案已不可用，请刷新列表。',

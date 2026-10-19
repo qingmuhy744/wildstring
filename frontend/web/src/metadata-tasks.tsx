@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from './api';
+import { MetadataReviewDialog } from './metadata-review';
 import { Icon } from './icons';
 import { JobDiagnostics, jobStatus, type ProviderJob } from './provider-diagnostics';
 import { Pagination } from './track-list';
@@ -43,6 +44,7 @@ const empty: Record<View, string> = {
 };
 
 export function MetadataJobs({ onInspect }: { onInspect: (id: string) => void }) {
+  const [reviewOpen, setReviewOpen] = useState(false);
   const [view, setView] = useState<View>('active');
   const [offset, setOffset] = useState(0);
   const [value, setValue] = useState<TaskPage | null>(null);
@@ -204,9 +206,16 @@ export function MetadataJobs({ onInspect }: { onInspect: (id: string) => void })
   }
   return (
     <section className="management-card metadata-tasks" aria-label="元数据更新任务">
+      {reviewOpen && (
+        <MetadataReviewDialog
+          onClose={() => setReviewOpen(false)}
+          onApplied={() => setTick((n) => n + 1)}
+        />
+      )}
       <div className="management-section-heading">
         <div>
           <h2>元数据更新</h2>
+          <button onClick={() => setReviewOpen(true)}>批量核对资料</button>
           <p className="muted" role="status">
             {value ? `等待 ${value.queued} 首 · 查询中 ${value.running} 首` : '正在读取任务…'}
           </p>

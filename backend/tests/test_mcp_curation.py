@@ -465,3 +465,104 @@ def test_inspection_reports_its_grouping_bound_instead_of_claiming_complete(cura
     checked = result(api, token, "inspect_library")
     assert checked["total"] == 2 and not checked["grouping_complete"]
     assert all("inspection_context_limited" in item["issues"] for item in checked["items"])
+
+
+@pytest.mark.parametrize("automatic", [False, True])
+def test_accept_or_auto_batch_uses_same_atomic_validation(curation, monkeypatch, automatic):
+    api, token, service = curation
+    album = result(api, token, "search_albums")["items"][0]
+    if automatic:
+        response = api.put(
+            BASE + "/application-policy",
+            headers=HEADERS,
+            json={"mode": "automatic", "kinds": ["metadata_batch"], "version": 1},
+        )
+        assert response.status_code == 200
+    original = MetadataEditor.save_in_transaction
+    seen = []
+
+    def fail_second(self, db, identity, body, **kwargs):
+        original(self, db, identity, body, **kwargs)
+        seen.append(identity)
+        if len(seen) == 2:
+            raise HTTPException(409, "synthetic_batch_failure")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(MetadataEditor, "save_in_transaction", fail_second)
+        draft = batch(api, token, album["id"], {"album": "Atomic selection"})
+        if not automatic:
+            denied = api.post(
+                BASE + f"/drafts/{draft['id']}/accept",
+                headers=HEADERS,
+                json={"version": 1, "idempotency_key": "accept-batch"},
+            )
+            assert denied.json()["detail"] == "draft_preview_required"
+            failed = api.post(
+                BASE + f"/drafts/{draft['id']}/accept",
+                headers=HEADERS,
+                json={
+                    "version": 1,
+                    "preview_digest": draft["preview_digest"],
+                    "idempotency_key": "accept-batch",
+                },
+            )
+            assert failed.status_code == 409
+    assert len(seen) == 2
+    saved = result(api, token, "get_draft", {"draft_id": draft["id"]})
+    assert saved["status"] == "pending" and saved["approved_version"] is None
+    for item in draft["payload"]["items"]:
+        assert (
+            MetadataEditor(service.repository).read(item["track_id"])["version"]
+            == item["metadata_version"]
+        )
+    if automatic:
+        assert saved["result"]["automatic_error"] == "synthetic_batch_failure"
+        saved = result(api, token, "apply_draft", apply_args(draft))
+    else:
+        saved = api.post(
+            BASE + f"/drafts/{draft['id']}/accept",
+            headers=HEADERS,
+            json={
+                "version": 1,
+                "preview_digest": draft["preview_digest"],
+                "idempotency_key": "accept-batch",
+            },
+        ).json()
+    assert saved["status"] == "applied"
+    assert saved["result"]["application_mode"] == ("automatic" if automatic else "manual")
+
+
+def test_mcp_http_creates_and_applies_only_user_authorized_types(curation):
+    api, token, service = curation
+    assert (
+        api.put(
+            BASE + "/application-policy",
+            headers=HEADERS,
+            json={"mode": "automatic", "kinds": ["playlist"], "version": 1},
+        ).status_code
+        == 200
+    )
+    bearer = token["Authorization"][7:]
+    track = result(api, token, "search_tracks")["items"][0]
+    response = rpc(
+        api,
+        bearer,
+        "tools/call",
+        {
+            "name": "create_draft",
+            "arguments": {
+                "kind": "playlist",
+                "title": "MCP auto",
+                "payload": {"name": "MCP auto", "track_ids": [track["id"]]},
+            },
+        },
+    ).json()["result"]
+    assert not response.get("isError")
+    saved = response["structuredContent"]["result"]
+    assert saved["status"] == "applied" and saved["result"]["application_mode"] == "automatic"
+    album = result(api, token, "search_albums")["items"][0]
+    pending = batch(api, token, album["id"], {"album": "Not authorized automatically"})
+    assert pending["status"] == "pending"
+    assert rpc(
+        api, bearer, "tools/call", {"name": "apply_draft", "arguments": apply_args(pending)}
+    ).json()["result"]["isError"]

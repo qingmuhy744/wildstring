@@ -59,3 +59,14 @@
 对话返回可选 `context_summary`，消息返回 `sources`；`DELETE /conversations/{id}/summary` 清除摘要，生成中拒绝操作。来源 URL 保留必要查询参数。来源数组表示检索取得的资料，不代表每条资料都支持全部回答。
 
 详细执行和验证边界见[助手联网与记忆](../docs/architecture/assistant-research.md)。
+
+
+## 用户选择应用方式（当前开发分支）
+
+详见 [整理方式与接口](../docs/product/agent-application-policy.md)。新增仅会话可写的 `application-policy` 和原子 `drafts/{id}/accept`；MCP 只能读取应用策略。默认仍需审核；明确开启自动整理且拥有应用 scope 时，授权类型的 `create_draft` 可能返回 `applied`。调用方必须按真实状态反馈。旧版 approve/apply 接口保留兼容。
+
+## 专辑批量核对
+
+管理员会话可读取 `GET /metadata-review/albums` 与 `GET /metadata-review?album_id=...`（或 `track_id`），查看当前、文件原始值、人工覆盖及待核对来源。每个候选带 `candidate_digest`；`POST /metadata-review/accept` 提交 `items[{track_id,suggestion_id,metadata_version,candidate_digest,fields}]`、`idempotency_key` 和可选 `cover_draft_id`，返回 applied 草案或 conflict 列表。最多 500 首，批次所有写入同一事务，重试同键同内容只执行一次。
+
+`POST /metadata-review/cover` 只准备 cover 草案与快照，不受账号自动应用设置影响；可带同专辑 `targets[{track_id,metadata_version}]`。固定封面与文字一起接受时，子草案也原子标记已应用，每曲元数据版本只增加一次。客户端不能提交伪造的 `cover_snapshot`。这些审核路由仅限登录会话；MCP 继续使用现有草案工具。

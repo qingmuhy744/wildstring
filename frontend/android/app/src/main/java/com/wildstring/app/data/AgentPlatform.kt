@@ -50,6 +50,7 @@ internal fun agentError(status: Int, code: String, traceId: String?): String {
         code == "search_daily_budget_exhausted" -> "今日搜索与读取请求已达到上限。"
         code == "native_search_requires_deepseek_pro" -> "DeepSeek 原生联网需要支持该功能的 Pro 模型。"
         code == "ai_output_incomplete" -> "模型输出未完成，请提高输出 Token 上限或缩小问题范围。"
+        code == "application_policy_version_conflict" -> "整理设置已在其他设备更新，请重新读取后保存。"
         code == "draft_preview_required" -> "请使用新版客户端查看完整图片或逐曲差异后，再批准此草案。"
         code == "album_membership_changed" -> "专辑曲目范围已变化，请重新读取并生成整批草案。"
         code == "cover_candidate_changed" -> "封面候选已变化，请重新生成草案。"

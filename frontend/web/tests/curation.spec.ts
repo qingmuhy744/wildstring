@@ -3,7 +3,7 @@ import { login, section } from './helpers';
 
 const headers = { 'X-Wildstring-Client': 'web' };
 
-test('真实批量草案逐曲展示差异，批准不写入，应用保存整批', async ({ page }, info) => {
+test('真实批量草案逐曲展示差异，接受一次保存整批', async ({ page }, info) => {
   await login(page);
   const tracks = (await (await page.request.get('/api/v1/tracks')).json()).items;
   const originals = await Promise.all(
@@ -37,18 +37,11 @@ test('真实批量草案逐曲展示差异，批准不写入，应用保存整�
     await expect(detail).toContainText('2 首歌曲 · 整批应用');
     for (const original of originals) await expect(detail).toContainText(original.effective.title);
     await expect(detail.getByRole('table')).toHaveCount(2);
-    await detail.getByRole('button', { name: '批准当前版本', exact: true }).click();
-    for (const original of originals) {
-      const current = await (
-        await page.request.get(`/api/v1/manage/tracks/${original.track_id}/metadata`)
-      ).json();
-      expect(current.version).toBe(original.version);
-    }
     await page.screenshot({
       path: `../../artifacts/mcp-batch-${info.project.name}.png`,
       fullPage: true,
     });
-    await detail.getByRole('button', { name: '应用已批准草案', exact: true }).click();
+    await detail.getByRole('button', { name: '接受并应用', exact: true }).click();
     await expect(detail).toContainText('此版本已应用');
     for (const original of originals) {
       const current = await (
@@ -86,9 +79,9 @@ test('封面草案展示快照，图片失败不能批准，恢复后可批准',
   await page.route('**/api/v1/agent/drafts?*', (route) =>
     route.fulfill({ json: { items: [draft], total: 1, limit: 100, offset: 0 } }),
   );
-  await page.route('**/api/v1/agent/drafts/fixed-cover/approve', (route) => {
+  await page.route('**/api/v1/agent/drafts/fixed-cover/accept', (route) => {
     approvals++;
-    draft.status = 'approved';
+    draft.status = 'applied';
     return route.fulfill({ json: draft });
   });
   await page.route('**/api/v1/agent/drafts/fixed-cover/cover-preview?*', (route) =>
@@ -104,19 +97,19 @@ test('封面草案展示快照，图片失败不能批准，恢复后可批准',
   await page.getByRole('button', { name: '查看草案 封面核对', exact: true }).click();
   const detail = page.getByRole('article', { name: '草案详情' });
   await expect(detail.getByRole('alert')).toContainText('无法显示');
-  await expect(detail.getByRole('button', { name: '批准当前版本', exact: true })).toBeDisabled();
+  await expect(detail.getByRole('button', { name: '接受并应用', exact: true })).toBeDisabled();
   expect(approvals).toBe(0);
   validImage = true;
   await page.reload();
   await section(page, '待确认草案');
   await page.getByRole('button', { name: '查看草案 封面核对', exact: true }).click();
   await expect(detail.getByRole('img', { name: '草案封面快照' })).toBeVisible();
-  await expect(detail.getByRole('button', { name: '批准当前版本', exact: true })).toBeEnabled();
+  await expect(detail.getByRole('button', { name: '接受并应用', exact: true })).toBeEnabled();
   await detail.getByRole('img', { name: '草案封面快照' }).scrollIntoViewIfNeeded();
   await page.screenshot({
     path: `../../artifacts/mcp-cover-${info.project.name}.png`,
   });
-  await detail.getByRole('button', { name: '批准当前版本', exact: true }).click();
-  await expect(detail.getByRole('button', { name: '应用已批准草案', exact: true })).toBeEnabled();
+  await detail.getByRole('button', { name: '接受并应用', exact: true }).click();
+  await expect(detail).toContainText('此版本已应用');
   expect(approvals).toBe(1);
 });

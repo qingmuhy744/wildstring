@@ -1,5 +1,7 @@
 # Agent、MCP 与通知运行说明
 
+当前开发分支的[整理方式设置](../product/agent-application-policy.md)支持审核后一次接受并应用，或用户授权类型自动应用；下文的双步骤批准流程为旧版行为。
+
 0.5.0 的联网检索、协议适配、摘要与记忆见[助手联网与记忆](assistant-research.md)。
 
 0.4.0 使用现有 Python／FastAPI、React、Android、SQLite。业务工具和批准逻辑位于服务端；内置助手使用有界 Chat Completions 工具循环，MCP 首版使用官方 Python SDK 2.3.0 的 stdio 传输；0.5.7 开发分支增加同一 SDK 的 Streamable HTTP，见下文。首版没有引入额外 Agent 框架，后续可在不改变业务权限、草案和持久任务的前提下评估 Pydantic AI。

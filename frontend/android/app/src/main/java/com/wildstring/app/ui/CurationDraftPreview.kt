@@ -28,6 +28,10 @@ import com.wildstring.app.data.*
         if (failed) Text("封面快照暂时无法显示，请核对图片后再批准。", color = MaterialTheme.colorScheme.error)
         Text("只采用这份草案保存的图片，不修改歌曲标签。版本变化时会拒绝应用。", style = MaterialTheme.typography.bodySmall)
     } else {
+        if (payload.text("cover_draft_id").isNotBlank()) {
+            val cover = draft.deepCopy().apply { addProperty("id", payload.text("cover_draft_id")); addProperty("kind", "cover"); add("payload", payload.getAsJsonObject("cover_snapshot")); add("before", before.getAsJsonObject("cover")) }
+            CurationDraftPreview(vm, cover, onPreviewReady)
+        }
         val items = payload.objects("items")
         Text("${items.size} 首歌曲 · 整批应用，任一版本冲突时整批保留原值。")
         val originals = before.objects("items").associateBy { it.text("track_id") }
