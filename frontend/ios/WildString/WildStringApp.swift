@@ -19,6 +19,8 @@ struct RootView: View {
             switch model.phase {
             case .loading:
                 ProgressView("正在连接…")
+            case .servers:
+                ServersView(model: model)
             case .connect:
                 ConnectionView(model: model)
             case .connected(let server, let username):

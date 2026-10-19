@@ -9,6 +9,7 @@ import Observation
 final class ConnectionModel {
     enum Phase: Equatable {
         case loading
+        case servers
         case connect
         case connected(server: String, username: String)
     }
@@ -25,20 +26,14 @@ final class ConnectionModel {
     private(set) var favorites: FavoritesModel?
     private(set) var offline: OfflineModel?
     private(set) var role: String?
+    private(set) var servers: [SavedServer] = []
     let demoAutoPlay: Bool
 
     private let store: any SessionStore
-    private let defaults: UserDefaults
     private let queueStore: any QueueStore
 
-    private static let lastServerKey = "lastServerAddress"
-
-    init(
-        store: any SessionStore = KeychainSessionStore(),
-        defaults: UserDefaults = .standard
-    ) {
+    init(store: any SessionStore = KeychainSessionStore()) {
         self.store = store
-        self.defaults = defaults
         if let queueStore = try? SwiftDataQueueStore.makeDefault() {
             self.queueStore = queueStore
         } else {
@@ -49,6 +44,7 @@ final class ConnectionModel {
         #else
             demoAutoPlay = false
         #endif
+        servers = SavedServersStore.load()
     }
 
     var canSubmit: Bool {
@@ -77,34 +73,33 @@ final class ConnectionModel {
                 return
             }
         #endif
-        guard let saved = defaults.string(forKey: Self.lastServerKey),
-            let address = try? makeAddress(saved)
+        guard let last = servers.max(by: { $0.lastUsedAt < $1.lastUsedAt }),
+            let address = try? makeAddress(last.address)
         else {
             phase = .connect
             return
         }
-        serverText = saved
+        serverText = last.address
+        username = last.username
         let client = WildstringClient(server: address, store: store)
-        guard await client.storedSessionExists() else {
-            phase = .connect
-            return
-        }
-        do {
-            let status = try await client.authStatus()
-            if status.authenticated, let user = status.user {
-                await activate(
-                    client: client,
-                    address: address,
-                    username: user.username,
-                    role: user.role
-                )
-                return
+        if await client.storedSessionExists() {
+            do {
+                let status = try await client.authStatus()
+                if status.authenticated, let user = status.user {
+                    await activate(
+                        client: client,
+                        address: address,
+                        username: user.username,
+                        role: user.role
+                    )
+                    return
+                }
+                await client.clearSession()
+            } catch {
+                // Server unreachable: keep the session so a retry can reuse it.
             }
-            await client.clearSession()
-        } catch {
-            // Keep the saved address prefilled; explain failures when the user retries.
         }
-        phase = .connect
+        phase = .servers
     }
 
     func login() async {
@@ -117,7 +112,6 @@ final class ConnectionModel {
             let client = WildstringClient(server: address, store: store)
             let user = try await client.login(username: username, password: password)
             serverText = address.description
-            defaults.set(address.description, forKey: Self.lastServerKey)
             password = ""
             await activate(
                 client: client,
@@ -152,7 +146,73 @@ final class ConnectionModel {
         username = ""
         password = ""
         errorMessage = nil
+        phase = servers.isEmpty ? .connect : .servers
+    }
+
+    /// Switches to a saved server; reuses its session or asks for the password.
+    func connect(to server: SavedServer) async {
+        guard !isBusy else { return }
+        errorMessage = nil
+        serverText = server.address
+        username = server.username
+        guard let address = try? makeAddress(server.address) else {
+            errorMessage = "服务器地址已失效"
+            return
+        }
+        isBusy = true
+        defer { isBusy = false }
+        let client = WildstringClient(server: address, store: store)
+        if await client.storedSessionExists() {
+            do {
+                let status = try await client.authStatus()
+                if status.authenticated, let user = status.user {
+                    await activate(
+                        client: client,
+                        address: address,
+                        username: user.username,
+                        role: user.role
+                    )
+                    return
+                }
+                await client.clearSession()
+            } catch {
+                // Unreachable: keep the session for a later retry.
+                errorMessage = "无法连接该服务器，请检查网络或地址"
+                return
+            }
+        }
+        password = ""
         phase = .connect
+    }
+
+    func showAddServer() {
+        serverText = ""
+        username = ""
+        password = ""
+        errorMessage = nil
+        phase = .connect
+    }
+
+    func showServers() {
+        errorMessage = nil
+        phase = .servers
+    }
+
+    /// Deletes a server and its session, caches, offline copies and queue space.
+    func deleteServer(_ server: SavedServer) async {
+        if let address = try? makeAddress(server.address) {
+            try? store.clearSession(origin: address.origin)
+            let space = Self.spaceName(for: address)
+            try? FileManager.default.removeItem(
+                at: Self.cachesRoot().appendingPathComponent(space)
+            )
+            try? FileManager.default.removeItem(
+                at: Self.offlineRoot().appendingPathComponent(space)
+            )
+            try? await queueStore.scoped(to: space).clear()
+        }
+        SavedServersStore.remove(address: server.address)
+        servers = SavedServersStore.load()
     }
 
     private static func cachesRoot() -> URL {
@@ -206,7 +266,7 @@ final class ConnectionModel {
         )
         let playback = PlaybackService(
             server: address,
-            store: queueStore,
+            store: queueStore.scoped(to: space),
             cookieHeader: { [weak client] in
                 await client?.cookieHeaderValue()
             },
@@ -231,6 +291,10 @@ final class ConnectionModel {
         self.favorites = FavoritesModel(client: client)
         self.offline = OfflineModel(downloads: downloads)
         self.role = role
+        SavedServersStore.upsert(
+            SavedServer(address: address.description, username: username, lastUsedAt: .now)
+        )
+        servers = SavedServersStore.load()
         phase = .connected(server: address.description, username: username)
     }
 

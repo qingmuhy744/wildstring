@@ -47,6 +47,19 @@ struct QueueStoreTests {
         #expect(loaded.items.map(\.trackID) == ["ta"])
     }
 
+    @Test func swiftDataStoreIsolatesConnectionSpaces() async throws {
+        let container = try SwiftDataQueueStore.inMemoryContainer()
+        let first = SwiftDataQueueStore(container: container, space: "a")
+        let second = SwiftDataQueueStore(container: container, space: "b")
+        try await first.saveQueue([queueItem("a")], currentIndex: 0)
+        try await second.saveQueue([queueItem("b")], currentIndex: 0)
+        #expect(try await first.load()?.items.map(\.trackID) == ["ta"])
+        #expect(try await second.load()?.items.map(\.trackID) == ["tb"])
+        try await first.clear()
+        #expect(try await first.load() == nil)
+        #expect(try await second.load() != nil)
+    }
+
     @Test func swiftDataStoreClearsEverything() async throws {
         let store = try SwiftDataQueueStore.inMemory()
         try await store.saveQueue([queueItem("a")], currentIndex: 0)

@@ -3,6 +3,7 @@ import SwiftData
 
 @Model
 final class StoredQueueEntry {
+    var space: String?
     var order: Int
     var entryID: UUID
     var trackID: String
@@ -11,7 +12,17 @@ final class StoredQueueEntry {
     var album: String?
     var streamPath: String
 
-    init(order: Int, entryID: UUID, trackID: String, title: String, artist: String, album: String?, streamPath: String) {
+    init(
+        space: String?,
+        order: Int,
+        entryID: UUID,
+        trackID: String,
+        title: String,
+        artist: String,
+        album: String?,
+        streamPath: String
+    ) {
+        self.space = space
         self.order = order
         self.entryID = entryID
         self.trackID = trackID
@@ -24,27 +35,32 @@ final class StoredQueueEntry {
 
 @Model
 final class StoredQueueState {
+    var space: String?
     var currentIndex: Int
     var position: Double
 
-    init(currentIndex: Int, position: Double) {
+    init(space: String?, currentIndex: Int, position: Double) {
+        self.space = space
         self.currentIndex = currentIndex
         self.position = position
     }
 }
 
-/// SwiftData-backed queue and restore-point store (queue order, entry IDs, position).
+/// SwiftData-backed queue and restore-point store, scoped to one connection
+/// space (server) so switching servers keeps independent queues.
 public struct SwiftDataQueueStore: QueueStore, @unchecked Sendable {
     private let container: ModelContainer
+    private let space: String
 
-    public init(container: ModelContainer) {
+    public init(container: ModelContainer, space: String = "default") {
         self.container = container
+        self.space = space
     }
 
     /// Default on-disk store for the app.
-    public static func makeDefault() throws -> SwiftDataQueueStore {
+    public static func makeDefault(space: String = "default") throws -> SwiftDataQueueStore {
         let container = try ModelContainer(for: StoredQueueEntry.self, StoredQueueState.self)
-        return SwiftDataQueueStore(container: container)
+        return SwiftDataQueueStore(container: container, space: space)
     }
 
     /// Disposable in-memory container for tests and previews.
@@ -55,17 +71,27 @@ public struct SwiftDataQueueStore: QueueStore, @unchecked Sendable {
         )
     }
 
-    public static func inMemory() throws -> SwiftDataQueueStore {
-        SwiftDataQueueStore(container: try inMemoryContainer())
+    public static func inMemory(space: String = "default") throws -> SwiftDataQueueStore {
+        SwiftDataQueueStore(container: try inMemoryContainer(), space: space)
+    }
+
+    public func scoped(to space: String) -> any QueueStore {
+        SwiftDataQueueStore(container: container, space: space)
     }
 
     public func load() async throws -> PersistedQueue? {
         let context = ModelContext(container)
+        let localSpace: String? = space
         let entries = try context.fetch(
-            FetchDescriptor<StoredQueueEntry>(sortBy: [SortDescriptor(\StoredQueueEntry.order)])
+            FetchDescriptor<StoredQueueEntry>(
+                predicate: #Predicate { $0.space == localSpace },
+                sortBy: [SortDescriptor(\StoredQueueEntry.order)]
+            )
         )
         guard !entries.isEmpty else { return nil }
-        let state = try context.fetch(FetchDescriptor<StoredQueueState>()).first
+        let state = try context.fetch(
+            FetchDescriptor<StoredQueueState>(predicate: #Predicate { $0.space == localSpace })
+        ).first
         return PersistedQueue(
             items: entries.map {
                 PlaybackService.Item(
@@ -84,11 +110,19 @@ public struct SwiftDataQueueStore: QueueStore, @unchecked Sendable {
 
     public func saveQueue(_ items: [PlaybackService.Item], currentIndex: Int?) async throws {
         let context = ModelContext(container)
-        try context.delete(model: StoredQueueEntry.self)
-        try context.delete(model: StoredQueueState.self)
+        let localSpace: String? = space
+        try context.delete(
+            model: StoredQueueEntry.self,
+            where: #Predicate { $0.space == localSpace }
+        )
+        try context.delete(
+            model: StoredQueueState.self,
+            where: #Predicate { $0.space == localSpace }
+        )
         for (index, item) in items.enumerated() {
             context.insert(
                 StoredQueueEntry(
+                    space: space,
                     order: index,
                     entryID: item.id,
                     trackID: item.trackID,
@@ -99,18 +133,24 @@ public struct SwiftDataQueueStore: QueueStore, @unchecked Sendable {
                 )
             )
         }
-        context.insert(StoredQueueState(currentIndex: currentIndex ?? -1, position: 0))
+        context.insert(
+            StoredQueueState(space: space, currentIndex: currentIndex ?? -1, position: 0)
+        )
         try context.save()
     }
 
     public func saveProgress(_ progress: QueueProgress) async throws {
         let context = ModelContext(container)
-        if let state = try context.fetch(FetchDescriptor<StoredQueueState>()).first {
+        let localSpace: String? = space
+        if let state = try context.fetch(
+            FetchDescriptor<StoredQueueState>(predicate: #Predicate { $0.space == localSpace })
+        ).first {
             state.currentIndex = progress.index ?? -1
             state.position = progress.position
         } else {
             context.insert(
                 StoredQueueState(
+                    space: space,
                     currentIndex: progress.index ?? -1,
                     position: progress.position
                 )
@@ -121,8 +161,15 @@ public struct SwiftDataQueueStore: QueueStore, @unchecked Sendable {
 
     public func clear() async throws {
         let context = ModelContext(container)
-        try context.delete(model: StoredQueueEntry.self)
-        try context.delete(model: StoredQueueState.self)
+        let localSpace: String? = space
+        try context.delete(
+            model: StoredQueueEntry.self,
+            where: #Predicate { $0.space == localSpace }
+        )
+        try context.delete(
+            model: StoredQueueState.self,
+            where: #Predicate { $0.space == localSpace }
+        )
         try context.save()
     }
 }

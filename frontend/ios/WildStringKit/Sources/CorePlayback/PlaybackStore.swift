@@ -27,6 +27,12 @@ public protocol QueueStore: Sendable {
     func saveQueue(_ items: [PlaybackService.Item], currentIndex: Int?) async throws
     func saveProgress(_ progress: QueueProgress) async throws
     func clear() async throws
+    /// A store bound to one connection space (server), or self when unscoped.
+    func scoped(to space: String) -> any QueueStore
+}
+
+extension QueueStore {
+    public func scoped(to space: String) -> any QueueStore { self }
 }
 
 /// In-memory queue store for tests and previews.

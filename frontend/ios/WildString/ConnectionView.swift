@@ -53,6 +53,17 @@ struct ConnectionView: View {
                 }
             }
             .navigationTitle("野弦")
+            .toolbar {
+                if !model.servers.isEmpty {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button {
+                            model.showServers()
+                        } label: {
+                            Label("服务器", systemImage: "chevron.backward")
+                        }
+                    }
+                }
+            }
         }
     }
 }
