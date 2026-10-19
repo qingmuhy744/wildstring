@@ -634,4 +634,147 @@ struct StubbedHTTPTests {
             #expect(detail.messages.isEmpty)
         }
     }
+
+    @Suite("Admin")
+    struct AdminSuite {
+        private func makeClient() throws -> WildstringClient {
+            WildstringClient(
+                server: try ServerAddress(input: "music.example.com"),
+                store: InMemorySessionStore(),
+                configuration: StubURLProtocol.configuration()
+            )
+        }
+
+        @Test func scansDecodeBareArray() async throws {
+            StubURLProtocol.respond { request in
+                #expect(request.url?.path == "/api/v1/scans")
+                #expect(request.url?.query == "limit=20")
+                return .json(
+                    status: 200,
+                    body: """
+                        [{"id":"s1","status":"completed","started_at":"2026-10-19T08:00:00+00:00","finished_at":"2026-10-19T08:00:01+00:00","counts":{"visited":2,"added":2,"updated":0,"unchanged":0,"errors":0,"missing":0,"skipped":2},"errors":[]}]
+                        """
+                )
+            }
+            let scans = try await makeClient().scans()
+            let scan = try #require(scans.first)
+            #expect(scan.status == "completed")
+            #expect(scan.counts?.added == 2)
+            #expect(scan.errors?.isEmpty == true)
+        }
+
+        @Test func importsDecodeBareArray() async throws {
+            StubURLProtocol.respond { request in
+                #expect(request.url?.path == "/api/v1/imports")
+                return .json(status: 200, body: #"[{"id":"i1","status":"completed","counts":{"copied":3},"errors":[]}]"#)
+            }
+            let imports = try await makeClient().imports()
+            #expect(imports.first?.id == "i1")
+            #expect(imports.first?.counts?["copied"] == 3)
+        }
+
+        @Test func metadataDecodeAndUpdateSendsOnlyChanges() async throws {
+            StubURLProtocol.respond { request in
+                #expect(request.url?.path == "/api/v1/manage/tracks/t1/metadata")
+                return .json(
+                    status: 200,
+                    body: """
+                        {"track_id":"t1","version":3,"observed":{"title":"晴天测试曲","artists":["野弦测试"],"album":"合成测试专辑","album_artists":["野弦测试"],"track_number":1,"disc_number":null,"description":""},"overrides":{},"effective":{}}
+                        """
+                )
+            }
+            let metadata = try await makeClient().manageMetadata(trackID: "t1")
+            #expect(metadata.version == 3)
+            #expect(metadata.observed.title == "晴天测试曲")
+            #expect(metadata.observed.albumArtists == ["野弦测试"])
+
+            StubURLProtocol.respond { request in
+                #expect(request.httpMethod == "PUT")
+                let body = try #require(StubURLProtocol.bodyData(of: request))
+                let json = try #require(
+                    try JSONSerialization.jsonObject(with: body) as? [String: Any]
+                )
+                #expect(json["version"] as? Int == 3)
+                let overrides = try #require(json["overrides"] as? [String: Any])
+                #expect(overrides["description"] as? String == "新描述")
+                #expect(overrides["title"] == nil)
+                return .json(
+                    status: 200,
+                    body: """
+                        {"track_id":"t1","version":4,"observed":{"title":"晴天测试曲"},"overrides":{"description":"新描述"},"effective":{}}
+                        """
+                )
+            }
+            var overrides = MetadataOverrides()
+            overrides.description = "新描述"
+            let updated = try await makeClient().updateMetadata(
+                trackID: "t1",
+                version: 3,
+                overrides: overrides
+            )
+            #expect(updated.version == 4)
+        }
+
+        @Test func managedLyricsDecodeAndSave() async throws {
+            StubURLProtocol.respond { request in
+                #expect(request.url?.path == "/api/v1/manage/tracks/t1/lyrics")
+                return .json(
+                    status: 200,
+                    body: """
+                        {"track_id":"t1","version":1,"file_version":"abc","override":null,"observed_text":"[00:00.000]第一行","text":"[00:00.000]第一行"}
+                        """
+                )
+            }
+            let lyrics = try await makeClient().managedLyrics(trackID: "t1")
+            #expect(lyrics.fileVersion == "abc")
+            #expect(lyrics.override == nil)
+
+            StubURLProtocol.respond { request in
+                #expect(request.httpMethod == "PUT")
+                let body = try #require(StubURLProtocol.bodyData(of: request))
+                let json = try #require(
+                    try JSONSerialization.jsonObject(with: body) as? [String: Any]
+                )
+                #expect(json["version"] as? Int == 1)
+                #expect(json["file_version"] as? String == "abc")
+                #expect(json["text"] as? String == "[00:00.000]改过的第一行")
+                return .json(
+                    status: 200,
+                    body: """
+                        {"track_id":"t1","version":2,"file_version":"abc","override":"[00:00.000]改过的第一行","observed_text":"[00:00.000]第一行","text":"[00:00.000]改过的第一行"}
+                        """
+                )
+            }
+            let saved = try await makeClient().saveLyrics(
+                trackID: "t1",
+                text: "[00:00.000]改过的第一行",
+                version: 1,
+                fileVersion: "abc"
+            )
+            #expect(saved.version == 2)
+            #expect(saved.override == "[00:00.000]改过的第一行")
+        }
+
+        @Test func restoreFileLyricsSendsNullText() async throws {
+            StubURLProtocol.respond { request in
+                let body = try #require(StubURLProtocol.bodyData(of: request))
+                let json = try #require(
+                    try JSONSerialization.jsonObject(with: body) as? [String: Any]
+                )
+                #expect(json["text"] is NSNull)
+                return .json(
+                    status: 200,
+                    body: """
+                        {"track_id":"t1","version":3,"file_version":"abc","override":null,"observed_text":"x","text":"x"}
+                        """
+                )
+            }
+            _ = try await makeClient().saveLyrics(
+                trackID: "t1",
+                text: nil,
+                version: 2,
+                fileVersion: "abc"
+            )
+        }
+    }
 }
