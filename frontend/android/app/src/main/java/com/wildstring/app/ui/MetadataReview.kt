@@ -72,7 +72,7 @@ private val reviewLabels = mapOf("title" to "歌名", "artists" to "歌曲艺人
         val album = page?.text("album_id").orEmpty(); val offset = page?.number("offset") ?: 0
         load(mapOf("album_id" to album, "offset" to offset.toString()), nextId); loadAlbums(); vm.load(); action.message = "已应用 ${chosen.size} 首的所选资料${if (snapshot != null) "及固定封面" else ""}。"
     }
-    LaunchedEffect(initialTrack?.id) { action.run { val list = loadAlbums(); load(if (initialTrack != null) mapOf("track_id" to initialTrack.id) else mapOf("album_id" to list.firstOrNull()?.text("id").orEmpty())) }; if (action.message == "已完成") action.message = null }
+    LaunchedEffect(initialTrack?.id) { action.run { val list = loadAlbums(); load(if (initialTrack != null) mapOf("track_id" to initialTrack.id) else mapOf("album_id" to list.firstOrNull()?.text("id").orEmpty()), initialTrack?.id) }; if (action.message == "已完成") action.message = null }
     Column(Modifier.fillMaxSize().testTag("metadata-review")) {
         LazyColumn(Modifier.weight(1f).fillMaxWidth().testTag("review-scroll"), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             item { Text("批量核对资料", style = MaterialTheme.typography.titleLarge); Text("先对比，再接受。人工值默认保留，勾选后会替换该字段。", style = MaterialTheme.typography.bodySmall)

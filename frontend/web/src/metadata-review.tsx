@@ -4,6 +4,7 @@ import type { AgentDraft, AgentPage } from './agent-api';
 import { OnlineLyrics } from './source-plugins';
 import { MetadataRefreshDialog } from './metadata-refresh';
 import { errorText } from './workspace-ui';
+import { JobDiagnostics, type ProviderJob } from './provider-diagnostics';
 import './metadata-review.css';
 
 type Values = Record<string, unknown>;
@@ -111,6 +112,20 @@ export function MetadataReviewWorkbench({
     onBusy?.(busy);
     return () => onBusy?.(false);
   }, [busy, onBusy]);
+  const [jobs, setJobs] = useState<ProviderJob[]>([]);
+  useEffect(() => {
+    const controller = new AbortController();
+    setJobs([]);
+    if (active)
+      void api<{ jobs: ProviderJob[] }>(`/manage/providers/tracks/${encodeURIComponent(active)}`, {
+        signal: controller.signal,
+      })
+        .then((value) => {
+          if (!controller.signal.aborted) setJobs(value.jobs);
+        })
+        .catch(() => {});
+    return () => controller.abort();
+  }, [active, page]);
   const sequence = useRef(0),
     request = useRef(false),
     key = useRef({ signature: '', value: eventId() });
@@ -160,6 +175,7 @@ export function MetadataReviewWorkbench({
           initialTrackId
             ? `track_id=${encodeURIComponent(initialTrackId)}`
             : `album_id=${encodeURIComponent(items[0]?.id || '')}`,
+          initialTrackId,
         );
       })
       .catch((e) => setError(errorText(e)));
@@ -457,7 +473,9 @@ export function MetadataReviewWorkbench({
                       setCoverReady(false);
                     }}
                   >
-                    <option value="">选择来源</option>
+                    <option value="" disabled>
+                      选择来源
+                    </option>
                     {current.suggestions.map((c) => (
                       <option key={c.id} value={c.id}>
                         {page?.provider_names[c.provider] || c.provider}
@@ -470,6 +488,14 @@ export function MetadataReviewWorkbench({
                   更新元数据
                 </button>
               </div>
+              {jobs.length > 0 && (
+                <details open={jobs.some((j) => j.status === 'failed')}>
+                  <summary>本曲最近查询记录</summary>
+                  {jobs.map((job) => (
+                    <JobDiagnostics key={job.id} job={job} />
+                  ))}
+                </details>
+              )}
               <nav className="workspace-tabs" aria-label="核对内容">
                 {[
                   ['fields', '文字资料'],
