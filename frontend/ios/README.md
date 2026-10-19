@@ -32,3 +32,5 @@ xcodebuild -project WildString.xcodeproj -scheme WildString \
 ## 现状
 
 I0 骨架：模拟器可启动占位页。实施批次见 [iOS 第一版](../../docs/product/ios-v1.md#实施与验收顺序)。
+
+图标源文件为 `design/app-icon.svg`，由 Android 自适应图标换算（按启动器可见区放大 1.5×）；`AppIcon-1024.png` 由它栅格化生成。
