@@ -57,7 +57,7 @@ struct SearchView: View {
             .navigationTitle("搜索")
             .searchable(text: $query, prompt: "歌曲、艺人或专辑")
             .task(id: query) { await runSearch() }
-            .miniPlayer(playback)
+            .miniPlayer(playback, client: client)
         }
     }
 

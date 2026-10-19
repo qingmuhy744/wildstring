@@ -37,7 +37,7 @@ struct AlbumDetailView: View {
         }
         .navigationTitle(album.title)
         .navigationBarTitleDisplayMode(.inline)
-        .miniPlayer(playback)
+        .miniPlayer(playback, client: client)
         .task {
             if loader == nil {
                 let loader = PagedListModel<Track>(pageSize: 200) { [client] limit, offset in
@@ -113,7 +113,7 @@ struct ArtistDetailView: View {
         }
         .navigationTitle(artist.name)
         .navigationBarTitleDisplayMode(.inline)
-        .miniPlayer(playback)
+        .miniPlayer(playback, client: client)
         .task { await ensureSectionLoaded() }
         .onChange(of: section) { _, _ in
             Task { await ensureSectionLoaded() }

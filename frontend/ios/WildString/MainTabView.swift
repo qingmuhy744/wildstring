@@ -18,6 +18,7 @@ struct MainTabView: View {
             SearchView(client: client, playback: playback)
                 .tabItem { Label("搜索", systemImage: "magnifyingglass") }
             AccountView(
+                client: client,
                 server: server,
                 username: username,
                 playback: playback,

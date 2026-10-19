@@ -42,7 +42,7 @@ struct BrowseView: View {
             .navigationDestination(for: Artist.self) { artist in
                 ArtistDetailView(client: client, playback: playback, artist: artist)
             }
-            .miniPlayer(playback)
+            .miniPlayer(playback, client: client)
         }
         .task { await ensureSectionLoaded() }
         .onChange(of: section) { _, _ in

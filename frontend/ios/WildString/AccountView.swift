@@ -1,8 +1,10 @@
+import CoreNetwork
 import CorePlayback
 import SwiftUI
 
 @MainActor
 struct AccountView: View {
+    let client: WildstringClient
     let server: String
     let username: String
     let playback: PlaybackService
@@ -25,7 +27,7 @@ struct AccountView: View {
                 }
             }
             .navigationTitle("我的")
-            .miniPlayer(playback)
+            .miniPlayer(playback, client: client)
         }
     }
 }
