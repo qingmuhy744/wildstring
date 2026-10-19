@@ -117,7 +117,7 @@ class MobileCompletionTest {
                     if (path.endsWith("/lastfm")) return json("""{"configured":false,"connected":false,"scrobble":false,"now_playing":false,"version":1}""")
                     if (path.endsWith("/agent/metadata-review/albums")) return json("""{"items":[{"id":"review-album","title":"手机测试专辑","artists":["测试艺人"],"count":2}],"total":1}""")
                     if (path.endsWith("/agent/metadata-review/accept")) { applied.set(true); return json("""{"status":"applied","draft":{"id":"receipt"}}""") }
-                    if (path.endsWith("/agent/metadata-review")) return json(reviewPage())
+                    if (path.endsWith("/agent/metadata-review")) return json(reviewPage()).setBodyDelay(500, TimeUnit.MILLISECONDS)
                     if (path.contains("/manage/")) return when {
                         path.endsWith("/overview") -> json("""{"counts":{"tracks":3,"size_bytes":1000},"albums":1,"artists":1}""")
                         path.endsWith("/intake/settings") -> json("""{"version":1,"enabled":false,"interval_seconds":60,"stable_seconds":120}""")
@@ -360,7 +360,7 @@ class MobileCompletionTest {
                 fixture.showSuggestions.set(true)
                 compose.onNodeWithContentDescription("手机测试歌曲 0的操作").performClick()
                 compose.onNodeWithText("更新元数据与建议").performScrollTo().performClick()
-                compose.waitUntil(10_000) { compose.onAllNodesWithTag("metadata-review").fetchSemanticsNodes().isNotEmpty() }
+                compose.waitUntil(10_000) { compose.onAllNodesWithText("已选 2 首 · 2 个字段", substring = false).fetchSemanticsNodes().isNotEmpty() }
                 compose.onNodeWithTag("review-scroll").performScrollToNode(hasTestTag("review-field-title"))
                 compose.onNodeWithTag("review-field-title").assertIsOn()
                 compose.onNodeWithTag("review-field-album").performScrollTo().assertIsOff()
