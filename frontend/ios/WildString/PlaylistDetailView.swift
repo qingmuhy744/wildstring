@@ -29,7 +29,8 @@ struct PlaylistDetailView: View {
                 LoadedList(
                     loader: loader,
                     emptyTitle: "歌单为空",
-                    emptyIcon: "music.note.list"
+                    emptyIcon: "music.note.list",
+                    onMove: onMoveHandler
                 ) { track in
                     TrackActionRow(client: client, track: track) {
                         Button {
@@ -58,6 +59,11 @@ struct PlaylistDetailView: View {
         }
         .navigationTitle(detail.name)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            if detail.isEditable, !(loader?.items.isEmpty ?? true) {
+                ToolbarItem(placement: .topBarTrailing) { EditButton() }
+            }
+        }
         .miniPlayer(playback, client: client)
         .task { await load() }
     }
@@ -102,6 +108,45 @@ struct PlaylistDetailView: View {
         if detail.isFavorites { return "自动收藏" }
         if detail.isSmart { return "规则歌单" }
         return "普通歌单"
+    }
+
+    private var onMoveHandler: ((IndexSet, Int) -> Void)? {
+        guard detail.isEditable else { return nil }
+        return { offsets, destination in
+            reorder(from: offsets, to: destination)
+        }
+    }
+
+    private func reorder(from offsets: IndexSet, to destination: Int) {
+        guard let loader, let current, current.isEditable else { return }
+        if current.trackCount > loader.items.count {
+            message = "请先滚动加载完整歌单再排序"
+            return
+        }
+        Haptics.selection()
+        loader.applyReorder(fromOffsets: offsets, toOffset: destination)
+        let ids = loader.items.map(\.id)
+        Task { await submitOrder(ids) }
+    }
+
+    private func submitOrder(_ ids: [String]) async {
+        guard let current else { return }
+        do {
+            try await client.reorderTracks(
+                playlistID: current.id,
+                trackIDs: ids,
+                version: current.version
+            )
+            self.current = try await client.playlist(id: current.id)
+            message = nil
+        } catch let error as APIError where error.statusCode == 409 {
+            self.current = try? await client.playlist(id: current.id)
+            await loader?.loadInitial()
+            message = "歌单已更新，已刷新，请重试"
+        } catch {
+            await loader?.loadInitial()
+            message = ErrorText.message(for: error)
+        }
     }
 
     private func load() async {

@@ -28,6 +28,7 @@ struct TrackActionRow<Content: View>: View {
         content()
             .contextMenu {
                 Button {
+                    Haptics.selection()
                     Task { await favorites.toggle(track.id) }
                 } label: {
                     Label(

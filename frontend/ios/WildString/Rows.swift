@@ -8,11 +8,22 @@ struct TrackRow: View {
     let track: Track
     let isCurrent: Bool
 
+    @AppStorage("songListSize") private var listSizeRaw = SongListSize.medium.rawValue
+
+    private var listSize: SongListSize {
+        SongListSize(rawValue: listSizeRaw) ?? .medium
+    }
+
     var body: some View {
         HStack(spacing: 12) {
-            CoverImage(client: client, trackID: track.hasCover ? track.id : nil)
+            CoverImage(
+                client: client,
+                trackID: track.hasCover ? track.id : nil,
+                size: listSize.coverSide
+            )
             VStack(alignment: .leading, spacing: 2) {
                 Text(track.title)
+                    .font(listSize.titleFont)
                     .foregroundStyle(isCurrent ? Color.accentColor : .primary)
                     .lineLimit(1)
                 Text(track.artistDisplay)
@@ -89,6 +100,7 @@ struct LoadedList<Element: Decodable & Identifiable & Sendable, Row: View>: View
     let loader: PagedListModel<Element>
     let emptyTitle: String
     let emptyIcon: String
+    var onMove: ((IndexSet, Int) -> Void)?
     let row: (Element) -> Row
 
     var body: some View {
@@ -101,6 +113,7 @@ struct LoadedList<Element: Decodable & Identifiable & Sendable, Row: View>: View
                         }
                     }
             }
+            .onMove(perform: onMove)
             if loader.isLoading, !loader.items.isEmpty {
                 HStack {
                     Spacer()
@@ -134,6 +147,7 @@ struct LoadedList<Element: Decodable & Identifiable & Sendable, Row: View>: View
 @MainActor
 func playTracks(_ tracks: [Track], startingAt track: Track, using playback: PlaybackService) {
     guard let index = tracks.firstIndex(where: { $0.id == track.id }) else { return }
+    Haptics.tap()
     playback.play(items: tracks.map(\.playbackItem), startingAt: index)
 }
 

@@ -28,6 +28,34 @@ public struct Page<Element: Decodable & Sendable>: Decodable, Sendable {
     public let offset: Int
 }
 
+public struct BrowseGroup: Decodable, Equatable, Sendable {
+    public let key: String
+    public let offset: Int?
+    public let count: Int
+}
+
+public struct BrowseIndex: Decodable, Equatable, Sendable {
+    public let kind: String
+    public let total: Int
+    public let groups: [BrowseGroup]
+}
+
+extension WildstringClient {
+    /// Name-group index (28 groups) used for alphabet positioning.
+    public func browseIndex(kind: String = "tracks", query: String? = nil) async throws
+        -> BrowseIndex
+    {
+        var queryItems = [URLQueryItem(name: "kind", value: kind)]
+        if let query, !query.isEmpty {
+            queryItems.append(URLQueryItem(name: "q", value: query))
+        }
+        let data = try await perform(
+            Request(method: "GET", path: "api/v1/browse-index", queryItems: queryItems)
+        )
+        return try JSONDecoder().decode(BrowseIndex.self, from: data)
+    }
+}
+
 extension WildstringClient {
     /// Paged track listing; mirrors `GET /api/v1/tracks`.
     public func tracks(limit: Int = 50, offset: Int = 0, query: String? = nil) async throws

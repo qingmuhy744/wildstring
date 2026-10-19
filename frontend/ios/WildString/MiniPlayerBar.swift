@@ -37,6 +37,7 @@ struct MiniPlayerBar: View {
                         ProgressView()
                     }
                     Button {
+                        Haptics.tap()
                         playback.togglePlayPause()
                     } label: {
                         Image(systemName: playback.isPlaying ? "pause.fill" : "play.fill")

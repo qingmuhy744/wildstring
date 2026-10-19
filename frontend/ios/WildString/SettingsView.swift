@@ -8,6 +8,10 @@ struct SettingsView: View {
     @Environment(OfflineModel.self) private var offline
     @Environment(\.isAdmin) private var isAdmin
     @AppStorage("fragmentCacheLimitMB") private var limitMB = 512
+    @AppStorage("appearanceTheme") private var theme = ThemeChoice.system.rawValue
+    @AppStorage("playerStyle") private var playerStyle = PlayerStyle.cover.rawValue
+    @AppStorage("songListSize") private var songListSize = SongListSize.medium.rawValue
+    @AppStorage("hapticsEnabled") private var hapticsEnabled = true
     @State private var cacheBytes: Int64 = 0
 
     var body: some View {
@@ -21,6 +25,24 @@ struct SettingsView: View {
                         Label("导入记录", systemImage: "tray.and.arrow.down")
                     }
                 }
+            }
+            Section("外观") {
+                Picker("主题", selection: $theme) {
+                    ForEach(ThemeChoice.allCases, id: \.self) { choice in
+                        Text(choice.label).tag(choice.rawValue)
+                    }
+                }
+                Picker("播放页样式", selection: $playerStyle) {
+                    ForEach(PlayerStyle.allCases, id: \.self) { style in
+                        Text(style.label).tag(style.rawValue)
+                    }
+                }
+                Picker("歌曲列表大小", selection: $songListSize) {
+                    ForEach(SongListSize.allCases, id: \.self) { size in
+                        Text(size.label).tag(size.rawValue)
+                    }
+                }
+                Toggle("轻触反馈", isOn: $hapticsEnabled)
             }
             Section("片段缓存") {
                 LabeledContent("已用空间", value: byteText(cacheBytes))

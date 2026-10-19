@@ -179,6 +179,30 @@ extension WildstringClient {
         )
     }
 
+    public func reorderTracks(
+        playlistID: String,
+        trackIDs: [String],
+        version: Int
+    ) async throws {
+        struct Body: Encodable {
+            let version: Int
+            let trackIds: [String]
+
+            enum CodingKeys: String, CodingKey {
+                case version
+                case trackIds = "track_ids"
+            }
+        }
+        _ = try await perform(
+            Request(
+                method: "PUT",
+                path: "api/v1/playlists/\(playlistID)/order",
+                body: try JSONEncoder().encode(Body(version: version, trackIds: trackIDs)),
+                contentType: "application/json"
+            )
+        )
+    }
+
     // MARK: - Daily recommendations
 
     public func dailyRecommendations() async throws -> DailyRecommendations {

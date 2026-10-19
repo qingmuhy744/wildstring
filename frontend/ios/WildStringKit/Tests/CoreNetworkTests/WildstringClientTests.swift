@@ -343,6 +343,23 @@ struct StubbedHTTPTests {
             #expect(lyrics.isEmpty)
             #expect(!lyrics.isSynced)
         }
+
+        @Test func browseIndexDecodesGroups() async throws {
+            StubURLProtocol.respond { request in
+                #expect(request.url?.path == "/api/v1/browse-index")
+                #expect(request.url?.query == "kind=tracks")
+                return .json(
+                    status: 200,
+                    body: """
+                        {"kind":"tracks","total":3,"groups":[{"key":"0–9","offset":null,"count":0},{"key":"A","offset":0,"count":1},{"key":"#","offset":2,"count":1}]}
+                        """
+                )
+            }
+            let index = try await makeClient().browseIndex()
+            #expect(index.groups.count == 3)
+            #expect(index.groups[1].offset == 0)
+            #expect(index.groups[0].offset == nil)
+        }
     }
 
     @Suite("PersonalLibrary")
@@ -451,6 +468,25 @@ struct StubbedHTTPTests {
                 return .empty(status: 204)
             }
             try await makeClient().removeTrack(playlistID: "p2", trackID: "t1", version: 4)
+        }
+
+        @Test func reorderTracksSendsVersionAndIDs() async throws {
+            StubURLProtocol.respond { request in
+                #expect(request.httpMethod == "PUT")
+                #expect(request.url?.path == "/api/v1/playlists/p2/order")
+                let body = try #require(StubURLProtocol.bodyData(of: request))
+                let json = try #require(
+                    try JSONSerialization.jsonObject(with: body) as? [String: Any]
+                )
+                #expect(json["version"] as? Int == 6)
+                #expect(json["track_ids"] as? [String] == ["t2", "t1"])
+                return .empty(status: 204)
+            }
+            try await makeClient().reorderTracks(
+                playlistID: "p2",
+                trackIDs: ["t2", "t1"],
+                version: 6
+            )
         }
 
         @Test func deletePlaylistUsesQueryVersion() async throws {

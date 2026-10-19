@@ -12,6 +12,7 @@ struct WildStringApp: App {
 @MainActor
 struct RootView: View {
     @State private var model = ConnectionModel()
+    @AppStorage("appearanceTheme") private var theme = ThemeChoice.system.rawValue
 
     var body: some View {
         Group {
@@ -41,7 +42,24 @@ struct RootView: View {
             }
         }
         .task {
+            Self.applyDemoDefaults()
             await model.restore()
         }
+        .preferredColorScheme((ThemeChoice(rawValue: theme) ?? .system).colorScheme)
+    }
+
+    private static func applyDemoDefaults() {
+        #if DEBUG
+            let environment = ProcessInfo.processInfo.environment
+            if let style = environment["WILDSTRING_DEMO_PLAYER_STYLE"] {
+                UserDefaults.standard.set(style, forKey: "playerStyle")
+            }
+            if let theme = environment["WILDSTRING_DEMO_THEME"] {
+                UserDefaults.standard.set(theme, forKey: "appearanceTheme")
+            }
+            if let size = environment["WILDSTRING_DEMO_LIST_SIZE"] {
+                UserDefaults.standard.set(size, forKey: "songListSize")
+            }
+        #endif
     }
 }

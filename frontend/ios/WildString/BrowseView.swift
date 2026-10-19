@@ -20,6 +20,7 @@ struct BrowseView: View {
     @State private var albumsLoader: PagedListModel<Album>?
     @State private var artistsLoader: PagedListModel<Artist>?
     @State private var didAutoPlay = false
+    @State private var browseGroups: [BrowseGroup] = []
     @State private var demoMetadataTrack: Track?
     @State private var demoLyricsTrack: Track?
 
@@ -80,6 +81,16 @@ struct BrowseView: View {
                         .buttonStyle(.plain)
                     }
                 }
+                .overlay(alignment: .trailing) {
+                    if !browseGroups.isEmpty {
+                        LetterIndexBar(groups: browseGroups) { group in
+                            guard let offset = group.offset else { return }
+                            Haptics.tap()
+                            Task { await songsLoader.jump(toOffset: offset) }
+                        }
+                        .padding(.trailing, 2)
+                    }
+                }
             } else {
                 ProgressView()
             }
@@ -124,6 +135,7 @@ struct BrowseView: View {
             }
             if songsLoader?.didLoadOnce == false {
                 await songsLoader?.loadInitial()
+                await loadBrowseIndexIfNeeded()
                 autoPlayIfNeeded()
             }
         case .albums:
@@ -153,6 +165,11 @@ struct BrowseView: View {
         guard autoPlayFirst, !didAutoPlay, let first = songsLoader?.items.first else { return }
         didAutoPlay = true
         playTracks(songsLoader?.items ?? [], startingAt: first, using: playback)
+    }
+
+    private func loadBrowseIndexIfNeeded() async {
+        guard browseGroups.isEmpty else { return }
+        browseGroups = (try? await client.browseIndex())?.groups ?? []
     }
 
     private func openDemoEditorsIfNeeded() {

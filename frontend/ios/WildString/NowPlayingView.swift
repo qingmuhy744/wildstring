@@ -10,8 +10,13 @@ struct NowPlayingView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.horizontalSizeClass) private var sizeClass
     @Environment(FavoritesModel.self) private var favorites
+    @AppStorage("playerStyle") private var playerStyleRaw = PlayerStyle.cover.rawValue
     @State private var showLyrics: Bool
     @State private var scrubTime: Double?
+
+    private var playerStyle: PlayerStyle {
+        PlayerStyle(rawValue: playerStyleRaw) ?? .cover
+    }
 
     init(client: WildstringClient, playback: PlaybackService, initiallyShowsLyrics: Bool = false) {
         self.client = client
@@ -87,7 +92,7 @@ struct NowPlayingView: View {
     private var playerColumn: some View {
         VStack(spacing: 18) {
             if let item = playback.currentItem {
-                CoverImage(client: client, trackID: item.trackID, size: coverSize)
+                playerArtwork(item)
                     .contentShape(Rectangle())
                     .onTapGesture {
                         if !isRegular {
@@ -166,6 +171,7 @@ struct NowPlayingView: View {
             }
             .buttonStyle(.plain)
             Button {
+                Haptics.tap()
                 playback.togglePlayPause()
             } label: {
                 Image(systemName: playback.isPlaying ? "pause.circle.fill" : "play.circle.fill")
@@ -181,10 +187,125 @@ struct NowPlayingView: View {
         }
         .padding(.vertical, 18)
     }
+
+    @ViewBuilder
+    private func playerArtwork(_ item: PlaybackService.Item) -> some View {
+        switch playerStyle {
+        case .cover:
+            CoverImage(client: client, trackID: item.trackID, size: coverSize)
+        case .vinyl:
+            VinylArtwork(
+                client: client,
+                trackID: item.trackID,
+                size: coverSize,
+                isPlaying: playback.isPlaying
+            )
+        case .cassette:
+            CassetteArtwork(
+                client: client,
+                trackID: item.trackID,
+                width: coverSize,
+                isPlaying: playback.isPlaying,
+                title: item.title
+            )
+        }
+    }
 }
 
 private func timeText(_ seconds: Double) -> String {
     guard seconds.isFinite, seconds >= 0 else { return "0:00" }
     let total = Int(seconds)
     return String(format: "%d:%02d", total / 60, total % 60)
+}
+
+/// Rotating vinyl disc with the cover in the center; spins only while playing.
+private struct VinylArtwork: View {
+    let client: WildstringClient
+    let trackID: String
+    let size: CGFloat
+    let isPlaying: Bool
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !isPlaying)) { context in
+            let seconds = context.date.timeIntervalSinceReferenceDate
+            let angle = isPlaying ? seconds.truncatingRemainder(dividingBy: 12) / 12 * 360 : 0
+            ZStack {
+                Circle()
+                    .fill(
+                        RadialGradient(
+                            colors: [Color(white: 0.20), Color(white: 0.06)],
+                            center: .center,
+                            startRadius: 0,
+                            endRadius: size / 2
+                        )
+                    )
+                    .overlay(Circle().stroke(Color(white: 0.28), lineWidth: 1))
+                CoverImage(
+                    client: client,
+                    trackID: trackID,
+                    size: size * 0.42,
+                    circular: true
+                )
+            }
+            .frame(width: size, height: size)
+            .rotationEffect(.degrees(angle))
+        }
+    }
+}
+
+/// Cassette shell with two rotating reels; reels spin only while playing.
+private struct CassetteArtwork: View {
+    let client: WildstringClient
+    let trackID: String
+    let width: CGFloat
+    let isPlaying: Bool
+    let title: String
+
+    private var height: CGFloat { width * 0.66 }
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !isPlaying)) { context in
+            let seconds = context.date.timeIntervalSinceReferenceDate
+            let spin = isPlaying ? seconds.truncatingRemainder(dividingBy: 6) / 6 * 360 : 0
+            ZStack {
+                RoundedRectangle(cornerRadius: 14)
+                    .fill(Color(.secondarySystemBackground))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14)
+                            .strokeBorder(Color(.separator), lineWidth: 1)
+                    )
+                VStack(spacing: width * 0.04) {
+                    Text(title)
+                        .font(.caption.bold())
+                        .lineLimit(1)
+                        .padding(.horizontal, width * 0.08)
+                    HStack(spacing: width * 0.2) {
+                        reel(rotation: spin)
+                        reel(rotation: -spin)
+                    }
+                    Spacer(minLength: 0)
+                }
+                .padding(.top, width * 0.06)
+            }
+            .frame(width: width, height: height)
+        }
+    }
+
+    private func reel(rotation: Double) -> some View {
+        ZStack {
+            Circle()
+                .fill(Color(.tertiarySystemFill))
+            Circle()
+                .strokeBorder(Color(.systemGray3), lineWidth: 1)
+            ForEach(0..<3, id: \.self) { index in
+                Capsule()
+                    .fill(Color(.systemGray2))
+                    .frame(width: width * 0.018, height: width * 0.08)
+                    .offset(y: -width * 0.03)
+                    .rotationEffect(.degrees(Double(index) * 120))
+            }
+        }
+        .frame(width: width * 0.16, height: width * 0.16)
+        .rotationEffect(.degrees(rotation))
+    }
 }
