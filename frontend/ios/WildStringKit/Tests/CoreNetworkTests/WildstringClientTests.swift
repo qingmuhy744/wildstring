@@ -360,6 +360,43 @@ struct StubbedHTTPTests {
             #expect(index.groups[1].offset == 0)
             #expect(index.groups[0].offset == nil)
         }
+
+        @Test func playbackPlanDecodesTranscodeDecision() async throws {
+            StubURLProtocol.respond { request in
+                #expect(request.url?.path == "/api/v1/tracks/t1/playback")
+                #expect(request.url?.query == "format=aac&bitrate_kbps=192&start_ms=53000")
+                return .json(
+                    status: 200,
+                    body: """
+                        {"mode":"transcode","reason":"lossless_to_aac","output":{"codec":"aac","container":"m4a","bitrate_kbps":192},"duration_ms":285000,"start_ms":53000,"cache_state":"miss","stream_url":"/api/v1/tracks/t1/stream?format=aac&bitrate_kbps=192&start_ms=53000"}
+                        """
+                )
+            }
+            let plan = try await makeClient().playbackPlan(
+                trackID: "t1",
+                bitrateKbps: 192,
+                startMs: 53000
+            )
+            #expect(plan.isTranscode)
+            #expect(plan.durationMs == 285_000)
+            #expect(plan.startMs == 53_000)
+            #expect(plan.output.codec == "aac")
+            #expect(plan.streamUrl.contains("format=aac"))
+        }
+
+        @Test func playbackPlanOriginalHasNoQuery() async throws {
+            StubURLProtocol.respond { request in
+                #expect(request.url?.query == nil)
+                return .json(
+                    status: 200,
+                    body: """
+                        {"mode":"original","reason":"original_requested","output":{"codec":"flac","container":"flac","bitrate_kbps":1100},"duration_ms":285000,"start_ms":0,"stream_url":"/api/v1/tracks/t1/stream"}
+                        """
+                )
+            }
+            let plan = try await makeClient().playbackPlan(trackID: "t1", bitrateKbps: nil)
+            #expect(!plan.isTranscode)
+        }
     }
 
     @Suite("PersonalLibrary")

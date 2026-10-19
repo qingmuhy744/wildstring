@@ -147,6 +147,11 @@ struct NowPlayingView: View {
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                     }
+                    if let label = playback.currentOutputLabel {
+                        Text(label)
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    }
                 }
                 progressSection
             } else {
@@ -234,17 +239,51 @@ struct NowPlayingView: View {
                 }
                 .buttonStyle(.plain)
             }
-            Button {
-                showingQueue = true
-            } label: {
-                Label("播放队列", systemImage: "list.bullet")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+            HStack(spacing: 44) {
+                sleepTimerMenu
+                Button {
+                    showingQueue = true
+                } label: {
+                    Label("播放队列", systemImage: "list.bullet")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
         }
         .padding(.top, 12)
         .padding(.bottom, 10)
+    }
+
+    private var sleepTimerMenu: some View {
+        Menu {
+            Button("15 分钟") { playback.setSleepTimer(minutes: 15) }
+            Button("30 分钟") { playback.setSleepTimer(minutes: 30) }
+            Button("45 分钟") { playback.setSleepTimer(minutes: 45) }
+            Button("60 分钟") { playback.setSleepTimer(minutes: 60) }
+            Button("播完本曲") { playback.sleepAfterCurrentTrack() }
+            if sleepTimerActive {
+                Divider()
+                Button("关闭定时", role: .destructive) { playback.cancelSleepTimer() }
+            }
+        } label: {
+            Label(sleepTimerLabel, systemImage: "moon.zzz")
+                .font(.footnote)
+                .foregroundStyle(sleepTimerActive ? Color.wildAccent : Color.secondary)
+        }
+    }
+
+    private var sleepTimerActive: Bool {
+        playback.sleepTimerEnd != nil || playback.pauseAfterCurrentTrack
+    }
+
+    private var sleepTimerLabel: String {
+        if playback.pauseAfterCurrentTrack { return "播完本曲停止" }
+        if let end = playback.sleepTimerEnd {
+            let minutes = max(0, Int(ceil(end.timeIntervalSinceNow / 60)))
+            return "剩余 \(minutes) 分"
+        }
+        return "定时"
     }
 
     @ViewBuilder

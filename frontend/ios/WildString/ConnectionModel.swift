@@ -176,6 +176,10 @@ final class ConnectionModel {
         return Int64(stored ?? 512) * 1_048_576
     }
 
+    private static func savedQualityBitrate() -> Int? {
+        Int(UserDefaults.standard.string(forKey: "playbackQuality") ?? "original")
+    }
+
     private func activate(
         client: WildstringClient,
         address: ServerAddress,
@@ -212,8 +216,16 @@ final class ConnectionModel {
                     OfflineDownloads.fileName(for: trackID)
                 )
                 return FileManager.default.fileExists(atPath: url.path) ? url : nil
+            },
+            planProvider: { trackID, bitrate, startMs in
+                try await client.playbackPlan(
+                    trackID: trackID,
+                    bitrateKbps: bitrate,
+                    startMs: startMs
+                )
             }
         )
+        playback.preferredBitrateKbps = Self.savedQualityBitrate()
         await playback.restore()
         self.playback = playback
         self.favorites = FavoritesModel(client: client)

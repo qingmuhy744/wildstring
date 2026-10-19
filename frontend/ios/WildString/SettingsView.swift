@@ -12,6 +12,7 @@ struct SettingsView: View {
     @AppStorage("playerStyle") private var playerStyle = PlayerStyle.cover.rawValue
     @AppStorage("songListSize") private var songListSize = SongListSize.medium.rawValue
     @AppStorage("hapticsEnabled") private var hapticsEnabled = true
+    @AppStorage("playbackQuality") private var playbackQuality = "original"
     @State private var cacheBytes: Int64 = 0
 
     var body: some View {
@@ -43,6 +44,18 @@ struct SettingsView: View {
                     }
                 }
                 Toggle("轻触反馈", isOn: $hapticsEnabled)
+            }
+            Section("播放") {
+                Picker("音质", selection: $playbackQuality) {
+                    Text("原音").tag("original")
+                    Text("AAC 128 kbps").tag("128")
+                    Text("AAC 192 kbps").tag("192")
+                    Text("AAC 256 kbps").tag("256")
+                    Text("AAC 320 kbps").tag("320")
+                }
+                Text("无损源转为 AAC；有损源保持原文件。转码不可用时自动回退原音。")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
             }
             Section("片段缓存") {
                 LabeledContent("已用空间", value: byteText(cacheBytes))
@@ -89,8 +102,12 @@ struct SettingsView: View {
         .onChange(of: limitMB) { _, newValue in
             playback.setFragmentCacheLimit(Int64(newValue) * 1_048_576)
         }
+        .onChange(of: playbackQuality) { _, newValue in
+            playback.preferredBitrateKbps = Int(newValue)
+        }
         .task {
             playback.setFragmentCacheLimit(Int64(limitMB) * 1_048_576)
+            playback.preferredBitrateKbps = Int(playbackQuality)
             await refresh()
             await offline.refresh()
             while !Task.isCancelled {

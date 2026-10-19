@@ -41,10 +41,15 @@ public final class WildstringAudioResourceLoader: NSObject, AVAssetResourceLoade
     }
 
     /// API path for a custom-scheme request URL, or nil for foreign schemes.
+    /// Query strings are preserved so transcode streams (`format=aac&start_ms=…`)
+    /// survive the trip through the custom scheme.
     public static func requestPath(from url: URL?) -> String? {
         guard let url, url.scheme == scheme else { return nil }
         var path = url.path
         while path.hasPrefix("/") { path.removeFirst() }
+        if let query = url.query, !query.isEmpty {
+            path += "?" + query
+        }
         return path
     }
 
@@ -91,6 +96,10 @@ public final class WildstringAudioResourceLoader: NSObject, AVAssetResourceLoade
     ) async {
         defer { lock.withLock { _ = tasks.removeValue(forKey: key) } }
         do {
+            if path.contains("format=aac") {
+                try await serveTranscode(loadingRequest, path: path)
+                return
+            }
             if let dataRequest = loadingRequest.dataRequest {
                 let offset = dataRequest.requestedOffset
                 let length = Int64(dataRequest.requestedLength)
@@ -148,12 +157,36 @@ public final class WildstringAudioResourceLoader: NSObject, AVAssetResourceLoade
         }
     }
 
+    /// Serves an AAC transcode: a non-seekable progressive stream that is
+    /// consumed sequentially; seeking reloads the plan with a new start_ms.
+    private func serveTranscode(
+        _ loadingRequest: AVAssetResourceLoadingRequest,
+        path: String
+    ) async throws {
+        if let info = loadingRequest.contentInformationRequest {
+            info.isByteRangeAccessSupported = false
+            info.contentType = "public.mpeg-4-audio"
+        }
+        guard let dataRequest = loadingRequest.dataRequest,
+            dataRequest.requestedOffset == 0
+        else {
+            loadingRequest.finishLoading()
+            return
+        }
+        try await fetcher.stream(path: path) { chunk in
+            if Task.isCancelled { return false }
+            dataRequest.respond(with: chunk)
+            return true
+        }
+        if Task.isCancelled { return }
+        loadingRequest.finishLoading()
+    }
+
     private static func fill(
         _ info: AVAssetResourceLoadingContentInformationRequest,
         totalLength: Int64?,
         contentType: String?
-    ) {
-        let mime = contentType ?? "application/octet-stream"
+    ) {        let mime = contentType ?? "application/octet-stream"
         info.isByteRangeAccessSupported = true
         if let totalLength, totalLength > 0 {
             info.contentLength = totalLength

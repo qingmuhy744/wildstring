@@ -53,6 +53,20 @@ public final class PlaybackService {
     @ObservationIgnored private let resourceLoader: WildstringAudioResourceLoader
     @ObservationIgnored private let fragmentCache: AudioDiskCache?
     @ObservationIgnored private let offlineLookup: @Sendable (String) -> URL?
+    @ObservationIgnored private let planProvider:
+        (@Sendable (String, Int?, Int64) async throws -> PlaybackPlan)?
+    @ObservationIgnored private var assetLoadTask: Task<Void, Never>?
+    @ObservationIgnored private var transcodeBaseSeconds: Double = 0
+    @ObservationIgnored private var durationOverrideSeconds: Double?
+    @ObservationIgnored private var currentIsTranscode = false
+    @ObservationIgnored private var sleepTask: Task<Void, Never>?
+    @ObservationIgnored private var didStreamFallback = false
+    @ObservationIgnored private var intendedPlaying = false
+    /// AAC 档位（kbps）；nil 表示原音。
+    @ObservationIgnored public var preferredBitrateKbps: Int?
+    public private(set) var currentOutputLabel: String?
+    public private(set) var sleepTimerEnd: Date?
+    public private(set) var pauseAfterCurrentTrack = false
     @ObservationIgnored private var itemObservations: [NSKeyValueObservation] = []
     @ObservationIgnored private var timeControlObservation: NSKeyValueObservation?
     @ObservationIgnored private var timeObserverToken: Any?
@@ -66,7 +80,8 @@ public final class PlaybackService {
         store: any QueueStore,
         cookieHeader: @escaping @Sendable () async -> String?,
         fragmentCache: AudioDiskCache? = nil,
-        offlineLookup: @escaping @Sendable (String) -> URL? = { _ in nil }
+        offlineLookup: @escaping @Sendable (String) -> URL? = { _ in nil },
+        planProvider: (@Sendable (String, Int?, Int64) async throws -> PlaybackPlan)? = nil
     ) {
         self.server = server
         self.store = store
@@ -74,6 +89,7 @@ public final class PlaybackService {
         self.player = AVPlayer()
         self.fragmentCache = fragmentCache
         self.offlineLookup = offlineLookup
+        self.planProvider = planProvider
         self.resourceLoader = WildstringAudioResourceLoader(
             server: server,
             cookieHeader: cookieHeader,
@@ -109,6 +125,7 @@ public final class PlaybackService {
 
     public func resume() {
         guard currentItem != nil else { return }
+        intendedPlaying = true
         if player.currentItem == nil {
             startCurrent(autoplay: true, startAt: currentTime)
         } else {
@@ -117,6 +134,7 @@ public final class PlaybackService {
     }
 
     public func pause() {
+        intendedPlaying = false
         player.pause()
         persistProgress()
     }
@@ -159,12 +177,23 @@ public final class PlaybackService {
     public func seek(to seconds: Double) {
         let upper = duration > 0 ? duration : seconds
         let target = min(max(0, seconds), upper)
+        if currentIsTranscode {
+            // Transcode streams are not byte-seekable: reload the plan from the
+            // target position instead (start_ms semantics).
+            currentTime = target
+            persistProgress()
+            startCurrent(autoplay: isPlaying, startAt: target)
+            return
+        }
         player.seek(to: CMTime(seconds: target, preferredTimescale: 600))
         currentTime = target
         persistProgress()
     }
 
     public func stopAndClear() {
+        assetLoadTask?.cancel()
+        assetLoadTask = nil
+        cancelSleepTimer()
         player.replaceCurrentItem(with: nil)
         queue = PlaybackQueue()
         currentTime = 0
@@ -172,12 +201,18 @@ public final class PlaybackService {
         isPlaying = false
         isBuffering = false
         errorMessage = nil
+        transcodeBaseSeconds = 0
+        durationOverrideSeconds = nil
+        currentIsTranscode = false
+        currentOutputLabel = nil
         clearSystemNowPlaying()
         persistence.enqueue { store in try? await store.clear() }
     }
 
     /// Removes observers and playback; used when the session ends.
     public func shutdown() {
+        assetLoadTask?.cancel()
+        cancelSleepTimer()
         stopAndClear()
         if let timeObserverToken {
             player.removeTimeObserver(timeObserverToken)
@@ -198,6 +233,36 @@ public final class PlaybackService {
     /// Waits until queued persistence writes have been flushed (tests, teardown).
     public func flushPersistence() async {
         await persistence.flush()
+    }
+
+    // MARK: - Sleep timer
+
+    public func setSleepTimer(minutes: Int) {
+        cancelSleepTimer()
+        sleepTimerEnd = Date().addingTimeInterval(TimeInterval(minutes) * 60)
+        sleepTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(minutes * 60))
+            guard !Task.isCancelled else { return }
+            self?.fireSleepTimer()
+        }
+    }
+
+    public func sleepAfterCurrentTrack() {
+        cancelSleepTimer()
+        pauseAfterCurrentTrack = true
+    }
+
+    public func cancelSleepTimer() {
+        sleepTask?.cancel()
+        sleepTask = nil
+        sleepTimerEnd = nil
+        pauseAfterCurrentTrack = false
+    }
+
+    private func fireSleepTimer() {
+        sleepTask = nil
+        sleepTimerEnd = nil
+        pause()
     }
 
     // MARK: - Fragment cache management
@@ -233,27 +298,119 @@ public final class PlaybackService {
             return
         }
         configureSystemPlaybackIfNeeded()
-        let asset: AVURLAsset
+        assetLoadTask?.cancel()
         if let offline = offlineLookup(item.trackID),
             FileManager.default.fileExists(atPath: offline.path)
         {
-            asset = AVURLAsset(url: offline)
-        } else {
-            asset = AVURLAsset(
-                url: WildstringAudioResourceLoader.assetURL(
-                    server: server,
-                    path: item.streamPath
-                )
+            buildAsset(
+                url: offline,
+                isTranscode: false,
+                transcodeBaseSeconds: 0,
+                durationOverride: nil,
+                outputLabel: "离线",
+                autoplay: autoplay,
+                startAt: startAt
             )
+            return
+        }
+        if let planProvider, preferredBitrateKbps != nil {
+            assetLoadTask = Task {
+                await self.resolveTranscodeAndStart(autoplay: autoplay, startAt: startAt)
+            }
+            return
+        }
+        buildAsset(
+            url: WildstringAudioResourceLoader.assetURL(server: server, path: item.streamPath),
+            isTranscode: false,
+            transcodeBaseSeconds: 0,
+            durationOverride: nil,
+            outputLabel: "原音",
+            autoplay: autoplay,
+            startAt: startAt
+        )
+    }
+
+    /// Fetches the playback decision first: AAC transcodes carry their own start
+    /// offset and duration, and fall back to the original stream when the server
+    /// cannot transcode (base playback never depends on FFmpeg).
+    private func resolveTranscodeAndStart(autoplay: Bool, startAt: Double) async {
+        guard let item = currentItem, let planProvider, let bitrate = preferredBitrateKbps else {
+            return
+        }
+        do {
+            let plan = try await planProvider(item.trackID, bitrate, Int64(startAt * 1000))
+            try Task.checkCancellation()
+            guard currentItem?.id == item.id else { return }
+            if plan.isTranscode, let path = Self.relativePath(from: plan.streamUrl) {
+                let baseMs = plan.startMs ?? 0
+                buildAsset(
+                    url: WildstringAudioResourceLoader.assetURL(server: server, path: path),
+                    isTranscode: true,
+                    transcodeBaseSeconds: Double(baseMs) / 1000,
+                    durationOverride: plan.durationMs.map { Double($0) / 1000 },
+                    outputLabel: Self.outputLabel(for: plan),
+                    autoplay: autoplay,
+                    startAt: 0
+                )
+            } else {
+                buildAsset(
+                    url: WildstringAudioResourceLoader.assetURL(
+                        server: server,
+                        path: item.streamPath
+                    ),
+                    isTranscode: false,
+                    transcodeBaseSeconds: 0,
+                    durationOverride: plan.durationMs.map { Double($0) / 1000 },
+                    outputLabel: Self.outputLabel(for: plan),
+                    autoplay: autoplay,
+                    startAt: startAt
+                )
+            }
+        } catch is CancellationError {
+            return
+        } catch {
+            guard currentItem?.id == item.id else { return }
+            errorMessage = "转码暂不可用，已回退原音"
+            buildAsset(
+                url: WildstringAudioResourceLoader.assetURL(server: server, path: item.streamPath),
+                isTranscode: false,
+                transcodeBaseSeconds: 0,
+                durationOverride: nil,
+                outputLabel: "原音",
+                autoplay: autoplay,
+                startAt: startAt
+            )
+        }
+    }
+
+    private func buildAsset(
+        url: URL,
+        isTranscode: Bool,
+        transcodeBaseSeconds: Double,
+        durationOverride: Double?,
+        outputLabel: String?,
+        autoplay: Bool,
+        startAt: Double
+    ) {
+        let asset = AVURLAsset(url: url)
+        if !url.isFileURL {
             asset.resourceLoader.setDelegate(resourceLoader, queue: .main)
         }
         let playerItem = AVPlayerItem(asset: asset)
         player.replaceCurrentItem(with: playerItem)
         observe(playerItem: playerItem)
-        currentTime = startAt
-        duration = 0
+        if isTranscode {
+            didStreamFallback = false
+        }
+        self.transcodeBaseSeconds = isTranscode ? transcodeBaseSeconds : 0
+        self.durationOverrideSeconds = durationOverride
+        self.currentIsTranscode = isTranscode
+        self.currentOutputLabel = outputLabel
+        intendedPlaying = autoplay
+        currentTime = isTranscode ? transcodeBaseSeconds : startAt
+        duration = durationOverride ?? 0
         errorMessage = nil
-        if startAt > 0 {
+        if startAt > 0, !isTranscode {
             player.seek(to: CMTime(seconds: startAt, preferredTimescale: 600))
         }
         if autoplay {
@@ -263,6 +420,28 @@ public final class PlaybackService {
             isPlaying = false
         }
         updateSystemNowPlaying()
+    }
+
+    private static func relativePath(from streamUrl: String) -> String? {
+        guard let url = URL(string: streamUrl) else { return nil }
+        var path = url.path
+        while path.hasPrefix("/") { path.removeFirst() }
+        guard !path.isEmpty else { return nil }
+        if let query = url.query, !query.isEmpty {
+            path += "?" + query
+        }
+        return path
+    }
+
+    private static func outputLabel(for plan: PlaybackPlan) -> String {
+        if plan.isTranscode {
+            if let bitrate = plan.output.bitrateKbps {
+                return "AAC \(bitrate) kbps"
+            }
+            return "AAC 转码"
+        }
+        let codec = plan.output.codec.uppercased()
+        return codec.isEmpty ? "原音" : "原音 · \(codec)"
     }
 
     private func observe(playerItem: AVPlayerItem) {
@@ -313,6 +492,26 @@ public final class PlaybackService {
         switch status {
         case .failed:
             isPlaying = false
+            if currentIsTranscode, !didStreamFallback, let item = currentItem {
+                // The transcode stream failed mid-flight (e.g. no FFmpeg on the
+                // server): fall back to the original file once, keeping position.
+                didStreamFallback = true
+                let resumeAt = transcodeBaseSeconds
+                buildAsset(
+                    url: WildstringAudioResourceLoader.assetURL(
+                        server: server,
+                        path: item.streamPath
+                    ),
+                    isTranscode: false,
+                    transcodeBaseSeconds: 0,
+                    durationOverride: nil,
+                    outputLabel: "原音",
+                    autoplay: intendedPlaying,
+                    startAt: resumeAt
+                )
+                errorMessage = "转码流失败，已回退原音"
+                return
+            }
             if let error = error as? APIError {
                 errorMessage = Self.message(for: error)
             } else if let error {
@@ -326,9 +525,13 @@ public final class PlaybackService {
                 errorMessage = "无法播放这首歌曲"
             }
         case .readyToPlay:
-            let itemDuration = player.currentItem?.duration.seconds ?? 0
-            if itemDuration.isFinite, itemDuration > 0 {
-                duration = itemDuration
+            if let durationOverrideSeconds, durationOverrideSeconds > 0 {
+                duration = durationOverrideSeconds
+            } else {
+                let itemDuration = player.currentItem?.duration.seconds ?? 0
+                if itemDuration.isFinite, itemDuration > 0 {
+                    duration = itemDuration
+                }
             }
             updateSystemNowPlaying()
         default:
@@ -347,7 +550,7 @@ public final class PlaybackService {
 
     private func handleTick(seconds: Double) {
         guard seconds.isFinite else { return }
-        currentTime = seconds
+        currentTime = transcodeBaseSeconds + seconds
         secondsSinceCheckpoint += 1
         if secondsSinceCheckpoint >= 5 {
             secondsSinceCheckpoint = 0
@@ -357,6 +560,14 @@ public final class PlaybackService {
     }
 
     private func handleItemEnded() {
+        if pauseAfterCurrentTrack {
+            pauseAfterCurrentTrack = false
+            isPlaying = false
+            currentTime = duration
+            persistProgress()
+            updateSystemNowPlaying()
+            return
+        }
         if queue.repeatMode == .one {
             player.seek(to: .zero)
             currentTime = 0

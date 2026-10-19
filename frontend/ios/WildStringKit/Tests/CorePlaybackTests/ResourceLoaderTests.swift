@@ -30,6 +30,17 @@ struct ResourceLoaderTests {
         )
     }
 
+    @Test func requestPathPreservesQueryForTranscodeStreams() {
+        let url = URL(
+            string:
+                "wildstring-audio://music.example.com/api/v1/tracks/t1/stream?format=aac&bitrate_kbps=192&start_ms=53000"
+        )!
+        #expect(
+            WildstringAudioResourceLoader.requestPath(from: url)
+                == "api/v1/tracks/t1/stream?format=aac&bitrate_kbps=192&start_ms=53000"
+        )
+    }
+
     @Test func requestPathRejectsForeignSchemes() {
         #expect(
             WildstringAudioResourceLoader.requestPath(from: URL(string: "https://x/y")!)

@@ -60,6 +60,9 @@ struct RootView: View {
             if let size = environment["WILDSTRING_DEMO_LIST_SIZE"] {
                 UserDefaults.standard.set(size, forKey: "songListSize")
             }
+            if let quality = environment["WILDSTRING_DEMO_QUALITY"] {
+                UserDefaults.standard.set(quality, forKey: "playbackQuality")
+            }
         #endif
     }
 }

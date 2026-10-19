@@ -59,8 +59,7 @@ public struct AudioRangeFetcher: Sendable {
         path: String,
         method: String,
         range: String?
-    ) async throws -> (Data, HTTPURLResponse) {
-        var request = URLRequest(url: server.appending(path: path))
+    ) async throws -> (Data, HTTPURLResponse) {        var request = URLRequest(url: server.appending(path: path))
         request.httpMethod = method
         request.timeoutInterval = 60
         request.setValue("*/*", forHTTPHeaderField: "Accept")
@@ -85,6 +84,40 @@ public struct AudioRangeFetcher: Sendable {
 
     private struct ErrorEnvelope: Decodable {
         let detail: String
+    }
+
+    /// Streams a non-seekable response (AAC transcode) chunk by chunk.
+    /// `onChunk` returns false to stop consuming (cancellation).
+    public func stream(
+        path: String,
+        onChunk: @Sendable (Data) async throws -> Bool
+    ) async throws {
+        var request = URLRequest(url: server.appending(path: path))
+        request.timeoutInterval = 60
+        request.setValue("*/*", forHTTPHeaderField: "Accept")
+        if let cookie = await cookieHeader() {
+            request.setValue(cookie, forHTTPHeaderField: "Cookie")
+        }
+        let (bytes, response) = try await session.bytes(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw URLError(.badServerResponse)
+        }
+        guard (200..<300).contains(http.statusCode) else {
+            throw APIError(statusCode: http.statusCode, code: "http_\(http.statusCode)")
+        }
+        var buffer = Data()
+        buffer.reserveCapacity(64 * 1024)
+        for try await byte in bytes {
+            buffer.append(byte)
+            if buffer.count >= 64 * 1024 {
+                let chunk = buffer
+                buffer.removeAll(keepingCapacity: true)
+                if try await !onChunk(chunk) { return }
+            }
+        }
+        if !buffer.isEmpty {
+            _ = try await onChunk(buffer)
+        }
     }
 
     private static func defaultConfiguration() -> URLSessionConfiguration {
