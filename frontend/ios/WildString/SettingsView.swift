@@ -6,11 +6,22 @@ struct SettingsView: View {
     let playback: PlaybackService
 
     @Environment(OfflineModel.self) private var offline
+    @Environment(\.isAdmin) private var isAdmin
     @AppStorage("fragmentCacheLimitMB") private var limitMB = 512
     @State private var cacheBytes: Int64 = 0
 
     var body: some View {
         List {
+            if isAdmin {
+                Section("管理员") {
+                    NavigationLink(value: AdminDestination.scans) {
+                        Label("扫描任务", systemImage: "arrow.triangle.2.circlepath")
+                    }
+                    NavigationLink(value: AdminDestination.imports) {
+                        Label("导入记录", systemImage: "tray.and.arrow.down")
+                    }
+                }
+            }
             Section("片段缓存") {
                 LabeledContent("已用空间", value: byteText(cacheBytes))
                 Picker("容量上限", selection: $limitMB) {

@@ -24,6 +24,7 @@ final class ConnectionModel {
     private(set) var playback: PlaybackService?
     private(set) var favorites: FavoritesModel?
     private(set) var offline: OfflineModel?
+    private(set) var role: String?
     let demoAutoPlay: Bool
 
     private let store: any SessionStore
@@ -91,7 +92,12 @@ final class ConnectionModel {
         do {
             let status = try await client.authStatus()
             if status.authenticated, let user = status.user {
-                await activate(client: client, address: address, username: user.username)
+                await activate(
+                    client: client,
+                    address: address,
+                    username: user.username,
+                    role: user.role
+                )
                 return
             }
             await client.clearSession()
@@ -113,7 +119,12 @@ final class ConnectionModel {
             serverText = address.description
             defaults.set(address.description, forKey: Self.lastServerKey)
             password = ""
-            await activate(client: client, address: address, username: user.username)
+            await activate(
+                client: client,
+                address: address,
+                username: user.username,
+                role: user.role
+            )
         } catch {
             errorMessage = Self.message(for: error)
         }
@@ -133,6 +144,7 @@ final class ConnectionModel {
         }
         offline = nil
         favorites = nil
+        role = nil
         if let client {
             try? await client.logout()
         }
@@ -167,7 +179,8 @@ final class ConnectionModel {
     private func activate(
         client: WildstringClient,
         address: ServerAddress,
-        username: String
+        username: String,
+        role: String
     ) async {
         self.client = client
         let space = Self.spaceName(for: address)
@@ -205,6 +218,7 @@ final class ConnectionModel {
         self.playback = playback
         self.favorites = FavoritesModel(client: client)
         self.offline = OfflineModel(downloads: downloads)
+        self.role = role
         phase = .connected(server: address.description, username: username)
     }
 

@@ -29,6 +29,7 @@ struct RootView: View {
                         playback: playback,
                         favorites: favorites,
                         offline: offline,
+                        isAdmin: model.role == "admin",
                         server: server,
                         username: username,
                         autoPlayFirst: model.demoAutoPlay,

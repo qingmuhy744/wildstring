@@ -91,6 +91,14 @@ struct AccountView: View {
             .navigationDestination(for: SettingsMarker.self) { _ in
                 SettingsView(playback: playback)
             }
+            .navigationDestination(for: AdminDestination.self) { destination in
+                switch destination {
+                case .scans:
+                    ScansView(client: client)
+                case .imports:
+                    ImportsView(client: client)
+                }
+            }
             .miniPlayer(playback, client: client)
             .task { await load() }
             .refreshable { await load() }
@@ -148,6 +156,11 @@ struct AccountView: View {
             let environment = ProcessInfo.processInfo.environment
             if environment["WILDSTRING_DEMO_OPEN_SETTINGS"] == "1" {
                 path.append(SettingsMarker())
+                return
+            }
+            if environment["WILDSTRING_DEMO_OPEN_SCANS"] == "1" {
+                path.append(SettingsMarker())
+                path.append(AdminDestination.scans)
                 return
             }
             guard environment["WILDSTRING_DEMO_OPEN_PLAYLIST"] == "1",

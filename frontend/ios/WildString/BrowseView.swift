@@ -20,6 +20,8 @@ struct BrowseView: View {
     @State private var albumsLoader: PagedListModel<Album>?
     @State private var artistsLoader: PagedListModel<Artist>?
     @State private var didAutoPlay = false
+    @State private var demoMetadataTrack: Track?
+    @State private var demoLyricsTrack: Track?
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -41,6 +43,12 @@ struct BrowseView: View {
             }
             .navigationDestination(for: Artist.self) { artist in
                 ArtistDetailView(client: client, playback: playback, artist: artist)
+            }
+            .sheet(item: $demoMetadataTrack) { track in
+                MetadataEditView(client: client, track: track)
+            }
+            .sheet(item: $demoLyricsTrack) { track in
+                LyricsEditView(client: client, track: track)
             }
             .miniPlayer(playback, client: client)
         }
@@ -141,9 +149,23 @@ struct BrowseView: View {
     }
 
     private func autoPlayIfNeeded() {
+        openDemoEditorsIfNeeded()
         guard autoPlayFirst, !didAutoPlay, let first = songsLoader?.items.first else { return }
         didAutoPlay = true
         playTracks(songsLoader?.items ?? [], startingAt: first, using: playback)
+    }
+
+    private func openDemoEditorsIfNeeded() {
+        #if DEBUG
+            guard let first = songsLoader?.items.first else { return }
+            let environment = ProcessInfo.processInfo.environment
+            if environment["WILDSTRING_DEMO_OPEN_METADATA"] == "1", demoMetadataTrack == nil {
+                demoMetadataTrack = first
+            }
+            if environment["WILDSTRING_DEMO_OPEN_LYRICS_EDITOR"] == "1", demoLyricsTrack == nil {
+                demoLyricsTrack = first
+            }
+        #endif
     }
 
     /// Debug-only hooks used by the simulator verification runs.

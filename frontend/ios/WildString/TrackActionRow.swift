@@ -11,7 +11,10 @@ struct TrackActionRow<Content: View>: View {
 
     @Environment(FavoritesModel.self) private var favorites
     @Environment(OfflineModel.self) private var offline
+    @Environment(\.isAdmin) private var isAdmin
     @State private var addingToPlaylist = false
+    @State private var editingMetadata = false
+    @State private var editingLyrics = false
 
     private var isDownloaded: Bool {
         offline.items.contains { $0.trackID == track.id && $0.isCompleted }
@@ -51,9 +54,27 @@ struct TrackActionRow<Content: View>: View {
                     }
                     .disabled(isDownloading)
                 }
+                if isAdmin {
+                    Button {
+                        editingMetadata = true
+                    } label: {
+                        Label("编辑元数据", systemImage: "square.and.pencil")
+                    }
+                    Button {
+                        editingLyrics = true
+                    } label: {
+                        Label("编辑歌词", systemImage: "text.quote")
+                    }
+                }
             }
             .sheet(isPresented: $addingToPlaylist) {
                 AddToPlaylistSheet(client: client, trackID: track.id)
+            }
+            .sheet(isPresented: $editingMetadata) {
+                MetadataEditView(client: client, track: track)
+            }
+            .sheet(isPresented: $editingLyrics) {
+                LyricsEditView(client: client, track: track)
             }
     }
 }

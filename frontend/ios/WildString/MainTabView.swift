@@ -8,6 +8,7 @@ struct MainTabView: View {
     let playback: PlaybackService
     let favorites: FavoritesModel
     let offline: OfflineModel
+    let isAdmin: Bool
     let server: String
     let username: String
     var autoPlayFirst = false
@@ -38,6 +39,7 @@ struct MainTabView: View {
         }
         .environment(favorites)
         .environment(offline)
+        .environment(\.isAdmin, isAdmin)
         .task {
             await favorites.load()
             await downloadDemoTrackIfNeeded()
