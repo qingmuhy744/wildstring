@@ -22,6 +22,7 @@ class AgentTimeoutInterceptor : Interceptor {
 
 internal fun JsonObject.text(key: String, fallback: String = ""): String = get(key)?.takeUnless { it.isJsonNull }?.let { runCatching { it.asString }.getOrNull() } ?: fallback
 internal fun JsonObject.number(key: String, fallback: Long = 0): Long = get(key)?.let { runCatching { it.asLong }.getOrNull() } ?: fallback
+internal fun JsonObject.objectOrNull(key: String): JsonObject? = get(key)?.takeIf { it.isJsonObject }?.asJsonObject
 internal fun JsonObject.flag(key: String): Boolean = get(key)?.let { runCatching { it.asBoolean }.getOrNull() } ?: false
 internal fun JsonObject.objects(key: String = "items"): List<JsonObject> = getAsJsonArray(key)?.filter { it.isJsonObject }?.map { it.asJsonObject } ?: emptyList()
 internal fun jsonBody(vararg pairs: Pair<String, Any?>): JsonObject = JsonObject().apply { pairs.forEach { (key, value) ->

@@ -180,14 +180,16 @@ export function Notifications({
   inbox: NotificationInbox;
   onOpen: (kind: 'drafts' | 'tasks', id: string) => void;
 }) {
-  const [filter, setFilter] = useState('all');
-  const visible = filter === 'unread' ? inbox.items.filter((item) => !item.read_at) : inbox.items;
+  const [filter, setFilter] = useState('unread');
+  const visible = inbox.items.filter((item) =>
+    filter === 'unread' ? !item.read_at : filter === 'read' ? !!item.read_at : true,
+  );
   return (
     <section className="workspace-page" aria-label="通知中心">
       <WorkspaceHeader
         eyebrow="YOUR INBOX"
         title="每一件事，都有回音。"
-        description="任务结果和待确认建议会保留在这里。打开列表不会自动标为已读。"
+        description="优先显示未读消息；已读通知收进记录，随时可查。打开列表不会自动标为已读。"
       >
         <RefreshWorkspace busy={inbox.busy} onClick={() => void inbox.refresh(true)} />
       </WorkspaceHeader>
@@ -195,11 +197,14 @@ export function Notifications({
       {!inbox.unsupported && (
         <>
           <div className="workspace-tabs">
-            <button aria-pressed={filter === 'all'} onClick={() => setFilter('all')}>
-              全部通知
-            </button>
             <button aria-pressed={filter === 'unread'} onClick={() => setFilter('unread')}>
               未读 · {inbox.unread}
+            </button>
+            <button aria-pressed={filter === 'read'} onClick={() => setFilter('read')}>
+              已读记录
+            </button>
+            <button aria-pressed={filter === 'all'} onClick={() => setFilter('all')}>
+              全部通知
             </button>
             <button disabled={!inbox.unread || inbox.busy} onClick={() => void inbox.read()}>
               将当前通知标为已读
@@ -211,8 +216,10 @@ export function Notifications({
                 {inbox.busy
                   ? '正在读取通知…'
                   : filter === 'unread'
-                    ? '没有未读通知。'
-                    : '还没有通知，继续听歌吧。'}
+                    ? '没有未读通知，已处理的消息可在已读记录中查看。'
+                    : filter === 'read'
+                      ? '暂无已读记录。'
+                      : '还没有通知，继续听歌吧。'}
               </p>
             )}
             {visible.map((item) => (

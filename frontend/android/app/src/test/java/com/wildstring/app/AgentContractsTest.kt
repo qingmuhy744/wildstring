@@ -6,6 +6,13 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class AgentContractsTest {
+    @Test fun optionalDraftResultAcceptsServerNullAndMissingFields() {
+        assertNull(JsonParser.parseString("{}").asJsonObject.objectOrNull("result"))
+        assertNull(JsonParser.parseString("{\"result\":null}").asJsonObject.objectOrNull("result"))
+        assertNull(JsonParser.parseString("{\"result\":[]}").asJsonObject.objectOrNull("result"))
+        val applied = JsonParser.parseString("{\"result\":{\"application_mode\":\"automatic\"}}").asJsonObject
+        assertEquals("automatic", applied.objectOrNull("result")?.text("application_mode"))
+    }
     @Test fun inspectionFailureExplainsItsStageAndRecovery() {
         assertEquals("AI 分析依据", inspectionStage("model_call", "failed"))
         assertEquals("处理结束，未全部完成", inspectionStage("completed", "failed"))

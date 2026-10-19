@@ -72,7 +72,6 @@ class MusicViewModel @Inject constructor(
     private var progressJob: Job? = null
     private var handoffJob: Job? = null
     private var localPlaybackEpoch = 0L
-    private var handoffDismissed = false
     private var offlineSyncJob: Job? = null
     private val offlineSyncLock = kotlinx.coroutines.sync.Mutex()
     private val mutableOfflineSync = MutableStateFlow("")
@@ -132,7 +131,7 @@ class MusicViewModel @Inject constructor(
         viewModelScope.launch { repository.session.invalidations.collect { selection ->
             yield()
             if (selection == supersededInvalidationSelection || selection != repository.session.requestState()?.selection.orEmpty()) return@collect
-            authGeneration++; optimisticFavorites.clear(); handoffDismissed = false
+            authGeneration++; optimisticFavorites.clear()
             loadGeneration++; loadJob?.cancel(); lyricJob?.cancel(); lyricTrack = null; pages.clear(); windows.clear(); browseIndices.clear(); cancelRanges(); tabs.clear(); history.clear(); repository.knownTracks.clear(); controller?.stop(); controller?.clearMediaItems()
             val message = invalidationMessage ?: "登录已失效，请重新登录。"
             invalidationMessage = null
@@ -175,7 +174,6 @@ class MusicViewModel @Inject constructor(
 
     fun observeProgress(visible: Boolean) {
         observeAgent(visible)
-        if (visible) handoffDismissed = false
         progressJob?.cancel()
         if (visible) progressJob = viewModelScope.launch { while (isActive) { refreshPlayer(); delay(500) } }
         handoffJob?.cancel()
@@ -477,39 +475,51 @@ class MusicViewModel @Inject constructor(
     }
 
     fun deviceId() = sharing.deviceId
-    fun syncMode(value: String) { handoffDismissed = false; sharing.mode(value) }
+    fun syncMode(value: String) { sharing.mode(value); if (value == "off") mutable.update { it.copy(handoff = null) } }
     suspend fun checkSharedPlayback(): Unit = withContext(Dispatchers.Main.immediate) {
-        if (sharing.mode.value == "off" || mutable.value.handoff != null) return@withContext
-        if (sharing.mode.value == "ask" && handoffDismissed) return@withContext
+        if (sharing.mode.value == "off") return@withContext
         val c = controller ?: return@withContext
         if (c.isPlaying || c.playWhenReady) return@withContext
         val owner = repository.session.cacheScope(); requireOwner(owner)
         val epoch = localPlaybackEpoch
         val saved = repository.api().sharedPlayback(RequestOwner(owner)); requireOwner(owner)
-        if (epoch != localPlaybackEpoch || c.isPlaying || c.playWhenReady || saved.trackIds.isEmpty() ||
-            saved.deviceId == sharing.deviceId || saved.version <= sharing.lastSeen()) return@withContext
-        if (sharing.mode.value == "auto") resumeShared(saved)
-        else if (sharing.mode.value == "ask") mutable.update { it.copy(handoff = saved) }
+        if (epoch != localPlaybackEpoch || c.isPlaying || c.playWhenReady) return@withContext
+        val currentOffer = mutable.value.handoff
+        val samePause = currentOffer != null && currentOffer.pauseEvent() == saved.pauseEvent()
+        if (!saved.isRecentPausedHandoff() || saved.deviceId == sharing.deviceId || saved.version <= sharing.lastSeen()) {
+            mutable.update { it.copy(handoff = null) }; return@withContext
+        }
+        if (samePause) { mutable.update { it.copy(handoff = saved) }; return@withContext }
+        if (!saved.canOfferHandoff(sharing.deviceId, sharing.lastSeen(), sharing.lastOfferedPause())) {
+            mutable.update { it.copy(handoff = null) }; return@withContext
+        }
+        if (sharing.mode.value == "auto") resumeShared(saved, requirePausedHandoff = true)
+        else if (sharing.mode.value == "ask") {
+            sharing.pauseOffered(saved)
+            mutable.update { it.copy(handoff = saved) }
+        }
     }
-    fun dismissHandoff() { handoffDismissed = true; mutable.value.handoff?.let { sharing.seen(it.version) }; mutable.update { it.copy(handoff = null) } }
+    fun dismissHandoff() { mutable.value.handoff?.let { sharing.pauseOffered(it); sharing.seen(it.version) }; mutable.update { it.copy(handoff = null) } }
     suspend fun acceptHandoff() {
-        if (mutable.value.handoff == null) return
+        val offer = mutable.value.handoff ?: return
         val owner = repository.session.cacheScope(); requireOwner(owner)
         val saved = repository.api().sharedPlayback(RequestOwner(owner)); requireOwner(owner)
+        if (!saved.isRecentPausedHandoff() || offer.pauseEvent() != saved.pauseEvent()) {
+            mutable.update { it.copy(handoff = null) }; return
+        }
         mutable.update { it.copy(handoff = saved) }
-        resumeShared(saved)
-        handoffDismissed = true
+        resumeShared(saved, requirePausedHandoff = true)
         mutable.update { it.copy(handoff = null) }
     }
     suspend fun sharePlayback(): SharedPlayback = withContext(Dispatchers.Main.immediate) {
         val c = controller ?: throw IOException("播放器尚未连接。")
         val snapshot = SharedPlayback(trackIds = queueSnapshot.map { it.trackId }, index = c.currentMediaItemIndex.coerceAtLeast(0),
-            positionMs = c.currentPosition.coerceAtLeast(0), mode = if (c.shuffleModeEnabled) "shuffle" else when(c.repeatMode) {
+            positionMs = c.currentPosition.coerceAtLeast(0), playbackState = if (c.playbackState == Player.STATE_ENDED) "ended" else if (c.playWhenReady) "playing" else "paused", mode = if (c.shuffleModeEnabled) "shuffle" else when(c.repeatMode) {
                 Player.REPEAT_MODE_ONE -> "repeat_one"; Player.REPEAT_MODE_ALL -> "repeat_all"; else -> "sequential"
             })
         sharing.publish(snapshot, claim = true) ?: throw IOException("尚无可同步的播放。")
     }
-    suspend fun resumeShared(saved: SharedPlayback): Unit = withContext(Dispatchers.Main.immediate) {
+    suspend fun resumeShared(saved: SharedPlayback, requirePausedHandoff: Boolean = false): Unit = withContext(Dispatchers.Main.immediate) {
         require(saved.trackIds.size <= 5000) { "共享队列超过本机 5000 首上限。" }
         val owner = repository.session.cacheScope()
         val epoch = localPlaybackEpoch
@@ -517,8 +527,13 @@ class MusicViewModel @Inject constructor(
         check(owner != null && owner == repository.session.cacheScope()) { "会话已变化。" }
         requireOwner(owner)
         val latest = repository.api().sharedPlayback(RequestOwner(owner)); requireOwner(owner)
+        if (requirePausedHandoff && (!latest.isRecentPausedHandoff() || latest.pauseEvent() != saved.pauseEvent())) {
+            mutable.update { it.copy(handoff = null) }
+            throw IOException("其他设备已恢复播放，或暂停记录已过期。")
+        }
         if (latest.version != saved.version) throw IOException("其他设备的进度已更新，请重新读取后继续。")
         check(epoch == localPlaybackEpoch && controller?.playWhenReady != true) { "本机播放已变化，请重新读取后继续。" }
+        sharing.pauseOffered(saved)
         sharing.acceptRemote(saved.version)
         play(tracks, saved.index, autoplay = false, positionMs = saved.positionMs)
         controller?.shuffleModeEnabled = saved.mode == "shuffle"

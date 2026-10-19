@@ -106,7 +106,7 @@ fun WildStringApp(model: MusicViewModel) {
                             shape = RoundedCornerShape(16.dp), tonalElevation = 6.dp, shadowElevation = 8.dp) {
                             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                 Text("其他设备有可接续的进度", style = MaterialTheme.typography.titleSmall)
-                                Text("${saved.trackIds.size} 首 · 第 ${saved.index + 1} 首 · ${formatTime(saved.positionMs)} · 载入后保持暂停",
+                                Text("${saved.trackIds.size} 首 · 第 ${saved.index + 1} 首 · ${formatTime(saved.positionMs)} · 其他设备最近暂停，载入后保持暂停",
                                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 if (action.message != "已完成") ActionStatus(action)
                                 Row(Modifier.align(Alignment.End)) {

@@ -317,6 +317,10 @@ class AgentWorkspaceTest {
             compose.onNodeWithTag("notice-read-notice-one").performClick()
             compose.waitUntil(15_000) { vm.agent.inbox.value.unread == 0 }
             compose.onNodeWithText("0 条未读").assertExists()
+            compose.onNodeWithText("新草案待确认").assertDoesNotExist()
+            compose.onNodeWithTag("notice-filter-read").performClick()
+            compose.onNodeWithText("新草案待确认").assertExists()
+            assertEquals("History filtering must not write", 1, fixture.writes.get())
             compose.onNodeWithTag("agent-tab-chat").performClick()
             // The chat tab independently loads connection permissions and history.
             // Wait for the actual editor to leave its loading/disabled state.
@@ -345,12 +349,17 @@ class AgentWorkspaceTest {
             compose.onAllNodesWithText("已应用").onFirst().assertExists()
             assertEquals(1, fixture.requests.count { it.first.endsWith("/draft-one/accept") })
             capture("agent-draft-phone.png")
+            compose.onNodeWithText("关闭", useUnmergedTree = true).performClick()
+            compose.onNodeWithTag("draft-open-draft-one").assertDoesNotExist()
+            compose.onNodeWithTag("draft-filter-history").performClick()
+            compose.onNodeWithTag("draft-open-draft-one").assertExists()
+            capture("agent-processed-history-phone.png")
         } finally { compose.runOnIdle { vm.settings.appearance("system"); vm.repository.session.invalidate() } } }
     }
     @Test fun lyricProposalShowsQualityAndExcerptsBeforeHumanApproval() {
         val vm = vm()
         Fixture().use { fixture -> try {
-            fixture.replacementDraft = JsonParser.parseString("""{"id":"draft-one","kind":"lyrics","title":"选用双语逐字歌词","payload":{"candidate_id":"candidate-one","version":1,"file_version":"${"a".repeat(64)}","offset_ms":250},"before":{"track_id":"song-a","title":"合成歌曲甲","provider":"合成来源","current_quality":{"label":"静态歌词"},"candidate_quality":{"label":"双语逐字动态"},"match":{"score":0.99},"current_lines":[{"text":"原歌词预览"}],"candidate_lines":[{"text":"Synthetic lyric","translation":"合成译文"}]},"evidence":[],"status":"pending","version":1,"trace_id":"${fixture.trace}"}""").asJsonObject
+            fixture.replacementDraft = JsonParser.parseString("""{"id":"draft-one","kind":"lyrics","title":"选用双语逐字歌词","payload":{"candidate_id":"candidate-one","version":1,"file_version":"${"a".repeat(64)}","offset_ms":250},"before":{"track_id":"song-a","title":"合成歌曲甲","provider":"合成来源","current_quality":{"label":"静态歌词"},"candidate_quality":{"label":"双语逐字动态"},"match":{"score":0.99},"current_lines":[{"text":"原歌词预览"}],"candidate_lines":[{"text":"Synthetic lyric","translation":"合成译文"}]},"evidence":[],"status":"pending","version":1,"trace_id":"${fixture.trace}"}""").asJsonObject.apply { add("result", com.google.gson.JsonNull.INSTANCE) }
             connect(vm, fixture)
             compose.onNodeWithContentDescription("设置").performClick()
             compose.onNodeWithText("野弦助手 / 通知与草案").performScrollTo().performClick()

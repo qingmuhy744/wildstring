@@ -23,7 +23,7 @@ interface Api {
     @PUT suspend fun reorderPlaylist(@Url url: String, @Body body: AddTracks): Playlist
     @GET("api/v1/listening/summary") suspend fun listeningSummary(): ListeningSummary
     @GET("api/v1/playback/state") suspend fun sharedPlayback(@Tag owner: RequestOwner? = null): SharedPlayback
-    @PUT("api/v1/playback/state") suspend fun saveSharedPlayback(@Body body: SharedPlaybackWrite, @Tag owner: RequestOwner? = null): SharedPlayback
+    @PUT("api/v1/playback/state") suspend fun saveSharedPlayback(@Body body: JsonObject, @Tag owner: RequestOwner? = null): SharedPlayback
     @GET("api/v1/recommendations/daily") suspend fun daily(@Tag policy: AgentRequestPolicy? = AgentRequestPolicy()): DailyRecommendations
     @POST("api/v1/recommendations/daily/refresh") suspend fun refreshDaily(@Body body: JsonObject = JsonObject(), @Tag policy: AgentRequestPolicy? = AgentRequestPolicy()): DailyRecommendations
     @GET("api/v1/recommendations/preferences") suspend fun recommendationPreferences(): RecommendationPreferences

@@ -435,7 +435,7 @@ class Core:
     def drafts(self, actor, limit=50, offset=0, status=None):
         with self.database.connect() as connection:
             rows = connection.execute(
-                "SELECT id FROM agent_drafts WHERE user_id=? AND (? IS NULL OR status=?) ORDER BY created_at DESC,id LIMIT ? OFFSET ?",
+                "SELECT id FROM agent_drafts WHERE user_id=? AND (? IS NULL OR status=?) ORDER BY CASE WHEN status IN ('pending','approved') THEN 0 ELSE 1 END,updated_at DESC,id DESC LIMIT ? OFFSET ?",
                 (actor.user_id, status, status, limit, offset),
             ).fetchall()
             total = connection.execute(
