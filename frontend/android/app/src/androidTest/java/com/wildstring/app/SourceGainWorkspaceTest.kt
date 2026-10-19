@@ -20,6 +20,8 @@ import okhttp3.mockwebserver.*
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 class SourceGainWorkspaceTest {
     @get:Rule val compose = createAndroidComposeRule<MainActivity>()
@@ -28,6 +30,9 @@ class SourceGainWorkspaceTest {
         val paths = java.util.concurrent.ConcurrentLinkedQueue<String>()
         @Volatile var album = 0.0; @Volatile var track = 0.0; @Volatile var enabled = false
         @Volatile var scanStatus = ""; @Volatile var scanItemStatus = "queued"
+        @Volatile var holdScanDetails = false
+        val scanDetailsRequested = CountDownLatch(1)
+        val releaseScanDetails = CountDownLatch(1)
         var scanOptions = JsonObject()
         fun scan() = """{"id":"scan-one","status":"$scanStatus","total":1,"created_at":1,"counts":{"$scanItemStatus":1},"cooldowns":[],"options":{"scope":"album","scope_id":"album-one"},"items":[{"id":"scan-item","track_id":"song-one","title":"合成歌词歌曲","status":"$scanItemStatus","baseline":{"label":"静态歌词"},"quality":{"label":"双语逐字动态"},"results":{}}]}"""
         var albumVersion = 0; var trackVersion = 0; var pluginVersion = 1
@@ -70,7 +75,13 @@ class SourceGainWorkspaceTest {
                         if (request.method == "POST") { scanOptions = body; scanStatus = "running"; json(scan()) }
                         else json("""{"items":[${if (scanStatus.isEmpty()) "" else scan()}]}""")
                     }
-                    path == "/api/v1/manage/lyric-scans/scan-one" -> json(scan())
+                    path == "/api/v1/manage/lyric-scans/scan-one" -> {
+                        if (holdScanDetails) {
+                            scanDetailsRequested.countDown()
+                            if (!releaseScanDetails.await(20, TimeUnit.SECONDS)) return@synchronized MockResponse().setResponseCode(504)
+                        }
+                        json(scan())
+                    }
                     path == "/api/v1/manage/lyric-scans/scan-one/control" -> {
                         scanStatus = if (body.text("action") == "pause") "paused" else "completed"
                         if (scanStatus == "completed") scanItemStatus = "ready"
@@ -91,7 +102,7 @@ class SourceGainWorkspaceTest {
             } }
             server.start(java.net.InetAddress.getByName("127.0.0.1"),0)
         }
-        override fun close() = server.close()
+        override fun close() { releaseScanDetails.countDown(); server.close() }
     }
     private fun connect(fixture: Fixture): MusicViewModel {
         val vm = compose.runOnIdle { ViewModelProvider(compose.activity)[MusicViewModel::class.java] }
@@ -106,6 +117,11 @@ class SourceGainWorkspaceTest {
         val folder = InstrumentationRegistry.getArguments().getString("additionalTestOutputDir")?.let { java.io.File(it) } ?: instrumentation.targetContext.getExternalFilesDir(null)!!
         folder.mkdirs(); val image = instrumentation.uiAutomation.takeScreenshot()!!
         java.io.File(folder,name).outputStream().use { image.compress(android.graphics.Bitmap.CompressFormat.PNG,100,it) }; image.recycle()
+    }
+    private fun waitForEnabledText(text: String) {
+        compose.waitUntil(10_000) {
+            compose.onAllNodes(hasText(text) and isEnabled()).fetchSemanticsNodes().isNotEmpty()
+        }
     }
     @Test fun pluginConfigurationCanBeEnabledAndSavedFromNativePanel() {
         Fixture().use { fixture ->
@@ -203,17 +219,24 @@ class SourceGainWorkspaceTest {
             compose.onNodeWithText("检查扫描范围").performScrollTo().performClick()
             try { compose.waitUntil(10_000) { compose.onAllNodesWithText("开始后台扫描").fetchSemanticsNodes().isNotEmpty() } }
             catch (error: Throwable) { println("Lyric fixture paths: ${fixture.paths}"); capture("lyric-scan-failure.png"); compose.onAllNodes(isRoot()).onLast().printToLog("LyricFailure"); throw error }
+            waitForEnabledText("开始后台扫描")
+            fixture.holdScanDetails = true
             compose.onNodeWithText("开始后台扫描").performScrollTo().performClick()
             compose.waitUntil(10_000) { fixture.scanStatus == "running" }
             assertEquals("album", fixture.scanOptions.text("scope")); assertEquals("album-one", fixture.scanOptions.text("scope_id"))
             assertEquals("custom", fixture.scanOptions.text("rate_profile")); assertEquals(7, fixture.scanOptions.number("interval_seconds").toInt())
-            compose.waitUntil(10_000) { compose.onAllNodesWithText("暂停扫描").fetchSemanticsNodes().isNotEmpty() }
+            compose.waitUntil(10_000) { fixture.scanDetailsRequested.count == 0L }
+            compose.onNodeWithText("暂停扫描").performScrollTo().assertIsNotEnabled()
+            fixture.holdScanDetails = false
+            fixture.releaseScanDetails.countDown()
+            waitForEnabledText("暂停扫描")
             compose.onNodeWithText("暂停扫描").performScrollTo().performClick()
             compose.waitUntil(10_000) { fixture.scanStatus == "paused" }
-            compose.waitUntil(10_000) { compose.onAllNodesWithText("继续扫描").fetchSemanticsNodes().isNotEmpty() }
+            waitForEnabledText("继续扫描")
             compose.onNodeWithText("继续扫描").performScrollTo().performClick()
             compose.waitUntil(10_000) { fixture.scanStatus == "completed" }
             compose.waitUntil(10_000) { compose.onAllNodesWithText("可升级").fetchSemanticsNodes().isNotEmpty() }
+            waitForEnabledText("选择本页可升级")
             compose.onNodeWithText("选择本页可升级").performScrollTo().performClick()
             compose.onNodeWithText("确认选中（1）").performScrollTo().performClick()
             assertFalse(fixture.paths.any { it.endsWith("/scan-one/apply") })
@@ -225,6 +248,7 @@ class SourceGainWorkspaceTest {
             compose.waitUntil(10_000) { compose.onAllNodesWithText("已启用").fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithText("恢复洗版前歌词").performScrollTo().assertExists()
             capture("lyric-scans-native.png")
+            waitForEnabledText("恢复洗版前歌词")
             compose.onNodeWithText("恢复洗版前歌词").performClick()
             compose.waitUntil(10_000) { fixture.scanItemStatus == "restored" }
             compose.waitUntil(10_000) { compose.onAllNodesWithText("已恢复").fetchSemanticsNodes().isNotEmpty() }
