@@ -397,6 +397,70 @@ struct StubbedHTTPTests {
             let plan = try await makeClient().playbackPlan(trackID: "t1", bitrateKbps: nil)
             #expect(!plan.isTranscode)
         }
+
+        @Test func playbackStateDecodeInitial() async throws {
+            StubURLProtocol.respond { request in
+                #expect(request.url?.path == "/api/v1/playback/state")
+                return .json(
+                    status: 200,
+                    body: """
+                        {"version":0,"device_id":"","track_ids":[],"index":0,"position_ms":0,"mode":"sequential","updated_at":null}
+                        """
+                )
+            }
+            let state = try await makeClient().playbackState()
+            #expect(state.version == 0)
+            #expect(state.trackIds.isEmpty)
+            #expect(state.mode == "sequential")
+        }
+
+        @Test func savePlaybackStateSendsSnapshot() async throws {
+            StubURLProtocol.respond { request in
+                #expect(request.httpMethod == "PUT")
+                #expect(request.url?.path == "/api/v1/playback/state")
+                let body = try #require(StubURLProtocol.bodyData(of: request))
+                let json = try #require(
+                    try JSONSerialization.jsonObject(with: body) as? [String: Any]
+                )
+                #expect(json["version"] as? Int == 3)
+                #expect(json["device_id"] as? String == "ios-device")
+                #expect(json["track_ids"] as? [String] == ["t1", "t2"])
+                #expect(json["index"] as? Int == 1)
+                #expect(json["position_ms"] as? Int == 42_000)
+                #expect(json["mode"] as? String == "shuffle")
+                return .json(
+                    status: 200,
+                    body: """
+                        {"version":4,"device_id":"ios-device","track_ids":["t1","t2"],"index":1,"position_ms":42000,"mode":"shuffle","updated_at":"2026-10-19T10:00:00+00:00"}
+                        """
+                )
+            }
+            let saved = try await makeClient().savePlaybackState(
+                RemotePlaybackState(
+                    version: 3,
+                    deviceId: "ios-device",
+                    trackIds: ["t1", "t2"],
+                    index: 1,
+                    positionMs: 42_000,
+                    mode: "shuffle"
+                )
+            )
+            #expect(saved.version == 4)
+        }
+
+        @Test func singleTrackFetchesByID() async throws {
+            StubURLProtocol.respond { request in
+                #expect(request.url?.path == "/api/v1/tracks/t1")
+                return .json(
+                    status: 200,
+                    body: """
+                        {"id":"t1","title":"歌","artists":["人"],"album":"集","duration_ms":1000,"has_cover":false,"album_id":null,"track_number":null,"disc_number":null}
+                        """
+                )
+            }
+            let track = try await makeClient().track(id: "t1")
+            #expect(track.title == "歌")
+        }
     }
 
     @Suite("PersonalLibrary")

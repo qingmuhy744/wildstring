@@ -3,6 +3,21 @@ import CoreNetwork
 import Foundation
 import Observation
 
+/// Queue/position/mode snapshot exchanged between devices.
+public struct PlaybackSnapshot: Equatable, Sendable {
+    public var trackIDs: [String]
+    public var index: Int
+    public var positionMs: Int64
+    public var mode: String
+
+    public init(trackIDs: [String], index: Int, positionMs: Int64, mode: String) {
+        self.trackIDs = trackIDs
+        self.index = index
+        self.positionMs = positionMs
+        self.mode = mode
+    }
+}
+
 /// Owns the single AVPlayer for the app, plus the queue, restore points and
 /// system playback controls (lock screen, headphones).
 @MainActor
@@ -233,6 +248,51 @@ public final class PlaybackService {
     /// Waits until queued persistence writes have been flushed (tests, teardown).
     public func flushPersistence() async {
         await persistence.flush()
+    }
+
+    // MARK: - Cross-device handoff
+
+    /// Snapshot of the current queue/position/mode for another device.
+    public func playbackSnapshot() -> PlaybackSnapshot {
+        let mode: String
+        if queue.isShuffled {
+            mode = "shuffle"
+        } else {
+            switch queue.repeatMode {
+            case .off: mode = "sequential"
+            case .all: mode = "repeat_all"
+            case .one: mode = "repeat_one"
+            }
+        }
+        return PlaybackSnapshot(
+            trackIDs: queue.items.map(\.trackID),
+            index: queue.currentIndex ?? 0,
+            positionMs: Int64(max(0, currentTime) * 1000),
+            mode: mode
+        )
+    }
+
+    /// Adopts a snapshot from another device: queue, mode and paused position.
+    public func adopt(items: [Item], startingAt index: Int, position: Double, mode: String) {
+        guard !items.isEmpty else { return }
+        queue.set(items: items, startingAt: min(max(0, index), items.count - 1))
+        let shuffled = mode == "shuffle"
+        if queue.isShuffled != shuffled {
+            queue.toggleShuffle()
+        }
+        switch mode {
+        case "repeat_one": queue.setRepeatMode(.one)
+        case "repeat_all", "shuffle": queue.setRepeatMode(.all)
+        default: queue.setRepeatMode(.off)
+        }
+        player.replaceCurrentItem(with: nil)
+        currentTime = max(0, position)
+        duration = 0
+        isPlaying = false
+        isBuffering = false
+        errorMessage = nil
+        persistQueueAndProgress()
+        updateSystemNowPlaying()
     }
 
     // MARK: - Sleep timer

@@ -25,13 +25,15 @@ struct RootView: View {
                 ConnectionView(model: model)
             case .connected(let server, let username):
                 if let client = model.client, let playback = model.playback,
-                    let favorites = model.favorites, let offline = model.offline
+                    let favorites = model.favorites, let offline = model.offline,
+                    let sharing = model.sharing
                 {
                     MainTabView(
                         client: client,
                         playback: playback,
                         favorites: favorites,
                         offline: offline,
+                        sharing: sharing,
                         isAdmin: model.role == "admin",
                         server: server,
                         username: username,
@@ -64,6 +66,9 @@ struct RootView: View {
             }
             if let quality = environment["WILDSTRING_DEMO_QUALITY"] {
                 UserDefaults.standard.set(quality, forKey: "playbackQuality")
+            }
+            if let syncMode = environment["WILDSTRING_DEMO_SYNC_MODE"] {
+                UserDefaults.standard.set(syncMode, forKey: "playbackSyncMode")
             }
         #endif
     }

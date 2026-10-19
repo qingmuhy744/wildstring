@@ -13,6 +13,7 @@ struct SettingsView: View {
     @AppStorage("songListSize") private var songListSize = SongListSize.medium.rawValue
     @AppStorage("hapticsEnabled") private var hapticsEnabled = true
     @AppStorage("playbackQuality") private var playbackQuality = "original"
+    @AppStorage("playbackSyncMode") private var syncMode = "ask"
     @State private var cacheBytes: Int64 = 0
 
     var body: some View {
@@ -56,6 +57,16 @@ struct SettingsView: View {
                 Text("无损源转为 AAC；有损源保持原文件。转码不可用时自动回退原音。")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
+                Picker("跨设备接续", selection: $syncMode) {
+                    Text("关闭").tag("off")
+                    Text("轻提示").tag("ask")
+                    Text("自动恢复").tag("auto")
+                }
+                if syncMode != "off" {
+                    Text("暂停时自动保存进度；发现其他设备的新记录时询问或自动恢复，载入后保持暂停。")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
             }
             Section("片段缓存") {
                 LabeledContent("已用空间", value: byteText(cacheBytes))

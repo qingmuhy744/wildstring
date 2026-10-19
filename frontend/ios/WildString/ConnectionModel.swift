@@ -27,6 +27,7 @@ final class ConnectionModel {
     private(set) var offline: OfflineModel?
     private(set) var role: String?
     private(set) var servers: [SavedServer] = []
+    private(set) var sharing: PlaybackSharingModel?
     let demoAutoPlay: Bool
 
     private let store: any SessionStore
@@ -131,6 +132,8 @@ final class ConnectionModel {
         if let playback {
             await playback.clearFragmentCache()
         }
+        sharing?.stop()
+        sharing = nil
         playback?.shutdown()
         playback = nil
         if let offline {
@@ -291,6 +294,7 @@ final class ConnectionModel {
         self.favorites = FavoritesModel(client: client)
         self.offline = OfflineModel(downloads: downloads)
         self.role = role
+        self.sharing = PlaybackSharingModel(client: client, playback: playback)
         SavedServersStore.upsert(
             SavedServer(address: address.description, username: username, lastUsedAt: .now)
         )

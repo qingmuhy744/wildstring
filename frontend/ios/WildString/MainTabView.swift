@@ -8,6 +8,7 @@ struct MainTabView: View {
     let playback: PlaybackService
     let favorites: FavoritesModel
     let offline: OfflineModel
+    let sharing: PlaybackSharingModel
     let isAdmin: Bool
     let server: String
     let username: String
@@ -40,10 +41,53 @@ struct MainTabView: View {
         .environment(favorites)
         .environment(offline)
         .environment(\.isAdmin, isAdmin)
+        .overlay(alignment: .top) {
+            if let handoff = sharing.handoff {
+                handoffBanner(handoff)
+            }
+        }
+        .onChange(of: playback.isPlaying) { _, playing in
+            if !playing {
+                Task { await sharing.publishIfPaused() }
+            }
+        }
         .task {
             await favorites.load()
             await downloadDemoTrackIfNeeded()
+            sharing.start()
         }
+    }
+
+    private func handoffBanner(_ handoff: PlaybackSharingModel.Handoff) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "arrow.triangle.2.circlepath.circle.fill")
+                .foregroundStyle(Color.wildAccent)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("其他设备有可接续的进度")
+                    .font(.footnote.bold())
+                if handoff.tracks.indices.contains(handoff.state.index) {
+                    Text(handoff.tracks[handoff.state.index].title)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+            Spacer()
+            Button("忽略") { sharing.dismiss() }
+                .font(.footnote)
+                .buttonStyle(.plain)
+            Button("继续") {
+                Task { await sharing.accept(handoff) }
+            }
+            .font(.footnote.bold())
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
+        .padding(.horizontal, 12)
+        .padding(.top, 6)
     }
 
     private func downloadDemoTrackIfNeeded() async {
