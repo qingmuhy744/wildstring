@@ -315,5 +315,33 @@ struct StubbedHTTPTests {
             let data = try await makeClient().authorizedData(path: "api/v1/tracks/t1/cover")
             #expect(data.count == 3)
         }
+
+        @Test func lyricsDecodeSyncedLines() async throws {
+            StubURLProtocol.respond { request in
+                #expect(request.url?.path == "/api/v1/tracks/t1/lyrics")
+                return .json(
+                    status: 200,
+                    body: """
+                        {"kind":"synced","source":"file","lines":[{"time_ms":0,"text":"第一行"},{"time_ms":4000,"text":"第二行"}]}
+                        """
+                )
+            }
+            let lyrics = try await makeClient().lyrics(trackID: "t1")
+            #expect(lyrics.kind == "synced")
+            #expect(lyrics.isSynced)
+            #expect(lyrics.lines.count == 2)
+            #expect(lyrics.lines.first?.timeMs == 0)
+            #expect(lyrics.lines.last?.text == "第二行")
+            #expect(lyrics.source == "file")
+        }
+
+        @Test func lyricsNoneStaysPlayable() async throws {
+            StubURLProtocol.respond { _ in
+                .json(status: 200, body: #"{"kind":"none","lines":[]}"#)
+            }
+            let lyrics = try await makeClient().lyrics(trackID: "t9")
+            #expect(lyrics.isEmpty)
+            #expect(!lyrics.isSynced)
+        }
     }
 }
