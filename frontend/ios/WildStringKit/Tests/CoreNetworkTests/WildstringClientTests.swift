@@ -240,4 +240,80 @@ struct StubbedHTTPTests {
             }
         }
     }
+
+    @Suite("LibraryAPI")
+    struct LibraryAPISuite {
+        private func makeClient() throws -> WildstringClient {
+            WildstringClient(
+                server: try ServerAddress(input: "music.example.com"),
+                store: InMemorySessionStore(),
+                configuration: StubURLProtocol.configuration()
+            )
+        }
+
+        @Test func albumsDecodePage() async throws {
+            StubURLProtocol.respond { request in
+                #expect(request.url?.path == "/api/v1/albums")
+                #expect(request.url?.query == "limit=50&offset=0")
+                return .json(
+                    status: 200,
+                    body: """
+                        {"items":[{"id":"a1","title":"夜航","artists":["阿岚"],"track_count":9,"duration_ms":2400000,"cover_track_id":"t1"}],"total":1,"limit":50,"offset":0}
+                        """
+                )
+            }
+            let page = try await makeClient().albums()
+            #expect(page.total == 1)
+            let album = try #require(page.items.first)
+            #expect(album.title == "夜航")
+            #expect(album.trackCount == 9)
+            #expect(album.coverTrackId == "t1")
+        }
+
+        @Test func albumTracksUseAlbumEndpoint() async throws {
+            StubURLProtocol.respond { request in
+                #expect(request.url?.path == "/api/v1/albums/a1/tracks")
+                #expect(request.url?.query == "limit=200&offset=0")
+                return .json(status: 200, body: #"{"items":[],"total":0,"limit":200,"offset":0}"#)
+            }
+            _ = try await makeClient().albumTracks(albumId: "a1")
+        }
+
+        @Test func artistsDecodePageAndQuery() async throws {
+            StubURLProtocol.respond { request in
+                #expect(request.url?.path == "/api/v1/artists")
+                #expect(request.url?.query == "q=%E9%98%BF&limit=50&offset=0")
+                return .json(
+                    status: 200,
+                    body: """
+                        {"items":[{"id":"ar1","name":"阿岚","track_count":12,"album_count":2,"duration_ms":3000000,"cover_track_id":"t2"}],"total":1,"limit":50,"offset":0}
+                        """
+                )
+            }
+            let page = try await makeClient().artists(query: "阿")
+            #expect(page.items.first?.name == "阿岚")
+            #expect(page.items.first?.albumCount == 2)
+        }
+
+        @Test func artistAlbumsUseArtistEndpoint() async throws {
+            StubURLProtocol.respond { request in
+                #expect(request.url?.path == "/api/v1/artists/ar1/albums")
+                return .json(status: 200, body: #"{"items":[],"total":0,"limit":50,"offset":0}"#)
+            }
+            _ = try await makeClient().artistAlbums(artistId: "ar1")
+        }
+
+        @Test func coverDataFetchesRawBytes() async throws {
+            StubURLProtocol.respond { request in
+                #expect(request.url?.path == "/api/v1/tracks/t1/cover")
+                return .init(
+                    statusCode: 200,
+                    headers: ["Content-Type": "image/jpeg"],
+                    body: Data([0xFF, 0xD8, 0xFF])
+                )
+            }
+            let data = try await makeClient().authorizedData(path: "api/v1/tracks/t1/cover")
+            #expect(data.count == 3)
+        }
+    }
 }
