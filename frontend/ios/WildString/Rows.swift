@@ -167,6 +167,7 @@ extension Track {
             trackID: id,
             title: title,
             artist: artistDisplay,
+            album: album,
             streamPath: "api/v1/tracks/\(id)/stream"
         )
     }

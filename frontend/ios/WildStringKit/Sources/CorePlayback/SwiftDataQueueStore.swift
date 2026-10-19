@@ -8,14 +8,16 @@ final class StoredQueueEntry {
     var trackID: String
     var title: String
     var artist: String
+    var album: String?
     var streamPath: String
 
-    init(order: Int, entryID: UUID, trackID: String, title: String, artist: String, streamPath: String) {
+    init(order: Int, entryID: UUID, trackID: String, title: String, artist: String, album: String?, streamPath: String) {
         self.order = order
         self.entryID = entryID
         self.trackID = trackID
         self.title = title
         self.artist = artist
+        self.album = album
         self.streamPath = streamPath
     }
 }
@@ -71,6 +73,7 @@ public struct SwiftDataQueueStore: QueueStore, @unchecked Sendable {
                     trackID: $0.trackID,
                     title: $0.title,
                     artist: $0.artist,
+                    album: $0.album,
                     streamPath: $0.streamPath
                 )
             },
@@ -91,6 +94,7 @@ public struct SwiftDataQueueStore: QueueStore, @unchecked Sendable {
                     trackID: item.trackID,
                     title: item.title,
                     artist: item.artist,
+                    album: item.album,
                     streamPath: item.streamPath
                 )
             )

@@ -13,10 +13,7 @@ struct NowPlayingView: View {
     @AppStorage("playerStyle") private var playerStyleRaw = PlayerStyle.cover.rawValue
     @State private var showLyrics: Bool
     @State private var scrubTime: Double?
-
-    private var playerStyle: PlayerStyle {
-        PlayerStyle(rawValue: playerStyleRaw) ?? .cover
-    }
+    @State private var showingQueue = false
 
     init(client: WildstringClient, playback: PlaybackService, initiallyShowsLyrics: Bool = false) {
         self.client = client
@@ -26,29 +23,48 @@ struct NowPlayingView: View {
 
     private var isRegular: Bool { sizeClass == .regular }
 
+    private var playerStyle: PlayerStyle {
+        PlayerStyle(rawValue: playerStyleRaw) ?? .cover
+    }
+
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            if isRegular {
-                HStack(alignment: .top, spacing: 28) {
-                    playerColumn
-                        .frame(maxWidth: 400)
-                    LyricsPane(client: client, playback: playback)
-                        .frame(maxWidth: .infinity)
-                }
-                .padding(.horizontal, 28)
-                Spacer(minLength: 0)
-            } else {
-                if showLyrics {
-                    LyricsPane(client: client, playback: playback)
+        ZStack {
+            ArtworkBackdrop(client: client, trackID: playback.currentItem?.trackID)
+            VStack(spacing: 0) {
+                header
+                if isRegular {
+                    HStack(alignment: .top, spacing: 28) {
+                        playerColumn
+                            .frame(maxWidth: 400)
+                        LyricsPane(client: client, playback: playback)
+                            .frame(maxWidth: .infinity)
+                    }
+                    .padding(.horizontal, 28)
+                    Spacer(minLength: 0)
                 } else {
-                    playerColumn
+                    if showLyrics {
+                        LyricsPane(client: client, playback: playback)
+                    } else {
+                        playerColumn
+                    }
+                    Spacer(minLength: 0)
                 }
-                Spacer(minLength: 0)
+                controls
             }
-            controls
         }
-        .background(Color(.systemBackground))
+        .tint(.wildAccent)
+        .sheet(isPresented: $showingQueue) {
+            QueueView(client: client, playback: playback)
+        }
+        .task { openQueueForDemoIfNeeded() }
+    }
+
+    private func openQueueForDemoIfNeeded() {
+        #if DEBUG
+            if ProcessInfo.processInfo.environment["WILDSTRING_DEMO_OPEN_QUEUE"] == "1" {
+                showingQueue = true
+            }
+        #endif
     }
 
     private var header: some View {
@@ -77,7 +93,7 @@ struct NowPlayingView: View {
                         .padding(.vertical, 5)
                         .background(
                             showLyrics
-                                ? AnyShapeStyle(Color.accentColor.opacity(0.18))
+                                ? AnyShapeStyle(Color.wildAccent.opacity(0.22))
                                 : AnyShapeStyle(Color.clear),
                             in: Capsule()
                         )
@@ -90,7 +106,7 @@ struct NowPlayingView: View {
     }
 
     private var playerColumn: some View {
-        VStack(spacing: 18) {
+        VStack(spacing: 16) {
             if let item = playback.currentItem {
                 playerArtwork(item)
                     .contentShape(Rectangle())
@@ -102,7 +118,7 @@ struct NowPlayingView: View {
                     .padding(.top, 8)
                 VStack(spacing: 6) {
                     Text(item.title)
-                        .font(.title3.bold())
+                        .font(.title2.bold())
                         .multilineTextAlignment(.center)
                         .lineLimit(2)
                     HStack(spacing: 12) {
@@ -111,6 +127,7 @@ struct NowPlayingView: View {
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                         Button {
+                            Haptics.selection()
                             Task { await favorites.toggle(item.trackID) }
                         } label: {
                             Image(
@@ -118,10 +135,17 @@ struct NowPlayingView: View {
                                     ? "heart.fill" : "heart"
                             )
                             .foregroundStyle(
-                                favorites.isFavorite(item.trackID) ? Color.pink : Color.secondary
+                                favorites.isFavorite(item.trackID)
+                                    ? Color.wildAccent : Color.secondary
                             )
                         }
                         .buttonStyle(.plain)
+                    }
+                    if let album = item.album, !album.isEmpty {
+                        Text(album)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
                     }
                 }
                 progressSection
@@ -163,29 +187,64 @@ struct NowPlayingView: View {
     }
 
     private var controls: some View {
-        HStack(spacing: 48) {
-            Button {
-                playback.previous()
-            } label: {
-                Image(systemName: "backward.fill").font(.title2)
+        VStack(spacing: 12) {
+            HStack(spacing: 36) {
+                Button {
+                    Haptics.selection()
+                    playback.toggleShuffle()
+                } label: {
+                    Image(systemName: "shuffle")
+                        .font(.title3)
+                        .foregroundStyle(
+                            playback.isShuffled ? Color.wildAccent : Color.secondary
+                        )
+                }
+                .buttonStyle(.plain)
+                Button {
+                    Haptics.tap()
+                    playback.previous()
+                } label: {
+                    Image(systemName: "backward.fill").font(.title2)
+                }
+                .buttonStyle(.plain)
+                Button {
+                    Haptics.tap()
+                    playback.togglePlayPause()
+                } label: {
+                    Image(systemName: playback.isPlaying ? "pause.circle.fill" : "play.circle.fill")
+                        .font(.system(size: 64))
+                }
+                .buttonStyle(.plain)
+                Button {
+                    Haptics.tap()
+                    playback.next()
+                } label: {
+                    Image(systemName: "forward.fill").font(.title2)
+                }
+                .buttonStyle(.plain)
+                Button {
+                    Haptics.selection()
+                    playback.cycleRepeatMode()
+                } label: {
+                    Image(systemName: playback.repeatMode == .one ? "repeat.1" : "repeat")
+                        .font(.title3)
+                        .foregroundStyle(
+                            playback.repeatMode == .off ? Color.secondary : Color.wildAccent
+                        )
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
             Button {
-                Haptics.tap()
-                playback.togglePlayPause()
+                showingQueue = true
             } label: {
-                Image(systemName: playback.isPlaying ? "pause.circle.fill" : "play.circle.fill")
-                    .font(.system(size: 64))
-            }
-            .buttonStyle(.plain)
-            Button {
-                playback.next()
-            } label: {
-                Image(systemName: "forward.fill").font(.title2)
+                Label("播放队列", systemImage: "list.bullet")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
             }
             .buttonStyle(.plain)
         }
-        .padding(.vertical, 18)
+        .padding(.top, 12)
+        .padding(.bottom, 10)
     }
 
     @ViewBuilder

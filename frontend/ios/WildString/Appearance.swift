@@ -82,3 +82,8 @@ enum Haptics {
         UISelectionFeedbackGenerator().selectionChanged()
     }
 }
+
+extension Color {
+    /// 野弦暖橙，与 Android 主题的品牌主色一致。
+    static let wildAccent = Color(red: 0.9137, green: 0.5412, blue: 0.4275)
+}

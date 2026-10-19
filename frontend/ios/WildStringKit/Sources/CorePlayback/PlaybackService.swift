@@ -13,6 +13,7 @@ public final class PlaybackService {
         public var trackID: String
         public var title: String
         public var artist: String
+        public var album: String?
         public var streamPath: String
 
         public init(
@@ -20,12 +21,14 @@ public final class PlaybackService {
             trackID: String,
             title: String,
             artist: String,
+            album: String? = nil,
             streamPath: String
         ) {
             self.id = id
             self.trackID = trackID
             self.title = title
             self.artist = artist
+            self.album = album
             self.streamPath = streamPath
         }
     }
@@ -40,6 +43,8 @@ public final class PlaybackService {
     public var items: [Item] { queue.items }
     public var currentIndex: Int? { queue.currentIndex }
     public var currentItem: Item? { queue.current }
+    public var repeatMode: PlaybackQueue.RepeatMode { queue.repeatMode }
+    public var isShuffled: Bool { queue.isShuffled }
 
     @ObservationIgnored let server: ServerAddress
     @ObservationIgnored let player: AVPlayer
@@ -124,6 +129,33 @@ public final class PlaybackService {
         move(by: -1)
     }
 
+    // MARK: - Queue editing and modes
+
+    public func toggleShuffle() {
+        queue.toggleShuffle()
+        persistQueueAndProgress()
+    }
+
+    public func cycleRepeatMode() {
+        queue.cycleRepeatMode()
+    }
+
+    public func playQueueEntry(at index: Int) {
+        queue.move(to: index)
+        startCurrent(autoplay: true, startAt: 0)
+        persistProgress()
+    }
+
+    public func removeQueueEntry(at index: Int) {
+        queue.remove(at: index)
+        persistQueueAndProgress()
+    }
+
+    public func moveQueueEntries(fromOffsets offsets: IndexSet, toOffset destination: Int) {
+        queue.moveEntries(fromOffsets: offsets, toOffset: destination)
+        persistQueueAndProgress()
+    }
+
     public func seek(to seconds: Double) {
         let upper = duration > 0 ? duration : seconds
         let target = min(max(0, seconds), upper)
@@ -188,12 +220,9 @@ public final class PlaybackService {
     // MARK: - Internals
 
     private func move(by delta: Int) {
-        guard let index = queue.currentIndex else { return }
-        let target = index + delta
-        guard queue.items.indices.contains(target) else { return }
-        let autoplay = isPlaying
-        queue.move(to: target)
-        startCurrent(autoplay: autoplay, startAt: 0)
+        let result = delta >= 0 ? queue.advance() : queue.rewind()
+        guard result != nil else { return }
+        startCurrent(autoplay: isPlaying, startAt: 0)
         persistProgress()
     }
 
@@ -328,13 +357,23 @@ public final class PlaybackService {
     }
 
     private func handleItemEnded() {
-        if let index = queue.currentIndex, index >= queue.items.count - 1 {
+        if queue.repeatMode == .one {
+            player.seek(to: .zero)
+            currentTime = 0
+            player.play()
+            isPlaying = true
+            persistProgress()
+            updateSystemNowPlaying()
+            return
+        }
+        if queue.advance() != nil {
+            startCurrent(autoplay: true, startAt: 0)
+            persistProgress()
+        } else {
             isPlaying = false
             currentTime = duration
             persistProgress()
             updateSystemNowPlaying()
-        } else {
-            move(by: 1)
         }
     }
 
