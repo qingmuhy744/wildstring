@@ -23,6 +23,7 @@ struct BrowseView: View {
     @State private var browseGroups: [BrowseGroup] = []
     @State private var demoMetadataTrack: Track?
     @State private var demoLyricsTrack: Track?
+    @State private var demoSuggestionsTrack: Track?
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -50,6 +51,9 @@ struct BrowseView: View {
             }
             .sheet(item: $demoLyricsTrack) { track in
                 LyricsEditView(client: client, track: track)
+            }
+            .sheet(item: $demoSuggestionsTrack) { track in
+                MetadataSuggestionsView(client: client, track: track)
             }
             .miniPlayer(playback, client: client)
         }
@@ -181,6 +185,9 @@ struct BrowseView: View {
             }
             if environment["WILDSTRING_DEMO_OPEN_LYRICS_EDITOR"] == "1", demoLyricsTrack == nil {
                 demoLyricsTrack = first
+            }
+            if environment["WILDSTRING_DEMO_OPEN_SUGGESTIONS"] == "1", demoSuggestionsTrack == nil {
+                demoSuggestionsTrack = first
             }
         #endif
     }

@@ -15,6 +15,7 @@ struct TrackActionRow<Content: View>: View {
     @State private var addingToPlaylist = false
     @State private var editingMetadata = false
     @State private var editingLyrics = false
+    @State private var editingSuggestions = false
 
     private var isDownloaded: Bool {
         offline.items.contains { $0.trackID == track.id && $0.isCompleted }
@@ -66,6 +67,11 @@ struct TrackActionRow<Content: View>: View {
                     } label: {
                         Label("编辑歌词", systemImage: "text.quote")
                     }
+                    Button {
+                        editingSuggestions = true
+                    } label: {
+                        Label("更新元数据与建议", systemImage: "sparkles")
+                    }
                 }
             }
             .sheet(isPresented: $addingToPlaylist) {
@@ -76,6 +82,9 @@ struct TrackActionRow<Content: View>: View {
             }
             .sheet(isPresented: $editingLyrics) {
                 LyricsEditView(client: client, track: track)
+            }
+            .sheet(isPresented: $editingSuggestions) {
+                MetadataSuggestionsView(client: client, track: track)
             }
     }
 }

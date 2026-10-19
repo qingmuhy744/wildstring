@@ -913,5 +913,106 @@ struct StubbedHTTPTests {
                 fileVersion: "abc"
             )
         }
+
+        @Test func providerSuggestionsDecodeFieldsAndMatches() async throws {
+            StubURLProtocol.respond { request in
+                #expect(request.url?.path == "/api/v1/manage/providers/tracks/t1")
+                return .json(
+                    status: 200,
+                    body: """
+                        {"suggestions":[{"id":"s1","job_id":"j1","track_id":"t1","metadata_version":3,"provider":"musicbrainz","source_url":"https://musicbrainz.org/release/x","fields":{"title":"新标题","artists":["甲","乙"],"track_number":4},"cover_url":"https://coverartarchive.org/release/x/1.jpg","status":"pending","created_at":123.0,"match":{"method":"acoustid","score":0.92}}],"jobs":[{"id":"j1","track_id":"t1","status":"running","refresh_mode":"missing","error":""}],"provider_names":{"musicbrainz":"MusicBrainz"}}
+                        """
+                )
+            }
+            let results = try await makeClient().providerSuggestions(trackID: "t1")
+            let suggestion = try #require(results.suggestions.first)
+            #expect(suggestion.status == "pending")
+            #expect(suggestion.metadataVersion == 3)
+            #expect(suggestion.fields["artists"]?.display == "甲、乙")
+            #expect(suggestion.fields["track_number"]?.display == "4")
+            #expect(suggestion.match?.score == 0.92)
+            #expect(suggestion.coverURL == "https://coverartarchive.org/release/x/1.jpg")
+            #expect(results.providerNames["musicbrainz"] == "MusicBrainz")
+            #expect(results.jobs.first?.status == "running")
+        }
+
+        @Test func refreshProviderTrackSendsScopeModeAndForce() async throws {
+            StubURLProtocol.respond { request in
+                #expect(request.httpMethod == "POST")
+                #expect(request.url?.path == "/api/v1/manage/providers/refresh")
+                let body = try #require(StubURLProtocol.bodyData(of: request))
+                let json = try #require(
+                    try JSONSerialization.jsonObject(with: body) as? [String: Any]
+                )
+                #expect(json["scope"] as? String == "track")
+                #expect(json["id"] as? String == "t1")
+                #expect(json["mode"] as? String == "all")
+                #expect(json["force"] as? Bool == true)
+                return .json(
+                    status: 200,
+                    body: #"{"queued":1,"already_active":0,"total":1}"#
+                )
+            }
+            let result = try await makeClient().refreshProviderMetadata(
+                trackID: "t1",
+                mode: "all",
+                force: true
+            )
+            #expect(result.queued == 1)
+            #expect(result.alreadyActive == 0)
+        }
+
+        @Test func applyProviderSuggestionSendsChosenFields() async throws {
+            StubURLProtocol.respond { request in
+                #expect(request.httpMethod == "POST")
+                #expect(request.url?.path == "/api/v1/manage/providers/suggestions/s1/apply")
+                let body = try #require(StubURLProtocol.bodyData(of: request))
+                let json = try #require(
+                    try JSONSerialization.jsonObject(with: body) as? [String: Any]
+                )
+                #expect(json["version"] as? Int == 3)
+                #expect(json["fields"] as? [String] == ["title", "album"])
+                return .json(
+                    status: 200,
+                    body: """
+                        {"track_id":"t1","version":4,"observed":{"title":"旧标题"},"overrides":{"title":"新标题"},"effective":{"title":"新标题"}}
+                        """
+                )
+            }
+            let saved = try await makeClient().applyProviderSuggestion(
+                id: "s1",
+                version: 3,
+                fields: ["title", "album"]
+            )
+            #expect(saved.version == 4)
+        }
+
+        @Test func applyProviderCoverSendsVersion() async throws {
+            StubURLProtocol.respond { request in
+                #expect(request.httpMethod == "POST")
+                #expect(request.url?.path == "/api/v1/manage/providers/suggestions/s1/cover")
+                let body = try #require(StubURLProtocol.bodyData(of: request))
+                let json = try #require(
+                    try JSONSerialization.jsonObject(with: body) as? [String: Any]
+                )
+                #expect(json["version"] as? Int == 3)
+                return .json(status: 200, body: #"{"applied":true}"#)
+            }
+            try await makeClient().applyProviderCover(suggestionID: "s1", version: 3)
+        }
+
+        @Test func coverPreviewReturnsRawImageData() async throws {
+            let jpeg = Data([0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10])
+            StubURLProtocol.respond { request in
+                #expect(request.url?.path == "/api/v1/manage/providers/suggestions/s1/cover-preview")
+                return StubURLProtocol.Stub(
+                    statusCode: 200,
+                    headers: ["Content-Type": "image/jpeg"],
+                    body: jpeg
+                )
+            }
+            let data = try await makeClient().providerCoverPreview(suggestionID: "s1")
+            #expect(data == jpeg)
+        }
     }
 }
