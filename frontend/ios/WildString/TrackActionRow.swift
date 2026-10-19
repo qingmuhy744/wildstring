@@ -1,15 +1,25 @@
 import CoreNetwork
+import CorePlayback
 import SwiftUI
 
-/// Wraps a track row with the shared context menu: favorite toggle and
-/// "add to playlist".
+/// Wraps a track row with the shared context menu: favorite toggle,
+/// "add to playlist" and offline download.
 struct TrackActionRow<Content: View>: View {
     let client: WildstringClient
     let track: Track
     @ViewBuilder let content: () -> Content
 
     @Environment(FavoritesModel.self) private var favorites
+    @Environment(OfflineModel.self) private var offline
     @State private var addingToPlaylist = false
+
+    private var isDownloaded: Bool {
+        offline.items.contains { $0.trackID == track.id && $0.isCompleted }
+    }
+
+    private var isDownloading: Bool {
+        offline.items.contains { $0.trackID == track.id && $0.isDownloading }
+    }
 
     var body: some View {
         content()
@@ -26,6 +36,20 @@ struct TrackActionRow<Content: View>: View {
                     addingToPlaylist = true
                 } label: {
                     Label("加入歌单", systemImage: "text.badge.plus")
+                }
+                if isDownloaded {
+                    Button(role: .destructive) {
+                        Task { await offline.remove(trackID: track.id) }
+                    } label: {
+                        Label("删除下载", systemImage: "arrow.down.circle.slash")
+                    }
+                } else {
+                    Button {
+                        Task { await offline.download(track) }
+                    } label: {
+                        Label("下载", systemImage: "arrow.down.circle")
+                    }
+                    .disabled(isDownloading)
                 }
             }
             .sheet(isPresented: $addingToPlaylist) {

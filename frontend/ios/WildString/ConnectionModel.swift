@@ -1,5 +1,6 @@
 import CoreNetwork
 import CorePlayback
+import CryptoKit
 import Foundation
 import Observation
 
@@ -22,6 +23,7 @@ final class ConnectionModel {
     private(set) var client: WildstringClient?
     private(set) var playback: PlaybackService?
     private(set) var favorites: FavoritesModel?
+    private(set) var offline: OfflineModel?
     let demoAutoPlay: Bool
 
     private let store: any SessionStore
@@ -121,8 +123,15 @@ final class ConnectionModel {
         guard !isBusy else { return }
         isBusy = true
         defer { isBusy = false }
+        if let playback {
+            await playback.clearFragmentCache()
+        }
         playback?.shutdown()
         playback = nil
+        if let offline {
+            await offline.shutdown()
+        }
+        offline = nil
         favorites = nil
         if let client {
             try? await client.logout()
@@ -134,22 +143,68 @@ final class ConnectionModel {
         phase = .connect
     }
 
+    private static func cachesRoot() -> URL {
+        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("WildString", isDirectory: true)
+    }
+
+    private static func offlineRoot() -> URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("WildString/Offline", isDirectory: true)
+    }
+
+    private static func spaceName(for address: ServerAddress) -> String {
+        var hasher = SHA256()
+        hasher.update(data: Data(address.origin.utf8))
+        return hasher.finalize().prefix(8).map { String(format: "%02x", $0) }.joined()
+    }
+
+    private static func fragmentCacheLimitBytes() -> Int64 {
+        let stored = UserDefaults.standard.object(forKey: "fragmentCacheLimitMB") as? Int
+        return Int64(stored ?? 512) * 1_048_576
+    }
+
     private func activate(
         client: WildstringClient,
         address: ServerAddress,
         username: String
     ) async {
         self.client = client
+        let space = Self.spaceName(for: address)
+        let fragmentCache = AudioDiskCache(
+            directory: Self.cachesRoot().appendingPathComponent(space, isDirectory: true),
+            limitBytes: Self.fragmentCacheLimitBytes()
+        )
+        let offlineDirectory = Self.offlineRoot().appendingPathComponent(
+            space,
+            isDirectory: true
+        )
+        let downloads = OfflineDownloads(
+            directory: offlineDirectory,
+            sessionIdentifier: "com.wildstring.app.offline",
+            server: address,
+            cookieHeader: { [weak client] in
+                await client?.cookieHeaderValue()
+            }
+        )
         let playback = PlaybackService(
             server: address,
             store: queueStore,
             cookieHeader: { [weak client] in
                 await client?.cookieHeaderValue()
+            },
+            fragmentCache: fragmentCache,
+            offlineLookup: { trackID in
+                let url = offlineDirectory.appendingPathComponent(
+                    OfflineDownloads.fileName(for: trackID)
+                )
+                return FileManager.default.fileExists(atPath: url.path) ? url : nil
             }
         )
         await playback.restore()
         self.playback = playback
         self.favorites = FavoritesModel(client: client)
+        self.offline = OfflineModel(downloads: downloads)
         phase = .connected(server: address.description, username: username)
     }
 

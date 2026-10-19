@@ -66,7 +66,7 @@ struct PlaylistDetailView: View {
         HStack(spacing: 12) {
             CoverImage(
                 client: client,
-                trackID: detail.coverTrackId.isEmpty ? nil : detail.coverTrackId,
+                trackID: detail.coverTrackId,
                 size: 88
             )
             VStack(alignment: .leading, spacing: 4) {

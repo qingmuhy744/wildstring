@@ -78,12 +78,18 @@ struct AccountView: View {
                     LabeledContent("服务器", value: server)
                 }
                 Section {
+                    NavigationLink(value: SettingsMarker()) {
+                        Label("设置", systemImage: "gearshape")
+                    }
                     Button("退出登录", role: .destructive, action: onLogout)
                 }
             }
             .navigationTitle("我的")
             .navigationDestination(for: Playlist.self) { playlist in
                 PlaylistDetailView(client: client, playback: playback, playlist: playlist)
+            }
+            .navigationDestination(for: SettingsMarker.self) { _ in
+                SettingsView(playback: playback)
             }
             .miniPlayer(playback, client: client)
             .task { await load() }
@@ -138,8 +144,14 @@ struct AccountView: View {
 
     private func openDemoPlaylistIfNeeded() {
         #if DEBUG
-            guard ProcessInfo.processInfo.environment["WILDSTRING_DEMO_OPEN_PLAYLIST"] == "1",
-                path.isEmpty, let first = playlists.first(where: \.isEditable)
+            guard path.isEmpty else { return }
+            let environment = ProcessInfo.processInfo.environment
+            if environment["WILDSTRING_DEMO_OPEN_SETTINGS"] == "1" {
+                path.append(SettingsMarker())
+                return
+            }
+            guard environment["WILDSTRING_DEMO_OPEN_PLAYLIST"] == "1",
+                let first = playlists.first(where: \.isEditable)
             else { return }
             path.append(first)
         #endif
@@ -192,6 +204,8 @@ struct AccountView: View {
     }
 }
 
+private struct SettingsMarker: Hashable {}
+
 private struct PlaylistListRow: View {
     let client: WildstringClient
     let playlist: Playlist
@@ -200,7 +214,7 @@ private struct PlaylistListRow: View {
         HStack(spacing: 10) {
             CoverImage(
                 client: client,
-                trackID: playlist.coverTrackId.isEmpty ? nil : playlist.coverTrackId,
+                trackID: playlist.coverTrackId,
                 size: 40
             )
             VStack(alignment: .leading, spacing: 2) {

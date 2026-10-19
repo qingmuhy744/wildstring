@@ -7,6 +7,7 @@ struct MainTabView: View {
     let client: WildstringClient
     let playback: PlaybackService
     let favorites: FavoritesModel
+    let offline: OfflineModel
     let server: String
     let username: String
     var autoPlayFirst = false
@@ -36,7 +37,26 @@ struct MainTabView: View {
             .tag(3)
         }
         .environment(favorites)
-        .task { await favorites.load() }
+        .environment(offline)
+        .task {
+            await favorites.load()
+            await downloadDemoTrackIfNeeded()
+        }
+    }
+
+    private func downloadDemoTrackIfNeeded() async {
+        #if DEBUG
+            guard ProcessInfo.processInfo.environment["WILDSTRING_DEMO_DOWNLOAD"] == "1"
+            else { return }
+            do {
+                let page = try await client.tracks(limit: 1)
+                if let first = page.items.first {
+                    await offline.download(first)
+                }
+            } catch {
+                // Demo hook only.
+            }
+        #endif
     }
 
     /// Debug-only hook used by the simulator verification runs.
