@@ -9,7 +9,7 @@
 - `admin`：曲库管理、元数据与歌词编辑、任务、AI 连接和访问设置、账号管理。
 - `user`：浏览与播放共享曲库、读取歌词、管理自己的收藏/歌单/收听记录、修改自己的密码。
 - `/api/v1/manage/**` 与扫描/导入历史要求管理员。网页隐藏管理入口只是辅助，权限在后端执行。
-- HTTP Cookie、认证音频和写请求的 `X-Wildstring-Client: web|android` 规则继续生效，不把令牌放入 URL。
+- HTTP Cookie、认证音频和写请求的 `X-Wildstring-Client: web|android|ios` 规则继续生效，不把令牌放入 URL。
 
 `GET /api/v1/auth/status` 保留 `configured`、`authenticated`；已登录时增加 `user`。`POST /api/v1/auth/login` 接受 `{username,password}`，返回 `{id,username,role,enabled,version}`，不再把账号固定为 admin。用户名不区分大小写。
 

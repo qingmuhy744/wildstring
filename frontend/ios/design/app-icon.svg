@@ -1,0 +1,11 @@
+<!-- 野弦 iOS 图标：由 Android 自适应图标换算（ic_launcher_foreground + #191A17 背景）。
+     按启动器可见区（72/108）放大 1.5×，使 iOS 全出血画布与 Android 启动器的实际观感一致。 -->
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 108 108">
+  <rect width="108" height="108" fill="#191A17"/>
+  <g transform="translate(54 54) scale(1.5) translate(-54 -54)">
+    <g transform="translate(1 6) translate(53 48) scale(0.875) translate(-53 -48)">
+      <path d="M24,39C35,20 35,76 46,57M42,39C53,20 53,76 64,57M60,39C71,20 71,76 82,57"
+            fill="none" stroke="#E98A6D" stroke-width="6" stroke-linecap="round"/>
+    </g>
+  </g>
+</svg>

@@ -10,6 +10,8 @@ TEST_BUILDER_IMAGE ?= wildstring-builder:dev
 TEST_IMAGE ?= wildstring-tests:dev
 LOG_ARGS ?= -f --tail=100
 SCAN_ARGS ?=
+IOS_DEVELOPMENT_TEAM ?=
+-include .env.ios-local
 export UV_CACHE_DIR ?= $(CURDIR)/.cache/uv
 export PRE_COMMIT_HOME ?= $(CURDIR)/.cache/pre-commit
 RUN = $(UV) run --frozen --project backend --extra community-sources
@@ -87,6 +89,16 @@ android-connected-test: ## Run native UI/playback tests on a connected emulator/
 android-locks: ## Refresh Android dependency locks and SHA-256 verification metadata
 	$(ANDROID) :app:assembleDebug :app:testDebugUnitTest :app:lintDebug :app:assembleDebugAndroidTest --write-locks --write-verification-metadata sha256
 	$(ANDROID) :app:assembleRelease :app:lintRelease --write-locks --write-verification-metadata sha256
+
+.PHONY: ios-gen ios-test ios-build
+ios-gen: ## Generate the iOS Xcode project from frontend/ios/project.yml (requires XcodeGen)
+	cd frontend/ios && WILDSTRING_DEVELOPMENT_TEAM="$(IOS_DEVELOPMENT_TEAM)" xcodegen generate
+
+ios-test: ## Run the iOS core package unit tests
+	swift test --package-path frontend/ios/WildStringKit
+
+ios-build: ios-gen ## Build the iOS app for the simulator
+	xcodebuild -project frontend/ios/WildString.xcodeproj -scheme WildString -destination 'generic/platform=iOS Simulator' build
 
 scan: env ## Rescan the managed library; use SCAN_ARGS=--full to refresh all tags
 	$(RUN) python -m wildstring.scan $(SCAN_ARGS)
