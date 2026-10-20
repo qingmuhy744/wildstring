@@ -46,7 +46,7 @@ def legacy_task(service, identity):
     """Read fixed legacy task projections; raw results can contain music paths."""
     with service.database.connect() as connection:
         row = connection.execute(
-            "SELECT id,kind,status,created_at,started_at,finished_at,error,result FROM admin_jobs WHERE id=? AND library_id=?",
+            "SELECT id,kind,status,created_at,started_at,finished_at,error,result,import_id FROM admin_jobs WHERE id=? AND library_id=?",
             (identity, service.library_id),
         ).fetchone()
         if row is not None:
@@ -65,6 +65,16 @@ def legacy_task(service, identity):
                     }
                 except (ValueError, AttributeError):
                     result["counts"] = {}
+            if row["import_id"] and row["status"] in {"queued", "running"}:
+                current = connection.execute(
+                    "SELECT counts FROM import_runs WHERE id=?", (row["import_id"],)
+                ).fetchone()
+                if current:
+                    result["counts"] = {
+                        key: value
+                        for key, value in json.loads(current[0]).items()
+                        if re.fullmatch(r"[a-z_]{1,40}", key) and type(value) is int
+                    }
             result["error_code"] = safe_code(row["error"])
             return result, identity.replace("-", "")
         row = connection.execute(

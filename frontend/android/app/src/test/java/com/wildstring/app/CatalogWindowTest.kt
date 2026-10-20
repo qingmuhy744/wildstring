@@ -35,6 +35,7 @@ class CatalogWindowTest {
     @Test fun indexIsOnlyAvailableForNameOrderedCatalogs() {
         val query = CatalogQuery(tab = "library", kind = "tracks")
         assertTrue(query.indexed)
+        assertFalse(query.copy(order = "desc").indexed)
         assertTrue(query.copy(collection = "artists", collectionId = "artist").indexed)
         assertFalse(query.copy(sort = "play_count").indexed)
         assertFalse(query.copy(kind = "recent").indexed)

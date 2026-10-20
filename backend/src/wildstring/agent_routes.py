@@ -3,10 +3,11 @@
 from typing import Annotated
 from uuid import uuid4
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, Response
 
 from wildstring.agent_common import SCOPES, tool_definitions
 from wildstring.agent_models import (
+    ApplicationPolicy,
     Apply,
     AssistantPreferences,
     Connection,
@@ -30,6 +31,7 @@ from wildstring.agent_models import (
     Verify,
     Version,
 )
+from wildstring.agent_review import ReviewAccept
 
 
 def page(items, limit=100, offset=0):
@@ -61,6 +63,8 @@ def agent_router(service):
             "tools": tool_definitions(),
             "features": {
                 "drafts": True,
+                "draft_accept_and_apply": True,
+                "automatic_application": True,
                 "notifications": True,
                 "telegram": True,
                 "inspections": True,
@@ -75,28 +79,7 @@ def agent_router(service):
 
     @router.get("/tools")
     def tools(actor: Annotated[object, Depends(transport_actor)]):
-        return {
-            "tools": [
-                {
-                    "name": tool["name"],
-                    "description": tool["description"],
-                    "inputSchema": tool["input_schema"],
-                    "annotations": {
-                        "readOnlyHint": tool["read_only"],
-                        "destructiveHint": False,
-                        "idempotentHint": tool["read_only"] or tool["name"] == "apply_draft",
-                        "openWorldHint": tool["name"]
-                        in {
-                            "request_metadata_refresh",
-                            "test_external_services",
-                            "submit_inspection",
-                        },
-                    },
-                }
-                for tool in tool_definitions()
-                if tool["scope"] in actor.scopes
-            ]
-        }
+        return {"tools": service.tool_catalog(actor)}
 
     @router.post("/tools/{name}")
     def tool(
@@ -128,6 +111,44 @@ def agent_router(service):
     def revoke_credential(identity: str, actor: Annotated[object, Depends(session)]):
         return service.revoke_credential(actor, identity)
 
+    @router.get("/application-policy")
+    def application_policy(actor: Annotated[object, Depends(session)]):
+        return service.application_policy(actor)
+
+    @router.put("/application-policy")
+    def save_application_policy(
+        body: ApplicationPolicy, actor: Annotated[object, Depends(session)]
+    ):
+        return service.save_application_policy(actor, body)
+
+    @router.get("/metadata-review/albums")
+    def review_albums(
+        actor: Annotated[object, Depends(session)],
+        limit: int = Query(100, ge=1, le=100),
+        offset: int = Query(0, ge=0, le=1000000),
+    ):
+        return service.review_albums(actor, limit, offset)
+
+    @router.get("/metadata-review")
+    def metadata_review(
+        actor: Annotated[object, Depends(session)],
+        album_id: str | None = Query(None, max_length=128),
+        track_id: str | None = Query(None, max_length=128),
+        limit: int = Query(100, ge=1, le=500),
+        offset: int = Query(0, ge=0, le=1000000),
+    ):
+        return service.review_page(actor, album_id, track_id, limit, offset)
+
+    @router.post("/metadata-review/accept")
+    def accept_review(body: ReviewAccept, actor: Annotated[object, Depends(session)]):
+        return service.accept_metadata_review(actor, body)
+
+    @router.post("/metadata-review/cover")
+    def review_cover(body: DraftCreate, actor: Annotated[object, Depends(session)]):
+        if body.kind != "cover":
+            raise HTTPException(422, "cover_required")
+        return service.create_draft(actor, body, auto_apply=False, notify_pending=False)
+
     @router.get("/drafts")
     def drafts(
         actor: Annotated[object, Depends(session)],
@@ -145,13 +166,40 @@ def agent_router(service):
     def draft(identity: str, actor: Annotated[object, Depends(session)]):
         return service.draft(actor, identity)
 
+    @router.get("/drafts/{identity}/cover-preview")
+    def draft_cover(identity: str, actor: Annotated[object, Depends(session)]):
+        from wildstring.library.artwork import CoverSelections
+
+        actor.require("library:manage", admin=True)
+        record = service.draft(actor, identity)
+        if record["kind"] != "cover":
+            raise HTTPException(404, "cover_draft_not_found")
+        _, thumbnail = CoverSelections(service.providers).image(
+            record["payload"].get("image_sha256")
+        )
+        return Response(
+            thumbnail,
+            media_type="image/jpeg",
+            headers={
+                "Cache-Control": "private, no-store",
+                "Vary": "Cookie",
+                "X-Content-Type-Options": "nosniff",
+            },
+        )
+
     @router.patch("/drafts/{identity}")
     def patch_draft(identity: str, body: DraftPatch, actor: Annotated[object, Depends(session)]):
         return service.patch_draft(actor, identity, body)
 
+    @router.post("/drafts/{identity}/accept")
+    def accept(identity: str, body: Apply, actor: Annotated[object, Depends(session)]):
+        return service.accept_draft(actor, identity, body)
+
     @router.post("/drafts/{identity}/approve")
     def approve(identity: str, body: Version, actor: Annotated[object, Depends(session)]):
-        return service.approve_draft(actor, identity, body.version)
+        return service.approve_draft(
+            actor, identity, body.version, preview_digest=body.preview_digest
+        )
 
     @router.post("/drafts/{identity}/reject")
     def reject(identity: str, body: Version, actor: Annotated[object, Depends(session)]):

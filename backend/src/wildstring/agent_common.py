@@ -77,27 +77,27 @@ TOOLS = {
         True,
         {"kind": "string", "limit": "integer", "offset": "integer"},
     ),
-    "inspect_library": (
-        "有界只读本地元数据巡检",
-        "library:read",
+    "get_application_policy": (
+        "读取本人整理方式和自动应用类型；只能由用户在站内修改授权",
+        "drafts:write",
         True,
-        {"track_ids": "array", "limit": "integer"},
+        {},
     ),
     "create_draft": (
-        "生成待站内确认的歌单或元数据草案，不修改曲库",
+        "生成有版本和依据的草案；用户开启自动整理且凭据有 drafts:apply 时，授权类型会直接应用；以返回 status 为准，共享曲库修改需要管理员",
         "drafts:write",
         False,
         {"kind": "string", "title": "string", "payload": "object", "evidence": "array"},
     ),
     "get_draft": ("读取本人草案", "drafts:write", True, {"draft_id": "string"}),
     "apply_draft": (
-        "应用已在站内批准的具体草案版本",
+        "应用已在站内批准的草案，或按用户当前自动整理授权应用待确认草案；仍校验版本和权限",
         "drafts:apply",
         False,
         {"draft_id": "string", "version": "integer", "idempotency_key": "string"},
     ),
     "submit_inspection": (
-        "提交持久巡检，默认本地规则；显式开启AI并选择连接和预算时会调用模型并可能计费，结果不自动应用",
+        "提交持久巡检，默认本地规则；显式开启AI并选择连接和预算时会调用模型并可能计费，结果按用户的整理授权审核或应用",
         "tasks:write",
         False,
         {
@@ -105,6 +105,7 @@ TOOLS = {
             "max_tracks": "integer",
             "max_calls": "integer",
             "use_ai": "boolean",
+            "rules": "array",
             "connection_id": "string",
         },
     ),
@@ -140,6 +141,8 @@ TOOLS.update(
 
 
 def tool_definitions():
+    from wildstring.agent_tool_schemas import describe
+
     required = {
         "get_track": ["track_id"],
         "get_metadata_suggestions": ["track_id"],
@@ -153,30 +156,44 @@ def tool_definitions():
         "get_operation_trace": ["trace_id"],
         "get_task_diagnostics": ["task_id"],
     }
+    from wildstring.agent_music_models import DEFINITIONS as MUSIC_TOOLS
+
     return [
         {
             "name": name,
             "description": desc,
             "scope": scope,
             "read_only": readonly,
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    key: {
-                        "type": value,
-                        **(
-                            {"items": {"type": "string"}}
-                            if value == "array" and key == "track_ids"
-                            else {"items": {"type": "object"}}
-                            if value == "array"
-                            else {}
-                        ),
-                    }
-                    for key, value in properties.items()
+            "input_schema": describe(
+                name,
+                {
+                    "type": "object",
+                    "properties": {
+                        key: {
+                            "type": value,
+                            **(
+                                {"items": {"type": "string"}}
+                                if value == "array" and key == "track_ids"
+                                else {"items": {"type": "object"}}
+                                if value == "array"
+                                else {}
+                            ),
+                        }
+                        for key, value in properties.items()
+                    },
+                    "required": required.get(name, []),
+                    "additionalProperties": False,
                 },
-                "required": required.get(name, []),
-                "additionalProperties": False,
-            },
+            ),
         }
         for name, (desc, scope, readonly, properties) in TOOLS.items()
+    ] + [
+        {
+            "name": name,
+            "description": desc,
+            "scope": scope,
+            "read_only": readonly,
+            "input_schema": model.model_json_schema(),
+        }
+        for name, (desc, scope, readonly, model) in MUSIC_TOOLS.items()
     ]

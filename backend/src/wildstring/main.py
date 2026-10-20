@@ -11,6 +11,7 @@ from tempfile import TemporaryFile
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.routing import Route
 
 from wildstring.agent_platform import AgentPlatform
 from wildstring.auth import Auth
@@ -23,6 +24,7 @@ from wildstring.library.playlists import PlaylistStore, playlist_router
 from wildstring.library.repository import LibraryRepository
 from wildstring.library.transcoding import Transcoding
 from wildstring.management import Management, management_router
+from wildstring.mcp_http import HTTPMCP
 from wildstring.mobile_experience import experience_router
 from wildstring.providers import Providers
 from wildstring.request_privacy import CallbackPrivacy, install_callback_filter
@@ -48,10 +50,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     platform = AgentPlatform(repository, auth)
     platform.diagnostics = diagnostics
     platform.providers = providers
+    platform.management = management
     providers.diagnostics = diagnostics
     management.diagnostics = diagnostics
     providers.platform = platform
     management.platform = platform
+    mcp = HTTPMCP(platform)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -72,7 +76,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         providers.start()
         platform.start()
         try:
-            yield
+            async with mcp.run():
+                yield
         finally:
             await asyncio.to_thread(platform.stop)
             await asyncio.to_thread(providers.stop)
@@ -130,6 +135,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.diagnostics = diagnostics
     app.state.agent_platform = platform
     app.include_router(platform.router())
+    app.router.routes.append(Route("/mcp", endpoint=mcp, methods=["GET", "POST", "DELETE"]))
     app.include_router(providers.router(auth))
     app.include_router(providers.sources.router(auth))
     app.include_router(providers.sources.scans.router(auth))

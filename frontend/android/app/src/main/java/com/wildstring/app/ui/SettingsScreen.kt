@@ -87,7 +87,7 @@ private val LocalSettingsFeedback = staticCompositionLocalOf<() -> Unit> { {} }
                 val syncMode by vm.sharing.mode.collectAsStateWithLifecycle()
                 SettingsChoice("跨设备接续", when(syncMode) { "off" -> "关闭"; "auto" -> "自动恢复"; else -> "轻提示" }, Icons.Default.Devices,
                     listOf("off" to "关闭", "ask" to "轻提示（默认）", "auto" to "自动恢复"), syncMode,
-                    "暂停时自动保存进度。发现其他设备的新记录时询问或恢复，载入后保持暂停。", vm::syncMode)
+                    "暂停时自动保存进度。仅提示其他设备最近 30 分钟内的暂停，每次暂停只提示一次；载入后保持暂停。", vm::syncMode)
                 SettingsChoice("播放音质", if (preferences.aacBitrate == 0) "原音" else "AAC · ${preferences.aacBitrate} kbps", Icons.Default.GraphicEq,
                     com.wildstring.app.data.PlaybackRequest.bitrates.map { it to if (it == 0) "原音" else "AAC · $it kbps" }, preferences.aacBitrate,
                     "默认原音。选择 AAC 后，无损音源转码，有损音源直放。切换保留播放位置和暂停状态。", vm.settings::quality)

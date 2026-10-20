@@ -27,6 +27,18 @@ class AppSettings @Inject constructor(@param:ApplicationContext private val cont
     val gainRevision = gainMutable.asStateFlow()
     private val avatarMutable = MutableStateFlow(0L)
     val avatarRevision = avatarMutable.asStateFlow()
+    fun catalogSort(owner: String?, context: String): CatalogSort {
+        val fallback = defaultCatalogSort(context)
+        val key = "catalog-sort:$owner:$context"
+        val sort = prefs.getString(key, fallback.sort).takeIf { candidate -> catalogSortChoices(context).any { it.first == candidate } } ?: fallback.sort
+        val order = prefs.getString("$key:order", fallback.order).takeIf { it in listOf("asc", "desc") } ?: fallback.order
+        return CatalogSort(sort, order)
+    }
+    fun catalogSort(owner: String?, context: String, selection: CatalogSort) {
+        require(catalogSortChoices(context).any { it.first == selection.sort } && selection.order in listOf("asc", "desc"))
+        val key = "catalog-sort:$owner:$context"
+        prefs.edit().putString(key, selection.sort).putString("$key:order", selection.order).apply()
+    }
     fun avatarChanged() { avatarMutable.value += 1 }
     fun gainChanged() { gainMutable.value += 1 }
     fun lyricFollowSeconds(seconds: Int) {

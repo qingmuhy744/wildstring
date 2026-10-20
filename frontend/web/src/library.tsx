@@ -1,3 +1,4 @@
+import { CatalogSortControl, useCatalogSorting } from './catalog-sort';
 import {
   Suspense,
   lazy,
@@ -133,7 +134,6 @@ type CatalogLocation = {
   playlist: Playlist | null;
   query: string;
   draft: string;
-  statsSort: string;
   scroll: number;
   playerOpen: boolean;
   queueOpen: boolean;
@@ -198,7 +198,6 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
   const [collectionsLoading, setCollectionsLoading] = useState(true);
   const [collectionRevision, setCollectionRevision] = useState(0);
   const [stats, setStats] = useState<ListeningSummary | null>(null);
-  const [statsSort, setStatsSort] = useState('last_played_at');
   const [listeningRevision, setListeningRevision] = useState(0);
   const [draft, setDraft] = useState(''),
     [query, setQuery] = useState('');
@@ -237,6 +236,23 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
         ? 'playlists'
         : 'tracks';
 
+  const sortContext = albumGrid
+    ? selectedArtist
+      ? 'artist-albums'
+      : 'albums'
+    : album
+      ? 'album-tracks'
+      : selectedArtist
+        ? 'artist-tracks'
+        : view === 'listening'
+          ? 'recent'
+          : 'tracks';
+  const { selection: catalogSort, change: changeCatalogSort } = useCatalogSorting(
+    user.id,
+    sortContext,
+  );
+  const statsSort = catalogSort.sort;
+  const sortable = !specialView && !activePlaylist && !artistGrid && !playlistGrid;
   const unit =
     kind === 'artists' ? '位' : kind === 'albums' ? '张' : kind === 'playlists' ? '个' : '首';
   const collectionsMetrics = view === 'playlists' || view === 'favorites' ? listeningRevision : 0;
@@ -247,7 +263,15 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
       collectionRequest.current = null;
       setCollectionBusy(false);
     },
-    [query, album?.id, selectedArtist?.id, artistRole, activePlaylist?.id, statsSort],
+    [
+      query,
+      album?.id,
+      selectedArtist?.id,
+      artistRole,
+      activePlaylist?.id,
+      statsSort,
+      catalogSort.order,
+    ],
   );
 
   useEffect(() => {
@@ -314,9 +338,10 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
   } else if (album) browsePath = `/albums/${album.id}/tracks`;
   else if (albumGrid) browsePath = '/albums';
   if (view === 'artists' && artistRole) parameters.set('role', artistRole);
-  if (view === 'listening') {
-    parameters.set('played_only', 'true');
-    parameters.set('sort', statsSort);
+  if (view === 'listening') parameters.set('played_only', 'true');
+  if (sortable) {
+    parameters.set('sort', catalogSort.sort);
+    parameters.set('order', catalogSort.order);
   }
   const browseIdentity = `${revision}|${view}|${browsePath}?${parameters}|${activePlaylist?.version || 0}|${playlistGrid ? collectionRevision : 0}|${metricsRevision}|${liveRules ? favorites.change : 0}`;
   const browse = useContinuousBrowse<Track | Album | Artist | Playlist>({
@@ -342,7 +367,12 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
     });
   }
   const indexEnabled =
-    !specialView && !activePlaylist && !album && view !== 'listening' && kind !== 'playlists';
+    !specialView &&
+    !activePlaylist &&
+    !album &&
+    view !== 'listening' &&
+    kind !== 'playlists' &&
+    (artistGrid || (catalogSort.order === 'asc' && ['title', 'name'].includes(catalogSort.sort)));
   const [browseIndex, setBrowseIndex] = useState<{ identity: string; index: BrowseIndex } | null>(
     null,
   );
@@ -470,7 +500,6 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
       playlist,
       query,
       draft,
-      statsSort,
       scroll: window.scrollY,
       playerOpen: lyricsOpen,
       queueOpen,
@@ -497,7 +526,6 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
     setPlaylist(previous.playlist);
     setQuery(previous.query);
     setDraft(previous.draft);
-    setStatsSort(previous.statsSort);
     setLyricsOpen(previous.playerOpen);
     setQueueOpen(previous.queueOpen);
     setError('');
@@ -674,9 +702,10 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
       if (album) parameters.set('album_id', album.id);
     } else if (album) path = `/albums/${album.id}/tracks`;
     if (view === 'artists' && artistRole) parameters.set('role', artistRole);
-    if (view === 'listening') {
-      parameters.set('played_only', 'true');
-      parameters.set('sort', statsSort);
+    if (view === 'listening') parameters.set('played_only', 'true');
+    if (sortable) {
+      parameters.set('sort', catalogSort.sort);
+      parameters.set('order', catalogSort.order);
     }
     return `${path}?${parameters}`;
   }
@@ -1243,18 +1272,12 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
                     </button>
                   </>
                 )}
-                {view === 'listening' && (
-                  <select
-                    aria-label="收听排序"
-                    value={statsSort}
-                    onChange={(event) => {
-                      setStatsSort(event.target.value);
-                    }}
-                  >
-                    <option value="last_played_at">最近听过</option>
-                    <option value="play_count">经常播放</option>
-                    <option value="listened_ms">收听最久</option>
-                  </select>
+                {sortable && (
+                  <CatalogSortControl
+                    context={sortContext}
+                    selection={catalogSort}
+                    change={changeCatalogSort}
+                  />
                 )}
                 {query && !album && (
                   <button className="text-button" onClick={clearSearch}>
@@ -1480,6 +1503,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
                       showStats={view === 'listening'}
                       statsSort={statsSort}
                       albumTracks={!!album}
+                      groupDiscs={!!album && ['track_number', 'title'].includes(catalogSort.sort)}
                     />
                   )
                 )}

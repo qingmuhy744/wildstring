@@ -29,6 +29,23 @@ class MobileContractsTest {
         val body = gson.toJsonTree(PlaylistUpdate("规则", 2, definition, "smart")).asJsonObject
         assertEquals("smart", body["kind"].asString); assertEquals(definition, body["definition"])
     }
+    @Test fun remoteOffersRequireExplicitRecentPauseAndPersistedPauseIdentity() {
+        val pause = SharedPlayback(version = 8, deviceId = "other", trackIds = listOf("a"), playbackState = "paused",
+            pausedAt = "2026-10-19T10:00:00Z", handoffSupported = true, handoffEligible = true)
+        assertTrue(pause.canOfferHandoff("local", 7, null))
+        assertFalse(pause.copy(playbackState = "playing").canOfferHandoff("local", 7, null))
+        assertFalse(pause.copy(handoffEligible = false).canOfferHandoff("local", 7, null))
+        assertFalse(pause.copy(pausedAt = null).canOfferHandoff("local", 7, null))
+        assertFalse(pause.canOfferHandoff("other", 7, null))
+        assertFalse(pause.canOfferHandoff("local", 8, null))
+        assertFalse(pause.copy(version = 9).canOfferHandoff("local", 7, pause.pauseEvent()))
+        assertTrue(pause.copy(version = 9, pausedAt = "2026-10-19T10:01:00Z").canOfferHandoff("local", 7, pause.pauseEvent()))
+        val write = pause.writeBody()
+        assertEquals("paused", write.get("playback_state").asString)
+        assertFalse(write.has("paused_at")); assertFalse(write.has("handoff_eligible")); assertFalse(write.has("handoff_supported"))
+        assertFalse(pause.writeBody(includePlaybackState = false).has("playback_state"))
+        assertFalse(SharedPlayback(version = 10, deviceId = "old", trackIds = listOf("a")).isRecentPausedHandoff())
+    }
     @Test fun sharedSnapshotWriteExcludesReadOnlyTimestampAndKeepsDuplicates() {
         val snapshot = SharedPlayback(version = 4, deviceId = "device", trackIds = listOf("a", "a"), index = 1, positionMs = 1000, mode = "repeat_all")
         val json = networkGson().toJsonTree(snapshot.writeBody()).asJsonObject

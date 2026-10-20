@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { api, type User } from './api';
 import { AISettings } from './ai-settings';
 import { useModelConnections } from './model-connection';
@@ -521,9 +521,12 @@ function Capabilities({ value }: { value: Record<string, unknown> }) {
 }
 const scopes: Record<string, string> = {
   'library:read': '读取共享曲库',
+  'library:manage': '管理导入、歌词和分析（管理员）',
+  'personal:write': '修改我的响度设置与调整',
+  'web:search': '使用我的联网检索与预算（需读取曲库权限）',
   'personal:read': '读取我的歌单与历史',
   'drafts:write': '创建和修改草案',
-  'drafts:apply': '应用已批准草案',
+  'drafts:apply': '应用草案（遵循我的整理方式）',
   'tasks:write': '提交和管理巡检',
   'diagnostics:read': '读取系统诊断（管理员）',
   'notifications:read': '读取我的通知',
@@ -577,7 +580,8 @@ export function ToolCredentials({ user }: { user: User }) {
     <section className="workspace-card" aria-label="MCP 工具凭据">
       <h2>MCP 与外部工具</h2>
       <p className="muted">
-        为 Codex 等工具生成独立凭据，按需选择最小权限。工具不能批准草案，也不能读取模型密钥。
+        为 Codex 等工具生成独立凭据，按需选择最小权限。原生 HTTP MCP 地址为本站 /mcp，使用 Bearer
+        凭据；也可继续使用 stdio 桥接。工具不能批准草案，也不能读取模型密钥。
       </p>
       <WorkspaceNotice error={error || list.error} notice={notice} unavailable={list.unsupported} />
       {!list.unsupported && (
@@ -628,7 +632,11 @@ export function ToolCredentials({ user }: { user: User }) {
                 <legend>允许的操作</legend>
                 <div className="workspace-check-grid">
                   {Object.entries(scopes)
-                    .filter(([key]) => user.role === 'admin' || key !== 'diagnostics:read')
+                    .filter(
+                      ([key]) =>
+                        user.role === 'admin' ||
+                        !['diagnostics:read', 'library:manage'].includes(key),
+                    )
                     .map(([key, label]) => (
                       <label className="workspace-check" key={key}>
                         <input
@@ -695,12 +703,13 @@ export function ToolCredentials({ user }: { user: User }) {
 }
 export function AssistantPreferences() {
   const prefs = useWorkspaceResource<{ retention_days: number }>('/agent/assistant-preferences');
+  const edited = useRef(false);
   const [days, setDays] = useState(30),
     [busy, setBusy] = useState(false),
     [error, setError] = useState(''),
     [notice, setNotice] = useState('');
   useEffect(() => {
-    if (prefs.value) setDays(prefs.value.retention_days);
+    if (prefs.value && !edited.current) setDays(prefs.value.retention_days);
   }, [prefs.value]);
   async function act(clear = false) {
     if (clear && !confirm('清除所有助手对话？草案和已保存的歌单会保留。')) return;
@@ -711,6 +720,10 @@ export function AssistantPreferences() {
         method: clear ? 'DELETE' : 'PUT',
         ...(clear ? {} : { body: JSON.stringify({ retention_days: days }) }),
       });
+      if (!clear) {
+        edited.current = false;
+        void prefs.reload();
+      }
       setNotice(clear ? '助手对话已清除。' : '对话保留时间已保存。');
     } catch (reason) {
       setError(errorText(reason));
@@ -732,7 +745,11 @@ export function AssistantPreferences() {
             min={1}
             max={365}
             value={days}
-            onChange={(e) => setDays(Number(e.target.value))}
+            disabled={busy}
+            onChange={(e) => {
+              edited.current = true;
+              setDays(Number(e.target.value));
+            }}
           />
         </label>
         <button

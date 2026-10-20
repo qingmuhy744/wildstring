@@ -8,6 +8,7 @@ import androidx.compose.animation.core.*
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import coil.request.ImageRequest
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import kotlinx.coroutines.delay
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.activity.compose.LocalActivity
@@ -43,8 +44,12 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.KeyboardType
@@ -106,7 +111,7 @@ fun WildStringApp(model: MusicViewModel) {
                             shape = RoundedCornerShape(16.dp), tonalElevation = 6.dp, shadowElevation = 8.dp) {
                             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                 Text("其他设备有可接续的进度", style = MaterialTheme.typography.titleSmall)
-                                Text("${saved.trackIds.size} 首 · 第 ${saved.index + 1} 首 · ${formatTime(saved.positionMs)} · 载入后保持暂停",
+                                Text("${saved.trackIds.size} 首 · 第 ${saved.index + 1} 首 · ${formatTime(saved.positionMs)} · 其他设备最近暂停，载入后保持暂停",
                                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 if (action.message != "已完成") ActionStatus(action)
                                 Row(Modifier.align(Alignment.End)) {
@@ -263,11 +268,11 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
                 }
                 Scaffold(
                     contentWindowInsets = WindowInsets(0, 0, 0, 0),
-                    topBar = { CatalogTopBar(state, vm::back, { vm.load() }, { settings = true }, compact = true, unread = unread,
+                    topBar = { CatalogTopBar(state, vm::back, { settings = true }, compact = true, unread = unread,
                         notifications = { feature = "notifications" },
-                        albumLyrics = if (state.account?.role == "admin" && (state.collection == "albums" || state.albumFilter != null)) ({ lyricScanAlbum = state.albumFilter ?: state.collectionId }) else null,
-                        albumRefresh = if (state.account?.role == "admin" && (state.collection == "albums" || state.albumFilter != null))
-                            ({ refreshAlbum = state.albumFilter ?: state.collectionId }) else null) },
+                        queue = if (state.kind !in listOf("tracks", "recent")) ({ queue = true }) else null,
+                        recent = if (state.kind !in listOf("tracks", "recent")) vm::recent else null,
+                        offline = if (state.kind !in listOf("tracks", "recent")) ({ feature = "offline" }) else null) },
                     bottomBar = { Column {
                         if (state.current != null) MiniPlayer(vm, state, onQueue = { queue = true }) { playerReturnDepth = -1; playerFromSettings = false; expanded = true; lyrics = false; queue = false }
                         if (!rail) NavigationBar(windowInsets = WindowInsets(0, 0, 0, 0), modifier = Modifier.testTag("bottom-navigation")) { BottomItems(state, vm) }
@@ -297,22 +302,31 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
                                 if (state.tab == "search" && state.kind == "discover") MobileShortcuts(discovery = true) { feature = it }
                                 state.error?.let { ErrorMessage(it, vm::load) }
                                 if (state.offline) Text("网络暂不可用 · 显示本机缓存", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
+                                if (state.kind == "albums") Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Text("${state.total} 张专辑", Modifier.weight(1f), color = Muted, style = MaterialTheme.typography.labelMedium, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
+                                    CatalogSortControls(state, vm::sort, vm::toggleSortOrder)
+                                }
                                 if (state.kind == "tracks" || state.kind == "recent") CatalogToolbar(state,
-                                    play = tactile { vm.playCollection { playerReturnDepth = -1; expanded = true; lyrics = false; queue = false } }, sort = vm::sort,
+                                    play = tactile { vm.playCollection { playerReturnDepth = -1; expanded = true; lyrics = false; queue = false } }, sort = vm::sort, reverse = vm::toggleSortOrder,
                                     multi = { feature = "multi" }, download = { vm.downloadCollection() },
                                     edit = { featurePlaylist = state.activePlaylist; feature = "playlist" },
                                     order = { featurePlaylist = state.activePlaylist; feature = "order" },
-                                    delete = { deletingPlaylist = state.activePlaylist })
+                                    delete = { deletingPlaylist = state.activePlaylist },
+                                    albumLyrics = if (state.account?.role == "admin" && (state.collection == "albums" || state.albumFilter != null)) ({ lyricScanAlbum = state.albumFilter ?: state.collectionId }) else null,
+                                    albumRefresh = if (state.account?.role == "admin" && (state.collection == "albums" || state.albumFilter != null)) ({ refreshAlbum = state.albumFilter ?: state.collectionId }) else null)
                             }
                         }
                         PullToRefreshBox(isRefreshing = state.loading, onRefresh = { if (!state.loading) vm.load() },
-                            modifier = Modifier.weight(1f), state = pullRefresh,
+                            modifier = Modifier.weight(1f).testTag("catalog-refresh-area").semantics {
+                                customActions = listOf(CustomAccessibilityAction("刷新当前页面") {
+                                    if (state.loading) false else { vm.load(); true }
+                                })
+                            }, state = pullRefresh,
                             indicator = { WildRefreshIndicator(state.loading, pullRefresh, Modifier.align(Alignment.TopCenter)) }) {
                             savedPages.SaveableStateProvider(state.contentKey.ifBlank { "initial" }) {
-                                if (state.kind == "discover") Column {
-                                    header()
-                                    DiscoveryPage(vm, state, play = { index -> vm.play(state.tracks, index); playerReturnDepth = -1; expanded = true; lyrics = false; queue = false }, recent = vm::recent)
-                                } else CatalogBrowser(vm, state, header,
+                                if (state.kind == "discover") DiscoveryPage(vm, state,
+                                    play = { index -> vm.play(state.tracks, index); playerReturnDepth = -1; expanded = true; lyrics = false; queue = false }, recent = vm::recent, header = header)
+                                else CatalogBrowser(vm, state, header,
                                     play = { track -> vm.playCollection(track.id) { playerReturnDepth = -1; expanded = true; lyrics = false; queue = false } },
                                     actions = { actions = it }, playlistActions = { playlistActions = it })
                             }
@@ -450,7 +464,7 @@ internal fun TrackRow(vm: MusicViewModel, track: Track, state: MusicState, index
         .padding(horizontal = 16.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         if (album) Box(Modifier.width(30.dp), contentAlignment = Alignment.Center) {
             if (current) PlaybackIndicator(state.playing, state.buffering)
-            else Text(if ((track.discNumber ?: 1) > 1 && track.trackNumber != null) "${track.discNumber}-${track.trackNumber}" else track.trackNumber?.toString() ?: (index + 1).toString(), color = Muted, style = MaterialTheme.typography.bodySmall, fontSize = size.artistSp.sp, lineHeight = size.artistLineSp.sp)
+            else Text(track.trackNumber?.toString()?.padStart(2, '0') ?: "—", color = Muted, style = MaterialTheme.typography.bodySmall, fontSize = size.artistSp.sp, lineHeight = size.artistLineSp.sp)
         } else Box(Modifier.size(size.coverDp.dp).clip(RoundedCornerShape(10.dp)).testTag("track-cover-$index"), contentAlignment = Alignment.Center) {
             Cover(vm, track.id.takeIf { track.hasCover }, track.title, Modifier.fillMaxSize())
             if (current) {
@@ -460,7 +474,7 @@ internal fun TrackRow(vm: MusicViewModel, track: Track, state: MusicState, index
         }
         Column(Modifier.weight(1f).padding(start = 14.dp)) {
             Text(track.title, Modifier.testTag("track-title-$index"), color = if (current) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.bodyLarge, fontSize = size.titleSp.sp, lineHeight = size.titleLineSp.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(listOfNotNull(track.artist, metric).joinToString(" · "), Modifier.testTag("track-subtitle-$index"), color = Muted,
+            Text(listOfNotNull(if (album && state.discs.size > 1 && state.sort !in listOf("title", "track_number")) "Disc ${track.discNumber ?: 1}" else null, track.artist, metric).joinToString(" · "), Modifier.testTag("track-subtitle-$index"), color = Muted,
                 style = MaterialTheme.typography.bodySmall, fontSize = size.artistSp.sp, lineHeight = size.artistLineSp.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         IconButton(actions, Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp).testTag("track-action-$index")) { Icon(Icons.Default.MoreVert, "${track.title}的操作") }
@@ -468,38 +482,57 @@ internal fun TrackRow(vm: MusicViewModel, track: Track, state: MusicState, index
 }
 
 @Composable
-private fun CatalogToolbar(state: MusicState, play: () -> Unit, sort: (String) -> Unit, multi: () -> Unit,
-    download: () -> Unit, edit: () -> Unit, order: () -> Unit, delete: () -> Unit) {
-    var sorting by remember { mutableStateOf(false) }
+internal fun CatalogToolbar(state: MusicState, play: () -> Unit, sort: (String) -> Unit, reverse: () -> Unit, multi: () -> Unit,
+    download: () -> Unit, edit: () -> Unit, order: () -> Unit, delete: () -> Unit,
+    albumLyrics: (() -> Unit)? = null, albumRefresh: (() -> Unit)? = null) {
     var more by remember { mutableStateOf(false) }
-    val sorts = listOf("title" to if (state.collection == "albums" || state.albumFilter != null) "曲目顺序" else "名称",
-        "play_count" to "播放次数", "listened_ms" to "收听时长", "last_played_at" to "最近听过")
-    Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 4.dp, bottom = 4.dp).testTag("catalog-toolbar"), verticalAlignment = Alignment.CenterVertically) {
-        FilledTonalButton(play, enabled = state.total > 0 && !state.collecting, contentPadding = PaddingValues(horizontal = 14.dp)) {
-            Icon(Icons.Default.PlayArrow, null, Modifier.size(18.dp)); Spacer(Modifier.width(4.dp)); Text(if (state.collecting) "准备中…" else "播放全部")
+    BoxWithConstraints(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 4.dp, bottom = 4.dp).testTag("catalog-toolbar")) {
+        // Measure the current labels with the actual font scale. Use one row
+        // whenever all controls and the full count fit, including the rail gutter.
+        val measurer = rememberTextMeasurer()
+        val density = LocalDensity.current
+        fun textWidth(text: String, style: androidx.compose.ui.text.TextStyle) = with(density) {
+            measurer.measure(AnnotatedString(text), style = style, softWrap = false, maxLines = 1).size.width.toDp()
         }
-        Text("${state.total} 首", Modifier.padding(start = 8.dp).weight(1f), style = MaterialTheme.typography.labelMedium, color = Muted)
-        if (state.collection != "playlists") Box {
-            TextButton({ sorting = true }, Modifier.testTag("catalog-sort"), contentPadding = PaddingValues(horizontal = 6.dp)) {
-                Text(sorts.firstOrNull { it.first == state.sort }?.second ?: "名称", style = MaterialTheme.typography.labelLarge)
-                Icon(Icons.Default.ArrowDropDown, null, Modifier.size(18.dp))
+        val playLabel = if (state.collecting) "准备中…" else "播放全部"
+        val countLabel = "${state.total} 首"
+        val sortContext = catalogSortContext(state.kind, state.collection, state.albumFilter)
+        val sortLabel = sortContext?.let { catalogSortChoices(it).firstOrNull { choice -> choice.first == state.sort }?.second ?: "歌曲名称" }
+        val requiredWidth = maxOf(64.dp, textWidth(playLabel, MaterialTheme.typography.labelLarge) + 50.dp) +
+            textWidth(countLabel, MaterialTheme.typography.labelMedium) + 8.dp + 48.dp + 8.dp +
+            (if (state.collection != "playlists" && sortLabel != null) maxOf(64.dp, textWidth(sortLabel, MaterialTheme.typography.labelLarge) + 36.dp) else 0.dp)
+        val stacked = maxWidth < requiredWidth
+        val playback: @Composable RowScope.() -> Unit = {
+            FilledTonalButton(play, Modifier.testTag("catalog-play-all"), enabled = state.total > 0 && !state.collecting, contentPadding = PaddingValues(horizontal = 14.dp)) {
+                Icon(Icons.Default.PlayArrow, null, Modifier.size(18.dp)); Spacer(Modifier.width(4.dp))
+                Text(playLabel, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
             }
-            DropdownMenu(sorting, { sorting = false }) { sorts.forEach { (key, name) ->
-                DropdownMenuItem(text = { Text(name) }, onClick = { sorting = false; sort(key) },
-                    trailingIcon = { if (state.sort == key) Icon(Icons.Default.Check, null) })
-            } }
+            Text(countLabel, Modifier.padding(start = 8.dp).weight(1f).testTag("catalog-count"),
+                style = MaterialTheme.typography.labelMedium, color = Muted, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
         }
-        Box {
-            IconButton({ more = true }) { Icon(Icons.Default.MoreVert, "列表操作") }
-            DropdownMenu(more, { more = false }) {
-                DropdownMenuItem(text = { Text("多选加入") }, onClick = { more = false; multi() })
-                DropdownMenuItem(text = { Text("离线保存") }, onClick = { more = false; download() }, enabled = !state.collecting)
-                state.activePlaylist?.takeIf { it.kind != "favorites" }?.let { playlist ->
-                    DropdownMenuItem(text = { Text("编辑歌单") }, onClick = { more = false; edit() })
-                    if (playlist.kind == "manual") DropdownMenuItem(text = { Text("拖动排序") }, onClick = { more = false; order() })
-                    DropdownMenuItem(text = { Text("删除歌单") }, onClick = { more = false; delete() })
+        val actions: @Composable RowScope.() -> Unit = {
+            if (state.collection != "playlists") CatalogSortControls(state, sort, reverse, if (stacked) Modifier.weight(1f) else Modifier)
+            Box {
+                IconButton({ more = true }, Modifier.testTag("catalog-more")) { Icon(Icons.Default.MoreVert, "列表操作") }
+                DropdownMenu(more, { more = false }) {
+                    albumLyrics?.let { open -> DropdownMenuItem(text = { Text("歌词补全与洗版") }, leadingIcon = { Icon(Icons.Default.Lyrics, null) }, onClick = { more = false; open() }) }
+                    albumRefresh?.let { update -> DropdownMenuItem(text = { Text("更新专辑元数据") }, leadingIcon = { Icon(Icons.Default.Edit, null) }, onClick = { more = false; update() }) }
+                    if (albumLyrics != null || albumRefresh != null) HorizontalDivider()
+                    DropdownMenuItem(text = { Text("多选加入") }, onClick = { more = false; multi() })
+                    DropdownMenuItem(text = { Text("离线保存") }, onClick = { more = false; download() }, enabled = !state.collecting)
+                    state.activePlaylist?.takeIf { it.kind != "favorites" }?.let { playlist ->
+                        DropdownMenuItem(text = { Text("编辑歌单") }, onClick = { more = false; edit() })
+                        if (playlist.kind == "manual") DropdownMenuItem(text = { Text("拖动排序") }, onClick = { more = false; order() })
+                        DropdownMenuItem(text = { Text("删除歌单") }, onClick = { more = false; delete() })
+                    }
                 }
             }
+        }
+        if (stacked) Column {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, content = playback)
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, content = actions)
+        } else Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            playback(); actions()
         }
     }
 }

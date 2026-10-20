@@ -14,6 +14,7 @@ import androidx.compose.material.icons.automirrored.filled.FactCheck
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -75,19 +76,28 @@ private fun localAgentTime(value: String): String = runCatching { Instant.parse(
     val scope = rememberCoroutineScope(); val action = remember { FeatureAction() }
     val owner = vm.repository.session.cacheScope()
     val valid = state.owner == owner
+    var filter by rememberSaveable { mutableStateOf("unread") }
+    val visible = if (!valid) emptyList() else state.items.filter { notice ->
+        when (filter) { "unread" -> notice.text("read_at").isBlank(); "read" -> notice.text("read_at").isNotBlank(); else -> true }
+    }
     LaunchedEffect(owner) { vm.agent.refreshInbox() }
     LazyColumn(Modifier.fillMaxSize().testTag("agent-notifications"), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("${if (valid) state.unread else 0} 条未读", Modifier.weight(1f), fontWeight = FontWeight.Medium)
                 IconButton({ scope.launch { vm.agent.refreshInbox(force = true) } }, enabled = !state.loading) { Icon(Icons.Default.Refresh, "刷新通知") }
-                TextButton({ scope.launch { action.run { vm.agent.readSnapshot() } } }, enabled = !action.busy && valid && state.items.isNotEmpty()) { Text("全部已读") }
+                TextButton({ scope.launch { action.run { vm.agent.readSnapshot() } } }, enabled = !action.busy && valid && state.unread > 0) { Text("全部已读") }
             }
-            Text("查看列表不会标记已读。其他设备的已读状态会自动同步。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf("unread" to "未读", "read" to "已读记录", "all" to "全部").forEach { (key, label) ->
+                    FilterChip(filter == key, { filter = key }, { Text(label) }, modifier = Modifier.testTag("notice-filter-$key"))
+                }
+            }
+            Text("已读通知收进记录，随时可查。查看列表不会标记已读，已读状态会在设备间同步。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             if (state.loading) LinearProgressIndicator(Modifier.fillMaxWidth())
             AgentError(state.error); ActionStatus(action)
         }
-        if (valid) items(state.items, key = { it.text("id") }) { notice ->
+        items(visible, key = { it.text("id") }) { notice ->
             AgentCard {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     if (notice.text("read_at").isBlank()) Icon(Icons.Default.Circle, "未读", Modifier.padding(end = 8.dp).size(8.dp), tint = MaterialTheme.colorScheme.primary)
@@ -104,7 +114,7 @@ private fun localAgentTime(value: String): String = runCatching { Instant.parse(
                 }
             }
         }
-        if (valid && state.items.isEmpty() && !state.loading && state.error == null) item { AgentEmpty("还没有通知。后台结果会在你下次打开时出现在这里。") }
+        if (valid && visible.isEmpty() && !state.loading && state.error == null) item { AgentEmpty(when (filter) { "unread" -> "没有未读通知。已处理的消息可在已读记录中查看。"; "read" -> "暂无已读记录。"; else -> "还没有通知。后台结果会在你下次打开时出现在这里。" }) }
         item { Spacer(Modifier.height(16.dp)) }
     }
 }
@@ -112,13 +122,32 @@ private fun localAgentTime(value: String): String = runCatching { Instant.parse(
 @Composable private fun AgentDrafts(vm: MusicViewModel, selectedId: String?) {
     var drafts by remember { mutableStateOf<List<JsonObject>>(emptyList()) }
     var selected by remember { mutableStateOf<JsonObject?>(null) }
+    var filter by rememberSaveable { mutableStateOf("pending") }
     val scope = rememberCoroutineScope(); val action = remember { FeatureAction() }
-    suspend fun load() { drafts = vm.agent.all("drafts"); selectedId?.let { id -> selected = drafts.firstOrNull { it.text("id") == id } ?: vm.agent.request("drafts/$id") } }
-    LaunchedEffect(Unit) { action.run { load() }; if (action.message == "已完成") action.message = null }
+    fun isPending(draft: JsonObject) = draft.text("status") in listOf("pending", "approved")
+    suspend fun load() {
+        drafts = vm.agent.all("drafts")
+        selectedId?.let { id ->
+            selected = drafts.firstOrNull { it.text("id") == id } ?: vm.agent.request("drafts/$id")
+            filter = if (selected?.let(::isPending) == true) "pending" else "history"
+        }
+    }
+    val visible = drafts.filter { when (filter) { "pending" -> isPending(it); "history" -> !isPending(it); else -> true } }
+        .sortedWith(compareByDescending<JsonObject> { it.text("updated_at").ifBlank { it.text("created_at") } }.thenByDescending { it.text("id") })
+    LaunchedEffect(selectedId) { action.run { load() }; if (action.message == "已完成") action.message = null }
     LazyColumn(Modifier.fillMaxSize().testTag("agent-drafts"), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        item { Row(verticalAlignment = Alignment.CenterVertically) { Text("确认后才会修改", Modifier.weight(1f), fontWeight = FontWeight.Medium); IconButton({ scope.launch { action.run { load() } } }, enabled = !action.busy) { Icon(Icons.Default.Refresh, "刷新草案") } }; ActionStatus(action) }
-        if (!action.busy && drafts.isEmpty() && action.message == null) item { AgentEmpty("暂时没有草案。可让助手或 MCP 先整理候选。") }
-        items(drafts, key = { it.text("id") }) { draft ->
+        item {
+            Row(verticalAlignment = Alignment.CenterVertically) { Text("草案与应用记录", Modifier.weight(1f), fontWeight = FontWeight.Medium); IconButton({ scope.launch { action.run { load() } } }, enabled = !action.busy) { Icon(Icons.Default.Refresh, "刷新草案") } }
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf("pending" to "待处理 · ${drafts.count(::isPending)}", "history" to "处理记录 · ${drafts.count { !isPending(it) }}", "all" to "全部").forEach { (key, label) ->
+                    FilterChip(filter == key, { filter = key }, { Text(label) }, modifier = Modifier.testTag("draft-filter-$key"))
+                }
+            }
+            Text("已应用、已拒绝的草案自动收进处理记录，按最近处理时间排列，差异与依据保留。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            ActionStatus(action)
+        }
+        if (!action.busy && visible.isEmpty() && action.message == null) item { AgentEmpty(when (filter) { "pending" -> "没有待处理草案。已完成的内容可在处理记录中查看。"; "history" -> "暂无处理记录。"; else -> "暂时没有草案。可让助手或 MCP 先整理候选。" }) }
+        items(visible, key = { it.text("id") }) { draft ->
             AgentCard { Text(draft.text("title"), fontWeight = FontWeight.SemiBold); Text(draftLabel(draft.text("status")), color = MaterialTheme.colorScheme.primary); AgentTrace(draft)
                 TextButton({ selected = draft }, Modifier.testTag("draft-open-${draft.text("id")}")) { Text("查看差异与依据") } }
         }
@@ -126,16 +155,17 @@ private fun localAgentTime(value: String): String = runCatching { Instant.parse(
     selected?.let { current -> AgentDraftDetail(vm, current, { selected = null }) { updated -> selected = updated; drafts = drafts.map { if (it.text("id") == updated.text("id")) updated else it } } }
 }
 
-private fun fieldName(key: String) = mapOf("title" to "歌名", "artists" to "艺人", "album" to "专辑", "album_artists" to "专辑艺人", "track_number" to "曲号", "disc_number" to "碟号", "genre" to "流派", "date" to "日期", "lyricists" to "作词", "composers" to "作曲", "arrangers" to "编曲", "name" to "歌单名", "track_ids" to "歌曲")[key] ?: key
-private fun displayValue(value: com.google.gson.JsonElement?): String = when { value == null || value.isJsonNull -> "未设置"; value.isJsonPrimitive -> value.asString; value.isJsonArray -> value.asJsonArray.joinToString(" / ") { displayValue(it) }; else -> value.toString() }
+internal fun fieldName(key: String) = mapOf("title" to "歌名", "artists" to "艺人", "album" to "专辑", "album_artists" to "专辑艺人", "track_number" to "曲号", "disc_number" to "碟号", "genre" to "流派", "date" to "日期", "lyricists" to "作词", "composers" to "作曲", "arrangers" to "编曲", "name" to "歌单名", "track_ids" to "歌曲")[key] ?: key
+internal fun displayValue(value: com.google.gson.JsonElement?): String = when { value == null || value.isJsonNull -> "未设置"; value.isJsonPrimitive -> value.asString; value.isJsonArray -> value.asJsonArray.joinToString(" / ") { displayValue(it) }; else -> value.toString() }
 @Composable private fun AgentDraftDetail(vm: MusicViewModel, initial: JsonObject, dismiss: () -> Unit, updated: (JsonObject) -> Unit) {
     var draft by remember(initial.text("id"), initial.number("version")) { mutableStateOf(initial) }
+    var coverReady by remember(draft.text("id"), draft.number("version")) { mutableStateOf(false) }
     var confirm by remember { mutableStateOf<String?>(null) }
     var tracks by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
     val action = remember { FeatureAction() }; val scope = rememberCoroutineScope()
     val payload = draft.getAsJsonObject("payload") ?: JsonObject()
     val before = draft.getAsJsonObject("before") ?: JsonObject()
-    val changes = if (draft.text("kind") == "metadata") payload.getAsJsonObject("overrides") ?: JsonObject() else payload
+    val changes = if (draft.text("kind") in listOf("metadata", "intake")) payload.getAsJsonObject("overrides") ?: JsonObject() else payload
     LaunchedEffect(draft.text("id"), draft.number("version")) {
         val ids = payload.getAsJsonArray("track_ids")?.map { it.asString } ?: listOfNotNull(payload.text("track_id").takeIf { it.isNotBlank() })
         val names = linkedMapOf<String, String>()
@@ -145,29 +175,45 @@ private fun displayValue(value: com.google.gson.JsonElement?): String = when { v
     AlertDialog(onDismissRequest = { if (!action.busy) dismiss() }, title = { Text(draft.text("title")) }, text = {
         Column(Modifier.heightIn(max = 500.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(draftLabel(draft.text("status")), color = MaterialTheme.colorScheme.primary)
+            if (draft.objectOrNull("result")?.text("application_mode") == "automatic") Text("按你的自动整理设置应用。", style = MaterialTheme.typography.bodySmall)
             if (draft.text("kind") == "metadata") Text("歌曲：${tracks[payload.text("track_id")] ?: payload.text("track_id")}")
-            changes.entrySet().filter { it.key !in listOf("track_id", "metadata_version", "playlist_id", "playlist_version") }.forEach { (field, value) ->
+            if (draft.text("kind") == "intake") Text("导入来源：${before.text("source_path")}。应用后安排复制到托管曲库，保留导入源。")
+            if (draft.text("kind") == "lyrics") {
+                Text("歌曲：${before.text("title")} · ${before.text("provider")}")
+                Text("${before.getAsJsonObject("current_quality")?.text("label")} → ${before.getAsJsonObject("candidate_quality")?.text("label")}")
+                Text("同步偏移：${payload.number("offset_ms")} ms")
+                Text("匹配依据：${before.text("match")}", style = MaterialTheme.typography.bodySmall)
+                Text("当前歌词预览", fontWeight = FontWeight.Medium)
+                before.objects("current_lines").forEach { Text(it.text("text"), style = MaterialTheme.typography.bodySmall) }
+                Text("候选歌词预览", fontWeight = FontWeight.Medium)
+                before.objects("candidate_lines").forEach { Text(listOf(it.text("text"), it.text("translation")).filter { v -> v.isNotBlank() }.joinToString(" / "), style = MaterialTheme.typography.bodySmall) }
+            }
+            if (draft.text("kind") in listOf("cover", "metadata_batch")) CurationDraftPreview(vm, draft) { coverReady = it }
+            changes.entrySet().filter { draft.text("kind") !in listOf("lyrics", "cover", "metadata_batch") && it.key !in listOf("track_id", "metadata_version", "playlist_id", "playlist_version", "file_version", "candidate_id") }.forEach { (field, value) ->
                 Text(fieldName(field), fontWeight = FontWeight.Medium)
                 if (field == "track_ids") {
                     value.asJsonArray.forEachIndexed { index, id -> Text("${index + 1}. ${tracks[id.asString] ?: id.asString}", style = MaterialTheme.typography.bodySmall) }
                 } else Text("${displayValue(before.get(field))} → ${displayValue(value)}", style = MaterialTheme.typography.bodyMedium)
             }
             draft.objects("evidence").forEach { evidence -> Text("${evidence.text("source")} · ${evidence.text("summary")}", style = MaterialTheme.typography.bodySmall); evidence.text("url").takeIf { it.isNotBlank() }?.let { SelectionContainer { Text(it, style = MaterialTheme.typography.labelSmall) } } }
-            Text("版本 ${draft.number("version")} · 只更新应用内资料，不写回音乐文件。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("版本 ${draft.number("version")} · 导入仅复制；资料与歌词更新保存在应用内，不写回音乐文件。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            draft.objectOrNull("result")?.text("automatic_error")?.takeIf { it.isNotBlank() }?.let { Text("自动应用未完成：${agentError(409, it, null)}。草案已保留。", color = MaterialTheme.colorScheme.error) }
             AgentTrace(draft); ActionStatus(action)
         }
     }, confirmButton = {
-        if (draft.text("status") in listOf("pending", "approved")) TextButton({ confirm = if (draft.text("status") == "pending") "approve" else "apply" }, enabled = !action.busy, modifier = Modifier.testTag("draft-confirm")) { Text(if (draft.text("status") == "pending") "批准此版本" else "应用已批准草案") }
+        if (draft.text("status") in listOf("pending", "approved")) TextButton({ scope.launch { action.run {
+            val body = jsonBody("version" to draft.number("version"), "idempotency_key" to "android-${draft.text("id")}-${draft.number("version")}")
+            if (draft.text("preview_digest").isNotBlank()) body.addProperty("preview_digest", draft.text("preview_digest"))
+            draft = vm.agent.request("drafts/${draft.text("id")}/accept", "POST", body); updated(draft); vm.agent.refreshInbox()
+        } } }, enabled = !action.busy && ((draft.text("kind") != "cover" && payload.text("cover_draft_id").isBlank()) || coverReady), modifier = Modifier.testTag("draft-confirm")) { Text("接受并应用") }
     }, dismissButton = { Row { if (draft.text("status") in listOf("pending", "approved")) TextButton({ confirm = "reject" }, enabled = !action.busy) { Text("拒绝") }; TextButton(dismiss, enabled = !action.busy) { Text("关闭") } } })
-    confirm?.let { operation ->
-        AlertDialog(onDismissRequest = { if (!action.busy) confirm = null }, title = { Text(when (operation) { "approve" -> "批准当前差异？"; "apply" -> "应用这个版本？"; else -> "拒绝这份草案？" }) },
-            text = { Text("${draft.text("title")} · 版本 ${draft.number("version")}" + if (operation == "approve") "。批准后仍需点击应用。" else "。服务器会再次校验版本与权限。") },
-            confirmButton = { TextButton({ scope.launch { action.run {
-                val body = jsonBody("version" to draft.number("version"))
-                if (operation == "apply") body.addProperty("idempotency_key", "android-${draft.text("id")}-${draft.number("version")}")
-                draft = vm.agent.request("drafts/${draft.text("id")}/$operation", "POST", body); updated(draft); confirm = null; vm.agent.refreshInbox()
-            } } }, enabled = !action.busy, modifier = Modifier.testTag("draft-confirm-$operation")) { Text("确认") } }, dismissButton = { TextButton({ confirm = null }, enabled = !action.busy) { Text("取消") } })
-    }
+    if (confirm != null) AlertDialog(onDismissRequest = { if (!action.busy) confirm = null }, title = { Text("拒绝这份草案？") },
+        text = { Text(draft.text("title")); ActionStatus(action) },
+        confirmButton = { TextButton({ scope.launch { action.run {
+            draft = vm.agent.request("drafts/${draft.text("id")}/reject", "POST", jsonBody("version" to draft.number("version")))
+            updated(draft); confirm = null; vm.agent.refreshInbox()
+        } } }, enabled = !action.busy, modifier = Modifier.testTag("draft-confirm-reject")) { Text("确认拒绝") } },
+        dismissButton = { TextButton({ confirm = null }, enabled = !action.busy) { Text("取消") } })
 }
 
 @Composable private fun AgentChat(vm: MusicViewModel, openDraft: (String) -> Unit) {
@@ -209,7 +255,7 @@ private fun displayValue(value: com.google.gson.JsonElement?): String = when { v
                 TextButton({ showSummary = !showSummary }) { Text("已压缩较早对话 · 查看上下文摘要") }
                 if (showSummary) { Text(summary.text("summary"), style = MaterialTheme.typography.bodySmall); TextButton({ scope.launch { action.run { val id = conversation!!.text("id"); vm.agent.request("conversations/$id/summary", "DELETE"); conversation = vm.agent.request("conversations/$id") } } }, enabled = !action.busy) { Text("清除摘要") } }
             } }
-            if (conversation == null) item { AgentEmpty("试试“把我很久没听的收藏整理成歌单”。助手会先生成草案，等你确认。未配置 AI 时仍可本地找歌。") }
+            if (conversation == null) item { AgentEmpty("试试“把我很久没听的收藏整理成歌单”。助手会按你的整理方式生成草案或应用。未配置 AI 时仍可本地找歌。") }
             items(conversation?.objects("messages") ?: emptyList(), key = { it.text("id") }) { message ->
                 AgentCard { Text(if (message.text("role") == "user") "你" else "野弦", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary); if (message.flag("partial")) Text("正在生成 · 内容尚未完成", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant); SelectionContainer { if (message.text("role") == "assistant") AssistantMarkdown(message.text("content")) else Text(message.text("content")) }; message.objects("sources").forEach { source ->
                     source.text("url").takeIf { it.startsWith("https://") }?.let { url -> TextButton({ runCatching { links.openUri(url) }.onFailure { action.message = "无法打开来源。" } }) { Text("来源：${source.text("title")}") } }
@@ -353,7 +399,8 @@ internal fun connectionBudget(connection: JsonObject): String {
                         Text(result.text("analysis"))
                     } else {
                         Text(result.text("title"), fontWeight = FontWeight.Medium)
-                        Text(result.getAsJsonArray("issues")?.joinToString(" · ") { issue -> mapOf("missing_album" to "缺少专辑", "missing_cover" to "缺少封面", "missing_lyrics" to "缺少歌词")[issue.asString] ?: issue.asString }.orEmpty(), style = MaterialTheme.typography.bodySmall)
+                        result.objects("findings").forEach { finding -> Text(finding.text("summary"), style = MaterialTheme.typography.bodySmall) }
+                        Text(result.getAsJsonArray("issues")?.joinToString(" · ") { issue -> mapOf("missing_album" to "缺少专辑", "missing_cover" to "缺少封面", "missing_lyrics" to "未读到歌词（纯音乐可能正常）", "missing_track_number" to "曲序待核对", "track_number_conflict" to "同碟曲序重复", "track_number_out_of_range" to "曲序超过总曲数", "disc_number_out_of_range" to "碟号超过总碟数", "missing_disc_number" to "多碟专辑缺少碟号", "same_title_versions" to "同名歌曲版本待核对", "possible_duplicate_recording" to "同名且时长接近，需核对音频", "possible_multidisc_split" to "多碟专辑可能被拆分")[issue.asString] ?: issue.asString }.orEmpty(), style = MaterialTheme.typography.bodySmall)
                     }
                 }
                 AgentTrace(task); if (action.message != "已完成") ActionStatus(action)
@@ -393,14 +440,14 @@ internal fun connectionBudget(connection: JsonObject): String {
                     style = MaterialTheme.typography.bodySmall,
                 )
                 OutlinedTextField(maxCalls, { maxCalls = it.filter(Char::isDigit) }, label = { Text("最多模型调用次数") }, singleLine = true)
-                Text(if (schedule) "定时巡检仅使用已授权自动使用的连接，受每日预算约束。结果先生成草案。" else "点击开始仅授权本次 AI 巡检，可能产生模型费用，受调用上限与每日预算约束。结果先生成草案。", style = MaterialTheme.typography.bodySmall)
+                Text(if (schedule) "定时巡检仅使用已授权自动使用的连接，受每日预算约束。结果按整理设置审核或应用。" else "点击开始仅授权本次 AI 巡检，可能产生模型费用，受调用上限与每日预算约束。结果按整理设置审核或应用。", style = MaterialTheme.typography.bodySmall)
             }
             if (schedule) {
                 OutlinedTextField(hours, { hours = it.filter(Char::isDigit) }, label = { Text("间隔小时（1–720）") }, singleLine = true)
                 OutlinedTextField(timezone, { timezone = it }, label = { Text("时区") }, singleLine = true)
                 Row(verticalAlignment = Alignment.CenterVertically) { Text("启用计划", Modifier.weight(1f)); Switch(enabled, { enabled = it }) }
             }
-            Text("检查和草案不会改动音乐文件；应用仍需你批准。", style = MaterialTheme.typography.bodySmall)
+            Text("应用方式由你的整理设置决定；检查不会改动音乐文件。", style = MaterialTheme.typography.bodySmall)
             ActionStatus(action)
         }
     }, confirmButton = { TextButton({ scope.launch { action.run {
@@ -429,6 +476,10 @@ internal fun connectionBudget(connection: JsonObject): String {
     suspend fun load() { connections = vm.agent.all("connections") }
     LaunchedEffect(Unit) { action.run { load() }; if (action.message == "已完成") action.message = null }
     LazyColumn(Modifier.fillMaxSize().testTag("agent-connections"), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        item { var expanded by remember { mutableStateOf(false) }; AgentCard {
+            TextButton({ expanded = !expanded }) { Text(if (expanded) "收起整理方式" else "整理方式") }
+            if (expanded) AgentApplicationPolicy(vm)
+        } }
         item { Row(verticalAlignment = Alignment.CenterVertically) { Text("你的模型连接", Modifier.weight(1f), fontWeight = FontWeight.Medium); TextButton({ creating = true }) { Text("添加连接") }; IconButton({ scope.launch { action.run { load() } } }, enabled = !action.busy) { Icon(Icons.Default.Refresh, "刷新连接") } }; ActionStatus(action) }
         item { Text("个人连接仅本人使用；共享实例连接由管理员授权。密钥只保存在服务端。", style = MaterialTheme.typography.bodySmall) }
         items(connections, key = { it.text("id") }) { connection -> AgentCard {

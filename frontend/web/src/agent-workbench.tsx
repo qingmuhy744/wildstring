@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { CurationDraftPreview } from './curation-drafts';
 import { api, errorCodeMessage, eventId, type User, type Track } from './api';
 import type { AgentConnection, AgentDraft, AgentPage, AgentSchedule, AgentTask } from './agent-api';
 import {
@@ -33,9 +34,17 @@ const format = (v: unknown) =>
 const issues: Record<string, string> = {
   missing_album: '缺少专辑',
   missing_cover: '缺少封面',
-  missing_lyrics: '缺少歌词',
+  missing_lyrics: '未读到歌词（纯音乐可能正常）',
   missing_artist: '缺少艺人',
   missing_title: '缺少歌名',
+  missing_track_number: '曲序待核对',
+  track_number_conflict: '同碟曲序重复',
+  track_number_out_of_range: '曲序超过总曲数',
+  disc_number_out_of_range: '碟号超过总碟数',
+  missing_disc_number: '多碟专辑缺少碟号',
+  same_title_versions: '同名歌曲版本待核对',
+  possible_duplicate_recording: '同名且时长接近，需核对音频',
+  possible_multidisc_split: '多碟专辑可能被拆分',
   metadata_conflict: '信息可能冲突',
   object_version_changed: '歌曲信息已变化，本项已跳过',
 };
@@ -54,6 +63,7 @@ function DraftDetail({
   const [busy, setBusy] = useState(false),
     [error, setError] = useState(''),
     [editing, setEditing] = useState(false),
+    [coverReady, setCoverReady] = useState(false),
     [name, setName] = useState(draft.title),
     [values, setValues] = useState<Record<string, string>>({}),
     [tracks, setTracks] = useState<Track[]>([]);
@@ -74,6 +84,7 @@ function DraftDetail({
       ),
     );
     setEditing(false);
+    setCoverReady(false);
     setError('');
     idempotency.current = eventId();
   }, [draft.id, draft.version]);
@@ -101,7 +112,7 @@ function DraftDetail({
     }
     return () => controller.abort();
   }, [draft.id, draft.version]);
-  async function action(kind: 'approve' | 'apply' | 'reject' | 'edit') {
+  async function action(kind: 'accept' | 'reject' | 'edit') {
     if (busy) return;
     setBusy(true);
     setError('');
@@ -136,7 +147,10 @@ function DraftDetail({
           method: kind === 'edit' ? 'PATCH' : 'POST',
           body: JSON.stringify({
             version: draft.version,
-            ...(kind === 'apply' ? { idempotency_key: idempotency.current } : {}),
+            ...(kind === 'accept' && draft.preview_digest
+              ? { preview_digest: draft.preview_digest }
+              : {}),
+            ...(kind === 'accept' ? { idempotency_key: idempotency.current } : {}),
             ...(kind === 'edit'
               ? { payload, title: draft.kind === 'playlist' ? name : draft.title }
               : {}),
@@ -144,7 +158,7 @@ function DraftDetail({
         },
       );
       onUpdated(result);
-      if (kind === 'apply') onApplied();
+      if (result.status === 'applied') onApplied();
     } catch (reason) {
       setError(errorText(reason));
     } finally {
@@ -158,8 +172,17 @@ function DraftDetail({
         <div>
           <h2>{draft.title}</h2>
           <small>
-            {draft.kind === 'playlist' ? '歌单草案' : '歌曲信息草案'} · 版本 {draft.version} ·{' '}
-            {localDate(draft.updated_at)}
+            {
+              {
+                playlist: '歌单草案',
+                metadata: '歌曲信息草案',
+                intake: '导入整理草案',
+                lyrics: '歌词选用草案',
+                cover: '封面选用草案',
+                metadata_batch: '专辑批量修改草案',
+              }[draft.kind]
+            }{' '}
+            · 版本 {draft.version} · {localDate(draft.updated_at)}
           </small>
         </div>
         <StateBadge state={draft.status} />
@@ -167,10 +190,12 @@ function DraftDetail({
       <WorkspaceNotice error={error} />
       <p className="muted">
         {draft.status === 'applied'
-          ? '此版本已应用。'
+          ? draft.result?.application_mode === 'automatic'
+            ? '此版本已应用。按你的自动整理设置执行。'
+            : '此版本已应用。'
           : draft.status === 'approved'
-            ? '当前版本已批准，仍需点击应用才会修改。'
-            : '核对具体内容和来源后再批准；批准不会自动应用。'}
+            ? '此为旧版已批准草案，点击接受即可完成应用。'
+            : '核对具体内容和来源后，点击接受即可直接应用。'}
       </p>
       {draft.kind === 'playlist' ? (
         <>
@@ -233,6 +258,43 @@ function DraftDetail({
               ))}
           </ol>
         </>
+      ) : draft.kind === 'cover' || draft.kind === 'metadata_batch' ? (
+        <CurationDraftPreview
+          key={`${draft.id}:${draft.version}`}
+          draft={draft}
+          fields={fields}
+          onPreviewReady={setCoverReady}
+        />
+      ) : draft.kind === 'lyrics' ? (
+        <div>
+          <p>歌曲：{String(draft.before?.title || draft.before?.track_id || '')}</p>
+          <p>
+            来源：{String(draft.before?.provider || '')} · 偏移{' '}
+            {Number(draft.payload.offset_ms || 0)} ms
+          </p>
+          <p>
+            当前：{String((draft.before?.current_quality as { label?: string })?.label || '')} →
+            候选：{String((draft.before?.candidate_quality as { label?: string })?.label || '')}
+          </p>
+          <p>匹配依据：{JSON.stringify(draft.before?.match)}</p>
+          <div className="workspace-diff">
+            <strong>当前歌词预览</strong>
+            <pre>
+              {((draft.before?.current_lines as { text: string }[]) || [])
+                .map((line) => line.text)
+                .join('\n')}
+            </pre>
+            <strong>候选歌词预览</strong>
+            <pre>
+              {((draft.before?.candidate_lines as { text: string; translation?: string }[]) || [])
+                .map((line) => [line.text, line.translation].filter(Boolean).join(' / '))
+                .join('\n')}
+            </pre>
+          </div>
+          <p className="muted">
+            请核对版本、时间轴和歌词内容。接受后应用此候选，保留原始格式和双语时间轴。
+          </p>
+        </div>
       ) : (
         <table className="workspace-diff">
           <thead>
@@ -271,6 +333,12 @@ function DraftDetail({
           </tbody>
         </table>
       )}
+      {draft.kind === 'intake' && (
+        <p className="muted">
+          来源：{String(draft.before?.source_path || '')}
+          。应用后安排复制到托管曲库，导入源保持不变。
+        </p>
+      )}
       <h3>来源与依据</h3>
       {draft.evidence.length ? (
         <ul className="draft-evidence">
@@ -303,27 +371,25 @@ function DraftDetail({
             </>
           ) : (
             <>
-              <button disabled={busy || !permitted} onClick={() => setEditing(true)}>
+              <button
+                disabled={
+                  busy || !permitted || ['lyrics', 'cover', 'metadata_batch'].includes(draft.kind)
+                }
+                onClick={() => setEditing(true)}
+              >
                 修改草案
               </button>
-              {draft.status === 'pending' && (
-                <button
-                  className="primary"
-                  disabled={busy || !permitted}
-                  onClick={() => void action('approve')}
-                >
-                  批准当前版本
-                </button>
-              )}
-              {draft.status === 'approved' && (
-                <button
-                  className="primary"
-                  disabled={busy || !permitted}
-                  onClick={() => void action('apply')}
-                >
-                  {busy ? '应用中…' : '应用已批准草案'}
-                </button>
-              )}
+              <button
+                className="primary"
+                disabled={
+                  busy ||
+                  !permitted ||
+                  ((draft.kind === 'cover' || !!draft.payload.cover_draft_id) && !coverReady)
+                }
+                onClick={() => void action('accept')}
+              >
+                {busy ? '应用中…' : '接受并应用'}
+              </button>
               <button disabled={busy} onClick={() => void action('reject')}>
                 拒绝草案
               </button>
@@ -332,7 +398,13 @@ function DraftDetail({
         </div>
       )}
       {!permitted && <p className="muted">共享歌曲信息的修改需要管理员。</p>}
-      {draft.result && (
+      {Boolean(draft.result?.automatic_error) && (
+        <p role="alert">
+          自动应用未完成：{errorCodeMessage(String(draft.result?.automatic_error))}
+          。草案已保留供核对。
+        </p>
+      )}
+      {draft.result && draft.status === 'applied' && (
         <p role="status">
           应用结果：
           {draft.result.playlist_id
@@ -374,9 +446,9 @@ export function Drafts({
   return (
     <section className="workspace-page" aria-label="草案工作台">
       <WorkspaceHeader
-        eyebrow="REVIEW BEFORE CHANGE"
-        title="好想法，先看一眼。"
-        description="所有修改先成为草案。核对、批准、应用，各自留下记录。"
+        eyebrow="YOUR CHOICES, YOUR CONTROL"
+        title="整理结果，由你掌控。"
+        description="审核模式下接受即应用；自动整理按授权类型执行，并保留差异与结果。"
       >
         <RefreshWorkspace busy={list.loading} onClick={() => void list.reload()} />
       </WorkspaceHeader>
@@ -425,7 +497,17 @@ export function Drafts({
               <div className="workspace-row-main">
                 <strong>{draft.title}</strong>
                 <small>
-                  {draft.kind === 'playlist' ? '歌单' : '歌曲信息'} · {localDate(draft.updated_at)}
+                  {
+                    {
+                      playlist: '歌单',
+                      metadata: '歌曲信息',
+                      intake: '导入整理',
+                      lyrics: '歌词选用',
+                      cover: '封面选用',
+                      metadata_batch: '专辑批量修改',
+                    }[draft.kind]
+                  }{' '}
+                  · {localDate(draft.updated_at)}
                 </small>
               </div>
               <StateBadge state={draft.status} />
@@ -847,9 +929,14 @@ export function AgentTasks({
                                   .join(' · ') || '未发现规则问题'}
                           </small>
                         )}
+                        {result.findings?.map((finding) => (
+                          <p className="muted" key={finding.code}>
+                            {finding.summary}
+                          </p>
+                        ))}
                         {result.draft_ids?.map((id) => (
                           <button key={id} onClick={() => onDraft?.(id)}>
-                            查看待确认草案
+                            查看草案与应用结果
                           </button>
                         ))}
                       </div>

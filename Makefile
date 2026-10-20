@@ -149,6 +149,9 @@ test-large-web: build-web ## Verify real API pagination and continuous playback 
 test-browse-web: build-web ## Verify continuous browsing, pinyin jumps and compact album rows against a real API
 	WILDSTRING_TEST_BROWSE_LIBRARY=1 npm --prefix frontend/web run test -- browse-real.spec.ts
 
+test-catalog-web: build-web ## Verify sorting, remembered preferences and continuous multi-disc playback
+	WILDSTRING_TEST_DISC_LIBRARY=1 npm --prefix frontend/web run test -- catalog-sort-real.spec.ts
+
 test-transcoding-web: build-web ## Verify real AAC playback and seeking (requires FFmpeg)
 	@if command -v ffmpeg >/dev/null && command -v ffprobe >/dev/null; then WILDSTRING_TEST_TRANSCODING=1 npm --prefix frontend/web run test -- transcoding.spec.ts; else echo "AAC browser tests skipped: install FFmpeg or run on CI."; fi
 
@@ -160,7 +163,7 @@ dependency-audit: ## Audit complete Web and provider npm lockfiles, including bu
 	npm --prefix frontend/web audit --audit-level=low
 	npm --prefix plugins/node-runtime audit --audit-level=low
 
-ci: check source-plugins dependency-audit test test-web test-large-web test-browse-web test-transcoding-web ## Run checks, backend tests, Web build and browser tests (install Chromium first)
+ci: check source-plugins dependency-audit test test-web test-large-web test-browse-web test-catalog-web test-transcoding-web ## Run checks, backend tests, Web build and browser tests (install Chromium first)
 	$(UV) lock --check --project backend
 
 health: ## Check the locally configured API readiness
@@ -214,7 +217,7 @@ mcp: ## Run the stdio MCP bridge (URL and scoped token must be environment varia
 	@$(RUN) python -m wildstring.mcp_bridge
 
 test-agent: ## Verify controlled tools, drafts, notifications, inspection and the real MCP protocol
-	$(RUN) pytest -c backend/pyproject.toml backend/tests/test_agent*.py backend/tests/test_mcp_bridge.py backend/tests/test_diagnostics.py backend/tests/test_task_notifications.py
+	$(RUN) pytest -c backend/pyproject.toml backend/tests/test_agent*.py backend/tests/test_mcp*.py backend/tests/test_diagnostics.py backend/tests/test_task_notifications.py
 
 test-network: ## Verify probes and production requests share actual proxy and model clients
 	$(RUN) pytest -c backend/pyproject.toml backend/tests/test_outbound.py backend/tests/test_provider_network.py backend/tests/test_ai_config.py

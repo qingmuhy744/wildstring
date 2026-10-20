@@ -75,10 +75,21 @@ class MobileCompletionTest {
         val holdPlaylistDetails = AtomicBoolean(false)
         val playlistDetailsRequested = CountDownLatch(1)
         val releasePlaylistDetails = CountDownLatch(1)
-        var snapshot = """{"version":0,"device_id":"","track_ids":[],"index":0,"position_ms":0,"mode":"sequential","updated_at":null}"""
+        var snapshot = """{"version":0,"device_id":"","track_ids":[],"index":0,"position_ms":0,"mode":"sequential","updated_at":null,"playback_state":"unknown","paused_at":null,"handoff_supported":true,"handoff_eligible":false}"""
+        @Volatile var resumeAfterSnapshot: String? = null
+        var importSettings = """{"version":1,"enabled":false,"interval_seconds":60,"stable_seconds":120,"download_policy":{"wait_for_album":true,"partial_suffixes":[".part",".tmp"]}}"""
         var lyrics = "第一句\n第二句"
         val audio = InstrumentationRegistry.getInstrumentation().context.assets.open("playback.mp3").use { it.readBytes() }
         fun track(index: Int) = """{"id":"completion-$index","title":"手机测试歌曲 $index","artists":["测试艺人"],"album":"手机测试专辑","duration_ms":12000,"has_cover":false,"loved":false,"format":"mp3","status":"available","play_count":2,"listened_ms":6000,"last_played_at":"2026-10-17T00:00:00Z"}"""
+        fun reviewPage(): String {
+            val rows = com.google.gson.JsonArray()
+            (0..1).forEach { n ->
+                val row = JsonParser.parseString("""{"id":"completion-$n","title":"手机测试歌曲 $n","album":"手机测试专辑","album_id":"review-album","artists":["测试艺人"],"has_cover":false,"metadata_version":1,"current":{"title":"手机测试歌曲 $n","album":"人工专辑"},"original":{"title":"原始","album":"文件专辑"},"overrides":{"album":"人工专辑"},"suggestions":[]}""").asJsonObject
+                if (!applied.get()) row.add("suggestions", JsonParser.parseString("""[{"id":"pending-$n","metadata_version":1,"provider":"musicbrainz","fields":{"title":"建议标题","album":"建议专辑"},"candidate_digest":"${"a".repeat(64)}","cover_url":"https://coverartarchive.org/candidate.jpg","match":{}},{"id":"stale-$n","metadata_version":0,"provider":"lastfm","fields":{"title":"过期建议"},"candidate_digest":"${"b".repeat(64)}","match":{}}]"""))
+                rows.add(row)
+            }
+            return JsonParser.parseString("""{"album_id":"review-album","provider_names":{"musicbrainz":"MusicBrainz","lastfm":"Last.fm"},"limit":500,"offset":0,"total":2}""").asJsonObject.apply { add("items", rows) }.toString()
+        }
         var manual = """{"id":"manual","name":"测试歌单","kind":"manual","version":1,"track_count":3,"cover_track_id":null}"""
         init {
             server.dispatcher = object : Dispatcher() {
@@ -90,10 +101,22 @@ class MobileCompletionTest {
                     if (path.endsWith("/auth/status")) { val authenticated = request.getHeader("Cookie")?.contains("wildstring_session=completion") == true; return json("""{"configured":true,"authenticated":$authenticated,"user":${if (authenticated) user else "null"}}""") }
                     if (path.endsWith("/auth/login")) return json(user).setHeader("Set-Cookie", "wildstring_session=completion; Path=/; Max-Age=3600; HttpOnly")
                     if (request.method in listOf("POST", "PUT", "DELETE")) mutations += path to request.body.clone().readUtf8()
+                    if (path.endsWith("/manage/intake/settings")) {
+                        if (request.method == "PUT") { val value = JsonParser.parseString(request.body.readUtf8()).asJsonObject; value.addProperty("version", value.get("version").asInt + 1); importSettings = value.toString() }
+                        return json(importSettings)
+                    }
                     if (path.endsWith("/auth/logout")) return MockResponse().setResponseCode(204)
                     if (path.endsWith("/playback/state")) {
-                        if (request.method == "PUT") { val body = JsonParser.parseString(request.body.readUtf8()).asJsonObject; assertFalse(body.has("updated_at")); if (body["version"].asInt != JsonParser.parseString(snapshot).asJsonObject["version"].asInt) return json("""{"detail":"playback_version_conflict"}""").setResponseCode(409); body.addProperty("version", body["version"].asInt + 1); body.addProperty("updated_at", "2026-10-17T00:00:00Z"); snapshot = body.toString() }
-                        return json(snapshot)
+                        if (request.method == "PUT") { val body = JsonParser.parseString(request.body.readUtf8()).asJsonObject; assertFalse(body.has("updated_at")); if (body["version"].asInt != JsonParser.parseString(snapshot).asJsonObject["version"].asInt) return json("""{"detail":"playback_version_conflict"}""").setResponseCode(409); body.addProperty("version", body["version"].asInt + 1); body.addProperty("updated_at", java.time.Instant.now().toString()); body.addProperty("handoff_supported", true)
+                            val previous = JsonParser.parseString(snapshot).asJsonObject
+                            val paused = body.text("playback_state") == "paused"
+                            if (paused) body.addProperty("paused_at", if (previous.text("playback_state") == "paused" && previous.text("device_id") == body.text("device_id")) previous.text("paused_at") else java.time.Instant.now().toString())
+                            else body.add("paused_at", com.google.gson.JsonNull.INSTANCE)
+                            body.addProperty("handoff_eligible", paused && body.getAsJsonArray("track_ids").size() > 0)
+                            snapshot = body.toString() }
+                        val response = json(snapshot)
+                        if (request.method == "GET") resumeAfterSnapshot?.let { snapshot = it; resumeAfterSnapshot = null }
+                        return response
                     }
                     if (path.endsWith("/recommendations/preferences")) return json("""{"version":1,"use_ai":false,"use_lastfm":false,"count":20}""")
                     if (path.contains("/recommendations/daily")) return json("""{"id":"daily","date":"2026-10-17","engine":"local","items":[{"track":${track(0)},"reason":"久未重听"}]}""")
@@ -101,6 +124,9 @@ class MobileCompletionTest {
                     if (path.endsWith("/recommendations/feedback") || path.endsWith("/listening")) return json("{}")
                     if (path.endsWith("/listening/summary")) return json("""{"play_count":8,"listened_ms":120000,"tracks_played":3,"favorites":1}""")
                     if (path.endsWith("/lastfm")) return json("""{"configured":false,"connected":false,"scrobble":false,"now_playing":false,"version":1}""")
+                    if (path.endsWith("/agent/metadata-review/albums")) return json("""{"items":[{"id":"review-album","title":"手机测试专辑","artists":["测试艺人"],"count":2}],"total":1}""")
+                    if (path.endsWith("/agent/metadata-review/accept")) { applied.set(true); return json("""{"status":"applied","draft":{"id":"receipt"}}""") }
+                    if (path.endsWith("/agent/metadata-review")) return json(reviewPage()).setBodyDelay(500, TimeUnit.MILLISECONDS)
                     if (path.contains("/manage/")) return when {
                         path.endsWith("/overview") -> json("""{"counts":{"tracks":3,"size_bytes":1000},"albums":1,"artists":1}""")
                         path.endsWith("/intake/settings") -> json("""{"version":1,"enabled":false,"interval_seconds":60,"stable_seconds":120}""")
@@ -168,8 +194,8 @@ class MobileCompletionTest {
     private fun connect(fixture: Fixture): MusicViewModel {
         val vm = compose.runOnIdle { ViewModelProvider(compose.activity)[MusicViewModel::class.java] }
         val address = fixture.server.url("/").newBuilder().host("127.0.0.1").build().toString()
-        compose.runOnIdle { vm.repository.session.invalidate(); vm.settings.quality(0); vm.sharing.mode("off"); vm.connect(address, "mobile-admin", "test-password", true) }
-        compose.waitUntil(20_000) { vm.state.value.connected && !vm.state.value.loading }
+        val connection = compose.runOnIdle { vm.repository.session.invalidate(); vm.settings.quality(0); vm.sharing.mode("off"); vm.connect(address, "mobile-admin", "test-password", true) }
+        compose.waitUntil(20_000) { connection.isCompleted && vm.state.value.connected && vm.state.value.server == address && !vm.state.value.loading }
         return vm
     }
     private fun cleanup(vm: MusicViewModel) { compose.runOnIdle { vm.sleep.cancel(); vm.repository.session.invalidate(); vm.controller?.stop(); vm.controller?.clearMediaItems() } }
@@ -225,6 +251,28 @@ class MobileCompletionTest {
         }
     }
 
+    @Test fun downloadCompletionPolicyCanBeConfiguredFromManagement() {
+        Fixture().use { fixture -> val vm = connect(fixture)
+            try {
+                compose.onNodeWithContentDescription("设置").performClick()
+                compose.onNodeWithText("曲库管理", substring = false).performScrollTo().performClick()
+                compose.waitUntil(10_000) { compose.onAllNodesWithText("下载完成与自动导入设置").fetchSemanticsNodes().isNotEmpty() }
+                compose.onNodeWithText("下载完成与自动导入设置").performScrollTo().performClick()
+                compose.onNodeWithText("检查间隔（15–86400 秒）").performTextReplacement("30")
+                compose.onNodeWithText("稳定期（5–86400 秒）").performTextReplacement("10")
+                compose.onNodeWithText("下载后缀，空格或逗号分隔").performTextReplacement(".part, .uploading")
+                compose.onNodeWithText("保存设置").performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnClick) { click -> assertTrue(click()) }
+                compose.waitUntil(10_000) { fixture.mutations.any { it.first.endsWith("/manage/intake/settings") } }
+                val value = JsonParser.parseString(fixture.mutations.last { it.first.endsWith("/manage/intake/settings") }.second).asJsonObject
+                assertEquals(30, value.get("interval_seconds").asInt)
+                assertEquals(10, value.get("stable_seconds").asInt)
+                assertEquals(".uploading", value.getAsJsonObject("download_policy").getAsJsonArray("partial_suffixes")[1].asString)
+                assertEquals(1, value.get("version").asInt)
+                capture("download-policy-phone.png")
+            } finally { cleanup(vm) }
+        }
+    }
+
     @Test fun phoneRecommendationAiPlaylistAndManagementEntriesHaveWorkingControls() {
         Fixture().use { fixture -> val vm = connect(fixture)
             try {
@@ -254,8 +302,10 @@ class MobileCompletionTest {
                 compose.onNodeWithTag("nav-mine").performClick()
                 compose.onNodeWithContentDescription("新建歌单").performClick()
                 compose.onNodeWithText("歌单名称").performTextInput("手机规则歌单")
+                dismissKeyboard()
                 compose.onNode(isToggleable()).performClick()
-                compose.onNodeWithText("保存歌单").performScrollTo().performClick()
+                compose.onNodeWithText("只选我喜欢的音乐").assertIsDisplayed()
+                compose.onNodeWithText("保存歌单").performScrollTo().performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnClick) { click -> assertTrue(click()) }
                 compose.waitUntil(10_000) { fixture.mutations.any { it.first.endsWith("/playlists") && it.second.contains("\"kind\":\"smart\"") } }
                 compose.onNodeWithContentDescription("设置").performClick()
                 compose.onNodeWithText("曲库管理", substring = false).performScrollTo().performClick()
@@ -321,17 +371,19 @@ class MobileCompletionTest {
                 fixture.showSuggestions.set(true)
                 compose.onNodeWithContentDescription("手机测试歌曲 0的操作").performClick()
                 compose.onNodeWithText("更新元数据与建议").performScrollTo().performClick()
-                compose.waitUntil(10_000) { compose.onAllNodesWithText("歌曲名称：建议标题").fetchSemanticsNodes().isNotEmpty() }
-                compose.onNodeWithText("歌曲名称：不应再次显示的建议").assertDoesNotExist()
-                compose.onNodeWithText("歌曲信息已变化，请重新查询。").assertExists()
-                compose.waitUntil(10_000) { compose.onAllNodes(isToggleable() and hasAnySibling(hasText("歌曲名称：建议标题")) and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
-                compose.onNode(isToggleable() and hasAnySibling(hasText("歌曲名称：建议标题"))).performClick()
-                compose.onAllNodes(hasText("应用选中信息") and isEnabled()).onFirst().performScrollTo().performClick()
-                compose.onNodeWithText("确认应用").performClick()
+                compose.waitUntil(10_000) { compose.onAllNodesWithText("已选 2 首 · 2 个字段", substring = false).fetchSemanticsNodes().isNotEmpty() }
+                compose.onNodeWithTag("review-scroll").performScrollToNode(hasTestTag("review-field-title"))
+                compose.onNodeWithTag("review-field-title").assertIsOn()
+                compose.onNodeWithTag("review-field-album").performScrollTo().assertIsOff()
+                compose.onAllNodesWithText("当前值").onFirst().assertExists()
+                compose.onAllNodesWithText("建议值").onFirst().assertExists()
+                compose.onNodeWithText("建议标题").performScrollTo().assertExists()
+                capture("metadata-review-native.png")
+                compose.onNodeWithText("接受选中项").performClick()
                 compose.waitUntil(10_000) { fixture.applied.get() }
-                val apply = JsonParser.parseString(fixture.mutations.last { it.first.endsWith("/apply") }.second).asJsonObject
-                assertEquals(1, apply["version"].asInt); assertEquals("title", apply.getAsJsonArray("fields")[0].asString)
-                compose.waitUntil(10_000) { fixture.requests.any { it.contains("/suggestions/pending/cover-preview") } }
+                val apply = JsonParser.parseString(fixture.mutations.last { it.first.endsWith("/metadata-review/accept") }.second).asJsonObject
+                assertEquals(2, apply.getAsJsonArray("items").size())
+                apply.getAsJsonArray("items").forEach { item -> assertEquals("title", item.asJsonObject.getAsJsonArray("fields").single().asString) }
             } finally { cleanup(vm) }
         }
     }
@@ -432,13 +484,41 @@ class MobileCompletionTest {
         }
     }
 
+    private fun remotePause(version: Int, state: String = "paused", at: String = "2026-10-19T10:00:00Z", eligible: Boolean = state == "paused", device: String = "other-device", ids: List<String> = listOf("completion-0"), index: Int = 0, position: Int = 2000): String =
+        jsonBody("version" to version, "device_id" to device, "track_ids" to jsonStrings(ids), "index" to index, "position_ms" to position,
+            "mode" to "repeat_all", "playback_state" to state, "paused_at" to if (state == "paused") at else null,
+            "handoff_supported" to true, "handoff_eligible" to eligible, "updated_at" to at).toString()
+
+    private fun awaitHandoffNotice(vm: MusicViewModel, version: Int) {
+        try {
+            // The API/state update can finish before the first measured frame.
+            // Wait for the actual notice and action to be visible, not just composed.
+            compose.waitUntil(10_000) {
+                vm.state.value.handoff?.version == version &&
+                    compose.onNodeWithTag("playback-handoff-notice").isDisplayed() &&
+                    compose.onNodeWithText("其他设备有可接续的进度").isDisplayed() &&
+                    compose.onNodeWithText("载入进度").isDisplayed()
+            }
+        } catch (error: Throwable) {
+            val tree = runCatching { compose.onRoot(useUnmergedTree = true).printToString() }.getOrDefault("UI unavailable")
+            throw AssertionError("Expected visible handoff $version; actual=${vm.state.value.handoff?.version}, playing=${vm.state.value.playing}\n$tree", error)
+        }
+        compose.onNodeWithTag("playback-handoff-notice").assertIsDisplayed()
+        compose.onNodeWithText("载入进度").assertIsEnabled()
+    }
+
     @Test fun crossDevicePromptRestoresPausedAndPausePublishesWithoutManualClaim() {
         Fixture().use { fixture -> val vm = connect(fixture)
             try {
                 compose.runOnIdle { vm.sharing.mode("ask") }
-                fixture.snapshot = """{"version":70,"device_id":"other-device","track_ids":["completion-0","completion-1"],"index":1,"position_ms":3000,"mode":"repeat_all","updated_at":"2026-10-17T00:00:00Z"}"""
+                for (ignored in listOf(remotePause(65, "playing"), remotePause(66, "unknown"), remotePause(67, eligible = false), remotePause(68, device = vm.deviceId()))) {
+                    fixture.snapshot = ignored
+                    runBlocking { withContext(Dispatchers.Main) { vm.checkSharedPlayback() } }
+                    compose.runOnIdle { assertNull(vm.state.value.handoff) }
+                }
+                fixture.snapshot = remotePause(70, ids = listOf("completion-0", "completion-1"), index = 1, position = 3000)
                 runBlocking { withContext(Dispatchers.Main) { vm.checkSharedPlayback() } }
-                compose.onNodeWithText("其他设备有可接续的进度").assertIsDisplayed()
+                awaitHandoffNotice(vm, 70)
                 compose.onNodeWithText("载入进度").performClick()
                 try { compose.waitUntil(10_000) { vm.state.value.handoff == null && vm.state.value.queue.size == 2 } }
                 catch (e: Throwable) {
@@ -452,22 +532,77 @@ class MobileCompletionTest {
                 compose.waitUntil(10_000) { vm.state.value.playing }
                 compose.runOnIdle { vm.seek(5000); vm.toggle() }
                 compose.waitUntil(10_000) { compose.runOnIdle { !vm.controller!!.playWhenReady && !vm.controller!!.isPlaying } }
-                compose.waitUntil(10_000) { JsonParser.parseString(fixture.snapshot).asJsonObject["position_ms"].asLong >= 4900 }
+                compose.waitUntil(10_000) {
+                    val saved = JsonParser.parseString(fixture.snapshot).asJsonObject
+                    saved["position_ms"].asLong >= 4900 && saved.text("playback_state") == "paused"
+                }
                 assertTrue(fixture.mutations.any { it.first.endsWith("/playback/state") })
                 val paused = gson.fromJson(fixture.snapshot, SharedPlayback::class.java)
-                val writes = fixture.mutations.count { it.first.endsWith("/playback/state") }
-                runBlocking { vm.sharing.publish(paused, force = true) }
-                assertEquals(writes, fixture.mutations.count { it.first.endsWith("/playback/state") })
-                fixture.snapshot = """{"version":90,"device_id":"other-device","track_ids":["completion-0"],"index":0,"position_ms":2000,"mode":"sequential","updated_at":null}"""
+                // Media3 can still deliver queued seek/pause events. Assert the
+                // final state here; isolated duplicate-publish coverage below
+                // does not race those legitimate position updates.
+                assertEquals("paused", paused.playbackState)
+                assertNotNull(paused.pausedAt)
+                fixture.snapshot = remotePause(90)
                 runBlocking { withContext(Dispatchers.Main) { vm.checkSharedPlayback() } }
                 compose.runOnIdle { assertNull(vm.state.value.handoff); vm.syncMode("off") }
                 runBlocking { withContext(Dispatchers.Main) { vm.checkSharedPlayback() } }
                 compose.runOnIdle { assertNull(vm.state.value.handoff); vm.sharing.mode("auto") }
+                fixture.snapshot = remotePause(91, at = "2026-10-19T10:05:00Z")
                 runBlocking { withContext(Dispatchers.Main) { vm.checkSharedPlayback() } }
                 compose.waitUntil(10_000) { vm.state.value.queue.size == 1 }
                 compose.waitUntil(10_000) { compose.runOnIdle { vm.controller!!.currentPosition == 2000L } }
                 compose.runOnIdle { assertFalse(vm.controller!!.playWhenReady) }
             } finally { vm.sharing.mode("off"); cleanup(vm) }
+        }
+    }
+    @Test fun resumeOfferDisappearsWhenPeerPlaysAndEachPauseIsOnlyOfferedOnce() {
+        Fixture().use { fixture -> val vm = connect(fixture)
+            try {
+                compose.runOnIdle { vm.observeProgress(false); vm.syncMode("ask") }
+                fixture.snapshot = remotePause(120)
+                runBlocking { withContext(Dispatchers.Main) { vm.checkSharedPlayback() } }
+                awaitHandoffNotice(vm, 120)
+                fixture.snapshot = remotePause(121, "playing")
+                runBlocking { withContext(Dispatchers.Main) { vm.checkSharedPlayback() } }
+                compose.onNodeWithTag("playback-handoff-notice").assertDoesNotExist()
+                fixture.snapshot = remotePause(122)
+                runBlocking { withContext(Dispatchers.Main) { vm.checkSharedPlayback() } }
+                compose.runOnIdle { assertNull(vm.state.value.handoff) }
+                fixture.snapshot = remotePause(123, at = "2026-10-19T10:10:00Z")
+                runBlocking { withContext(Dispatchers.Main) { vm.checkSharedPlayback() } }
+                awaitHandoffNotice(vm, 123)
+                fixture.snapshot = remotePause(124, "playing")
+                val queueBefore = vm.state.value.queue
+                runBlocking { withContext(Dispatchers.Main) { vm.acceptHandoff() } }
+                compose.runOnIdle { assertNull(vm.state.value.handoff); assertEquals(queueBefore, vm.state.value.queue) }
+                fixture.snapshot = remotePause(125, at = "2026-10-19T10:20:00Z")
+                runBlocking { withContext(Dispatchers.Main) { vm.checkSharedPlayback() } }
+                fixture.resumeAfterSnapshot = remotePause(126, "playing")
+                try {
+                    runBlocking { withContext(Dispatchers.Main) { vm.acceptHandoff() } }
+                    fail("A peer resuming during queue loading must cancel the handoff")
+                } catch (error: java.io.IOException) { assertTrue(error.message.orEmpty().contains("恢复播放")) }
+                compose.runOnIdle { assertNull(vm.state.value.handoff); assertEquals(queueBefore, vm.state.value.queue) }
+                assertFalse(fixture.mutations.any { it.first.endsWith("/playback/state") })
+            } finally { vm.sharing.mode("off"); cleanup(vm) }
+        }
+    }
+
+
+    @Test fun identicalPausedSnapshotsDoNotPublishAgain() {
+        Fixture().use { fixture -> val vm = connect(fixture)
+            try {
+                val snapshot = SharedPlayback(trackIds = listOf("completion-0"), positionMs = 5000, playbackState = "paused")
+                compose.runOnIdle { vm.sharing.mode("ask"); vm.sharing.localPlaybackStarted() }
+                val saved = runBlocking { vm.sharing.publish(snapshot, force = true) }
+                assertNotNull(saved)
+                val writes = fixture.mutations.count { it.first.endsWith("/playback/state") }
+                assertEquals(1, writes)
+                repeat(3) { assertNull(runBlocking { vm.sharing.publish(saved!!, force = true) }) }
+                assertEquals(writes, fixture.mutations.count { it.first.endsWith("/playback/state") })
+                assertEquals("paused", gson.fromJson(fixture.snapshot, SharedPlayback::class.java).playbackState)
+            } finally { cleanup(vm) }
         }
     }
 }

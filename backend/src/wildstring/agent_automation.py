@@ -1,4 +1,4 @@
-"""SQLite leases and incremental read-only inspection; approved changes are never automatic."""
+"""SQLite leases and incremental read-only inspection; application follows user-owned policy."""
 
 import json
 import threading
@@ -321,6 +321,9 @@ class Automation:
         try:
             actor = self.validate_task_actor(job)
             identities = parameters["track_ids"]
+            from wildstring.library.inspection import InspectionIndex
+
+            inspection_index = InspectionIndex(self.repository_for(actor))
             started = time.monotonic()
             for index in range(job["checkpoint"], len(identities)):
                 if time.monotonic() - started > 1800:
@@ -335,7 +338,9 @@ class Automation:
                     return
                 identity = identities[index]
                 try:
-                    record = self.inspect(actor, [identity], 1)["items"][0]
+                    record = self.inspect(
+                        actor, [identity], 1, rules=parameters.get("rules"), index=inspection_index
+                    )["items"][0]
                     if record["metadata_version"] != parameters.get("metadata_versions", {}).get(
                         identity
                     ):
@@ -379,7 +384,7 @@ class Automation:
                 prompt = (
                     "只解释这些实际规则巡检证据及可行的下一步，按问题类型汇总，回答不超过600字，不逐曲重复正常项。"
                     "统计覆盖整个巡检，items只是最多20首异常样本；未列出的歌曲不能视为已完成AI考证。"
-                    "不要编造音乐事实或把缺失字段猜成已知。需要修改时仅生成待确认草案。\n"
+                    "不要编造音乐事实或把缺失字段猜成已知。需要修改时通过 create_draft，是否应用以返回 status 为准。\n"
                     + encoded(evidence)
                 )
 
@@ -391,7 +396,7 @@ class Automation:
 
                 def save_model_progress(progress):
                     summary = {
-                        "analysis": f"已完成 {progress['tool_calls']} 次受控工具调用，已有草案仍需站内确认。",
+                        "analysis": f"已完成 {progress['tool_calls']} 次受控工具调用，请查看草案及实际应用状态。",
                         "draft_ids": progress["draft_ids"],
                         "partial": True,
                     }

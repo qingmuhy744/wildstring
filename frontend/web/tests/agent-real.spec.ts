@@ -23,13 +23,7 @@ test('真实后端：草案确认后应用一次，歌单和通知可从网页�
   const detail = page.getByRole('article', { name: '草案详情' });
   await expect(detail).toContainText('晴天测试曲');
   await expect(detail).toContainText('夜晚测试曲');
-  await detail.getByRole('button', { name: '批准当前版本', exact: true }).click();
-  expect(
-    (await (await page.request.get('/api/v1/playlists')).json()).items.some(
-      (p: { name: string }) => p.name === title,
-    ),
-  ).toBe(false);
-  await detail.getByRole('button', { name: '应用已批准草案', exact: true }).click();
+  await detail.getByRole('button', { name: '接受并应用', exact: true }).click();
   await expect(detail).toContainText('歌单已保存');
   const applied = await (await page.request.get(`/api/v1/agent/drafts/${draft.id}`)).json();
   expect(applied.status).toBe('applied');

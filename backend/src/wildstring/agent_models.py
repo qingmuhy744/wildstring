@@ -6,6 +6,8 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 
+from wildstring.library.inspection import Rule
+
 SCOPES = (
     "library:read",
     "personal:read",
@@ -14,6 +16,9 @@ SCOPES = (
     "tasks:write",
     "diagnostics:read",
     "notifications:read",
+    "library:manage",
+    "personal:write",
+    "web:search",
 )
 
 
@@ -23,7 +28,7 @@ class Input(BaseModel):
 
 class CredentialCreate(Input):
     name: str = Field(min_length=1, max_length=100)
-    scopes: list[str] = Field(min_length=1, max_length=7)
+    scopes: list[str] = Field(min_length=1, max_length=len(SCOPES))
     expires_in_days: int = Field(default=30, ge=1, le=365)
 
     @field_validator("scopes")
@@ -56,7 +61,7 @@ class Evidence(Input):
 
 
 class DraftCreate(Input):
-    kind: Literal["playlist", "metadata"]
+    kind: Literal["playlist", "metadata", "intake", "lyrics", "cover", "metadata_batch"]
     title: str = Field(min_length=1, max_length=200)
     payload: dict
     evidence: list[Evidence] = Field(default_factory=list, max_length=20)
@@ -71,10 +76,24 @@ class DraftPatch(Input):
 
 class Version(Input):
     version: int = Field(ge=1)
+    preview_digest: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
 
 
 class Apply(Version):
     idempotency_key: str = Field(min_length=8, max_length=128, pattern=r"^[A-Za-z0-9_.:-]+$")
+
+
+class ApplicationPolicy(Input):
+    mode: Literal["manual", "automatic"] = "manual"
+    kinds: list[Literal["playlist", "metadata", "metadata_batch", "cover", "lyrics", "intake"]] = (
+        Field(max_length=6)
+    )
+    version: int = Field(ge=1)
+
+    @field_validator("kinds")
+    @classmethod
+    def unique_kinds(cls, value):
+        return list(dict.fromkeys(value))
 
 
 class PlaylistPayload(Input):
@@ -85,6 +104,7 @@ class PlaylistPayload(Input):
 
 
 class Inspection(Input):
+    rules: list[Rule] | None = Field(default=None, max_length=30)
     track_ids: list[str] | None = Field(default=None, max_length=5000)
     max_tracks: int = Field(default=500, ge=1, le=5000)
     max_calls: int = Field(default=0, ge=0, le=100)

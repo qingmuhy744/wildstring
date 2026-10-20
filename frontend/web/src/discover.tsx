@@ -592,6 +592,7 @@ interface SharedPlayback {
   position_ms: number;
   mode: PlaybackMode;
   updated_at: string | null;
+  handoff_supported?: boolean;
 }
 export function Devices({ player, user }: { player: Player; user: User }) {
   const [snapshot, setSnapshot] = useState<SharedPlayback | null>(null),
@@ -633,7 +634,10 @@ export function Devices({ player, user }: { player: Player; user: User }) {
     <section className="completion-page" aria-label="跨设备继续">
       <p className="eyebrow">TAKE YOUR MUSIC WITH YOU</p>
       <h1>换个地方，接着听。</h1>
-      <p className="muted">暂停时自动保存进度。默认以小提示提供其他设备的进度，载入后保持暂停。</p>
+      <p className="muted">
+        暂停时自动保存进度。仅对其他设备最近 30
+        分钟内的暂停显示一次轻提示；载入后保持暂停，旧记录仍可手动载入。
+      </p>
       <SyncModeControl userId={user.id} />
       <div className="management-card">
         <h2>账号共享进度</h2>
@@ -671,6 +675,15 @@ export function Devices({ player, user }: { player: Player; user: User }) {
                     index: player.index,
                     position_ms: Math.round(player.position * 1000),
                     mode: player.mode,
+                    ...(snapshot?.handoff_supported
+                      ? {
+                          playback_state: player.audio.current?.ended
+                            ? 'ended'
+                            : player.audio.current?.paused === false
+                              ? 'playing'
+                              : 'paused',
+                        }
+                      : {}),
                   }),
                 });
                 setSnapshot(result);

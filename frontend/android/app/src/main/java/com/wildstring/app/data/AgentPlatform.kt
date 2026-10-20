@@ -22,6 +22,7 @@ class AgentTimeoutInterceptor : Interceptor {
 
 internal fun JsonObject.text(key: String, fallback: String = ""): String = get(key)?.takeUnless { it.isJsonNull }?.let { runCatching { it.asString }.getOrNull() } ?: fallback
 internal fun JsonObject.number(key: String, fallback: Long = 0): Long = get(key)?.let { runCatching { it.asLong }.getOrNull() } ?: fallback
+internal fun JsonObject.objectOrNull(key: String): JsonObject? = get(key)?.takeIf { it.isJsonObject }?.asJsonObject
 internal fun JsonObject.flag(key: String): Boolean = get(key)?.let { runCatching { it.asBoolean }.getOrNull() } ?: false
 internal fun JsonObject.objects(key: String = "items"): List<JsonObject> = getAsJsonArray(key)?.filter { it.isJsonObject }?.map { it.asJsonObject } ?: emptyList()
 internal fun jsonBody(vararg pairs: Pair<String, Any?>): JsonObject = JsonObject().apply { pairs.forEach { (key, value) ->
@@ -50,6 +51,12 @@ internal fun agentError(status: Int, code: String, traceId: String?): String {
         code == "search_daily_budget_exhausted" -> "今日搜索与读取请求已达到上限。"
         code == "native_search_requires_deepseek_pro" -> "DeepSeek 原生联网需要支持该功能的 Pro 模型。"
         code == "ai_output_incomplete" -> "模型输出未完成，请提高输出 Token 上限或缩小问题范围。"
+        code == "application_policy_version_conflict" -> "整理设置已在其他设备更新，请重新读取后保存。"
+        code == "draft_preview_required" -> "请使用新版客户端查看完整图片或逐曲差异后，再批准此草案。"
+        code == "album_membership_changed" -> "专辑曲目范围已变化，请重新读取并生成整批草案。"
+        code == "cover_candidate_changed" -> "封面候选已变化，请重新生成草案。"
+        code == "cover_snapshot_unavailable" -> "封面快照不可用，请重新生成草案后核对。"
+        code == "metadata_version_conflict" -> "歌曲信息已变化，本次未应用。请重新生成草案。"
         code == "ai_output_limit" -> "模型达到输出 Token 上限，分析未完成。请在 AI 连接中提高上限或降低推理强度；旧连接请新建可配置连接。调整后再恢复，恢复可能产生费用。"
         code == "ai_content_filtered" -> "模型服务过滤了本次输出。请调整问题范围后再恢复，恢复可能产生费用。"
         code == "ai_response_failed" -> "模型服务未能完成本次响应，请检查服务状态后再恢复，恢复可能产生费用。"

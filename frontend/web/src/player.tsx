@@ -160,6 +160,7 @@ export function usePlayer(userId: string) {
   }, [buffering, current]);
 
   function play() {
+    desiredPlay.current = true;
     playbackGain.prepare();
     if (loading.current) {
       desiredPlay.current = true;
@@ -324,8 +325,11 @@ export function usePlayer(userId: string) {
       desiredPlay.current = !desiredPlay.current;
       return;
     }
-    if (!audio.current.paused) audio.current.pause();
-    else {
+    if (!audio.current.paused) {
+      desiredPlay.current = false;
+      audio.current.pause();
+      setBuffering(false);
+    } else {
       setError('');
       if (audio.current.error || !audio.current.getAttribute('src')) start(queue, index);
       else play();
@@ -519,6 +523,7 @@ export function usePlayer(userId: string) {
       onPause: () => {
         if (audio.current) tracker.current.playing(audio.current, false);
         setPlaying(false);
+        if (!loading.current || !desiredPlay.current) setBuffering(false);
       },
       onSeeking: () => {
         if (audio.current) tracker.current.beforeSeek(audio.current);
@@ -533,7 +538,7 @@ export function usePlayer(userId: string) {
       },
       onWaiting: () => {
         if (audio.current) tracker.current.playing(audio.current, false);
-        setBuffering(true);
+        if (!audio.current?.paused || (loading.current && desiredPlay.current)) setBuffering(true);
       },
       onTimeUpdate: () => {
         if (loading.current) return;

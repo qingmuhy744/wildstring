@@ -281,7 +281,7 @@ class PlaybackService : MediaSessionService() {
         if (profile != repository.session.cacheScope()) return
         val entries = queueEntries
         val shared = SharedPlayback(trackIds = entries.map { it.trackId }, index = player.currentMediaItemIndex.coerceAtLeast(0),
-            positionMs = player.currentPosition.coerceAtLeast(0), mode = if (player.shuffleModeEnabled) "shuffle" else when (player.repeatMode) {
+            positionMs = player.currentPosition.coerceAtLeast(0), playbackState = if (player.playbackState == Player.STATE_ENDED) "ended" else if (player.playWhenReady) "playing" else "paused", mode = if (player.shuffleModeEnabled) "shuffle" else when (player.repeatMode) {
                 Player.REPEAT_MODE_ONE -> "repeat_one"; Player.REPEAT_MODE_ALL -> "repeat_all"; else -> "sequential"
             })
         if (shared.trackIds.isNotEmpty()) scope.launch {

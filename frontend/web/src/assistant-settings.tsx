@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { ApplicationPolicySettings } from './application-policy';
 import type { User } from './api';
 import { AgentConnections, AssistantPreferences, ToolCredentials } from './agent-settings';
 import { TelegramSettings } from './telegram-settings';
@@ -16,6 +17,7 @@ export function AssistantSettings({ user }: { user: User }) {
       <nav className="workspace-tabs" aria-label="助手设置分类">
         {[
           ['connections', '模型连接'],
+          ['application', '整理方式'],
           ['telegram', '通知与 Telegram'],
           ['credentials', 'MCP 工具凭据'],
           ['history', '对话历史'],
@@ -30,6 +32,7 @@ export function AssistantSettings({ user }: { user: User }) {
       {tab === 'telegram' && <TelegramSettings />}
       {tab === 'credentials' && <ToolCredentials user={user} />}{' '}
       {tab === 'history' && <AssistantPreferences />}
+      {tab === 'application' && <ApplicationPolicySettings />}
       {tab === 'research' && <ResearchSettings />}
     </section>
   );

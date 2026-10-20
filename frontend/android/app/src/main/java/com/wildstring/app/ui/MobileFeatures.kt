@@ -202,11 +202,11 @@ private fun DevicesPanel(vm: MusicViewModel) {
     LaunchedEffect(Unit) { action.run { remote = vm.repository.api().sharedPlayback() } }
     Column(Modifier.padding(24.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         ActionStatus(action)
-        Text("暂停时自动保存进度。默认以小提示提供其他设备的进度，载入后保持暂停；可在设置中调整。")
+        Text("暂停时自动保存进度。仅对其他设备最近 30 分钟内的暂停显示一次轻提示，载入后保持暂停；旧记录仍可在这里手动载入。")
         remote?.let { saved ->
             Text(if (saved.trackIds.isEmpty()) "还没有共享播放记录" else "${saved.trackIds.size} 首 · 第 ${saved.index + 1} 首 · ${formatTime(saved.positionMs)}")
             if (saved.deviceId == device && saved.trackIds.isNotEmpty()) Text("这是本机最近同步的记录", style = MaterialTheme.typography.bodySmall)
-            Button({ scope.launch { action.run { vm.resumeShared(saved); action.message = "已继续播放" } } }, enabled = !action.busy && saved.trackIds.isNotEmpty()) { Text("从这条记录继续") }
+            Button({ scope.launch { action.run { vm.resumeShared(saved); action.message = "已载入进度，保持暂停" } } }, enabled = !action.busy && saved.trackIds.isNotEmpty()) { Text("从这条记录继续") }
         }
         OutlinedButton({ scope.launch { action.run { remote = vm.sharePlayback(); action.message = "当前队列与进度已同步" } } }, enabled = !action.busy && player.queue.isNotEmpty()) { Text("同步本机当前播放") }
         TextButton({ scope.launch { action.run { remote = vm.repository.api().sharedPlayback() } } }, enabled = !action.busy) { Text("刷新记录") }

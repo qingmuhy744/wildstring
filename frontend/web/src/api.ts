@@ -33,7 +33,15 @@ export interface Track {
   added_at: string;
 }
 
+export interface DiscSummary {
+  number: number;
+  track_count: number;
+  duration_ms: number;
+  offset: number;
+}
+
 export interface TrackPage {
+  discs?: DiscSummary[];
   items: Track[];
   total: number;
   limit: number;
@@ -71,6 +79,7 @@ const messages: Record<string, string> = {
   playback_gain_version_conflict: '响度设置已在其他设备变化，请重新打开后保存。',
   loudness_tool_missing: '服务端缺少 FFmpeg，请更新官方镜像或安装后重试。',
 
+  application_policy_version_conflict: '整理设置已在其他设备更新，请重新读取后保存。',
   draft_version_conflict: '草案已变化，请刷新并重新核对当前版本。',
   draft_not_approved: '请先核对并批准当前草案版本。',
   draft_not_found: '草案已不可用，请刷新列表。',
@@ -143,6 +152,11 @@ const messages: Record<string, string> = {
   cannot_change_self_role: '不能停用或修改当前账号的角色。',
   use_self_password_change: '请到账号设置修改自己的密码。',
   lyrics_version_conflict: '歌词或文件已经变化，请重新读取后再保存。',
+  draft_preview_required: '请使用新版客户端查看完整图片或逐曲差异后，再批准此草案。',
+  album_membership_changed: '专辑的曲目范围已变化，请重新读取并生成整批草案。',
+  cover_candidate_changed: '封面候选已变化，请重新生成草案。',
+  cover_snapshot_unavailable: '封面快照不可用，请重新生成草案后核对。',
+  empty_metadata_changes: '批量草案中每首歌曲都需要明确的修改字段。',
   metadata_version_conflict: '这首歌的信息已变化，请重新读取后再编辑。',
   settings_version_conflict: '设置已被更新，请刷新后重试。',
   library_task_busy: '曲库已有任务在排队或执行，请等待完成。',

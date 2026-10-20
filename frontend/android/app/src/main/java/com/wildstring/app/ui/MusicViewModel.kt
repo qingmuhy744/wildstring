@@ -36,7 +36,7 @@ data class MusicState(
     val entryId: String? = null, val repeatMode: Int = Player.REPEAT_MODE_OFF, val shuffle: Boolean = false,
     val playbackError: String? = null, val lyrics: Lyrics = Lyrics(), val lyricsLoading: Boolean = false,
     val lyricsError: String? = null, val offline: Boolean = false, val hasContent: Boolean = false,
-    val role: String = "artist", val sort: String = "title", val albumFilter: String? = null, val collecting: Boolean = false,
+    val discs: List<DiscSummary> = emptyList(), val order: String = "asc", val role: String = "artist", val sort: String = "title", val albumFilter: String? = null, val collecting: Boolean = false,
     val contentKey: String = "", val canGoBack: Boolean = false, val navigationDepth: Int = 0,
     val window: CatalogWindow = CatalogWindow(), val rangeLoading: Set<Int> = emptySet(),
     val rangeErrors: Map<Int, String> = emptyMap(), val browseIndex: BrowseIndex? = null,
@@ -72,7 +72,6 @@ class MusicViewModel @Inject constructor(
     private var progressJob: Job? = null
     private var handoffJob: Job? = null
     private var localPlaybackEpoch = 0L
-    private var handoffDismissed = false
     private var offlineSyncJob: Job? = null
     private val offlineSyncLock = kotlinx.coroutines.sync.Mutex()
     private val mutableOfflineSync = MutableStateFlow("")
@@ -92,13 +91,13 @@ class MusicViewModel @Inject constructor(
     private val pages = object : LinkedHashMap<String, CatalogPage>(24, .75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, CatalogPage>?) = size > 24
     }
-    private fun query() = mutable.value.let { CatalogQuery(it.tab, it.kind, it.title, it.query, it.offset, it.collection, it.collectionId, it.activePlaylist, it.role, it.sort, it.albumFilter) }
+    private fun query() = mutable.value.let { CatalogQuery(it.tab, it.kind, it.title, it.query, it.offset, it.collection, it.collectionId, it.activePlaylist, it.role, it.sort, it.albumFilter, it.order) }
     private fun MusicState.withPage(page: CatalogPage) = copy(tracks = page.tracks.map { track -> track.copy(loved = optimisticFavorites[track.id] ?: repository.knownTracks[track.id]?.loved ?: track.loved) }, albums = page.albums, artists = page.artists,
-        playlists = page.playlists, total = page.total, hasContent = true)
+        playlists = page.playlists, total = page.total, discs = page.discs.orEmpty(), hasContent = true)
     private fun MusicState.withWindow(value: CatalogWindow): MusicState {
         val ordered = value.pages.toSortedMap().values
         return withPage(CatalogPage(tracks = ordered.flatMap { it.tracks }, albums = ordered.flatMap { it.albums },
-            artists = ordered.flatMap { it.artists }, playlists = ordered.flatMap { it.playlists }, total = value.total)).copy(window = value)
+            artists = ordered.flatMap { it.artists }, playlists = ordered.flatMap { it.playlists }, total = value.total, discs = ordered.firstOrNull()?.discs)).copy(window = value)
     }
     private fun cancelRanges() { rangeJobs.values.forEach { it.cancel() }; rangeJobs.clear() }
     suspend fun cacheUsage(): Triple<Long, Long, Long> = withContext(Dispatchers.IO) { val (metadata, art) = repository.cache.usage(); Triple(metadata, art, audioCache.bytes()) }
@@ -132,7 +131,7 @@ class MusicViewModel @Inject constructor(
         viewModelScope.launch { repository.session.invalidations.collect { selection ->
             yield()
             if (selection == supersededInvalidationSelection || selection != repository.session.requestState()?.selection.orEmpty()) return@collect
-            authGeneration++; optimisticFavorites.clear(); handoffDismissed = false
+            authGeneration++; optimisticFavorites.clear()
             loadGeneration++; loadJob?.cancel(); lyricJob?.cancel(); lyricTrack = null; pages.clear(); windows.clear(); browseIndices.clear(); cancelRanges(); tabs.clear(); history.clear(); repository.knownTracks.clear(); controller?.stop(); controller?.clearMediaItems()
             val message = invalidationMessage ?: "登录已失效，请重新登录。"
             invalidationMessage = null
@@ -175,7 +174,6 @@ class MusicViewModel @Inject constructor(
 
     fun observeProgress(visible: Boolean) {
         observeAgent(visible)
-        if (visible) handoffDismissed = false
         progressJob?.cancel()
         if (visible) progressJob = viewModelScope.launch { while (isActive) { refreshPlayer(); delay(500) } }
         handoffJob?.cancel()
@@ -330,11 +328,13 @@ class MusicViewModel @Inject constructor(
         show(CatalogQuery(tab = "library", kind = "albums", title = "曲库"))
     }
     private fun show(target: CatalogQuery, delayMs: Long = 0) {
-        val target = target.copy(offset = 0)
+        val context = catalogSortContext(target.kind, target.collection, target.albumFilter)
+        val preference = context?.let { settings.catalogSort(repository.session.cacheScope(), it) }
+        val target = target.copy(offset = 0, sort = preference?.sort ?: target.sort, order = preference?.order ?: target.order)
         val savedWindow = windows[target.key] ?: pages[target.key]?.let { CatalogWindow(mapOf(0 to it)) }
         mutable.update { current ->
             val next = current.copy(tab = target.tab, kind = target.kind, title = target.title, query = target.query, offset = target.offset,
-                collection = target.collection, collectionId = target.collectionId, activePlaylist = target.playlist, role = target.role, sort = target.sort, albumFilter = target.albumFilter,
+                collection = target.collection, collectionId = target.collectionId, activePlaylist = target.playlist, role = target.role, sort = target.sort, order = target.order, albumFilter = target.albumFilter, discs = emptyList(),
                 contentKey = target.key, canGoBack = history[target.tab]?.isNotEmpty() == true,
                 navigationDepth = history[target.tab]?.size ?: 0, error = null,
                 window = CatalogWindow(), rangeLoading = emptySet(), rangeErrors = emptyMap(), browseIndex = browseIndices[target.key],
@@ -350,7 +350,18 @@ class MusicViewModel @Inject constructor(
     }
     fun kind(kind: String) { if (kind != mutable.value.kind) show(query().copy(kind = kind, offset = 0, sort = "title")) }
     fun role(value: String) { show(query().copy(role = value, offset = 0)) }
-    fun sort(value: String) { show(query().copy(sort = value, offset = 0)) }
+    fun sort(value: String) {
+        val current = query()
+        val context = catalogSortContext(current.kind, current.collection, current.albumFilter) ?: return
+        settings.catalogSort(repository.session.cacheScope(), context, CatalogSort(value, if (value in listOf("title", "name", "track_number", "artist")) "asc" else "desc"))
+        show(current)
+    }
+    fun toggleSortOrder() {
+        val current = query()
+        val context = catalogSortContext(current.kind, current.collection, current.albumFilter) ?: return
+        settings.catalogSort(repository.session.cacheScope(), context, CatalogSort(current.sort, if (current.order == "asc") "desc" else "asc"))
+        show(current)
+    }
     fun search(query: String) {
         show(this.query().copy(kind = if (query.isBlank()) "discover" else "tracks", query = query.take(256), offset = 0,
             title = "发现", collection = null, collectionId = null, playlist = null), 300)
@@ -375,9 +386,10 @@ class MusicViewModel @Inject constructor(
                     return@launch
                 }
                 // Open the whole album, clearing any artist/playlist/search constraints.
+                val preference = settings.catalogSort(owner, "album-tracks")
                 val destination = query().copy(kind = "tracks", collection = "albums", collectionId = id,
                     title = current.album ?: "未知专辑", query = "", offset = 0, playlist = null,
-                    albumFilter = null, sort = "title")
+                    albumFilter = null, sort = preference.sort, order = preference.order)
                 // Resolve the first page before dismissing the player. A failed lookup leaves it visible.
                 val first = repository.catalog(destination)
                 requireOwner(owner)
@@ -477,39 +489,51 @@ class MusicViewModel @Inject constructor(
     }
 
     fun deviceId() = sharing.deviceId
-    fun syncMode(value: String) { handoffDismissed = false; sharing.mode(value) }
+    fun syncMode(value: String) { sharing.mode(value); if (value == "off") mutable.update { it.copy(handoff = null) } }
     suspend fun checkSharedPlayback(): Unit = withContext(Dispatchers.Main.immediate) {
-        if (sharing.mode.value == "off" || mutable.value.handoff != null) return@withContext
-        if (sharing.mode.value == "ask" && handoffDismissed) return@withContext
+        if (sharing.mode.value == "off") return@withContext
         val c = controller ?: return@withContext
         if (c.isPlaying || c.playWhenReady) return@withContext
         val owner = repository.session.cacheScope(); requireOwner(owner)
         val epoch = localPlaybackEpoch
         val saved = repository.api().sharedPlayback(RequestOwner(owner)); requireOwner(owner)
-        if (epoch != localPlaybackEpoch || c.isPlaying || c.playWhenReady || saved.trackIds.isEmpty() ||
-            saved.deviceId == sharing.deviceId || saved.version <= sharing.lastSeen()) return@withContext
-        if (sharing.mode.value == "auto") resumeShared(saved)
-        else if (sharing.mode.value == "ask") mutable.update { it.copy(handoff = saved) }
+        if (epoch != localPlaybackEpoch || c.isPlaying || c.playWhenReady) return@withContext
+        val currentOffer = mutable.value.handoff
+        val samePause = currentOffer != null && currentOffer.pauseEvent() == saved.pauseEvent()
+        if (!saved.isRecentPausedHandoff() || saved.deviceId == sharing.deviceId || saved.version <= sharing.lastSeen()) {
+            mutable.update { it.copy(handoff = null) }; return@withContext
+        }
+        if (samePause) { mutable.update { it.copy(handoff = saved) }; return@withContext }
+        if (!saved.canOfferHandoff(sharing.deviceId, sharing.lastSeen(), sharing.lastOfferedPause())) {
+            mutable.update { it.copy(handoff = null) }; return@withContext
+        }
+        if (sharing.mode.value == "auto") resumeShared(saved, requirePausedHandoff = true)
+        else if (sharing.mode.value == "ask") {
+            sharing.pauseOffered(saved)
+            mutable.update { it.copy(handoff = saved) }
+        }
     }
-    fun dismissHandoff() { handoffDismissed = true; mutable.value.handoff?.let { sharing.seen(it.version) }; mutable.update { it.copy(handoff = null) } }
+    fun dismissHandoff() { mutable.value.handoff?.let { sharing.pauseOffered(it); sharing.seen(it.version) }; mutable.update { it.copy(handoff = null) } }
     suspend fun acceptHandoff() {
-        if (mutable.value.handoff == null) return
+        val offer = mutable.value.handoff ?: return
         val owner = repository.session.cacheScope(); requireOwner(owner)
         val saved = repository.api().sharedPlayback(RequestOwner(owner)); requireOwner(owner)
+        if (!saved.isRecentPausedHandoff() || offer.pauseEvent() != saved.pauseEvent()) {
+            mutable.update { it.copy(handoff = null) }; return
+        }
         mutable.update { it.copy(handoff = saved) }
-        resumeShared(saved)
-        handoffDismissed = true
+        resumeShared(saved, requirePausedHandoff = true)
         mutable.update { it.copy(handoff = null) }
     }
     suspend fun sharePlayback(): SharedPlayback = withContext(Dispatchers.Main.immediate) {
         val c = controller ?: throw IOException("播放器尚未连接。")
         val snapshot = SharedPlayback(trackIds = queueSnapshot.map { it.trackId }, index = c.currentMediaItemIndex.coerceAtLeast(0),
-            positionMs = c.currentPosition.coerceAtLeast(0), mode = if (c.shuffleModeEnabled) "shuffle" else when(c.repeatMode) {
+            positionMs = c.currentPosition.coerceAtLeast(0), playbackState = if (c.playbackState == Player.STATE_ENDED) "ended" else if (c.playWhenReady) "playing" else "paused", mode = if (c.shuffleModeEnabled) "shuffle" else when(c.repeatMode) {
                 Player.REPEAT_MODE_ONE -> "repeat_one"; Player.REPEAT_MODE_ALL -> "repeat_all"; else -> "sequential"
             })
         sharing.publish(snapshot, claim = true) ?: throw IOException("尚无可同步的播放。")
     }
-    suspend fun resumeShared(saved: SharedPlayback): Unit = withContext(Dispatchers.Main.immediate) {
+    suspend fun resumeShared(saved: SharedPlayback, requirePausedHandoff: Boolean = false): Unit = withContext(Dispatchers.Main.immediate) {
         require(saved.trackIds.size <= 5000) { "共享队列超过本机 5000 首上限。" }
         val owner = repository.session.cacheScope()
         val epoch = localPlaybackEpoch
@@ -517,8 +541,13 @@ class MusicViewModel @Inject constructor(
         check(owner != null && owner == repository.session.cacheScope()) { "会话已变化。" }
         requireOwner(owner)
         val latest = repository.api().sharedPlayback(RequestOwner(owner)); requireOwner(owner)
+        if (requirePausedHandoff && (!latest.isRecentPausedHandoff() || latest.pauseEvent() != saved.pauseEvent())) {
+            mutable.update { it.copy(handoff = null) }
+            throw IOException("其他设备已恢复播放，或暂停记录已过期。")
+        }
         if (latest.version != saved.version) throw IOException("其他设备的进度已更新，请重新读取后继续。")
         check(epoch == localPlaybackEpoch && controller?.playWhenReady != true) { "本机播放已变化，请重新读取后继续。" }
+        sharing.pauseOffered(saved)
         sharing.acceptRemote(saved.version)
         play(tracks, saved.index, autoplay = false, positionMs = saved.positionMs)
         controller?.shuffleModeEnabled = saved.mode == "shuffle"

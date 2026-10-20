@@ -104,7 +104,9 @@ def test_official_stdio_discovery_call_resource_prompt_and_revocation():
                 arbitrary = await client.call_tool("delete_files", {})
                 assert arbitrary.is_error
                 usage = await client.read_resource("wildstring://usage")
-                assert "human approves" in usage.contents[0].text
+                assert "manual mode requires" in usage.contents[0].text
+                assert "automatic mode applies only" in usage.contents[0].text
+                assert "Tools cannot change" in usage.contents[0].text
                 prompts = await client.list_prompts()
                 assert prompts.prompts[0].name == "inspect-library"
                 prompt = await client.get_prompt("inspect-library")
@@ -220,7 +222,7 @@ def test_stdio_real_backend_draft_approval_apply_diagnostics_and_revoke(
                 notices = await client.call_tool("list_notifications", {})
                 assert notices.structured_content["result"]["unread_count"] >= 2
                 status = await client.call_tool("get_system_status", {})
-                assert status.structured_content["result"]["schema_version"] == 21
+                assert status.structured_content["result"]["schema_version"] == 23
                 deletion_response = api.delete(
                     "/api/v1/agent/credentials/" + credential["id"], headers=HEADERS
                 )

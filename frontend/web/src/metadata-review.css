@@ -1,0 +1,273 @@
+.metadata-review {
+  color: var(--workspace-text);
+  min-width: 0;
+}
+.metadata-review .review-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: start;
+}
+.review-layout {
+  display: grid;
+  grid-template-columns: minmax(160px, 220px) minmax(0, 1fr);
+  gap: 20px;
+}
+.review-layout aside {
+  border-right: 1px solid var(--border);
+  padding-right: 12px;
+}
+.review-layout aside input {
+  box-sizing: border-box;
+  width: 100%;
+  background: var(--workspace-panel);
+  color: inherit;
+}
+.review-layout aside ul {
+  list-style: none;
+  padding: 0;
+  max-height: 62vh;
+  overflow: auto;
+}
+.review-layout aside button {
+  width: 100%;
+  text-align: left;
+  margin-bottom: 8px;
+}
+.review-layout aside small,
+.review-song-list small {
+  display: block;
+  color: var(--muted);
+  font-size: 0.8em;
+}
+.review-layout aside [aria-pressed='true'],
+.review-song-list .active {
+  background: var(--workspace-selected);
+}
+.review-layout main {
+  min-width: 0;
+}
+.review-album {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.review-album h3 {
+  width: 100%;
+  margin: 0;
+}
+.review-song-list {
+  max-height: 220px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  margin: 16px 0;
+}
+.review-song-list > div {
+  display: flex;
+  gap: 12px;
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--border);
+  align-items: center;
+}
+.review-song-list button {
+  border: 0;
+  background: none;
+  flex: 1;
+  text-align: left;
+}
+.review-detail {
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+.review-diff {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+}
+.review-diff th,
+.review-diff td {
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+  padding: 12px 8px;
+  overflow-wrap: anywhere;
+  vertical-align: top;
+}
+.review-diff th label {
+  display: flex;
+  gap: 8px;
+  align-items: start;
+}
+.review-diff th small {
+  display: block;
+  color: var(--accent);
+}
+.review-diff td button {
+  font-size: 0.75rem;
+  margin-top: 8px;
+}
+.metadata-review input[type='checkbox'] {
+  accent-color: var(--accent);
+  padding: 0;
+  flex-shrink: 0;
+}
+.metadata-review select {
+  max-width: 100%;
+  background: var(--workspace-panel);
+  color: inherit;
+  padding: 8px;
+}
+.metadata-review details {
+  margin: 18px 0;
+}
+.metadata-review dl > div {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 12px;
+  border-bottom: 1px solid var(--border);
+  padding: 8px;
+}
+.metadata-review dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.metadata-review pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.review-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 4;
+  background: var(--workspace-bg);
+  border-top: 1px solid var(--border);
+  padding: 14px 0;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+}
+.review-actions > div {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.review-covers {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin: 18px 0;
+}
+.review-covers figure {
+  margin: 0;
+  text-align: center;
+}
+.review-covers img,
+.review-no-cover {
+  width: 100%;
+  max-width: 280px;
+  aspect-ratio: 1;
+  object-fit: contain;
+  border-radius: 12px;
+}
+.review-no-cover {
+  display: grid;
+  place-items: center;
+  background: var(--workspace-selected);
+  color: var(--muted);
+}
+.metadata-review-dialog {
+  width: min(1250px, 96vw);
+  max-width: 96vw;
+  height: 92dvh;
+  max-height: 92dvh;
+  box-sizing: border-box;
+  background: var(--workspace-bg);
+  color: var(--workspace-text);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  padding: 20px;
+  overflow: auto;
+}
+.metadata-review-dialog > header {
+  display: flex;
+  justify-content: flex-end;
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: var(--workspace-bg);
+}
+.metadata-review-dialog::backdrop {
+  background: #0008;
+}
+@media (max-width: 760px) {
+  .review-layout {
+    grid-template-columns: 1fr;
+  }
+  .review-layout aside {
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+    padding: 0;
+  }
+  .review-layout aside ul {
+    display: flex;
+    gap: 8px;
+    max-height: 130px;
+    overflow: auto;
+  }
+  .review-layout aside li {
+    min-width: 170px;
+    max-width: 240px;
+  }
+  .review-diff thead {
+    display: none;
+  }
+  .review-diff tr {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 10px;
+    margin: 12px 0;
+    gap: 10px;
+  }
+  .review-diff th {
+    grid-column: 1/-1;
+  }
+  .review-diff th,
+  .review-diff td {
+    display: block;
+    padding: 4px;
+    border: 0;
+  }
+  .review-diff td:before {
+    content: attr(data-label);
+    display: block;
+    font-size: 0.75em;
+    color: var(--muted);
+    margin-bottom: 6px;
+  }
+  .review-diff td:last-child {
+    grid-column: 1/-1;
+  }
+  .review-actions {
+    display: block;
+    padding-bottom: max(14px, env(safe-area-inset-bottom));
+  }
+  .review-actions > div {
+    margin-top: 10px;
+  }
+  .metadata-review-dialog {
+    padding: 12px;
+    width: 100vw;
+    max-width: 100vw;
+    height: 100dvh;
+    max-height: 100dvh;
+    border-radius: 0;
+    margin: 0;
+  }
+  .review-covers {
+    gap: 8px;
+  }
+}

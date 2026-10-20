@@ -1,8 +1,10 @@
 # Agent、MCP 与通知运行说明
 
+当前开发分支的[整理方式设置](../product/agent-application-policy.md)支持审核后一次接受并应用，或用户授权类型自动应用；下文的双步骤批准流程为旧版行为。
+
 0.5.0 的联网检索、协议适配、摘要与记忆见[助手联网与记忆](assistant-research.md)。
 
-0.4.0 使用现有 Python／FastAPI、React、Android、SQLite。业务工具和批准逻辑位于服务端；内置助手使用有界 Chat Completions 工具循环，MCP 使用官方 Python SDK 2.3.0 的 stdio 传输。首版没有引入额外 Agent 框架，后续可在不改变业务权限、草案和持久任务的前提下评估 Pydantic AI。
+0.4.0 使用现有 Python／FastAPI、React、Android、SQLite。业务工具和批准逻辑位于服务端；内置助手使用有界 Chat Completions 工具循环，MCP 首版使用官方 Python SDK 2.3.0 的 stdio 传输；0.5.7 开发分支增加同一 SDK 的 Streamable HTTP，见下文。首版没有引入额外 Agent 框架，后续可在不改变业务权限、草案和持久任务的前提下评估 Pydantic AI。
 
 接口与字段见 [Agent 平台契约](../../contracts/agent-platform.md)，产品计划见 [完整开发计划](../product/agent-mcp-observability-notifications-plan.md)。文档中的计划验收与本版实际记录分别查看；正式版本、自动化和真实设备验证见 [0.4.0 发布说明](../releases/v0.4.0.md)。
 
@@ -31,9 +33,19 @@ make test-agent      # 合成曲库、权限、草案、任务、通知与真实
 make test-network    # 正式请求／探测共用代理的真实 HTTP 夹具
 ```
 
-Codex 配置见 [不含秘密的示例](../../deploy/mcp.codex.toml.example)。替换绝对项目路径，将配置表合入个人 Codex 配置，让 URL／令牌通过 `env_vars` 传入，再在客户端重新载入 MCP。此配置依据 [OpenAI 官方 MCP 文档](https://learn.chatgpt.com/docs/extend/mcp)；本地启动进程与远端工具 API 是两层，不能把野弦首页 URL 当作直接的 HTTP MCP 端点。
+Codex 配置见 [不含秘密的示例](../../deploy/mcp.codex.toml.example)。替换绝对项目路径，将配置表合入个人 Codex 配置，让 URL／令牌通过 `env_vars` 传入，再在客户端重新载入 MCP。此配置依据 [OpenAI 官方 MCP 文档](https://learn.chatgpt.com/docs/extend/mcp)；本地启动进程与远端工具 API 是两层，不能把野弦首页 URL 当作 MCP 端点；0.5.7 原生 HTTP 使用独立的 `/mcp` 路径。
 
 可使用的流程包括检索歌曲、检查缺项、读取与提交来源查询、生成有证据的歌单／元数据草案、应用已批准草案、检查任务及通知、按诊断编号查询日志。管理员诊断工具只接受固定参数和固定服务目标，不提供 Shell、SQL、任意 URL 或文件路径入口。
+
+### 0.5.7 原生 HTTP 与整理工具
+
+支持 Streamable HTTP 和自定义 Bearer 头的客户端可直接配置 `https://你的域名/mcp`，Authorization 使用站内创建的独立受限凭据。反向代理保留该路径和协议头。没有新增 OAuth 授权发现或动态客户端注册；必须依赖 OAuth 的客户端不能据此视为已适配，仍可使用原 stdio 桥接路线。
+
+原有 20 个工具保持名称，增加 28 个业务工具；完整 Schema 可从工具目录读取，分页统一最多 100 条。旧凭据不自动扩大权限，新增 `library:manage`、`personal:write`、`web:search` 在网页工具凭据页单独勾选。管理员可观察只读导入源、提出待整理修正、提交限速歌词查询／扫描和响度分析；个人响度和检索预算只属于当前用户。
+
+导入修正使用 `create_draft(kind="intake", payload={item_id,version,overrides})`；歌词选用使用 `create_draft(kind="lyrics", payload={candidate_id,version,file_version,offset_ms})`。Web／Android 展示具体差异或歌词质量、来源、预览，批准后再应用。MCP 没有批准工具；来源、版本或草案变化后必须重新核对。联网只读取本人近期搜索返回的 source_id，不能给任意 URL；正文视为不可信资料。
+
+验证与版本边界见 [0.5.7 发布说明](../releases/v0.5.7.md)。
 
 ## 网络与日志
 
@@ -56,3 +68,16 @@ Telegram 默认关闭。用户输入 Bot Token、目标和可选 Topic，点击�
 默认关闭新计划、后台 AI 与 Telegram；播放、浏览和本地找歌不依赖模型。MCP token 在服务端只存摘要；模型和 Bot 秘密独立保存在权限受限的服务端目录，不进入数据库响应、诊断包、镜像或公开附件。
 
 物理 ColorOS、用户自选模型、私人 Telegram 目标和自托管网络的联调结果应单独记录；合成测试与模拟器通过不代表这些真实条件已验证。
+
+
+### 0.5.8 封面、专辑批量与规则巡检
+
+工具共 52 个，按凭据权限裁剪；新增 `get_album_tracks`、`get_inspection_rules`、`get_cover_candidates`、`get_cover_preview`。原有 `inspect_library` 增加 offset、album_id 和 rules，可分页；同名版本／曲序关系使用服务端曲库上下文而非当前页。结构上下文最多一万首，达到上限时返回 `inspection_context_limited` 和 grouping_complete=false，不静默声称已完整检查。规则仅提示字段与结构证据，无歌词可能是纯音乐，同名与接近时长不等于重复录音。
+
+封面流程：先按 track_id 读取已有候选，再按 suggestion_id 预览，最后生成 `create_draft(kind="cover", payload={"suggestion_id":"...","metadata_version":1})`。预览复用服务端代理、可信图片域名和图片解码限制；MCP 直接返回 ImageContent。创建草案时保存实际图片的内容快照，Web／Android 从本人草案的受保护端点读取这份图片。批准后应用同一内容哈希，禁止上游更新后偷偷换图；候选、元数据版本或快照变化则拒绝应用。客户端不能注入或替换服务端快照字段。现有网页直接采用封面的接口也复用同一服务。
+
+批量流程：通过 `get_album_tracks(album_id,limit,offset)` 获取每曲 metadata_version 与当前值。生成 `kind="metadata_batch"`，payload.items 逐曲包含 track_id、metadata_version、overrides，最多500首；payload.album_ids 可包含至多20个专辑，此时要求 items 恰好覆盖这些专辑的全部可用曲目。范围或任一版本变化都拒绝整批应用。显式 items 可用于指定歌曲的批量修正；不凭专辑名猜测歌曲。保存时合并原有人工覆盖，整批事务写入并逐曲审计，幂等重试不会重复应用。多碟归并仍需核对真实发行版本并明确指定专辑艺人，不自动合并。
+
+上述两类草案需要管理员的 library:manage、drafts:write，应用另需 drafts:apply；MCP 仍不能批准。旧凭据和旧草案保持原语义。新草案请使用0.5.8客户端预览；批准时提交该草案当前 payload 的 preview_digest，旧客户端缺少此确认摘要会收到 draft_preview_required，不能在没有图片或逐曲差异的界面盲目确认。纯规则与读取候选不调用模型；get_cover_preview 和创建封面草案会读取公开图片，新增巡检默认不调用外部来源。
+
+网易云证据链接保留白名单 id 参数，酷狗保留公开 hash 片段；其他查询参数和凭据均不透传。数据库仍为schema22，无新迁移。验证结果见[0.5.8发布说明](../releases/v0.5.8.md)。

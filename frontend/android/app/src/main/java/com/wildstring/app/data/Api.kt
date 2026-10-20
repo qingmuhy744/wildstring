@@ -23,7 +23,7 @@ interface Api {
     @PUT suspend fun reorderPlaylist(@Url url: String, @Body body: AddTracks): Playlist
     @GET("api/v1/listening/summary") suspend fun listeningSummary(): ListeningSummary
     @GET("api/v1/playback/state") suspend fun sharedPlayback(@Tag owner: RequestOwner? = null): SharedPlayback
-    @PUT("api/v1/playback/state") suspend fun saveSharedPlayback(@Body body: SharedPlaybackWrite, @Tag owner: RequestOwner? = null): SharedPlayback
+    @PUT("api/v1/playback/state") suspend fun saveSharedPlayback(@Body body: JsonObject, @Tag owner: RequestOwner? = null): SharedPlayback
     @GET("api/v1/recommendations/daily") suspend fun daily(@Tag policy: AgentRequestPolicy? = AgentRequestPolicy()): DailyRecommendations
     @POST("api/v1/recommendations/daily/refresh") suspend fun refreshDaily(@Body body: JsonObject = JsonObject(), @Tag policy: AgentRequestPolicy? = AgentRequestPolicy()): DailyRecommendations
     @GET("api/v1/recommendations/preferences") suspend fun recommendationPreferences(): RecommendationPreferences
@@ -46,8 +46,8 @@ interface Api {
     @POST("api/v1/auth/password") suspend fun changePassword(@Header("Cookie") cookie: String, @Body body: PasswordChange): retrofit2.Response<Unit>
     @GET suspend fun tracks(@Url url: String, @Query("q") query: String, @Query("limit") limit: Int = 50, @Query("offset") offset: Int = 0): Page<Track>
     @GET suspend fun track(@Url url: String): Track
-    @GET("api/v1/albums") suspend fun albums(@Query("q") query: String, @Query("limit") limit: Int = 50, @Query("offset") offset: Int = 0): Page<Album>
-    @GET suspend fun artistAlbums(@Url url: String, @Query("q") query: String, @Query("limit") limit: Int = 50, @Query("offset") offset: Int = 0, @Query("role") role: String = "artist"): Page<Album>
+    @GET("api/v1/albums") suspend fun albums(@Query("q") query: String, @Query("limit") limit: Int = 50, @Query("offset") offset: Int = 0, @Query("sort") sort: String = "title", @Query("order") order: String = "asc"): Page<Album>
+    @GET suspend fun artistAlbums(@Url url: String, @Query("q") query: String, @Query("limit") limit: Int = 50, @Query("offset") offset: Int = 0, @Query("role") role: String = "artist", @Query("sort") sort: String = "title", @Query("order") order: String = "asc"): Page<Album>
     @GET("api/v1/artists") suspend fun artists(@Query("q") query: String, @Query("limit") limit: Int = 50, @Query("offset") offset: Int = 0, @Query("role") role: String = "artist"): Page<Artist>
     @GET("api/v1/browse-index") suspend fun browseIndex(@Query("kind") kind: String, @Query("q") query: String,
         @Query("artist_id") artistId: String? = null, @Query("role") role: String? = null,
