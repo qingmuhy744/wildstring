@@ -514,7 +514,10 @@ class MobileCompletionTest {
                 compose.waitUntil(10_000) { vm.state.value.playing }
                 compose.runOnIdle { vm.seek(5000); vm.toggle() }
                 compose.waitUntil(10_000) { compose.runOnIdle { !vm.controller!!.playWhenReady && !vm.controller!!.isPlaying } }
-                compose.waitUntil(10_000) { JsonParser.parseString(fixture.snapshot).asJsonObject["position_ms"].asLong >= 4900 }
+                compose.waitUntil(10_000) {
+                    val saved = JsonParser.parseString(fixture.snapshot).asJsonObject
+                    saved["position_ms"].asLong >= 4900 && saved.text("playback_state") == "paused"
+                }
                 assertTrue(fixture.mutations.any { it.first.endsWith("/playback/state") })
                 val paused = gson.fromJson(fixture.snapshot, SharedPlayback::class.java)
                 // Media3 can still deliver queued seek/pause events. Assert the
