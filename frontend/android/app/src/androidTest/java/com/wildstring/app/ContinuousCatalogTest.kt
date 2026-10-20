@@ -108,6 +108,43 @@ class ContinuousCatalogTest {
         directory.mkdirs(); File(directory, name).outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }; bitmap.recycle()
     }
 
+    @Test fun searchAndAlbumViewportKeepCountComplete() {
+        MockWebServer().use { server ->
+            fixture(server); val vm = connect(server)
+            try {
+                compose.runOnIdle { vm.navigate("search"); vm.search("步步") }
+                ready(vm)
+                compose.runOnIdle { vm.play(songs, 0); vm.controller!!.pause() }
+                compose.waitUntil(10_000) { vm.state.value.current?.id == songs.first().id }
+                val samples = mutableListOf<Map<String, Any>>()
+                fun sample(name: String) {
+                    compose.onNodeWithTag("catalog-list").performScrollToIndex(0)
+                    val layouts = mutableListOf<androidx.compose.ui.text.TextLayoutResult>()
+                    compose.onNodeWithTag("catalog-count").assertIsDisplayed()
+                        .performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.GetTextLayoutResult) { it(layouts) }
+                    assertEquals(1, layouts.single().lineCount)
+                    assertFalse(layouts.single().hasVisualOverflow)
+                    val mini = compose.onNodeWithTag("mini-player").fetchSemanticsNode().boundsInRoot
+                    val top = compose.onNodeWithTag("catalog-list").fetchSemanticsNode().boundsInRoot.top
+                    val density = compose.activity.resources.displayMetrics.density
+                    val rows = compose.onAllNodes(hasTestTagPrefix("catalog-item-")).fetchSemanticsNodes()
+                    val complete = rows.count { it.boundsInRoot.top >= top && it.boundsInRoot.bottom <= mini.top && it.boundsInRoot.height >= 64 * density - 1 }
+                    val toolbar = compose.onNodeWithTag("catalog-toolbar").fetchSemanticsNode().boundsInRoot
+                    samples += mapOf("screen" to name, "complete_song_rows" to complete, "toolbar_height_dp" to toolbar.height / density,
+                        "width_dp" to compose.activity.resources.configuration.screenWidthDp, "height_dp" to compose.activity.resources.configuration.screenHeightDp)
+                    capture("$name.png")
+                }
+                sample("search-toolbar-full")
+                compose.runOnIdle { vm.openAlbum(Album("album-v", "V", listOf("演唱者"), 12, null)) }
+                compose.waitUntil(10_000) { vm.state.value.collectionId == "album-v" && !vm.state.value.loading }
+                sample("album-toolbar-full")
+                val context = InstrumentationRegistry.getInstrumentation().targetContext
+                val directory = InstrumentationRegistry.getArguments().getString("additionalTestOutputDir")?.let(::File) ?: context.getExternalFilesDir(null)!!
+                directory.mkdirs(); File(directory, "toolbar-viewport.json").writeText(gson.toJson(samples))
+            } finally { compose.runOnIdle { vm.controller?.stop(); vm.repository.session.invalidate() } }
+        }
+    }
+
     @Test fun jumpLoadsUnseenPageCanScrollBackAndPreservesAnchorAfterAlbum() {
         MockWebServer().use { server ->
             fixture(server); val vm = connect(server)
@@ -239,10 +276,17 @@ class ContinuousCatalogTest {
                 }
                 assertTrue("Compact album should expose at least six full rows; actual=$fullyVisible", fullyVisible >= 6)
                 capture("compact-album-light.png")
-                compose.onNodeWithContentDescription("更多选项").performClick()
+                compose.onNodeWithTag("catalog-global-more").assertDoesNotExist()
+                compose.onNodeWithTag("catalog-more").performClick()
                 compose.onNodeWithText("更新专辑元数据").assertIsDisplayed()
-                compose.onNodeWithText("刷新曲库").performClick()
-                compose.waitUntil(10_000) { !vm.state.value.loading }
+                compose.onNodeWithText("歌词补全与洗版").assertIsDisplayed()
+                compose.onNodeWithText("刷新曲库").assertDoesNotExist()
+                InstrumentationRegistry.getInstrumentation().sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
+                compose.onNodeWithText("更新专辑元数据").assertDoesNotExist()
+                assertEquals("album-v", vm.state.value.collectionId)
+                val beforeRefresh = requests.count { it.startsWith("/api/v1/albums/album-v/tracks?") }
+                compose.onNodeWithTag("catalog-list").performTouchInput { swipeDown(startY = 40f, endY = 650f, durationMillis = 600) }
+                compose.waitUntil(10_000) { requests.count { it.startsWith("/api/v1/albums/album-v/tracks?") } > beforeRefresh && !vm.state.value.loading }
                 compose.onNodeWithTag("mini-player-open").performClick()
                 compose.onNodeWithTag("player-visual-stage").performClick()
                 compose.onNodeWithTag("player-album").assertIsDisplayed()

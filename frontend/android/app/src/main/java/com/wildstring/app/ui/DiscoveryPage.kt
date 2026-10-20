@@ -16,9 +16,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 
 /** The reference layout, backed by actual albums and listening history rather than invented picks. */
-@Composable internal fun DiscoveryPage(vm: MusicViewModel, state: MusicState, play: (Int) -> Unit, recent: () -> Unit) {
+@Composable internal fun DiscoveryPage(vm: MusicViewModel, state: MusicState, play: (Int) -> Unit, recent: () -> Unit, header: @Composable () -> Unit = {}) {
     Box(Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.TopCenter) {
         LazyColumn(Modifier.widthIn(max = 1040.dp).fillMaxSize().testTag("discovery-page"), contentPadding = PaddingValues(bottom = 16.dp)) {
+            item(key = "discovery-header") { header() }
             item {
                 SectionHeading("专辑", "查看全部", vm::browseAlbums)
             }
