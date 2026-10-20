@@ -140,7 +140,7 @@ export function PlaybackVisual({
       role="img"
       tabIndex={0}
       aria-label="歌曲封面，长按或按回车查看大图"
-      title="长按查看大封面"
+      data-help="右键或长按查看大封面"
       style={
         {
           '--left-pack': `${38 - progress * 13}%`,

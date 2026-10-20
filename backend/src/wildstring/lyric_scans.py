@@ -377,6 +377,16 @@ class LyricScans:
                         "歌词补全与洗版扫描结束",
                         f"可升级 {counts['ready']} 首，待核对 {counts['review']} 首，未匹配 {counts['no_match']} 首，失败 {counts['failed']} 首。请到歌词补全查看并确认。",
                         counts=dict(counts),
+                        trace_id=identity,
+                        actions=[
+                            {
+                                "id": "lyric-scan",
+                                "target": "lyric-scan",
+                                "label": "查看扫描结果",
+                                "params": {"batch_id": identity},
+                                "count": counts["ready"] + counts["review"],
+                            }
+                        ],
                     )
 
     def step(self):

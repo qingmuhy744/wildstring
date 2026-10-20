@@ -23,8 +23,9 @@ CREATE TABLE IF NOT EXISTS agent_audit (
 CREATE TABLE IF NOT EXISTS agent_events (
  id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), kind TEXT NOT NULL,
  dedupe_key TEXT NOT NULL UNIQUE, title TEXT NOT NULL, summary TEXT NOT NULL,
- severity TEXT NOT NULL, task_id TEXT, draft_id TEXT, trace_id TEXT NOT NULL,
- counts TEXT NOT NULL, created_at TEXT NOT NULL, schema_version INTEGER NOT NULL DEFAULT 1
+    severity TEXT NOT NULL, task_id TEXT, draft_id TEXT, trace_id TEXT NOT NULL,
+    counts TEXT NOT NULL, actions TEXT NOT NULL DEFAULT '[]', created_at TEXT NOT NULL,
+    schema_version INTEGER NOT NULL DEFAULT 1
 );
 CREATE TABLE IF NOT EXISTS agent_notifications (
  id TEXT PRIMARY KEY, event_id TEXT NOT NULL UNIQUE REFERENCES agent_events(id),

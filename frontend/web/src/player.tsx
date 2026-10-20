@@ -1,3 +1,4 @@
+import { hints } from './help-content';
 import { useEffect, useId, useRef, useState } from 'react';
 import { api, eventId, artist, streamUrl, time, type PlaybackPlan, type Track } from './api';
 import { Cover } from './cover';
@@ -629,6 +630,7 @@ export function PlayerBar({
           aria-expanded={lyricsOpen}
           disabled={!current}
           aria-label="显示歌词"
+          data-help="查看同步歌词"
         >
           词
         </button>
@@ -655,7 +657,7 @@ export function PlaybackControls({ player }: { player: Player }) {
         <button
           className="icon-button playback-mode"
           aria-label={`播放模式：${modeNames[player.mode]}`}
-          title={modeNames[player.mode]}
+          data-help={`播放模式：${modeNames[player.mode]}`}
           onClick={() => {
             const modes = Object.keys(modeNames) as PlaybackMode[];
             player.setMode(modes[(modes.indexOf(player.mode) + 1) % modes.length]);
@@ -757,6 +759,7 @@ export function QualityControl({ player }: { player: Player }) {
       <span>音质</span>
       <select
         aria-label="播放音质"
+        data-help={hints.playbackQuality}
         value={player.quality}
         onChange={(event) => player.changeQuality(event.target.value)}
       >
@@ -780,6 +783,7 @@ export function SleepControl({ player }: { player: Player }) {
         className={`icon-button sleep-trigger ${player.sleep !== null ? 'active' : ''}`}
         aria-label="睡眠定时设置"
         title={player.sleepLabel}
+        data-help={player.sleepLabel}
         popoverTarget={id}
         onClick={(event) => {
           if (panel.current) {

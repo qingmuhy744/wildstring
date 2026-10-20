@@ -1,3 +1,4 @@
+import { HelpLabel } from './desktop-help';
 import { useState } from 'react';
 import { api } from './api';
 import {
@@ -157,7 +158,7 @@ export function SystemDiagnostics() {
               }}
             >
               <label>
-                诊断编号
+                <HelpLabel hint="diagnostic">诊断编号</HelpLabel>
                 <input
                   aria-label="筛选诊断编号"
                   value={trace}

@@ -1,3 +1,4 @@
+import { HelpLabel } from './desktop-help';
 import { useEffect, useRef, useState } from 'react';
 import { api, ApiError, eventId, time, type Track } from './api';
 import { QUEUE_LIMIT, type PlaybackMode } from './playback-state';
@@ -38,7 +39,7 @@ export function SyncModeControl({ userId }: { userId: string }) {
   const [mode, setMode] = useState(() => playbackSyncMode(userId));
   return (
     <label>
-      跨设备接续
+      <HelpLabel hint="handoff">跨设备接续</HelpLabel>
       <select
         aria-label="跨设备接续方式"
         value={mode}

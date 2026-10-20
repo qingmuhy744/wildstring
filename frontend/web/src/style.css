@@ -4100,7 +4100,8 @@ select {
   flex-shrink: 0;
 }
 .sidebar-bottom {
-  margin-top: 0;
+  border-top: 1px solid var(--border);
+  margin-top: 12px;
   padding-top: 12px;
 }
 

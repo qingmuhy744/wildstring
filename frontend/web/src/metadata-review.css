@@ -190,14 +190,6 @@
   padding: 20px;
   overflow: auto;
 }
-.metadata-review-dialog > header {
-  display: flex;
-  justify-content: flex-end;
-  position: sticky;
-  top: 0;
-  z-index: 5;
-  background: var(--workspace-bg);
-}
 .metadata-review-dialog::backdrop {
   background: #0008;
 }
@@ -270,4 +262,128 @@
   .review-covers {
     gap: 8px;
   }
+}
+
+/* Keep dialog chrome out of the two independent scroll regions. */
+.metadata-review-dialog[open] {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  gap: 8px;
+}
+.metadata-review-dialog .metadata-review {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+.metadata-review-dialog .review-heading {
+  flex-shrink: 0;
+  padding-bottom: 12px;
+}
+.metadata-review-dialog .review-heading h2 {
+  margin: 0;
+}
+.metadata-review-dialog .review-heading p {
+  margin: 8px 0 0;
+}
+.metadata-review-dialog .review-layout {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+.metadata-review-dialog .review-layout aside {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+.metadata-review-dialog .review-layout aside ul {
+  flex: 1;
+  min-height: 0;
+  max-height: none;
+  overscroll-behavior: contain;
+}
+.metadata-review-dialog .review-layout main {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  padding-right: 8px;
+}
+.metadata-review-dialog .review-actions {
+  position: static;
+  flex-shrink: 0;
+  padding-bottom: 0;
+}
+.review-song-toggle {
+  margin: 12px 0;
+}
+.review-detail .workspace-actions > label {
+  display: grid;
+  gap: 6px;
+  flex: 1 1 320px;
+  min-width: 0;
+  max-width: 100%;
+}
+.review-detail select {
+  width: 100%;
+  min-width: 0;
+}
+.review-candidate-note {
+  font-size: 0.85rem;
+}
+@media (max-width: 760px) {
+  .metadata-review-dialog .review-layout {
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+  .metadata-review-dialog .review-layout aside ul {
+    flex: none;
+    max-height: 100px;
+    margin: 8px 0;
+  }
+  .metadata-review-dialog .review-heading p {
+    font-size: 0.8rem;
+  }
+  .metadata-review-dialog .review-actions {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}
+
+.metadata-review-dialog .review-heading > div {
+  min-width: 0;
+}
+.metadata-review-dialog .review-heading-actions button {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.review-heading-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.metadata-review-dialog .review-album h3 {
+  flex: 1 1 140px;
+  width: auto;
+  font-size: 1.05rem;
+}
+.metadata-review-dialog .review-album p {
+  margin: 0;
+  white-space: nowrap;
+  font-size: 0.85rem;
+}
+.metadata-review-dialog .review-song-toggle {
+  margin: 0;
+}
+.metadata-review-dialog .review-detail > h3 {
+  margin: 8px 0 4px;
+}
+.metadata-review-dialog .review-detail > p {
+  margin: 4px 0 10px;
+}
+.metadata-review-dialog .workspace-tabs {
+  padding-bottom: 8px;
+  margin-bottom: 12px;
 }

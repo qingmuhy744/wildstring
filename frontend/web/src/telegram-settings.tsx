@@ -1,3 +1,4 @@
+import { HelpLabel } from './desktop-help';
 import { useEffect, useState, type FormEvent } from 'react';
 import { api } from './api';
 import type { AgentPage, Delivery, NotificationPreferences, TelegramTarget } from './agent-api';
@@ -142,7 +143,7 @@ export function TelegramSettings() {
                   </select>
                 </label>
                 <label>
-                  静默时区
+                  <HelpLabel hint="telegramQuiet">静默时区</HelpLabel>
                   <input
                     required
                     value={prefs.timezone}
@@ -319,7 +320,7 @@ export function TelegramSettings() {
                   />
                 </label>
                 <label>
-                  Chat ID
+                  <HelpLabel hint="telegramTarget">Chat ID</HelpLabel>
                   <input
                     aria-label="Telegram Chat ID"
                     required
@@ -329,7 +330,7 @@ export function TelegramSettings() {
                   />
                 </label>
                 <label>
-                  Topic ID（可选）
+                  <HelpLabel hint="telegramTarget">Topic ID（可选）</HelpLabel>
                   <input
                     aria-label="Telegram Topic ID"
                     type="number"

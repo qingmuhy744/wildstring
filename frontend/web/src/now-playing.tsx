@@ -318,7 +318,7 @@ export function NowPlaying({
               <button
                 aria-label="显示歌词"
                 aria-pressed={panel === 'lyrics'}
-                title="歌词"
+                data-help="查看同步歌词"
                 onClick={() => setPanel((current) => (current === 'lyrics' ? null : 'lyrics'))}
               >
                 词
@@ -327,7 +327,7 @@ export function NowPlaying({
                 ref={queueToggle}
                 aria-label="显示播放队列"
                 aria-pressed={panel === 'queue'}
-                title="播放队列"
+                data-help="查看播放队列"
                 onClick={() => setPanel((current) => (current === 'queue' ? null : 'queue'))}
               >
                 <svg

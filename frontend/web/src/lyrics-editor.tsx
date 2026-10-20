@@ -1,3 +1,4 @@
+import { HelpLabel } from './desktop-help';
 import { useEffect, useRef, useState } from 'react';
 import { api, time, type Lyrics, type Track } from './api';
 import type { Player } from './player';
@@ -408,7 +409,7 @@ export function LyricsEditor({
               </ol>
               <div className="lyric-shift">
                 <label>
-                  整体偏移（秒）
+                  <HelpLabel hint="lyricOffset">整体偏移（秒）</HelpLabel>
                   <input
                     type="number"
                     step={0.1}

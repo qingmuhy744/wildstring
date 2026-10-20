@@ -58,6 +58,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.common.Player
+import com.google.gson.JsonObject
 import coil.compose.AsyncImage
 import com.wildstring.app.BuildConfig
 import com.wildstring.app.R
@@ -175,6 +176,7 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
     var feature by remember { mutableStateOf<String?>(null) }
     var featureTrack by remember { mutableStateOf<Track?>(null) }
     var featurePlaylist by remember { mutableStateOf<Playlist?>(null) }
+    var featureBatchId by remember { mutableStateOf<String?>(null) }
     var sleepDialog by remember { mutableStateOf(false) }
     var diagnostics by remember { mutableStateOf(false) }
     var refreshAlbum by remember { mutableStateOf<String?>(null) }
@@ -342,7 +344,14 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
     Box(Modifier.fillMaxSize().safeDrawingPadding(), contentAlignment = if (playerFeedback) Alignment.TopCenter else Alignment.BottomCenter) {
         SnackbarHost(mutationSnackbar, Modifier.padding(horizontal = 16.dp, vertical = if (playerFeedback) 64.dp else 16.dp).testTag("mutation-feedback"))
     }
-    feature?.let { route -> FeatureDialog(vm, route, featureTrack, featurePlaylist) { feature = null; featureTrack = null; featurePlaylist = null } }
+    fun openFeatureAction(target: String, params: JsonObject?) {
+        val batchId = params?.text("batch_id")?.takeIf { it.isNotBlank() }
+        when (target) {
+            "metadata-center", "metadata-review" -> { feature = "management"; featureBatchId = batchId }
+            "lyric-scan" -> { feature = "lyric-scans"; featureBatchId = batchId }
+        }
+    }
+    feature?.let { route -> FeatureDialog(vm, route, featureTrack, featurePlaylist, dismiss = { feature = null; featureTrack = null; featurePlaylist = null; featureBatchId = null }, initialBatchId = featureBatchId, onOpenAction = ::openFeatureAction) }
     playlistActions?.let { playlist -> ModalBottomSheet(onDismissRequest = { playlistActions = null }) {
         Text(playlist.name, Modifier.padding(horizontal = 20.dp, vertical = 12.dp), style = MaterialTheme.typography.titleLarge)
         SongAction("打开歌单", Icons.AutoMirrored.Filled.PlaylistPlay) { playlistActions = null; vm.openPlaylist(playlist) }
@@ -356,7 +365,7 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
         }
         Spacer(Modifier.height(24.dp))
     } }
-    lyricScanAlbum?.let { albumId -> FeatureDialog(vm, "lyric-scans", albumId = albumId) { lyricScanAlbum = null } }
+    lyricScanAlbum?.let { albumId -> FeatureDialog(vm, "lyric-scans", albumId = albumId, dismiss = { lyricScanAlbum = null }) }
     refreshAlbum?.let { albumId -> MetadataRefreshPrompt(vm, "album", albumId) { refreshAlbum = null } }
     if (sleepDialog) SleepDialog(vm) { sleepDialog = false }
     if (diagnostics) PlaybackDiagnosticsDialog(vm) { diagnostics = false }

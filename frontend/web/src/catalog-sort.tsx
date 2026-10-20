@@ -1,3 +1,4 @@
+import { hints } from './help-content';
 import { useState } from 'react';
 
 export type CatalogSort = { sort: string; order: 'asc' | 'desc' };
@@ -68,7 +69,7 @@ export function CatalogSortControl({
   change: (value: CatalogSort) => void;
 }) {
   return (
-    <div className="catalog-sort-control">
+    <div className="catalog-sort-control" data-help={hints.sorting}>
       <select
         aria-label="列表排序"
         value={selection.sort}
@@ -89,7 +90,9 @@ export function CatalogSortControl({
       <button
         className="text-button"
         aria-label={selection.order === 'asc' ? '切换为降序' : '切换为升序'}
-        title={selection.order === 'asc' ? '当前升序' : '当前降序'}
+        data-help={
+          selection.order === 'asc' ? '当前升序，点击切换为降序。' : '当前降序，点击切换为升序。'
+        }
         onClick={() => change({ ...selection, order: selection.order === 'asc' ? 'desc' : 'asc' })}
       >
         {selection.order === 'asc' ? '↑ 升序' : '↓ 降序'}

@@ -1,5 +1,10 @@
-import { useEffect, useState } from 'react';
+import { hints } from './help-content';
+import { HelpLabel } from './desktop-help';
+import { useEffect, useRef, useState } from 'react';
 import { api } from './api';
+import { Icon } from './icons';
+import { PluginZipUpload } from './plugin-zip-upload';
+import './source-plugins.css';
 
 type Plugin = {
   id: string;
@@ -18,19 +23,41 @@ type Plugin = {
   configured_secrets: string[];
   settings: { key: string; label: string; type: string; required?: boolean }[];
 };
+type Feedback = { text: string; kind: 'pending' | 'success' | 'error' };
+function PluginFeedback({ value, className = '' }: { value?: Feedback; className?: string }) {
+  return value ? (
+    <p
+      className={`plugin-feedback ${className}`}
+      data-kind={value.kind}
+      role={value.kind === 'error' ? 'alert' : 'status'}
+      aria-live="polite"
+    >
+      {value.text}
+    </p>
+  ) : null;
+}
 
 export function SourcePlugins() {
   const [plugins, setPlugins] = useState<Plugin[]>([]);
-  const [file, setFile] = useState<File | null>(null);
-  const [busy, setBusy] = useState(false),
-    [message, setMessage] = useState('');
+  const [operation, setOperation] = useState<string | null>(null);
+  const pending = useRef(false);
+  const busy = operation !== null;
+  const [message, setMessage] = useState<Feedback>();
+  const [notices, setNotices] = useState<Record<string, Feedback>>({});
   const [values, setValues] = useState<Record<string, Record<string, string>>>({});
   const [saved, setSaved] = useState<Record<string, string>>({});
-  const [results, setResults] = useState<Record<string, string>>({});
-  async function load() {
+  const [results, setResults] = useState<Record<string, Feedback>>({});
+  async function load(resetId?: string) {
     const result = await api<{ items: Plugin[] }>('/manage/source-plugins');
-    setPlugins(result.items);
-    setValues(Object.fromEntries(result.items.map((p) => [p.id, p.config])));
+    const drafts = new Map(
+      plugins.filter((p) => p.id !== resetId && dirty(p)).map((p) => [p.id, p]),
+    );
+    setPlugins(result.items.map((p) => drafts.get(p.id) || p));
+    setValues(
+      Object.fromEntries(
+        result.items.map((p) => [p.id, drafts.has(p.id) ? values[p.id] : p.config]),
+      ),
+    );
     setSaved(
       Object.fromEntries(
         result.items.map((p) => [
@@ -47,7 +74,7 @@ export function SourcePlugins() {
     );
   }
   useEffect(() => {
-    void load().catch(() => setMessage('无法读取数据源插件。'));
+    void load().catch(() => setMessage({ kind: 'error', text: '无法读取数据源插件。' }));
   }, []);
   function dirty(p: Plugin) {
     return (
@@ -62,208 +89,310 @@ export function SourcePlugins() {
     );
   }
   async function testPlugin(p: Plugin) {
-    if (busy || dirty(p)) return;
-    setBusy(true);
-    setResults((prior) => ({ ...prior, [p.id]: '正在测试此插件…' }));
+    if (pending.current || dirty(p)) return;
+    pending.current = true;
+    setOperation(`test:${p.id}`);
+    setResults((prior) => ({ ...prior, [p.id]: { kind: 'pending', text: '正在测试此插件…' } }));
     try {
       const result = await api<{ count: number }>(`/manage/source-plugins/${p.id}/test`, {
         method: 'POST',
       });
-      setResults((prior) => ({ ...prior, [p.id]: `检索已响应 · 返回 ${result.count} 条候选。` }));
+      setResults((prior) => ({
+        ...prior,
+        [p.id]: { kind: 'success', text: `检索已响应 · 返回 ${result.count} 条候选。` },
+      }));
     } catch (error) {
       setResults((prior) => ({
         ...prior,
-        [p.id]: error instanceof Error ? error.message : '插件测试未完成。',
+        [p.id]: {
+          kind: 'error',
+          text: error instanceof Error ? error.message : '插件测试未完成。',
+        },
       }));
     } finally {
-      setBusy(false);
+      pending.current = false;
+      setOperation(null);
     }
   }
-  async function run(work: () => Promise<unknown>, success: string) {
-    if (busy) return;
-    setBusy(true);
-    setMessage('正在处理…');
+  async function run(
+    work: () => Promise<unknown>,
+    success: string,
+    action: string,
+    pluginId?: string,
+  ) {
+    if (pending.current) return false;
+    pending.current = true;
+    setOperation(action);
+    if (pluginId)
+      setResults((prior) =>
+        Object.fromEntries(Object.entries(prior).filter(([id]) => id !== pluginId)),
+      );
+    const feedback = (value: Feedback) =>
+      pluginId ? setNotices((prior) => ({ ...prior, [pluginId]: value })) : setMessage(value);
+    feedback({ kind: 'pending', text: '正在处理…' });
     try {
       await work();
-      await load();
-      setMessage(success);
+      await load(pluginId);
+      feedback({ kind: 'success', text: success });
+      return true;
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : '操作未完成。');
+      feedback({ kind: 'error', text: error instanceof Error ? error.message : '操作未完成。' });
+      return false;
     } finally {
-      setBusy(false);
+      pending.current = false;
+      setOperation(null);
     }
   }
   return (
-    <section className="management-card source-plugins">
-      <h3>数据源插件</h3>
-      <p className="muted">
-        导入 WildString ZIP 插件包，独立启用元数据和歌词。插件运行 Python
-        代码，只导入你信任的包。升级会保留配置并先停用；社区平台接口的可用性由各插件验证。
-      </p>
-      <label>
-        插件 ZIP
-        <input
-          aria-label="数据源插件 ZIP"
-          type="file"
-          accept=".zip,application/zip"
+    <section className="source-plugins" aria-labelledby="source-plugins-heading">
+      <header className="source-plugins-heading">
+        <h3 id="source-plugins-heading">数据源插件</h3>
+        <p className="muted">为曲库补充元数据、封面和歌词，按来源独立配置。</p>
+      </header>
+      <section className="plugin-import" aria-labelledby="plugin-import-heading">
+        <h4 id="plugin-import-heading">导入新插件</h4>
+        <p className="muted">
+          插件会运行代码，请选择你信任的 WildString 插件包。导入后需配置并启用。
+        </p>
+        <PluginZipUpload
+          inputLabel="数据源插件 ZIP"
+          actionLabel="导入插件"
           disabled={busy}
-          onChange={(e) => setFile(e.target.files?.[0] || null)}
+          working={operation === 'import'}
+          onUpload={(file) =>
+            run(
+              async () =>
+                api('/manage/source-plugins/import', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/zip' },
+                  body: await file.arrayBuffer(),
+                }),
+              '插件已导入，请在下方配置并启用。',
+              'import',
+            )
+          }
         />
-      </label>
-      <button
-        disabled={!file || busy}
-        onClick={() =>
-          void run(async () => {
-            const imported = await api<Plugin>('/manage/source-plugins/import', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/zip' },
-              body: await file!.arrayBuffer(),
-            });
-            setFile(null);
-            return imported;
-          }, '插件已导入，请配置并启用。')
-        }
-      >
-        导入插件
-      </button>
-      <p role="status">{message}</p>
-      {plugins.map((p) => (
-        <article className="suggestion-card" key={p.id}>
-          <h4>{p.name}</h4>
-          <p>
-            <a href={p.upstream} target="_blank" rel="noreferrer">
-              上游项目
-            </a>{' '}
-            · {p.license} · 插件 {p.plugin_version} · 配置版本 {p.version}
-          </p>
-          {!p.available && (
-            <p role="status">
-              运行环境缺少插件声明的依赖，请使用含社区插件运行时的官方镜像或按插件说明配置。
-            </p>
-          )}
-          <fieldset disabled={busy}>
-            {(['enabled', 'metadata_enabled', 'lyrics_enabled'] as const).map((field, index) => (
-              <label className="check-label" key={field}>
-                <input
-                  type="checkbox"
-                  checked={p[field]}
-                  onChange={(e) =>
-                    setPlugins(
-                      plugins.map((value) =>
-                        value.id === p.id ? { ...value, [field]: e.target.checked } : value,
-                      ),
-                    )
-                  }
-                />
-                {['启用此插件', '提供元数据与封面', '提供歌词'][index]}
-              </label>
-            ))}
-            <label>
-              来源优先级（数值越小越优先）
-              <input
-                type="number"
-                min="0"
-                max="100"
-                value={p.priority}
-                onChange={(e) =>
-                  setPlugins(
-                    plugins.map((value) =>
-                      value.id === p.id ? { ...value, priority: Number(e.target.value) } : value,
-                    ),
-                  )
-                }
-              />
-            </label>
-            {p.settings.map((field) => (
-              <label key={field.key}>
-                {field.label}
-                <input
-                  type={
-                    field.type === 'secret' ? 'password' : field.type === 'url' ? 'url' : 'text'
-                  }
-                  value={values[p.id]?.[field.key] || ''}
-                  placeholder={p.configured_secrets.includes(field.key) ? '已保存，留空保留' : ''}
-                  onChange={(e) =>
-                    setValues({
-                      ...values,
-                      [p.id]: { ...values[p.id], [field.key]: e.target.value },
-                    })
-                  }
-                />
-              </label>
-            ))}
-            <button
-              onClick={() =>
-                void run(
-                  () =>
-                    api(`/manage/source-plugins/${p.id}`, {
-                      method: 'PUT',
-                      body: JSON.stringify({
-                        version: p.version,
-                        enabled: p.enabled,
-                        metadata_enabled: p.metadata_enabled,
-                        lyrics_enabled: p.lyrics_enabled,
-                        priority: p.priority,
-                        config: values[p.id] || {},
-                      }),
-                    }),
-                  '插件配置已保存。',
-                )
-              }
-            >
-              保存 {p.name}
-            </button>
-            <button disabled={!p.enabled || dirty(p)} onClick={() => void testPlugin(p)}>
-              测试 {p.name}
-            </button>
-            {dirty(p) && <p className="muted">请先保存当前插件设置，再测试。</p>}
-            {results[p.id] && (
-              <p role="status" aria-live="polite" className="plugin-test-result">
-                {results[p.id]}
+        <PluginFeedback value={message} className="plugin-import-result" />
+      </section>
+      <div className="plugin-list-heading">
+        <h4>已安装插件</h4>
+        <span>{plugins.length} 个来源</span>
+      </div>
+      <div className="plugin-list">
+        {plugins.map((p) => (
+          <article
+            className="source-plugin-card"
+            key={p.id}
+            aria-labelledby={`plugin-name-${p.id}`}
+          >
+            <header className="source-plugin-header">
+              <div>
+                <h4 id={`plugin-name-${p.id}`}>{p.name}</h4>
+                <p className="plugin-version">
+                  插件 {p.plugin_version} · 配置版本 {p.version}
+                </p>
+                <a href={p.upstream} target="_blank" rel="noreferrer">
+                  上游项目 ↗
+                </a>
+                <span className="plugin-license">{p.license}</span>
+              </div>
+              <span className={`plugin-state${p.enabled ? ' is-enabled' : ''}`}>
+                {dirty(p) ? '未保存' : p.enabled ? '已启用' : '已停用'}
+              </span>
+            </header>
+            {!p.available && (
+              <p className="plugin-feedback" data-kind="error" role="status">
+                运行环境缺少插件声明的依赖，请使用含社区插件运行时的官方镜像或按插件说明配置。
               </p>
             )}
-            <a href={`/api/v1/manage/source-plugins/${p.id}/export`}>导出 ZIP</a>
-            <label>
-              升级插件 ZIP
-              <input
-                type="file"
-                accept=".zip"
-                onChange={(e) => {
-                  const upgrade = e.target.files?.[0];
-                  if (upgrade)
-                    void run(
-                      async () =>
-                        api(
-                          `/manage/source-plugins/import?expected_version=${p.version}&expected_id=${encodeURIComponent(p.id)}`,
-                          {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/zip' },
-                            body: await upgrade.arrayBuffer(),
-                          },
+            <fieldset disabled={busy}>
+              <legend className="plugin-sr-only">{p.name} 配置</legend>
+              <div className="plugin-capabilities">
+                {(['enabled', 'metadata_enabled', 'lyrics_enabled'] as const).map(
+                  (field, index) => (
+                    <label className="check-label" key={field}>
+                      <input
+                        type="checkbox"
+                        checked={p[field]}
+                        onChange={(e) =>
+                          setPlugins(
+                            plugins.map((value) =>
+                              value.id === p.id ? { ...value, [field]: e.target.checked } : value,
+                            ),
+                          )
+                        }
+                      />
+                      {index === 0 ? (
+                        <HelpLabel hint="pluginEnabled">启用此插件</HelpLabel>
+                      ) : (
+                        ['启用此插件', '提供元数据与封面', '提供歌词'][index]
+                      )}
+                    </label>
+                  ),
+                )}
+              </div>
+              <div className="plugin-config-grid">
+                <label>
+                  <HelpLabel hint="sourcePriority">来源优先级（0–100，越小越优先）</HelpLabel>
+                  <input
+                    type="number"
+                    min="0"
+                    max="100"
+                    value={p.priority}
+                    onChange={(e) =>
+                      setPlugins(
+                        plugins.map((value) =>
+                          value.id === p.id
+                            ? { ...value, priority: Number(e.target.value) }
+                            : value,
                         ),
-                      '插件已升级并停用，配置已保留，请重新核对后启用。',
-                    );
-                }}
-              />
-            </label>
-            <button
-              disabled={p.enabled}
-              onClick={() =>
-                void run(
-                  () =>
-                    api(`/manage/source-plugins/${p.id}?version=${p.version}`, {
-                      method: 'DELETE',
-                    }),
-                  '插件已卸载。已有候选和歌词保留。',
-                )
-              }
-            >
-              卸载 {p.name}
-            </button>
-          </fieldset>
-        </article>
-      ))}
-      {!plugins.length && <p>尚未导入数据源插件。QQ、酷狗和网易云插件 ZIP 随本次 Release 提供。</p>}
+                      )
+                    }
+                  />
+                </label>
+                {p.settings.map((field) => (
+                  <label key={field.key}>
+                    {field.type === 'secret' || field.type === 'url' ? (
+                      <HelpLabel hint={field.type === 'secret' ? 'savedSecret' : 'pluginUrl'}>
+                        {field.label}
+                      </HelpLabel>
+                    ) : (
+                      field.label
+                    )}
+                    <input
+                      type={
+                        field.type === 'secret' ? 'password' : field.type === 'url' ? 'url' : 'text'
+                      }
+                      value={values[p.id]?.[field.key] || ''}
+                      placeholder={
+                        p.configured_secrets.includes(field.key) ? '已保存，留空保留' : ''
+                      }
+                      onChange={(e) =>
+                        setValues({
+                          ...values,
+                          [p.id]: { ...values[p.id], [field.key]: e.target.value },
+                        })
+                      }
+                    />
+                  </label>
+                ))}
+              </div>
+              <div className="plugin-main-actions">
+                <button
+                  className="primary"
+                  aria-label={`保存 ${p.name}`}
+                  onClick={() =>
+                    void run(
+                      () =>
+                        api(`/manage/source-plugins/${p.id}`, {
+                          method: 'PUT',
+                          body: JSON.stringify({
+                            version: p.version,
+                            enabled: p.enabled,
+                            metadata_enabled: p.metadata_enabled,
+                            lyrics_enabled: p.lyrics_enabled,
+                            priority: p.priority,
+                            config: values[p.id] || {},
+                          }),
+                        }),
+                      '插件配置已保存。',
+                      `save:${p.id}`,
+                      p.id,
+                    )
+                  }
+                >
+                  {operation === `save:${p.id}` ? '正在保存…' : '保存设置'}
+                </button>
+                <button
+                  aria-label={`测试 ${p.name}`}
+                  disabled={!p.enabled || dirty(p)}
+                  onClick={() => void testPlugin(p)}
+                >
+                  {operation === `test:${p.id}` ? '正在测试…' : '测试连接'}
+                </button>
+              </div>
+              {dirty(p) && (
+                <p className="muted plugin-unsaved">有未保存的设置，请先保存，再测试或升级。</p>
+              )}
+              <PluginFeedback value={notices[p.id]} className="plugin-operation-result" />
+              <PluginFeedback value={results[p.id]} className="plugin-test-result" />
+              <details className="plugin-maintenance">
+                <summary data-help={hints.pluginMaintenance}>
+                  <strong>版本与维护</strong>
+                  <span>升级 · 导出 · 卸载</span>
+                  <Icon name="chevron" />
+                </summary>
+                <div className="plugin-maintenance-content">
+                  <h5>升级 {p.name}</h5>
+                  <p className="muted">
+                    选择此插件的 ZIP 升级包，确认后上传。升级保留配置并停用插件，核对后可重新启用。
+                  </p>
+                  <PluginZipUpload
+                    inputLabel={`${p.name} 升级 ZIP`}
+                    actionLabel="确认升级"
+                    disabled={busy || dirty(p)}
+                    working={operation === `upgrade:${p.id}`}
+                    onUpload={(file) =>
+                      run(
+                        async () =>
+                          api(
+                            `/manage/source-plugins/import?expected_version=${p.version}&expected_id=${encodeURIComponent(p.id)}`,
+                            {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/zip' },
+                              body: await file.arrayBuffer(),
+                            },
+                          ),
+                        '插件已升级并停用，配置已保留，请重新核对后启用。',
+                        `upgrade:${p.id}`,
+                        p.id,
+                      )
+                    }
+                  />
+                  <div className="plugin-maintenance-actions">
+                    <a
+                      className="plugin-export"
+                      href={`/api/v1/manage/source-plugins/${p.id}/export`}
+                    >
+                      <Icon name="download" />
+                      导出 ZIP
+                    </a>
+                    <div>
+                      <button
+                        className="plugin-uninstall"
+                        aria-label={`卸载 ${p.name}`}
+                        disabled={p.enabled || dirty(p)}
+                        onClick={() =>
+                          void run(
+                            () =>
+                              api(`/manage/source-plugins/${p.id}?version=${p.version}`, {
+                                method: 'DELETE',
+                              }),
+                            `已卸载 ${p.name}，已有候选和歌词保留。`,
+                            `uninstall:${p.id}`,
+                          )
+                        }
+                      >
+                        卸载插件
+                      </button>
+                      <small>
+                        {p.enabled || dirty(p)
+                          ? '先停用并保存，才能卸载。'
+                          : '卸载会保留已有候选和歌词。'}
+                      </small>
+                    </div>
+                  </div>
+                </div>
+              </details>
+            </fieldset>
+          </article>
+        ))}
+      </div>
+      {!plugins.length && (
+        <p className="plugin-empty">
+          还没有插件。可以从 WildString Release 下载 QQ、酷狗或网易云插件 ZIP，使用上方入口导入。
+        </p>
+      )}
     </section>
   );
 }

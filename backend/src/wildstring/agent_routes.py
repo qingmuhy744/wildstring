@@ -31,7 +31,7 @@ from wildstring.agent_models import (
     Verify,
     Version,
 )
-from wildstring.agent_review import ReviewAccept
+from wildstring.agent_review import ReviewAccept, ReviewReject
 
 
 def page(items, limit=100, offset=0):
@@ -134,14 +134,19 @@ def agent_router(service):
         actor: Annotated[object, Depends(session)],
         album_id: str | None = Query(None, max_length=128),
         track_id: str | None = Query(None, max_length=128),
+        batch_id: str | None = Query(None, max_length=128),
         limit: int = Query(100, ge=1, le=500),
         offset: int = Query(0, ge=0, le=1000000),
     ):
-        return service.review_page(actor, album_id, track_id, limit, offset)
+        return service.review_page(actor, album_id, track_id, batch_id, limit, offset)
 
     @router.post("/metadata-review/accept")
     def accept_review(body: ReviewAccept, actor: Annotated[object, Depends(session)]):
         return service.accept_metadata_review(actor, body)
+
+    @router.post("/metadata-review/reject")
+    def reject_review(body: ReviewReject, actor: Annotated[object, Depends(session)]):
+        return service.reject_metadata_review(actor, body)
 
     @router.post("/metadata-review/cover")
     def review_cover(body: DraftCreate, actor: Annotated[object, Depends(session)]):

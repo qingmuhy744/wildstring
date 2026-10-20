@@ -28,7 +28,7 @@ import kotlinx.coroutines.launch
 private val lyricLevels = listOf("无歌词", "静态歌词", "逐行动态", "双语逐行动态", "逐字动态", "双语逐字动态")
 private val lyricStates = mapOf("running" to "扫描中", "queued" to "等待", "paused" to "已暂停", "completed" to "扫描结束", "cancelled" to "已取消", "ready" to "可升级", "review" to "待核对", "no_match" to "未匹配", "failed" to "失败", "locked" to "已锁定", "skipped_goal" to "已满足目标", "skipped_scanned" to "已扫跳过", "stale" to "歌曲已变化", "applied" to "已启用", "restored" to "已恢复")
 
-@Composable internal fun LyricScansPanel(vm: MusicViewModel, albumId: String? = null) {
+@Composable internal fun LyricScansPanel(vm: MusicViewModel, albumId: String? = null, initialBatchId: String? = null) {
     val focus = LocalFocusManager.current; val keyboard = LocalSoftwareKeyboardController.current
     val scope = rememberCoroutineScope(); val action = remember { FeatureAction() }
     val list = rememberLazyListState()
@@ -52,7 +52,7 @@ private val lyricStates = mapOf("running" to "扫描中", "queued" to "等待", 
         batch?.let { vm.repository.feature("$endpoint/${it.text("id")}/control", "POST", jsonBody("action" to command)) }
         confirm = null; load()
     } } }
-    LaunchedEffect(albumId) { action.run { load(); defaults = vm.repository.feature("manage/lyric-scan-settings"); profile = defaults!!.text("default_profile") }; if (action.message == "已完成") action.message = null }
+    LaunchedEffect(albumId, initialBatchId) { action.run { load(initialBatchId); defaults = vm.repository.feature("manage/lyric-scan-settings"); profile = defaults!!.text("default_profile") }; if (action.message == "已完成") action.message = null }
     LaunchedEffect(batch?.text("id")) { if (batch != null) list.animateScrollToItem(1) }
     LaunchedEffect(goal, mode, preference, profile, interval, force) { preview = null }
     LaunchedEffect(batch?.text("id"), batch?.text("status"), offset) {

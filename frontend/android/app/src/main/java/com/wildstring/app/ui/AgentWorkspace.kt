@@ -34,7 +34,7 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
 /** Same authenticated business API as Web and MCP; approval always previews a concrete version. */
-@Composable internal fun AgentWorkspace(vm: MusicViewModel, initialTab: String = "chat") {
+@Composable internal fun AgentWorkspace(vm: MusicViewModel, initialTab: String = "chat", onOpenAction: (String, JsonObject?) -> Unit = { _, _ -> }) {
     val owner by vm.repository.session.profiles.collectAsStateWithLifecycle()
     key(owner) {
         var tab by remember { mutableStateOf(initialTab) }
@@ -47,7 +47,7 @@ import java.time.format.DateTimeFormatter
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 when (tab) {
                     "chat" -> AgentChat(vm) { draft -> selected = draft; tab = "drafts" }
-                    "notifications" -> AgentNotifications(vm) { type, id -> selected = id; tab = type }
+                    "notifications" -> AgentNotifications(vm, { type, id -> selected = id; tab = type }, onOpenAction)
                     "drafts" -> AgentDrafts(vm, selected)
                     "tasks" -> AgentTasks(vm, selected)
                     "connections" -> AgentConnections(vm)
@@ -71,7 +71,7 @@ private fun taskLabel(status: String): String = mapOf("queued" to "等待开始"
 private fun draftLabel(status: String): String = mapOf("pending" to "待确认", "approved" to "已批准，尚未应用", "applied" to "已应用", "rejected" to "已拒绝")[status] ?: status
 private fun localAgentTime(value: String): String = runCatching { Instant.parse(value).atZone(ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")) }.getOrDefault(value)
 
-@Composable private fun AgentNotifications(vm: MusicViewModel, open: (String, String) -> Unit) {
+@Composable private fun AgentNotifications(vm: MusicViewModel, open: (String, String) -> Unit, openAction: (String, JsonObject?) -> Unit) {
     val state by vm.agent.inbox.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope(); val action = remember { FeatureAction() }
     val owner = vm.repository.session.cacheScope()
@@ -109,6 +109,12 @@ private fun localAgentTime(value: String): String = runCatching { Instant.parse(
                 Row {
                     notice.text("draft_id").takeIf { it.isNotBlank() }?.let { TextButton({ open("drafts", it) }) { Text("查看草案") } }
                     notice.text("task_id").takeIf { it.isNotBlank() }?.let { TextButton({ open("tasks", it) }) { Text("查看巡检") } }
+                    notice.objects("actions").forEach { actionItem ->
+                        val target = actionItem.text("target")
+                        if (target.isNotBlank()) TextButton({ openAction(target, actionItem.objectOrNull("params")) }) {
+                            Text(actionItem.text("label").ifBlank { "查看结果" })
+                        }
+                    }
                     if (notice.text("read_at").isBlank()) TextButton({ scope.launch { action.run { vm.agent.readNotification(notice.text("id")) } } }, enabled = !action.busy,
                         modifier = Modifier.testTag("notice-read-${notice.text("id")}")) { Text("标为已读") }
                 }

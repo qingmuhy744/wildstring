@@ -83,6 +83,22 @@ class AlbumPage(Page):
     album_id: Identifier
 
 
+class ReleaseLockPage(Input):
+    album_id: Identifier
+
+
+class ReleaseLockUpdate(ReleaseLockPage):
+    provider: str = Field(min_length=1, max_length=100)
+    release_id: str = Field(min_length=1, max_length=256)
+    source_url: str = Field(default="", max_length=2048)
+    snapshot: dict = Field(default_factory=dict)
+    version: int | None = Field(default=None, ge=1, strict=True)
+
+
+class ReleaseLockClear(ReleaseLockPage):
+    version: int | None = Field(default=None, ge=1, strict=True)
+
+
 class CoverCandidate(Input):
     suggestion_id: Identifier
 
@@ -101,6 +117,24 @@ DEFINITIONS = {
         True,
         AlbumPage,
     ),
+    "get_album_release_lock": (
+        "读取专辑级发行版本锁定；未锁定时返回明确状态",
+        "library:manage",
+        True,
+        ReleaseLockPage,
+    ),
+    "set_album_release_lock": (
+        "管理员锁定专辑的发行版本，联网整理遇到其他发行时只生成预警不自动应用",
+        "library:manage",
+        False,
+        ReleaseLockUpdate,
+    ),
+    "clear_album_release_lock": (
+        "管理员清除专辑发行版本锁定，需当前版本",
+        "library:manage",
+        False,
+        ReleaseLockClear,
+    ),
     "get_inspection_rules": (
         "读取本地巡检规则、证据边界和严重程度，不调用模型",
         "library:read",
@@ -108,7 +142,7 @@ DEFINITIONS = {
         Empty,
     ),
     "inspect_library": (
-        "分页本地巡检：缺失字段、曲序冲突、同名版本和多碟分组；不判定音乐事实",
+        "分页本地巡检：缺失字段、曲序冲突、同名版本、相近专辑拆分和多碟分组；不判定音乐事实",
         "library:read",
         True,
         InspectPage,

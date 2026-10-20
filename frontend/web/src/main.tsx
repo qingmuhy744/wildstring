@@ -4,6 +4,7 @@ import { api, type User } from './api';
 import { Brand } from './brand';
 import { Library } from './library';
 import { ThemeControl } from './theme';
+import { DesktopHelpProvider } from './desktop-help';
 import { clearOfflineAccount, offlineUser, setOfflineAccount } from './offline';
 import './style.css';
 import './completion.css';
@@ -291,7 +292,9 @@ function App() {
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <App />
+    <DesktopHelpProvider>
+      <App />
+    </DesktopHelpProvider>
   </StrictMode>,
 );
 

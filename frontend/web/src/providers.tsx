@@ -1,3 +1,4 @@
+import { HelpLabel } from './desktop-help';
 import { useEffect, useRef, useState } from 'react';
 import { api } from './api';
 import { ProviderPriority } from './metadata-refresh';
@@ -131,7 +132,7 @@ export function ProviderSettings() {
             <p role="status">服务端缺少指纹工具，请更新 Docker 镜像或安装 Chromaprint。</p>
           )}
           <label>
-            AcoustID Application API Key
+            <HelpLabel hint="acoustid">AcoustID Application API Key</HelpLabel>
             <input
               type="password"
               autoComplete="new-password"
@@ -153,7 +154,7 @@ export function ProviderSettings() {
             提供候选；它们不参与资料字段排序。
           </p>
           <label>
-            联网代理
+            <HelpLabel hint="proxy">联网代理</HelpLabel>
             <select
               aria-label="联网代理"
               value={config.proxy_mode}
@@ -173,7 +174,7 @@ export function ProviderSettings() {
             支持 HTTP_PROXY、HTTPS_PROXY、ALL_PROXY 和 NO_PROXY。
           </p>
           <label>
-            HTTP 代理地址
+            <HelpLabel hint="proxy">HTTP 代理地址</HelpLabel>
             <input
               type="password"
               autoComplete="new-password"
@@ -187,7 +188,7 @@ export function ProviderSettings() {
           </p>
           <ProviderNetworkTest mode={config.proxy_mode} proxy={proxy} disabled={busy} />
           <label>
-            公开访问地址
+            <HelpLabel hint="publicUrl">公开访问地址</HelpLabel>
             <input
               type="url"
               placeholder="https://music.example.com"
@@ -197,7 +198,7 @@ export function ProviderSettings() {
           </label>
           <p className="muted">Last.fm 授权回到此地址。请填写手机和浏览器都能访问的地址。</p>
           <label>
-            Last.fm API Key
+            <HelpLabel hint="savedSecret">Last.fm API Key</HelpLabel>
             <input
               autoComplete="off"
               value={key}
@@ -206,7 +207,7 @@ export function ProviderSettings() {
             />
           </label>
           <label>
-            Last.fm API Secret
+            <HelpLabel hint="savedSecret">Last.fm API Secret</HelpLabel>
             <input
               type="password"
               autoComplete="new-password"

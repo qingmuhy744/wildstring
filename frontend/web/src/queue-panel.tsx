@@ -145,7 +145,7 @@ export function QueuePanel({
                 className="queue-grip icon-button"
                 aria-label={`拖动队列第 ${i + 1} 首排序`}
                 aria-describedby={instruction}
-                title="拖动排序"
+                data-help="拖动调整队列顺序"
                 onPointerDown={(event) => {
                   const element = panel.current;
                   if (!element || !event.isPrimary || event.button !== 0 || dragging.current)

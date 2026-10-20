@@ -135,9 +135,9 @@ internal fun SuggestionsPanel(vm: MusicViewModel, track: Track) { MetadataReview
 internal fun statusName(value: String): String = when(value) { "queued" -> "等待中"; "running" -> "执行中"; "completed" -> "已完成"; "completed_with_errors" -> "完成，部分文件需处理"; "failed" -> "失败"; "interrupted" -> "已中断"; "review" -> "待确认"; "conflict" -> "存在冲突"; "ready" -> "准备就绪"; "waiting" -> "等待文件稳定"; "no_match" -> "没有匹配结果"; else -> value }
 
 @Composable
-internal fun ManagementPanel(vm: MusicViewModel) {
-    var reviewOpen by remember { mutableStateOf(false) }
-    if (reviewOpen) { Column(Modifier.fillMaxSize()) { TextButton({ reviewOpen = false }) { Text("返回曲库管理") }; MetadataReviewPanel(vm) }; return }
+internal fun ManagementPanel(vm: MusicViewModel, initialBatchId: String? = null) {
+    var reviewOpen by remember { mutableStateOf(initialBatchId != null) }
+    if (reviewOpen) { Column(Modifier.fillMaxSize()) { TextButton({ reviewOpen = false }) { Text("返回曲库管理") }; MetadataReviewPanel(vm, initialBatchId = initialBatchId) }; return }
     val scope = rememberCoroutineScope(); val action = remember { FeatureAction() }
     var overview by remember { mutableStateOf<JsonObject?>(null) }; var jobs by remember { mutableStateOf<JsonObject?>(null) }
     var intake by remember { mutableStateOf<JsonObject?>(null) }; var automatic by remember { mutableStateOf<JsonObject?>(null) }
