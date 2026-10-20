@@ -44,7 +44,8 @@ def handoff_details(playback_state, paused_at, *, has_tracks, at):
             if paused.tzinfo is not None and current.tzinfo is not None:
                 eligible = 0 <= (current - paused).total_seconds() <= HANDOFF_MAX_AGE_SECONDS
         except (ValueError, TypeError):
-            pass
+            # Malformed legacy timestamps allow manual restore, never a prompt.
+            eligible = False
     return {
         "playback_state": playback_state,
         "paused_at": paused_at,
