@@ -8,6 +8,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -19,21 +20,25 @@ import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 
-@Composable internal fun CatalogTopBar(state: MusicState, back: () -> Unit, refresh: () -> Unit, settings: () -> Unit, compact: Boolean = false, albumRefresh: (() -> Unit)? = null,
-    unread: Int = 0, notifications: (() -> Unit)? = null, albumLyrics: (() -> Unit)? = null) {
-    var menu by remember { mutableStateOf(false) }
+@Composable internal fun CatalogTopBar(state: MusicState, back: () -> Unit, settings: () -> Unit, compact: Boolean = false,
+    unread: Int = 0, notifications: (() -> Unit)? = null, queue: (() -> Unit)? = null,
+    recent: (() -> Unit)? = null, offline: (() -> Unit)? = null) {
+    var menu by remember(state.contentKey) { mutableStateOf(false) }
     val title: @Composable () -> Unit = { Text(state.title, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis) }
     val actions: @Composable RowScope.() -> Unit = {
         notifications?.let { open -> IconButton(open, Modifier.testTag("open-notifications")) {
             BadgedBox(badge = { if (unread > 0) Badge { Text(if (unread > 99) "99+" else unread.toString()) } }) { Icon(Icons.Default.NotificationsNone, "通知") }
         } }
         IconButton(settings) { Icon(Icons.Default.Settings, "设置") }
-        Box {
-            IconButton({ menu = true }) { Icon(Icons.Default.MoreVert, "更多选项") }
+        if (queue != null || recent != null || offline != null) Box {
+            IconButton({ menu = true }, Modifier.testTag("catalog-global-more")) { Icon(Icons.Default.MoreVert, "更多选项") }
             DropdownMenu(menu, { menu = false }) {
-                albumLyrics?.let { open -> DropdownMenuItem(text = { Text("歌词补全与洗版") }, leadingIcon = { Icon(Icons.Default.Lyrics, null) }, onClick = { menu = false; open() }) }
-                albumRefresh?.let { update -> DropdownMenuItem(text = { Text("更新专辑元数据") }, leadingIcon = { Icon(Icons.Default.Edit, null) }, onClick = { menu = false; update() }) }
-                DropdownMenuItem(text = { Text("刷新曲库") }, leadingIcon = { Icon(Icons.Default.Refresh, null) }, onClick = { menu = false; refresh() })
+                queue?.let { open -> DropdownMenuItem(text = { Text("播放队列") }, modifier = Modifier.testTag("catalog-open-queue"),
+                    leadingIcon = { Icon(Icons.AutoMirrored.Filled.QueueMusic, null) }, onClick = { menu = false; open() }) }
+                recent?.let { open -> DropdownMenuItem(text = { Text("最近听过") }, modifier = Modifier.testTag("catalog-open-recent"),
+                    leadingIcon = { Icon(Icons.Default.History, null) }, onClick = { menu = false; open() }) }
+                offline?.let { open -> DropdownMenuItem(text = { Text("离线音乐") }, modifier = Modifier.testTag("catalog-open-offline"),
+                    leadingIcon = { Icon(Icons.Default.Download, null) }, onClick = { menu = false; open() }) }
             }
         }
     }

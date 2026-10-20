@@ -19,6 +19,7 @@ import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.wildstring.app.playback.PlaybackService
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
@@ -53,6 +54,8 @@ class NativeNavigationTest {
         val requests = AtomicInteger()
         val streamRequests = AtomicInteger()
         val history = AtomicBoolean(true)
+        val slowRefresh = AtomicBoolean(false)
+        val refreshGate = CountDownLatch(1)
         val audio = InstrumentationRegistry.getInstrumentation().context.assets.open("playback.mp3").use { it.readBytes() }
         val vm = compose.runOnIdle { ViewModelProvider(compose.activity)[MusicViewModel::class.java] }
         compose.runOnIdle { vm.settings.theme(false); vm.settings.appearance("light"); vm.settings.quality(0) }
@@ -92,7 +95,10 @@ class NativeNavigationTest {
                     // Lifecycle inbox/continuity probes are independent of catalog restoration.
                     if (listOf("/albums", "/artists", "/playlists", "/tracks", "/browse-index").any(path::endsWith)) requests.incrementAndGet()
                     return when {
-                        path.endsWith("/albums") -> json("""{"items":[$albums],"total":20,"limit":50,"offset":0}""")
+                        path.endsWith("/albums") -> {
+                            if (slowRefresh.get() && !refreshGate.await(15, TimeUnit.SECONDS)) MockResponse().setResponseCode(504)
+                            else json("""{"items":[$albums],"total":20,"limit":50,"offset":0}""")
+                        }
                         path.endsWith("/artists") -> json("""{"items":[{"id":"artist","name":"测试艺人","track_count":1}],"total":1,"limit":50,"offset":0}""")
                         path.endsWith("/playlists") -> json("""{"items":[{"id":"playlist","name":"布局测试歌单","kind":"manual","track_count":1}],"total":1,"limit":50,"offset":0}""")
                         path.endsWith("/tracks") -> if (url.queryParameter("played_only") == "true" && !history.get()) json("""{"items":[],"total":0,"limit":50,"offset":0}""")
@@ -123,6 +129,40 @@ class NativeNavigationTest {
                 compose.onNodeWithTag("discovery-albums").assertIsDisplayed()
                 compose.onNodeWithText("最近听过").assertIsDisplayed()
                 capture("reference-phone-discovery.png")
+                compose.onNodeWithTag("catalog-global-more").performClick()
+                compose.onNodeWithTag("catalog-open-queue").assertIsDisplayed()
+                compose.onNodeWithTag("catalog-open-recent").assertIsDisplayed()
+                compose.onNodeWithTag("catalog-open-offline").assertIsDisplayed()
+                compose.onNodeWithText("刷新曲库").assertDoesNotExist()
+                capture("discovery-actions.png")
+                compose.onNodeWithTag("catalog-open-queue").performClick()
+                compose.onNodeWithText("播放队列 · ", substring = true).assertIsDisplayed()
+                compose.runOnUiThread { compose.activity.onBackPressedDispatcher.onBackPressed() }
+                compose.waitUntil(5_000) { compose.onAllNodesWithText("播放队列 · ", substring = true).fetchSemanticsNodes().isEmpty() }
+                compose.onNodeWithTag("catalog-global-more").performClick()
+                compose.onNodeWithTag("catalog-open-offline").performClick()
+                compose.onNodeWithTag("feature-offline").assertIsDisplayed()
+                compose.onNodeWithContentDescription("返回").performClick()
+                compose.onNodeWithTag("catalog-global-more").performClick()
+                compose.onNodeWithTag("catalog-open-recent").performClick()
+                compose.waitUntil(10_000) { vm.state.value.kind == "recent" && !vm.state.value.loading }
+                compose.onNodeWithContentDescription("返回上一页").performClick()
+                compose.waitUntil(10_000) { vm.state.value.kind == "discover" && !vm.state.value.loading }
+                val beforePull = connectionRequests.count { it == "/api/v1/albums" }
+                slowRefresh.set(true)
+                // The shortcut tiles are now inside the vertical list, so a pull
+                // beginning over a tile also reaches the refresh gesture.
+                compose.onNodeWithTag("discovery-shortcuts").performTouchInput { swipeDown(startY = 20f, endY = 650f, durationMillis = 600) }
+                compose.waitUntil(10_000) { connectionRequests.count { it == "/api/v1/albums" } > beforePull }
+                compose.onNodeWithTag("wildstring-refresh").assertIsDisplayed()
+                capture("discovery-pull-refresh.png")
+                refreshGate.countDown()
+                compose.waitUntil(10_000) { !vm.state.value.loading }
+                slowRefresh.set(false)
+                val beforeAccessibleRefresh = connectionRequests.count { it == "/api/v1/albums" }
+                val accessibleActions = compose.onNodeWithTag("catalog-refresh-area").fetchSemanticsNode().config[androidx.compose.ui.semantics.SemanticsActions.CustomActions]
+                compose.runOnIdle { assertTrue(accessibleActions.single { it.label == "刷新当前页面" }.action()) }
+                compose.waitUntil(10_000) { connectionRequests.count { it == "/api/v1/albums" } > beforeAccessibleRefresh && !vm.state.value.loading }
                 compose.onNodeWithTag("nav-library").performClick()
                 compose.waitUntil(15_000) { vm.state.value.kind == "albums" && !vm.state.value.loading }
                 compose.onNodeWithTag("nav-library").assertIsSelected()
@@ -262,6 +302,7 @@ class NativeNavigationTest {
                 runCatching { capture("native-navigation-failure.png") }
                 throw failure
             } finally {
+                refreshGate.countDown()
                 compose.runOnIdle { pauseObserver?.release() }
                 shell("wm size reset"); shell("wm density reset")
                 compose.runOnIdle { vm.settings.theme(false); vm.settings.appearance("system"); vm.logout() }
