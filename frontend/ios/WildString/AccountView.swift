@@ -19,6 +19,7 @@ struct AccountView: View {
     @State private var renaming: Playlist?
     @State private var renameText = ""
     @State private var deleting: Playlist?
+    @State private var unreadNotifications = 0
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -73,6 +74,24 @@ struct AccountView: View {
                             .foregroundStyle(.red)
                     }
                 }
+                Section("动态") {
+                    NavigationLink {
+                        NotificationsView(client: client)
+                    } label: {
+                        HStack {
+                            Label("通知", systemImage: "bell")
+                            Spacer()
+                            if unreadNotifications > 0 {
+                                Text("\(unreadNotifications)")
+                                    .font(.caption2.bold())
+                                    .foregroundStyle(.white)
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 2)
+                                    .background(Color.wildAccent, in: Capsule())
+                            }
+                        }
+                    }
+                }
                 Section("账号") {
                     LabeledContent("用户名", value: username)
                     LabeledContent("服务器", value: server)
@@ -100,7 +119,11 @@ struct AccountView: View {
                 }
             }
             .miniPlayer(playback, client: client)
-            .task { await load() }
+            .task {
+                await load()
+                unreadNotifications =
+                    (try? await client.notifications(limit: 1))?.unreadCount ?? 0
+            }
             .refreshable { await load() }
             .alert("新建歌单", isPresented: $showingCreate) {
                 TextField("歌单名称", text: $newName)

@@ -1024,6 +1024,47 @@ struct StubbedHTTPTests {
             #expect(draft.id == "cover-draft")
             #expect(draft.previewDigest == "abc")
         }
+        @Test func notificationsDecodeAndMarkRead() async throws {
+            StubURLProtocol.respond { request in
+                #expect(request.url?.path == "/api/v1/agent/notifications")
+                let items = URLComponents(url: try #require(request.url), resolvingAgainstBaseURL: false)?
+                    .queryItems ?? []
+                let values = Dictionary(uniqueKeysWithValues: items.map { ($0.name, $0.value ?? "") })
+                #expect(values["limit"] == "50")
+                return .json(
+                    status: 200,
+                    body: """
+                        {"items":[{"id":"n1","event_type":"draft.pending","title":"有新的草案","summary":"批量核对资料 · 2 首","severity":"info","task_id":null,"draft_id":"d1","trace_id":"abc","counts":{"tracks":2},"created_at":"2026-10-20T08:00:00+00:00","read_at":null,"detail_route":"drafts/d1"}],"total":1,"limit":50,"offset":0,"next_cursor":"cursor-1","unread_count":1,"high_watermark":7}
+                        """
+                )
+            }
+            let page = try await makeClient().notifications()
+            #expect(page.unreadCount == 1)
+            #expect(page.items.first?.isUnread == true)
+            #expect(page.items.first?.draftID == "d1")
+
+            StubURLProtocol.respond { request in
+                #expect(request.url?.path == "/api/v1/agent/notifications/read")
+                let body = try #require(StubURLProtocol.bodyData(of: request))
+                let json = try #require(
+                    try JSONSerialization.jsonObject(with: body) as? [String: Any]
+                )
+                #expect(json["ids"] as? [String] == ["n1"])
+                return .json(status: 200, body: #"{"updated":1}"#)
+            }
+            try await makeClient().markNotificationsRead(ids: ["n1"])
+
+            StubURLProtocol.respond { request in
+                #expect(request.url?.path == "/api/v1/agent/notifications/read-all")
+                let body = try #require(StubURLProtocol.bodyData(of: request))
+                let json = try #require(
+                    try JSONSerialization.jsonObject(with: body) as? [String: Any]
+                )
+                #expect(json["high_watermark"] as? Int == 7)
+                return .json(status: 200, body: #"{"updated":1}"#)
+            }
+            try await makeClient().markAllNotificationsRead(highWatermark: 7)
+        }
     }
 
     @Suite("Admin")
