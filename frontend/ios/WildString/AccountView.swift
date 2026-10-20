@@ -15,6 +15,7 @@ struct AccountView: View {
     @State private var isLoading = true
     @State private var message: String?
     @State private var showingCreate = false
+    @State private var showingNotifications = false
     @State private var newName = ""
     @State private var renaming: Playlist?
     @State private var renameText = ""
@@ -119,6 +120,11 @@ struct AccountView: View {
                 }
             }
             .miniPlayer(playback, client: client)
+            .sheet(isPresented: $showingNotifications) {
+                NavigationStack {
+                    NotificationsView(client: client)
+                }
+            }
             .task {
                 await load()
                 unreadNotifications =
@@ -177,6 +183,10 @@ struct AccountView: View {
         #if DEBUG
             guard path.isEmpty else { return }
             let environment = ProcessInfo.processInfo.environment
+            if environment["WILDSTRING_DEMO_OPEN_NOTIFICATIONS"] == "1" {
+                showingNotifications = true
+                return
+            }
             if environment["WILDSTRING_DEMO_OPEN_SETTINGS"] == "1" {
                 path.append(SettingsMarker())
                 return
