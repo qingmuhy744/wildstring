@@ -391,9 +391,11 @@ class NativePlaybackTest {
                 stage("style begin $key")
                 val playerBack = if (compose.onAllNodesWithContentDescription("返回封面").fetchSemanticsNodes().isNotEmpty()) "返回封面" else "收起播放器"
                 compose.onNodeWithContentDescription(playerBack).performClick()
-                compose.waitUntil(15_000) { compose.onAllNodesWithContentDescription("设置").fetchSemanticsNodes().isNotEmpty() || compose.onAllNodesWithTag("mini-player-open").fetchSemanticsNodes().isNotEmpty() }
+                compose.waitUntil(5_000) { compose.onAllNodesWithContentDescription("设置").fetchSemanticsNodes().isNotEmpty() || compose.onAllNodesWithTag("mini-player-open").fetchSemanticsNodes().isNotEmpty() || compose.onAllNodesWithTag("player-phone").fetchSemanticsNodes().isNotEmpty() }
                 if (compose.onAllNodesWithContentDescription("设置").fetchSemanticsNodes().isEmpty() && compose.onAllNodesWithTag("mini-player-open").fetchSemanticsNodes().isNotEmpty()) {
                     compose.onNodeWithTag("mini-player-open").performClick()
+                } else if (compose.onAllNodesWithContentDescription("设置").fetchSemanticsNodes().isEmpty() && compose.onAllNodesWithTag("player-phone").fetchSemanticsNodes().isNotEmpty()) {
+                    compose.onNodeWithTag("player-phone").performTouchInput { swipeDown(startY = 120f, endY = 680f, durationMillis = 500) }
                 }
                 compose.waitUntil(15_000) { compose.onAllNodesWithContentDescription("设置").fetchSemanticsNodes().isNotEmpty() }
                 compose.onNodeWithContentDescription("设置").performClick()
