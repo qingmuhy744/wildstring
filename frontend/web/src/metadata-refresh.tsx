@@ -101,7 +101,7 @@ export function MetadataRefreshDialog({
       });
       setMessage(
         result.total
-          ? `新增排队 ${result.queued} 首，已有任务 ${result.already_active} 首${
+          ? `已加入 ${result.queued} 首（新增排队 ${result.queued} 首，已有任务 ${result.already_active} 首${
               (result as { upgraded?: number; refresh_intents?: number }).upgraded ||
               (result as { upgraded?: number; refresh_intents?: number }).refresh_intents
                 ? `，刷新意图已更新 ${
@@ -109,7 +109,7 @@ export function MetadataRefreshDialog({
                     ((result as { refresh_intents?: number }).refresh_intents || 0)
                   } 首`
                 : ''
-            }。`
+            }）。`
           : '当前范围没有可更新的歌曲。',
       );
       setDone(true);

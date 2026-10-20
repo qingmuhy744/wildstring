@@ -77,6 +77,8 @@ const names: Record<string, string> = {
   description: '简介',
 };
 const same = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+const candidateStale = (candidate: Candidate, track: ReviewTrack) =>
+  candidate.stale ?? candidate.metadata_version !== track.metadata_version;
 const display = (v: unknown): string =>
   v == null
     ? '未设置'
@@ -110,14 +112,14 @@ function candidateLabel(
       ? `匹配度 ${Math.round(score <= 1 ? score * 100 : score)}%`
       : '',
     candidate.match.album_release_lock ? '与锁定发行冲突' : '',
-    candidate.stale_reason || (candidate.stale ? '查询依据已变化' : ''),
+    candidate.stale_reason || (candidateStale(candidate, track) ? '查询依据已变化' : ''),
   ]
     .filter(Boolean)
     .join(' · ');
 }
 
 function defaultChoice(track: ReviewTrack): Choice {
-  const source = track.suggestions.find((s) => !s.stale);
+  const source = track.suggestions.find((s) => !candidateStale(s, track));
   return {
     source: source?.id || '',
     fields: source
@@ -602,7 +604,7 @@ export function MetadataReviewWorkbench({
                     <small>
                       {conflicts[t.id]
                         ? '版本或来源冲突'
-                        : t.suggestions.some((s) => !s.stale)
+                        : t.suggestions.some((s) => !candidateStale(s, t))
                           ? `${choices[t.id]?.fields.length || 0} 个字段已选`
                           : '暂无有效候选'}
                     </small>
@@ -646,7 +648,7 @@ export function MetadataReviewWorkbench({
                         ...old,
                         [current.id]: {
                           source: c.id,
-                          fields: !c.stale
+                          fields: !candidateStale(c, current)
                             ? Object.keys(c.fields).filter(
                                 (k) =>
                                   !same(current.current[k], c.fields[k]) &&
@@ -734,7 +736,7 @@ export function MetadataReviewWorkbench({
                                       type="checkbox"
                                       checked={choices[current.id]?.fields.includes(field) || false}
                                       aria-label={`采用 ${names[field] || field}`}
-                                      disabled={disabled || candidate.stale}
+                                      disabled={disabled || candidateStale(candidate, current)}
                                       onChange={(e) =>
                                         choose(
                                           current.id,
@@ -780,7 +782,7 @@ export function MetadataReviewWorkbench({
                                               {
                                                 ...old[t.id],
                                                 fields:
-                                                  c && field in c.fields && !c.stale
+                                                  c && field in c.fields && !candidateStale(c, t)
                                                     ? on
                                                       ? [...new Set([...fields, field])]
                                                       : fields.filter((k) => k !== field)
@@ -835,7 +837,7 @@ export function MetadataReviewWorkbench({
                   </label>
                   {candidate?.cover_url ? (
                     <button
-                      disabled={disabled || candidate.stale}
+                      disabled={disabled || candidateStale(candidate, current)}
                       onClick={() => void prepareCover()}
                     >
                       固定并预览此封面
