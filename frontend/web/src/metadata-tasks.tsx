@@ -225,7 +225,7 @@ export function MetadataJobs({
     );
   }
   return (
-    <section className="management-card metadata-tasks" aria-label="元数据候选中心">
+    <section className="management-card metadata-tasks" aria-label="元数据更新任务">
       {reviewOpen && (
         <MetadataReviewDialog
           onClose={() => setReviewOpen(false)}
