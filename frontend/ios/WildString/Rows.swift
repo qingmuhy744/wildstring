@@ -7,6 +7,7 @@ struct TrackRow: View {
     let client: WildstringClient
     let track: Track
     let isCurrent: Bool
+    var showsDisc = false
 
     @AppStorage("songListSize") private var listSizeRaw = SongListSize.medium.rawValue
 
@@ -26,7 +27,7 @@ struct TrackRow: View {
                     .font(listSize.titleFont)
                     .foregroundStyle(isCurrent ? Color.accentColor : .primary)
                     .lineLimit(1)
-                Text(track.artistDisplay)
+                Text(detailLine)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -42,6 +43,11 @@ struct TrackRow: View {
                 .foregroundStyle(.secondary)
         }
         .contentShape(Rectangle())
+    }
+
+    private var detailLine: String {
+        guard showsDisc, let disc = track.discNumber else { return track.artistDisplay }
+        return "DISC \(String(format: "%02d", disc)) · \(track.artistDisplay)"
     }
 }
 

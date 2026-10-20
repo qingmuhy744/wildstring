@@ -95,6 +95,7 @@ struct PlaybackServiceTests {
         #expect(snapshot.index == 1)
         #expect(snapshot.positionMs == 12_500)
         #expect(snapshot.mode == "repeat_one")
+        #expect(snapshot.playbackState == "paused")
 
         service.cycleRepeatMode()
         snapshot = service.playbackSnapshot()

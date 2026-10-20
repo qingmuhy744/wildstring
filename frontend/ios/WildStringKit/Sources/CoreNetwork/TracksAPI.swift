@@ -58,15 +58,23 @@ extension WildstringClient {
 
 extension WildstringClient {
     /// Paged track listing; mirrors `GET /api/v1/tracks`.
-    public func tracks(limit: Int = 50, offset: Int = 0, query: String? = nil) async throws
-        -> Page<Track>
-    {
+    public func tracks(
+        limit: Int = 50,
+        offset: Int = 0,
+        query: String? = nil,
+        sort: TrackSort = .title,
+        order: CatalogSortOrder? = nil
+    ) async throws -> Page<Track> {
         var queryItems = [
             URLQueryItem(name: "limit", value: String(limit)),
             URLQueryItem(name: "offset", value: String(offset)),
+            URLQueryItem(name: "sort", value: sort.rawValue),
         ]
         if let query, !query.isEmpty {
             queryItems.insert(URLQueryItem(name: "q", value: query), at: 0)
+        }
+        if let order {
+            queryItems.append(URLQueryItem(name: "order", value: order.rawValue))
         }
         let data = try await perform(
             Request(method: "GET", path: "api/v1/tracks", queryItems: queryItems)

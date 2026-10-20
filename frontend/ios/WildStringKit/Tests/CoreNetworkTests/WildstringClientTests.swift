@@ -200,7 +200,12 @@ struct StubbedHTTPTests {
             StubURLProtocol.respond { request in
                 #expect(request.httpMethod == "GET")
                 #expect(request.url?.path == "/api/v1/tracks")
-                #expect(request.url?.query == "limit=50&offset=0")
+                let items = URLComponents(url: try #require(request.url), resolvingAgainstBaseURL: false)?
+                    .queryItems ?? []
+                let values = Dictionary(uniqueKeysWithValues: items.map { ($0.name, $0.value ?? "") })
+                #expect(values["limit"] == "50")
+                #expect(values["offset"] == "0")
+                #expect(values["sort"] == "title")
                 return .json(
                     status: 200,
                     body: """
@@ -254,7 +259,12 @@ struct StubbedHTTPTests {
         @Test func albumsDecodePage() async throws {
             StubURLProtocol.respond { request in
                 #expect(request.url?.path == "/api/v1/albums")
-                #expect(request.url?.query == "limit=50&offset=0")
+                let items = URLComponents(url: try #require(request.url), resolvingAgainstBaseURL: false)?
+                    .queryItems ?? []
+                let values = Dictionary(uniqueKeysWithValues: items.map { ($0.name, $0.value ?? "") })
+                #expect(values["limit"] == "50")
+                #expect(values["offset"] == "0")
+                #expect(values["sort"] == "title")
                 return .json(
                     status: 200,
                     body: """
@@ -273,10 +283,73 @@ struct StubbedHTTPTests {
         @Test func albumTracksUseAlbumEndpoint() async throws {
             StubURLProtocol.respond { request in
                 #expect(request.url?.path == "/api/v1/albums/a1/tracks")
-                #expect(request.url?.query == "limit=200&offset=0")
-                return .json(status: 200, body: #"{"items":[],"total":0,"limit":200,"offset":0}"#)
+                let items = URLComponents(url: try #require(request.url), resolvingAgainstBaseURL: false)?
+                    .queryItems ?? []
+                let values = Dictionary(uniqueKeysWithValues: items.map { ($0.name, $0.value ?? "") })
+                #expect(values["limit"] == "200")
+                #expect(values["offset"] == "0")
+                #expect(values["sort"] == "track_number")
+                #expect(values["order"] == nil)
+                return .json(status: 200, body: #"{"items":[],"discs":[],"total":0,"limit":200,"offset":0}"#)
             }
             _ = try await makeClient().albumTracks(albumId: "a1")
+        }
+
+        @Test func albumTracksDecodeDiscSummaries() async throws {
+            StubURLProtocol.respond { request in
+                let items = URLComponents(url: try #require(request.url), resolvingAgainstBaseURL: false)?
+                    .queryItems ?? []
+                let values = Dictionary(uniqueKeysWithValues: items.map { ($0.name, $0.value ?? "") })
+                #expect(values["sort"] == "added_at")
+                #expect(values["order"] == "desc")
+                return .json(
+                    status: 200,
+                    body: """
+                        {"items":[{"id":"t1","title":"甲","artists":["A"],"album":"集","duration_ms":1000,"has_cover":false,"album_id":"a1","track_number":1,"disc_number":1}],"discs":[{"number":1,"track_count":2,"duration_ms":2000,"offset":0},{"number":2,"track_count":3,"duration_ms":3000,"offset":2}],"total":5,"limit":200,"offset":0}
+                        """
+                )
+            }
+            let page = try await makeClient().albumTracks(
+                albumId: "a1",
+                sort: .addedAt,
+                order: .desc
+            )
+            #expect(page.items.count == 1)
+            #expect(page.discs.count == 2)
+            #expect(page.discs[1].number == 2)
+            #expect(page.discs[1].offset == 2)
+            #expect(page.discs[0].trackCount == 2)
+        }
+
+        @Test func libraryTracksSendSortAndOrder() async throws {
+            StubURLProtocol.respond { request in
+                #expect(request.url?.path == "/api/v1/tracks")
+                let items = URLComponents(url: try #require(request.url), resolvingAgainstBaseURL: false)?
+                    .queryItems ?? []
+                let values = Dictionary(uniqueKeysWithValues: items.map { ($0.name, $0.value ?? "") })
+                #expect(values["sort"] == "last_played_at")
+                #expect(values["order"] == "desc")
+                return .json(status: 200, body: #"{"items":[],"discs":[],"total":0,"limit":100,"offset":0}"#)
+            }
+            _ = try await makeClient().tracks(
+                limit: 100,
+                offset: 0,
+                sort: .lastPlayed,
+                order: .desc
+            )
+        }
+
+        @Test func libraryAlbumsSendSortAndOrder() async throws {
+            StubURLProtocol.respond { request in
+                #expect(request.url?.path == "/api/v1/albums")
+                let items = URLComponents(url: try #require(request.url), resolvingAgainstBaseURL: false)?
+                    .queryItems ?? []
+                let values = Dictionary(uniqueKeysWithValues: items.map { ($0.name, $0.value ?? "") })
+                #expect(values["sort"] == "release_date")
+                #expect(values["order"] == "desc")
+                return .json(status: 200, body: #"{"items":[],"total":0,"limit":50,"offset":0}"#)
+            }
+            _ = try await makeClient().albums(sort: .releaseDate, order: .desc)
         }
 
         @Test func artistsDecodePageAndQuery() async throws {
@@ -428,10 +501,11 @@ struct StubbedHTTPTests {
                 #expect(json["index"] as? Int == 1)
                 #expect(json["position_ms"] as? Int == 42_000)
                 #expect(json["mode"] as? String == "shuffle")
+                #expect(json["playback_state"] as? String == "paused")
                 return .json(
                     status: 200,
                     body: """
-                        {"version":4,"device_id":"ios-device","track_ids":["t1","t2"],"index":1,"position_ms":42000,"mode":"shuffle","updated_at":"2026-10-19T10:00:00+00:00"}
+                        {"version":4,"device_id":"ios-device","track_ids":["t1","t2"],"index":1,"position_ms":42000,"mode":"shuffle","updated_at":"2026-10-19T10:00:00+00:00","playback_state":"paused","paused_at":"2026-10-19T10:00:00+00:00","handoff_supported":true,"handoff_eligible":true}
                         """
                 )
             }
@@ -442,10 +516,31 @@ struct StubbedHTTPTests {
                     trackIds: ["t1", "t2"],
                     index: 1,
                     positionMs: 42_000,
-                    mode: "shuffle"
+                    mode: "shuffle",
+                    playbackState: "paused"
                 )
             )
             #expect(saved.version == 4)
+            #expect(saved.playbackState == "paused")
+            #expect(saved.handoffEligible == true)
+            #expect(saved.pausedAt == "2026-10-19T10:00:00+00:00")
+        }
+
+        @Test func playbackStateDecodesHandoffEligibility() async throws {
+            StubURLProtocol.respond { request in
+                #expect(request.url?.path == "/api/v1/playback/state")
+                return .json(
+                    status: 200,
+                    body: """
+                        {"version":7,"device_id":"android","track_ids":["t1"],"index":0,"position_ms":1000,"mode":"sequential","updated_at":"2026-10-20T08:00:00+00:00","playback_state":"paused","paused_at":"2026-10-20T07:59:00+00:00","handoff_supported":true,"handoff_eligible":true}
+                        """
+                )
+            }
+            let state = try await makeClient().playbackState()
+            #expect(state.playbackState == "paused")
+            #expect(state.handoffSupported == true)
+            #expect(state.handoffEligible == true)
+            #expect(state.pausedAt == "2026-10-20T07:59:00+00:00")
         }
 
         @Test func singleTrackFetchesByID() async throws {
@@ -769,6 +864,165 @@ struct StubbedHTTPTests {
             let detail = try await makeClient().createConversation()
             #expect(detail.id == "c2")
             #expect(detail.messages.isEmpty)
+        }
+
+        @Test func metadataReviewDecodesCandidatesAndDuplicates() async throws {
+            StubURLProtocol.respond { request in
+                #expect(request.url?.path == "/api/v1/agent/metadata-review")
+                let items = URLComponents(url: try #require(request.url), resolvingAgainstBaseURL: false)?
+                    .queryItems ?? []
+                let values = Dictionary(uniqueKeysWithValues: items.map { ($0.name, $0.value ?? "") })
+                #expect(values["album_id"] == "a1")
+                #expect(values["limit"] == "500")
+                return .json(
+                    status: 200,
+                    body: """
+                        {"items":[{"id":"t1","title":"甲","album":"集","album_id":"a1","artists":["A"],"disc_number":1,"track_number":2,"has_cover":true,"metadata_version":4,"current":{"title":"甲","artists":["A"],"external_ids":{"release":"r1"}},"original":{"title":"甲"},"overrides":{},"suggestions":[{"id":"s1","track_id":"t1","metadata_version":4,"provider":"musicbrainz","cover_url":null,"fields":{"title":"甲（重制）","track_number":2},"match":{"method":"acoustid","score":0.9},"source_url":"https://musicbrainz.org/recording/x","candidate_digest":"digest-1","duplicate_count":2}]}],"total":1,"limit":500,"offset":0,"album_id":"a1","provider_names":{"musicbrainz":"MusicBrainz"}}
+                        """
+                )
+            }
+            let page = try await makeClient().metadataReview(albumID: "a1")
+            let track = try #require(page.items.first)
+            #expect(track.metadataVersion == 4)
+            #expect(track.current["title"]?.display == "甲")
+            #expect(track.current["external_ids"]?.display == "release：r1")
+            let candidate = try #require(track.suggestions.first)
+            #expect(candidate.candidateDigest == "digest-1")
+            #expect(candidate.duplicateCount == 2)
+            #expect(candidate.fields["track_number"]?.display == "2")
+            #expect(page.providerNames["musicbrainz"] == "MusicBrainz")
+        }
+
+        @Test func acceptReviewSendsDigestsFieldsAndCover() async throws {
+            StubURLProtocol.respond { request in
+                #expect(request.httpMethod == "POST")
+                #expect(request.url?.path == "/api/v1/agent/metadata-review/accept")
+                let body = try #require(StubURLProtocol.bodyData(of: request))
+                let json = try #require(
+                    try JSONSerialization.jsonObject(with: body) as? [String: Any]
+                )
+                #expect(json["cover_draft_id"] as? String == "cover-draft")
+                #expect(json["idempotency_key"] as? String == "review-key")
+                let items = try #require(json["items"] as? [[String: Any]])
+                #expect(items.first?["track_id"] as? String == "t1")
+                #expect(items.first?["suggestion_id"] as? String == "s1")
+                #expect(items.first?["metadata_version"] as? Int == 4)
+                #expect(items.first?["candidate_digest"] as? String == "digest-1")
+                #expect(items.first?["fields"] as? [String] == ["title"])
+                return .json(
+                    status: 200,
+                    body: """
+                        {"status":"applied","draft":{"id":"d1","kind":"metadata_batch","title":"批量核对资料 · 1 首","status":"applied","version":2,"approved_version":2,"payload":{"items":[]},"evidence":[],"result":null,"preview_digest":"abc"}}
+                        """
+                )
+            }
+            let result = try await makeClient().acceptReview(
+                items: [
+                    ReviewAcceptItem(
+                        trackID: "t1",
+                        suggestionID: "s1",
+                        metadataVersion: 4,
+                        candidateDigest: "digest-1",
+                        fields: ["title"]
+                    )
+                ],
+                coverDraftID: "cover-draft",
+                idempotencyKey: "review-key"
+            )
+            #expect(result.status == "applied")
+            #expect(result.draft?.previewDigest == "abc")
+        }
+
+        @Test func rejectReviewSendsCandidateDigest() async throws {
+            StubURLProtocol.respond { request in
+                #expect(request.httpMethod == "POST")
+                #expect(request.url?.path == "/api/v1/agent/metadata-review/reject")
+                let body = try #require(StubURLProtocol.bodyData(of: request))
+                let json = try #require(
+                    try JSONSerialization.jsonObject(with: body) as? [String: Any]
+                )
+                #expect(json["track_id"] as? String == "t1")
+                #expect(json["suggestion_id"] as? String == "s1")
+                #expect(json["metadata_version"] as? Int == 4)
+                #expect(json["candidate_digest"] as? String == "digest-1")
+                return .json(
+                    status: 200,
+                    body: #"{"status":"ignored","ignored_count":2,"already_ignored":false}"#
+                )
+            }
+            let result = try await makeClient().rejectReview(
+                trackID: "t1",
+                suggestionID: "s1",
+                metadataVersion: 4,
+                candidateDigest: "digest-1"
+            )
+            #expect(result.ignoredCount == 2)
+        }
+
+        @Test func applicationPolicyRoundTrip() async throws {
+            StubURLProtocol.respond { request in
+                #expect(request.url?.path == "/api/v1/agent/application-policy")
+                return .json(
+                    status: 200,
+                    body: #"{"mode":"manual","kinds":["playlist"],"version":3,"allowed_kinds":["playlist","metadata","metadata_batch","cover","lyrics","intake"]}"#
+                )
+            }
+            let policy = try await makeClient().applicationPolicy()
+            #expect(policy.version == 3)
+            #expect(policy.allowedKinds.contains("metadata"))
+
+            StubURLProtocol.respond { request in
+                #expect(request.httpMethod == "PUT")
+                let body = try #require(StubURLProtocol.bodyData(of: request))
+                let json = try #require(
+                    try JSONSerialization.jsonObject(with: body) as? [String: Any]
+                )
+                #expect(json["mode"] as? String == "automatic")
+                #expect(json["kinds"] as? [String] == ["metadata_batch"])
+                #expect(json["version"] as? Int == 3)
+                return .json(
+                    status: 200,
+                    body: #"{"mode":"automatic","kinds":["metadata_batch"],"version":4,"allowed_kinds":["metadata_batch"]}"#
+                )
+            }
+            let saved = try await makeClient().saveApplicationPolicy(
+                mode: "automatic",
+                kinds: ["metadata_batch"],
+                version: 3
+            )
+            #expect(saved.version == 4)
+        }
+
+        @Test func reviewCoverDraftSendsSnapshotTargets() async throws {
+            StubURLProtocol.respond { request in
+                #expect(request.httpMethod == "POST")
+                #expect(request.url?.path == "/api/v1/agent/metadata-review/cover")
+                let body = try #require(StubURLProtocol.bodyData(of: request))
+                let json = try #require(
+                    try JSONSerialization.jsonObject(with: body) as? [String: Any]
+                )
+                #expect(json["kind"] as? String == "cover")
+                let payload = try #require(json["payload"] as? [String: Any])
+                #expect(payload["suggestion_id"] as? String == "s1")
+                #expect(payload["metadata_version"] as? Int == 4)
+                let targets = try #require(payload["targets"] as? [[String: Any]])
+                #expect(targets.first?["track_id"] as? String == "t1")
+                #expect(targets.first?["metadata_version"] as? Int == 4)
+                return .json(
+                    status: 200,
+                    body: """
+                        {"id":"cover-draft","kind":"cover","title":"封面核对 · 集","status":"pending","version":1,"approved_version":null,"payload":{"suggestion_id":"s1","metadata_version":4,"targets":[]},"evidence":[],"result":null,"preview_digest":"abc"}
+                        """
+                )
+            }
+            let draft = try await makeClient().reviewCoverDraft(
+                title: "封面核对 · 集",
+                suggestionID: "s1",
+                metadataVersion: 4,
+                targets: [ReviewCoverTarget(trackID: "t1", metadataVersion: 4)]
+            )
+            #expect(draft.id == "cover-draft")
+            #expect(draft.previewDigest == "abc")
         }
     }
 

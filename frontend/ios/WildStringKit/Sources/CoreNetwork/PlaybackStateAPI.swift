@@ -8,6 +8,12 @@ public struct RemotePlaybackState: Codable, Equatable, Sendable {
     public var index: Int
     public var positionMs: Int64
     public var mode: String
+    /// Written by the client (`playing` / `paused` / `ended`); omitted when nil.
+    public var playbackState: String?
+    /// Read-only fields issued by the server.
+    public var pausedAt: String?
+    public var handoffSupported: Bool?
+    public var handoffEligible: Bool?
 
     public init(
         version: Int,
@@ -15,7 +21,8 @@ public struct RemotePlaybackState: Codable, Equatable, Sendable {
         trackIds: [String],
         index: Int,
         positionMs: Int64,
-        mode: String
+        mode: String,
+        playbackState: String? = nil
     ) {
         self.version = version
         self.deviceId = deviceId
@@ -23,6 +30,7 @@ public struct RemotePlaybackState: Codable, Equatable, Sendable {
         self.index = index
         self.positionMs = positionMs
         self.mode = mode
+        self.playbackState = playbackState
     }
 
     enum CodingKeys: String, CodingKey {
@@ -30,6 +38,10 @@ public struct RemotePlaybackState: Codable, Equatable, Sendable {
         case deviceId = "device_id"
         case trackIds = "track_ids"
         case positionMs = "position_ms"
+        case playbackState = "playback_state"
+        case pausedAt = "paused_at"
+        case handoffSupported = "handoff_supported"
+        case handoffEligible = "handoff_eligible"
     }
 }
 

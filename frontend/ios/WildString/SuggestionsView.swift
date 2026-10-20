@@ -17,6 +17,7 @@ struct MetadataSuggestionsView: View {
     @State private var chosen: [String: Set<String>] = [:]
     @State private var pendingApply: PendingApply?
     @State private var pendingCover: ProviderSuggestion?
+    @State private var showingReview = false
     @State private var isWorking = false
     @State private var message: String?
     @State private var messageIsError = false
@@ -86,6 +87,12 @@ struct MetadataSuggestionsView: View {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("关闭") { dismiss() }
                 }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("批量核对") { showingReview = true }
+                }
+            }
+            .sheet(isPresented: $showingReview) {
+                MetadataReviewView(client: client, initialTrack: track)
             }
             .task { await poll() }
             .alert(

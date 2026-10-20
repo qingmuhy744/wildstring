@@ -47,9 +47,10 @@ struct MainTabView: View {
             }
         }
         .onChange(of: playback.isPlaying) { _, playing in
-            if !playing {
-                Task { await sharing.publishIfPaused() }
+            if playing {
+                sharing.localPlaybackStarted()
             }
+            Task { await sharing.publishCurrent() }
         }
         .task {
             await favorites.load()

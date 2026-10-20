@@ -48,6 +48,27 @@ final class PlaybackSharingModel {
         return ["off", "ask", "auto"].contains(raw) ? raw : "ask"
     }
 
+    /// Persisted per server so two instances never suppress each other's offers.
+    private var offeredPauseKey: String {
+        get { defaults.string(forKey: "playbackSyncOffered.\(client.server.origin)") ?? "" }
+        set { defaults.set(newValue, forKey: "playbackSyncOffered.\(client.server.origin)") }
+    }
+
+    private func pauseEvent(_ state: RemotePlaybackState) -> String? {
+        guard let pausedAt = state.pausedAt, !pausedAt.isEmpty, !state.deviceId.isEmpty else {
+            return nil
+        }
+        return "\(state.deviceId):\(pausedAt)"
+    }
+
+    /// Mirrors the server rule: only a real recent pause with a usable queue.
+    private func isEligible(_ state: RemotePlaybackState) -> Bool {
+        state.handoffEligible == true
+            && state.playbackState == "paused"
+            && !state.trackIds.isEmpty
+            && pauseEvent(state) != nil
+    }
+
     func start() {
         guard task == nil else { return }
         task = Task { [weak self] in
@@ -64,12 +85,11 @@ final class PlaybackSharingModel {
         handoff = nil
     }
 
-    /// Publishes the current queue when paused. Mirrors the Android client:
-    /// 15-second throttle, identical snapshots skipped, and a single retry with
-    /// a refreshed version when another device saved first (409).
-    func publishIfPaused() async {
-        guard mode != "off", !playback.isPlaying, !playback.items.isEmpty else { return }
-        guard Date().timeIntervalSince(lastPublishedAt) > 15 else { return }
+    /// Publishes the current snapshot after a playback state change. The server
+    /// issues `handoff_eligible`; this client only records playing / paused /
+    /// ended so other devices can retract stale offers.
+    func publishCurrent() async {
+        guard mode != "off", !playback.items.isEmpty else { return }
         let snapshot = playback.playbackSnapshot()
         if let last = lastSnapshot, last == snapshot {
             return
@@ -100,7 +120,8 @@ final class PlaybackSharingModel {
                     trackIds: snapshot.trackIDs,
                     index: snapshot.index,
                     positionMs: snapshot.positionMs,
-                    mode: snapshot.mode
+                    mode: snapshot.mode,
+                    playbackState: snapshot.playbackState
                 )
             )
             recordVersion(saved.version)
@@ -124,10 +145,13 @@ final class PlaybackSharingModel {
         defer { isWorking = false }
         do {
             let latest = try await client.playbackState()
-            guard latest.version == handoff.state.version, !latest.trackIds.isEmpty else {
+            guard latest.version == handoff.state.version,
+                isEligible(latest),
+                pauseEvent(latest) == pauseEvent(handoff.state)
+            else {
                 recordVersion(latest.version)
                 self.handoff = nil
-                message = "其他设备的进度已更新，请重新查看"
+                message = "其他设备已恢复播放，或进度已更新"
                 return
             }
             let items = handoff.tracks.map(\.playbackItem)
@@ -135,6 +159,7 @@ final class PlaybackSharingModel {
                 self.handoff = nil
                 return
             }
+            offeredPauseKey = pauseEvent(latest) ?? ""
             playback.adopt(
                 items: items,
                 startingAt: min(handoff.state.index, items.count - 1),
@@ -152,27 +177,41 @@ final class PlaybackSharingModel {
     func dismiss() {
         if let handoff {
             dismissedVersion = handoff.state.version
+            offeredPauseKey = pauseEvent(handoff.state) ?? offeredPauseKey
             recordVersion(handoff.state.version)
         }
         handoff = nil
     }
 
+    /// Local playback started, so a waiting offer is no longer relevant.
+    func localPlaybackStarted() {
+        handoff = nil
+    }
+
     private func poll() async {
-        guard mode != "off", !playback.isPlaying, handoff == nil, !isWorking else { return }
+        guard mode != "off", !playback.isPlaying, !isWorking else { return }
         guard let remote = try? await client.playbackState() else { return }
-        guard !remote.trackIds.isEmpty,
-            !remote.deviceId.isEmpty,
+        if let current = handoff,
+            remote.version != current.state.version || !isEligible(remote)
+        {
+            handoff = nil
+        }
+        guard handoff == nil else { return }
+        guard isEligible(remote),
             remote.deviceId != deviceId,
             remote.version > lastSeenVersion,
-            remote.version != dismissedVersion
+            remote.version != dismissedVersion,
+            pauseEvent(remote) != offeredPauseKey
         else { return }
         guard let tracks = try? await resolveTracks(remote.trackIds), !tracks.isEmpty else {
             return
         }
         let candidate = Handoff(state: remote, tracks: tracks)
         if mode == "auto" {
+            offeredPauseKey = pauseEvent(remote) ?? ""
             await accept(candidate)
         } else {
+            offeredPauseKey = pauseEvent(remote) ?? ""
             handoff = candidate
         }
     }

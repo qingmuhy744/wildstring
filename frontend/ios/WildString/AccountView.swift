@@ -89,7 +89,7 @@ struct AccountView: View {
                 PlaylistDetailView(client: client, playback: playback, playlist: playlist)
             }
             .navigationDestination(for: SettingsMarker.self) { _ in
-                SettingsView(playback: playback)
+                SettingsView(playback: playback, client: client)
             }
             .navigationDestination(for: AdminDestination.self) { destination in
                 switch destination {

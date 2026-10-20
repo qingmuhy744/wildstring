@@ -1,9 +1,11 @@
+import CoreNetwork
 import CorePlayback
 import SwiftUI
 
 @MainActor
 struct SettingsView: View {
     let playback: PlaybackService
+    let client: WildstringClient
 
     @Environment(OfflineModel.self) private var offline
     @Environment(\.isAdmin) private var isAdmin
@@ -15,17 +17,31 @@ struct SettingsView: View {
     @AppStorage("playbackQuality") private var playbackQuality = "original"
     @AppStorage("playbackSyncMode") private var syncMode = "ask"
     @State private var cacheBytes: Int64 = 0
+    @State private var showingReview = false
 
     var body: some View {
         List {
             if isAdmin {
                 Section("管理员") {
+                    Button {
+                        showingReview = true
+                    } label: {
+                        Label("批量核对资料", systemImage: "checklist")
+                    }
+                    NavigationLink {
+                        ApplicationPolicyView(client: client)
+                    } label: {
+                        Label("整理方式", systemImage: "wand.and.stars")
+                    }
                     NavigationLink(value: AdminDestination.scans) {
                         Label("扫描任务", systemImage: "arrow.triangle.2.circlepath")
                     }
                     NavigationLink(value: AdminDestination.imports) {
                         Label("导入记录", systemImage: "tray.and.arrow.down")
                     }
+                }
+                .sheet(isPresented: $showingReview) {
+                    MetadataReviewView(client: client)
                 }
             }
             Section("外观") {
@@ -63,7 +79,7 @@ struct SettingsView: View {
                     Text("自动恢复").tag("auto")
                 }
                 if syncMode != "off" {
-                    Text("暂停时自动保存进度；发现其他设备的新记录时询问或自动恢复，载入后保持暂停。")
+                    Text("暂停时自动保存进度；仅提示其他设备最近 30 分钟内的暂停，每次暂停只提示一次；载入后保持暂停。")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }

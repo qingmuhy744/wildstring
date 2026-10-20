@@ -24,6 +24,26 @@ struct BrowseView: View {
     @State private var demoMetadataTrack: Track?
     @State private var demoLyricsTrack: Track?
     @State private var demoSuggestionsTrack: Track?
+    @State private var demoReviewTrack: Track?
+    @State private var songSort: TrackSort
+    @State private var songOrder: CatalogSortOrder
+    @State private var albumSort: AlbumSort
+    @State private var albumOrder: CatalogSortOrder
+
+    init(client: WildstringClient, playback: PlaybackService, autoPlayFirst: Bool = false) {
+        self.client = client
+        self.playback = playback
+        self.autoPlayFirst = autoPlayFirst
+        let preferences = CatalogSortPreference(origin: client.server.origin)
+        _songSort = State(initialValue: preferences.songSort)
+        _songOrder = State(initialValue: preferences.songOrder)
+        _albumSort = State(initialValue: preferences.albumSort)
+        _albumOrder = State(initialValue: preferences.albumOrder)
+    }
+
+    private var preferences: CatalogSortPreference {
+        CatalogSortPreference(origin: client.server.origin)
+    }
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -40,6 +60,13 @@ struct BrowseView: View {
                 content
             }
             .navigationTitle("曲库")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    if section != .artists {
+                        sortMenu
+                    }
+                }
+            }
             .navigationDestination(for: Album.self) { album in
                 AlbumDetailView(client: client, playback: playback, album: album)
             }
@@ -54,6 +81,9 @@ struct BrowseView: View {
             }
             .sheet(item: $demoSuggestionsTrack) { track in
                 MetadataSuggestionsView(client: client, track: track)
+            }
+            .sheet(item: $demoReviewTrack) { track in
+                MetadataReviewView(client: client, initialTrack: track)
             }
             .miniPlayer(playback, client: client)
         }
@@ -86,7 +116,7 @@ struct BrowseView: View {
                     }
                 }
                 .overlay(alignment: .trailing) {
-                    if !browseGroups.isEmpty {
+                    if songSort == .name, songOrder == .asc, !browseGroups.isEmpty {
                         LetterIndexBar(groups: browseGroups) { group in
                             guard let offset = group.offset else { return }
                             Haptics.tap()
@@ -133,8 +163,15 @@ struct BrowseView: View {
         switch section {
         case .songs:
             if songsLoader == nil {
+                let sort = songSort
+                let order = songOrder
                 songsLoader = PagedListModel<Track>(pageSize: 100) { [client] limit, offset in
-                    try await client.tracks(limit: limit, offset: offset)
+                    try await client.tracks(
+                        limit: limit,
+                        offset: offset,
+                        sort: sort,
+                        order: order
+                    )
                 }
             }
             if songsLoader?.didLoadOnce == false {
@@ -144,8 +181,15 @@ struct BrowseView: View {
             }
         case .albums:
             if albumsLoader == nil {
+                let sort = albumSort
+                let order = albumOrder
                 albumsLoader = PagedListModel<Album>(pageSize: 50) { [client] limit, offset in
-                    try await client.albums(limit: limit, offset: offset)
+                    try await client.albums(
+                        limit: limit,
+                        offset: offset,
+                        sort: sort,
+                        order: order
+                    )
                 }
             }
             if albumsLoader?.didLoadOnce == false {
@@ -176,6 +220,91 @@ struct BrowseView: View {
         browseGroups = (try? await client.browseIndex())?.groups ?? []
     }
 
+    private var sortMenu: some View {
+        Menu {
+            if section == .songs {
+                ForEach(CatalogSorting.songSorts, id: \.self) { sort in
+                    Button {
+                        choose(songSort: sort)
+                    } label: {
+                        if songSort == sort {
+                            Label(CatalogSorting.label(sort), systemImage: "checkmark")
+                        } else {
+                            Text(CatalogSorting.label(sort))
+                        }
+                    }
+                }
+                Divider()
+                Button {
+                    toggleSongOrder()
+                } label: {
+                    Label(
+                        songOrder == .asc ? "改为降序" : "改为升序",
+                        systemImage: songOrder == .asc ? "arrow.down" : "arrow.up"
+                    )
+                }
+            } else if section == .albums {
+                ForEach(CatalogSorting.albumSorts, id: \.self) { sort in
+                    Button {
+                        choose(albumSort: sort)
+                    } label: {
+                        if albumSort == sort {
+                            Label(CatalogSorting.label(sort), systemImage: "checkmark")
+                        } else {
+                            Text(CatalogSorting.label(sort))
+                        }
+                    }
+                }
+                Divider()
+                Button {
+                    toggleAlbumOrder()
+                } label: {
+                    Label(
+                        albumOrder == .asc ? "改为降序" : "改为升序",
+                        systemImage: albumOrder == .asc ? "arrow.down" : "arrow.up"
+                    )
+                }
+            }
+        } label: {
+            Image(systemName: "arrow.up.arrow.down")
+        }
+        .accessibilityLabel("排序")
+    }
+
+    private func choose(songSort sort: TrackSort) {
+        guard sort != songSort else { return }
+        songSort = sort
+        songOrder = CatalogSorting.defaultOrder(for: sort)
+        preferences.songSort = songSort
+        preferences.songOrder = songOrder
+        songsLoader = nil
+        Task { await ensureSectionLoaded() }
+    }
+
+    private func toggleSongOrder() {
+        songOrder = songOrder == .asc ? .desc : .asc
+        preferences.songOrder = songOrder
+        songsLoader = nil
+        Task { await ensureSectionLoaded() }
+    }
+
+    private func choose(albumSort sort: AlbumSort) {
+        guard sort != albumSort else { return }
+        albumSort = sort
+        albumOrder = CatalogSorting.defaultOrder(for: sort)
+        preferences.albumSort = albumSort
+        preferences.albumOrder = albumOrder
+        albumsLoader = nil
+        Task { await ensureSectionLoaded() }
+    }
+
+    private func toggleAlbumOrder() {
+        albumOrder = albumOrder == .asc ? .desc : .asc
+        preferences.albumOrder = albumOrder
+        albumsLoader = nil
+        Task { await ensureSectionLoaded() }
+    }
+
     private func openDemoEditorsIfNeeded() {
         #if DEBUG
             guard let first = songsLoader?.items.first else { return }
@@ -188,6 +317,9 @@ struct BrowseView: View {
             }
             if environment["WILDSTRING_DEMO_OPEN_SUGGESTIONS"] == "1", demoSuggestionsTrack == nil {
                 demoSuggestionsTrack = first
+            }
+            if environment["WILDSTRING_DEMO_OPEN_REVIEW"] == "1", demoReviewTrack == nil {
+                demoReviewTrack = first
             }
         #endif
     }

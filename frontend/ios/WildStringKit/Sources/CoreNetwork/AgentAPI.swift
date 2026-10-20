@@ -60,10 +60,12 @@ public struct Draft: Decodable, Equatable, Sendable, Identifiable {
     public let payload: DraftPayload?
     public let evidence: [DraftEvidence]
     public let result: DraftResult?
+    public let previewDigest: String?
 
     enum CodingKeys: String, CodingKey {
         case id, kind, title, status, version, payload, evidence, result
         case approvedVersion = "approved_version"
+        case previewDigest = "preview_digest"
     }
 
     public var isPending: Bool { status == "pending" }
@@ -138,15 +140,23 @@ extension WildstringClient {
 
     // MARK: - Drafts
 
-    public func drafts(limit: Int = 50, offset: Int = 0) async throws -> Page<Draft> {
+    public func drafts(
+        limit: Int = 50,
+        offset: Int = 0,
+        status: String? = nil
+    ) async throws -> Page<Draft> {
+        var queryItems = [
+            URLQueryItem(name: "limit", value: String(limit)),
+            URLQueryItem(name: "offset", value: String(offset)),
+        ]
+        if let status, !status.isEmpty {
+            queryItems.append(URLQueryItem(name: "status", value: status))
+        }
         let data = try await perform(
             Request(
                 method: "GET",
                 path: "api/v1/agent/drafts",
-                queryItems: [
-                    URLQueryItem(name: "limit", value: String(limit)),
-                    URLQueryItem(name: "offset", value: String(offset)),
-                ]
+                queryItems: queryItems
             )
         )
         return try JSONDecoder().decode(Page<Draft>.self, from: data)

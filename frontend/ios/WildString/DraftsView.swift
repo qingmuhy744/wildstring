@@ -10,6 +10,13 @@ struct DraftsView: View {
     @State private var isLoading = true
     @State private var busyID: String?
     @State private var message: String?
+    @State private var filter: DraftFilter = .pending
+
+    private enum DraftFilter: String, CaseIterable {
+        case pending = "待处理"
+        case processed = "已处理"
+        case all = "全部"
+    }
 
     var body: some View {
         NavigationStack {
@@ -25,6 +32,7 @@ struct DraftsView: View {
                     DraftRow(
                         draft: draft,
                         busy: busyID == draft.id,
+                        onAccept: { Task { await accept(draft) } },
                         onApprove: { Task { await approve(draft) } },
                         onReject: { Task { await reject(draft) } },
                         onApply: { Task { await apply(draft) } }
@@ -37,6 +45,17 @@ struct DraftsView: View {
                 }
             }
             .listStyle(.plain)
+            .safeAreaInset(edge: .top) {
+                Picker("状态", selection: $filter) {
+                    ForEach(DraftFilter.allCases, id: \.self) { value in
+                        Text(value.rawValue).tag(value)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 6)
+                .background(.bar)
+            }
             .navigationTitle("助手草案")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -45,6 +64,9 @@ struct DraftsView: View {
                 }
             }
             .task { await load() }
+            .onChange(of: filter) { _, _ in
+                Task { await load() }
+            }
             .refreshable { await load() }
         }
     }
@@ -53,7 +75,30 @@ struct DraftsView: View {
         isLoading = true
         defer { isLoading = false }
         do {
-            drafts = try await client.drafts().items
+            let page = try await client.drafts(
+                limit: 100,
+                status: filter == .pending ? "pending" : nil
+            )
+            drafts = filter == .processed
+                ? page.items.filter { !$0.isPending }
+                : page.items
+            message = nil
+        } catch {
+            message = ErrorText.message(for: error)
+        }
+    }
+
+    private func accept(_ draft: Draft) async {
+        busyID = draft.id
+        defer { busyID = nil }
+        do {
+            replace(
+                try await client.acceptDraft(
+                    id: draft.id,
+                    version: draft.version,
+                    previewDigest: draft.previewDigest
+                )
+            )
             message = nil
         } catch {
             message = ErrorText.message(for: error)
@@ -106,6 +151,7 @@ struct DraftsView: View {
 private struct DraftRow: View {
     let draft: Draft
     let busy: Bool
+    let onAccept: () -> Void
     let onApprove: () -> Void
     let onReject: () -> Void
     let onApply: () -> Void
@@ -141,8 +187,11 @@ private struct DraftRow: View {
                 if busy {
                     ProgressView()
                 } else if draft.isPending {
-                    Button("批准", action: onApprove)
+                    Button("接受并应用", action: onAccept)
                         .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                    Button("批准", action: onApprove)
+                        .buttonStyle(.bordered)
                         .controlSize(.small)
                     Button("拒绝", role: .destructive, action: onReject)
                         .buttonStyle(.bordered)
@@ -159,7 +208,14 @@ private struct DraftRow: View {
     }
 
     private var kindLabel: String {
-        draft.kind == "playlist" ? "歌单" : "元数据"
+        switch draft.kind {
+        case "playlist": return "歌单"
+        case "metadata_batch": return "专辑批量"
+        case "cover": return "封面"
+        case "lyrics": return "歌词"
+        case "intake": return "导入"
+        default: return "元数据"
+        }
     }
 
     private var statusText: String {

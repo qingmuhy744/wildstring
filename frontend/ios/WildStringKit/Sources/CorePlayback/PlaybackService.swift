@@ -9,12 +9,20 @@ public struct PlaybackSnapshot: Equatable, Sendable {
     public var index: Int
     public var positionMs: Int64
     public var mode: String
+    public var playbackState: String
 
-    public init(trackIDs: [String], index: Int, positionMs: Int64, mode: String) {
+    public init(
+        trackIDs: [String],
+        index: Int,
+        positionMs: Int64,
+        mode: String,
+        playbackState: String
+    ) {
         self.trackIDs = trackIDs
         self.index = index
         self.positionMs = positionMs
         self.mode = mode
+        self.playbackState = playbackState
     }
 }
 
@@ -50,6 +58,9 @@ public final class PlaybackService {
 
     public private(set) var queue = PlaybackQueue()
     public private(set) var isPlaying = false
+    /// True when the queue stopped after its last track, so handoff publishes
+    /// `ended` instead of offering a finished queue as a paused one.
+    public private(set) var didFinishQueue = false
     public private(set) var isBuffering = false
     public private(set) var currentTime: Double = 0
     public private(set) var duration: Double = 0
@@ -150,6 +161,7 @@ public final class PlaybackService {
 
     public func pause() {
         intendedPlaying = false
+        didFinishQueue = false
         player.pause()
         persistProgress()
     }
@@ -268,7 +280,8 @@ public final class PlaybackService {
             trackIDs: queue.items.map(\.trackID),
             index: queue.currentIndex ?? 0,
             positionMs: Int64(max(0, currentTime) * 1000),
-            mode: mode
+            mode: mode,
+            playbackState: didFinishQueue ? "ended" : (isPlaying ? "playing" : "paused")
         )
     }
 
@@ -290,6 +303,7 @@ public final class PlaybackService {
         duration = 0
         isPlaying = false
         isBuffering = false
+        didFinishQueue = false
         errorMessage = nil
         persistQueueAndProgress()
         updateSystemNowPlaying()
@@ -361,6 +375,7 @@ public final class PlaybackService {
             isPlaying = false
             return
         }
+        didFinishQueue = false
         configureSystemPlaybackIfNeeded()
         assetLoadTask?.cancel()
         if let offline = offlineLookup(item.trackID),
@@ -649,6 +664,7 @@ public final class PlaybackService {
             persistProgress()
         } else {
             isPlaying = false
+            didFinishQueue = true
             currentTime = duration
             persistProgress()
             updateSystemNowPlaying()
