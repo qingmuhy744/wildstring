@@ -43,6 +43,14 @@ struct PlaybackServiceTests {
         #expect(service.currentItem == nil)
     }
 
+    @Test func persistedItemsWithoutArtworkFlagRemainReadable() throws {
+        let data = #"[{"id":"00000000-0000-0000-0000-000000000001","trackID":"legacy","title":"Legacy","artist":"Artist","album":"Album","streamPath":"api/v1/tracks/legacy/stream"}]"#.data(using: .utf8)!
+        let items = try JSONDecoder().decode([PlaybackService.Item].self, from: data)
+        #expect(items.count == 1)
+        #expect(items[0].trackID == "legacy")
+        #expect(items[0].hasCover == false)
+    }
+
     @Test func adoptAppliesSharedQueuePaused() async throws {
         let service = try makeService(store: InMemoryQueueStore())
         let items = [

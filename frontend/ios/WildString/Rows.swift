@@ -174,6 +174,7 @@ extension Track {
             title: title,
             artist: artistDisplay,
             album: album,
+            hasCover: hasCover,
             streamPath: "api/v1/tracks/\(id)/stream"
         )
     }

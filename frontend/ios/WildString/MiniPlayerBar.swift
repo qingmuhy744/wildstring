@@ -5,34 +5,35 @@ import SwiftUI
 
 @MainActor
 struct MiniPlayerBar: View {
+    let client: WildstringClient
     let playback: PlaybackService
     var onExpand: (() -> Void)?
 
     var body: some View {
         if let item = playback.currentItem {
             VStack(spacing: 0) {
-                Divider()
                 HStack(spacing: 12) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(item.title)
-                            .font(.subheadline)
-                            .lineLimit(1)
-                        Text(item.artist)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
+                    Button { onExpand?() } label: {
+                        HStack(spacing: 12) {
+                            CoverImage(
+                                client: client,
+                                trackID: item.hasCover ? item.trackID : nil,
+                                size: 42,
+                                circular: true
+                            )
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(item.title)
+                                    .font(.subheadline.weight(.semibold))
+                                    .lineLimit(1)
+                                Text(item.artist)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+                        }
                     }
+                    .buttonStyle(.plain)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
-                    .onTapGesture { onExpand?() }
-                    if playback.duration > 0 {
-                        Text(
-                            "\(timeText(playback.currentTime)) / \(timeText(playback.duration))"
-                        )
-                        .font(.caption2)
-                        .monospacedDigit()
-                        .foregroundStyle(.secondary)
-                    }
                     if playback.isBuffering {
                         ProgressView()
                     }
@@ -41,20 +42,41 @@ struct MiniPlayerBar: View {
                         playback.togglePlayPause()
                     } label: {
                         Image(systemName: playback.isPlaying ? "pause.fill" : "play.fill")
-                            .font(.title2)
+                            .font(.title3)
+                            .frame(width: 32, height: 32)
                     }
                     .buttonStyle(.plain)
                     Button {
+                        Haptics.tap()
                         playback.next()
                     } label: {
                         Image(systemName: "forward.fill")
+                            .font(.body)
+                            .frame(width: 28, height: 32)
                     }
                     .buttonStyle(.plain)
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
-                .background(.bar)
+                .padding(.horizontal, 12)
+                .padding(.top, 7)
+                .padding(.bottom, 5)
+                if playback.duration > 0 {
+                    ProgressView(
+                        value: min(max(playback.currentTime / playback.duration, 0), 1)
+                    )
+                    .progressViewStyle(.linear)
+                    .tint(.wildAccent)
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 7)
+                }
             }
+            .background(.bar, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+            )
+            .shadow(color: .black.opacity(0.12), radius: 8, y: 3)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 5)
         }
     }
 
@@ -92,7 +114,7 @@ struct MiniPlayerInset: ViewModifier {
                         .frame(maxWidth: .infinity)
                         .background(.bar)
                     }
-                    MiniPlayerBar(playback: playback, onExpand: { showPlayer = true })
+                    MiniPlayerBar(client: client, playback: playback, onExpand: { showPlayer = true })
                 }
             }
             .fullScreenCover(isPresented: $showPlayer) {

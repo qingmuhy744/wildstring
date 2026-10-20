@@ -10,6 +10,7 @@ final class StoredQueueEntry {
     var title: String
     var artist: String
     var album: String?
+    var hasCover: Bool
     var streamPath: String
 
     init(
@@ -20,6 +21,7 @@ final class StoredQueueEntry {
         title: String,
         artist: String,
         album: String?,
+        hasCover: Bool = false,
         streamPath: String
     ) {
         self.space = space
@@ -29,6 +31,7 @@ final class StoredQueueEntry {
         self.title = title
         self.artist = artist
         self.album = album
+        self.hasCover = hasCover
         self.streamPath = streamPath
     }
 }
@@ -100,6 +103,7 @@ public struct SwiftDataQueueStore: QueueStore, @unchecked Sendable {
                     title: $0.title,
                     artist: $0.artist,
                     album: $0.album,
+                    hasCover: $0.hasCover,
                     streamPath: $0.streamPath
                 )
             },
@@ -129,6 +133,7 @@ public struct SwiftDataQueueStore: QueueStore, @unchecked Sendable {
                     title: item.title,
                     artist: item.artist,
                     album: item.album,
+                    hasCover: item.hasCover,
                     streamPath: item.streamPath
                 )
             )

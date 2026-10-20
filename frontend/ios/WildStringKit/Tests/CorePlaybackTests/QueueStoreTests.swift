@@ -3,11 +3,12 @@ import SwiftData
 import Testing
 @testable import CorePlayback
 
-private func queueItem(_ suffix: String) -> PlaybackService.Item {
+private func queueItem(_ suffix: String, hasCover: Bool = false) -> PlaybackService.Item {
     PlaybackService.Item(
         trackID: "t\(suffix)",
         title: "Title \(suffix)",
         artist: "Artist",
+        hasCover: hasCover,
         streamPath: "api/v1/tracks/t\(suffix)/stream"
     )
 }
@@ -29,11 +30,12 @@ struct QueueStoreTests {
 
     @Test func swiftDataStoreRoundTripsQueueAndProgress() async throws {
         let store = try SwiftDataQueueStore.inMemory()
-        let items = [queueItem("a"), queueItem("b"), queueItem("a")]
+        let items = [queueItem("a", hasCover: true), queueItem("b"), queueItem("a")]
         try await store.saveQueue(items, currentIndex: 2)
         try await store.saveProgress(QueueProgress(index: 2, position: 12.25))
         let loaded = try #require(try await store.load())
         #expect(loaded.items == items)
+        #expect(loaded.items[0].hasCover)
         #expect(loaded.currentIndex == 2)
         #expect(loaded.position == 12.25)
     }

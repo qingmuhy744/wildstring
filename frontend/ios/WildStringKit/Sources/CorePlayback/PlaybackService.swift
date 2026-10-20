@@ -37,7 +37,12 @@ public final class PlaybackService {
         public var title: String
         public var artist: String
         public var album: String?
+        public var hasCover: Bool
         public var streamPath: String
+
+        private enum CodingKeys: String, CodingKey {
+            case id, trackID, title, artist, album, hasCover, streamPath
+        }
 
         public init(
             id: UUID = UUID(),
@@ -45,6 +50,7 @@ public final class PlaybackService {
             title: String,
             artist: String,
             album: String? = nil,
+            hasCover: Bool = false,
             streamPath: String
         ) {
             self.id = id
@@ -52,7 +58,19 @@ public final class PlaybackService {
             self.title = title
             self.artist = artist
             self.album = album
+            self.hasCover = hasCover
             self.streamPath = streamPath
+        }
+
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            id = try container.decode(UUID.self, forKey: .id)
+            trackID = try container.decode(String.self, forKey: .trackID)
+            title = try container.decode(String.self, forKey: .title)
+            artist = try container.decode(String.self, forKey: .artist)
+            album = try container.decodeIfPresent(String.self, forKey: .album)
+            hasCover = try container.decodeIfPresent(Bool.self, forKey: .hasCover) ?? false
+            streamPath = try container.decode(String.self, forKey: .streamPath)
         }
     }
 
@@ -77,6 +95,7 @@ public final class PlaybackService {
     @ObservationIgnored private let store: any QueueStore
     @ObservationIgnored private let persistence: PersistenceQueue
     @ObservationIgnored private let resourceLoader: WildstringAudioResourceLoader
+    @ObservationIgnored let cookieHeader: @Sendable () async -> String?
     @ObservationIgnored private let fragmentCache: AudioDiskCache?
     @ObservationIgnored private let offlineLookup: @Sendable (String) -> URL?
     @ObservationIgnored private let planProvider:
@@ -100,6 +119,10 @@ public final class PlaybackService {
     @ObservationIgnored private var secondsSinceCheckpoint: Double = 0
     @ObservationIgnored var systemControlsConfigured = false
     @ObservationIgnored var systemObserverTokens: [NSObjectProtocol] = []
+#if os(iOS)
+    @ObservationIgnored var nowPlayingArtworkTask: Task<Void, Never>?
+    @ObservationIgnored var nowPlayingArtworkTrackID: String?
+#endif
 
     public init(
         server: ServerAddress,
@@ -113,6 +136,7 @@ public final class PlaybackService {
         self.store = store
         self.persistence = PersistenceQueue(store: store)
         self.player = AVPlayer()
+        self.cookieHeader = cookieHeader
         self.fragmentCache = fragmentCache
         self.offlineLookup = offlineLookup
         self.planProvider = planProvider

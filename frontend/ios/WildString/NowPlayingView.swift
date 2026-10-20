@@ -14,6 +14,7 @@ struct NowPlayingView: View {
     @State private var showLyrics: Bool
     @State private var scrubTime: Double?
     @State private var showingQueue = false
+    @State private var showingArtwork = false
 
     init(client: WildstringClient, playback: PlaybackService, initiallyShowsLyrics: Bool = false) {
         self.client = client
@@ -55,6 +56,12 @@ struct NowPlayingView: View {
         .tint(.wildAccent)
         .sheet(isPresented: $showingQueue) {
             QueueView(client: client, playback: playback)
+        }
+        .sheet(isPresented: $showingArtwork) {
+            if let item = playback.currentItem {
+                ArtworkPreview(client: client, item: item)
+                    .presentationDetents([.medium, .large])
+            }
         }
         .task { openQueueForDemoIfNeeded() }
     }
@@ -114,6 +121,10 @@ struct NowPlayingView: View {
                         if !isRegular {
                             withAnimation(.easeInOut(duration: 0.2)) { showLyrics = true }
                         }
+                    }
+                    .onLongPressGesture(minimumDuration: 0.45) {
+                        Haptics.selection()
+                        showingArtwork = true
                     }
                     .padding(.top, 8)
                 VStack(spacing: 6) {
@@ -244,7 +255,7 @@ struct NowPlayingView: View {
                 Button {
                     showingQueue = true
                 } label: {
-                    Label("播放队列", systemImage: "list.bullet")
+                    Label("播放队列 · \(playback.items.count)", systemImage: "list.bullet")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
@@ -405,5 +416,47 @@ private struct CassetteArtwork: View {
         }
         .frame(width: width * 0.16, height: width * 0.16)
         .rotationEffect(.degrees(rotation))
+    }
+}
+
+private struct ArtworkPreview: View {
+    let client: WildstringClient
+    let item: PlaybackService.Item
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                Color(.systemBackground)
+                    .ignoresSafeArea()
+                VStack(spacing: 18) {
+                    CoverImage(
+                        client: client,
+                        trackID: item.hasCover ? item.trackID : nil,
+                        size: min(UIScreen.main.bounds.width - 48, 420)
+                    )
+                    .shadow(color: .black.opacity(0.18), radius: 22, y: 10)
+                    VStack(spacing: 4) {
+                        Text(item.title)
+                            .font(.headline)
+                            .multilineTextAlignment(.center)
+                        Text(item.artist)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                    }
+                    Spacer(minLength: 0)
+                }
+                .padding(24)
+            }
+            .navigationTitle("封面")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("完成") { dismiss() }
+                }
+            }
+        }
     }
 }
