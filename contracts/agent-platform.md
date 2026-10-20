@@ -12,7 +12,7 @@
 
 ## 草案
 
-`GET /drafts?status=&limit=&offset=`；`POST /drafts {kind:playlist|metadata,title,payload,evidence:[]}`；`GET /drafts/{id}`。草案字段：`id,kind,title,payload,evidence,status:pending|approved|applied|rejected,version,approved_version,created_at,updated_at,result,trace_id`。
+`GET /drafts?status=&limit=&offset=`；`POST /drafts {kind:playlist|metadata,title,payload,evidence:[]}`；`GET /drafts/{id}`。草案字段：`id,kind,title,payload,evidence,status:pending|approved|applied|rejected,version,approved_version,created_at,updated_at,result,trace_id`。`result` 为对象或 null；客户端必须接受显式 null。列表待处理（pending/approved）优先，其余按 updated_at 倒序；按 status 过滤时也按最近处理时间排列。Android 默认待处理视图，已应用/已拒绝自动进入处理记录；Web 既有已应用/已拒绝视图保留。
 
 歌单 payload `{name,track_ids:[真实ID],playlist_id?:已有本人手工歌单ID,playlist_version?:版本}`；元数据 payload `{track_id,metadata_version,overrides:{字段:值}}`，仅管理员可创建和应用共享元数据草案。证据为 `{source,summary,url?}`，最多 20 项。元数据更新合并既有人工覆盖，不清空无关修改。
 
@@ -22,7 +22,7 @@
 
 `GET /notifications?limit=&offset=&cursor=` 返回 `{items,total,limit,offset,next_cursor,unread_count,high_watermark}`。`cursor` 是上次响应的 next_cursor；全量首次不传，增量按收件箱变更序列递增返回，包含跨设备已读变化。游标过期 410 `notification_cursor_expired`，应全量重拉。item：`id,event_id,event_type,title,summary,severity:info|warning|error,task_id,draft_id,trace_id,created_at,read_at,version,detail_route`。
 
-读取列表不标已读。`POST /notifications/read {ids:[…]}` 只处理本人消息；`POST /notifications/read-all {high_watermark}` 仅已拉取快照内消息。`GET /notification-preferences` 和 `PUT /notification-preferences {telegram_enabled:false,event_types:[],min_severity:info,quiet_start:null,quiet_end:null,timezone:Asia/Shanghai}`。站内不关闭。`GET /deliveries`；`POST /deliveries/{id}/retry {acknowledge_unknown:true?}`，unknown 必须明确确认。投递字段 `id,event_id,target_id,status,attempt,next_attempt_at,error_code,message_id,trace_id`。
+Web／Android 默认仅显示未读通知，已读通知保留在「已读记录」，不删除事件或草案依据。读取列表不标已读。`POST /notifications/read {ids:[…]}` 只处理本人消息；`POST /notifications/read-all {high_watermark}` 仅已拉取快照内消息。`GET /notification-preferences` 和 `PUT /notification-preferences {telegram_enabled:false,event_types:[],min_severity:info,quiet_start:null,quiet_end:null,timezone:Asia/Shanghai}`。站内不关闭。`GET /deliveries`；`POST /deliveries/{id}/retry {acknowledge_unknown:true?}`，unknown 必须明确确认。投递字段 `id,event_id,target_id,status,attempt,next_attempt_at,error_code,message_id,trace_id`。
 
 ## Telegram
 

@@ -149,18 +149,21 @@ test('通知跨页、已读补拉、快照批量已读与待确认跳转', async
   await page.route('**/api/v1/agent/notifications?*', (r) => {
     const q = new URL(r.request().url()).searchParams;
     const offset = Number(q.get('offset') || 0);
+    const changed = notices
+      .filter((n) => n.version > Number(q.get('cursor')))
+      .sort((a, b) => a.version - b.version);
+    const page = q.has('cursor') ? changed.slice(0, 100) : notices.slice(offset, offset + 100);
     return r.fulfill({
-      json: list(
-        q.has('cursor') ? (version > 1 ? [notices[0]] : []) : notices.slice(offset, offset + 100),
-        {
-          total: notices.length,
-          limit: 100,
-          offset,
-          next_cursor: String(version),
-          high_watermark: 107,
-          unread_count: notices.filter((n) => !n.read_at).length,
-        },
-      ),
+      json: list(page, {
+        total: notices.length,
+        limit: 100,
+        offset,
+        next_cursor: String(
+          q.has('cursor') && page.length === 100 ? page.at(-1)!.version : version,
+        ),
+        high_watermark: 107,
+        unread_count: notices.filter((n) => !n.read_at).length,
+      }),
     });
   });
   await page.route('**/api/v1/agent/notifications/read', async (r) => {
@@ -191,6 +194,10 @@ test('通知跨页、已读补拉、快照批量已读与待确认跳转', async
   expect(readPosts).toBe(1);
   await panel.getByRole('button', { name: '将当前通知标为已读', exact: true }).click();
   await expect.poll(() => readAll).toEqual({ high_watermark: 107 });
+  await expect(panel.getByRole('heading', { name: /待确认草案 / })).toHaveCount(0);
+  await panel.getByRole('button', { name: '已读记录', exact: true }).click();
+  await expect(panel.getByRole('heading', { name: /待确认草案 / })).toHaveCount(107);
+  expect(readPosts).toBe(1);
   await panel.getByRole('button', { name: '查看草案', exact: true }).first().click();
   await expect(page.getByRole('region', { name: '草案工作台' })).toContainText('轻摇滚候选');
   await page.screenshot({

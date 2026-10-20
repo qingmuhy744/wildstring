@@ -279,5 +279,5 @@ def test_permissions_pagination_library_scope_and_schema15_upgrade(settings, aut
     database.initialize()
     database.initialize()
     with database.connect() as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION == 22
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION == 23
         assert connection.execute("SELECT count(*) FROM provider_jobs").fetchone()[0] == 1

@@ -1,12 +1,15 @@
 """Explicit, versioned playback snapshots; reading never controls another device."""
 
 import json
+from datetime import datetime
 from typing import Literal
 
 from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from wildstring.library.repository import now
+
+HANDOFF_MAX_AGE_SECONDS = 30 * 60
 
 
 class PlaybackState(BaseModel):
@@ -17,6 +20,8 @@ class PlaybackState(BaseModel):
     index: int = Field(ge=0, strict=True)
     position_ms: int = Field(ge=0, le=86_400_000, strict=True)
     mode: Literal["sequential", "repeat_all", "repeat_one", "shuffle"] = "sequential"
+
+    playback_state: Literal["unknown", "playing", "paused", "ended"] = "unknown"
 
     @model_validator(mode="after")
     def valid_queue(self):
@@ -29,6 +34,24 @@ class PlaybackState(BaseModel):
         if any(ord(character) < 32 for character in self.device_id):
             raise ValueError("Invalid device ID")
         return self
+
+
+def handoff_details(playback_state, paused_at, *, has_tracks, at):
+    eligible = False
+    if playback_state == "paused" and paused_at and has_tracks:
+        try:
+            paused, current = datetime.fromisoformat(paused_at), datetime.fromisoformat(at)
+            if paused.tzinfo is not None and current.tzinfo is not None:
+                eligible = 0 <= (current - paused).total_seconds() <= HANDOFF_MAX_AGE_SECONDS
+        except (ValueError, TypeError):
+            # Malformed legacy timestamps allow manual restore, never a prompt.
+            eligible = False
+    return {
+        "playback_state": playback_state,
+        "paused_at": paused_at,
+        "handoff_supported": True,
+        "handoff_eligible": eligible,
+    }
 
 
 def available_tracks(repository, connection, identities):
@@ -55,7 +78,7 @@ def get_state(repository):
         "position_ms": 0,
         "mode": "sequential",
         "updated_at": None,
-    }
+    } | handoff_details("unknown", None, has_tracks=False, at=now())
     with repository.database.connect() as connection:
         row = connection.execute(
             "SELECT * FROM playback_states WHERE user_id=? AND library_id=?",
@@ -81,7 +104,9 @@ def get_state(repository):
         else 0,
         "mode": row["mode"],
         "updated_at": row["updated_at"],
-    }
+    } | handoff_details(
+        row["playback_state"], row["paused_at"], has_tracks=bool(filtered), at=now()
+    )
 
 
 def put_state(repository, body):
@@ -90,7 +115,7 @@ def put_state(repository, body):
     with repository.database.connect(write=True) as connection:
         connection.execute("BEGIN IMMEDIATE")
         row = connection.execute(
-            "SELECT version FROM playback_states WHERE user_id=? AND library_id=?",
+            "SELECT * FROM playback_states WHERE user_id=? AND library_id=?",
             (repository.database.user_id, library_id),
         ).fetchone()
         version = row["version"] if row else 0
@@ -101,12 +126,24 @@ def put_state(repository, body):
             raise HTTPException(422, "playback_track_unavailable")
         if body.track_ids and body.position_ms > available[body.track_ids[body.index]]:
             raise HTTPException(422, "playback_position_invalid")
+        paused_at = None
+        if body.playback_state == "paused":
+            same_pause = (
+                row is not None
+                and row["device_id"] == body.device_id
+                and row["playback_state"] == "paused"
+                and row["paused_at"]
+            )
+            paused_at = row["paused_at"] if same_pause else updated_at
         connection.execute(
-            """INSERT INTO playback_states VALUES (?,?,?,?,?,?,?,?,?)
+            """INSERT INTO playback_states
+            (user_id,library_id,version,device_id,track_ids,position_index,position_ms,mode,
+             updated_at,playback_state,paused_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(user_id,library_id) DO UPDATE SET version=excluded.version,
             device_id=excluded.device_id,track_ids=excluded.track_ids,
             position_index=excluded.position_index,position_ms=excluded.position_ms,
-            mode=excluded.mode,updated_at=excluded.updated_at""",
+            mode=excluded.mode,updated_at=excluded.updated_at,
+            playback_state=excluded.playback_state,paused_at=excluded.paused_at""",
             (
                 repository.database.user_id,
                 library_id,
@@ -117,6 +154,14 @@ def put_state(repository, body):
                 body.position_ms,
                 body.mode,
                 updated_at,
+                body.playback_state,
+                paused_at,
             ),
         )
-    return body.model_dump() | {"version": body.version + 1, "updated_at": updated_at}
+    return (
+        body.model_dump()
+        | {"version": body.version + 1, "updated_at": updated_at}
+        | handoff_details(
+            body.playback_state, paused_at, has_tracks=bool(body.track_ids), at=updated_at
+        )
+    )

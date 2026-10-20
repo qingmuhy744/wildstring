@@ -182,13 +182,26 @@ test('共享进度显式载入且暂停，版本冲突不会覆盖', async ({ pa
   await expect(panel.getByRole('status').first()).toContainText('点击播放继续');
   expect((await audio(page)).paused).toBe(true);
   const snapshot = await (await page.request.get('/api/v1/playback/state')).json();
-  await page.request.put('/api/v1/playback/state', {
+  const concurrent = await page.request.put('/api/v1/playback/state', {
     headers,
     data: {
-      ...Object.fromEntries(Object.entries(snapshot).filter(([k]) => k !== 'updated_at')),
+      ...Object.fromEntries(
+        Object.entries(snapshot).filter(([key]) =>
+          [
+            'version',
+            'device_id',
+            'track_ids',
+            'index',
+            'position_ms',
+            'mode',
+            'playback_state',
+          ].includes(key),
+        ),
+      ),
       device_id: 'other-device',
     },
   });
+  expect(concurrent.ok()).toBe(true);
   await panel.getByRole('button', { name: '共享当前播放进度' }).click();
   await expect(panel.getByRole('status').first()).toContainText('其他设备更新');
   expect((await (await page.request.get('/api/v1/playback/state')).json()).device_id).toBe(

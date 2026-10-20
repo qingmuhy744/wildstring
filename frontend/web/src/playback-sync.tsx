@@ -12,6 +12,21 @@ interface SharedPlayback {
   position_ms: number;
   mode: PlaybackMode;
   updated_at: string | null;
+  playback_state?: 'unknown' | 'playing' | 'paused' | 'ended';
+  paused_at?: string | null;
+  handoff_supported?: boolean;
+  handoff_eligible?: boolean;
+}
+function pauseEvent(state: SharedPlayback): string | null {
+  return state.device_id && state.paused_at ? `${state.device_id}:${state.paused_at}` : null;
+}
+function isRecentPause(state: SharedPlayback): boolean {
+  return (
+    state.handoff_eligible === true &&
+    state.playback_state === 'paused' &&
+    state.track_ids.length > 0 &&
+    pauseEvent(state) !== null
+  );
 }
 const optionsEvent = 'wildstring:playback-sync-options';
 const modeKey = (id: string) => `wildstring:playback-sync:${id}`;
@@ -57,12 +72,22 @@ export function PlaybackSync({ player, userId }: { player: Player; userId: strin
     localStorage.setItem(deviceKey, device);
     const seenKey = `wildstring:playback-seen:${userId}`;
     let seen = Number(localStorage.getItem(seenKey)) || 0;
+    const pauseKey = `wildstring:playback-pause-seen:${userId}`;
+    let lastOfferedPause = localStorage.getItem(pauseKey);
+    let offeredPause: string | null = null;
+    let supportsPausedHandoff = false;
+    const rememberPause = (state: SharedPlayback) => {
+      const key = pauseEvent(state);
+      if (key) {
+        lastOfferedPause = key;
+        localStorage.setItem(pauseKey, key);
+      }
+    };
     let version: number | null = null;
     let armed = false,
       reading = false,
       writing = false,
       applying = false,
-      prompted = false,
       offered = 0,
       epoch = 0;
     let serial = Promise.resolve();
@@ -71,9 +96,9 @@ export function PlaybackSync({ player, userId }: { player: Player; userId: strin
       localStorage.setItem(seenKey, String(seen));
     };
     dismiss.current = (value) => {
-      prompted = true;
       seenVersion(value);
       offered = 0;
+      offeredPause = null;
       setOffer(null);
       setError('');
     };
@@ -86,6 +111,12 @@ export function PlaybackSync({ player, userId }: { player: Player; userId: strin
       const original = latest.current;
       try {
         const state = await api<SharedPlayback>('/playback/state', { signal: controller.signal });
+        if (!isRecentPause(state) || pauseEvent(state) !== pauseEvent(saved)) {
+          offered = 0;
+          offeredPause = null;
+          setOffer(null);
+          return;
+        }
         if (state.track_ids.length > QUEUE_LIMIT)
           throw new Error(`共享队列超过网页 ${QUEUE_LIMIT} 首上限。`);
         const tracks: Track[] = [];
@@ -108,14 +139,44 @@ export function PlaybackSync({ player, userId }: { player: Player; userId: strin
           original.mode !== latest.current.mode
         )
           return;
+        const verified = await api<SharedPlayback>('/playback/state', {
+          signal: controller.signal,
+        });
+        if (
+          !isRecentPause(verified) ||
+          pauseEvent(verified) !== pauseEvent(saved) ||
+          playbackSyncMode(userId) === 'off'
+        ) {
+          offered = 0;
+          offeredPause = null;
+          setOffer(null);
+          return;
+        }
+        if (
+          controller.signal.aborted ||
+          epoch !== originalEpoch ||
+          latest.current.playing ||
+          original.queue !== latest.current.queue ||
+          original.index !== latest.current.index ||
+          original.mode !== latest.current.mode
+        )
+          return;
+        if (verified.version !== state.version) {
+          offered = verified.version;
+          offeredPause = pauseEvent(verified);
+          setOffer(verified);
+          setError('其他设备的进度已更新，请重新核对后载入。');
+          return;
+        }
         if (!tracks.length) throw new Error('共享队列已经不可用。');
         armed = false;
         version = state.version;
         seenVersion(state.version);
+        rememberPause(state);
+        offeredPause = null;
         offered = 0;
         latest.current.setMode(state.mode);
         latest.current.start(tracks, state.index, state.position_ms / 1000, false);
-        prompted = true;
         setOffer(null);
       } catch (reason) {
         if (!controller.signal.aborted) {
@@ -133,9 +194,13 @@ export function PlaybackSync({ player, userId }: { player: Player; userId: strin
           return;
         writing = true;
         try {
-          if (claim || version === null)
-            version = (await api<SharedPlayback>('/playback/state', { signal: controller.signal }))
-              .version;
+          if (claim || version === null) {
+            const remote = await api<SharedPlayback>('/playback/state', {
+              signal: controller.signal,
+            });
+            version = remote.version;
+            supportsPausedHandoff = remote.handoff_supported === true;
+          }
           if (controller.signal.aborted) return;
           const current = latest.current;
           if (!current.current || !current.queue.length) return;
@@ -152,6 +217,15 @@ export function PlaybackSync({ player, userId }: { player: Player; userId: strin
                 Math.round(current.playbackTime() * 1000),
               ),
               mode: current.mode,
+              ...(supportsPausedHandoff
+                ? {
+                    playback_state: current.audio.current?.ended
+                      ? 'ended'
+                      : current.audio.current?.paused === false
+                        ? 'playing'
+                        : 'paused',
+                  }
+                : {}),
             }),
           });
           version = result.version;
@@ -172,9 +246,7 @@ export function PlaybackSync({ player, userId }: { player: Player; userId: strin
         reading ||
         writing ||
         applying ||
-        offered ||
         playbackSyncMode(userId) === 'off' ||
-        (playbackSyncMode(userId) === 'ask' && prompted) ||
         document.visibilityState !== 'visible' ||
         latest.current.playing
       )
@@ -187,14 +259,26 @@ export function PlaybackSync({ player, userId }: { player: Player; userId: strin
           controller.signal.aborted ||
           originalEpoch !== epoch ||
           latest.current.playing ||
-          !state.track_ids.length ||
+          !isRecentPause(state) ||
           state.device_id === device ||
           state.version <= seen
-        )
+        ) {
+          if (offered) {
+            offered = 0;
+            offeredPause = null;
+            setOffer(null);
+          }
           return;
+        }
+        const event = pauseEvent(state);
+        if (event === lastOfferedPause && event !== offeredPause) return;
         offered = state.version;
+        offeredPause = event;
         if (playbackSyncMode(userId) === 'auto') await accept.current(state);
-        else setOffer(state);
+        else {
+          rememberPause(state);
+          setOffer(state);
+        }
       } catch {
         /* Retry on the next foreground check without interrupting local playback. */
       } finally {
@@ -205,6 +289,7 @@ export function PlaybackSync({ player, userId }: { player: Player; userId: strin
     const play = () => {
       epoch++;
       offered = 0;
+      offeredPause = null;
       setOffer(null);
       armed = true;
       publish(true);
@@ -220,7 +305,6 @@ export function PlaybackSync({ player, userId }: { player: Player; userId: strin
     element?.addEventListener('pause', pause);
     element?.addEventListener('seeking', seek);
     const foreground = () => {
-      prompted = false;
       void read();
     };
     const online = () => void read();
@@ -228,9 +312,9 @@ export function PlaybackSync({ player, userId }: { player: Player; userId: strin
       if (document.visibilityState === 'visible') foreground();
     };
     const options = () => {
-      prompted = false;
       if (playbackSyncMode(userId) === 'off') {
         offered = 0;
+        offeredPause = null;
         setOffer(null);
       } else void read();
     };
@@ -261,7 +345,7 @@ export function PlaybackSync({ player, userId }: { player: Player; userId: strin
       <p>
         {offer.track_ids.length} 首队列 · 第 {offer.index + 1} 首 · {time(offer.position_ms / 1000)}
       </p>
-      <small className="muted">载入后保持暂停</small>
+      <small className="muted">其他设备最近暂停 · 载入后保持暂停</small>
       {error && (
         <p className="error" role="alert">
           {error}

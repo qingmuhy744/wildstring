@@ -7,7 +7,7 @@
 以下路径相对 `/api/v1`；登录、账号隔离、曲库权限和 `X-Wildstring-Client` 与现有接口一致。普通用户不能调用 `/manage`。离线保存不改变导入源或托管音频。
 
 - `GET /playback/state`：本用户最近共享播放快照。初始 version=0，空 track_ids，index=0、position_ms=0、mode=sequential。响应包含 version、device_id、track_ids、index、position_ms、mode、updated_at；不返回其他用户状态。
-- `PUT /playback/state`：`{version, device_id, track_ids, index, position_ms, mode}`；mode 为 sequential/repeat_all/repeat_one/shuffle。只允许真实、可用、本曲库 ID；最多 10000 首，版本冲突 409。读取与继续在其他设备上必须显式点击，不自动接管另一台设备。
+- `PUT /playback/state`：`{version, device_id, track_ids, index, position_ms, mode, playback_state?}`；mode 为 sequential/repeat_all/repeat_one/shuffle；playback_state 为 playing/paused/ended/unknown，省略时为 unknown。只允许真实、可用、本曲库 ID；最多 10000 首，版本冲突 409。服务器管理 `paused_at`，拒绝客户端发送该字段以及 handoff_eligible/handoff_supported 等只读字段。响应额外提供 `playback_state, paused_at, handoff_supported:true, handoff_eligible`；仅服务器最近 30 分钟内的 paused 记录和非空可用队列返回 handoff_eligible=true。同设备连续暂停保存保留 paused_at，恢复播放则清空，不能用普通更新时间推断暂停。旧记录迁移为 unknown；旧快照可手动载入。新客户端对旧服务端省略新增写入字段，且不根据旧协议记录触发提示；两端不自动控制另一台设备。
 - `GET /recommendations/daily`：当前用户以 Asia/Shanghai（UTC+8）日界计算的当日推荐，返回 `{id,date,items:[{track,reason}],engine}`。同日缓存稳定，曲目仅来自本曲库，可用 ID 去重；小曲库自动减少数量。
 - `POST /recommendations/daily/refresh`：主动换一批，与普通变更请求校验一致。请求可为空对象。
 - `GET/PUT /recommendations/preferences`：`{version,use_ai,use_lastfm,count}`，默认 AI 和外部相似查询关闭、count=20（范围 1–50）、初始 version=1。修改偏好保留已生成的当日集合，主动换批才重新生成；读取时剔除失效或明确不感兴趣的歌曲。engine 为 local、ai、local+lastfm 或 ai+lastfm。外部增强失效时继续提供本地推荐；密钥只由管理员在现有设置中配置。

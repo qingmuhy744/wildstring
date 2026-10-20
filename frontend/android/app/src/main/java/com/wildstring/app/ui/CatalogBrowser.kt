@@ -111,7 +111,14 @@ import kotlin.math.roundToInt
                     } ?: CatalogPlaceholder(vm, state, index)
                     else -> state.window.trackAt(index)?.let { track ->
                         val display = tracksById[track.id] ?: track
-                        TrackRow(vm, display, state, index, { play(display) }, { actions(display) })
+                        Column {
+                            if (state.discs.size > 1 && state.sort in listOf("title", "track_number")) {
+                                state.discs.firstOrNull { it.offset == index }?.let { disc ->
+                                    DiscHeading(disc)
+                                }
+                            }
+                            TrackRow(vm, display, state, index, { play(display) }, { actions(display) })
+                        }
                     } ?: CatalogPlaceholder(vm, state, index)
                 }
             }
@@ -190,5 +197,17 @@ import kotlin.math.roundToInt
             shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.primaryContainer, shadowElevation = 6.dp) {
             Box(contentAlignment = Alignment.Center) { Text(letter, style = MaterialTheme.typography.headlineLarge) }
         } }
+    }
+}
+
+/** A restrained divider, leaving song positions and paging indices unchanged. */
+@Composable private fun DiscHeading(disc: DiscSummary) {
+    Row(Modifier.fillMaxWidth().padding(start = 18.dp, end = 20.dp, top = 14.dp, bottom = 4.dp).heightIn(min = 24.dp)
+        .testTag("disc-heading-${disc.number}").semantics { contentDescription = "Disc ${disc.number}，${disc.trackCount} 首" },
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text("DISC ${disc.number.toString().padStart(2, '0')}", color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.labelSmall, fontSize = 11.sp, letterSpacing = 1.sp, fontWeight = FontWeight.SemiBold)
+        Text("${disc.trackCount} 首", color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .7f), fontSize = 10.sp)
+        HorizontalDivider(Modifier.weight(1f), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .5f))
     }
 }

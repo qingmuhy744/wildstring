@@ -2,7 +2,9 @@ package com.wildstring.app.data
 
 import com.google.gson.annotations.SerializedName
 
-data class Page<T>(val items: List<T>, val total: Int, val limit: Int, val offset: Int)
+data class DiscSummary(val number: Int, @SerializedName("track_count") val trackCount: Int,
+    @SerializedName("duration_ms") val durationMs: Long, val offset: Int)
+data class Page<T>(val items: List<T>, val total: Int, val limit: Int, val offset: Int, val discs: List<DiscSummary>? = null)
 data class Account(val id: String, val username: String, val role: String, val enabled: Boolean = true, val version: Int = 1)
 data class AuthStatus(val configured: Boolean, val authenticated: Boolean, val user: Account? = null)
 data class PasswordChange(@SerializedName("current_password") val currentPassword: String, @SerializedName("new_password") val newPassword: String)
@@ -64,7 +66,11 @@ data class ListeningSummary(@SerializedName("play_count") val playCount: Long = 
 data class SharedPlayback(val version: Int = 0, @SerializedName("device_id") val deviceId: String = "",
     @SerializedName("track_ids") val trackIds: List<String> = emptyList(), val index: Int = 0,
     @SerializedName("position_ms") val positionMs: Long = 0, val mode: String = "sequential",
-    @SerializedName("updated_at") val updatedAt: String? = null)
+    @SerializedName("updated_at") val updatedAt: String? = null,
+    @SerializedName("playback_state") val playbackState: String = "unknown",
+    @SerializedName("paused_at") val pausedAt: String? = null,
+    @SerializedName("handoff_supported") val handoffSupported: Boolean = false,
+    @SerializedName("handoff_eligible") val handoffEligible: Boolean = false)
 data class RecommendationItem(val track: Track, val reason: String = "",
     @SerializedName("source_ids") val sourceIds: List<String>? = emptyList())
 data class RecommendationSourceStatus(val id: String = "", val status: String = "", val matched: Int = 0,
@@ -114,7 +120,10 @@ data class ExternalMusicFeedback(@SerializedName("external_id") val externalId: 
 data class SharedPlaybackWrite(val version: Int, @SerializedName("device_id") val deviceId: String,
     @SerializedName("track_ids") val trackIds: List<String>, val index: Int,
     @SerializedName("position_ms") val positionMs: Long, val mode: String)
-fun SharedPlayback.writeBody() = SharedPlaybackWrite(version, deviceId, trackIds, index, positionMs, mode)
+fun SharedPlayback.writeBody(includePlaybackState: Boolean = true): com.google.gson.JsonObject =
+    networkGson().toJsonTree(SharedPlaybackWrite(version, deviceId, trackIds, index, positionMs, mode)).asJsonObject.apply {
+        if (includePlaybackState) addProperty("playback_state", playbackState)
+    }
 fun networkGson(): com.google.gson.Gson = com.google.gson.GsonBuilder().serializeNulls().create()
 
 /** Server-owned order and offsets, shared by all clients (including Chinese pinyin). */

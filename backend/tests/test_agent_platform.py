@@ -816,7 +816,7 @@ def test_real_v16_migration_preserves_library_people_accounts_and_credentials(ag
     monkeypatch.setattr(wildstring.agent_schema, "SCHEMA", schema)
     service.database.initialize()
     service.database.initialize()
-    assert snapshot() == original and SCHEMA_VERSION == 22
+    assert snapshot() == original and SCHEMA_VERSION == 23
     assert legacy_secret.read_text() == "synthetic-original-private-secret"
     assert service.database.check_ready()
 
@@ -1047,3 +1047,23 @@ def test_external_detail_links_use_only_configured_public_https(base, expected):
     from wildstring.agent_notifications import Notifications
 
     assert Notifications.public_detail_url(base, "proposal-id") == expected
+
+
+def test_draft_worklist_prioritizes_pending_and_history_uses_last_handled_time(agent):
+    client, service = agent
+    track = first_track(client)
+    active, old_record, recent_record = [playlist_draft(client, track) for _ in range(3)]
+    with service.database.connect(write=True) as connection:
+        for identity, status, at in (
+            (active["id"], "pending", "2026-01-01T00:00:00Z"),
+            (old_record["id"], "applied", "2026-02-01T00:00:00Z"),
+            (recent_record["id"], "applied", "2026-03-01T00:00:00Z"),
+        ):
+            connection.execute(
+                "UPDATE agent_drafts SET status=?,updated_at=? WHERE id=?", (status, at, identity)
+            )
+    listing = client.get(BASE + "/drafts").json()["items"]
+    assert [item["id"] for item in listing] == [active["id"], recent_record["id"], old_record["id"]]
+    history = client.get(BASE + "/drafts?status=applied").json()["items"]
+    assert [item["id"] for item in history] == [recent_record["id"], old_record["id"]]
+    assert client.get(BASE + "/drafts?status=pending").json()["total"] == 1

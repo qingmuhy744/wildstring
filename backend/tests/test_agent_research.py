@@ -366,7 +366,7 @@ def test_v18_migration_is_atomic_and_preserves_existing_connection(agent, monkey
         current = dict(
             db.execute("SELECT * FROM agent_connections WHERE id=?", (c["id"],)).fetchone()
         )
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 22
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 23
     assert {k: v for k, v in current.items() if k != "options"} == {
         k: v for k, v in original.items() if k != "options"
     }

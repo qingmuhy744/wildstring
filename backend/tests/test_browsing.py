@@ -334,3 +334,108 @@ def test_index_auth_validation_empty_library_and_regular_user(settings, authenti
             assert response.status_code == 200
             assert response.json()["total"] == 1
             assert response.json() == admin.get("/api/v1/browse-index?kind=tracks").json()
+
+
+@pytest.mark.parametrize("order", ["asc", "desc"])
+def test_explicit_track_sorting_and_disc_offsets_cover_the_whole_filtered_album(
+    settings, authenticated_client, order
+):
+    for i, (title, disc, track) in enumerate((("Zebra", 1, 1), ("Alpha", 1, 2), ("Middle", 2, 1))):
+        song(settings, i, title, artist="同一艺人", album="双碟", disc=disc, track=track)
+    scan_library(settings)
+    with authenticated_client(settings) as client:
+        album = client.get("/api/v1/albums").json()["items"][0]["id"]
+        artist = client.get("/api/v1/artists").json()["items"][0]["id"]
+        for endpoint, extra in (
+            (f"/api/v1/albums/{album}/tracks", {}),
+            (f"/api/v1/artists/{artist}/tracks", {"album_id": album}),
+        ):
+
+            def page(sort, offset=0, endpoint=endpoint, extra=extra):
+                response = client.get(
+                    endpoint,
+                    params=extra | {"sort": sort, "order": order, "limit": 1, "offset": offset},
+                )
+                assert response.status_code == 200, response.text
+                return response.json()
+
+            names = [page("name", i)["items"][0]["title"] for i in range(3)]
+            assert names == sorted(["Zebra", "Alpha", "Middle"], reverse=order == "desc")
+            original = [page("track_number", i)["items"][0]["title"] for i in range(3)]
+            assert original == (
+                ["Zebra", "Alpha", "Middle"] if order == "asc" else ["Middle", "Alpha", "Zebra"]
+            )
+            summaries = page("track_number", 1)["discs"]
+            assert [(d["number"], d["track_count"], d["offset"]) for d in summaries] == (
+                [(1, 2, 0), (2, 1, 2)] if order == "asc" else [(2, 1, 0), (1, 2, 1)]
+            )
+        assert client.get("/api/v1/tracks?sort=added_at&order=INVALID").status_code == 422
+        assert client.get("/api/v1/albums?sort=title%3BDROP%20TABLE%20tracks").status_code == 422
+
+
+@pytest.mark.parametrize("order", ["asc", "desc"])
+def test_album_sorting_uses_first_import_date_and_unknown_release_dates_stay_last(
+    settings, authenticated_client, order
+):
+    for i, (album, artist) in enumerate(
+        (("Alpha", "Zebra"), ("Zebra", "Alpha"), ("Missing", "Middle"))
+    ):
+        song(settings, i, album, album=album, artist=artist)
+    scan_library(settings)
+    database = Database(settings.data_dir)
+    with database.connect(write=True) as connection:
+        connection.execute(
+            "UPDATE tracks SET added_at = '2020-01-01T00:00:00Z', extra = '{\"release_date\":\"2010\"}' WHERE album='Alpha'"
+        )
+        connection.execute(
+            "UPDATE tracks SET added_at = '2022-01-01T00:00:00Z', extra = '{\"release_date\":\"2020-02\"}' WHERE album='Zebra'"
+        )
+        connection.execute(
+            "UPDATE tracks SET added_at = '2024-01-01T00:00:00Z' WHERE album='Missing'"
+        )
+    # Re-reading tags and adding another song must not reset the original import date.
+    scan_library(settings, full=True)
+    with database.connect(write=True) as connection:
+        connection.execute(
+            "UPDATE tracks SET extra = '{\"release_date\":\"2010\"}' WHERE album='Alpha'"
+        )
+        connection.execute(
+            "UPDATE tracks SET extra = '{\"release_date\":\"2020-02\"}' WHERE album='Zebra'"
+        )
+    song(settings, 3, "补入", album="Alpha", artist="Zebra", track=2)
+    scan_library(settings)
+    with authenticated_client(settings) as client:
+
+        def titles(sort):
+            return [
+                client.get(
+                    "/api/v1/albums", params={"sort": sort, "order": order, "limit": 1, "offset": i}
+                ).json()["items"][0]["title"]
+                for i in range(3)
+            ]
+
+        assert titles("added_at") == (
+            ["Alpha", "Zebra", "Missing"] if order == "asc" else ["Missing", "Zebra", "Alpha"]
+        )
+        assert titles("release_date") == (
+            ["Alpha", "Zebra", "Missing"] if order == "asc" else ["Zebra", "Alpha", "Missing"]
+        )
+        assert titles("artist") == (
+            ["Zebra", "Missing", "Alpha"] if order == "asc" else ["Alpha", "Missing", "Zebra"]
+        )
+        item = client.get("/api/v1/albums?sort=added_at&order=asc").json()["items"][0]
+        assert item["added_at"] == "2020-01-01T00:00:00Z"
+        for sort in ("added_at", "duration_ms", "play_count", "last_played_at"):
+            all_ids = [
+                t["id"]
+                for t in client.get("/api/v1/tracks", params={"sort": sort, "order": order}).json()[
+                    "items"
+                ]
+            ]
+            paged = [
+                client.get(
+                    "/api/v1/tracks", params={"sort": sort, "order": order, "limit": 1, "offset": i}
+                ).json()["items"][0]["id"]
+                for i in range(4)
+            ]
+            assert paged == all_ids

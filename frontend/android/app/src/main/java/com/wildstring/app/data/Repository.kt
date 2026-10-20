@@ -21,13 +21,13 @@ import retrofit2.converter.gson.GsonConverterFactory
 
 data class CatalogQuery(val tab: String = "search", val kind: String = "discover", val title: String = "发现",
     val query: String = "", val offset: Int = 0, val collection: String? = null, val collectionId: String? = null,
-    val playlist: Playlist? = null, val role: String = "artist", val sort: String = "title", val albumFilter: String? = null) {
-    val indexed: Boolean get() = kind in listOf("tracks", "albums", "artists") && sort == "title" &&
+    val playlist: Playlist? = null, val role: String = "artist", val sort: String = "title", val albumFilter: String? = null, val order: String = "asc") {
+    val indexed: Boolean get() = kind in listOf("tracks", "albums", "artists") && sort in listOf("title", "name") && order == "asc" &&
         collection != "playlists" && collection != "albums" && albumFilter == null
-    val key: String get() = Gson().toJson(listOf(tab, kind, query, offset, collection, collectionId, role, sort, albumFilter))
+    val key: String get() = Gson().toJson(listOf(tab, kind, query, offset, collection, collectionId, role, sort, albumFilter, order))
 }
 data class CatalogPage(val tracks: List<Track> = emptyList(), val albums: List<Album> = emptyList(),
-    val artists: List<Artist> = emptyList(), val playlists: List<Playlist> = emptyList(), val total: Int = 0)
+    val artists: List<Artist> = emptyList(), val playlists: List<Playlist> = emptyList(), val total: Int = 0, val discs: List<DiscSummary>? = null)
 
 @Singleton
 class Repository @Inject constructor(val session: SessionStore, val client: OkHttpClient, val database: QueueDatabase, val cache: ClientCache, val settings: AppSettings, val downloads: OfflineDownloads) {
@@ -133,12 +133,13 @@ class Repository @Inject constructor(val session: SessionStore, val client: OkHt
         if (owner != session.cacheScope() || base != session.endpoint) throw CancellationException("会话已变化。")
         if (!response.isSuccessful) throw HttpException(response)
     }
-    suspend fun tracks(query: String = "", offset: Int = 0, collection: String? = null, collectionId: String? = null, recent: Boolean = false, role: String = "artist", sort: String = if (recent) "last_played_at" else "title", limit: Int = 50, albumFilter: String? = null): Page<Track> {
+    suspend fun tracks(query: String = "", offset: Int = 0, collection: String? = null, collectionId: String? = null, recent: Boolean = false, role: String = "artist", sort: String = if (recent) "last_played_at" else "title", limit: Int = 50, albumFilter: String? = null, order: String? = null): Page<Track> {
         val profile = session.cacheScope()
         val snapshot = favoriteClock.get()
         val resource = if (collection != null && collectionId != null) url("api", "v1", collection, collectionId, "tracks") else url("api", "v1", "tracks")
         val target = resource.toHttpUrl().newBuilder().apply {
             addQueryParameter("sort", sort)
+            if (order != null) addQueryParameter("order", order)
             if (recent) addQueryParameter("played_only", "true")
             if (collection == "artists") { addQueryParameter("role", role); if (albumFilter != null) addQueryParameter("album_id", albumFilter) }
         }.build().toString()
@@ -197,10 +198,10 @@ class Repository @Inject constructor(val session: SessionStore, val client: OkHt
                 val albumPage = albums.await()
                 CatalogPage(albums = albumPage.items, tracks = recent.await().items, total = albumPage.total)
             }
-            "albums" -> (if (query.collection == "artists" && query.collectionId != null) api().artistAlbums(url("api", "v1", "artists", query.collectionId, "albums"), query.query, offset = query.offset, role = query.role) else api().albums(query.query, offset = query.offset)).checked(query).let { CatalogPage(albums = it.items, total = it.total) }
+            "albums" -> (if (query.collection == "artists" && query.collectionId != null) api().artistAlbums(url("api", "v1", "artists", query.collectionId, "albums"), query.query, offset = query.offset, role = query.role, sort = query.sort, order = query.order) else api().albums(query.query, offset = query.offset, sort = query.sort, order = query.order)).checked(query).let { CatalogPage(albums = it.items, total = it.total) }
             "artists" -> api().artists(query.query, offset = query.offset, role = query.role).checked(query).let { CatalogPage(artists = it.items, total = it.total) }
             "playlists" -> api().playlists(limit = 50, offset = query.offset).checked(query).let { CatalogPage(playlists = it.items, total = it.total) }
-            else -> tracks(query.query, query.offset, query.collection, query.collectionId, query.kind == "recent", query.role, query.sort, albumFilter = query.albumFilter).checked(query).let { CatalogPage(tracks = it.items, total = it.total) }
+            else -> tracks(query.query, query.offset, query.collection, query.collectionId, query.kind == "recent", query.role, query.sort, albumFilter = query.albumFilter, order = query.order).checked(query).let { CatalogPage(tracks = it.items, total = it.total, discs = it.discs) }
         }
         requireProfile(profile)
         if (revision != cache.catalogRevision) throw CancellationException("曲库已更新。")
@@ -228,7 +229,7 @@ class Repository @Inject constructor(val session: SessionStore, val client: OkHt
         var offset = 0
         var expected = -1
         while (true) {
-            val page = tracks(query.query, offset, query.collection, query.collectionId, query.kind == "recent", query.role, query.sort, 200, query.albumFilter)
+            val page = tracks(query.query, offset, query.collection, query.collectionId, query.kind == "recent", query.role, query.sort, 200, query.albumFilter, query.order)
             requireProfile(owner)
             if (expected == -1) { expected = page.total; require(expected <= 5000) { "集合超过 5000 首，请筛选后播放。" } }
             require(expected == page.total) { "集合已变化，请重试。" }
