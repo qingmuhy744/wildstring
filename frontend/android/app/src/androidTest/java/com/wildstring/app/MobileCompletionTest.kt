@@ -194,8 +194,8 @@ class MobileCompletionTest {
     private fun connect(fixture: Fixture): MusicViewModel {
         val vm = compose.runOnIdle { ViewModelProvider(compose.activity)[MusicViewModel::class.java] }
         val address = fixture.server.url("/").newBuilder().host("127.0.0.1").build().toString()
-        compose.runOnIdle { vm.repository.session.invalidate(); vm.settings.quality(0); vm.sharing.mode("off"); vm.connect(address, "mobile-admin", "test-password", true) }
-        compose.waitUntil(20_000) { vm.state.value.connected && !vm.state.value.loading }
+        val connection = compose.runOnIdle { vm.repository.session.invalidate(); vm.settings.quality(0); vm.sharing.mode("off"); vm.connect(address, "mobile-admin", "test-password", true) }
+        compose.waitUntil(20_000) { connection.isCompleted && vm.state.value.connected && vm.state.value.server == address && !vm.state.value.loading }
         return vm
     }
     private fun cleanup(vm: MusicViewModel) { compose.runOnIdle { vm.sleep.cancel(); vm.repository.session.invalidate(); vm.controller?.stop(); vm.controller?.clearMediaItems() } }
@@ -302,8 +302,10 @@ class MobileCompletionTest {
                 compose.onNodeWithTag("nav-mine").performClick()
                 compose.onNodeWithContentDescription("新建歌单").performClick()
                 compose.onNodeWithText("歌单名称").performTextInput("手机规则歌单")
+                dismissKeyboard()
                 compose.onNode(isToggleable()).performClick()
-                compose.onNodeWithText("保存歌单").performScrollTo().performClick()
+                compose.onNodeWithText("只选我喜欢的音乐").assertIsDisplayed()
+                compose.onNodeWithText("保存歌单").performScrollTo().performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnClick) { click -> assertTrue(click()) }
                 compose.waitUntil(10_000) { fixture.mutations.any { it.first.endsWith("/playlists") && it.second.contains("\"kind\":\"smart\"") } }
                 compose.onNodeWithContentDescription("设置").performClick()
                 compose.onNodeWithText("曲库管理", substring = false).performScrollTo().performClick()
@@ -515,10 +517,11 @@ class MobileCompletionTest {
                 compose.waitUntil(10_000) { JsonParser.parseString(fixture.snapshot).asJsonObject["position_ms"].asLong >= 4900 }
                 assertTrue(fixture.mutations.any { it.first.endsWith("/playback/state") })
                 val paused = gson.fromJson(fixture.snapshot, SharedPlayback::class.java)
-                val writes = fixture.mutations.count { it.first.endsWith("/playback/state") }
-                runBlocking { vm.sharing.publish(paused, force = true) }
-                assertEquals(writes, fixture.mutations.count { it.first.endsWith("/playback/state") })
+                // Media3 can still deliver queued seek/pause events. Assert the
+                // final state here; isolated duplicate-publish coverage below
+                // does not race those legitimate position updates.
                 assertEquals("paused", paused.playbackState)
+                assertNotNull(paused.pausedAt)
                 fixture.snapshot = remotePause(90)
                 runBlocking { withContext(Dispatchers.Main) { vm.checkSharedPlayback() } }
                 compose.runOnIdle { assertNull(vm.state.value.handoff); vm.syncMode("off") }
@@ -565,4 +568,20 @@ class MobileCompletionTest {
         }
     }
 
+
+    @Test fun identicalPausedSnapshotsDoNotPublishAgain() {
+        Fixture().use { fixture -> val vm = connect(fixture)
+            try {
+                val snapshot = SharedPlayback(trackIds = listOf("completion-0"), positionMs = 5000, playbackState = "paused")
+                compose.runOnIdle { vm.sharing.mode("ask"); vm.sharing.localPlaybackStarted() }
+                val saved = runBlocking { vm.sharing.publish(snapshot, force = true) }
+                assertNotNull(saved)
+                val writes = fixture.mutations.count { it.first.endsWith("/playback/state") }
+                assertEquals(1, writes)
+                repeat(3) { assertNull(runBlocking { vm.sharing.publish(saved!!, force = true) }) }
+                assertEquals(writes, fixture.mutations.count { it.first.endsWith("/playback/state") })
+                assertEquals("paused", gson.fromJson(fixture.snapshot, SharedPlayback::class.java).playbackState)
+            } finally { cleanup(vm) }
+        }
+    }
 }
