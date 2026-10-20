@@ -31,6 +31,27 @@ def candidate_digest(row):
     )
 
 
+def canonical_fields(value):
+    return json.dumps(json.loads(value), sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+
+
+def candidate_group(row):
+    return (
+        row["provider"],
+        row["metadata_version"],
+        row["source_url"] or "",
+        canonical_fields(row["fields"]),
+        row["cover_url"] or "",
+    )
+
+
+class ReviewReject(Input):
+    track_id: str = Field(min_length=1, max_length=128)
+    suggestion_id: str = Field(min_length=1, max_length=128)
+    metadata_version: int = Field(ge=1)
+    candidate_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
 class ReviewItem(Input):
     track_id: str = Field(min_length=1, max_length=128)
     suggestion_id: str = Field(min_length=1, max_length=128)
@@ -53,6 +74,7 @@ class Review:
                 "SELECT t.album_id,t.album,t.album_artists,count(*) AS count FROM tracks t "
                 "WHERE t.library_id=? AND t.status='available' AND EXISTS "
                 "(SELECT 1 FROM metadata_suggestions s WHERE s.track_id=t.id AND s.status='pending' "
+                "AND s.metadata_version=(SELECT version FROM track_metadata WHERE track_id=t.id) "
                 "AND (s.fields<>'{}' OR s.cover_url IS NOT NULL)) GROUP BY t.album_id ORDER BY t.album,t.album_id",
                 (self.library_id,),
             ).fetchall()
@@ -92,9 +114,22 @@ class Review:
                 "SELECT count(*) FROM tracks WHERE library_id=? AND status='available' AND album_id=?",
                 (self.library_id, album_id),
             ).fetchone()[0]
+            # Collapse repeated queries before limiting unique candidates. Different
+            # releases, versions and providers remain independent evidence.
+            db.create_function("review_fields", 1, canonical_fields, deterministic=True)
             suggestions = db.execute(
-                "SELECT * FROM (SELECT s.*,row_number() OVER (PARTITION BY track_id ORDER BY created_at DESC,id) AS position FROM metadata_suggestions s "
-                "WHERE s.track_id IN (SELECT value FROM json_each(?)) AND s.status='pending') WHERE position<=30",
+                """WITH grouped AS (
+                    SELECT s.*,s.rowid AS observed_sequence,row_number() OVER (
+                        PARTITION BY track_id,provider,metadata_version,COALESCE(source_url,''),review_fields(fields),COALESCE(cover_url,'')
+                        ORDER BY s.rowid DESC) AS duplicate_position,
+                        count(*) OVER (
+                        PARTITION BY track_id,provider,metadata_version,COALESCE(source_url,''),review_fields(fields),COALESCE(cover_url,'')) AS duplicate_count
+                    FROM metadata_suggestions s
+                    WHERE s.track_id IN (SELECT value FROM json_each(?)) AND s.status='pending'
+                ) SELECT * FROM (
+                    SELECT *,row_number() OVER (PARTITION BY track_id ORDER BY observed_sequence DESC) AS position
+                    FROM grouped WHERE duplicate_position=1
+                ) WHERE position<=30""",
                 (encoded([r["id"] for r in rows]),),
             ).fetchall()
         by_track = {}
@@ -108,6 +143,7 @@ class Review:
                 match=json.loads(row["match"]),
                 source_url=evidence_url(row["source_url"]),
                 candidate_digest=candidate_digest(row),
+                duplicate_count=row["duplicate_count"],
             )
             by_track.setdefault(row["track_id"], []).append(value)
         items = []
@@ -145,6 +181,40 @@ class Review:
             "provider_names": {s["id"]: s["name"] for s in self.providers.sources.catalog()}
             | {"musicbrainz": "MusicBrainz", "lastfm": "Last.fm"},
         }
+
+    def reject_metadata_review(self, actor, body):
+        actor.require("library:manage", admin=True)
+        with self.database.connect(write=True) as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                "SELECT s.*,s.rowid AS observed_sequence,m.version AS current_version FROM metadata_suggestions s "
+                "JOIN tracks t ON t.id=s.track_id JOIN track_metadata m ON m.track_id=t.id "
+                "WHERE s.id=? AND s.track_id=? AND t.library_id=? AND t.status='available'",
+                (body.suggestion_id, body.track_id, self.library_id),
+            ).fetchone()
+            if row is None:
+                raise HTTPException(404, "suggestion_not_found")
+            if candidate_digest(row) != body.candidate_digest:
+                raise HTTPException(409, "metadata_candidate_changed")
+            if row["status"] == "ignored":
+                return {"status": "ignored", "ignored_count": 0, "already_ignored": True}
+            if row["status"] != "pending":
+                raise HTTPException(409, "suggestion_already_resolved")
+            if row["current_version"] != body.metadata_version:
+                raise HTTPException(409, "metadata_version_conflict")
+            # Reject only the observed candidate and its older exact duplicates.
+            # A concurrent/new lookup or another release must remain pending.
+            older = db.execute(
+                "SELECT * FROM metadata_suggestions WHERE track_id=? AND provider=? "
+                "AND metadata_version=? AND status='pending' AND rowid<=?",
+                (body.track_id, row["provider"], row["metadata_version"], row["observed_sequence"]),
+            ).fetchall()
+            identities = [r["id"] for r in older if candidate_group(r) == candidate_group(row)]
+            db.execute(
+                "UPDATE metadata_suggestions SET status='ignored' WHERE id IN (SELECT value FROM json_each(?))",
+                (encoded(identities),),
+            )
+        return {"status": "ignored", "ignored_count": len(identities), "already_ignored": False}
 
     def accept_metadata_review(self, actor, body):
         actor.require("library:manage", admin=True)

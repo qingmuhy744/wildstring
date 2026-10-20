@@ -16,6 +16,7 @@ type Candidate = {
   source_url: string | null;
   cover_url: string | null;
   candidate_digest: string;
+  duplicate_count?: number;
   match: Record<string, unknown>;
 };
 export type ReviewTrack = {
@@ -70,6 +71,36 @@ const display = (v: unknown): string =>
       : typeof v === 'object'
         ? JSON.stringify(v)
         : String(v);
+function candidateLabel(
+  candidate: Candidate,
+  track: ReviewTrack,
+  providers: Record<string, string>,
+) {
+  const album =
+    typeof candidate.fields.album === 'string' && candidate.fields.album
+      ? candidate.fields.album
+      : '未提供专辑';
+  const title =
+    typeof candidate.fields.title === 'string' && candidate.fields.title !== track.title
+      ? candidate.fields.title
+      : '';
+  const date =
+    typeof candidate.fields.release_date === 'string' ? candidate.fields.release_date : '';
+  const score = candidate.match.score;
+  return [
+    providers[candidate.provider] || candidate.provider,
+    title,
+    album,
+    date,
+    typeof score === 'number' && Number.isFinite(score)
+      ? `匹配度 ${Math.round(score <= 1 ? score * 100 : score)}%`
+      : '',
+    candidate.metadata_version !== track.metadata_version ? '已过期' : '',
+  ]
+    .filter(Boolean)
+    .join(' · ');
+}
+
 function defaultChoice(track: ReviewTrack): Choice {
   const source = track.suggestions.find((s) => s.metadata_version === track.metadata_version);
   return {
@@ -86,8 +117,10 @@ export function MetadataReviewWorkbench({
   initialTrackId,
   onApplied,
   onBusy,
+  onClose,
 }: {
   initialTrackId?: string;
+  onClose?: () => void;
   onApplied?: () => void | Promise<void>;
   onBusy?: (busy: boolean) => void;
 }) {
@@ -106,6 +139,7 @@ export function MetadataReviewWorkbench({
     [cover, setCover] = useState<AgentDraft | null>(null),
     [coverAll, setCoverAll] = useState(false),
     [coverReady, setCoverReady] = useState(false);
+  const [showSongs, setShowSongs] = useState(false);
   const [refresh, setRefresh] = useState(false),
     [conflicts, setConflicts] = useState<Record<string, string>>({});
   useEffect(() => {
@@ -141,7 +175,7 @@ export function MetadataReviewWorkbench({
     setAlbumTotal(result.total);
     return result.items;
   }
-  async function load(query: string, next?: string) {
+  async function load(query: string, next?: string, preserveOtherChoices = false) {
     const generation = ++sequence.current;
     setLoading(true);
     setError('');
@@ -149,7 +183,26 @@ export function MetadataReviewWorkbench({
       const result = await api<ReviewPage>(`/agent/metadata-review?limit=500&${query}`);
       if (generation !== sequence.current) return;
       setPage(result);
-      setChoices(Object.fromEntries(result.items.map((t) => [t.id, defaultChoice(t)])));
+      setChoices((previous) =>
+        Object.fromEntries(
+          result.items.map((t) => {
+            const choice = previous[t.id];
+            if (
+              preserveOtherChoices &&
+              t.id !== next &&
+              choice &&
+              page?.items.find((old) => old.id === t.id)?.metadata_version === t.metadata_version &&
+              t.suggestions.some((source) => source.id === choice.source)
+            )
+              return [t.id, choice];
+            const fallback = defaultChoice(t);
+            return [
+              t.id,
+              preserveOtherChoices && t.id === next ? { ...fallback, fields: [] } : fallback,
+            ];
+          }),
+        ),
+      );
       setActive(
         next && result.items.some((t) => t.id === next)
           ? next
@@ -189,11 +242,43 @@ export function MetadataReviewWorkbench({
   }
   function nextItem() {
     if (!page || !current) return;
+    setNotice('');
+    setError('');
     const index = page.items.indexOf(current);
     setActive(page.items[(index + 1) % page.items.length]?.id || '');
     setTab('fields');
     setCover(null);
     setCoverReady(false);
+  }
+  async function rejectCurrent() {
+    if (request.current || busy || loading || !current || !candidate || !page) return;
+    request.current = true;
+    setBusy(true);
+    setError('');
+    setNotice('');
+    try {
+      await api('/agent/metadata-review/reject', {
+        method: 'POST',
+        body: JSON.stringify({
+          track_id: current.id,
+          suggestion_id: candidate.id,
+          metadata_version: current.metadata_version,
+          candidate_digest: candidate.candidate_digest,
+        }),
+      });
+      await load(
+        `album_id=${encodeURIComponent(page.album_id)}&offset=${page.offset}`,
+        active,
+        true,
+      );
+      await loadAlbums();
+      setNotice('已拒绝当前候选及其旧的重复记录，现有资料保持不变；其他候选和后续查询不受影响。');
+    } catch (reason) {
+      setError(errorText(reason));
+    } finally {
+      request.current = false;
+      setBusy(false);
+    }
   }
   async function accept(single = false) {
     if (request.current || busy || loading || !page || (cover && !coverReady)) return;
@@ -308,15 +393,25 @@ export function MetadataReviewWorkbench({
           <h2>批量核对资料</h2>
           <p className="muted">只勾选需要的变化。已有人工值默认保留；勾选后会替换该字段。</p>
         </div>
-        <button
-          disabled={disabled}
-          onClick={() =>
-            page &&
-            void load(`album_id=${encodeURIComponent(page.album_id)}&offset=${page.offset}`, active)
-          }
-        >
-          重新读取
-        </button>
+        <div className="review-heading-actions">
+          <button
+            disabled={disabled}
+            onClick={() =>
+              page &&
+              void load(
+                `album_id=${encodeURIComponent(page.album_id)}&offset=${page.offset}`,
+                active,
+              )
+            }
+          >
+            重新读取
+          </button>
+          {onClose && (
+            <button aria-label="关闭批量核对" disabled={busy} onClick={onClose}>
+              关闭
+            </button>
+          )}
+        </div>
       </header>
       {error && (
         <p role="alert" className="error">
@@ -384,40 +479,51 @@ export function MetadataReviewWorkbench({
             >
               清空选择
             </button>
+            <button
+              className="review-song-toggle"
+              aria-expanded={showSongs}
+              onClick={() => setShowSongs(!showSongs)}
+            >
+              {showSongs ? '收起歌曲列表' : `选择歌曲（已选 ${selected.length} 首）`}
+            </button>
           </div>
           {loading && <p role="status">正在读取专辑差异…</p>}
-          <div className="review-song-list" aria-label="专辑歌曲">
-            {page?.items.map((t) => (
-              <div key={t.id} className={active === t.id ? 'active' : ''}>
-                <input
-                  type="checkbox"
-                  aria-label={`选择 ${t.title}`}
-                  checked={!!choices[t.id]?.fields.length}
-                  disabled={disabled}
-                  onChange={(e) => choose(t.id, e.target.checked ? defaultChoice(t).fields : [])}
-                />
-                <button
-                  disabled={disabled}
-                  onClick={() => {
-                    setActive(t.id);
-                    setCover(null);
-                    setCoverReady(false);
-                  }}
-                >
-                  <span>
-                    {t.disc_number || 1}.{t.track_number || '—'} {t.title}
-                  </span>
-                  <small>
-                    {conflicts[t.id]
-                      ? '版本或来源冲突'
-                      : t.suggestions.some((s) => s.metadata_version === t.metadata_version)
-                        ? `${choices[t.id]?.fields.length || 0} 个字段已选`
-                        : '暂无有效候选'}
-                  </small>
-                </button>
-              </div>
-            ))}
-          </div>
+          {showSongs && (
+            <div className="review-song-list" aria-label="专辑歌曲">
+              {page?.items.map((t) => (
+                <div key={t.id} className={active === t.id ? 'active' : ''}>
+                  <input
+                    type="checkbox"
+                    aria-label={`选择 ${t.title}`}
+                    checked={!!choices[t.id]?.fields.length}
+                    disabled={disabled}
+                    onChange={(e) => choose(t.id, e.target.checked ? defaultChoice(t).fields : [])}
+                  />
+                  <button
+                    disabled={disabled}
+                    onClick={() => {
+                      setActive(t.id);
+                      setNotice('');
+                      setError('');
+                      setCover(null);
+                      setCoverReady(false);
+                    }}
+                  >
+                    <span>
+                      {t.disc_number || 1}.{t.track_number || '—'} {t.title}
+                    </span>
+                    <small>
+                      {conflicts[t.id]
+                        ? '版本或来源冲突'
+                        : t.suggestions.some((s) => s.metadata_version === t.metadata_version)
+                          ? `${choices[t.id]?.fields.length || 0} 个字段已选`
+                          : '暂无有效候选'}
+                    </small>
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
           {page && page.total > page.limit && (
             <div className="workspace-actions">
               <button
@@ -454,6 +560,8 @@ export function MetadataReviewWorkbench({
                     value={choices[current.id]?.source || ''}
                     disabled={disabled}
                     onChange={(e) => {
+                      setNotice('');
+                      setError('');
                       const c = current.suggestions.find((s) => s.id === e.target.value)!;
                       setChoices((old) => ({
                         ...old,
@@ -478,8 +586,7 @@ export function MetadataReviewWorkbench({
                     </option>
                     {current.suggestions.map((c) => (
                       <option key={c.id} value={c.id}>
-                        {page?.provider_names[c.provider] || c.provider}
-                        {c.metadata_version !== current.metadata_version ? ' · 已过期' : ''}
+                        {candidateLabel(c, current, page?.provider_names || {})}
                       </option>
                     ))}
                   </select>
@@ -488,6 +595,11 @@ export function MetadataReviewWorkbench({
                   更新元数据
                 </button>
               </div>
+              {candidate && (candidate.duplicate_count || 1) > 1 && (
+                <p className="muted review-candidate-note">
+                  已合并 {candidate.duplicate_count} 条相同候选记录；不同发行版本仍分别保留。
+                </p>
+              )}
               {jobs.length > 0 && (
                 <details open={jobs.some((j) => j.status === 'failed')}>
                   <summary>本曲最近查询记录</summary>
@@ -720,6 +832,13 @@ export function MetadataReviewWorkbench({
             本次跳过 / 下一首
           </button>
           <button
+            disabled={disabled || !candidate}
+            onClick={() => void rejectCurrent()}
+            title="仅归档这份候选，不修改歌曲资料或禁用来源"
+          >
+            拒绝当前建议
+          </button>
+          <button
             disabled={
               disabled ||
               (!choices[active]?.fields.length && !cover) ||
@@ -761,7 +880,12 @@ export function MetadataReviewDialog({
   const [busy, setBusy] = useState(false);
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => {
+    const previous = document.documentElement.style.overflow;
+    document.documentElement.style.overflow = 'hidden';
     dialog.current?.showModal();
+    return () => {
+      document.documentElement.style.overflow = previous;
+    };
   }, []);
   return (
     <dialog
@@ -773,12 +897,12 @@ export function MetadataReviewDialog({
         if (!busy) onClose();
       }}
     >
-      <header>
-        <button aria-label="关闭批量核对" disabled={busy} onClick={onClose}>
-          关闭
-        </button>
-      </header>
-      <MetadataReviewWorkbench initialTrackId={trackId} onApplied={onApplied} onBusy={setBusy} />
+      <MetadataReviewWorkbench
+        initialTrackId={trackId}
+        onApplied={onApplied}
+        onBusy={setBusy}
+        onClose={onClose}
+      />
     </dialog>
   );
 }

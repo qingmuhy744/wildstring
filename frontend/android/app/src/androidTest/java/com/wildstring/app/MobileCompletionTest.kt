@@ -69,6 +69,8 @@ class MobileCompletionTest {
         val showSuggestions = AtomicBoolean(false)
         val failLyrics = AtomicBoolean(false)
         val applied = AtomicBoolean(false)
+        val rejected = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+        val failRejection = AtomicBoolean(false)
         val slowCatalog = AtomicBoolean(false)
         val aacDownloads = AtomicBoolean(false)
         val deletedPlaylist = AtomicBoolean(false)
@@ -85,7 +87,9 @@ class MobileCompletionTest {
             val rows = com.google.gson.JsonArray()
             (0..1).forEach { n ->
                 val row = JsonParser.parseString("""{"id":"completion-$n","title":"手机测试歌曲 $n","album":"手机测试专辑","album_id":"review-album","artists":["测试艺人"],"has_cover":false,"metadata_version":1,"current":{"title":"手机测试歌曲 $n","album":"人工专辑"},"original":{"title":"原始","album":"文件专辑"},"overrides":{"album":"人工专辑"},"suggestions":[]}""").asJsonObject
-                if (!applied.get()) row.add("suggestions", JsonParser.parseString("""[{"id":"pending-$n","metadata_version":1,"provider":"musicbrainz","fields":{"title":"建议标题","album":"建议专辑"},"candidate_digest":"${"a".repeat(64)}","cover_url":"https://coverartarchive.org/candidate.jpg","match":{}},{"id":"stale-$n","metadata_version":0,"provider":"lastfm","fields":{"title":"过期建议"},"candidate_digest":"${"b".repeat(64)}","match":{}}]"""))
+                if (!applied.get()) row.add("suggestions", JsonParser.parseString("""[{"id":"pending-$n","metadata_version":1,"provider":"musicbrainz","fields":{"title":"建议标题","album":"建议专辑"},"candidate_digest":"${"a".repeat(64)}","cover_url":"https://coverartarchive.org/candidate.jpg","duplicate_count":2,"match":{"score":0.98}},{"id":"stale-$n","metadata_version":0,"provider":"lastfm","fields":{"title":"过期建议"},"candidate_digest":"${"b".repeat(64)}","match":{}}]"""))
+                val suggestions = row.getAsJsonArray("suggestions")
+                for (i in suggestions.size() - 1 downTo 0) if (suggestions[i].asJsonObject.text("id") in rejected) suggestions.remove(i)
                 rows.add(row)
             }
             return JsonParser.parseString("""{"album_id":"review-album","provider_names":{"musicbrainz":"MusicBrainz","lastfm":"Last.fm"},"limit":500,"offset":0,"total":2}""").asJsonObject.apply { add("items", rows) }.toString()
@@ -125,6 +129,11 @@ class MobileCompletionTest {
                     if (path.endsWith("/listening/summary")) return json("""{"play_count":8,"listened_ms":120000,"tracks_played":3,"favorites":1}""")
                     if (path.endsWith("/lastfm")) return json("""{"configured":false,"connected":false,"scrobble":false,"now_playing":false,"version":1}""")
                     if (path.endsWith("/agent/metadata-review/albums")) return json("""{"items":[{"id":"review-album","title":"手机测试专辑","artists":["测试艺人"],"count":2}],"total":1}""")
+                    if (path.endsWith("/agent/metadata-review/reject")) {
+                        if (failRejection.getAndSet(false)) return json("""{"detail":"metadata_candidate_changed"}""").setResponseCode(409)
+                        rejected.add(JsonParser.parseString(request.body.readUtf8()).asJsonObject.text("suggestion_id"))
+                        return json("""{"status":"ignored","ignored_count":2,"already_ignored":false}""")
+                    }
                     if (path.endsWith("/agent/metadata-review/accept")) { applied.set(true); return json("""{"status":"applied","draft":{"id":"receipt"}}""") }
                     if (path.endsWith("/agent/metadata-review")) return json(reviewPage()).setBodyDelay(500, TimeUnit.MILLISECONDS)
                     if (path.contains("/manage/")) return when {
@@ -384,6 +393,44 @@ class MobileCompletionTest {
                 val apply = JsonParser.parseString(fixture.mutations.last { it.first.endsWith("/metadata-review/accept") }.second).asJsonObject
                 assertEquals(2, apply.getAsJsonArray("items").size())
                 apply.getAsJsonArray("items").forEach { item -> assertEquals("title", item.asJsonObject.getAsJsonArray("fields").single().asString) }
+            } finally { cleanup(vm) }
+        }
+    }
+    @Test fun metadataReviewRejectsOnlyCurrentCandidateAndPreservesOtherChoices() {
+        Fixture().use { fixture -> val vm = connect(fixture)
+            try {
+                fixture.showSuggestions.set(true)
+                compose.runOnIdle { vm.openAlbum(Album("completion-album", "手机测试专辑", listOf("测试艺人"), 3, null)) }
+                compose.waitUntil(10_000) { compose.onAllNodesWithContentDescription("手机测试歌曲 0的操作").fetchSemanticsNodes().isNotEmpty() }
+                compose.onNodeWithContentDescription("手机测试歌曲 0的操作").performClick()
+                compose.onNodeWithText("更新元数据与建议").performScrollTo().performClick()
+                compose.waitUntil(10_000) { compose.onAllNodesWithTag("review-source").fetchSemanticsNodes().isNotEmpty() }
+                compose.onNodeWithTag("review-scroll").performScrollToNode(hasTestTag("review-source"))
+                compose.onNodeWithTag("review-source").performClick()
+                compose.onAllNodesWithText("MusicBrainz · 建议标题 · 建议专辑 · 匹配度 98%", substring = true).onLast().assertIsDisplayed()
+                capture("metadata-review-candidates-native.png")
+                compose.onNodeWithText("关闭", substring = false).performClick()
+                compose.onNodeWithText("清空", substring = false).performScrollTo().performClick()
+                compose.onNodeWithTag("review-reject-current").assertIsEnabled()
+                fixture.failRejection.set(true)
+                compose.onNodeWithTag("review-reject-current").performClick()
+                compose.waitUntil(10_000) { compose.onAllNodesWithText("请刷新并重新核对", substring = true).fetchSemanticsNodes().isNotEmpty() }
+                assertTrue(fixture.rejected.isEmpty())
+                compose.onNodeWithTag("review-reject-current").performClick()
+                compose.waitUntil(10_000) { compose.onAllNodesWithTag("review-rejection-notice").fetchSemanticsNodes().isNotEmpty() }
+                assertEquals(setOf("pending-0"), fixture.rejected.toSet())
+                compose.onNodeWithText("已选 0 首 · 0 个字段", substring = false).assertIsDisplayed()
+                compose.onNodeWithTag("review-accept-selected").assertIsNotEnabled()
+                assertFalse(fixture.applied.get())
+                val attempts = fixture.mutations.filter { it.first.endsWith("/metadata-review/reject") }
+                assertEquals(2, attempts.size); assertEquals(attempts[0].second, attempts[1].second)
+                val body = JsonParser.parseString(attempts[0].second).asJsonObject
+                assertEquals("completion-0", body.text("track_id")); assertEquals("pending-0", body.text("suggestion_id"))
+                assertEquals("a".repeat(64), body.text("candidate_digest")); assertEquals(1, body.number("metadata_version").toInt())
+                capture("metadata-review-rejected-native.png")
+                compose.onNodeWithText("本次跳过", substring = false).performClick()
+                compose.onNodeWithTag("review-rejection-notice").assertDoesNotExist()
+                compose.onNodeWithTag("review-reject-current").assertIsEnabled()
             } finally { cleanup(vm) }
         }
     }
