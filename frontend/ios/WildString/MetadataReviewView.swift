@@ -774,8 +774,11 @@ struct MetadataReviewView: View {
                     )
                 )
             }
-            let signature = items.map(\.trackID).joined(separator: ",")
-                + "|\(items.reduce(0) { $0 + $1.fields.count })|\(coverDraft?.id ?? "")"
+            let signature = items.map {
+                "\($0.trackID):\($0.fields.sorted().joined(separator: ","))"
+            }.joined(separator: "|")
+                + "|cover:\(coverDraft?.id ?? "")"
+                + "|targets:\(coverAll ? "page" : "track")"
             if signature != operationSignature {
                 operationSignature = signature
                 operationKey = UUID().uuidString.lowercased()
