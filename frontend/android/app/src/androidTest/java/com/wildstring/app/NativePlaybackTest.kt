@@ -389,7 +389,8 @@ class NativePlaybackTest {
             val styleStreams = requests.count { it.path?.contains("/stream") == true }
             for ((key, label) in listOf("vinyl" to "黑胶", "cassette" to "磁带", "cover" to "封面")) {
                 stage("style begin $key")
-                compose.onNodeWithContentDescription("收起播放器").performClick()
+                val playerBack = if (compose.onAllNodesWithContentDescription("返回封面").fetchSemanticsNodes().isNotEmpty()) "返回封面" else "收起播放器"
+                compose.onNodeWithContentDescription(playerBack).performClick()
                 compose.onNodeWithContentDescription("设置").performClick()
                 compose.onNodeWithTag("setting-播放样式").performScrollTo().performClick()
                 waitForDialogWindow("style choice $key")
