@@ -157,6 +157,34 @@ def test_metadata_validation_permissions_and_library_isolation(settings, authent
         assert client.get("/api/v1/manage/overview").json()["counts"]["tracks"] == 0
 
 
+def test_folder_metadata_batch_updates_all_members_and_keeps_versions(
+    settings, authenticated_client
+):
+    music(settings, "批量一.flac", ["甲"], ["甲"], album="错误专辑", number=1)
+    music(settings, "批量二.flac", ["乙"], ["乙"], album="另一个错误专辑", number=2)
+    scan_library(settings)
+    with authenticated_client(settings) as client:
+        folders = client.get("/api/v1/manage/metadata/folders").json()
+        assert folders["total"] == 1 and folders["items"][0]["warning"]
+        folder = folders["items"][0]["folder"]
+        detail = client.get("/api/v1/manage/metadata/folders", params={"folder": folder}).json()
+        response = client.put(
+            "/api/v1/manage/metadata/folders",
+            headers=HEADERS,
+            json={
+                "folder": folder,
+                "tracks": [
+                    {"track_id": item["track_id"], "version": item["metadata_version"]}
+                    for item in detail["tracks"]
+                ],
+                "overrides": {"album": "2 的奉献", "album_artists": ["GALA"]},
+            },
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["updated"] == 2
+        assert client.get("/api/v1/albums").json()["items"][0]["title"] == "2 的奉献"
+
+
 def test_v5_migration_preserves_identity_and_personal_data(settings, authenticated_client):
     music(settings, "旧版本.flac", ["甲"], ["甲"])
     scan_library(settings)

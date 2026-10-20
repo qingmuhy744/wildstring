@@ -43,7 +43,7 @@ class BilingualLyricTest {
         return Gson().fromJson(source, Lyrics::class.java)
     }
 
-    @Test fun originalAndTranslationShareOneRowAndLanguagesCanBeHiddenWithoutSeeking() {
+    @Test fun chineseTranslationAppearsBeforeEnglishSourceAndCanBeHiddenWithoutSeeking() {
         val lyrics = languageFixture()
         val index = lyrics.lines.indexOfFirst { !it.translation.isNullOrBlank() }
         assertTrue("fixture needs an aligned translation", index >= 0)
@@ -53,7 +53,7 @@ class BilingualLyricTest {
         compose.onNodeWithTag("lyric-translation-$index").assertIsDisplayed()
         val original = compose.onNodeWithTag("lyric-line-$index").fetchSemanticsNode().boundsInRoot
         val translated = compose.onNodeWithTag("lyric-translation-$index").fetchSemanticsNode().boundsInRoot
-        assertTrue("translation belongs below the same original", translated.top >= original.bottom)
+        assertTrue("Chinese translation belongs above the English source", translated.bottom <= original.top)
         compose.onNodeWithTag("lyric-translation-toggle").performClick()
         compose.onNodeWithTag("lyric-translation-$index").assertDoesNotExist()
         compose.onNodeWithTag("lyric-translation-toggle").performClick()

@@ -133,6 +133,7 @@ import kotlin.math.roundToInt
         if (!state.loading && state.total == 0 && state.error == null) Text(
             if (state.query.isNotBlank()) "没有找到匹配的音乐" else if (state.kind == "playlists") "还没有歌单" else "这里还没有音乐，请先在网页端导入曲库。",
             Modifier.align(Alignment.Center).padding(24.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (state.loading && !state.hasContent) CatalogSkeleton(state.kind)
     }
 }
 

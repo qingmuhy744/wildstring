@@ -21,6 +21,8 @@ type Candidate = {
   candidate_digest: string;
   duplicate_count?: number;
   match: Record<string, unknown>;
+  stale?: boolean;
+  stale_reason?: string | null;
 };
 export type ReviewTrack = {
   id: string;
@@ -108,14 +110,14 @@ function candidateLabel(
       ? `匹配度 ${Math.round(score <= 1 ? score * 100 : score)}%`
       : '',
     candidate.match.album_release_lock ? '与锁定发行冲突' : '',
-    candidate.metadata_version !== track.metadata_version ? '已过期' : '',
+    candidate.stale_reason || (candidate.stale ? '查询依据已变化' : ''),
   ]
     .filter(Boolean)
     .join(' · ');
 }
 
 function defaultChoice(track: ReviewTrack): Choice {
-  const source = track.suggestions.find((s) => s.metadata_version === track.metadata_version);
+  const source = track.suggestions.find((s) => !s.stale);
   return {
     source: source?.id || '',
     fields: source
@@ -600,7 +602,7 @@ export function MetadataReviewWorkbench({
                     <small>
                       {conflicts[t.id]
                         ? '版本或来源冲突'
-                        : t.suggestions.some((s) => s.metadata_version === t.metadata_version)
+                        : t.suggestions.some((s) => !s.stale)
                           ? `${choices[t.id]?.fields.length || 0} 个字段已选`
                           : '暂无有效候选'}
                     </small>
@@ -644,14 +646,13 @@ export function MetadataReviewWorkbench({
                         ...old,
                         [current.id]: {
                           source: c.id,
-                          fields:
-                            c.metadata_version === current.metadata_version
-                              ? Object.keys(c.fields).filter(
-                                  (k) =>
-                                    !same(current.current[k], c.fields[k]) &&
-                                    !Object.hasOwn(current.overrides, k),
-                                )
-                              : [],
+                          fields: !c.stale
+                            ? Object.keys(c.fields).filter(
+                                (k) =>
+                                  !same(current.current[k], c.fields[k]) &&
+                                  !Object.hasOwn(current.overrides, k),
+                              )
+                            : [],
                         },
                       }));
                       setCover(null);
@@ -711,9 +712,7 @@ export function MetadataReviewWorkbench({
                       <p className="muted">
                         来源：{page?.provider_names[candidate.provider] || candidate.provider} ·
                         信息版本 {candidate.metadata_version}
-                        {candidate.metadata_version !== current.metadata_version
-                          ? '（已变化，仅供核对）'
-                          : ''}
+                        {candidate.stale_reason ? `（${candidate.stale_reason}）` : ''}
                       </p>
                       <table className="review-diff">
                         <thead>
@@ -735,10 +734,7 @@ export function MetadataReviewWorkbench({
                                       type="checkbox"
                                       checked={choices[current.id]?.fields.includes(field) || false}
                                       aria-label={`采用 ${names[field] || field}`}
-                                      disabled={
-                                        disabled ||
-                                        candidate.metadata_version !== current.metadata_version
-                                      }
+                                      disabled={disabled || candidate.stale}
                                       onChange={(e) =>
                                         choose(
                                           current.id,
@@ -784,9 +780,7 @@ export function MetadataReviewWorkbench({
                                               {
                                                 ...old[t.id],
                                                 fields:
-                                                  c &&
-                                                  field in c.fields &&
-                                                  c.metadata_version === t.metadata_version
+                                                  c && field in c.fields && !c.stale
                                                     ? on
                                                       ? [...new Set([...fields, field])]
                                                       : fields.filter((k) => k !== field)
@@ -841,7 +835,7 @@ export function MetadataReviewWorkbench({
                   </label>
                   {candidate?.cover_url ? (
                     <button
-                      disabled={disabled || candidate.metadata_version !== current.metadata_version}
+                      disabled={disabled || candidate.stale}
                       onClick={() => void prepareCover()}
                     >
                       固定并预览此封面

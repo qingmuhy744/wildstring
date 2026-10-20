@@ -9,6 +9,7 @@ from pydantic import Field
 from wildstring.agent_common import digest, encoded
 from wildstring.agent_models import Apply, DraftCreate, Evidence, Input
 from wildstring.agent_sources import evidence_url
+from wildstring.metadata_matching import candidate_matches
 
 
 def candidate_digest(row):
@@ -117,7 +118,7 @@ class Review:
                 track_args = (self.library_id, album_id, limit, offset)
                 count_args = (self.library_id, album_id)
             rows = db.execute(
-                "SELECT t.id,t.title,t.album,t.album_id,t.artists,t.disc_number,t.track_number,t.has_cover,m.version,m.observed,m.overrides "  # nosec B608
+                "SELECT t.id,t.title,t.album,t.album_id,t.artists,t.disc_number,t.track_number,t.has_cover,t.duration_ms,m.version,m.observed,m.overrides "  # nosec B608
                 "FROM tracks t JOIN track_metadata m ON m.track_id=t.id WHERE t.library_id=? AND t.status='available' AND "
                 + membership
                 + " ORDER BY COALESCE(t.disc_number,1),COALESCE(t.track_number,99999),t.title,t.id LIMIT ? OFFSET ?",
@@ -153,12 +154,17 @@ class Review:
         by_track = {}
         priority = self.providers.source_priority()
         for row in suggestions:
+            match = json.loads(row["match"])
+            public_match = {
+                key: value for key, value in match.items() if not key.startswith("input_")
+            }
             value = {
                 k: row[k] for k in ("id", "track_id", "metadata_version", "provider", "cover_url")
             }
             value.update(
                 fields=json.loads(row["fields"]),
-                match=json.loads(row["match"]),
+                match=public_match,
+                _lookup_match=match,
                 source_url=evidence_url(row["source_url"]),
                 candidate_digest=candidate_digest(row),
                 duplicate_count=row["duplicate_count"],
@@ -166,7 +172,22 @@ class Review:
             by_track.setdefault(row["track_id"], []).append(value)
         items = []
         for row in rows:
+            current = json.loads(row["observed"]) | json.loads(row["overrides"])
+            lookup_current = current | {"duration_ms": row["duration_ms"]}
             candidates = by_track.get(row["id"], [])
+            for candidate in candidates:
+                candidate["stale"] = not candidate_matches(
+                    lookup_current, candidate.pop("_lookup_match", {})
+                )
+                candidate["stale_reason"] = (
+                    "查询依据已变化，请重新查询"
+                    if candidate["stale"]
+                    else (
+                        "元数据版本已更新，但查询依据未变，可继续核对"
+                        if candidate["metadata_version"] != row["version"]
+                        else None
+                    )
+                )
             candidates.sort(
                 key=lambda x: (
                     priority.index(x["provider"]) if x["provider"] in priority else len(priority),
@@ -184,7 +205,7 @@ class Review:
                     "track_number": row["track_number"],
                     "has_cover": bool(row["has_cover"]),
                     "metadata_version": row["version"],
-                    "current": json.loads(row["observed"]) | json.loads(row["overrides"]),
+                    "current": current,
                     "original": json.loads(row["observed"]),
                     "overrides": json.loads(row["overrides"]),
                     "suggestions": candidates,
@@ -273,19 +294,21 @@ class Review:
         with self.database.connect() as db:
             for item in body.items:
                 row = db.execute(
-                    "SELECT s.*,t.title,m.version AS current_version FROM metadata_suggestions s JOIN tracks t ON t.id=s.track_id JOIN track_metadata m ON m.track_id=t.id WHERE s.id=? AND s.track_id=? AND t.library_id=? AND t.status='available'",
+                    "SELECT s.*,t.title,t.duration_ms,m.version AS current_version,m.observed,m.overrides FROM metadata_suggestions s JOIN tracks t ON t.id=s.track_id JOIN track_metadata m ON m.track_id=t.id WHERE s.id=? AND s.track_id=? AND t.library_id=? AND t.status='available'",
                     (item.suggestion_id, item.track_id, self.library_id),
                 ).fetchone()
                 code = None
                 if row is None:
                     code = "suggestion_not_found"
-                elif (
-                    row["current_version"] != item.metadata_version
-                    or row["metadata_version"] != item.metadata_version
-                ):
+                elif row["current_version"] != item.metadata_version:
                     code = "metadata_version_conflict"
                 elif row["status"] != "pending" or candidate_digest(row) != item.candidate_digest:
                     code = "metadata_candidate_changed"
+                else:
+                    match = json.loads(row["match"])
+                    current = json.loads(row["observed"]) | json.loads(row["overrides"])
+                    if not candidate_matches(current | {"duration_ms": row["duration_ms"]}, match):
+                        code = "metadata_version_conflict"
                 if code:
                     conflicts.append(
                         {

@@ -7,18 +7,19 @@ import shutil
 import sqlite3
 import time
 from importlib.metadata import version
+from pathlib import PurePosixPath
 from threading import Event, Thread
 from typing import Annotated, Literal
 from uuid import uuid4
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 from filelock import FileLock, Timeout
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from wildstring.ai_config import AIService, AIUpdate
 from wildstring.album_release_locks import ReleaseLockInput
 from wildstring.diagnostics import record_event, trace_context
-from wildstring.library.edits import MetadataEditor, MetadataUpdate
+from wildstring.library.edits import MetadataEditor, MetadataUpdate, Overrides
 from wildstring.library.importer import import_music
 from wildstring.library.intake import Intake, IntakeApproval, IntakeSettings
 from wildstring.library.lyric_edits import LyricsEditor, LyricsText, LyricsUpdate
@@ -39,6 +40,31 @@ class PreferencesUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
     name: str = Field(min_length=1, max_length=100)
     version: int = Field(ge=1, strict=True)
+
+
+def validate_folder(value: str) -> str:
+    path = PurePosixPath(value)
+    if value.startswith("/") or ".." in path.parts:
+        raise ValueError("invalid_folder")
+    return path.as_posix()
+
+
+class FolderTrackUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    track_id: str = Field(min_length=1, max_length=128)
+    version: int = Field(ge=1, strict=True)
+
+
+class FolderMetadataUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    folder: str = Field(min_length=1, max_length=4096)
+    tracks: list[FolderTrackUpdate] = Field(min_length=1, max_length=1000)
+    overrides: Overrides
+
+    @field_validator("folder")
+    @classmethod
+    def valid_folder(cls, value: str) -> str:
+        return validate_folder(value)
 
 
 class Management:
@@ -159,6 +185,92 @@ class Management:
             "total": total,
             "limit": limit,
             "offset": offset,
+        }
+
+    def metadata_folders(self, limit=100, offset=0, folder=None):
+        """Group managed tracks by their relative parent folder for batch editing."""
+        library_id = self.repository.library_id()
+        with self.database.connect() as connection:
+            rows = connection.execute(
+                """SELECT t.id,t.path,t.title,t.album,t.album_artists,t.artists,t.track_number,
+                t.disc_number,m.version,m.observed,m.overrides
+                FROM tracks t JOIN track_metadata m ON m.track_id=t.id
+                WHERE t.library_id=? AND t.status='available' ORDER BY t.path,t.id""",
+                (library_id,),
+            ).fetchall()
+        grouped = {}
+        for row in rows:
+            parent = PurePosixPath(row["path"]).parent.as_posix()
+            if folder is not None and parent != folder:
+                continue
+            current = json.loads(row["observed"]) | json.loads(row["overrides"])
+            item = {
+                "track_id": row["id"],
+                "title": row["title"],
+                "album": row["album"],
+                "album_artists": json.loads(row["album_artists"]),
+                "artists": json.loads(row["artists"]),
+                "track_number": row["track_number"],
+                "disc_number": row["disc_number"],
+                "metadata_version": row["version"],
+                "metadata": current,
+            }
+            group = grouped.setdefault(
+                parent,
+                {"folder": parent, "tracks": [], "albums": set(), "album_artists": set()},
+            )
+            group["tracks"].append(item)
+            group["albums"].add(row["album"] or "")
+            group["album_artists"].update(json.loads(row["album_artists"]))
+        values = []
+        for group in grouped.values():
+            albums = sorted(value for value in group.pop("albums") if value)
+            artists = sorted(value for value in group.pop("album_artists") if value)
+            group.update(
+                {
+                    "track_count": len(group["tracks"]),
+                    "album_variants": albums,
+                    "album_artist_variants": artists,
+                    "warning": len(albums) > 1 or len(artists) > 1,
+                }
+            )
+            values.append(group)
+        values.sort(key=lambda item: item["folder"])
+        if folder is not None:
+            return values[0] if values else None
+        return {
+            "items": [
+                {key: value for key, value in item.items() if key != "tracks"}
+                for item in values[offset : offset + limit]
+            ],
+            "total": len(values),
+            "limit": limit,
+            "offset": offset,
+        }
+
+    def update_metadata_folder(self, body, *, user_id="admin"):
+        group = self.metadata_folders(folder=body.folder)
+        if group is None:
+            raise HTTPException(404, "folder_not_found")
+        requested = {item.track_id: item.version for item in body.tracks}
+        available = {item["track_id"]: item for item in group["tracks"]}
+        if set(requested) - set(available):
+            raise HTTPException(409, "folder_membership_changed")
+        editor = MetadataEditor(self.repository)
+        with self.database.connect(write=True) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            for track_id, version_number in requested.items():
+                editor.save_in_transaction(
+                    connection,
+                    track_id,
+                    MetadataUpdate(version=version_number, overrides=body.overrides),
+                    user_id=user_id,
+                    source="folder-batch",
+                )
+        return {
+            "folder": body.folder,
+            "updated": len(requested),
+            "album_variants": self.metadata_folders(folder=body.folder)["album_variants"],
         }
 
     def link(self, job_id, *, import_id=None, scan_id=None):
@@ -440,6 +552,22 @@ def management_router(service, auth, providers=None):
     @router.get("/jobs/{job_id}")
     def job(job_id: str):
         return service.job(job_id)
+
+    @router.get("/metadata/folders")
+    def metadata_folders(
+        limit: Annotated[int, Query(ge=1, le=200)] = 100,
+        offset: Annotated[int, Query(ge=0)] = 0,
+        folder: str | None = None,
+    ):
+        if folder is not None:
+            folder = validate_folder(folder)
+        return service.metadata_folders(limit, offset, folder)
+
+    @router.put("/metadata/folders", dependencies=[Depends(auth.require_client)])
+    def update_metadata_folder(
+        body: FolderMetadataUpdate, user: Annotated[dict, Depends(auth.require_admin)]
+    ):
+        return service.update_metadata_folder(body, user_id=user["id"])
 
     @router.get("/tracks/{track_id}/metadata")
     def metadata(track_id: str):

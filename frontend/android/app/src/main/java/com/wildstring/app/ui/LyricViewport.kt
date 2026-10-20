@@ -128,11 +128,19 @@ import kotlin.math.roundToInt
                     val selection = if (line.timeMs != null) Modifier.combinedClickable(
                         onClickLabel = "选择歌词时间", onLongClickLabel = "查看大封面",
                         onLongClick = onArtwork, hapticFeedbackEnabled = false, onClick = selectLine) else Modifier
-                    Text(text, Modifier.testTag("lyric-line-$index").then(selection), style = mainStyle,
-                        color = if (lyrics.kind == "plain" || highlighted) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .65f))
-                    if (showTranslation && !line.translation.isNullOrBlank())
-                        Text(line.translation, Modifier.testTag("lyric-translation-$index").then(selection), style = secondaryStyle,
+                    val translation = line.translation?.takeIf { showTranslation && it.isNotBlank() }
+                    val translationFirst = translation != null && containsCjk(translation) && !containsCjk(line.text)
+                    val originalColor = if (lyrics.kind == "plain" || highlighted) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .65f)
+                    if (translationFirst) {
+                        Text(translation, Modifier.testTag("lyric-translation-$index").then(selection), style = secondaryStyle,
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(text, Modifier.testTag("lyric-line-$index").then(selection), style = mainStyle, color = originalColor)
+                    } else {
+                        Text(text, Modifier.testTag("lyric-line-$index").then(selection), style = mainStyle, color = originalColor)
+                        if (translation != null)
+                            Text(translation, Modifier.testTag("lyric-translation-$index").then(selection), style = secondaryStyle,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                     if (showRomanization && !line.romanization.isNullOrBlank())
                         Text(line.romanization, Modifier.testTag("lyric-romanization-$index").then(selection), style = secondaryStyle,
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -160,4 +168,8 @@ import kotlin.math.roundToInt
             }
         }
     }
+}
+
+private fun containsCjk(value: String): Boolean = value.any {
+    it in '\u3400'..'\u4DBF' || it in '\u4E00'..'\u9FFF' || it in '\uF900'..'\uFAFF'
 }

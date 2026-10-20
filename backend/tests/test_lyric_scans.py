@@ -289,7 +289,7 @@ def test_schema20_upgrade_keeps_existing_library(settings):
         before = connection.execute("SELECT count(*) FROM users").fetchone()[0]
     db.initialize()
     with db.connect() as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 25
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 26
         assert connection.execute("SELECT count(*) FROM users").fetchone()[0] == before
 
 

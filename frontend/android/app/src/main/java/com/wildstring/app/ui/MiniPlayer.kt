@@ -26,12 +26,16 @@ import androidx.compose.ui.unit.dp
 /** Album-tinted capsule with independent playback and queue targets. No per-frame artwork work. */
 @Composable internal fun MiniPlayer(vm: MusicViewModel, state: MusicState, onQueue: () -> Unit, expand: () -> Unit) {
     val track = state.current ?: return
+    val feedback = LocalTactileFeedback.current
     val art = artworkAtmosphere(vm, track)
     val colors = MaterialTheme.colorScheme
     val dark = LocalDarkAppearance.current || LocalRedCloth.current
     val tint = art?.tint ?: colors.secondary
     Box(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 5.dp), contentAlignment = Alignment.Center) {
-        Surface(Modifier.widthIn(max = 640.dp).fillMaxWidth().testTag("mini-player"), shape = RoundedCornerShape(36.dp),
+        Surface(Modifier.widthIn(max = 640.dp).fillMaxWidth().testTag("mini-player")
+            .trackSwipeGestures(true,
+                onPrevious = { feedback(TactileKind.Tap); vm.previous() },
+                onNext = { feedback(TactileKind.Tap); vm.next() }), shape = RoundedCornerShape(36.dp),
             color = colors.surfaceContainerHigh, shadowElevation = 8.dp) {
             Box {
                 art?.let { Image(it.image, null, Modifier.matchParentSize(), contentScale = ContentScale.Crop,

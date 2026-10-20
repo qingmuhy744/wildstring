@@ -12,6 +12,7 @@ import { Pagination } from './track-list';
 import { IntakePanel } from './intake-panel';
 import { MetadataJobs } from './metadata-tasks';
 import { MetadataReviewDialog } from './metadata-review';
+import { FolderMetadataEditor } from './folder-metadata';
 
 type Directory = {
   path: string;
@@ -402,6 +403,7 @@ export function Management({
                     <p className="muted">还没有扫描记录。</p>
                   )}
                 </section>
+                <FolderMetadataEditor onChanged={onChanged} />
               </>
             )}
             {tab === 'tracks' && (

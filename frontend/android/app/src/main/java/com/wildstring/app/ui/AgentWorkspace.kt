@@ -81,6 +81,7 @@ private fun localAgentTime(value: String): String = runCatching { Instant.parse(
         when (filter) { "unread" -> notice.text("read_at").isBlank(); "read" -> notice.text("read_at").isNotBlank(); else -> true }
     }
     LaunchedEffect(owner) { vm.agent.refreshInbox() }
+    Box(Modifier.fillMaxSize()) {
     LazyColumn(Modifier.fillMaxSize().testTag("agent-notifications"), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -123,6 +124,8 @@ private fun localAgentTime(value: String): String = runCatching { Instant.parse(
         if (valid && visible.isEmpty() && !state.loading && state.error == null) item { AgentEmpty(when (filter) { "unread" -> "没有未读通知。已处理的消息可在已读记录中查看。"; "read" -> "暂无已读记录。"; else -> "还没有通知。后台结果会在你下次打开时出现在这里。" }) }
         item { Spacer(Modifier.height(16.dp)) }
     }
+    if (state.loading && visible.isEmpty()) AgentSkeleton()
+    }
 }
 
 @Composable private fun AgentDrafts(vm: MusicViewModel, selectedId: String?) {
@@ -152,6 +155,7 @@ private fun localAgentTime(value: String): String = runCatching { Instant.parse(
             Text("已应用、已拒绝的草案自动收进处理记录，按最近处理时间排列，差异与依据保留。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             ActionStatus(action)
         }
+        if (action.busy && drafts.isEmpty()) item { AgentSkeleton(Modifier.height(420.dp)) }
         if (!action.busy && visible.isEmpty() && action.message == null) item { AgentEmpty(when (filter) { "pending" -> "没有待处理草案。已完成的内容可在处理记录中查看。"; "history" -> "暂无处理记录。"; else -> "暂时没有草案。可让助手或 MCP 先整理候选。" }) }
         items(visible, key = { it.text("id") }) { draft ->
             AgentCard { Text(draft.text("title"), fontWeight = FontWeight.SemiBold); Text(draftLabel(draft.text("status")), color = MaterialTheme.colorScheme.primary); AgentTrace(draft)
@@ -383,6 +387,7 @@ internal fun connectionBudget(connection: JsonObject): String {
             Text("默认只检查本地资料，不调用 AI，也不会自动应用修改。", Modifier.padding(top = 8.dp), style = MaterialTheme.typography.bodySmall)
             ActionStatus(action)
         }
+        if (action.busy && tasks.isEmpty()) item { AgentSkeleton(Modifier.height(420.dp)) }
         items(tasks, key = { it.text("id") }) { task -> AgentCard {
             Text("${taskLabel(task.text("status"))} · ${inspectionStage(task.text("stage"), task.text("status"))}", fontWeight = FontWeight.Medium)
             Text(localAgentTime(task.text("created_at")), style = MaterialTheme.typography.labelSmall); AgentCounts(task); AgentTrace(task)
@@ -488,6 +493,7 @@ internal fun connectionBudget(connection: JsonObject): String {
         } }
         item { Row(verticalAlignment = Alignment.CenterVertically) { Text("你的模型连接", Modifier.weight(1f), fontWeight = FontWeight.Medium); TextButton({ creating = true }) { Text("添加连接") }; IconButton({ scope.launch { action.run { load() } } }, enabled = !action.busy) { Icon(Icons.Default.Refresh, "刷新连接") } }; ActionStatus(action) }
         item { Text("个人连接仅本人使用；共享实例连接由管理员授权。密钥只保存在服务端。", style = MaterialTheme.typography.bodySmall) }
+        if (action.busy && connections.isEmpty()) item { AgentSkeleton(Modifier.height(420.dp)) }
         items(connections, key = { it.text("id") }) { connection -> AgentCard {
             Text(connection.text("name"), fontWeight = FontWeight.Medium); Text("${connection.text("model")} · ${if (connection.text("scope") == "instance") "实例连接" else "个人连接"}")
             Text(connection.text("base_url"), style = MaterialTheme.typography.bodySmall)
