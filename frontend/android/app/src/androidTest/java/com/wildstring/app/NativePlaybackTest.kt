@@ -394,8 +394,8 @@ class NativePlaybackTest {
                 compose.waitUntil(5_000) { compose.onAllNodesWithContentDescription("设置").fetchSemanticsNodes().isNotEmpty() || compose.onAllNodesWithTag("mini-player-open").fetchSemanticsNodes().isNotEmpty() || compose.onAllNodesWithTag("player-phone").fetchSemanticsNodes().isNotEmpty() }
                 if (compose.onAllNodesWithContentDescription("设置").fetchSemanticsNodes().isEmpty() && compose.onAllNodesWithTag("mini-player-open").fetchSemanticsNodes().isNotEmpty()) {
                     compose.onNodeWithTag("mini-player-open").performClick()
-                } else if (compose.onAllNodesWithContentDescription("设置").fetchSemanticsNodes().isEmpty() && compose.onAllNodesWithTag("player-phone").fetchSemanticsNodes().isNotEmpty()) {
-                    compose.onNodeWithTag("player-phone").performTouchInput { swipeDown(startY = 120f, endY = 680f, durationMillis = 500) }
+                } else if (compose.onAllNodesWithContentDescription("设置").fetchSemanticsNodes().isEmpty() && compose.onAllNodesWithTag("player-visual-stage").fetchSemanticsNodes().isNotEmpty()) {
+                    compose.onNodeWithTag("player-visual-stage").performTouchInput { swipeDown(startY = 120f, endY = 680f, durationMillis = 500) }
                 }
                 compose.waitUntil(15_000) { compose.onAllNodesWithContentDescription("设置").fetchSemanticsNodes().isNotEmpty() }
                 compose.onNodeWithContentDescription("设置").performClick()
