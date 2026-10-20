@@ -42,7 +42,38 @@ def execute(service, actor, name, arguments):
             }
             for track in result["items"]
         ]
-        return result | {"album": album}
+        with service.database.connect() as db:
+            from wildstring.album_release_locks import read
+
+            release_lock = read(db, service.library_id, body.album_id)
+        return result | {"album": album, "release_lock": release_lock}
+    if name in {"get_album_release_lock", "set_album_release_lock", "clear_album_release_lock"}:
+        from wildstring.album_release_locks import ReleaseLockInput, clear, read, save
+
+        library_id = service.library_id
+        if name == "get_album_release_lock":
+            with service.database.connect() as db:
+                return read(db, library_id, body.album_id) or {
+                    "album_id": body.album_id,
+                    "locked": False,
+                }
+        with service.database.connect(write=True) as db:
+            db.execute("BEGIN IMMEDIATE")
+            if name == "set_album_release_lock":
+                result = save(
+                    db,
+                    library_id,
+                    body.album_id,
+                    ReleaseLockInput(
+                        provider=body.provider,
+                        release_id=body.release_id,
+                        source_url=body.source_url,
+                        snapshot=body.snapshot,
+                        version=body.version,
+                    ),
+                )
+                return result | {"locked": True}
+            return clear(db, library_id, body.album_id, body.version)
     if name in {"get_cover_candidates", "get_cover_preview"}:
         return cover_tool(service, name, body)
     if name == "list_drafts":

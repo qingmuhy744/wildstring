@@ -1,3 +1,6 @@
+import { HelpText } from './desktop-help';
+import { hints } from './help-content';
+import { HelpLabel } from './desktop-help';
 import { useEffect, useRef, useState } from 'react';
 import { api, eventId } from './api';
 import type { AgentDraft, AgentPage } from './agent-api';
@@ -37,7 +40,16 @@ export type ReviewTrack = {
 type Album = { id: string; title: string; artists: string[]; count: number };
 type ReviewPage = AgentPage<ReviewTrack> & {
   album_id: string;
+  batch_id?: string | null;
   provider_names: Record<string, string>;
+  release_lock?: {
+    album_id: string;
+    provider: string;
+    release_id: string;
+    source_url: string;
+    version: number;
+    snapshot: Values;
+  } | null;
 };
 type Choice = { source: string; fields: string[] };
 const names: Record<string, string> = {
@@ -95,6 +107,7 @@ function candidateLabel(
     typeof score === 'number' && Number.isFinite(score)
       ? `匹配度 ${Math.round(score <= 1 ? score * 100 : score)}%`
       : '',
+    candidate.match.album_release_lock ? '与锁定发行冲突' : '',
     candidate.metadata_version !== track.metadata_version ? '已过期' : '',
   ]
     .filter(Boolean)
@@ -113,13 +126,26 @@ function defaultChoice(track: ReviewTrack): Choice {
   };
 }
 
+function releaseId(candidate: Candidate | undefined): string {
+  if (!candidate) return '';
+  if (typeof candidate.match.release_id === 'string') return candidate.match.release_id;
+  const external = candidate.fields.external_ids;
+  return external && typeof external === 'object' && !Array.isArray(external)
+    ? typeof (external as Values).release === 'string'
+      ? ((external as Values).release as string)
+      : ''
+    : '';
+}
+
 export function MetadataReviewWorkbench({
   initialTrackId,
+  initialBatchId,
   onApplied,
   onBusy,
   onClose,
 }: {
   initialTrackId?: string;
+  initialBatchId?: string;
   onClose?: () => void;
   onApplied?: () => void | Promise<void>;
   onBusy?: (busy: boolean) => void;
@@ -142,6 +168,7 @@ export function MetadataReviewWorkbench({
   const [showSongs, setShowSongs] = useState(false);
   const [refresh, setRefresh] = useState(false),
     [conflicts, setConflicts] = useState<Record<string, string>>({});
+  const [lockBusy, setLockBusy] = useState(false);
   useEffect(() => {
     onBusy?.(busy);
     return () => onBusy?.(false);
@@ -219,6 +246,11 @@ export function MetadataReviewWorkbench({
       if (generation === sequence.current) setLoading(false);
     }
   }
+  function pageQuery(value: ReviewPage, offset = value.offset) {
+    return value.batch_id
+      ? `batch_id=${encodeURIComponent(value.batch_id)}&offset=${offset}`
+      : `album_id=${encodeURIComponent(value.album_id)}&offset=${offset}`;
+  }
   useEffect(() => {
     let mounted = true;
     void loadAlbums()
@@ -227,7 +259,9 @@ export function MetadataReviewWorkbench({
         return load(
           initialTrackId
             ? `track_id=${encodeURIComponent(initialTrackId)}`
-            : `album_id=${encodeURIComponent(items[0]?.id || '')}`,
+            : initialBatchId
+              ? `batch_id=${encodeURIComponent(initialBatchId)}`
+              : `album_id=${encodeURIComponent(items[0]?.id || '')}`,
           initialTrackId,
         );
       })
@@ -236,7 +270,7 @@ export function MetadataReviewWorkbench({
       mounted = false;
       sequence.current++;
     };
-  }, [initialTrackId]);
+  }, [initialTrackId, initialBatchId]);
   function choose(id: string, fields: string[]) {
     setChoices((old) => ({ ...old, [id]: { ...old[id], fields } }));
   }
@@ -266,11 +300,7 @@ export function MetadataReviewWorkbench({
           candidate_digest: candidate.candidate_digest,
         }),
       });
-      await load(
-        `album_id=${encodeURIComponent(page.album_id)}&offset=${page.offset}`,
-        active,
-        true,
-      );
+      await load(pageQuery(page), active, true);
       await loadAlbums();
       setNotice('已拒绝当前候选及其旧的重复记录，现有资料保持不变；其他候选和后续查询不受影响。');
     } catch (reason) {
@@ -334,7 +364,7 @@ export function MetadataReviewWorkbench({
         : undefined;
       window.dispatchEvent(new Event('wildstring:artwork-updated'));
       await onApplied?.();
-      await load(`album_id=${encodeURIComponent(page.album_id)}&offset=${page.offset}`, next);
+      await load(pageQuery(page), next);
       await loadAlbums();
       setNotice(
         `已应用 ${tracks.length} 首的 ${items.reduce((n, i) => n + i.fields.length, 0)} 个字段${cover ? '及已预览封面' : ''}。`,
@@ -385,6 +415,45 @@ export function MetadataReviewWorkbench({
       setBusy(false);
     }
   }
+  async function updateReleaseLock(clear = false) {
+    if (!page || lockBusy) return;
+    setLockBusy(true);
+    setError('');
+    try {
+      if (clear) {
+        const query = page.release_lock ? `?version=${page.release_lock.version}` : '';
+        await api(`/manage/albums/${encodeURIComponent(page.album_id)}/release-lock${query}`, {
+          method: 'DELETE',
+        });
+      } else {
+        const id = releaseId(candidate);
+        if (!candidate || !id) {
+          setError('当前候选没有可锁定的发行版本 ID，请选择带发行信息的来源。');
+          return;
+        }
+        await api(`/manage/albums/${encodeURIComponent(page.album_id)}/release-lock`, {
+          method: 'PUT',
+          body: JSON.stringify({
+            provider: candidate.provider,
+            release_id: id,
+            source_url: candidate.source_url || '',
+            snapshot: { album: current?.album, track_count: page.total, match: candidate.match },
+            ...(page.release_lock ? { version: page.release_lock.version } : {}),
+          }),
+        });
+      }
+      await load(pageQuery(page), active, true);
+      setNotice(
+        clear
+          ? '已解除专辑发行版本锁定。'
+          : '已锁定当前发行版本；其他发行候选仍会保留，但不能自动应用。',
+      );
+    } catch (reason) {
+      setError(errorText(reason));
+    } finally {
+      setLockBusy(false);
+    }
+  }
   const disabled = busy || loading;
   return (
     <section className="metadata-review" aria-label="批量核对工作台">
@@ -394,16 +463,7 @@ export function MetadataReviewWorkbench({
           <p className="muted">只勾选需要的变化。已有人工值默认保留；勾选后会替换该字段。</p>
         </div>
         <div className="review-heading-actions">
-          <button
-            disabled={disabled}
-            onClick={() =>
-              page &&
-              void load(
-                `album_id=${encodeURIComponent(page.album_id)}&offset=${page.offset}`,
-                active,
-              )
-            }
-          >
+          <button disabled={disabled} onClick={() => page && void load(pageQuery(page), active)}>
             重新读取
           </button>
           {onClose && (
@@ -457,6 +517,31 @@ export function MetadataReviewWorkbench({
             <p>
               {page?.total || 0} 首 · 本页 {page?.items.length || 0} 首
             </p>
+            {!page?.batch_id && page?.release_lock ? (
+              <p className="muted">
+                已锁定发行版本：{page.release_lock.provider} · {page.release_lock.release_id}{' '}
+                <button
+                  disabled={disabled || lockBusy}
+                  onClick={() => void updateReleaseLock(true)}
+                >
+                  解除锁定
+                </button>
+              </p>
+            ) : !page?.batch_id ? (
+              <p className="muted">
+                尚未锁定发行版本；选择带 release ID 的候选后可固定，避免自动整理拆分专辑。{' '}
+                <button
+                  disabled={disabled || lockBusy || !releaseId(candidate)}
+                  onClick={() => void updateReleaseLock()}
+                >
+                  锁定当前来源
+                </button>
+              </p>
+            ) : (
+              <p className="muted">
+                本页按查询批次汇总候选；专辑发行版本锁定请在单张专辑核对时设置。
+              </p>
+            )}
             <button
               disabled={disabled || !page?.items.length}
               onClick={() =>
@@ -528,21 +613,13 @@ export function MetadataReviewWorkbench({
             <div className="workspace-actions">
               <button
                 disabled={disabled || page.offset === 0}
-                onClick={() =>
-                  void load(
-                    `album_id=${encodeURIComponent(page.album_id)}&offset=${Math.max(0, page.offset - page.limit)}`,
-                  )
-                }
+                onClick={() => void load(pageQuery(page, Math.max(0, page.offset - page.limit)))}
               >
                 上一页
               </button>
               <button
                 disabled={disabled || page.offset + page.limit >= page.total}
-                onClick={() =>
-                  void load(
-                    `album_id=${encodeURIComponent(page.album_id)}&offset=${page.offset + page.limit}`,
-                  )
-                }
+                onClick={() => void load(pageQuery(page, page.offset + page.limit))}
               >
                 下一页
               </button>
@@ -554,7 +631,7 @@ export function MetadataReviewWorkbench({
               <p>{current.artists.join(' / ')}</p>
               <div className="workspace-actions">
                 <label>
-                  候选来源
+                  <HelpLabel hint="candidate">候选来源</HelpLabel>
                   <select
                     aria-label="候选来源"
                     value={choices[current.id]?.source || ''}
@@ -673,7 +750,11 @@ export function MetadataReviewWorkbench({
                                     />
                                     {names[field] || field}
                                   </label>
-                                  {Object.hasOwn(current.overrides, field) && <small>人工值</small>}
+                                  {Object.hasOwn(current.overrides, field) && (
+                                    <small>
+                                      <HelpText hint="manualValue">人工值</HelpText>
+                                    </small>
+                                  )}
                                 </th>
                                 <td data-label="当前值">{display(current.current[field])}</td>
                                 <td data-label="建议值">{display(value)}</td>
@@ -824,6 +905,7 @@ export function MetadataReviewWorkbench({
         <div>
           <button
             disabled={disabled || !current}
+            data-help={hints.reviewSkip}
             onClick={() => {
               if (current) choose(current.id, []);
               nextItem();
@@ -834,7 +916,7 @@ export function MetadataReviewWorkbench({
           <button
             disabled={disabled || !candidate}
             onClick={() => void rejectCurrent()}
-            title="仅归档这份候选，不修改歌曲资料或禁用来源"
+            data-help={hints.reviewReject}
           >
             拒绝当前建议
           </button>
@@ -844,6 +926,7 @@ export function MetadataReviewWorkbench({
               (!choices[active]?.fields.length && !cover) ||
               (!!cover && (!coverReady || coverAll))
             }
+            data-help={hints.reviewAccept}
             onClick={() => void accept(true)}
           >
             接受本曲并下一首
@@ -851,6 +934,7 @@ export function MetadataReviewWorkbench({
           <button
             className="primary"
             disabled={disabled || (!selected.length && !cover) || (!!cover && !coverReady)}
+            data-help={hints.reviewAccept}
             onClick={() => void accept()}
           >
             {busy ? '应用中…' : '接受选中项'}
@@ -870,10 +954,12 @@ export function MetadataReviewWorkbench({
 
 export function MetadataReviewDialog({
   trackId,
+  batchId,
   onClose,
   onApplied,
 }: {
   trackId?: string;
+  batchId?: string;
   onClose: () => void;
   onApplied?: () => void | Promise<void>;
 }) {
@@ -899,6 +985,7 @@ export function MetadataReviewDialog({
     >
       <MetadataReviewWorkbench
         initialTrackId={trackId}
+        initialBatchId={batchId}
         onApplied={onApplied}
         onBusy={setBusy}
         onClose={onClose}

@@ -1,3 +1,4 @@
+import { HelpText } from './desktop-help';
 import { useEffect, useRef, useState } from 'react';
 import { api } from './api';
 
@@ -232,7 +233,11 @@ export function ProviderNetworkTest({
             {value.items.map((item) => (
               <li key={item.provider} className={`network-${item.status}`}>
                 <div>
-                  <strong>{providerNames[item.provider] || '资料来源'}</strong>
+                  <strong>
+                    <HelpText hint="networkCheck">
+                      {providerNames[item.provider] || '资料来源'}
+                    </HelpText>
+                  </strong>
                   <span>
                     {item.status === 'ok'
                       ? '可连接'

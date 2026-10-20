@@ -1,3 +1,4 @@
+import { HelpLabel, HelpText } from './desktop-help';
 import { useEffect, useRef, useState } from 'react';
 import { api } from './api';
 import { OnlineLyrics } from './source-plugins';
@@ -54,7 +55,13 @@ type Scan = {
   cooldowns: { plugin_id: string; cooldown_until: number; reason: string }[];
 };
 
-export function LyricScans({ albumId }: { albumId?: string }) {
+export function LyricScans({
+  albumId,
+  initialBatchId,
+}: {
+  albumId?: string;
+  initialBatchId?: string;
+}) {
   const [goal, setGoal] = useState(5),
     [mode, setMode] = useState('upgrade');
   const [preference, setPreference] = useState('timing'),
@@ -90,14 +97,14 @@ export function LyricScans({ albumId }: { albumId?: string }) {
     if (id) setBatch(await api<Scan>(`${endpoint}/${id}?offset=${pageOffset}&limit=50`));
   }
   useEffect(() => {
-    void load().catch((error) => setMessage(String(error)));
+    void load(initialBatchId).catch((error) => setMessage(String(error)));
     void api<RateSettings>('/manage/lyric-scan-settings')
       .then((value) => {
         setDefaults(value);
         setRateProfile(value.default_profile);
       })
       .catch((error) => setMessage(String(error)));
-  }, [albumId]);
+  }, [albumId, initialBatchId]);
   useEffect(() => {
     if (!batch || batch.status !== 'running') return;
     let disposed = false;
@@ -148,7 +155,7 @@ export function LyricScans({ albumId }: { albumId?: string }) {
       </p>
       <fieldset disabled={busy || !defaults} className="lyric-scan-options">
         <label>
-          扫描模式
+          <HelpLabel hint="scanMode">扫描模式</HelpLabel>
           <select value={mode} onChange={(e) => setMode(e.target.value)}>
             <option value="upgrade">歌词洗版</option>
             <option value="missing">仅补缺失</option>
@@ -156,7 +163,7 @@ export function LyricScans({ albumId }: { albumId?: string }) {
         </label>
         {mode === 'upgrade' && (
           <label>
-            目标等级
+            <HelpLabel hint="lyricGoal">目标等级</HelpLabel>
             <select value={goal} onChange={(e) => setGoal(Number(e.target.value))}>
               {levels.slice(1).map((label, i) => (
                 <option value={i + 1} key={label}>
@@ -167,14 +174,14 @@ export function LyricScans({ albumId }: { albumId?: string }) {
           </label>
         )}
         <label>
-          洗版偏好
+          <HelpLabel hint="lyricPreference">洗版偏好</HelpLabel>
           <select value={preference} onChange={(e) => setPreference(e.target.value)}>
             <option value="timing">逐字优先</option>
             <option value="bilingual">双语优先</option>
           </select>
         </label>
         <label>
-          请求频率
+          <HelpLabel hint="scanRate">请求频率</HelpLabel>
           <select value={rateProfile} onChange={(e) => setRateProfile(e.target.value)}>
             <option value="low">低频（{defaults?.low_seconds ?? 10}秒）</option>
             <option value="medium">中频（{defaults?.medium_seconds ?? 5}秒）</option>
@@ -184,7 +191,7 @@ export function LyricScans({ albumId }: { albumId?: string }) {
         </label>
         {rateProfile === 'custom' && (
           <label>
-            来源请求最短间隔（秒）
+            <HelpLabel hint="scanRate">来源请求最短间隔（秒）</HelpLabel>
             <input
               type="number"
               min={1}
@@ -196,7 +203,7 @@ export function LyricScans({ albumId }: { albumId?: string }) {
         )}
         <label className="check">
           <input type="checkbox" checked={force} onChange={(e) => setForce(e.target.checked)} />
-          强制重扫已查记录和缓存
+          <HelpLabel hint="scanForce">强制重扫已查记录和缓存</HelpLabel>
         </label>
       </fieldset>
       <p className="muted">
@@ -329,9 +336,20 @@ export function LyricScans({ albumId }: { albumId?: string }) {
           </h4>
           <div className="lyric-scan-counts">
             {Object.entries(batch.counts).map(([state, count]) => (
-              <span key={state}>
+              <HelpText
+                key={state}
+                hint={
+                  state === 'ready' || state === 'review'
+                    ? 'lyricReady'
+                    : state === 'no_match'
+                      ? 'lyricNoMatch'
+                      : ['skipped_goal', 'skipped_scanned'].includes(state)
+                        ? 'lyricSkipped'
+                        : undefined
+                }
+              >
                 {statuses[state] ?? state} {count}
-              </span>
+              </HelpText>
             ))}
           </div>
           {batch.cooldowns.map((c) => (
@@ -528,7 +546,15 @@ export function LyricScans({ albumId }: { albumId?: string }) {
   );
 }
 
-export function LyricScanDialog({ albumId, onClose }: { albumId?: string; onClose: () => void }) {
+export function LyricScanDialog({
+  albumId,
+  batchId,
+  onClose,
+}: {
+  albumId?: string;
+  batchId?: string;
+  onClose: () => void;
+}) {
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
@@ -554,7 +580,7 @@ export function LyricScanDialog({ albumId, onClose }: { albumId?: string; onClos
           关闭
         </button>
       </header>
-      <LyricScans albumId={albumId} />
+      <LyricScans albumId={albumId} initialBatchId={batchId} />
     </dialog>
   );
 }

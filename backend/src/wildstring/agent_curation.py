@@ -49,6 +49,17 @@ def records(service, body, connection):
                 or any(json.loads(candidate["fields"]).get(k) != v for k, v in changes.items())
             ):
                 raise HTTPException(409, "metadata_candidate_changed")
+            from wildstring.album_release_locks import candidate_conflict
+
+            conflict = candidate_conflict(
+                connection,
+                service.library_id,
+                row["album_id"],
+                candidate,
+                set(changes),
+            )
+            if conflict:
+                raise HTTPException(409, conflict["code"])
             source = {
                 "suggestion_id": candidate["id"],
                 "provider": candidate["provider"],
@@ -56,6 +67,14 @@ def records(service, body, connection):
             }
         elif item.source_digest:
             raise HTTPException(422, "invalid_suggestion_fields")
+        else:
+            from wildstring.album_release_locks import ALBUM_FIELDS
+            from wildstring.album_release_locks import read as read_lock
+
+            if read_lock(
+                connection, service.library_id, row["album_id"]
+            ) and ALBUM_FIELDS.intersection(item.overrides.model_fields_set):
+                raise HTTPException(409, "album_release_lock_requires_source")
         result.append(
             {
                 "track_id": row["id"],

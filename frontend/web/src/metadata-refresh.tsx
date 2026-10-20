@@ -1,3 +1,4 @@
+import { hints } from './help-content';
 import { useEffect, useRef, useState } from 'react';
 import { api } from './api';
 import { JobDiagnostics, jobStatus, type ProviderJob } from './provider-diagnostics';
@@ -237,7 +238,12 @@ export function ProviderPriority({
       <p id="provider-priority-help" className="muted">
         拖动调整来源优先级，也可用方向键。靠前来源优先推荐；同一录音的不同发行版仍需分别核对。
       </p>
-      <ol ref={list} className="provider-priority" aria-label="元数据来源优先级">
+      <ol
+        ref={list}
+        className="provider-priority"
+        aria-label="元数据来源优先级"
+        data-help={hints.providerPriority}
+      >
         {value.map((source, index) => (
           <li key={source} className={over === index ? 'priority-target' : ''}>
             <button

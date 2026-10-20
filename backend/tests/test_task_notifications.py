@@ -48,6 +48,8 @@ def test_refresh_batch_notifies_once_after_all_members_and_keeps_pending(
         assert result["total"] == 1 and result["unread_count"] == 1
         assert result["items"][0]["trace_id"] == queued["batch_id"]
         assert "确认后应用" in result["items"][0]["summary"]
+        assert result["items"][0]["actions"][0]["target"] == "metadata-center"
+        assert result["items"][0]["actions"][0]["params"]["batch_id"] == queued["batch_id"]
         assert all(
             track["album"] == "合成专辑" for track in client.get("/api/v1/tracks").json()["items"]
         )

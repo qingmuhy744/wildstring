@@ -162,7 +162,7 @@ class BridgeProtocol(ABC):
                         role="user",
                         content=TextContent(
                             type="text",
-                            text="Inspect a bounded set of my library for missing metadata, numbering conflicts, same-title versions and possible split multi-disc releases. Use get_inspection_rules and paginated inspect_library; use get_album_tracks for versioned batches and get_cover_candidates/get_cover_preview before a cover draft. Use the tools to collect evidence, report uncertainty and create drafts for any supported changes. Wait for my approval in WildString before applying. "
+                            text="Inspect a bounded set of my library for missing metadata, numbering conflicts, same-title versions, near-identical album splits and possible split multi-disc releases. Use get_inspection_rules and paginated inspect_library; use get_album_tracks and get_album_release_lock for versioned batches, and get_cover_candidates/get_cover_preview before a cover draft. Respect an existing release lock: report a conflict and create a reviewable draft rather than applying a different release. Use the tools to collect evidence, report uncertainty and create drafts for any supported changes. Wait for my approval in WildString before applying. "
                             + USAGE,
                         ),
                     )

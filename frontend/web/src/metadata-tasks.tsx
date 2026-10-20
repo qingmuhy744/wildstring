@@ -1,3 +1,4 @@
+import { hints } from './help-content';
 import { useEffect, useRef, useState } from 'react';
 import { api } from './api';
 import { MetadataReviewDialog } from './metadata-review';
@@ -43,7 +44,13 @@ const empty: Record<View, string> = {
   history: '没有已归档的查询。',
 };
 
-export function MetadataJobs({ onInspect }: { onInspect: (id: string) => void }) {
+export function MetadataJobs({
+  onInspect,
+  batchId,
+}: {
+  onInspect: (id: string) => void;
+  batchId?: string;
+}) {
   const [reviewOpen, setReviewOpen] = useState(false);
   const [view, setView] = useState<View>('active');
   const [offset, setOffset] = useState(0);
@@ -59,12 +66,19 @@ export function MetadataJobs({ onInspect }: { onInspect: (id: string) => void })
   const initial = useRef(true),
     request = useRef(false);
   useEffect(() => {
+    initial.current = true;
+    setView('active');
+    setOffset(0);
+    setHistory(null);
+    setHistoryOffset(0);
+  }, [batchId]);
+  useEffect(() => {
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
     async function load() {
       try {
         const result = await api<TaskPage>(
-          `/manage/providers/tasks?view=${view}&offset=${offset}`,
+          `/manage/providers/tasks?view=${view}&offset=${offset}${batchId ? `&batch_id=${encodeURIComponent(batchId)}` : ''}`,
           { signal: controller.signal },
         );
         if (controller.signal.aborted) return;
@@ -91,13 +105,16 @@ export function MetadataJobs({ onInspect }: { onInspect: (id: string) => void })
       controller.abort();
       clearTimeout(timer);
     };
-  }, [view, offset, tick]);
+  }, [view, offset, tick, batchId]);
   useEffect(() => {
     if (!historyOpen) return;
     const controller = new AbortController();
-    api<TaskPage>(`/manage/providers/tasks?view=history&offset=${historyOffset}`, {
-      signal: controller.signal,
-    })
+    api<TaskPage>(
+      `/manage/providers/tasks?view=history&offset=${historyOffset}${batchId ? `&batch_id=${encodeURIComponent(batchId)}` : ''}`,
+      {
+        signal: controller.signal,
+      },
+    )
       .then((result) => {
         if (controller.signal.aborted) return;
         if (historyOffset > 0 && historyOffset >= result.total) {
@@ -111,7 +128,7 @@ export function MetadataJobs({ onInspect }: { onInspect: (id: string) => void })
         if (!controller.signal.aborted) setHistoryError('无法读取历史记录。');
       });
     return () => controller.abort();
-  }, [historyOpen, historyOffset, tick, value?.counts.history]);
+  }, [historyOpen, historyOffset, tick, value?.counts.history, batchId]);
 
   async function mutate(path: string, body: unknown, success: string) {
     if (request.current) return;
@@ -139,7 +156,7 @@ export function MetadataJobs({ onInspect }: { onInspect: (id: string) => void })
     if (!confirm(prompt)) return;
     void mutate(
       `/manage/providers/tasks/tracks/${encodeURIComponent(task.track_id)}/review`,
-      { view, through: value.snapshot_at },
+      { view, through: value.snapshot_at, ...(batchId ? { batch_id: batchId } : {}) },
       '已处理的记录已归档。',
     );
   }
@@ -153,7 +170,10 @@ export function MetadataJobs({ onInspect }: { onInspect: (id: string) => void })
           <li key={task.track_id}>
             <div className="metadata-task-copy">
               <strong>{task.title}</strong>
-              <span className={task.requires_attention ? 'metadata-task-warning' : ''}>
+              <span
+                data-help={hints.taskHistory}
+                className={task.requires_attention ? 'metadata-task-warning' : ''}
+              >
                 {task.status === 'completed' && task.has_issue
                   ? '部分完成'
                   : current === 'history' && task.status === 'completed'
@@ -205,17 +225,20 @@ export function MetadataJobs({ onInspect }: { onInspect: (id: string) => void })
     );
   }
   return (
-    <section className="management-card metadata-tasks" aria-label="元数据更新任务">
+    <section className="management-card metadata-tasks" aria-label="元数据候选中心">
       {reviewOpen && (
         <MetadataReviewDialog
           onClose={() => setReviewOpen(false)}
+          batchId={batchId}
           onApplied={() => setTick((n) => n + 1)}
         />
       )}
       <div className="management-section-heading">
         <div>
-          <h2>元数据更新</h2>
-          <button onClick={() => setReviewOpen(true)}>批量核对资料</button>
+          <h2>元数据候选中心</h2>
+          <button onClick={() => setReviewOpen(true)}>
+            {batchId ? '核对本批次候选' : '批量核对资料'}
+          </button>
           <p className="muted" role="status">
             {value ? `等待 ${value.queued} 首 · 查询中 ${value.running} 首` : '正在读取任务…'}
           </p>
@@ -225,7 +248,7 @@ export function MetadataJobs({ onInspect }: { onInspect: (id: string) => void })
           刷新
         </button>
       </div>
-      <nav className="metadata-task-tabs" aria-label="元数据任务分类">
+      <nav className="metadata-task-tabs" aria-label="元数据任务分类" data-help={hints.taskHistory}>
         {(['active', 'pending', 'attention'] as const).map((name) => (
           <button
             key={name}

@@ -1,3 +1,5 @@
+import { HelpText } from './desktop-help';
+import { importCounterHelp } from './help-content';
 import { SystemDiagnostics } from './system-diagnostics';
 import { ProviderSettings } from './providers';
 import { LyricScanEntry } from './lyric-scans';
@@ -109,9 +111,9 @@ function RunDetail({ title, run }: { title: string; run: Run | null }) {
         </h4>
         <div className="run-counters">
           {Object.entries(run.counts).map(([key, n]) => (
-            <span key={key}>
+            <HelpText key={key} text={importCounterHelp[key]}>
               {counterLabels[key] || key} <b>{n}</b>
-            </span>
+            </HelpText>
           ))}
         </div>
         {run.errors.length > 0 && (
@@ -136,6 +138,7 @@ export function Management({
   onChanged,
   onRefresh,
   onOpenConnections,
+  initialAction,
 }: {
   revision: number;
   onBack: () => void;
@@ -143,11 +146,15 @@ export function Management({
   onChanged: () => void;
   onRefresh: () => void;
   onOpenConnections: () => void;
+  initialAction?: { type: 'metadata-center'; batchId?: string } | null;
 }) {
   const [tab, setTab] = useState<
     'overview' | 'tracks' | 'jobs' | 'intake' | 'settings' | 'users' | 'diagnostics'
   >('overview');
   const [reviewOpen, setReviewOpen] = useState(false);
+  const [metadataBatchId, setMetadataBatchId] = useState<string | undefined>(
+    initialAction?.batchId,
+  );
   const finished = useRef<string | null>(null);
   const [overview, setOverview] = useState<Overview | null>(null),
     [jobs, setJobs] = useState<Jobs | null>(null),
@@ -162,6 +169,12 @@ export function Management({
     [loading, setLoading] = useState(true),
     [tick, setTick] = useState(0),
     [full, setFull] = useState(false);
+  useEffect(() => {
+    if (initialAction?.type === 'metadata-center') {
+      setTab('jobs');
+      setMetadataBatchId(initialAction.batchId);
+    }
+  }, [initialAction]);
   useEffect(() => {
     const controller = new AbortController();
     Promise.all([
@@ -463,6 +476,7 @@ export function Management({
             {tab === 'jobs' && (
               <section className="management-card">
                 <MetadataJobs
+                  batchId={metadataBatchId}
                   onInspect={(id) => {
                     void api<Track>(`/tracks/${id}`)
                       .then(onEdit)

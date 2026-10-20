@@ -16,7 +16,7 @@ FIELDS = (*BASE_FIELDS, *DETAIL_DEFAULTS)
 
 def apply_effective(connection, track_id):
     row = connection.execute(
-        "SELECT t.library_id, t.path, m.observed, m.overrides FROM tracks t "
+        "SELECT t.library_id, t.path, t.album_id AS old_album_id, m.observed, m.overrides FROM tracks t "
         "JOIN track_metadata m ON m.track_id=t.id WHERE t.id=?",
         (track_id,),
     ).fetchone()
@@ -24,6 +24,10 @@ def apply_effective(connection, track_id):
     fields["album_id"] = album_key(
         row["library_id"], row["path"], fields["album"], fields["album_artists"]
     )
+    if row["old_album_id"] and row["old_album_id"] != fields["album_id"]:
+        from wildstring.album_release_locks import transfer
+
+        transfer(connection, row["library_id"], row["old_album_id"], fields["album_id"])
     fields["search_text"] = normalize(
         " ".join(
             [

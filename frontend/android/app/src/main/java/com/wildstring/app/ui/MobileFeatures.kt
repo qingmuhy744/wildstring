@@ -43,14 +43,14 @@ internal fun MobileShortcuts(discovery: Boolean = false, open: (String) -> Unit)
 }
 
 @Composable
-internal fun FeatureDialog(vm: MusicViewModel, route: String, track: Track? = null, playlist: Playlist? = null, albumId: String? = null, dismiss: () -> Unit) {
+internal fun FeatureDialog(vm: MusicViewModel, route: String, track: Track? = null, playlist: Playlist? = null, albumId: String? = null, initialBatchId: String? = null, onOpenAction: (String, JsonObject?) -> Unit = { _, _ -> }, dismiss: () -> Unit) {
     val account by vm.state.collectAsStateWithLifecycle()
     val title = when (route) {
         "assistant" -> "野弦助手"; "notifications" -> "通知与任务"
         "connections" -> "模型连接"; "research" -> "联网与记忆"; "channels" -> "通知设置"
         "external" -> "发现新音乐"; "rankings" -> "收听排行"; "daily" -> "每日推荐"; "ai" -> "AI 找歌与歌单"; "offline" -> "离线保存"; "statistics" -> "收听统计"; "devices" -> "其他设备继续"
         "playlist" -> if (playlist == null) "新建歌单" else "编辑歌单"; "order" -> "歌单排序"; "multi" -> "多选加入歌单"
-        "lyric-scans" -> "歌词补全与洗版"; "gain" -> "响度均衡与手动调整"; "source-plugins" -> "数据源 ZIP 插件"
+        "lyric-scans" -> "歌词补全与洗版"; "gain" -> "响度均衡与手动调整"; "source-plugins" -> "数据源 ZIP 插件"; "management" -> "曲库管理"
         "metadata" -> "编辑歌曲信息"; "lyrics" -> "编辑歌词"; "suggestions" -> "更新元数据与建议"; else -> "曲库管理"
     }
     Dialog(onDismissRequest = dismiss, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
@@ -72,8 +72,8 @@ internal fun FeatureDialog(vm: MusicViewModel, route: String, track: Track? = nu
                 TopAppBar(title = { Text(title) }, navigationIcon = { IconButton(dismiss) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回") } })
                 Box(Modifier.weight(1f).fillMaxWidth()) {
                     when (route) {
-                        "assistant", "notifications" -> AgentWorkspace(vm, if (route == "notifications") "notifications" else "chat")
-                        "connections", "research", "channels" -> AgentWorkspace(vm, route)
+                        "assistant", "notifications" -> AgentWorkspace(vm, if (route == "notifications") "notifications" else "chat", onOpenAction)
+                        "connections", "research", "channels" -> AgentWorkspace(vm, route, onOpenAction)
                         "daily" -> DailyPanel(vm)
                         "rankings" -> RankingsPanel(vm)
                         "external" -> ExternalMusicPanel(vm)
@@ -90,8 +90,8 @@ internal fun FeatureDialog(vm: MusicViewModel, route: String, track: Track? = nu
                             "lyrics" -> track?.let { LyricsEditorPanel(vm, it) }
                             "suggestions" -> track?.let { SuggestionsPanel(vm, it) }
                             "source-plugins" -> SourcePluginsPanel(vm)
-                            "lyric-scans" -> LyricScansPanel(vm, albumId)
-                            else -> ManagementPanel(vm)
+                            "lyric-scans" -> LyricScansPanel(vm, albumId, initialBatchId)
+                            else -> ManagementPanel(vm, initialBatchId)
                         } else Text("需要管理员权限。", Modifier.padding(24.dp))
                     }
                 }

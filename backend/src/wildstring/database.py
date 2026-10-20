@@ -9,7 +9,7 @@ from pathlib import Path
 from wildstring.library.albums import album_key
 from wildstring.provider_schema import SCHEMA as PROVIDER_SCHEMA
 
-SCHEMA_VERSION = 23
+SCHEMA_VERSION = 25
 TRANSCODING_SCHEMA = """
 BEGIN IMMEDIATE;
 CREATE TABLE transcoding_settings (
@@ -441,6 +441,21 @@ class Database:
                 from wildstring.playback_handoff_schema import SCHEMA as PLAYBACK_HANDOFF_SCHEMA
 
                 connection.executescript(PLAYBACK_HANDOFF_SCHEMA)
+            if current < 24:
+                from wildstring.album_release_locks import SCHEMA as ALBUM_RELEASE_LOCK_SCHEMA
+
+                connection.executescript(ALBUM_RELEASE_LOCK_SCHEMA)
+            if current < 25:
+                columns = {row[1] for row in connection.execute("PRAGMA table_info(agent_events)")}
+                if "actions" not in columns:
+                    connection.execute("BEGIN IMMEDIATE")
+                    connection.execute(
+                        "ALTER TABLE agent_events ADD COLUMN actions TEXT NOT NULL DEFAULT '[]'"
+                    )
+                    connection.execute("PRAGMA user_version = 25")
+                    connection.commit()
+                else:
+                    connection.execute("PRAGMA user_version = 25")
             connection.execute("PRAGMA journal_mode = WAL")
 
     def check_ready(self) -> bool:

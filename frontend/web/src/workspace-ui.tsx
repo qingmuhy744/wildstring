@@ -1,3 +1,5 @@
+import { HelpText } from './desktop-help';
+import { hints, stateHelp } from './help-content';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { ApiError, api } from './api';
 import { Icon } from './icons';
@@ -128,7 +130,7 @@ export function DiagnosticId({ id, label = '诊断编号' }: { id?: string | nul
   return (
     <button
       className="trace-copy text-button"
-      title="复制诊断编号"
+      data-help={hints.diagnostic}
       onClick={() =>
         void navigator.clipboard
           .writeText(id)
@@ -186,5 +188,9 @@ export const stateNames: Record<string, string> = {
   error: '检测失败',
 };
 export function StateBadge({ state }: { state: string }) {
-  return <span className={`workspace-badge state-${state}`}>{stateNames[state] || state}</span>;
+  return (
+    <HelpText className={`workspace-badge state-${state}`} text={stateHelp[state]}>
+      {stateNames[state] || state}
+    </HelpText>
+  );
 }

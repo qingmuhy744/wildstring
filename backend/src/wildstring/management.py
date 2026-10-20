@@ -16,6 +16,7 @@ from filelock import FileLock, Timeout
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from wildstring.ai_config import AIService, AIUpdate
+from wildstring.album_release_locks import ReleaseLockInput
 from wildstring.diagnostics import record_event, trace_context
 from wildstring.library.edits import MetadataEditor, MetadataUpdate
 from wildstring.library.importer import import_music
@@ -449,6 +450,31 @@ def management_router(service, auth, providers=None):
         track_id: str, body: MetadataUpdate, user: Annotated[dict, Depends(auth.require_admin)]
     ):
         return editor.save(track_id, body, user_id=user["id"])
+
+    @router.get("/albums/{album_id}/release-lock")
+    def album_release_lock(album_id: str):
+        with service.database.connect() as connection:
+            from wildstring.album_release_locks import read
+
+            result = read(connection, service.repository.library_id(), album_id)
+        return result or {"album_id": album_id, "locked": False}
+
+    @router.put("/albums/{album_id}/release-lock", dependencies=[Depends(auth.require_client)])
+    def save_album_release_lock(album_id: str, body: ReleaseLockInput):
+        with service.database.connect(write=True) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            from wildstring.album_release_locks import save
+
+            result = save(connection, service.repository.library_id(), album_id, body)
+        return result | {"locked": True}
+
+    @router.delete("/albums/{album_id}/release-lock", dependencies=[Depends(auth.require_client)])
+    def clear_album_release_lock(album_id: str, version: Annotated[int | None, Query(ge=1)] = None):
+        with service.database.connect(write=True) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            from wildstring.album_release_locks import clear
+
+            return clear(connection, service.repository.library_id(), album_id, version)
 
     @router.get("/tracks/{track_id}/lyrics")
     def read_lyrics(track_id: str):

@@ -1,6 +1,7 @@
 """Deterministic library checks describe evidence, never establish musical facts."""
 
 import json
+import re
 from collections import defaultdict
 from typing import Literal
 
@@ -21,6 +22,7 @@ Rule = Literal[
     "same_title_versions",
     "possible_duplicate_recording",
     "possible_multidisc_split",
+    "possible_album_split",
 ]
 GROUPING_LIMIT = 10000
 
@@ -39,6 +41,7 @@ RULES = {
     "same_title_versions": ("同专辑同名歌曲时长不同，需核对版本标记；不要直接删除", "info"),
     "possible_duplicate_recording": ("同专辑同名且时长接近；不能据此认定重复音频", "info"),
     "possible_multidisc_split": ("多碟发行可能因缺少专辑艺人而分组；核对版本后批量整理", "info"),
+    "possible_album_split": ("相同或近似专辑名称被拆成多个分组；先核对发行版本再合并", "warning"),
 }
 
 
@@ -79,6 +82,7 @@ class InspectionIndex:
             defaultdict(list),
             defaultdict(list),
         )
+        self.album_groups = defaultdict(list)
         for row in self.tracks.values():
             if row["track_number"] is not None:
                 self.positions[
@@ -86,6 +90,9 @@ class InspectionIndex:
                 ].append(row)
             artists = tuple(sorted(normalize(a) for a in row["artists"]))
             self.titles[(row["album_id"], normalize(row["title"]), artists)].append(row)
+            album_key = re.sub(r"[^\w]+", "", normalize(row["album"] or ""), flags=re.UNICODE)
+            if album_key:
+                self.album_groups[(album_key, artists)].append(row)
             # Cross-folder grouping is only a hint when explicit multi-disc tags support it.
             if (
                 not row["album_artists"]
@@ -167,4 +174,23 @@ class InspectionIndex:
             and sum(map(len, disc_sets)) == len(set().union(*disc_sets))
         ):
             add("possible_multidisc_split", related_album_ids=sorted(albums)[:20])
+        peers = self.album_groups.get(
+            (
+                re.sub(r"[^\w]+", "", normalize(row["album"] or ""), flags=re.UNICODE),
+                artists,
+            ),
+            [],
+        )
+        albums = {peer["album_id"] for peer in peers}
+        if len(albums) > 1:
+            counts = {
+                album: sum(1 for peer in peers if peer["album_id"] == album)
+                for album in sorted(albums)
+            }
+            add(
+                "possible_album_split",
+                related_album_ids=sorted(albums)[:20],
+                album_track_counts=counts,
+                album_key=re.sub(r"[^\w]+", "", normalize(row["album"] or ""), flags=re.UNICODE),
+            )
         return findings

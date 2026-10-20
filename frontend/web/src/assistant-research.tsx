@@ -1,3 +1,4 @@
+import { HelpLabel } from './desktop-help';
 import { useEffect, useState } from 'react';
 import { api } from './api';
 import type { AgentPage } from './agent-api';
@@ -112,7 +113,7 @@ export function ResearchSettings() {
       >
         <div className="workspace-form">
           <label>
-            搜索服务
+            <HelpLabel hint="searchService">搜索服务</HelpLabel>
             <select
               aria-label="搜索服务"
               value={provider}
@@ -126,7 +127,7 @@ export function ResearchSettings() {
             </select>
           </label>
           <label>
-            搜索 API Key
+            <HelpLabel hint="savedSecret">搜索 API Key</HelpLabel>
             <input
               aria-label="搜索 API Key"
               type="password"
@@ -137,7 +138,7 @@ export function ResearchSettings() {
             />
           </label>
           <label>
-            每日搜索与读取请求上限
+            <HelpLabel hint="searchBudget">每日搜索与读取请求上限</HelpLabel>
             <input
               aria-label="每日搜索请求上限"
               type="number"
@@ -200,7 +201,7 @@ export function ResearchSettings() {
             void act(() => preference('context_summary', e.target.checked), '上下文设置已保存。')
           }
         />
-        启用长对话摘要
+        <HelpLabel hint="summary">启用长对话摘要</HelpLabel>
       </label>{' '}
       <label>
         <input
@@ -211,7 +212,7 @@ export function ResearchSettings() {
             void act(() => preference('long_term_memory', e.target.checked), '记忆使用设置已保存。')
           }
         />
-        在聊天中使用已保存的记忆
+        <HelpLabel hint="memory">在聊天中使用已保存的记忆</HelpLabel>
       </label>
       <form
         onSubmit={(e) => {

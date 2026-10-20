@@ -39,7 +39,7 @@ export function TrackActions({
         className="icon-button track-more"
         popoverTarget={id}
         aria-label={`歌曲操作 ${track.title}`}
-        title="更多操作"
+        data-help="更多操作"
         onClick={(event) => {
           const box = event.currentTarget.getBoundingClientRect();
           if (panel.current) {

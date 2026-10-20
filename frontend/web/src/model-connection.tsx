@@ -1,3 +1,4 @@
+import { HelpLabel } from './desktop-help';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, ApiError } from './api';
 import type { AgentConnection, AgentPage } from './agent-api';
@@ -75,7 +76,7 @@ export function ModelConnectionChoice({
     <div className="model-connection-choice">
       <div className="model-connection-label">
         <label>
-          {label}
+          <HelpLabel hint="modelConnection">{label}</HelpLabel>
           <select
             aria-label={label}
             value={value}

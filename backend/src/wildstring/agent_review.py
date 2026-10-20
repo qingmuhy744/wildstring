@@ -93,7 +93,7 @@ class Review:
             "offset": offset,
         }
 
-    def review_page(self, actor, album_id=None, track_id=None, limit=100, offset=0):
+    def review_page(self, actor, album_id=None, track_id=None, batch_id=None, limit=100, offset=0):
         actor.require("library:manage", admin=True)
         with self.database.connect() as db:
             if track_id:
@@ -104,15 +104,29 @@ class Review:
                 if row is None:
                     raise HTTPException(404, "track_not_found")
                 album_id = row[0]
+            if batch_id:
+                membership = (
+                    "EXISTS (SELECT 1 FROM metadata_suggestions ms "
+                    "JOIN provider_refresh_members prm ON prm.job_id=ms.job_id "
+                    "WHERE ms.track_id=t.id AND ms.status='pending' AND prm.batch_id=?)"
+                )
+                track_args = (self.library_id, batch_id, limit, offset)
+                count_args = (self.library_id, batch_id)
+            else:
+                membership = "t.album_id=?"
+                track_args = (self.library_id, album_id, limit, offset)
+                count_args = (self.library_id, album_id)
             rows = db.execute(
-                "SELECT t.id,t.title,t.album,t.album_id,t.artists,t.disc_number,t.track_number,t.has_cover,m.version,m.observed,m.overrides "
-                "FROM tracks t JOIN track_metadata m ON m.track_id=t.id WHERE t.library_id=? AND t.status='available' AND t.album_id=? "
-                "ORDER BY COALESCE(t.disc_number,1),COALESCE(t.track_number,99999),t.title,t.id LIMIT ? OFFSET ?",
-                (self.library_id, album_id, limit, offset),
+                "SELECT t.id,t.title,t.album,t.album_id,t.artists,t.disc_number,t.track_number,t.has_cover,m.version,m.observed,m.overrides "  # nosec B608
+                "FROM tracks t JOIN track_metadata m ON m.track_id=t.id WHERE t.library_id=? AND t.status='available' AND "
+                + membership
+                + " ORDER BY COALESCE(t.disc_number,1),COALESCE(t.track_number,99999),t.title,t.id LIMIT ? OFFSET ?",
+                track_args,
             ).fetchall()
-            total = db.execute(
-                "SELECT count(*) FROM tracks WHERE library_id=? AND status='available' AND album_id=?",
-                (self.library_id, album_id),
+            total = db.execute(  # nosec B608: membership is selected from fixed internal SQL fragments
+                "SELECT count(*) FROM tracks t WHERE t.library_id=? AND t.status='available' AND "  # nosec B608
+                + membership,
+                count_args,
             ).fetchone()[0]
             # Collapse repeated queries before limiting unique candidates. Different
             # releases, versions and providers remain independent evidence.
@@ -126,12 +140,16 @@ class Review:
                         PARTITION BY track_id,provider,metadata_version,COALESCE(source_url,''),review_fields(fields),COALESCE(cover_url,'')) AS duplicate_count
                     FROM metadata_suggestions s
                     WHERE s.track_id IN (SELECT value FROM json_each(?)) AND s.status='pending'
+                    AND (? IS NULL OR EXISTS (SELECT 1 FROM provider_refresh_members prm WHERE prm.job_id=s.job_id AND prm.batch_id=?))
                 ) SELECT * FROM (
                     SELECT *,row_number() OVER (PARTITION BY track_id ORDER BY observed_sequence DESC) AS position
                     FROM grouped WHERE duplicate_position=1
                 ) WHERE position<=30""",
-                (encoded([r["id"] for r in rows]),),
+                (encoded([r["id"] for r in rows]), batch_id, batch_id),
             ).fetchall()
+            from wildstring.album_release_locks import read as read_release_lock
+
+            release_lock = read_release_lock(db, self.library_id, album_id)
         by_track = {}
         priority = self.providers.source_priority()
         for row in suggestions:
@@ -178,6 +196,8 @@ class Review:
             "limit": limit,
             "offset": offset,
             "album_id": album_id,
+            "batch_id": batch_id,
+            "release_lock": release_lock,
             "provider_names": {s["id"]: s["name"] for s in self.providers.sources.catalog()}
             | {"musicbrainz": "MusicBrainz", "lastfm": "Last.fm"},
         }

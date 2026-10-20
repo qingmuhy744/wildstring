@@ -770,6 +770,22 @@ class Providers:
                         else:
                             cover = "https://coverartarchive.org" + parsed.path
                     validated = Overrides.model_validate(fields).model_dump(exclude_unset=True)
+                    match = dict(match or {})
+                    from wildstring.album_release_locks import candidate_conflict
+
+                    conflict = candidate_conflict(
+                        connection,
+                        self.repository.library_id(),
+                        track["album_id"],
+                        {
+                            "provider": source,
+                            "match": json.dumps(match),
+                            "fields": json.dumps(validated),
+                        },
+                        set(validated),
+                    )
+                    if conflict:
+                        match["album_release_lock"] = conflict
                     connection.execute(
                         "INSERT INTO metadata_suggestions(id,job_id,track_id,metadata_version,provider,source_url,fields,cover_url,created_at,match) VALUES (?,?,?,?,?,?,?,?,?,?)",
                         (
@@ -1235,10 +1251,11 @@ class Providers:
             view: View = "active",
             limit: int = Query(20, ge=1, le=50),
             offset: int = Query(0, ge=0),
+            batch_id: str | None = Query(None, max_length=128),
         ):
             response.headers["Cache-Control"] = "private, no-store"
             response.headers["Vary"] = "Cookie"
-            return task_page(self.repository, view, limit, offset)
+            return task_page(self.repository, view, limit, offset, batch_id)
 
         @router.post("/manage/providers/tasks/history/clear", dependencies=mutation)
         def clear_tasks(body: HistoryClear, user: admin):
@@ -1326,6 +1343,17 @@ class Providers:
             candidate = json.loads(row["fields"])
             if not body.fields or set(body.fields) - set(candidate):
                 raise HTTPException(422, "invalid_suggestion_fields")
+            with self.database.connect() as connection:
+                track = connection.execute(
+                    "SELECT album_id,library_id FROM tracks WHERE id=?", (row["track_id"],)
+                ).fetchone()
+                from wildstring.album_release_locks import candidate_conflict
+
+                conflict = candidate_conflict(
+                    connection, track["library_id"], track["album_id"], row, set(body.fields)
+                )
+            if conflict:
+                raise HTTPException(409, conflict["code"])
             values = record["overrides"] | {key: candidate[key] for key in body.fields}
             saved = MetadataEditor(self.repository).save(
                 row["track_id"],

@@ -53,6 +53,7 @@ class ReviewTasks(BaseModel):
     model_config = ConfigDict(extra="forbid")
     view: Literal["pending", "attention"]
     through: float = Field(ge=0, allow_inf_nan=False)
+    batch_id: str | None = Field(default=None, max_length=128)
 
 
 class HistoryClear(BaseModel):
@@ -60,14 +61,24 @@ class HistoryClear(BaseModel):
     through: float = Field(ge=0, allow_inf_nan=False)
 
 
-def statement(tail):
+def statement(tail, batch_id=None):
     """Compose fixed internal SQL fragments; every request value remains bound."""
-    return "".join((SELECTION, tail))
+    selection = SELECTION
+    if batch_id:
+        selection = selection.replace(
+            "WHERE t.library_id=?",
+            "WHERE t.library_id=? AND EXISTS ("
+            "SELECT 1 FROM provider_refresh_members prm JOIN provider_jobs pj ON pj.id=prm.job_id "
+            "WHERE pj.track_id=t.id AND prm.batch_id=?)",
+            1,
+        )
+    return "".join((selection, tail))
 
 
-def task_page(repository, view: View, limit=20, offset=0):
+def task_page(repository, view: View, limit=20, offset=0, batch_id=None):
     snapshot = time.time()
     library = repository.library_id()
+    prefix = (library, batch_id) if batch_id else (library,)
     with repository.database.connect() as connection:
         counts = dict.fromkeys(VIEWS, 0)
         counts.update(
@@ -75,22 +86,25 @@ def task_page(repository, view: View, limit=20, offset=0):
                 connection.execute(
                     statement(
                         "SELECT bucket,count(DISTINCT track_id) FROM classified "
-                        "WHERE bucket<>'history' OR hidden_at IS NULL GROUP BY bucket"
+                        "WHERE bucket<>'history' OR hidden_at IS NULL GROUP BY bucket",
+                        batch_id,
                     ),
-                    (library,),
+                    prefix,
                 ).fetchall()
             )
         )
         active = dict(
             connection.execute(
                 statement(
-                    "SELECT status,count(*) FROM classified WHERE bucket='active' GROUP BY status"
+                    "SELECT status,count(*) FROM classified WHERE bucket='active' GROUP BY status",
+                    batch_id,
                 ),
-                (library,),
+                prefix,
             ).fetchall()
         )
         rows = connection.execute(
-            statement(""", ranked AS (
+            statement(
+                """, ranked AS (
                 SELECT *,row_number() OVER (
                     PARTITION BY track_id ORDER BY created_at DESC,id DESC) AS position,
                     count(*) OVER (PARTITION BY track_id) AS job_count,
@@ -99,8 +113,10 @@ def task_page(repository, view: View, limit=20, offset=0):
                     max(has_issue AND acknowledged_at IS NULL) OVER (PARTITION BY track_id) AS requires_attention
                 FROM classified WHERE bucket=? AND (bucket<>'history' OR hidden_at IS NULL)
             ) SELECT * FROM ranked WHERE position=1 ORDER BY created_at DESC,id DESC
-            LIMIT ? OFFSET ?"""),
-            (library, view, limit, offset),
+            LIMIT ? OFFSET ?""",
+                batch_id,
+            ),
+            (*prefix, view, limit, offset),
         ).fetchall()
         items = []
         diagnostics = {}
@@ -108,9 +124,10 @@ def task_page(repository, view: View, limit=20, offset=0):
             statement(
                 "SELECT track_id,error,warnings FROM classified WHERE bucket=? "
                 "AND (bucket<>'history' OR hidden_at IS NULL) "
-                "AND track_id IN (SELECT value FROM json_each(?))"
+                "AND track_id IN (SELECT value FROM json_each(?))",
+                batch_id,
             ),
-            (library, view, json.dumps([row["track_id"] for row in rows])),
+            (*prefix, view, json.dumps([row["track_id"] for row in rows])),
         ):
             codes = diagnostics.setdefault(row["track_id"], [])
             codes.extend(json.loads(row["warnings"]))
@@ -143,8 +160,20 @@ def review_tasks(repository, track_id, body: ReviewTasks):
     with repository.database.connect(write=True) as connection:
         connection.execute("BEGIN IMMEDIATE")
         jobs = connection.execute(
-            statement("SELECT id FROM classified WHERE track_id=? AND bucket=? AND updated_at<=?"),
-            (repository.library_id(), track_id, body.view, min(body.through, clock)),
+            statement(
+                "SELECT id FROM classified WHERE track_id=? AND bucket=? AND updated_at<=?",
+                body.batch_id,
+            ),
+            (
+                *(
+                    (repository.library_id(), body.batch_id)
+                    if body.batch_id
+                    else (repository.library_id(),)
+                ),
+                track_id,
+                body.view,
+                min(body.through, clock),
+            ),
         ).fetchall()
         for job in jobs:
             if body.view == "pending":
