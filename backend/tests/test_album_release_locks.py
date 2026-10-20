@@ -84,10 +84,12 @@ def test_release_lock_can_be_cleared_with_version(settings, authenticated_client
             ).status_code
             == 200
         )
-        assert client.delete(
+        cleared = client.delete(
             f"/api/v1/manage/albums/{album_id}/release-lock?version=1", headers=HEADERS
-        ).json() == {"album_id": album_id, "cleared": True}
-        assert client.get(f"/api/v1/manage/albums/{album_id}/release-lock").json() == {
+        ).json()
+        assert cleared == {"album_id": album_id, "cleared": True}
+        current = client.get(f"/api/v1/manage/albums/{album_id}/release-lock").json()
+        assert current == {
             "album_id": album_id,
             "locked": False,
         }
