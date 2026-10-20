@@ -55,10 +55,11 @@ class Notifications:
         draft_id=None,
         trace_id=None,
         counts=None,
+        actions=None,
     ):
         identity, trace_id = uuid4().hex, trace_id or uuid4().hex
         inserted = connection.execute(
-            "INSERT OR IGNORE INTO agent_events(id,user_id,kind,dedupe_key,title,summary,severity,task_id,draft_id,trace_id,counts,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            "INSERT OR IGNORE INTO agent_events(id,user_id,kind,dedupe_key,title,summary,severity,task_id,draft_id,trace_id,counts,actions,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 identity,
                 user_id,
@@ -71,6 +72,7 @@ class Notifications:
                 draft_id,
                 trace_id,
                 encoded(counts or {}),
+                encoded(actions or []),
                 now(),
             ),
         )
@@ -137,7 +139,7 @@ class Notifications:
                         raise ValueError
                 except (ValueError, TypeError):
                     raise HTTPException(410, "notification_cursor_expired") from None
-            query = "SELECT n.*,e.kind AS event_type,e.title,e.summary,e.severity,e.task_id,e.draft_id,e.trace_id,e.counts FROM agent_notifications n JOIN agent_events e ON e.id=n.event_id WHERE n.user_id=?"
+            query = "SELECT n.*,e.kind AS event_type,e.title,e.summary,e.severity,e.task_id,e.draft_id,e.trace_id,e.counts,e.actions FROM agent_notifications n JOIN agent_events e ON e.id=n.event_id WHERE n.user_id=?"
             if cursor is not None:
                 query += " AND n.changed_seq>? ORDER BY n.changed_seq,n.id LIMIT ?"
                 rows = connection.execute(query, (actor.user_id, seq, limit)).fetchall()
@@ -160,9 +162,10 @@ class Notifications:
             item = {
                 key: row[key]
                 for key in row.keys()
-                if key not in {"user_id", "changed_seq", "counts"}
+                if key not in {"user_id", "changed_seq", "counts", "actions"}
             }
             item["counts"] = json.loads(row["counts"])
+            item["actions"] = json.loads(row["actions"] or "[]")
             item["detail_route"] = (
                 f"drafts/{row['draft_id']}"
                 if row["draft_id"]

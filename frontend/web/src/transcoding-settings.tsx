@@ -1,3 +1,4 @@
+import { HelpLabel } from './desktop-help';
 import { useEffect, useState, type FormEvent } from 'react';
 import { api } from './api';
 interface Settings {
@@ -98,7 +99,7 @@ export function TranscodingSettings() {
         </p>
       )}
       <label>
-        保留天数（自上次使用）
+        <HelpLabel hint="cacheDays">保留天数（自上次使用）</HelpLabel>
         <input
           type="number"
           disabled={!record || busy}
@@ -110,7 +111,7 @@ export function TranscodingSettings() {
         />
       </label>
       <label>
-        缓存上限（MiB）
+        <HelpLabel hint="cacheSize">缓存上限（MiB）</HelpLabel>
         <input
           type="number"
           disabled={!record || busy}
@@ -122,7 +123,7 @@ export function TranscodingSettings() {
         />
       </label>
       <label>
-        同时转码任务数
+        <HelpLabel hint="transcodeJobs">同时转码任务数</HelpLabel>
         <input
           type="number"
           disabled={!record || busy}

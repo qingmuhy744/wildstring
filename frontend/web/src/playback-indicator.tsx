@@ -22,7 +22,7 @@ export function PlaybackIndicator({
       className="playback-indicator"
       role="img"
       aria-label={label}
-      title={label}
+      data-help={label}
       data-state={state}
       data-animate={state === 'playing' && visible}
     >

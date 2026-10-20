@@ -1,3 +1,4 @@
+import { HelpLabel } from './desktop-help';
 import { useEffect, useState } from 'react';
 import { artist, type Playlist } from './api';
 import {
@@ -95,7 +96,7 @@ export function OfflinePanel({ player, userId }: { player: Player; userId: strin
           播放离线音乐
         </button>
         <label>
-          容量上限（MB）
+          <HelpLabel hint="offlineLimit">容量上限（MB）</HelpLabel>
           <input
             aria-label="离线容量上限"
             type="number"
@@ -116,7 +117,7 @@ export function OfflinePanel({ player, userId }: { player: Player; userId: strin
       <details className="management-card offline-options">
         <summary>下载设置与自动下载歌单</summary>
         <label>
-          默认下载音质
+          <HelpLabel hint="offlineQuality">默认下载音质</HelpLabel>
           <select
             aria-label="默认下载音质"
             value={bitrate}

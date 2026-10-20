@@ -1,3 +1,4 @@
+import { HelpLabel, HelpText } from './desktop-help';
 import { useEffect, useRef, useState, type RefObject } from 'react';
 import { api } from './api';
 
@@ -154,7 +155,7 @@ export function GainControls({ trackId }: { trackId?: string }) {
           {record && (
             <fieldset disabled={busy}>
               <label>
-                自动响度均衡
+                <HelpLabel hint="replayGain">自动响度均衡</HelpLabel>
                 <select
                   value={record.settings.mode}
                   onChange={(e) =>
@@ -170,7 +171,7 @@ export function GainControls({ trackId }: { trackId?: string }) {
                 </select>
               </label>
               <label>
-                自动均衡前级（dB）
+                <HelpLabel hint="gainPreamp">自动均衡前级（dB）</HelpLabel>
                 <input
                   type="number"
                   min="-12"
@@ -196,7 +197,7 @@ export function GainControls({ trackId }: { trackId?: string }) {
                     })
                   }
                 />
-                根据峰值防止削波（未知峰值时只衰减）
+                <HelpLabel hint="clipping">根据峰值防止削波（未知峰值时只衰减）</HelpLabel>
               </label>
               <button
                 onClick={() =>
@@ -215,7 +216,9 @@ export function GainControls({ trackId }: { trackId?: string }) {
               {(['album', 'track'] as const).map((scope) => (
                 <div key={scope}>
                   <label>
-                    {scope === 'album' ? '整张专辑增减（dB）' : '本曲额外微调（dB）'}
+                    <HelpLabel hint={scope === 'album' ? 'albumGain' : 'trackGain'}>
+                      {scope === 'album' ? '整张专辑增减（dB）' : '本曲额外微调（dB）'}
+                    </HelpLabel>
                     <input
                       type="number"
                       aria-label={scope === 'album' ? '专辑增益 dB' : '单曲增益 dB'}
@@ -269,9 +272,11 @@ export function GainControls({ trackId }: { trackId?: string }) {
                 </div>
               ))}
               <p>
-                请求增益 {record.requested_db.toFixed(1)} dB · 实际 {record.applied_db.toFixed(1)}{' '}
-                dB{record.limited ? '（受峰值保护限制）' : ''} · 峰值
-                {record.peak_known ? '已知' : '未知'}
+                <HelpText hint="gainResult">
+                  请求增益 {record.requested_db.toFixed(1)} dB · 实际 {record.applied_db.toFixed(1)}{' '}
+                  dB{record.limited ? '（受峰值保护限制）' : ''} · 峰值
+                  {record.peak_known ? '已知' : '未知'}
+                </HelpText>
               </p>
               {record.can_analyze && (
                 <button

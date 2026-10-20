@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, ApiError } from './api';
-import type { AgentNotification, NotificationPage } from './agent-api';
+import type { AgentNotification, NotificationAction, NotificationPage } from './agent-api';
 import {
   DiagnosticId,
   errorText,
@@ -178,7 +178,7 @@ export function Notifications({
   onOpen,
 }: {
   inbox: NotificationInbox;
-  onOpen: (kind: 'drafts' | 'tasks', id: string) => void;
+  onOpen: (action: NotificationAction) => void;
 }) {
   const [filter, setFilter] = useState('unread');
   const visible = inbox.items.filter((item) =>
@@ -206,7 +206,11 @@ export function Notifications({
             <button aria-pressed={filter === 'all'} onClick={() => setFilter('all')}>
               全部通知
             </button>
-            <button disabled={!inbox.unread || inbox.busy} onClick={() => void inbox.read()}>
+            <button
+              data-help="只更新当前账号的已读状态，不删除通知，也不会接受草案或应用资料。"
+              disabled={!inbox.unread || inbox.busy}
+              onClick={() => void inbox.read()}
+            >
               将当前通知标为已读
             </button>
           </div>
@@ -242,11 +246,45 @@ export function Notifications({
                   <DiagnosticId id={item.trace_id} />
                 </div>
                 <div className="workspace-actions">
-                  {item.draft_id && (
-                    <button onClick={() => onOpen('drafts', item.draft_id!)}>查看草案</button>
+                  {(item.actions || []).map((action) => (
+                    <button
+                      key={action.id}
+                      className={action.id === item.actions?.[0]?.id ? 'primary' : undefined}
+                      onClick={() => onOpen(action)}
+                    >
+                      {action.label}
+                      {typeof action.count === 'number' && action.count > 0
+                        ? ` · ${action.count}`
+                        : ''}
+                    </button>
+                  ))}
+                  {!item.actions?.length && item.draft_id && (
+                    <button
+                      onClick={() =>
+                        onOpen({
+                          id: 'draft',
+                          target: 'draft',
+                          label: '查看草案',
+                          params: { id: item.draft_id! },
+                        })
+                      }
+                    >
+                      查看草案
+                    </button>
                   )}
-                  {item.task_id && (
-                    <button onClick={() => onOpen('tasks', item.task_id!)}>查看任务</button>
+                  {!item.actions?.length && item.task_id && (
+                    <button
+                      onClick={() =>
+                        onOpen({
+                          id: 'task',
+                          target: 'task',
+                          label: '查看任务',
+                          params: { id: item.task_id! },
+                        })
+                      }
+                    >
+                      查看任务
+                    </button>
                   )}
                   {!item.read_at && (
                     <button

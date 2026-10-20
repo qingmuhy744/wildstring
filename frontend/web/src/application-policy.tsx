@@ -1,3 +1,4 @@
+import { HelpLabel } from './desktop-help';
 import { useEffect, useState } from 'react';
 import { api } from './api';
 import { errorText, useWorkspaceResource, WorkspaceNotice } from './workspace-ui';
@@ -55,7 +56,7 @@ export function ApplicationPolicySettings() {
       {form ? (
         <>
           <label>
-            应用方式
+            <HelpLabel hint="application">应用方式</HelpLabel>
             <select
               aria-label="应用方式"
               value={form.mode}

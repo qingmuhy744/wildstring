@@ -1,3 +1,4 @@
+import { HelpLabel } from './desktop-help';
 import { useEffect, useState } from 'react';
 import type { AgentConnection } from './agent-api';
 import { ModelConnectionChoice } from './model-connection';
@@ -79,7 +80,9 @@ export function RecommendationPreferencesForm({
               onManage={onConnections}
             />
             <fieldset className="recommendation-source-group">
-              <legend>本库推荐来源</legend>
+              <legend>
+                <HelpLabel hint="recommendations">本库推荐来源</HelpLabel>
+              </legend>
               <p className="muted">
                 混合自己的收听、全站汇总热度和未充分听过的收藏。全站排行不展示其他账号的个人记录。
               </p>

@@ -1,3 +1,4 @@
+import { HelpLabel, HelpText } from './desktop-help';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { api, type User } from './api';
 import { AISettings } from './ai-settings';
@@ -216,7 +217,7 @@ export function AgentConnections({ user }: { user: User }) {
             <h3>{editing ? '编辑模型连接' : '添加模型连接'}</h3>
             <div className="workspace-form">
               <label>
-                API 协议
+                <HelpLabel hint="aiProtocol">API 协议</HelpLabel>
                 <select
                   aria-label="API 协议"
                   value={form.protocol}
@@ -229,7 +230,7 @@ export function AgentConnections({ user }: { user: User }) {
                 </select>
               </label>
               <label>
-                供应商适配
+                <HelpLabel hint="aiProvider">供应商适配</HelpLabel>
                 <select
                   aria-label="供应商适配"
                   value={form.provider}
@@ -251,7 +252,7 @@ export function AgentConnections({ user }: { user: User }) {
                 </select>
               </label>
               <label>
-                推理强度
+                <HelpLabel hint="reasoning">推理强度</HelpLabel>
                 <select
                   aria-label="推理强度"
                   value={form.reasoning_effort}
@@ -265,7 +266,7 @@ export function AgentConnections({ user }: { user: User }) {
                 </select>
               </label>
               <label>
-                单次输出 Token 上限
+                <HelpLabel hint="outputTokens">单次输出 Token 上限</HelpLabel>
                 <input
                   aria-label="单次输出 Token 上限"
                   type="number"
@@ -281,7 +282,7 @@ export function AgentConnections({ user }: { user: User }) {
                   checked={form.stream_output}
                   onChange={(e) => setForm({ ...form, stream_output: e.target.checked })}
                 />
-                逐步显示回答（兼容接口不支持时可关闭）
+                <HelpLabel hint="aiStream">逐步显示回答（兼容接口不支持时可关闭）</HelpLabel>
               </label>
               {form.protocol === 'responses' &&
                 ['openai', 'deepseek', 'qwen'].includes(form.provider) && (
@@ -291,7 +292,7 @@ export function AgentConnections({ user }: { user: User }) {
                       checked={form.native_search}
                       onChange={(e) => setForm({ ...form, native_search: e.target.checked })}
                     />
-                    使用模型原生联网搜索（按供应商计费）
+                    <HelpLabel hint="nativeSearch">使用模型原生联网搜索（按供应商计费）</HelpLabel>
                   </label>
                 )}
               <label>
@@ -354,7 +355,7 @@ export function AgentConnections({ user }: { user: User }) {
                 />
               </label>
               <label>
-                超时（秒）
+                <HelpLabel hint="aiTimeout">超时（秒）</HelpLabel>
                 <input
                   type="number"
                   min={1}
@@ -365,7 +366,7 @@ export function AgentConnections({ user }: { user: User }) {
                 />
               </label>
               <label>
-                每日模型调用上限
+                <HelpLabel hint="aiBudget">每日模型调用上限</HelpLabel>
                 <input
                   type="number"
                   min={1}
@@ -402,7 +403,7 @@ export function AgentConnections({ user }: { user: User }) {
                     checked={form.background_allowed}
                     onChange={(e) => setForm({ ...form, background_allowed: e.target.checked })}
                   />
-                  允许自动巡检使用
+                  <HelpLabel hint="backgroundAI">允许自动巡检使用</HelpLabel>
                 </label>
                 <p className="muted">用于定时巡检等自动任务；手动开始无需开启。</p>
                 {user.role === 'admin' && form.scope === 'instance' && (
@@ -629,7 +630,9 @@ export function ToolCredentials({ user }: { user: User }) {
                 />
               </label>
               <fieldset className="span-all">
-                <legend>允许的操作</legend>
+                <legend>
+                  <HelpText hint="mcpScopes">允许的操作</HelpText>
+                </legend>
                 <div className="workspace-check-grid">
                   {Object.entries(scopes)
                     .filter(
@@ -738,7 +741,7 @@ export function AssistantPreferences() {
       <WorkspaceNotice error={error || prefs.error} notice={notice} />
       <div className="workspace-inline">
         <label>
-          助手对话保留天数
+          <HelpLabel hint="history">助手对话保留天数</HelpLabel>
           <input
             aria-label="助手历史保留天数"
             type="number"

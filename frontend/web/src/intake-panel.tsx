@@ -1,3 +1,4 @@
+import { HelpLabel } from './desktop-help';
 import { useEffect, useState } from 'react';
 import { api } from './api';
 
@@ -222,7 +223,7 @@ export function IntakePanel() {
               自动发现并导入新音乐
             </label>
             <label>
-              检查间隔（秒）
+              <HelpLabel hint="importInterval">检查间隔（秒）</HelpLabel>
               <input
                 type="number"
                 min="15"
@@ -237,7 +238,7 @@ export function IntakePanel() {
               />
             </label>
             <label>
-              等待文件稳定（秒）
+              <HelpLabel hint="importStable">等待文件稳定（秒）</HelpLabel>
               <input
                 type="number"
                 min="5"
@@ -274,7 +275,9 @@ export function IntakePanel() {
                   同专辑有下载标记时整张等待（含 CD / Disc 子目录）
                 </label>
                 <label>
-                  下载中文件／目录后缀（空格或逗号分隔）
+                  <HelpLabel hint="downloadSuffix">
+                    下载中文件／目录后缀（空格或逗号分隔）
+                  </HelpLabel>
                   <input
                     required
                     value={suffixText}

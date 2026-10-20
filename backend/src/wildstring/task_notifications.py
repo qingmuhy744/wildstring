@@ -69,4 +69,13 @@ def metadata_result(service, connection, job_id):
                 severity="warning" if warnings or counts["failed"] or counts["stale"] else "info",
                 trace_id=identity,
                 counts=dict(counts) | {"total": len(rows), "warnings": warnings},
+                actions=[
+                    {
+                        "id": "metadata-review",
+                        "target": "metadata-center",
+                        "label": "查看候选",
+                        "params": {"batch_id": identity},
+                        "count": counts["completed"],
+                    }
+                ],
             )

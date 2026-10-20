@@ -339,6 +339,17 @@ class Core:
         record = MetadataEditor(repository).read(payload["track_id"])
         if record["version"] != body.version:
             raise HTTPException(409, "metadata_version_conflict")
+        from wildstring.album_release_locks import ALBUM_FIELDS
+        from wildstring.album_release_locks import read as read_release_lock
+
+        with self.database.connect() as connection:
+            row = connection.execute(
+                "SELECT album_id FROM tracks WHERE id=? AND library_id=?",
+                (payload["track_id"], self.library_id),
+            ).fetchone()
+            if row and read_release_lock(connection, self.library_id, row["album_id"]):
+                if ALBUM_FIELDS.intersection(body.overrides.model_fields_set):
+                    raise HTTPException(409, "album_release_lock_requires_source")
         return {
             "track_id": payload["track_id"],
             "metadata_version": body.version,

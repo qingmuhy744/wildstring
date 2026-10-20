@@ -1,0 +1,62 @@
+.desktop-help-label {
+  display: inline;
+  max-width: 100%;
+}
+.desktop-help-marker {
+  display: none;
+}
+.desktop-help-bubble {
+  display: none;
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  padding: 11px 14px;
+  width: max-content;
+  max-width: min(320px, calc(100vw - 24px));
+  box-sizing: border-box;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--workspace-panel, #20211b);
+  color: var(--workspace-text, #eeeae2);
+  font:
+    12px/1.7 Inter,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    'PingFang SC',
+    sans-serif;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  box-shadow: 0 5px 22px #0002;
+  z-index: 10000;
+}
+@media (min-width: 761px) and (hover: hover) and (pointer: fine) {
+  .desktop-help-bubble {
+    display: block;
+  }
+  .desktop-help-marker {
+    display: inline;
+    margin-left: 5px;
+    flex-shrink: 0;
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 400;
+  }
+  .desktop-help-label,
+  .desktop-help-term[data-help] {
+    cursor: help;
+  }
+  .desktop-help-term[data-help] {
+    text-decoration: underline dotted color-mix(in srgb, currentColor 40%, transparent);
+    text-underline-offset: 4px;
+  }
+  .desktop-help-term:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 4px;
+    border-radius: 3px;
+  }
+}
+
+.desktop-help-marker::before {
+  content: 'ⓘ';
+}

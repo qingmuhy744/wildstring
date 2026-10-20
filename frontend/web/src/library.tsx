@@ -54,6 +54,7 @@ import type { TrackOperations } from './track-actions';
 import { Discover, Devices } from './discover';
 import { OfflinePanel } from './offline-panel';
 import { Notifications, useNotifications } from './notifications';
+import type { NotificationAction } from './agent-api';
 import './workspace.css';
 import { followPlaylist, followedPlaylists, useOfflinePlaylistSync } from './offline-playlists';
 import { collectTracks } from './playback-state';
@@ -165,9 +166,26 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
     kind: 'drafts' | 'tasks';
     id: string;
   } | null>(null);
+  const [managementAction, setManagementAction] = useState<{
+    type: 'metadata-center';
+    batchId?: string;
+  } | null>(null);
   function openAgentItem(kind: 'drafts' | 'tasks', id: string) {
     setSelectedAgentItem({ kind, id });
     switchView(kind);
+  }
+  function openNotificationAction(action: NotificationAction) {
+    const id = action.params?.id;
+    if (action.target === 'draft' && id) return openAgentItem('drafts', id);
+    if (action.target === 'task' && id) return openAgentItem('tasks', id);
+    if (action.target === 'metadata-center' || action.target === 'metadata-review') {
+      setManagementAction({ type: 'metadata-center', batchId: action.params?.batch_id });
+      setManageOpen(true);
+      return;
+    }
+    if (action.target === 'lyric-scan') {
+      setLyricScanBatch(action.params?.batch_id || null);
+    }
   }
   const [collectionBusy, setCollectionBusy] = useState(false);
   const collectionRequest = useRef<AbortController | null>(null);
@@ -188,6 +206,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
   const refreshLibrary = useCallback(() => setRevision((value) => value + 1), []);
   const [album, setAlbum] = useState<Album | null>(null);
   const [lyricScanAlbum, setLyricScanAlbum] = useState<string | null>(null);
+  const [lyricScanBatch, setLyricScanBatch] = useState<string | null>(null);
   const [selectedArtist, setSelectedArtist] = useState<Artist | null>(null);
   const [artistRole, setArtistRole] = useState('');
   const [artistView, setArtistView] = useState<'tracks' | 'albums'>('tracks');
@@ -937,11 +956,15 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
         {manageOpen && (
           <Management
             revision={revision}
-            onBack={() => setManageOpen(false)}
+            onBack={() => {
+              setManageOpen(false);
+              setManagementAction(null);
+            }}
             onEdit={setEditingTrack}
             onChanged={refreshLibrary}
             onRefresh={() => setMetadataRefresh({ scope: 'library', label: '整个曲库' })}
             onOpenConnections={openModelConnections}
+            initialAction={managementAction}
           />
         )}
         <main className={`library ${album ? 'is-album' : ''}`} hidden={manageOpen}>
@@ -1004,7 +1027,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
             <button
               className={`notification-entry icon-button ${view === 'notifications' ? 'selected' : ''}`}
               aria-label="通知中心"
-              title={inbox.unread ? `${inbox.unread} 条未读通知` : '通知中心'}
+              data-help={inbox.unread ? `${inbox.unread} 条未读通知` : '通知中心'}
               onClick={() => switchView('notifications')}
             >
               <Icon name="bell" />
@@ -1058,7 +1081,9 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
                 selectedId={selectedAgentItem?.kind === 'tasks' ? selectedAgentItem.id : undefined}
               />
             )}
-            {view === 'notifications' && <Notifications inbox={inbox} onOpen={openAgentItem} />}
+            {view === 'notifications' && (
+              <Notifications inbox={inbox} onOpen={openNotificationAction} />
+            )}
             {view === 'assistant-settings' && (
               <AssistantSettings key={connectionSettingsRevision} user={user} />
             )}
@@ -1125,7 +1150,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
               <div className="listening-summary" aria-label="收听统计">
                 <div>
                   <strong>{stats?.play_count ?? 0}</strong>
-                  <span title="累计听过半首或 4 分钟计一次；同一次播放只计一次">播放次数</span>
+                  <span data-help="累计听过半首或 4 分钟计一次；同一次播放只计一次">播放次数</span>
                 </div>
                 <div>
                   <strong>{listeningTime(stats?.listened_ms || 0)}</strong>
@@ -1579,6 +1604,9 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
       )}
       {lyricScanAlbum && (
         <LyricScanDialog albumId={lyricScanAlbum} onClose={() => setLyricScanAlbum(null)} />
+      )}
+      {lyricScanBatch && (
+        <LyricScanDialog batchId={lyricScanBatch} onClose={() => setLyricScanBatch(null)} />
       )}
       {metadataRefresh && (
         <MetadataRefreshDialog target={metadataRefresh} onClose={() => setMetadataRefresh(null)} />

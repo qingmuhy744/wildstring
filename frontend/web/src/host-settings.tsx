@@ -1,3 +1,4 @@
+import { HelpLabel } from './desktop-help';
 import { useEffect, useState, type FormEvent } from 'react';
 import { api } from './api';
 interface Settings {
@@ -80,7 +81,7 @@ export function HostSettings() {
         启用域名白名单
       </label>
       <label>
-        允许访问的域名或 IP
+        <HelpLabel hint="hostAllowlist">允许访问的域名或 IP</HelpLabel>
         <textarea
           rows={5}
           placeholder={'music.example.com\n192.168.10.65'}

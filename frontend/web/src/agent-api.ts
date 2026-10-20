@@ -73,6 +73,14 @@ export interface AgentNotification {
   read_at: string | null;
   version: number;
   detail_route: string | null;
+  actions: NotificationAction[];
+}
+export interface NotificationAction {
+  id: string;
+  target: 'draft' | 'task' | 'metadata-center' | 'metadata-review' | 'lyric-scan' | 'diagnostics';
+  label: string;
+  params?: Record<string, string>;
+  count?: number;
 }
 export interface NotificationPage extends AgentPage<AgentNotification> {
   next_cursor: string | null;

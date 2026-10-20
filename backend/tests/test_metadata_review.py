@@ -191,3 +191,159 @@ def test_review_is_session_only_and_preserves_unselected_manual_values(curation)
     assert MetadataEditor(service.repository).read(target["id"])["overrides"] == {
         "composers": ["User composer"]
     }
+
+
+def duplicate(service, identity, **changes):
+    from uuid import uuid4
+
+    with service.database.connect(write=True) as db:
+        row = dict(
+            db.execute("SELECT * FROM metadata_suggestions WHERE id=?", (identity,)).fetchone()
+        )
+        row.update(id=uuid4().hex, **changes)
+        db.execute(
+            "INSERT INTO metadata_suggestions(id,job_id,track_id,metadata_version,provider,source_url,fields,cover_url,status,created_at,match) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            tuple(
+                row[key]
+                for key in (
+                    "id",
+                    "job_id",
+                    "track_id",
+                    "metadata_version",
+                    "provider",
+                    "source_url",
+                    "fields",
+                    "cover_url",
+                    "status",
+                    "created_at",
+                    "match",
+                )
+            ),
+        )
+    return row
+
+
+def reject_body(track):
+    return {
+        key: value for key, value in body({"items": [track]})["items"][0].items() if key != "fields"
+    }
+
+
+def test_review_collapses_content_before_limit_but_preserves_releases_and_sources(curation):
+    api, token, service = curation
+    page = seed(api, service)
+    track = page["items"][0]
+    identity = track["suggestions"][0]["id"]
+    for i in range(40):
+        last = duplicate(
+            service,
+            identity,
+            fields=json.dumps({"composers": ["New composer"], "genres": ["Rock"]}),
+            created_at=2000000000 + i,
+            match=json.dumps({"score": i / 100}),
+        )
+    duplicate(
+        service,
+        identity,
+        fields=json.dumps({"genres": ["Rock"], "album": "Live version"}),
+        created_at=2000000100,
+    )
+    duplicate(service, identity, provider="lastfm", created_at=2000000101)
+    result = api.get(BASE, params={"track_id": track["id"]}).json()["items"][0]["suggestions"]
+    assert len(result) == 3
+    source = next(r for r in result if r["id"] == last["id"])
+    assert source["duplicate_count"] == 41 and source["match"]["score"] == 0.39
+    assert any(r["fields"].get("album") == "Live version" for r in result)
+    assert any(r["provider"] == "lastfm" for r in result)
+
+
+def test_rejection_ignores_observed_duplicates_not_new_lookup_or_other_release(curation):
+    api, token, service = curation
+    track = seed(api, service)["items"][0]
+    original = track["suggestions"][0]["id"]
+    older = duplicate(service, original, created_at=2000000000)
+    track = api.get(BASE, params={"track_id": track["id"]}).json()["items"][0]
+    newer = duplicate(service, original, created_at=2000000010)
+    release = duplicate(service, original, fields=json.dumps({"album": "Other release"}))
+    before = MetadataEditor(service.repository).read(track["id"])
+    response = api.post(BASE + "/reject", headers=HEADERS, json=reject_body(track))
+    assert response.status_code == 200, response.text
+    assert response.json() == {"status": "ignored", "ignored_count": 2, "already_ignored": False}
+    assert api.post(BASE + "/reject", headers=HEADERS, json=reject_body(track)).json()[
+        "already_ignored"
+    ]
+    with service.database.connect() as db:
+        values = dict(
+            db.execute(
+                "SELECT id,status FROM metadata_suggestions WHERE track_id=?", (track["id"],)
+            )
+        )
+    assert values[original] == values[older["id"]] == "ignored"
+    assert values[newer["id"]] == values[release["id"]] == "pending"
+    assert MetadataEditor(service.repository).read(track["id"]) == before
+    refreshed = api.get(BASE, params={"track_id": track["id"]}).json()["items"][0]["suggestions"]
+    assert {r["id"] for r in refreshed} == {newer["id"], release["id"]}
+
+
+@pytest.mark.parametrize("change", ["version", "candidate", "applied", "track"])
+def test_rejection_conflict_does_not_discard_other_candidates(curation, change):
+    api, token, service = curation
+    page = seed(api, service)
+    track = page["items"][0]
+    request = reject_body(track)
+    with service.database.connect(write=True) as db:
+        if change == "version":
+            db.execute(
+                "UPDATE track_metadata SET version=version+1 WHERE track_id=?", (track["id"],)
+            )
+        elif change == "candidate":
+            db.execute(
+                "UPDATE metadata_suggestions SET fields='{}' WHERE id=?",
+                (request["suggestion_id"],),
+            )
+        elif change == "applied":
+            db.execute(
+                "UPDATE metadata_suggestions SET status='applied' WHERE id=?",
+                (request["suggestion_id"],),
+            )
+        else:
+            request["track_id"] = page["items"][1]["id"]
+    response = api.post(BASE + "/reject", headers=HEADERS, json=request)
+    assert response.status_code == (404 if change == "track" else 409)
+    with service.database.connect() as db:
+        assert (
+            db.execute(
+                "SELECT count(*) FROM metadata_suggestions WHERE status='ignored'"
+            ).fetchone()[0]
+            == 0
+        )
+
+
+def test_rejection_permission_and_stale_candidates_do_not_inflate_pending_albums(curation):
+    api, token, service = curation
+    page = seed(api, service)
+    request = reject_body(page["items"][0])
+    assert api.post(BASE + "/reject", json=request).status_code == 403
+    with TestClient(api.app) as external:
+        assert external.post(BASE + "/reject", headers=token, json=request).status_code == 401
+    target = page["items"][0]
+    MetadataEditor(service.repository).save(
+        target["id"], MetadataUpdate(version=1, overrides=Overrides(title="Changed title"))
+    )
+    albums = api.get(BASE + "/albums").json()
+    assert albums["items"][0]["count"] == 1
+    current = api.get(BASE, params={"track_id": target["id"]}).json()["items"][0]
+    assert api.post(BASE + "/reject", headers=HEADERS, json=reject_body(current)).status_code == 200
+
+
+def test_rejection_does_not_hide_later_lookup_when_wall_clock_moves_back(curation):
+    api, token, service = curation
+    track = seed(api, service)["items"][0]
+    original = track["suggestions"][0]["id"]
+    later = duplicate(service, original, created_at=1)
+    assert (
+        api.post(BASE + "/reject", headers=HEADERS, json=reject_body(track)).json()["ignored_count"]
+        == 1
+    )
+    refreshed = api.get(BASE, params={"track_id": track["id"]}).json()["items"][0]["suggestions"]
+    assert len(refreshed) == 1 and refreshed[0]["id"] == later["id"]

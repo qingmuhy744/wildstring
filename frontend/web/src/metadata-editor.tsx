@@ -217,7 +217,10 @@ export function MetadataEditor({
                   <label className="metadata-field" key={key}>
                     <span className="metadata-field-label">
                       {labels[key]}
-                      <span className="metadata-source">
+                      <span
+                        className="metadata-source"
+                        data-help="文件标签是原始音频中的资料；人工或来源建议是数据库覆盖值。保存和重扫不会把它们写回音频文件。"
+                      >
                         {overridden.includes(key)
                           ? record.origins?.[key]?.startsWith('musicbrainz:')
                             ? 'MusicBrainz'

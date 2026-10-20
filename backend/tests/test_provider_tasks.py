@@ -68,6 +68,14 @@ def test_query_completion_preserves_pending_then_apply_archives_without_changing
         assert page(client, "history")["total"] == 0
         pending = page(client, "pending")
         assert pending["total"] == 1 and pending["items"][0]["suggestion_count"] == 1
+        batch_pending = client.get(
+            BASE + "/tasks", params={"view": "pending", "batch_id": batch}
+        ).json()
+        assert batch_pending["total"] == 1 and batch_pending["items"][0]["track_id"] == track["id"]
+        batch_review = client.get("/api/v1/agent/metadata-review", params={"batch_id": batch})
+        assert batch_review.status_code == 200
+        assert batch_review.json()["batch_id"] == batch
+        assert [item["id"] for item in batch_review.json()["items"]] == [track["id"]]
         assert client.post(
             BASE + "/tasks/history/clear", headers=HEADERS, json={"through": time.time()}
         ).json() == {"cleared": 0}
@@ -279,5 +287,5 @@ def test_permissions_pagination_library_scope_and_schema15_upgrade(settings, aut
     database.initialize()
     database.initialize()
     with database.connect() as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION == 23
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION == 25
         assert connection.execute("SELECT count(*) FROM provider_jobs").fetchone()[0] == 1
