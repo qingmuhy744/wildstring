@@ -635,8 +635,8 @@ private fun PlayerScreen(vm: MusicViewModel, input: MusicState, wide: Boolean, l
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
             IconButton(onBack) {
                 Icon(
-                    if (lyrics && !wide) Icons.AutoMirrored.Filled.ArrowBack else Icons.Default.KeyboardArrowDown,
-                    if (lyrics && !wide) "返回封面" else "收起播放器",
+                    Icons.Default.KeyboardArrowDown,
+                    "收起播放器",
                 )
             }
             Spacer(Modifier.weight(1f))
