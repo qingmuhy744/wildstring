@@ -489,6 +489,24 @@ class MobileCompletionTest {
             "mode" to "repeat_all", "playback_state" to state, "paused_at" to if (state == "paused") at else null,
             "handoff_supported" to true, "handoff_eligible" to eligible, "updated_at" to at).toString()
 
+    private fun awaitHandoffNotice(vm: MusicViewModel, version: Int) {
+        try {
+            // The API/state update can finish before the first measured frame.
+            // Wait for the actual notice and action to be visible, not just composed.
+            compose.waitUntil(10_000) {
+                vm.state.value.handoff?.version == version &&
+                    compose.onNodeWithTag("playback-handoff-notice").isDisplayed() &&
+                    compose.onNodeWithText("其他设备有可接续的进度").isDisplayed() &&
+                    compose.onNodeWithText("载入进度").isDisplayed()
+            }
+        } catch (error: Throwable) {
+            val tree = runCatching { compose.onRoot(useUnmergedTree = true).printToString() }.getOrDefault("UI unavailable")
+            throw AssertionError("Expected visible handoff $version; actual=${vm.state.value.handoff?.version}, playing=${vm.state.value.playing}\n$tree", error)
+        }
+        compose.onNodeWithTag("playback-handoff-notice").assertIsDisplayed()
+        compose.onNodeWithText("载入进度").assertIsEnabled()
+    }
+
     @Test fun crossDevicePromptRestoresPausedAndPausePublishesWithoutManualClaim() {
         Fixture().use { fixture -> val vm = connect(fixture)
             try {
@@ -500,7 +518,7 @@ class MobileCompletionTest {
                 }
                 fixture.snapshot = remotePause(70, ids = listOf("completion-0", "completion-1"), index = 1, position = 3000)
                 runBlocking { withContext(Dispatchers.Main) { vm.checkSharedPlayback() } }
-                compose.onNodeWithText("其他设备有可接续的进度").assertIsDisplayed()
+                awaitHandoffNotice(vm, 70)
                 compose.onNodeWithText("载入进度").performClick()
                 try { compose.waitUntil(10_000) { vm.state.value.handoff == null && vm.state.value.queue.size == 2 } }
                 catch (e: Throwable) {
@@ -544,7 +562,7 @@ class MobileCompletionTest {
                 compose.runOnIdle { vm.observeProgress(false); vm.syncMode("ask") }
                 fixture.snapshot = remotePause(120)
                 runBlocking { withContext(Dispatchers.Main) { vm.checkSharedPlayback() } }
-                compose.onNodeWithTag("playback-handoff-notice").assertIsDisplayed()
+                awaitHandoffNotice(vm, 120)
                 fixture.snapshot = remotePause(121, "playing")
                 runBlocking { withContext(Dispatchers.Main) { vm.checkSharedPlayback() } }
                 compose.onNodeWithTag("playback-handoff-notice").assertDoesNotExist()
@@ -553,7 +571,7 @@ class MobileCompletionTest {
                 compose.runOnIdle { assertNull(vm.state.value.handoff) }
                 fixture.snapshot = remotePause(123, at = "2026-10-19T10:10:00Z")
                 runBlocking { withContext(Dispatchers.Main) { vm.checkSharedPlayback() } }
-                compose.onNodeWithTag("playback-handoff-notice").assertIsDisplayed()
+                awaitHandoffNotice(vm, 123)
                 fixture.snapshot = remotePause(124, "playing")
                 val queueBefore = vm.state.value.queue
                 runBlocking { withContext(Dispatchers.Main) { vm.acceptHandoff() } }
