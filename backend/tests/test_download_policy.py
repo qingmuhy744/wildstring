@@ -131,7 +131,7 @@ def test_custom_markers_old_client_preserves_policy_and_v21_migration(settings):
     Database(settings.data_dir).initialize()
     with intake.database.connect() as db:
         assert dict(db.execute("SELECT * FROM intake_items").fetchone()) == before
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 25
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 26
     assert intake.repository.tracks()["items"][0]["id"] == track["id"]
     assert intake.preferences()["download_policy"]["wait_for_album"] is True
     assert intake.preferences()["enabled"] is True

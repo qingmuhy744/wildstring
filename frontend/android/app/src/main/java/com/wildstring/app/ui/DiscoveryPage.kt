@@ -49,6 +49,7 @@ import androidx.compose.ui.unit.dp
                     modifier = Modifier.fillMaxWidth().clickable(onClick = playTrack).padding(horizontal = 4.dp, vertical = 4.dp))
             }
         }
+        if (state.loading && state.albums.isEmpty() && state.tracks.isEmpty()) DiscoverySkeleton()
     }
 }
 

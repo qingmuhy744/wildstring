@@ -252,6 +252,7 @@ class AgentWorkspaceTest {
             assertTrue(submitted.flag("use_ai")); assertEquals("legacy", submitted.text("connection_id")); assertEquals(4, submitted.number("max_calls").toInt())
             assertFalse(submitted.has("_manual_ai_authorized"))
             compose.waitUntil(15_000) { compose.onAllNodesWithText("开始曲库巡检", substring = false).fetchSemanticsNodes().isEmpty() }
+            compose.waitUntil(15_000) { compose.onAllNodesWithText("新建计划", substring = false).fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithText("新建计划", substring = false).performScrollTo().performClick()
             compose.onNodeWithTag("inspection-use-ai").performScrollTo().performClick()
             compose.waitUntil(15_000) { compose.onAllNodesWithText("没有可用于定时巡检的连接。", substring = true).fetchSemanticsNodes().isNotEmpty() }

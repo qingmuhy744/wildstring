@@ -2,6 +2,8 @@ package com.wildstring.app.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.rememberTransformableState
+import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
@@ -16,6 +18,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
@@ -53,8 +57,29 @@ import kotlinx.coroutines.withContext
     Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         BoxWithConstraints(Modifier.fillMaxSize().background(Color(0xFF10110F)).safeDrawingPadding()
             .testTag("artwork-preview").pointerInput(onClose) { detectTapGestures(onTap = { onClose() }) }, contentAlignment = Alignment.Center) {
+            val density = androidx.compose.ui.platform.LocalDensity.current
+            val imageSize = minOf(maxWidth, maxHeight, 900.dp)
+            val imageSizePx = with(density) { imageSize.toPx() }
+            var scale by remember { mutableFloatStateOf(1f) }
+            var offset by remember { mutableStateOf(Offset.Zero) }
+            val transformState = rememberTransformableState { zoomChange, panChange, _ ->
+                val nextScale = (scale * zoomChange).coerceIn(1f, 4f)
+                val maxPan = imageSizePx * (nextScale - 1f) / 2f
+                scale = nextScale
+                offset = Offset(
+                    (offset.x + panChange.x).coerceIn(-maxPan, maxPan),
+                    (offset.y + panChange.y).coerceIn(-maxPan, maxPan),
+                )
+            }
             Cover(vm, track.id.takeIf { track.hasCover }, track.title,
-                Modifier.padding(20.dp).size(minOf(maxWidth, maxHeight, 900.dp))
+                Modifier.padding(20.dp).size(imageSize)
+                    .graphicsLayer {
+                        scaleX = scale
+                        scaleY = scale
+                        translationX = offset.x
+                        translationY = offset.y
+                    }
+                    .transformable(transformState)
                     .pointerInput(Unit) { detectTapGestures(onTap = {}) }, ContentScale.Fit)
             Row(Modifier.align(Alignment.TopEnd).padding(8.dp)) {
                 if (track.hasCover) IconButton({ scope.launch {

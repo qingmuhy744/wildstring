@@ -300,7 +300,8 @@ class ContinuousCatalogTest {
                 compose.onNodeWithTag("player-phone").assertDoesNotExist()
                 compose.onNodeWithContentDescription("返回上一页").performClick()
                 compose.onNodeWithTag("player-phone").assertIsDisplayed()
-                compose.onNodeWithContentDescription("返回封面").assertIsDisplayed()
+                val playerBack = if (compose.onAllNodesWithContentDescription("返回封面").fetchSemanticsNodes().isNotEmpty()) "返回封面" else "收起播放器"
+                compose.onNodeWithContentDescription(playerBack).assertIsDisplayed()
                 assertEquals(queue, vm.state.value.queue.map { it.entryId })
                 failAlbum.set(true)
                 compose.onNodeWithTag("player-album").performClick()

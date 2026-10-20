@@ -71,17 +71,18 @@ internal fun PlaylistOrder(vm: MusicViewModel, playlist: Playlist, dismiss: () -
     LaunchedEffect(playlist.id) { action.run { tracks = vm.playlistTracks(playlist) } }
     Column(Modifier.fillMaxSize().padding(16.dp)) {
         ActionStatus(action)
-        QueueList(tracks.mapIndexed { index, t -> QueueRow(t.id, t.id, t.title, t.artist, index) }, null, Modifier.weight(1f),
-            onPlay = {}, onRemove = { row ->
-                if (!action.busy) tracks.firstOrNull { it.id == row.trackId }?.let { track -> scope.launch { action.run {
-                    vm.removePlaylistTrack(track, record)
-                    record = vm.repository.api().playlist(vm.repository.url("api", "v1", "playlists", playlist.id))
-                    tracks = tracks.filter { it.id != row.trackId }
-                } } }
-            }, onMove = { id, destination ->
-                val from = tracks.indexOfFirst { it.id == id }
-                if (!action.busy && from >= 0 && destination in tracks.indices) tracks = tracks.toMutableList().apply { add(destination, removeAt(from)) }
-            }, onHaptic = feedback, allowRemove = !action.busy, title = "拖动排序，或移除曲目")
+        if (action.busy && tracks.isEmpty()) CatalogSkeleton("tracks", Modifier.weight(1f))
+        else QueueList(tracks.mapIndexed { index, t -> QueueRow(t.id, t.id, t.title, t.artist, index) }, null, Modifier.weight(1f),
+                onPlay = {}, onRemove = { row ->
+                    if (!action.busy) tracks.firstOrNull { it.id == row.trackId }?.let { track -> scope.launch { action.run {
+                        vm.removePlaylistTrack(track, record)
+                        record = vm.repository.api().playlist(vm.repository.url("api", "v1", "playlists", playlist.id))
+                        tracks = tracks.filter { it.id != row.trackId }
+                    } } }
+                }, onMove = { id, destination ->
+                    val from = tracks.indexOfFirst { it.id == id }
+                    if (!action.busy && from >= 0 && destination in tracks.indices) tracks = tracks.toMutableList().apply { add(destination, removeAt(from)) }
+                }, onHaptic = feedback, allowRemove = !action.busy, title = "拖动排序，或移除曲目")
         Button({ scope.launch { action.run { vm.reorderPlaylist(record, tracks.map { it.id }); dismiss() } } }, enabled = !action.busy && tracks.isNotEmpty(), modifier = Modifier.fillMaxWidth()) { Text("保存顺序") }
     }
 }
@@ -100,7 +101,8 @@ internal fun MultiSelectPanel(vm: MusicViewModel, dismiss: () -> Unit) {
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
         ActionStatus(action)
         Row { TextButton({ selected = tracks.map { it.id }.toSet() }) { Text("全选") }; TextButton({ selected = emptySet() }) { Text("清空") }; Text("已选 ${selected.size} 首", Modifier.padding(12.dp)) }
-        LazyColumn(Modifier.weight(1f)) { items(tracks, key = { it.id }) { track ->
+        if (action.busy && tracks.isEmpty()) CatalogSkeleton("tracks", Modifier.weight(1f))
+        else LazyColumn(Modifier.weight(1f)) { items(tracks, key = { it.id }) { track ->
             Row(Modifier.fillMaxWidth().clickable { selected = if (track.id in selected) selected - track.id else selected + track.id }, verticalAlignment = Alignment.CenterVertically) {
                 Checkbox(track.id in selected, null); Column(Modifier.padding(12.dp)) { Text(track.title); Text(track.artist, style = MaterialTheme.typography.bodySmall) }
             }

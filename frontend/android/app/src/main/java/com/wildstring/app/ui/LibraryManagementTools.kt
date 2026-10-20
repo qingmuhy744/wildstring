@@ -233,7 +233,8 @@ internal fun MetadataRefreshPrompt(vm: MusicViewModel, scopeName: String, id: St
         }
     }, confirmButton = { TextButton({ scope.launch { action.run {
         val result = vm.repository.api().objectPost(vm.repository.url("api", "v1", "manage", "providers", "refresh"), obj("scope" to scopeName, "id" to id, "mode" to if (missing) "missing" else "all", "force" to force))
-        action.message = "已排队 ${result.text("queued")} 首"; vm.notify(action.message!!); dismiss()
+        val queued = result.number("queued").toInt(); val active = result.number("already_active").toInt(); val upgraded = result.number("upgraded").toInt(); val intents = result.number("refresh_intents").toInt()
+        action.message = "新增排队 $queued 首 · 已有任务 $active 首" + if (upgraded + intents > 0) " · 已更新刷新意图 ${upgraded + intents} 首" else ""; vm.notify(action.message!!); dismiss()
     } } }, enabled = !action.busy) { Text(if (action.busy) "正在提交…" else "开始更新") } }, dismissButton = { TextButton(dismiss, enabled = !action.busy) { Text("取消") } })
 }
 

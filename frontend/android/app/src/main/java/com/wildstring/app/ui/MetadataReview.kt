@@ -25,8 +25,9 @@ import java.util.UUID
 
 private data class ReviewChoice(val source: String, val fields: Set<String>)
 private fun candidate(track: JsonObject, choice: ReviewChoice?) = track.objects("suggestions").firstOrNull { it.text("id") == choice?.source }
+private fun stale(source: JsonObject?) = source?.get("stale")?.asBoolean ?: false
 private fun defaultReviewChoice(track: JsonObject): ReviewChoice {
-    val source = track.objects("suggestions").firstOrNull { it.number("metadata_version") == track.number("metadata_version") }
+    val source = track.objects("suggestions").firstOrNull { !stale(it) }
     val current = track.getAsJsonObject("current") ?: JsonObject(); val overrides = track.getAsJsonObject("overrides") ?: JsonObject()
     val fields = source?.getAsJsonObject("fields")?.entrySet()?.filter { (k, v) -> current.get(k) != v && !overrides.has(k) }?.map { it.key }?.toSet() ?: emptySet()
     return ReviewChoice(source?.text("id").orEmpty(), fields)
@@ -38,7 +39,7 @@ private fun reviewCandidateLabel(source: JsonObject, track: JsonObject, names: J
         fields.text("title").takeIf { it.isNotBlank() && it != track.text("title") },
         fields.text("album").ifBlank { "未提供专辑" }, fields.text("release_date").takeIf { it.isNotBlank() },
         score?.takeIf { it.isFinite() }?.let { "匹配度 ${kotlin.math.round(if (it <= 1) it * 100 else it).toInt()}%" },
-        "已过期".takeIf { source.number("metadata_version") != track.number("metadata_version") }).joinToString(" · ")
+        source.text("stale_reason").takeIf { it.isNotBlank() } ?: "查询依据已变化".takeIf { stale(source) }).joinToString(" · ")
 }
 private val reviewLabels = mapOf("title" to "歌名", "artists" to "歌曲艺人", "album" to "专辑", "album_artists" to "专辑艺人", "track_number" to "曲序", "disc_number" to "碟号", "track_total" to "总曲数", "disc_total" to "总碟数", "release_date" to "发行日期", "original_date" to "首次发行日期", "composers" to "作曲", "lyricists" to "作词", "arrangers" to "编曲", "vocalists" to "演唱", "genres" to "风格", "external_ids" to "外部标识", "description" to "简介")
 
@@ -102,7 +103,10 @@ private val reviewLabels = mapOf("title" to "歌名", "artists" to "歌曲艺人
     }
     LaunchedEffect(initialTrack?.id, initialBatchId) { action.run { val list = loadAlbums(); load(when { initialTrack != null -> mapOf("track_id" to initialTrack.id); initialBatchId != null -> mapOf("batch_id" to initialBatchId); else -> mapOf("album_id" to list.firstOrNull()?.text("id").orEmpty()) }, initialTrack?.id) }; if (action.message == "已完成") action.message = null }
     Column(Modifier.fillMaxSize().testTag("metadata-review")) {
-        LazyColumn(Modifier.weight(1f).fillMaxWidth().testTag("review-scroll"), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        if (action.busy && page == null) {
+            ActionStatus(action)
+            ReviewSkeleton(Modifier.weight(1f))
+        } else LazyColumn(Modifier.weight(1f).fillMaxWidth().testTag("review-scroll"), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             item { Text("批量核对资料", style = MaterialTheme.typography.titleLarge); Text("先对比，再接受。人工值默认保留，勾选后会替换该字段。", style = MaterialTheme.typography.bodySmall)
                 Row { TextButton({ showAlbums = true }, enabled = !action.busy) { Text("选择专辑") }; TextButton({ scope.launch { action.run { page?.let { load(currentQuery(it), active) } } } }, enabled = !action.busy) { Text("重新读取") } }
                 Text(current?.text("album") ?: "暂无待核对专辑", style = MaterialTheme.typography.titleMedium)
@@ -123,16 +127,16 @@ private val reviewLabels = mapOf("title" to "歌名", "artists" to "歌曲艺人
                 }
                 if (tab == "fields") {
                     item { Row(verticalAlignment = Alignment.CenterVertically) { Checkbox(onlyChanges, { onlyChanges = it }); Text("只看变化字段") }
-                        if (source != null) { Text("信息版本 ${source.number("metadata_version")}${if (source.number("metadata_version") != current.number("metadata_version")) " · 已过期，仅供核对" else ""}", style = MaterialTheme.typography.bodySmall); if (source.text("source_url").isNotBlank()) TextButton({ uri.openUri(source.text("source_url")) }) { Text("查看来源依据") } }
+                        if (source != null) { Text("信息版本 ${source.number("metadata_version")}${source.text("stale_reason").takeIf { it.isNotBlank() }?.let { " · $it" } ?: if (stale(source)) " · 查询依据已变化" else ""}", style = MaterialTheme.typography.bodySmall); if (source.text("source_url").isNotBlank()) TextButton({ uri.openUri(source.text("source_url")) }) { Text("查看来源依据") } }
                         else Text("没有有效候选，可以查询资料或跳过。")
                     }
                     val fields = source?.getAsJsonObject("fields")?.entrySet()?.filter { !onlyChanges || current.getAsJsonObject("current")?.get(it.key) != it.value } ?: emptyList()
                     items(fields, key = { it.key }) { entry -> val field = entry.key; val chosen = choices[active]?.fields.orEmpty()
                         Surface(shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surfaceContainerLow) { Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) { Checkbox(field in chosen, { checked -> choose(active, if (checked) chosen + field else chosen - field) }, enabled = !action.busy && source?.number("metadata_version") == current.number("metadata_version"), modifier = Modifier.testTag("review-field-$field")); Text(reviewLabels[field] ?: field, Modifier.weight(1f), style = MaterialTheme.typography.titleSmall); if (current.getAsJsonObject("overrides")?.has(field) == true) Text("人工值", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall) }
+                            Row(verticalAlignment = Alignment.CenterVertically) { Checkbox(field in chosen, { checked -> choose(active, if (checked) chosen + field else chosen - field) }, enabled = !action.busy && !stale(source), modifier = Modifier.testTag("review-field-$field")); Text(reviewLabels[field] ?: field, Modifier.weight(1f), style = MaterialTheme.typography.titleSmall); if (current.getAsJsonObject("overrides")?.has(field) == true) Text("人工值", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall) }
                             Text("当前值", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant); Text(displayValue(current.getAsJsonObject("current")?.get(field)))
                             HorizontalDivider(); Text("建议值", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary); Text(displayValue(entry.value))
-                            TextButton({ val on = field !in chosen; choices = choices.mapValues { (id, choice) -> val row = tracks.first { it.text("id") == id }; val c = candidate(row, choice); if (c?.getAsJsonObject("fields")?.has(field) == true && c.number("metadata_version") == row.number("metadata_version")) choice.copy(fields = if (on) choice.fields + field else choice.fields - field) else choice } }, enabled = !action.busy) { Text("本页同字段${if (field in chosen) "取消" else "勾选"}") }
+                            TextButton({ val on = field !in chosen; choices = choices.mapValues { (id, choice) -> val row = tracks.first { it.text("id") == id }; val c = candidate(row, choice); if (c?.getAsJsonObject("fields")?.has(field) == true && !stale(c)) choice.copy(fields = if (on) choice.fields + field else choice.fields - field) else choice } }, enabled = !action.busy) { Text("本页同字段${if (field in chosen) "取消" else "勾选"}") }
                         } }
                     }
                     item { TextButton({ original = !original }) { Text("文件原始值与匹配依据") }; if (original) { current.getAsJsonObject("original")?.entrySet()?.forEach { (k, v) -> Text("${reviewLabels[k] ?: k}：${displayValue(v)}", style = MaterialTheme.typography.bodySmall) }; Text(source?.get("match")?.toString().orEmpty(), style = MaterialTheme.typography.bodySmall) } }
@@ -142,7 +146,7 @@ private val reviewLabels = mapOf("title" to "歌名", "artists" to "歌曲艺人
                     Button({ scope.launch { action.run {
                         val targets = JsonArray().apply { (if (coverAll) tracks else listOf(current)).forEach { add(jsonBody("track_id" to it.text("id"), "metadata_version" to it.number("metadata_version"))) } }
                         coverReady = false; cover = vm.agent.request("metadata-review/cover", "POST", jsonBody("kind" to "cover", "title" to "封面核对 · ${current.text("album")}", "payload" to jsonBody("suggestion_id" to source!!.text("id"), "metadata_version" to current.number("metadata_version"), "targets" to targets)))
-                    } } }, enabled = !action.busy && source?.text("cover_url")?.isNotBlank() == true && source.number("metadata_version") == current.number("metadata_version")) { Text("固定并预览此封面") }
+                    } } }, enabled = !action.busy && source?.text("cover_url")?.isNotBlank() == true && !stale(source)) { Text("固定并预览此封面") }
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         Column(Modifier.weight(1f)) { Text("当前封面"); if (current.flag("has_cover")) AsyncImage(ImageRequest.Builder(LocalContext.current).data(vm.repository.url("api", "v1", "tracks", active, "cover") + "?size=320&v=${current.number("metadata_version")}").build(), "当前封面", imageLoader = vm.imageLoader, modifier = Modifier.fillMaxWidth().aspectRatio(1f)) else Text("暂无封面") }
                         Column(Modifier.weight(1f)) { Text("将采用的封面"); cover?.let { snapshot -> AsyncImage(ImageRequest.Builder(LocalContext.current).data(vm.repository.url("api", "v1", "agent", "drafts", snapshot.text("id"), "cover-preview")).memoryCacheKey("${vm.repository.session.cacheScope()}:${snapshot.text("id")}").build(), "固定封面快照", imageLoader = vm.imageLoader, modifier = Modifier.fillMaxWidth().aspectRatio(1f), onSuccess = { coverReady = true }, onError = { coverReady = false; action.message = "封面无法显示，本次不能应用。" }) } }
@@ -162,6 +166,6 @@ private val reviewLabels = mapOf("title" to "歌名", "artists" to "歌曲艺人
         } }
     }
     if (showAlbums) AlertDialog(onDismissRequest = { showAlbums = false }, title = { Text("待核对专辑") }, text = { Column { OutlinedTextField(filter, { filter = it }, label = { Text("筛选专辑") }); LazyColumn(Modifier.heightIn(max = 360.dp)) { items(albums.filter { (it.text("title") + it.text("artists")).contains(filter, true) }, key = { it.text("id") }) { album -> TextButton({ scope.launch { action.run { load(mapOf("album_id" to album.text("id"))); showAlbums = false } } }, enabled = !action.busy) { Text("${album.text("title")} · ${album.number("count")} 首") } }; if (albums.size < albumTotal) item { TextButton({ scope.launch { action.run { loadAlbums(true) } } }) { Text("更多专辑") } } } } }, confirmButton = { TextButton({ showAlbums = false }) { Text("关闭") } })
-    if (showSources && current != null) AlertDialog(onDismissRequest = { showSources = false }, title = { Text("候选来源") }, text = { Column(Modifier.verticalScroll(rememberScrollState())) { current.objects("suggestions").forEach { c -> TextButton({ choices = choices + (active to ReviewChoice(c.text("id"), if (c.number("metadata_version") != current.number("metadata_version")) emptySet() else c.getAsJsonObject("fields").entrySet().filter { (k, v) -> current.getAsJsonObject("current")?.get(k) != v && current.getAsJsonObject("overrides")?.has(k) != true }.map { it.key }.toSet())); cover = null; coverReady = false; showSources = false; rejectionNotice = null; action.message = null }) { Text(reviewCandidateLabel(c, current, names)) } } } }, confirmButton = { TextButton({ showSources = false }) { Text("关闭") } })
+    if (showSources && current != null) AlertDialog(onDismissRequest = { showSources = false }, title = { Text("候选来源") }, text = { Column(Modifier.verticalScroll(rememberScrollState())) { current.objects("suggestions").forEach { c -> TextButton({ choices = choices + (active to ReviewChoice(c.text("id"), if (stale(c)) emptySet() else c.getAsJsonObject("fields").entrySet().filter { (k, v) -> current.getAsJsonObject("current")?.get(k) != v && current.getAsJsonObject("overrides")?.has(k) != true }.map { it.key }.toSet())); cover = null; coverReady = false; showSources = false; rejectionNotice = null; action.message = null }) { Text(reviewCandidateLabel(c, current, names)) } } } }, confirmButton = { TextButton({ showSources = false }) { Text("关闭") } })
     if (refresh && current != null) MetadataRefreshPrompt(vm, "album", current.text("album_id")) { refresh = false; action.message = "查询已排队，完成后重新读取。" }
 }

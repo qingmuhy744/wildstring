@@ -16,7 +16,9 @@ import androidx.core.view.WindowCompat
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -64,10 +66,52 @@ import com.wildstring.app.BuildConfig
 import com.wildstring.app.R
 import com.wildstring.app.data.*
 import kotlinx.coroutines.launch
+import kotlin.math.abs
 
 private val Accent: Color @Composable get() = MaterialTheme.colorScheme.primary
 private val Background: Color @Composable get() = MaterialTheme.colorScheme.background
 private val Muted: Color @Composable get() = MaterialTheme.colorScheme.onSurfaceVariant
+
+/** Horizontal track navigation is limited to the artwork stage so lyric scrolling and system back gestures stay untouched. */
+internal fun Modifier.trackSwipeGestures(
+    enabled: Boolean,
+    onPrevious: () -> Unit,
+    onNext: () -> Unit,
+): Modifier = if (!enabled) this else pointerInput(enabled) {
+    var distance = 0f
+    detectHorizontalDragGestures(
+        onDragStart = { distance = 0f },
+        onHorizontalDrag = { change, amount ->
+            distance += amount
+            change.consume()
+        },
+        onDragEnd = {
+            if (abs(distance) >= 72.dp.toPx()) {
+                if (distance < 0) onNext() else onPrevious()
+            }
+        },
+        onDragCancel = { distance = 0f },
+    )
+}
+
+/** A downward swipe on the visual stage collapses the player; lyric and queue views stay scrollable. */
+internal fun Modifier.dismissPlayerSwipe(
+    enabled: Boolean,
+    onDismiss: () -> Unit,
+): Modifier = if (!enabled) this else pointerInput(enabled) {
+    var distance = 0f
+    detectVerticalDragGestures(
+        onDragStart = { distance = 0f },
+        onVerticalDrag = { change, amount ->
+            distance += amount
+            change.consume()
+        },
+        onDragEnd = {
+            if (distance >= 96.dp.toPx()) onDismiss()
+        },
+        onDragCancel = { distance = 0f },
+    )
+}
 internal val classicDarkColors = darkColorScheme(primary = Color(0xFFE98A6D), onPrimary = Color(0xFF291E17), background = Color(0xFF191A17),
     surface = Color(0xFF191A17), surfaceVariant = Color(0xFF2B2E25), onSurface = Color(0xFFEEEAE2), onSurfaceVariant = Color(0xFFA8AA9D))
 internal val redColors = darkColorScheme(
@@ -219,6 +263,14 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
     }
     val scope = rememberCoroutineScope()
     val mutationSnackbar = remember { SnackbarHostState() }
+    var slowCatalogLoad by remember { mutableStateOf(false) }
+    LaunchedEffect(state.loading, state.contentKey) {
+        slowCatalogLoad = false
+        if (state.loading) {
+            delay(2_200)
+            slowCatalogLoad = true
+        }
+    }
     LaunchedEffect(state.error, state.mutationMessage) {
         (state.error ?: state.mutationMessage)?.let { message ->
             try { mutationSnackbar.showSnackbar(message) }
@@ -318,19 +370,38 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
                                     albumRefresh = if (state.account?.role == "admin" && (state.collection == "albums" || state.albumFilter != null)) ({ refreshAlbum = state.albumFilter ?: state.collectionId }) else null)
                             }
                         }
-                        PullToRefreshBox(isRefreshing = state.loading, onRefresh = { if (!state.loading) vm.load() },
-                            modifier = Modifier.weight(1f).testTag("catalog-refresh-area").semantics {
-                                customActions = listOf(CustomAccessibilityAction("刷新当前页面") {
-                                    if (state.loading) false else { vm.load(); true }
-                                })
-                            }, state = pullRefresh,
-                            indicator = { WildRefreshIndicator(state.loading, pullRefresh, Modifier.align(Alignment.TopCenter)) }) {
-                            savedPages.SaveableStateProvider(state.contentKey.ifBlank { "initial" }) {
-                                if (state.kind == "discover") DiscoveryPage(vm, state,
-                                    play = { index -> vm.play(state.tracks, index); playerReturnDepth = -1; expanded = true; lyrics = false; queue = false }, recent = vm::recent, header = header)
-                                else CatalogBrowser(vm, state, header,
-                                    play = { track -> vm.playCollection(track.id) { playerReturnDepth = -1; expanded = true; lyrics = false; queue = false } },
-                                    actions = { actions = it }, playlistActions = { playlistActions = it })
+                        Box(Modifier.weight(1f)) {
+                            PullToRefreshBox(isRefreshing = state.loading, onRefresh = { if (!state.loading) vm.load() },
+                                modifier = Modifier.fillMaxSize().testTag("catalog-refresh-area").semantics {
+                                    customActions = listOf(CustomAccessibilityAction("刷新当前页面") {
+                                        if (state.loading) false else { vm.load(); true }
+                                    })
+                                }, state = pullRefresh,
+                                indicator = { WildRefreshIndicator(state.loading, pullRefresh, Modifier.align(Alignment.TopCenter)) }) {
+                                savedPages.SaveableStateProvider(state.contentKey.ifBlank { "initial" }) {
+                                    if (state.kind == "discover") DiscoveryPage(vm, state,
+                                        play = { index -> vm.play(state.tracks, index); playerReturnDepth = -1; expanded = true; lyrics = false; queue = false }, recent = vm::recent, header = header)
+                                    else CatalogBrowser(vm, state, header,
+                                        play = { track -> vm.playCollection(track.id) { playerReturnDepth = -1; expanded = true; lyrics = false; queue = false } },
+                                        actions = { actions = it }, playlistActions = { playlistActions = it })
+                                }
+                            }
+                            if (state.loading) Surface(
+                                Modifier.align(Alignment.TopCenter).padding(top = 8.dp).testTag("catalog-loading-feedback"),
+                                shape = RoundedCornerShape(20.dp), tonalElevation = 3.dp,
+                            ) {
+                                Row(Modifier.padding(horizontal = 14.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(
+                                        when {
+                                            slowCatalogLoad -> "网络较慢，仍在加载…"
+                                            state.hasContent -> "正在更新…"
+                                            else -> "正在打开…"
+                                        },
+                                        style = MaterialTheme.typography.labelMedium,
+                                    )
+                                }
                             }
                         }
                     }
@@ -552,6 +623,7 @@ private fun PlayerScreen(vm: MusicViewModel, input: MusicState, wide: Boolean, l
     val state = input.copy(position = position)
     val preferences by vm.settings.state.collectAsStateWithLifecycle()
     val sleep by vm.sleep.state.collectAsStateWithLifecycle()
+    val feedback = LocalTactileFeedback.current
     val track = state.current ?: return
     val progress = if (state.duration > 0) state.position.toFloat() / state.duration else 0f
     var artworkPreview by rememberSaveable { mutableStateOf(false) }
@@ -561,16 +633,30 @@ private fun PlayerScreen(vm: MusicViewModel, input: MusicState, wide: Boolean, l
     Box(Modifier.fillMaxSize()) {
     Column(Modifier.testTag(if (wide) "player-tablet" else if (landscape) "player-landscape" else "player-phone").fillMaxSize().padding(horizontal = if (wide) 34.dp else 20.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-            IconButton(onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, if (lyrics && !wide) "返回封面" else "收起播放器") }
+            IconButton(onBack) {
+                Icon(
+                    Icons.Default.KeyboardArrowDown,
+                    "收起播放器",
+                )
+            }
             Spacer(Modifier.weight(1f))
             IconButton(onSleep) { Icon(Icons.Default.Bedtime, "睡眠定时", tint = if (sleep.deadline != null || sleep.entryId != null) Accent else Muted) }
             IconButton(vm::refreshLyrics) { Icon(Icons.Default.Refresh, "刷新歌词") }
             IconButton(onAdd) { Icon(Icons.Default.MoreVert, "当前歌曲操作") }
         }
         if (landscape) Row(Modifier.weight(1f).fillMaxWidth().padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
-            BoxWithConstraints(Modifier.weight(1f).fillMaxHeight().testTag("player-visual-stage").pointerInput(onLyrics, showArtwork) {
-                detectTapGestures(onLongPress = { if (!queue) showArtwork() }, onTap = { onLyrics() })
-            }, contentAlignment = Alignment.Center) {
+            BoxWithConstraints(Modifier.weight(1f).fillMaxHeight().testTag("player-visual-stage")
+                .pointerInput(onLyrics, showArtwork, queue) {
+                    detectTapGestures(
+                        onDoubleTap = { /* Deliberately no double-tap action on the cover. */ },
+                        onLongPress = { if (!queue) showArtwork() },
+                        onTap = { onLyrics() },
+                    )
+                }
+                .dismissPlayerSwipe(!queue && !lyrics, onBack)
+                .trackSwipeGestures(!queue && !lyrics,
+                    onPrevious = { feedback(TactileKind.Tap); vm.previous() },
+                    onNext = { feedback(TactileKind.Tap); vm.next() }), contentAlignment = Alignment.Center) {
                 when {
                     queue -> QueuePanel(vm, state, Modifier.fillMaxSize())
                     lyrics -> LyricsPanel(vm, state, Modifier.fillMaxSize(), onLyrics, showArtwork)
@@ -583,7 +669,11 @@ private fun PlayerScreen(vm: MusicViewModel, input: MusicState, wide: Boolean, l
             }
         } else if (wide) Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(48.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(.9f).fillMaxHeight().widthIn(max = 380.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                BoxWithConstraints(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()
+                    .dismissPlayerSwipe(!lyrics && !queue, onBack)
+                    .trackSwipeGestures(!lyrics && !queue,
+                        onPrevious = { feedback(TactileKind.Tap); vm.previous() },
+                        onNext = { feedback(TactileKind.Tap); vm.next() }), contentAlignment = Alignment.Center) {
                     val visualSize = minOf(300.dp, maxWidth, maxHeight)
                     PlaybackVisual(vm, track, preferences.playbackStyle, spinning, true, progress, rotation,
                         Modifier.size(visualSize), showArtwork) { if (queue) onQueue() }
@@ -598,9 +688,18 @@ private fun PlayerScreen(vm: MusicViewModel, input: MusicState, wide: Boolean, l
                 if (queue) QueuePanel(vm, state, Modifier.weight(1f)) else LyricsPanel(vm, state, Modifier.weight(1f), onArtwork = showArtwork)
             }
         } else {
-            BoxWithConstraints(Modifier.weight(1f).fillMaxWidth().testTag("player-visual-stage").pointerInput(onLyrics, showArtwork) {
-                detectTapGestures(onLongPress = { showArtwork() }, onTap = { onLyrics() })
-            }, contentAlignment = Alignment.Center) {
+            BoxWithConstraints(Modifier.weight(1f).fillMaxWidth().testTag("player-visual-stage")
+                .pointerInput(onLyrics, showArtwork, lyrics) {
+                    detectTapGestures(
+                        onDoubleTap = { /* Deliberately no double-tap action on the cover. */ },
+                        onLongPress = { showArtwork() },
+                        onTap = { onLyrics() },
+                    )
+                }
+                .dismissPlayerSwipe(!lyrics, onBack)
+                .trackSwipeGestures(!lyrics,
+                    onPrevious = { feedback(TactileKind.Tap); vm.previous() },
+                    onNext = { feedback(TactileKind.Tap); vm.next() }), contentAlignment = Alignment.Center) {
                 val visualSize = minOf(370.dp, maxWidth, maxHeight)
                 Crossfade(lyrics, Modifier.fillMaxSize(), animationSpec = tween(240), label = "lyrics-cover") { showingLyrics ->
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -661,7 +760,12 @@ private fun LyricsPanel(vm: MusicViewModel, state: MusicState, modifier: Modifie
     val preferences by vm.settings.state.collectAsStateWithLifecycle()
     Box(modifier, contentAlignment = Alignment.Center) {
         when {
-            state.lyricsLoading -> if (delayed(state.lyricsLoading, 350)) CircularProgressIndicator()
+            state.lyricsLoading && state.lyrics.lines.isEmpty() -> LyricsSkeleton()
+            state.lyricsLoading -> {
+                LyricViewport(state.lyrics, state.position, vm::seek, onBlank, Modifier.fillMaxSize(), onArtwork,
+                    followDelayMs = preferences.lyricFollowSeconds * 1_000L)
+                LinearProgressIndicator(Modifier.fillMaxWidth().align(Alignment.TopCenter))
+            }
             state.lyricsError != null -> Text(state.lyricsError, color = Muted)
             state.lyrics.lines.isEmpty() -> Text("暂无歌词", color = Muted)
             else -> LyricViewport(state.lyrics, state.position, vm::seek, onBlank, Modifier.fillMaxSize(), onArtwork,

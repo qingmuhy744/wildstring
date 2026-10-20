@@ -171,6 +171,7 @@ class AccountPlaybackTest {
             assertTrue(kotlin.math.abs(compose.runOnIdle { vm.controller!!.currentPosition } - 6000) < 200)
             assertFalse(compose.runOnIdle { vm.controller!!.playWhenReady })
             compose.onNodeWithTag("player-visual-stage").performTouchInput { click(androidx.compose.ui.geometry.Offset(4f, 4f)) }
+            compose.waitUntil(10_000) { compose.onAllNodesWithText("六秒后的人工歌词").fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithText("六秒后的人工歌词").assertIsDisplayed()
             // READY/bufferedPosition may still describe the previous quality while Media3 drains its loader.
             // Establish a paused, non-loading, stable baseline before attributing new reads to lyric refresh.

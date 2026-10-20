@@ -34,6 +34,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 from wildstring.diagnostics import record_event, trace_context
 from wildstring.fingerprints import FingerprintError, calculate
 from wildstring.library.edits import MetadataEditor, MetadataUpdate, Overrides
+from wildstring.metadata_matching import lookup_fingerprint, lookup_snapshot
 from wildstring.outbound import OutboundError, network_error, request_bytes, validate_proxy
 from wildstring.provider_network import (
     NetworkTest,
@@ -503,6 +504,12 @@ class Providers:
                 raise HTTPException(404, "track_not_found")
             before = connection.total_changes
             clock = time.time()
+            existing_active = connection.execute(
+                "SELECT id,track_id,metadata_version,status,refresh_mode,force FROM provider_jobs "
+                "WHERE status IN ('queued','running') AND track_id IN "
+                "(SELECT value FROM json_each(?))",
+                (json.dumps([row["id"] for row in rows]),),
+            ).fetchall()
             connection.executemany(
                 "INSERT OR IGNORE INTO provider_jobs(id,track_id,metadata_version,status,created_at,updated_at,refresh_mode,force) VALUES (?,?,?,'queued',?,?,?,?)",
                 [
@@ -511,12 +518,70 @@ class Providers:
                 ],
             )
             added = connection.total_changes - before
+            upgraded = 0
+            intents = 0
+            # A force refresh must also affect a job that is already queued.  A
+            # running job cannot be replaced because of the active-track unique
+            # index, so retain a durable intent and enqueue the latest version as
+            # soon as the old request finishes.
+            current_by_id = {row["id"]: row for row in rows}
+            for job in existing_active:
+                current = current_by_id[job["track_id"]]
+                merged_mode = "all" if mode == "all" or job["refresh_mode"] == "all" else "missing"
+                if job["status"] == "queued":
+                    changed = (
+                        job["metadata_version"] != current["version"]
+                        or merged_mode != job["refresh_mode"]
+                        or bool(force)
+                        and not job["force"]
+                    )
+                    if changed:
+                        connection.execute(
+                            "UPDATE provider_jobs SET metadata_version=?,refresh_mode=?,force=?,updated_at=? WHERE id=?",
+                            (
+                                current["version"],
+                                merged_mode,
+                                int(bool(force or job["force"])),
+                                clock,
+                                job["id"],
+                            ),
+                        )
+                        upgraded += 1
+                elif job["metadata_version"] != current["version"]:
+                    connection.execute(
+                        """INSERT INTO provider_refresh_intents(track_id,metadata_version,refresh_mode,force,created_at,updated_at)
+                        VALUES (?,?,?,?,?,?)
+                        ON CONFLICT(track_id) DO UPDATE SET metadata_version=excluded.metadata_version,
+                        refresh_mode=CASE WHEN provider_refresh_intents.refresh_mode='all' OR excluded.refresh_mode='all' THEN 'all' ELSE 'missing' END,
+                        force=MAX(provider_refresh_intents.force,excluded.force),updated_at=excluded.updated_at""",
+                        (
+                            job["track_id"],
+                            current["version"],
+                            merged_mode,
+                            int(bool(force or job["force"])),
+                            clock,
+                            clock,
+                        ),
+                    )
+                    intents += 1
+                else:
+                    changed = merged_mode != job["refresh_mode"] or bool(force) and not job["force"]
+                    if changed:
+                        connection.execute(
+                            "UPDATE provider_jobs SET refresh_mode=?,force=?,updated_at=? WHERE id=?",
+                            (merged_mode, int(bool(force or job["force"])), clock, job["id"]),
+                        )
+                        upgraded += 1
             connection.executemany(
                 "INSERT OR IGNORE INTO provider_seen VALUES (?)", [(row["id"],) for row in rows]
             )
             if track_batch:
                 batch_id = record_batch(connection, library_id, rows)
         result = {"queued": added, "already_active": len(rows) - added, "total": len(rows)}
+        if upgraded:
+            result["upgraded"] = upgraded
+        if intents:
+            result["refresh_intents"] = intents
         if batch_id is not None:
             result["batch_id"] = batch_id
         record_event("provider.tasks.queued", count=added, batch_id=batch_id)
@@ -739,6 +804,8 @@ class Providers:
         if track is None:
             raise ProviderError("track_not_found", False)
         suggestions, warnings = self.suggestions(track, force=bool(job["force"]))
+        input_snapshot = lookup_snapshot(track)
+        input_fingerprint = lookup_fingerprint(snapshot=input_snapshot)
         manual = MetadataEditor(self.repository).read(job["track_id"])["overrides"]
         with self.database.connect(write=True) as connection:
             version = connection.execute(
@@ -771,6 +838,8 @@ class Providers:
                             cover = "https://coverartarchive.org" + parsed.path
                     validated = Overrides.model_validate(fields).model_dump(exclude_unset=True)
                     match = dict(match or {})
+                    match["input_snapshot"] = input_snapshot
+                    match["input_fingerprint"] = input_fingerprint
                     from wildstring.album_release_locks import candidate_conflict
 
                     conflict = candidate_conflict(
@@ -803,10 +872,39 @@ class Providers:
                     )
                     saved += 1
                 status = "completed" if saved else "failed" if warnings else "no_match"
+            intent = connection.execute(
+                "SELECT * FROM provider_refresh_intents WHERE track_id=?",
+                (job["track_id"],),
+            ).fetchone()
             connection.execute(
                 "UPDATE provider_jobs SET status=?,warnings=?,updated_at=? WHERE id=?",
                 (status, json.dumps(warnings), time.time(), job["id"]),
             )
+            if intent is not None:
+                latest = connection.execute(
+                    "SELECT version FROM track_metadata WHERE track_id=?", (job["track_id"],)
+                ).fetchone()
+                if latest is not None:
+                    successor = uuid4().hex
+                    connection.execute(
+                        "INSERT INTO provider_jobs(id,track_id,metadata_version,status,created_at,updated_at,refresh_mode,force) VALUES (?,?,?,'queued',?,?,?,?)",
+                        (
+                            successor,
+                            job["track_id"],
+                            latest["version"],
+                            time.time(),
+                            time.time(),
+                            intent["refresh_mode"],
+                            intent["force"],
+                        ),
+                    )
+                    connection.execute(
+                        "UPDATE provider_refresh_members SET job_id=? WHERE job_id=?",
+                        (successor, job["id"]),
+                    )
+                    connection.execute(
+                        "DELETE FROM provider_refresh_intents WHERE track_id=?", (job["track_id"],)
+                    )
             metadata_result(self, connection, job["id"])
 
     def start(self):
@@ -1311,7 +1409,11 @@ class Providers:
                 ]
             for result in suggestions:
                 result["fields"] = json.loads(result["fields"])
-                result["match"] = json.loads(result["match"])
+                result["match"] = {
+                    key: value
+                    for key, value in json.loads(result["match"]).items()
+                    if not key.startswith("input_")
+                }
             priority = self.source_priority()
             suggestions.sort(
                 key=lambda item: (

@@ -371,6 +371,7 @@ class MusicViewModel @Inject constructor(
     fun cancelAlbumNavigation() { albumNavigationJob?.cancel() }
     fun openTrackAlbum(track: Track, fromPlayer: Boolean = false, onOpened: () -> Unit = {}) {
         albumNavigationJob?.cancel()
+        mutable.update { it.copy(mutationMessage = "正在打开专辑…", error = null) }
         albumNavigationJob = viewModelScope.launch {
             val owner = repository.session.cacheScope()
             val generation = authGeneration

@@ -389,7 +389,15 @@ class NativePlaybackTest {
             val styleStreams = requests.count { it.path?.contains("/stream") == true }
             for ((key, label) in listOf("vinyl" to "黑胶", "cassette" to "磁带", "cover" to "封面")) {
                 stage("style begin $key")
-                compose.onNodeWithContentDescription("收起播放器").performClick()
+                val playerBack = if (compose.onAllNodesWithContentDescription("返回封面").fetchSemanticsNodes().isNotEmpty()) "返回封面" else "收起播放器"
+                compose.onNodeWithContentDescription(playerBack).performClick()
+                compose.waitUntil(5_000) { compose.onAllNodesWithContentDescription("设置").fetchSemanticsNodes().isNotEmpty() || compose.onAllNodesWithTag("mini-player-open").fetchSemanticsNodes().isNotEmpty() || compose.onAllNodesWithTag("player-phone").fetchSemanticsNodes().isNotEmpty() }
+                if (compose.onAllNodesWithContentDescription("设置").fetchSemanticsNodes().isEmpty() && compose.onAllNodesWithTag("mini-player-open").fetchSemanticsNodes().isNotEmpty()) {
+                    compose.onNodeWithTag("mini-player-open").performClick()
+                } else if (compose.onAllNodesWithContentDescription("设置").fetchSemanticsNodes().isEmpty() && compose.onAllNodesWithTag("player-visual-stage").fetchSemanticsNodes().isNotEmpty()) {
+                    compose.onNodeWithTag("player-visual-stage").performTouchInput { swipeDown(startY = 120f, endY = 680f, durationMillis = 500) }
+                }
+                compose.waitUntil(15_000) { compose.onAllNodesWithContentDescription("设置").fetchSemanticsNodes().isNotEmpty() }
                 compose.onNodeWithContentDescription("设置").performClick()
                 compose.onNodeWithTag("setting-播放样式").performScrollTo().performClick()
                 waitForDialogWindow("style choice $key")
@@ -527,8 +535,11 @@ class NativePlaybackTest {
             stage("appearance controls begin")
             compose.runOnIdle { player.removeMediaItems(1, player.mediaItemCount) }
             // Exercise actual controls during playback and inspect both appearance options.
-            compose.onNodeWithContentDescription("返回封面").performClick()
-            compose.onNodeWithContentDescription("收起播放器").performClick()
+            val appearanceBack = if (compose.onAllNodesWithContentDescription("返回封面").fetchSemanticsNodes().isNotEmpty()) "返回封面" else "收起播放器"
+            compose.onNodeWithContentDescription(appearanceBack).performClick()
+            if (compose.onAllNodesWithContentDescription("设置").fetchSemanticsNodes().isEmpty() && compose.onAllNodesWithContentDescription("收起播放器").fetchSemanticsNodes().isNotEmpty())
+                compose.onNodeWithContentDescription("收起播放器").performClick()
+            compose.waitUntil(15_000) { compose.onAllNodesWithContentDescription("设置").fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithContentDescription("设置").performClick()
             compose.onNodeWithTag("setting-日夜模式").performScrollTo().performClick()
             waitForDialogWindow("dark choice")

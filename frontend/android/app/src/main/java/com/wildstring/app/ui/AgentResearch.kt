@@ -43,6 +43,7 @@ import kotlinx.coroutines.launch
             Text("实时核对库外最新发行与历史资料。搜索服务需要独立密钥，按服务商规则计费；不上传音频或整份曲库。", style = MaterialTheme.typography.bodySmall)
             ActionStatus(action)
         }
+        if (action.busy && settings == null) item { AgentSkeleton(Modifier.height(420.dp)) }
         item {
             ResearchChoice("搜索服务", provider, listOf("deepseek" to "DeepSeek 官方", "tavily" to "Tavily")) { provider = it; secret = "" }
             OutlinedTextField(secret, { secret = it }, label = { Text(if (settings?.flag("has_api_key") == true) "搜索 API Key（留空保留）" else "搜索 API Key") }, visualTransformation = PasswordVisualTransformation(), singleLine = true)
