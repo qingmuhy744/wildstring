@@ -391,6 +391,7 @@ class NativePlaybackTest {
                 stage("style begin $key")
                 val playerBack = if (compose.onAllNodesWithContentDescription("返回封面").fetchSemanticsNodes().isNotEmpty()) "返回封面" else "收起播放器"
                 compose.onNodeWithContentDescription(playerBack).performClick()
+                compose.waitUntil(5_000) { compose.onAllNodesWithContentDescription("设置").fetchSemanticsNodes().isNotEmpty() || compose.onAllNodesWithTag("mini-player-open").fetchSemanticsNodes().isNotEmpty() }
                 if (compose.onAllNodesWithContentDescription("设置").fetchSemanticsNodes().isEmpty() && compose.onAllNodesWithTag("mini-player-open").fetchSemanticsNodes().isNotEmpty()) {
                     compose.onNodeWithTag("mini-player-open").performClick()
                 }
