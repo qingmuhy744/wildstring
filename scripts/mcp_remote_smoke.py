@@ -14,8 +14,13 @@ async def check(url: str, token: str) -> int:
     parts = urlsplit(url)
     if parts.scheme != "https" or not parts.hostname or parts.username or parts.password:
         raise ValueError("MCP remote smoke requires an HTTPS URL")
+    no_proxy = os.environ.get("WILDSTRING_MCP_NO_PROXY", "").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
     async with httpx2.AsyncClient(
-        headers={"Authorization": f"Bearer {token}"}, trust_env=False
+        headers={"Authorization": f"Bearer {token}"}, trust_env=not no_proxy
     ) as http:
         async with streamable_http_client(url, http_client=http) as (
             read_stream,
