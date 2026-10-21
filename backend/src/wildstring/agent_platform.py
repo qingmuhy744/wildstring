@@ -30,6 +30,7 @@ from wildstring.agent_review import Review
 from wildstring.library.edits import MetadataEditor, MetadataUpdate
 from wildstring.library.playlists import PlaylistStore
 from wildstring.library.repository import now
+from wildstring.permissions import profile_for, scopes_for
 
 
 class Core:
@@ -57,7 +58,7 @@ class Core:
             for tool in tool_definitions()
             if tool["scope"] in actor.scopes
             and (
-                actor.role == "admin"
+                actor.profile == "owner"
                 or tool["name"]
                 not in ADMIN_TOOLS | {"get_metadata_suggestions", "request_metadata_refresh"}
                 and tool["scope"] != "diagnostics:read"
@@ -72,17 +73,17 @@ class Core:
                 raise HTTPException(401, "agent_credential_invalid")
             with self.database.connect() as connection:
                 row = connection.execute(
-                    "SELECT c.*,u.role,u.version AS auth_version FROM agent_credentials c JOIN users u ON u.id=c.user_id WHERE c.token_hash=? AND c.revoked_at IS NULL AND c.expires_at>? AND u.enabled=1 AND u.password_hash IS NOT NULL",
+                    "SELECT c.*,u.profile,u.version AS auth_version FROM agent_credentials c JOIN users u ON u.id=c.user_id WHERE c.token_hash=? AND c.revoked_at IS NULL AND c.expires_at>? AND u.enabled=1 AND u.password_hash IS NOT NULL",
                     (digest(authorization[7:]), now()),
                 ).fetchone()
             if row is None:
                 raise HTTPException(401, "agent_credential_invalid")
             return Actor(
                 row["user_id"],
-                row["role"],
                 row["auth_version"],
-                frozenset(json.loads(row["scopes"])),
+                frozenset(json.loads(row["scopes"])).intersection(scopes_for(row)),
                 row["id"],
+                profile=row["profile"],
             )
         user = self.auth.require_session(request)
         return self.current_actor(user["id"])
@@ -97,10 +98,10 @@ class Core:
             raise HTTPException(403, "agent_authorization_revoked")
         return Actor(
             user_id,
-            row["role"],
             row["version"],
-            frozenset(SCOPES if scopes is None else scopes),
+            frozenset(SCOPES if scopes is None else scopes).intersection(scopes_for(row)),
             credential_id,
+            profile=profile_for(row),
         )
 
     def refresh_actor(self, actor):
@@ -160,7 +161,7 @@ class Core:
     def create_credential(self, actor, body):
         if {"diagnostics:read", "library:manage"}.intersection(
             body.scopes
-        ) and actor.role != "admin":
+        ) and actor.profile != "owner":
             raise HTTPException(403, "admin_required")
         identity, token = uuid4().hex, "ws_" + secrets.token_urlsafe(32)
         with self.database.connect(write=True) as connection:
@@ -503,7 +504,7 @@ class Core:
         with self.database.connect(write=True) as connection:
             connection.execute("BEGIN IMMEDIATE")
             record = self.draft(actor, identity, connection)
-            if record["kind"] != "playlist" and actor.role != "admin":
+            if record["kind"] != "playlist" and actor.profile != "owner":
                 raise HTTPException(403, "admin_required")
             if (
                 not reject
@@ -533,7 +534,7 @@ class Core:
                 connection.execute("BEGIN IMMEDIATE")
                 self.check_application_actor(actor, connection)
                 record = self.draft(actor, identity, connection)
-                if record["kind"] != "playlist" and actor.role != "admin":
+                if record["kind"] != "playlist" and actor.profile != "owner":
                     raise HTTPException(403, "admin_required")
                 raw = connection.execute(
                     "SELECT * FROM agent_drafts WHERE id=?", (identity,)

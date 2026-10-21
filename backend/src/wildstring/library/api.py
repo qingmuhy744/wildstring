@@ -240,7 +240,7 @@ def library_router(repository: LibraryRepository, auth: Auth, transcoding) -> AP
             q, limit, offset, artist_id=artist_id, role=role, sort=sort, order=order
         )
 
-    @router.get("/imports", dependencies=[Depends(auth.require_admin)])
+    @router.get("/imports", dependencies=[Depends(auth.require_permission("library:inspect"))])
     def imports(limit: Annotated[int, Query(ge=1, le=100)] = 20):
         return repository.imports(limit)
 
@@ -345,13 +345,17 @@ def library_router(repository: LibraryRepository, auth: Auth, transcoding) -> AP
         return result
 
     @router.get(
-        "/scans", response_model=list[ScanReport], dependencies=[Depends(auth.require_admin)]
+        "/scans",
+        response_model=list[ScanReport],
+        dependencies=[Depends(auth.require_permission("library:inspect"))],
     )
     def scans(limit: Annotated[int, Query(ge=1, le=100)] = 20):
         return repository.scans(limit)
 
     @router.get(
-        "/scans/{run_id}", response_model=ScanReport, dependencies=[Depends(auth.require_admin)]
+        "/scans/{run_id}",
+        response_model=ScanReport,
+        dependencies=[Depends(auth.require_permission("library:inspect"))],
     )
     def scan(run_id: str):
         result = repository.scan(run_id)

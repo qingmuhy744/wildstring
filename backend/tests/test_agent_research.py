@@ -10,6 +10,7 @@ from test_agent_platform import agent as agent
 from test_personal_library import HEADERS
 
 from wildstring.agent_models import Connection, Memory, SearchSettings
+from wildstring.database import SCHEMA_VERSION
 from wildstring.library.repository import now
 from wildstring.model_protocol import parse, request
 from wildstring.outbound import OutboundError
@@ -366,7 +367,7 @@ def test_v18_migration_is_atomic_and_preserves_existing_connection(agent, monkey
         current = dict(
             db.execute("SELECT * FROM agent_connections WHERE id=?", (c["id"],)).fetchone()
         )
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 26
+        assert db.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
     assert {k: v for k, v in current.items() if k != "options"} == {
         k: v for k, v in original.items() if k != "options"
     }

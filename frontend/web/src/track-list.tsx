@@ -1,5 +1,5 @@
 import { Fragment, useLayoutEffect, useRef } from 'react';
-import { artist, listeningTime, time, type TrackPage } from './api';
+import { listeningTime, time, type TrackPage } from './api';
 import { TrackActions, type TrackOperations } from './track-actions';
 import { Cover } from './cover';
 import type { Player } from './player';
@@ -18,6 +18,7 @@ export function TrackList({
   albumTracks = false,
   groupDiscs = false,
   onPlay,
+  onOpenArtist,
 }: {
   page: TrackPage;
   player: Player;
@@ -29,6 +30,7 @@ export function TrackList({
   albumTracks?: boolean;
   groupDiscs?: boolean;
   onPlay?: (track: TrackPage['items'][number]) => void;
+  onOpenArtist?: (name: string) => void;
 }) {
   const listSize = useTrackListSize();
   const root = useRef<HTMLDivElement>(null);
@@ -134,17 +136,39 @@ export function TrackList({
                   title={track.album || track.title}
                 />
               )}
-              <button
-                className="track-title"
-                onClick={() => (onPlay ? onPlay(track) : player.start(page.items, i))}
-                aria-label={`播放 ${track.title}`}
-              >
-                <strong>{track.title}</strong>
-                <small>
+              <div className="track-title-group">
+                <button
+                  className="track-title"
+                  onClick={() => (onPlay ? onPlay(track) : player.start(page.items, i))}
+                  aria-label={`播放 ${track.title}`}
+                >
+                  <strong>{track.title}</strong>
+                </button>
+                <small className="track-artist-row">
                   {albumTracks && multiDisc && !groupDiscs && (
                     <span className="disc-chip">Disc {track.disc_number || 1}</span>
                   )}
-                  {artist(track)}
+                  {track.artists.length
+                    ? track.artists.map((name, artistIndex) => (
+                        <Fragment key={`${name}-${artistIndex}`}>
+                          {artistIndex > 0 && <span aria-hidden="true"> / </span>}
+                          {onOpenArtist ? (
+                            <button
+                              className="track-artist-link"
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                onOpenArtist(name);
+                              }}
+                            >
+                              {name}
+                            </button>
+                          ) : (
+                            name
+                          )}
+                        </Fragment>
+                      ))
+                    : '未知艺人'}
                   {showStats && (
                     <span className="track-stat">
                       {' '}
@@ -159,7 +183,7 @@ export function TrackList({
                     </span>
                   )}
                 </small>
-              </button>
+              </div>
             </div>
             <span className="album-column ellipsis" role="cell" title={track.album || ''}>
               {operations.onOpenAlbum && track.album_id ? (

@@ -254,16 +254,22 @@
     min-height: 68px;
     padding-block: 6px;
   }
-  .track-title {
+  .track-title-group {
     gap: 5px;
     min-height: 48px;
     justify-content: center;
+  }
+  .track-title-group > .track-title {
+    min-height: 0;
+    padding: 0;
+    gap: 0;
+    display: block;
   }
   .track-title strong {
     font-size: 15px;
     line-height: 1.35;
   }
-  .track-title small {
+  :is(.track-title small, .track-artist-row) {
     font-size: 12px;
     line-height: 1.4;
   }
@@ -339,16 +345,22 @@
   height: var(--track-cover-size);
   flex: 0 0 var(--track-cover-size);
 }
-.track-list[data-list-size] .track-title {
+.track-list[data-list-size] .track-title-group {
   min-height: 44px;
   gap: 4px;
   justify-content: center;
+}
+.track-list[data-list-size] .track-title-group > .track-title {
+  min-height: 0;
+  padding: 0;
+  gap: 0;
+  display: block;
 }
 .track-list[data-list-size] .track-title strong {
   font-size: var(--track-title-size);
   line-height: 1.25;
 }
-.track-list[data-list-size] .track-title small {
+.track-list[data-list-size] :is(.track-title small, .track-artist-row) {
   font-size: var(--track-artist-size);
   line-height: 1.25;
 }

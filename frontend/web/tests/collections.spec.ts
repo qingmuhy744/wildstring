@@ -179,7 +179,7 @@ test('可视化规则歌单、实时收藏筛选与编辑任一条件', async ({
   }
 });
 
-test('下一首插入、三横杠鼠标或触摸拖动保持当前播放', async ({ page }, info) => {
+test('下一首插入、队列上移下移保持当前播放', async ({ page }) => {
   await login(page);
   const firstTitle = (await tracks(page))[0].title;
   await page.getByRole('button', { name: '播放全部', exact: true }).click();
@@ -191,62 +191,33 @@ test('下一首插入、三横杠鼠标或触摸拖动保持当前播放', async
   const queue = page.getByRole('complementary', { name: '播放队列', exact: true });
   await expect(queue.getByRole('listitem')).toHaveCount(3);
   await expect(queue.getByRole('listitem').nth(1)).toContainText('夜晚测试曲');
-  await expect(queue.getByRole('button', { name: /上移队列|下移队列/ })).toHaveCount(0);
-  async function drag(from: number, to: number) {
-    const handle = await queue
-      .getByRole('button', { name: `拖动队列第 ${from + 1} 首排序`, exact: true })
-      .boundingBox();
-    const target = await queue.getByRole('listitem').nth(to).boundingBox();
-    if (!handle || !target) throw new Error('Queue drag target unavailable');
-    const x = handle.x + handle.width / 2;
-    const y = handle.y + handle.height / 2;
-    const targetY = target.y + target.height / 2;
-    if (info.project.name === 'mobile') {
-      const session = await page.context().newCDPSession(page);
-      try {
-        await session.send('Input.dispatchTouchEvent', {
-          type: 'touchStart',
-          touchPoints: [{ x, y }],
-        });
-        for (let step = 1; step <= 8; step++)
-          await session.send('Input.dispatchTouchEvent', {
-            type: 'touchMove',
-            touchPoints: [{ x, y: y + ((targetY - y) * step) / 8 }],
-          });
-        await session.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
-      } finally {
-        await session.detach();
-      }
-    } else {
-      await page.mouse.move(x, y);
-      await page.mouse.down();
-      await page.mouse.move(x, targetY, { steps: 10 });
-      await page.mouse.up();
-    }
-  }
-  await drag(0, 2);
+  await expect(queue.getByRole('button', { name: /上移队列|下移队列/ })).toHaveCount(6);
+  await expect(queue.getByRole('button', { name: '上移队列第 1 首', exact: true })).toBeDisabled();
+  await expect(queue.getByRole('button', { name: '下移队列第 3 首', exact: true })).toBeDisabled();
+  await queue.getByRole('button', { name: '下移队列第 1 首', exact: true }).click();
+  await expect(queue.getByRole('listitem').nth(1)).toContainText(firstTitle);
+  await queue.getByRole('button', { name: '下移队列第 2 首', exact: true }).click();
   await expect(queue.getByRole('listitem').last()).toContainText(firstTitle);
   await expect(queue.locator('li.selected')).toContainText(firstTitle);
   expect((await audio(page)).source).toBe(before.source);
   expect((await audio(page)).time).toBeGreaterThanOrEqual(before.time);
   expect((await audio(page)).paused).toBe(false);
-  await drag(2, 0);
+  const up = queue.getByRole('button', { name: '上移队列第 3 首', exact: true });
+  await up.focus();
+  await page.keyboard.press('Enter');
+  await expect(queue.getByRole('listitem').nth(1)).toContainText(firstTitle);
+  await queue.getByRole('button', { name: '上移队列第 2 首', exact: true }).click();
   await expect(queue.getByRole('listitem').first()).toContainText(firstTitle);
-  const keyboardHandle = queue.getByRole('button', { name: '拖动队列第 1 首排序', exact: true });
-  await keyboardHandle.focus();
-  await keyboardHandle.press('ArrowDown');
-  await expect(
-    queue.getByRole('button', { name: '拖动队列第 2 首排序', exact: true }),
-  ).toBeFocused();
-  await page.keyboard.press('ArrowUp');
-  await expect(queue.getByRole('listitem').first()).toContainText(firstTitle);
+  await expect(queue.locator('li.selected')).toContainText(firstTitle);
+  await expect(queue.getByRole('button', { name: '上移队列第 1 首', exact: true })).toBeDisabled();
+  await expect(queue.getByRole('button', { name: '下移队列第 3 首', exact: true })).toBeDisabled();
   await queue.getByRole('button', { name: '关闭队列' }).click();
   await page.getByRole('button', { name: '下一首', exact: true }).click();
   await expect.poll(async () => (await audio(page)).source).not.toBe(before.source);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
 
-test('长队列拖动边缘滚动、取消与暂停状态', async ({ page }, info) => {
+test('长队列上移下移、首尾禁用与暂停状态', async ({ page }, info) => {
   await login(page);
   const firstTitle = (await tracks(page))[0].title;
   await page.getByRole('button', { name: '播放全部', exact: true }).click();
@@ -260,60 +231,25 @@ test('长队列拖动边缘滚动、取消与暂停状态', async ({ page }, inf
   await page.getByRole('button', { name: '播放队列', exact: true }).last().click();
   const queue = page.getByRole('complementary', { name: '播放队列', exact: true });
   await expect(queue.getByRole('listitem')).toHaveCount(18);
-  const handle = await queue
-    .getByRole('button', { name: '拖动队列第 1 首排序', exact: true })
-    .boundingBox();
-  const box = await queue.boundingBox();
-  if (!handle || !box) throw new Error('Queue drag target unavailable');
-  const x = handle.x + handle.width / 2;
-  const y = handle.y + handle.height / 2;
-  const edge = box.y + box.height - 5;
-  const session = info.project.name === 'mobile' ? await page.context().newCDPSession(page) : null;
-  async function pointer(type: 'start' | 'move' | 'end' | 'cancel', clientY = y) {
-    if (session) {
-      await session.send('Input.dispatchTouchEvent', {
-        type: { start: 'touchStart', move: 'touchMove', end: 'touchEnd', cancel: 'touchCancel' }[
-          type
-        ] as 'touchStart' | 'touchMove' | 'touchEnd' | 'touchCancel',
-        touchPoints: type === 'end' || type === 'cancel' ? [] : [{ x, y: clientY }],
-      });
-    } else {
-      if (type === 'start') {
-        await page.mouse.move(x, y);
-        await page.mouse.down();
-      }
-      if (type === 'move') await page.mouse.move(x, clientY, { steps: 10 });
-      if (type === 'cancel') await page.keyboard.press('Escape');
-      if (type === 'end' || type === 'cancel') await page.mouse.up();
-    }
+  await expect(queue.getByRole('button', { name: '上移队列第 1 首', exact: true })).toBeDisabled();
+  await expect(queue.getByRole('button', { name: '下移队列第 18 首', exact: true })).toBeDisabled();
+  await queue.getByRole('button', { name: '下移队列第 1 首', exact: true }).click();
+  await expect(queue.getByRole('listitem').nth(1)).toContainText(firstTitle);
+  await expect(queue.locator('li.selected')).toContainText(firstTitle);
+  expect((await audio(page)).source).toBe(before.source);
+  expect((await audio(page)).time).toBe(before.time);
+  expect((await audio(page)).paused).toBe(true);
+  await queue.getByRole('button', { name: '上移队列第 2 首', exact: true }).click();
+  await expect(queue.getByRole('listitem').first()).toContainText(firstTitle);
+  await page.screenshot({ path: `../../artifacts/queue-reorder-${info.project.name}.png` });
+  if (info.project.name === 'mobile') {
+    // The queue fills the phone screen, so its own close button is the way out.
+    await queue.getByRole('button', { name: '关闭队列' }).click();
+  } else {
+    const scrim = page.getByRole('button', { name: '关闭播放队列', exact: true });
+    await scrim.click({ position: { x: 24, y: 240 } });
   }
-  try {
-    await pointer('start');
-    await pointer('move', edge);
-    await expect.poll(() => queue.evaluate((node) => node.scrollTop)).toBeGreaterThan(100);
-    await pointer('cancel');
-    await expect(queue.locator('.is-dragging')).toHaveCount(0);
-    await expect(queue.getByRole('listitem').first()).toContainText(firstTitle);
-    await queue.evaluate((node) => {
-      node.scrollTop = 0;
-    });
-    await pointer('start');
-    await pointer('move', edge);
-    await expect.poll(() => queue.evaluate((node) => node.scrollTop)).toBeGreaterThan(250);
-    await pointer('end', edge);
-    await expect(queue.locator('li.selected')).toContainText(firstTitle);
-    expect(
-      await queue
-        .locator('li.selected')
-        .evaluate((node) => Array.from(node.parentElement!.children).indexOf(node)),
-    ).toBeGreaterThan(2);
-    expect((await audio(page)).source).toBe(before.source);
-    expect((await audio(page)).time).toBe(before.time);
-    expect((await audio(page)).paused).toBe(true);
-    await page.screenshot({ path: `../../artifacts/queue-drag-${info.project.name}.png` });
-  } finally {
-    await session?.detach();
-  }
+  await expect(queue).toHaveCount(0);
 });
 
 test('实际收听累计、一次计数、暂停跳转不增加与收听视图', async ({ page }, info) => {

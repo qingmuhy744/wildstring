@@ -237,7 +237,7 @@ def test_mcp_search_reuses_budgets_caching_and_owner_bound_sources(
         service = api.app.state.agent_platform
         with service.database.connect() as db:
             actor = service.current_actor(
-                db.execute("SELECT id FROM users WHERE role='admin'").fetchone()[0]
+                db.execute("SELECT id FROM users WHERE profile='owner'").fetchone()[0]
             )
         service.save_search_settings(
             actor,
@@ -305,7 +305,11 @@ def test_regular_user_cannot_mint_admin_capability_or_read_other_sources(
         user = api.post(
             "/api/v1/manage/users",
             headers=HEADERS,
-            json={"username": "listener", "password": "listener-password-123", "role": "user"},
+            json={
+                "username": "listener",
+                "password": "listener-password-123",
+                "profile": "listener",
+            },
         )
         assert user.status_code == 201, user.text
         actor = service.current_actor(user.json()["id"])
@@ -327,7 +331,7 @@ def test_regular_user_cannot_mint_admin_capability_or_read_other_sources(
         own = result(api, headers, "get_gain_settings")
         result(api, headers, "set_gain_settings", own | {"mode": "track"})
         with service.database.connect() as db:
-            admin_id = db.execute("SELECT id FROM users WHERE role='admin'").fetchone()[0]
+            admin_id = db.execute("SELECT id FROM users WHERE profile='owner'").fetchone()[0]
         assert service.providers.loudness.settings(admin_id)["mode"] == "off"
         service.save_search_settings(
             actor,
@@ -371,7 +375,7 @@ def test_mcp_resume_cannot_inherit_one_off_ui_model_authorization(
         service = api.app.state.agent_platform
         with service.database.connect() as db:
             actor = service.current_actor(
-                db.execute("SELECT id FROM users WHERE role='admin'").fetchone()[0]
+                db.execute("SELECT id FROM users WHERE profile='owner'").fetchone()[0]
             )
         connection = service.save_connection(
             actor,

@@ -20,7 +20,7 @@ struct StubbedHTTPTests {
 
         @Test func loginSendsIOSClientHeaderAndPersistsCookies() async throws {
             let userJSON =
-                #"{"id":"admin","username":"admin","role":"admin","version":3,"enabled":true}"#
+                #"{"id":"admin","username":"admin","profile":"owner","version":3,"enabled":true}"#
             let store = InMemorySessionStore()
             StubURLProtocol.respond { request in
                 #expect(request.httpMethod == "POST")
@@ -47,7 +47,7 @@ struct StubbedHTTPTests {
                 password: "fixture-admin-password"
             )
             #expect(user.username == "admin")
-            #expect(user.role == "admin")
+            #expect(user.profile == "owner")
             let session = try #require(try store.loadSession(origin: origin))
             #expect(session.cookies.map(\.name) == ["wildstring_session"])
             #expect(session.cookies.first?.value == "token-123")
@@ -69,7 +69,7 @@ struct StubbedHTTPTests {
 
         @Test func olderServersRetryWithWebClientHeader() async throws {
             let userJSON =
-                #"{"id":"admin","username":"admin","role":"admin","version":3,"enabled":true}"#
+                #"{"id":"admin","username":"admin","profile":"owner","version":3,"enabled":true}"#
             let store = InMemorySessionStore()
             StubURLProtocol.respond { request in
                 let header = request.value(forHTTPHeaderField: "X-Wildstring-Client")
@@ -88,7 +88,7 @@ struct StubbedHTTPTests {
 
         @Test func statusSendsStoredSessionCookie() async throws {
             let userJSON =
-                #"{"id":"admin","username":"admin","role":"admin","version":3,"enabled":true}"#
+                #"{"id":"admin","username":"admin","profile":"owner","version":3,"enabled":true}"#
             let store = InMemorySessionStore()
             try store.saveSession(
                 StoredSession(cookies: [

@@ -89,7 +89,7 @@ class AccountPlaybackTest {
                     fun json(body: String) = MockResponse().setHeader("Content-Type", "application/json").setBody(body)
                     val owner = account.get()
                     val authenticated = owner != null && request.getHeader("Cookie")?.contains("wildstring_session=$owner") == true
-                    fun user(name: String) = """{"id":"user-$name","username":"$name","role":"user","enabled":true,"version":1}"""
+                    fun user(name: String) = """{"id":"user-$name","username":"$name","profile":"listener","enabled":true,"version":1}"""
                     if (path.endsWith("/auth/status")) return json("""{"configured":true,"authenticated":$authenticated,"user":${if (authenticated) user(owner!!) else "null"}}""")
                     if (path.endsWith("/auth/login")) {
                         val body = gson.fromJson(request.body.readUtf8(), Map::class.java)
@@ -150,7 +150,7 @@ class AccountPlaybackTest {
             }
             compose.waitUntil(5_000) { compose.onAllNodesWithContentDescription("设置").fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithContentDescription("设置").performClick()
-            compose.onNodeWithText("alice · 普通用户").assertExists()
+            compose.onNodeWithText("alice · 听众").assertExists()
             compose.onNodeWithTag("setting-播放音质").performScrollTo().performClick()
             compose.onNodeWithText("AAC · 192 kbps").performClick()
             try {
@@ -216,7 +216,7 @@ class AccountPlaybackTest {
             assertTrue(vm.state.value.queue.isEmpty())
             assertTrue(runBlocking { vm.repository.database.queue().entries().isEmpty() })
             compose.onNodeWithContentDescription("设置").performClick()
-            compose.onNodeWithText("bob · 普通用户").assertExists()
+            compose.onNodeWithText("bob · 听众").assertExists()
             capture("account-settings.png")
             compose.onNodeWithText("修改密码").performClick()
             compose.onNodeWithText("当前密码").performTextInput("wrong-password")

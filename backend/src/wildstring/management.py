@@ -7,7 +7,7 @@ import shutil
 import sqlite3
 import time
 from importlib.metadata import version
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from threading import Event, Thread
 from typing import Annotated, Literal
 from uuid import uuid4
@@ -19,9 +19,10 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 from wildstring.ai_config import AIService, AIUpdate
 from wildstring.album_release_locks import ReleaseLockInput
 from wildstring.diagnostics import record_event, trace_context
+from wildstring.library.download_policy import partial
 from wildstring.library.edits import MetadataEditor, MetadataUpdate, Overrides
 from wildstring.library.importer import import_music
-from wildstring.library.intake import Intake, IntakeApproval, IntakeSettings
+from wildstring.library.intake import INPUT_SUFFIXES, Intake, IntakeApproval, IntakeSettings
 from wildstring.library.lyric_edits import LyricsEditor, LyricsText, LyricsUpdate
 from wildstring.library.repository import now
 from wildstring.library.scanner import ScanBusyError, scan_library
@@ -34,6 +35,12 @@ class JobRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     kind: Literal["import", "scan"]
     full: bool = Field(default=False, strict=True)
+    path: str = "."
+
+    @field_validator("path")
+    @classmethod
+    def valid_path(cls, value: str) -> str:
+        return validate_folder(value) if value != "." else "."
 
 
 class PreferencesUpdate(BaseModel):
@@ -72,6 +79,17 @@ class AlbumMetadataUpdate(BaseModel):
     album_id: str = Field(min_length=1, max_length=128)
     tracks: list[FolderTrackUpdate] = Field(min_length=1, max_length=1000)
     overrides: Overrides
+
+
+class SourcePathRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    source_id: Literal["import"] = "import"
+    path: str = "."
+
+    @field_validator("path")
+    @classmethod
+    def valid_path(cls, value: str) -> str:
+        return validate_folder(value) if value != "." else "."
 
 
 class Management:
@@ -137,13 +155,17 @@ class Management:
                 (library_id,),
             ).fetchone()
             if active:
-                if active["kind"] == body.kind and bool(active["full"]) == body.full:
+                if (
+                    active["kind"] == body.kind
+                    and bool(active["full"]) == body.full
+                    and active["scope_path"] == body.path
+                ):
                     return self.job(active["id"])
                 raise HTTPException(409, "library_task_busy")
             job_id = uuid4().hex
             connection.execute(
-                "INSERT INTO admin_jobs(id,library_id,kind,full,status,created_at,automatic) VALUES (?,?,?,?,'queued',?,?)",
-                (job_id, library_id, body.kind, body.full, now(), automatic),
+                "INSERT INTO admin_jobs(id,library_id,kind,full,status,created_at,automatic,scope_path) VALUES (?,?,?,?,'queued',?,?,?)",
+                (job_id, library_id, body.kind, body.full, now(), automatic, body.path),
             )
         return self.job(job_id)
 
@@ -322,6 +344,168 @@ class Management:
             "warning": len(albums) > 1 or len(album_artists) > 1,
         }
 
+    def source_roots(self):
+        return [{"id": "import", "name": "导入目录", "read_only": True}]
+
+    def source_folders(self, source_id="import", path="."):
+        if source_id != "import":
+            raise HTTPException(404, "source_not_found")
+        relative = Path(".") if path == "." else Path(validate_folder(path))
+        root = self.settings.music_dir.resolve()
+        directory = (root / relative).resolve()
+        if not directory.is_relative_to(root) or not directory.is_dir():
+            raise HTTPException(404, "source_folder_not_found")
+        policy = self.intake.preferences()["download_policy"]
+        entries = []
+        for entry in sorted(
+            directory.iterdir(), key=lambda item: (not item.is_dir(), item.name.casefold())
+        ):
+            if entry.is_symlink() or entry.name.startswith("."):
+                continue
+            entry_path = (relative / entry.name).as_posix()
+            if entry.is_dir():
+                entries.append({"name": entry.name, "path": entry_path, "kind": "folder"})
+                continue
+            pending_download = partial(entry.name, policy)
+            entries.append(
+                {
+                    "name": entry.name,
+                    "path": entry_path,
+                    "kind": "file",
+                    "importable": entry.suffix.lower() in INPUT_SUFFIXES and not pending_download,
+                    "pending": pending_download,
+                }
+            )
+        return {"source_id": source_id, "path": path, "items": entries}
+
+    def import_preview(self, body):
+        if body.source_id != "import":
+            raise HTTPException(404, "source_not_found")
+        folder = Path(".") if body.path == "." else Path(validate_folder(body.path))
+        root = self.settings.music_dir.resolve()
+        directory = (root / folder).resolve()
+        if not directory.is_relative_to(root) or not directory.is_dir():
+            raise HTTPException(404, "source_folder_not_found")
+        files = [
+            relative.as_posix()
+            for relative in self.intake.paths()
+            if folder == Path(".") or relative == folder or folder in relative.parents
+        ]
+        return {
+            "source_id": body.source_id,
+            "path": body.path,
+            "files": files,
+            "count": len(files),
+            "pending_markers": [
+                item["path"]
+                for item in self.source_folders(body.source_id, body.path)["items"]
+                if item.get("pending")
+            ],
+        }
+
+    def trash_album(self, album_id, *, user_id):
+        library_id = self.repository.library_id()
+        with self.database.connect() as connection:
+            rows = connection.execute(
+                "SELECT id,path FROM tracks WHERE library_id=? AND album_id=? AND status='available' ORDER BY path",
+                (library_id, album_id),
+            ).fetchall()
+        if not rows:
+            raise HTTPException(404, "album_not_found")
+        identity = uuid4().hex
+        trash_root = self.settings.data_dir / "trash" / identity
+        root = self.settings.library_dir.resolve()
+        entries = []
+        moved: list[tuple[Path, Path]] = []
+        trash_root.mkdir(parents=True, exist_ok=False)
+        try:
+            for row in rows:
+                original = Path(row["path"])
+                source = (root / original).resolve(strict=False)
+                if not source.is_relative_to(root) or not source.is_file():
+                    continue
+                destination = trash_root / original
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(source), str(destination))
+                moved.append((source, destination))
+                entries.append({"track_id": row["id"], "path": original.as_posix()})
+            if not entries:
+                raise HTTPException(409, "managed_copy_missing")
+            with self.database.connect(write=True) as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                connection.execute(
+                    "INSERT INTO library_trash(id,library_id,album_id,entries,created_at,created_by) VALUES (?,?,?,?,?,?)",
+                    (identity, library_id, album_id, json.dumps(entries), now(), user_id),
+                )
+                connection.executemany(
+                    "UPDATE tracks SET status='missing' WHERE id=? AND library_id=?",
+                    [(entry["track_id"], library_id) for entry in entries],
+                )
+        except BaseException:
+            for source, destination in reversed(moved):
+                if destination.exists() and not source.exists():
+                    source.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.move(str(destination), str(source))
+            if trash_root.exists():
+                shutil.rmtree(trash_root, ignore_errors=True)
+            raise
+        return {"id": identity, "album_id": album_id, "tracks": len(entries), "status": "trashed"}
+
+    def restore_trash(self, identity):
+        library_id = self.repository.library_id()
+        with self.database.connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM library_trash WHERE id=? AND library_id=? AND status='trashed'",
+                (identity, library_id),
+            ).fetchone()
+        if row is None:
+            raise HTTPException(404, "trash_not_found")
+        root = self.settings.library_dir.resolve()
+        trash_root = self.settings.data_dir / "trash" / identity
+        entries = json.loads(row["entries"])
+        moved: list[tuple[Path, Path]] = []
+        for entry in entries:
+            source = trash_root / entry["path"]
+            destination = (root / entry["path"]).resolve(strict=False)
+            if not destination.is_relative_to(root) or not source.is_file() or destination.exists():
+                raise HTTPException(409, "trash_restore_conflict")
+        with self.database.connect(write=True) as connection:
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+                for entry in entries:
+                    source = trash_root / entry["path"]
+                    destination = root / entry["path"]
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.move(str(source), str(destination))
+                    moved.append((source, destination))
+                    connection.execute(
+                        "UPDATE tracks SET status='available' WHERE id=? AND library_id=?",
+                        (entry["track_id"], library_id),
+                    )
+                connection.execute(
+                    "UPDATE library_trash SET status='restored' WHERE id=?", (identity,)
+                )
+            except BaseException:
+                for source, destination in reversed(moved):
+                    if destination.exists() and not source.exists():
+                        source.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.move(str(destination), str(source))
+                raise
+        shutil.rmtree(trash_root, ignore_errors=True)
+        return {"id": identity, "status": "restored", "tracks": len(entries)}
+
+    def purge_trash(self, identity):
+        library_id = self.repository.library_id()
+        with self.database.connect(write=True) as connection:
+            result = connection.execute(
+                "UPDATE library_trash SET status='purged' WHERE id=? AND library_id=? AND status='trashed'",
+                (identity, library_id),
+            )
+            if not result.rowcount:
+                raise HTTPException(404, "trash_not_found")
+        shutil.rmtree(self.settings.data_dir / "trash" / identity, ignore_errors=True)
+        return {"id": identity, "status": "purged"}
+
     def update_metadata_album(self, body, *, user_id="admin"):
         group = self.metadata_album(body.album_id)
         if group is None:
@@ -374,6 +558,7 @@ class Management:
                 import_music(
                     self.settings,
                     full=bool(job["full"]),
+                    relative_root=job.get("scope_path", "."),
                     on_import=lambda run_id: self.link(job["id"], import_id=run_id),
                     on_scan=on_scan,
                     automatic=bool(job["automatic"]),
@@ -523,7 +708,10 @@ class Management:
 
 
 def management_router(service, auth, providers=None):
-    router = APIRouter(prefix="/api/v1/manage", dependencies=[Depends(auth.require_admin)])
+    # The management shell is visible to librarian/editor profiles; sensitive
+    # settings and account operations still have their own owner check.
+    inspect = Depends(auth.require_permission("library:inspect"))
+    router = APIRouter(prefix="/api/v1/manage", dependencies=[inspect])
     editor = MetadataEditor(service.repository)
     lyrics = LyricsEditor(service.repository)
     ai = AIService(service.settings.data_dir, providers)
@@ -532,7 +720,13 @@ def management_router(service, auth, providers=None):
     def intake_settings():
         return service.intake.preferences()
 
-    @router.put("/intake/settings", dependencies=[Depends(auth.require_client)])
+    @router.put(
+        "/intake/settings",
+        dependencies=[
+            Depends(auth.require_client),
+            Depends(auth.require_permission("library:import")),
+        ],
+    )
     def configure_intake(body: IntakeSettings):
         result = service.intake.configure(body)
         service.next_discovery = 0
@@ -544,7 +738,13 @@ def management_router(service, auth, providers=None):
     ):
         return service.intake.items(limit, offset)
 
-    @router.post("/intake/items/{item_id}/approve", dependencies=[Depends(auth.require_client)])
+    @router.post(
+        "/intake/items/{item_id}/approve",
+        dependencies=[
+            Depends(auth.require_client),
+            Depends(auth.require_permission("library:import")),
+        ],
+    )
     def approve_intake(item_id: str, body: IntakeApproval):
         result = service.intake.approve(item_id, body)
         service.next_discovery = 0
@@ -555,13 +755,25 @@ def management_router(service, auth, providers=None):
                 raise
         return result
 
-    @router.post("/intake/items/{item_id}/ignore", dependencies=[Depends(auth.require_client)])
+    @router.post(
+        "/intake/items/{item_id}/ignore",
+        dependencies=[
+            Depends(auth.require_client),
+            Depends(auth.require_permission("library:import")),
+        ],
+    )
     def ignore_intake(item_id: str, body: Annotated[dict, Body()]):
         if set(body) != {"version"} or type(body["version"]) is not int or body["version"] < 1:
             raise HTTPException(422, "invalid_version")
         return service.intake.ignore(item_id, body["version"])
 
-    @router.post("/intake/items/{item_id}/retry", dependencies=[Depends(auth.require_client)])
+    @router.post(
+        "/intake/items/{item_id}/retry",
+        dependencies=[
+            Depends(auth.require_client),
+            Depends(auth.require_permission("library:import")),
+        ],
+    )
     def retry_intake(item_id: str, body: Annotated[dict, Body()]):
         if set(body) != {"version"} or type(body["version"]) is not int or body["version"] < 1:
             raise HTTPException(422, "invalid_version")
@@ -580,11 +792,11 @@ def management_router(service, auth, providers=None):
                 raise
         return service.intake.public(service.intake.item(item_id))
 
-    @router.get("/ai")
+    @router.get("/ai", dependencies=[Depends(auth.require_owner)])
     def ai_settings():
         return ai.get()
 
-    @router.put("/ai", dependencies=[Depends(auth.require_client)])
+    @router.put("/ai", dependencies=[Depends(auth.require_client), Depends(auth.require_owner)])
     def update_ai(body: object = Body(...)):
         try:
             validated = AIUpdate.model_validate(body)
@@ -593,7 +805,9 @@ def management_router(service, auth, providers=None):
             raise HTTPException(422, "invalid_ai_settings") from None
         return ai.save(validated)
 
-    @router.post("/ai/test", dependencies=[Depends(auth.require_client)])
+    @router.post(
+        "/ai/test", dependencies=[Depends(auth.require_client), Depends(auth.require_owner)]
+    )
     def test_ai():
         return ai.probe()
 
@@ -605,7 +819,9 @@ def management_router(service, auth, providers=None):
             result["deployment"].update(host=address[0], port=address[1])
         return result
 
-    @router.put("/preferences", dependencies=[Depends(auth.require_client)])
+    @router.put(
+        "/preferences", dependencies=[Depends(auth.require_client), Depends(auth.require_owner)]
+    )
     def preferences(body: PreferencesUpdate):
         return service.update_preferences(body)
 
@@ -615,13 +831,92 @@ def management_router(service, auth, providers=None):
     ):
         return service.jobs(limit, offset)
 
-    @router.post("/jobs", status_code=202, dependencies=[Depends(auth.require_client)])
+    @router.post(
+        "/jobs",
+        status_code=202,
+        dependencies=[
+            Depends(auth.require_client),
+            Depends(auth.require_permission("tasks:control")),
+        ],
+    )
     def submit(body: JobRequest):
         return service.submit(body)
 
     @router.get("/jobs/{job_id}")
     def job(job_id: str):
         return service.job(job_id)
+
+    @router.get("/library/sources")
+    def library_sources():
+        return {"items": service.source_roots()}
+
+    @router.get("/library/folders")
+    def library_folders(source_id: Literal["import"] = "import", path: str = "."):
+        return service.source_folders(source_id, validate_folder(path) if path != "." else ".")
+
+    @router.post(
+        "/library/import/preview",
+        dependencies=[
+            Depends(auth.require_client),
+            Depends(auth.require_permission("library:import")),
+        ],
+    )
+    def library_import_preview(body: SourcePathRequest):
+        return service.import_preview(body)
+
+    @router.post(
+        "/library/import",
+        status_code=202,
+        dependencies=[
+            Depends(auth.require_client),
+            Depends(auth.require_permission("library:import")),
+        ],
+    )
+    def library_import(body: SourcePathRequest):
+        return service.submit(JobRequest(kind="import", path=body.path)) | {
+            "source_id": body.source_id,
+            "path": body.path,
+        }
+
+    @router.get("/library/trash")
+    def library_trash():
+        with service.database.connect() as connection:
+            rows = connection.execute(
+                "SELECT id,album_id,created_at,created_by,status,json_array_length(entries) AS tracks "
+                "FROM library_trash WHERE library_id=? ORDER BY created_at DESC",
+                (service.repository.library_id(),),
+            ).fetchall()
+        return {"items": [dict(row) for row in rows]}
+
+    @router.post(
+        "/albums/{album_id}/trash",
+        status_code=202,
+        dependencies=[
+            Depends(auth.require_client),
+            Depends(auth.require_permission("library:delete")),
+        ],
+    )
+    def trash_album(
+        album_id: str, user: Annotated[dict, Depends(auth.require_permission("library:delete"))]
+    ):
+        return service.trash_album(album_id, user_id=user["id"])
+
+    @router.post(
+        "/library/trash/{identity}/restore",
+        dependencies=[
+            Depends(auth.require_client),
+            Depends(auth.require_permission("library:delete")),
+        ],
+    )
+    def restore_trash(identity: str):
+        return service.restore_trash(identity)
+
+    @router.delete(
+        "/library/trash/{identity}",
+        dependencies=[Depends(auth.require_client), Depends(auth.require_owner)],
+    )
+    def purge_trash(identity: str):
+        return service.purge_trash(identity)
 
     @router.get("/metadata/folders")
     def metadata_folders(
@@ -633,9 +928,16 @@ def management_router(service, auth, providers=None):
             folder = validate_folder(folder)
         return service.metadata_folders(limit, offset, folder)
 
-    @router.put("/metadata/folders", dependencies=[Depends(auth.require_client)])
+    @router.put(
+        "/metadata/folders",
+        dependencies=[
+            Depends(auth.require_client),
+            Depends(auth.require_permission("metadata:write")),
+        ],
+    )
     def update_metadata_folder(
-        body: FolderMetadataUpdate, user: Annotated[dict, Depends(auth.require_admin)]
+        body: FolderMetadataUpdate,
+        user: Annotated[dict, Depends(auth.require_permission("metadata:write"))],
     ):
         return service.update_metadata_folder(body, user_id=user["id"])
 
@@ -646,9 +948,16 @@ def management_router(service, auth, providers=None):
             raise HTTPException(404, "album_not_found")
         return result
 
-    @router.put("/metadata/albums", dependencies=[Depends(auth.require_client)])
+    @router.put(
+        "/metadata/albums",
+        dependencies=[
+            Depends(auth.require_client),
+            Depends(auth.require_permission("metadata:write")),
+        ],
+    )
     def update_metadata_album(
-        body: AlbumMetadataUpdate, user: Annotated[dict, Depends(auth.require_admin)]
+        body: AlbumMetadataUpdate,
+        user: Annotated[dict, Depends(auth.require_permission("metadata:write"))],
     ):
         return service.update_metadata_album(body, user_id=user["id"])
 
@@ -656,9 +965,17 @@ def management_router(service, auth, providers=None):
     def metadata(track_id: str):
         return editor.read(track_id)
 
-    @router.put("/tracks/{track_id}/metadata", dependencies=[Depends(auth.require_client)])
+    @router.put(
+        "/tracks/{track_id}/metadata",
+        dependencies=[
+            Depends(auth.require_client),
+            Depends(auth.require_permission("metadata:write")),
+        ],
+    )
     def update_metadata(
-        track_id: str, body: MetadataUpdate, user: Annotated[dict, Depends(auth.require_admin)]
+        track_id: str,
+        body: MetadataUpdate,
+        user: Annotated[dict, Depends(auth.require_permission("metadata:write"))],
     ):
         return editor.save(track_id, body, user_id=user["id"])
 
@@ -670,7 +987,13 @@ def management_router(service, auth, providers=None):
             result = read(connection, service.repository.library_id(), album_id)
         return result or {"album_id": album_id, "locked": False}
 
-    @router.put("/albums/{album_id}/release-lock", dependencies=[Depends(auth.require_client)])
+    @router.put(
+        "/albums/{album_id}/release-lock",
+        dependencies=[
+            Depends(auth.require_client),
+            Depends(auth.require_permission("release-lock:write")),
+        ],
+    )
     def save_album_release_lock(album_id: str, body: ReleaseLockInput):
         with service.database.connect(write=True) as connection:
             connection.execute("BEGIN IMMEDIATE")
@@ -679,7 +1002,13 @@ def management_router(service, auth, providers=None):
             result = save(connection, service.repository.library_id(), album_id, body)
         return result | {"locked": True}
 
-    @router.delete("/albums/{album_id}/release-lock", dependencies=[Depends(auth.require_client)])
+    @router.delete(
+        "/albums/{album_id}/release-lock",
+        dependencies=[
+            Depends(auth.require_client),
+            Depends(auth.require_permission("release-lock:write")),
+        ],
+    )
     def clear_album_release_lock(album_id: str, version: Annotated[int | None, Query(ge=1)] = None):
         with service.database.connect(write=True) as connection:
             connection.execute("BEGIN IMMEDIATE")
@@ -691,11 +1020,23 @@ def management_router(service, auth, providers=None):
     def read_lyrics(track_id: str):
         return lyrics.read(track_id)
 
-    @router.post("/tracks/{track_id}/lyrics/preview", dependencies=[Depends(auth.require_client)])
+    @router.post(
+        "/tracks/{track_id}/lyrics/preview",
+        dependencies=[
+            Depends(auth.require_client),
+            Depends(auth.require_permission("lyrics:write")),
+        ],
+    )
     def preview_lyrics(track_id: str, body: LyricsText):
         return lyrics.preview(track_id, body)
 
-    @router.put("/tracks/{track_id}/lyrics", dependencies=[Depends(auth.require_client)])
+    @router.put(
+        "/tracks/{track_id}/lyrics",
+        dependencies=[
+            Depends(auth.require_client),
+            Depends(auth.require_permission("lyrics:write")),
+        ],
+    )
     def update_lyrics(track_id: str, body: LyricsUpdate):
         return lyrics.save(track_id, body)
 

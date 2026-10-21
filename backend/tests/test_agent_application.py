@@ -151,7 +151,7 @@ def test_policy_is_account_owned_and_normal_users_cannot_authorize_shared_librar
     track = first_track(client)
     user = client.post(
         "/api/v1/manage/users",
-        json={"username": "normal", "password": "normal-password-123", "role": "user"},
+        json={"username": "normal", "password": "normal-password-123", "profile": "listener"},
         headers=HEADERS,
     ).json()
     actor = service.current_actor(user["id"])

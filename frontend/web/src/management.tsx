@@ -7,12 +7,13 @@ import { UsersPanel } from './accounts';
 import { TranscodingSettings } from './transcoding-settings';
 import { HostSettings } from './host-settings';
 import { useEffect, useRef, useState } from 'react';
-import { api, type Track, type TrackPage } from './api';
+import { api, type Track, type TrackPage, type User } from './api';
 import { Pagination } from './track-list';
 import { IntakePanel } from './intake-panel';
 import { MetadataJobs } from './metadata-tasks';
 import { MetadataReviewDialog } from './metadata-review';
 import { FolderMetadataEditor } from './folder-metadata';
+import { LibrarySources } from './library-sources';
 
 type Directory = {
   path: string;
@@ -139,6 +140,7 @@ export function Management({
   onChanged,
   onRefresh,
   onOpenConnections,
+  profile,
   initialAction,
 }: {
   revision: number;
@@ -147,8 +149,11 @@ export function Management({
   onChanged: () => void;
   onRefresh: () => void;
   onOpenConnections: () => void;
+  profile: User['profile'];
   initialAction?: { type: 'metadata-center'; batchId?: string } | null;
 }) {
+  const canOwner = profile === 'owner';
+  const canImport = profile === 'owner' || profile === 'librarian';
   const [tab, setTab] = useState<
     'overview' | 'tracks' | 'jobs' | 'intake' | 'settings' | 'users' | 'diagnostics'
   >('overview');
@@ -292,11 +297,16 @@ export function Management({
             ['users', '用户'],
             ['diagnostics', '诊断'],
           ] as const
-        ).map(([key, label]) => (
-          <button key={key} aria-pressed={tab === key} onClick={() => setTab(key)}>
-            {label}
-          </button>
-        ))}
+        )
+          .filter(
+            ([key]) => canOwner || (key !== 'settings' && key !== 'users' && key !== 'diagnostics'),
+          )
+          .filter(([key]) => canImport || key !== 'intake')
+          .map(([key, label]) => (
+            <button key={key} aria-pressed={tab === key} onClick={() => setTab(key)}>
+              {label}
+            </button>
+          ))}
       </nav>
       {error && (
         <p role="alert" className="error">
@@ -312,7 +322,17 @@ export function Management({
         overview && (
           <>
             {tab === 'diagnostics' && <SystemDiagnostics />}
-            {tab === 'intake' && <IntakePanel />}
+            {tab === 'intake' && (
+              <>
+                <LibrarySources
+                  canImport={canImport}
+                  canDelete={canImport}
+                  canPurge={canOwner}
+                  onChanged={onChanged}
+                />
+                <IntakePanel />
+              </>
+            )}
             {tab === 'users' && <UsersPanel />}
             {tab === 'overview' && (
               <>

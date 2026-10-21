@@ -68,7 +68,7 @@ class NativeNavigationTest {
             canvas.drawRect(0f, 68f, 96f, 96f, paint)
             ByteArrayOutputStream().also { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it); bitmap.recycle() }.toByteArray()
         }
-        val user = """{"id":"navigation-user","username":"ui-test","role":"user","enabled":true,"version":1}"""
+        val user = """{"id":"navigation-user","username":"ui-test","profile":"listener","enabled":true,"version":1}"""
         val track = """{"id":"navigation-track","title":"布局测试歌曲","artists":["测试艺人"],"duration_ms":12000,"has_cover":true,"loved":false,"format":"mp3","status":"available"}"""
         val albums = (1..20).joinToString(",") { """{"id":"album-$it","title":"布局测试专辑 ${it.toString().padStart(2, '0')}","artists":["测试艺人"],"track_count":1,"cover_track_id":"cover-$it"}""" }
         MockWebServer().use { server ->

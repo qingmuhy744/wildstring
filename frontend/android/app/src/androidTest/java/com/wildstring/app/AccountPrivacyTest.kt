@@ -27,18 +27,18 @@ class AccountPrivacyTest {
             val second = session.saveServer(null, "https://second.example/", "Second", false).id
             // Fixed synthetic profiles reproduce the storage layout of earlier versions.
             check(prefs.edit()
-                .putString("server:$first:account", """{"id":"fixture-first","username":"fixture-user-one","role":"admin","enabled":true,"version":7}""")
-                .putString("server:$second:account", """{"id":"fixture-second","username":"fixture-user-two","role":"user","enabled":true,"version":3}""")
+                .putString("server:$first:account", """{"id":"fixture-first","username":"fixture-user-one","profile":"owner","enabled":true,"version":7}""")
+                .putString("server:$second:account", """{"id":"fixture-second","username":"fixture-user-two","profile":"listener","enabled":true,"version":3}""")
                 .commit())
             val restored = SessionStore(context)
             assertEquals(cookie, restored.read())
-            assertEquals(Account("fixture-first", "fixture-user-one", "admin", true, 7), restored.account)
-            assertEquals(Account("fixture-second", "fixture-user-two", "user", true, 3), restored.accountFor(second))
+            assertEquals(Account("fixture-first", "fixture-user-one", "owner", true, 7), restored.account)
+            assertEquals(Account("fixture-second", "fixture-user-two", "listener", true, 3), restored.accountFor(second))
             assertFalse(prefs.contains("server:$first:account"))
             assertFalse(prefs.contains("server:$second:account"))
             assertFalse(prefs.all.values.any { it.toString().contains("fixture-user") })
 
-            restored.bindAccount(Account("fixture-first", "fixture-user-renamed", "admin"))
+            restored.bindAccount(Account("fixture-first", "fixture-user-renamed", "owner"))
             assertEquals("fixture-user-renamed", SessionStore(context).account!!.username)
             assertFalse(prefs.all.values.any { it.toString().contains("fixture-user") })
             restored.removeServer(second)

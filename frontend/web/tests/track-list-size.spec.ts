@@ -35,7 +35,7 @@ async function geometry(page: Page) {
         height: box.height,
         cover: row.querySelector('.cover')?.getBoundingClientRect().width,
         titleSize: parseFloat(getComputedStyle(row.querySelector('.track-title strong')!).fontSize),
-        artistSize: parseFloat(getComputedStyle(row.querySelector('.track-title small')!).fontSize),
+        artistSize: parseFloat(getComputedStyle(row.querySelector('.track-artist-row')!).fontSize),
         centers: elements.map((item) => {
           const rect = item.getBoundingClientRect();
           return Math.abs(rect.y + rect.height / 2 - box.y - box.height / 2);

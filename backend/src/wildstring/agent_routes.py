@@ -74,7 +74,7 @@ def agent_router(service):
                 "context_summary": True,
                 "long_term_memory": True,
             },
-            "role": actor.role,
+            "profile": actor.profile,
         }
 
     @router.get("/tools")

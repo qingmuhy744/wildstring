@@ -1,5 +1,6 @@
-"""Real multi-session role checks, personal data isolation and password revocation."""
+"""Real multi-session profile checks, personal data isolation and password revocation."""
 
+import shutil
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
@@ -13,11 +14,11 @@ from wildstring.main import create_app
 PASSWORD = "ordinary-test-password"
 
 
-def new_user(admin, username="listener", role="user"):
+def new_user(admin, username="listener", profile="listener"):
     response = admin.post(
         "/api/v1/manage/users",
         headers=HEADERS,
-        json={"username": username, "password": PASSWORD, "role": role},
+        json={"username": username, "password": PASSWORD, "profile": profile},
     )
     assert response.status_code == 201, response.text
     assert "password" not in response.text
@@ -30,7 +31,7 @@ def login(client, username="listener", password=PASSWORD):
     )
 
 
-def test_roles_and_private_collections_in_every_track_view(settings, authenticated_client):
+def test_profiles_and_private_collections_in_every_track_view(settings, authenticated_client):
     music(settings, "shared.flac", ["乐队"], ["乐队"])
     scan_library(settings)
     with authenticated_client(settings) as admin:
@@ -48,7 +49,7 @@ def test_roles_and_private_collections_in_every_track_view(settings, authenticat
         assert admin.post("/api/v1/listening", headers=HEADERS, json=report).status_code == 200
         with TestClient(create_app(settings)) as user:
             assert login(user, "LISTENER").status_code == 200
-            assert user.get("/api/v1/auth/status").json()["user"]["role"] == "user"
+            assert user.get("/api/v1/auth/status").json()["user"]["profile"] == "listener"
             for path in [
                 "/api/v1/manage/overview",
                 "/api/v1/manage/users",
@@ -62,7 +63,7 @@ def test_roles_and_private_collections_in_every_track_view(settings, authenticat
                 user.post(
                     "/api/v1/manage/users",
                     headers=HEADERS,
-                    json={"username": "escape", "password": PASSWORD, "role": "admin"},
+                    json={"username": "escape", "password": PASSWORD, "profile": "owner"},
                 ).status_code
                 == 403
             )
@@ -155,7 +156,7 @@ def test_password_reset_self_change_disable_and_admin_self_change(settings, auth
             disabled = admin.put(
                 endpoint,
                 headers=HEADERS,
-                json={"version": current["version"], "role": "user", "enabled": False},
+                json={"version": current["version"], "profile": "listener", "enabled": False},
             )
             assert disabled.status_code == 200
             assert user.get("/api/v1/tracks").status_code == 401
@@ -164,7 +165,7 @@ def test_password_reset_self_change_disable_and_admin_self_change(settings, auth
                 admin.put(
                     endpoint,
                     headers=HEADERS,
-                    json={"version": current["version"], "role": "user", "enabled": True},
+                    json={"version": current["version"], "profile": "listener", "enabled": True},
                 ).status_code
                 == 409
             )
@@ -173,7 +174,7 @@ def test_password_reset_self_change_disable_and_admin_self_change(settings, auth
             admin.put(
                 "/api/v1/manage/users/admin",
                 headers=HEADERS,
-                json={"version": self["version"], "role": "user", "enabled": False},
+                json={"version": self["version"], "profile": "listener", "enabled": False},
             ).status_code
             == 409
         )
@@ -214,7 +215,7 @@ def test_account_validation_secrets_and_no_self_promotion(settings, authenticate
         for body in [
             {"username": "../bad", "password": PASSWORD},
             {"username": "valid", "password": "short"},
-            {"username": "valid", "password": PASSWORD, "role": "superuser"},
+            {"username": "valid", "password": PASSWORD, "profile": "superuser"},
         ]:
             response = admin.post("/api/v1/manage/users", headers=HEADERS, json=body)
             assert response.status_code == 422 and body["password"] not in response.text
@@ -225,6 +226,103 @@ def test_account_validation_secrets_and_no_self_promotion(settings, authenticate
                     "SELECT password_hash FROM users WHERE username='Listener'"
                 ).fetchone()[0]
             )
+
+
+def test_profiles_source_browser_and_safe_album_trash(settings, authenticated_client):
+    settings.music_dir.mkdir()
+    music(settings, "库内.flac", ["曲库艺人"], ["曲库艺人"], album="待替换专辑")
+    shutil.copyfile(settings.library_dir / "库内.flac", settings.music_dir / "库内.flac")
+    (settings.music_dir / "未完成.flac.part").write_bytes(b"partial")
+    (settings.music_dir / "待下载").mkdir()
+    (settings.music_dir / "待下载" / "新专辑.flac.part").write_bytes(b"partial")
+    scan_library(settings)
+    with authenticated_client(settings) as admin:
+        created = admin.post(
+            "/api/v1/manage/users",
+            headers=HEADERS,
+            json={
+                "username": "librarian",
+                "password": "librarian-password-123",
+                "profile": "librarian",
+            },
+        )
+        assert created.status_code == 201, created.text
+        assert created.json()["profile"] == "librarian"
+        for username, profile in (("editor", "editor"), ("listener", "listener")):
+            response = admin.post(
+                "/api/v1/manage/users",
+                headers=HEADERS,
+                json={
+                    "username": username,
+                    "password": f"{username}-password-123",
+                    "profile": profile,
+                },
+            )
+            assert response.status_code == 201, response.text
+        track = admin.get("/api/v1/tracks").json()["items"][0]
+        album_id = track["album_id"]
+        assert admin.get("/api/v1/manage/library/sources").status_code == 200
+        folders = admin.get("/api/v1/manage/library/folders").json()["items"]
+        assert any(item["name"] == "未完成.flac.part" and item["pending"] for item in folders)
+        assert (
+            admin.post(
+                "/api/v1/manage/library/import/preview",
+                headers=HEADERS,
+                json={"source_id": "import", "path": "."},
+            ).json()["count"]
+            == 1
+        )
+        scoped_preview = admin.post(
+            "/api/v1/manage/library/import/preview",
+            headers=HEADERS,
+            json={"source_id": "import", "path": "待下载"},
+        )
+        assert scoped_preview.status_code == 200
+        assert scoped_preview.json()["count"] == 0
+        scoped_job = admin.post(
+            "/api/v1/manage/library/import",
+            headers=HEADERS,
+            json={"source_id": "import", "path": "待下载"},
+        )
+        assert scoped_job.status_code == 202
+        assert (
+            admin.get(f"/api/v1/manage/jobs/{scoped_job.json()['id']}").json()["scope_path"]
+            == "待下载"
+        )
+        assert (
+            admin.post(f"/api/v1/manage/albums/{album_id}/trash", headers=HEADERS).status_code
+            == 202
+        )
+        assert admin.get("/api/v1/tracks").json()["total"] == 0
+        trash = admin.get("/api/v1/manage/library/trash").json()["items"]
+        assert len(trash) == 1 and trash[0]["status"] == "trashed"
+        identity = trash[0]["id"]
+        assert (
+            admin.post(
+                f"/api/v1/manage/library/trash/{identity}/restore", headers=HEADERS
+            ).status_code
+            == 200
+        )
+        assert admin.get("/api/v1/tracks").json()["total"] == 1
+
+    with TestClient(create_app(settings)) as librarian:
+        assert login(librarian, "librarian", "librarian-password-123").status_code == 200
+        assert librarian.get("/api/v1/manage/overview").status_code == 200
+        assert librarian.get("/api/v1/manage/ai").status_code == 403
+        assert librarian.get("/api/v1/manage/library/sources").status_code == 200
+        assert librarian.get("/api/v1/scans").status_code == 200
+        assert librarian.get("/api/v1/manage/transcoding").status_code == 403
+        purge = librarian.delete(f"/api/v1/manage/library/trash/{identity}", headers=HEADERS)
+        assert purge.status_code == 403
+    with TestClient(create_app(settings)) as editor:
+        assert login(editor, "editor", "editor-password-123").status_code == 200
+        assert editor.get("/api/v1/manage/metadata/folders").status_code == 200
+        assert editor.get("/api/v1/manage/ai").status_code == 403
+        assert editor.get("/api/v1/scans").status_code == 200
+        assert editor.get("/api/v1/manage/lyric-scans").status_code == 403
+    with TestClient(create_app(settings)) as listener:
+        assert login(listener, "listener", "listener-password-123").status_code == 200
+        assert listener.get("/api/v1/manage/overview").status_code == 403
 
 
 def test_v7_upgrade_preserves_password_cookie_ids_and_existing_personal_data(
@@ -257,6 +355,12 @@ def test_v7_upgrade_preserves_password_cookie_ids_and_existing_personal_data(
         pre18(connection)
         connection.execute("PRAGMA user_version=7")
     database.initialize()
+    with database.connect() as connection:
+        assert "role" not in {row[1] for row in connection.execute("PRAGMA table_info(users)")}
+        assert (
+            connection.execute("SELECT profile FROM users WHERE id='admin'").fetchone()[0]
+            == "owner"
+        )
     with TestClient(create_app(settings)) as client:
         client.cookies.set(COOKIE, token)
         assert client.get("/api/v1/auth/status").json()["user"]["id"] == "admin"

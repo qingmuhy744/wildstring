@@ -28,9 +28,9 @@ class PlaybackRequestTest {
         }
     }
     @Test fun userIdentityAndEditedLyricsParseWithoutAssumingNumericIds() {
-        val status = Gson().fromJson("""{"configured":true,"authenticated":true,"user":{"id":"user-uuid","username":"alice","role":"user","enabled":true,"version":2}}""", AuthStatus::class.java)
+        val status = Gson().fromJson("""{"configured":true,"authenticated":true,"user":{"id":"user-uuid","username":"alice","profile":"listener","enabled":true,"version":2}}""", AuthStatus::class.java)
         assertEquals("user-uuid", status.user!!.id)
-        assertEquals("user", status.user.role)
+        assertEquals("listener", status.user.profile)
         val lyrics = Gson().fromJson("""{"kind":"synced","source":"user","lines":[{"time_ms":6000,"text":"人工歌词"}]}""", Lyrics::class.java)
         assertEquals("user", lyrics.source)
         assertEquals(6000L, lyrics.lines.single().timeMs)

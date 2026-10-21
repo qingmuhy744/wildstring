@@ -52,6 +52,7 @@ export function MetadataJobs({
   batchId?: string;
 }) {
   const [reviewOpen, setReviewOpen] = useState(false);
+  const [reviewTrackId, setReviewTrackId] = useState<string>();
   const [view, setView] = useState<View>('active');
   const [offset, setOffset] = useState(0);
   const [value, setValue] = useState<TaskPage | null>(null);
@@ -190,10 +191,20 @@ export function MetadataJobs({
             </div>
             <div className="metadata-task-actions">
               <button
-                aria-label={`查看 ${task.title} 的资料建议`}
-                onClick={() => onInspect(task.track_id)}
+                aria-label={`${current === 'history' ? '查看' : '核对'} ${task.title} 的资料结果`}
+                onClick={() => {
+                  if (current === 'history') onInspect(task.track_id);
+                  else {
+                    setReviewTrackId(task.track_id);
+                    setReviewOpen(true);
+                  }
+                }}
               >
-                {current === 'pending' ? '查看建议' : '查看详情'}
+                {current === 'history'
+                  ? '查看详情'
+                  : task.requires_attention
+                    ? '查看旧结果'
+                    : '查看候选'}
               </button>
               {['pending', 'attention'].includes(current) && !!task.requires_attention && (
                 <button
@@ -228,25 +239,60 @@ export function MetadataJobs({
     <section className="management-card metadata-tasks" aria-label="元数据更新任务">
       {reviewOpen && (
         <MetadataReviewDialog
-          onClose={() => setReviewOpen(false)}
-          batchId={batchId}
+          onClose={() => {
+            setReviewOpen(false);
+            setReviewTrackId(undefined);
+          }}
+          trackId={reviewTrackId}
+          batchId={reviewTrackId ? undefined : batchId}
           onApplied={() => setTick((n) => n + 1)}
         />
       )}
       <div className="management-section-heading">
         <div>
           <h2>元数据候选中心</h2>
-          <button onClick={() => setReviewOpen(true)}>
+          <button
+            onClick={() => {
+              setReviewTrackId(undefined);
+              setReviewOpen(true);
+            }}
+          >
             {batchId ? '核对本批次候选' : '批量核对资料'}
           </button>
           <p className="muted" role="status">
             {value ? `等待 ${value.queued} 首 · 查询中 ${value.running} 首` : '正在读取任务…'}
           </p>
+          {view === 'attention' && !!value?.counts.attention && (
+            <p className="muted metadata-task-guidance" role="note">
+              这些结果产生后歌曲信息发生过变化，旧候选不能直接应用。请点“重新查询”生成新的候选；“查看旧结果”只用于核对历史依据。
+            </p>
+          )}
         </div>
-        <button onClick={() => setTick((n) => n + 1)}>
-          <Icon name="refresh" />
-          刷新
-        </button>
+        <div className="metadata-task-toolbar">
+          {value?.queued ? (
+            <button
+              disabled={busy}
+              onClick={() => {
+                if (
+                  confirm(
+                    `清空等待队列中的 ${value.queued} 首歌曲？正在查询的歌曲不会停止，已有候选和历史记录会保留。`,
+                  )
+                )
+                  void mutate(
+                    '/manage/providers/tasks/clear-queued',
+                    {},
+                    `已取消 ${value.queued} 首等待中的查询。`,
+                  );
+              }}
+            >
+              清空等待队列（{value.queued}）
+            </button>
+          ) : null}
+          <button onClick={() => setTick((n) => n + 1)}>
+            <Icon name="refresh" />
+            刷新
+          </button>
+        </div>
       </div>
       <nav className="metadata-task-tabs" aria-label="元数据任务分类" data-help={hints.taskHistory}>
         {(['active', 'pending', 'attention'] as const).map((name) => (

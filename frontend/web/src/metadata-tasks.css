@@ -31,6 +31,10 @@
 .metadata-task-copy small {
   font-size: 11px;
 }
+.metadata-task-guidance {
+  max-width: 72ch;
+  margin: 6px 0 0;
+}
 .metadata-task-list .metadata-task-warning {
   color: var(--accent);
 }
@@ -67,10 +71,19 @@
     align-items: flex-start;
     flex-direction: column;
   }
+  .metadata-task-toolbar {
+    justify-content: flex-start;
+  }
 }
 .metadata-tasks > .management-section-heading {
   flex-direction: row;
   align-items: center;
+}
+.metadata-task-toolbar {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 .metadata-tasks .management-section-heading button,
 .metadata-task-actions button {

@@ -18,6 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from wildstring.library.assets import TrackAssets
 from wildstring.library.scanner import fingerprint, open_source
 from wildstring.library.tag_fields import TagReader
+from wildstring.permissions import scopes_for
 
 
 class GainSettings(BaseModel):
@@ -288,7 +289,7 @@ class Loudness:
     def router(self, auth):
         router = APIRouter(prefix="/api/v1")
         member = Depends(auth.require_session)
-        admin = Depends(auth.require_admin)
+        analyst = Depends(auth.require_permission("tasks:control"))
         mutation = [Depends(auth.require_client)]
 
         @router.get("/playback/gain-settings")
@@ -301,14 +302,19 @@ class Loudness:
 
         @router.get("/tracks/{track_id}/playback-gain")
         def gain(track_id: str, user=member):
-            return self.detail(user["id"], track_id) | {"can_analyze": user["role"] == "admin"}
+            return self.detail(user["id"], track_id) | {
+                "can_analyze": "tasks:control" in scopes_for(user)
+            }
 
         @router.put("/tracks/{track_id}/playback-gain", dependencies=mutation)
         def adjust(track_id: str, body: GainAdjustment, user=member):
             return self.adjust(user["id"], track_id, body)
 
-        @router.post("/manage/tracks/{track_id}/analyze-loudness", dependencies=mutation)
-        def analyze(track_id: str, user=admin):
+        @router.post(
+            "/manage/tracks/{track_id}/analyze-loudness",
+            dependencies=mutation + [analyst],
+        )
+        def analyze(track_id: str, user=analyst):
             return self.enqueue(track_id)
 
         return router

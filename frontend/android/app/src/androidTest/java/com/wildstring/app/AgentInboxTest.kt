@@ -38,7 +38,7 @@ class AgentInboxTest {
         val repository = Repository(session, client, database, cache, settings, OfflineDownloads(context, session, client))
         val agent = AgentPlatform(repository)
         fun select(server: MockWebServer, user: String) {
-            session.configure(server.url("/").toString(), true); session.write("wildstring_session=$user; Path=/; Max-Age=3600"); session.bindAccount(Account(user, user, "user")); agent.reset()
+            session.configure(server.url("/").toString(), true); session.write("wildstring_session=$user; Path=/; Max-Age=3600"); session.bindAccount(Account(user, user, "listener")); agent.reset()
         }
         override fun close() { session.invalidate(); client.dispatcher.cancelAll(); client.connectionPool.evictAll(); database.close(); root.deleteRecursively() }
     }

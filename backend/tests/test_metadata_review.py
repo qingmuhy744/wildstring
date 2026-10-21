@@ -111,6 +111,23 @@ def test_stale_review_reports_conflict_without_partial_write(curation, change):
         assert db.execute("SELECT count(*) FROM agent_audit").fetchone()[0] == 0
 
 
+def test_review_marks_old_candidate_version_stale_and_requires_new_query(curation):
+    api, token, service = curation
+    page = seed(api, service)
+    target = page["items"][0]
+    with service.database.connect(write=True) as db:
+        db.execute("UPDATE track_metadata SET version=version+1 WHERE track_id=?", (target["id"],))
+    refreshed = api.get(BASE, params={"track_id": target["id"]}).json()
+    candidate = refreshed["items"][0]["suggestions"][0]
+    assert candidate["stale"] is True
+    assert candidate["stale_reason"] == "歌曲信息版本已变化，请重新查询"
+    request = body(refreshed)
+    response = api.post(BASE + "/accept", headers=HEADERS, json=request)
+    assert response.status_code == 200
+    assert response.json()["status"] == "conflict"
+    assert response.json()["conflicts"][0]["error_code"] == "metadata_version_conflict"
+
+
 def test_cover_and_metadata_apply_atomically_using_frozen_image(curation, monkeypatch):
     api, token, service = curation
     page = seed(api, service)

@@ -73,7 +73,7 @@ def test_user_cannot_rename_or_delete_another_users_history(agent):
     user = client.post(
         "/api/v1/manage/users",
         headers=HEADERS,
-        json={"username": "reader", "password": "reader-password-123", "role": "user"},
+        json={"username": "reader", "password": "reader-password-123", "profile": "listener"},
     )
     assert user.status_code == 201
     client.cookies.clear()

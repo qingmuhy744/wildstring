@@ -10,7 +10,7 @@
 }
 .review-layout {
   display: grid;
-  grid-template-columns: minmax(160px, 220px) minmax(0, 1fr);
+  grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
   gap: 20px;
 }
 .review-layout aside {
@@ -178,8 +178,8 @@
   color: var(--muted);
 }
 .metadata-review-dialog {
-  width: min(1250px, 96vw);
-  max-width: 96vw;
+  width: min(1680px, 98vw);
+  max-width: 98vw;
   height: 92dvh;
   max-height: 92dvh;
   box-sizing: border-box;
@@ -333,6 +333,13 @@
 }
 .review-candidate-note {
   font-size: 0.85rem;
+}
+.review-stale-notice {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  color: var(--accent);
 }
 @media (max-width: 760px) {
   .metadata-review-dialog .review-layout {

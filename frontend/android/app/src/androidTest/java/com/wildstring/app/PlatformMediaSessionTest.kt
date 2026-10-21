@@ -73,7 +73,7 @@ class PlatformMediaSessionTest {
             server.dispatcher = object : Dispatcher() { override fun dispatch(request: RecordedRequest): MockResponse {
                 val url = request.requestUrl!!; val path = url.encodedPath; requests += request.path.orEmpty()
                 fun json(value: String) = MockResponse().setHeader("Content-Type", "application/json").setBody(value)
-                if (path.endsWith("/auth/status")) return json("""{"configured":true,"authenticated":${request.getHeader("Cookie") != null},"user":{"id":"media-user","username":"media","role":"user"}}""")
+                if (path.endsWith("/auth/status")) return json("""{"configured":true,"authenticated":${request.getHeader("Cookie") != null},"user":{"id":"media-user","username":"media","profile":"listener"}}""")
                 if (path.endsWith("/auth/login")) return json("{}").setHeader("Set-Cookie", "wildstring_session=media; Path=/; Max-Age=3600")
                 if (path.endsWith("/playback")) {
                     if (path.contains("/lossy/")) return json("""{"mode":"original","reason":"lossy_passthrough","output":{"codec":"mp3","bitrate_kbps":128},"duration_ms":12000,"start_ms":0,"stream_url":"/api/v1/tracks/lossy/stream"}""")

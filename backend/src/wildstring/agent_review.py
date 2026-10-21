@@ -176,17 +176,16 @@ class Review:
             lookup_current = current | {"duration_ms": row["duration_ms"]}
             candidates = by_track.get(row["id"], [])
             for candidate in candidates:
-                candidate["stale"] = not candidate_matches(
-                    lookup_current, candidate.pop("_lookup_match", {})
-                )
+                match = candidate.pop("_lookup_match", {})
+                lookup_matches = candidate_matches(lookup_current, match)
+                version_matches = candidate["metadata_version"] == row["version"]
+                candidate["stale"] = not (lookup_matches and version_matches)
                 candidate["stale_reason"] = (
                     "查询依据已变化，请重新查询"
-                    if candidate["stale"]
-                    else (
-                        "元数据版本已更新，但查询依据未变，可继续核对"
-                        if candidate["metadata_version"] != row["version"]
-                        else None
-                    )
+                    if not lookup_matches
+                    else "歌曲信息版本已变化，请重新查询"
+                    if not version_matches
+                    else None
                 )
             candidates.sort(
                 key=lambda x: (
@@ -300,7 +299,10 @@ class Review:
                 code = None
                 if row is None:
                     code = "suggestion_not_found"
-                elif row["current_version"] != item.metadata_version:
+                elif (
+                    row["current_version"] != item.metadata_version
+                    or row["metadata_version"] != item.metadata_version
+                ):
                     code = "metadata_version_conflict"
                 elif row["status"] != "pending" or candidate_digest(row) != item.candidate_digest:
                     code = "metadata_candidate_changed"

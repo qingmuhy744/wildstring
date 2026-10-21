@@ -52,7 +52,7 @@ class SongAlbumNavigationTest {
                     fun json(value: Any) = MockResponse().setHeader("Content-Type", "application/json").setBody(gson.toJson(value))
                     fun page(items: List<Any>) = json(mapOf("items" to items, "total" to items.size, "limit" to 50, "offset" to 0))
                     return when (path) {
-                        "/api/v1/auth/status" -> json(mapOf("configured" to true, "authenticated" to loggedIn.get(), "user" to if (loggedIn.get()) mapOf("id" to "album-user", "username" to "listener", "role" to "user") else null))
+                        "/api/v1/auth/status" -> json(mapOf("configured" to true, "authenticated" to loggedIn.get(), "user" to if (loggedIn.get()) mapOf("id" to "album-user", "username" to "listener", "profile" to "listener") else null))
                         "/api/v1/auth/login" -> { loggedIn.set(true); json(emptyMap<String, String>()).setHeader("Set-Cookie", "wildstring_session=album-test; Path=/; HttpOnly") }
                         "/api/v1/tracks/song-one" -> json(track)
                         "/api/v1/tracks/song-two" -> json(second)

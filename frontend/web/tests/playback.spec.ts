@@ -232,13 +232,9 @@ test('全屏展开收起连续播放、切歌、焦点边界与 Esc 返回', asy
   await expect(dialog.getByRole('list', { name: '歌词', exact: true })).toHaveCount(0);
   const fullQueue = dialog.getByRole('complementary', { name: '播放队列', exact: true });
   await expect(fullQueue.getByRole('listitem')).toHaveCount(2);
-  await fullQueue
-    .getByRole('button', { name: '拖动队列第 1 首排序', exact: true })
-    .press('ArrowDown');
+  await fullQueue.getByRole('button', { name: '下移队列第 1 首', exact: true }).click();
   await expect(fullQueue.getByRole('listitem').last()).toHaveClass(/selected/);
-  await fullQueue
-    .getByRole('button', { name: '拖动队列第 2 首排序', exact: true })
-    .press('ArrowUp');
+  await fullQueue.getByRole('button', { name: '上移队列第 2 首', exact: true }).click();
   await expect(fullQueue.getByRole('listitem').first()).toHaveClass(/selected/);
   await page.screenshot({ path: `../../artifacts/fullscreen-queue-${testInfo.project.name}.png` });
   expect(await audio(page)).toEqual(paused);

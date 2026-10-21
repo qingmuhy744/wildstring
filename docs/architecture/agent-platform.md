@@ -24,6 +24,8 @@ Web 侧边栏进入助手、草案与巡检、通知；连接、工具凭据、T
 
 在启动 MCP 客户端的环境中提供 `WILDSTRING_MCP_URL` 和 `WILDSTRING_MCP_TOKEN`，不要把令牌放在启动参数、聊天记录或仓库中。URL 默认需要 HTTPS；本机回环 HTTP 可用于开发，其他 HTTP 必须显式设置 `WILDSTRING_MCP_ALLOW_HTTP=true`。MCP 桥接不会访问数据库或音乐目录。
 
+远程部署可在 Codex 所在设备运行 `make mcp-remote-smoke`，它读取 `WILDSTRING_MCP_URL` 与 `WILDSTRING_MCP_TOKEN`，连接根地址下的 `/mcp` 并列出工具。默认跟随系统 HTTP(S) 代理；需要直连时设置 `WILDSTRING_MCP_NO_PROXY=true`。该检查只打印工具数量和前几个工具名，不打印令牌；真实远程检查必须在能访问部署域名的网络环境中运行。
+
 本地验证：
 
 ```sh

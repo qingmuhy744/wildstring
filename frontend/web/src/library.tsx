@@ -141,7 +141,9 @@ type CatalogLocation = {
 };
 
 export function Library({ onLogout, user }: { onLogout: () => Promise<void>; user: User }) {
-  const isAdmin = user.role === 'admin';
+  const profile = user.profile;
+  const canManage = profile !== 'listener';
+  const canImport = profile === 'owner' || profile === 'librarian';
   const [accountOpen, setAccountOpen] = useState(false);
   const [connectionSettingsRevision, setConnectionSettingsRevision] = useState(0);
   function openModelConnections() {
@@ -597,6 +599,30 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
     setAlbum(null);
     clearSearch();
   }
+  async function openArtistName(name: string) {
+    const query = name.trim();
+    if (!query) return;
+    setNotice(`正在打开艺人“${query}”…`);
+    try {
+      const result = await api<ArtistPage>(
+        `/artists?q=${encodeURIComponent(query)}&limit=20&offset=0`,
+      );
+      const item =
+        result.items.find((candidate) => candidate.name === query) ||
+        result.items.find(
+          (candidate) =>
+            candidate.name.localeCompare(query, undefined, { sensitivity: 'base' }) === 0,
+        ) ||
+        (result.items.length === 1 ? result.items[0] : undefined);
+      if (!item) {
+        setNotice(`没有找到艺人“${query}”，可以用顶部搜索查看。`);
+        return;
+      }
+      openArtist(item);
+    } catch (error) {
+      setNotice(error instanceof ApiError ? error.message : '艺人暂时无法打开，请稍后重试。');
+    }
+  }
   function openPlaylist(item: Playlist) {
     rememberLocation();
     window.scrollTo(0, 0);
@@ -767,8 +793,8 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
     playlists: catalog.filter((item) => item.kind === 'manual'),
     onAdd: addToPlaylist,
     onCreate: (track) => setEditor({ initial: null, track }),
-    onEdit: isAdmin ? setEditingTrack : undefined,
-    onRefresh: isAdmin
+    onEdit: canManage ? setEditingTrack : undefined,
+    onRefresh: canImport
       ? (track) => setMetadataRefresh({ scope: 'track', id: track.id, label: track.title })
       : undefined,
     ...(activePlaylist?.kind === 'manual'
@@ -931,7 +957,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
             <span>☷</span>播放队列 <small>{player.queue.length}</small>
           </button>
           <div className="sidebar-bottom">
-            {isAdmin && (
+            {canManage && (
               <button
                 className={`nav-button manage-entry ${manageOpen ? 'nav-current' : ''}`}
                 onClick={() => {
@@ -964,6 +990,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
             onChanged={refreshLibrary}
             onRefresh={() => setMetadataRefresh({ scope: 'library', label: '整个曲库' })}
             onOpenConnections={openModelConnections}
+            profile={profile}
             initialAction={managementAction}
           />
         )}
@@ -993,7 +1020,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
                   {labels[target]}
                 </option>
               ))}
-              {isAdmin && <option value="manage">管理</option>}
+              {canManage && <option value="manage">管理</option>}
               <option value="account">账号设置</option>
             </select>
             <form className="search" onSubmit={search} role="search" autoComplete="off">
@@ -1250,7 +1277,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
                           <Icon name="download" />
                           保存整个集合离线
                         </button>
-                        {album && isAdmin && (
+                        {album && canImport && (
                           <button
                             onClick={(event) => {
                               event.currentTarget.closest('details')?.removeAttribute('open');
@@ -1260,7 +1287,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
                             歌词补全与洗版
                           </button>
                         )}
-                        {album && isAdmin && (
+                        {album && canImport && (
                           <button
                             onClick={(event) => {
                               event.currentTarget.closest('details')?.removeAttribute('open');
@@ -1490,30 +1517,45 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
                 ) : kind === 'albums' ? (
                   <div className="album-grid" aria-label="专辑列表">
                     {(visible as AlbumPage).items.map((item) => (
-                      <button
-                        className="album-card"
-                        key={item.id}
-                        data-browse-id={item.id}
-                        aria-label={`打开专辑 ${item.title}`}
-                        onClick={() => {
-                          albumRequest.current?.abort();
-                          rememberLocation();
-                          window.scrollTo(0, 0);
-                          setAlbum(item);
-                        }}
-                      >
-                        <Cover
-                          key={`${item.id}-${revision}`}
-                          trackId={item.cover_track_id}
-                          title={item.title}
-                          size={320}
-                        />
-                        <strong>{item.title}</strong>
-                        <span>{item.artists.join(' / ') || '未知艺人'}</span>
-                        <small>
-                          {item.track_count} 首 · {time(item.duration_ms / 1000)}
-                        </small>
-                      </button>
+                      <div className="album-card" key={item.id} data-browse-id={item.id}>
+                        <button
+                          className="album-card-main"
+                          aria-label={`打开专辑 ${item.title}`}
+                          onClick={() => {
+                            albumRequest.current?.abort();
+                            rememberLocation();
+                            window.scrollTo(0, 0);
+                            setAlbum(item);
+                          }}
+                        >
+                          <Cover
+                            key={`${item.id}-${revision}`}
+                            trackId={item.cover_track_id}
+                            title={item.title}
+                            size={320}
+                          />
+                          <strong>{item.title}</strong>
+                          <small>
+                            {item.track_count} 首 · {time(item.duration_ms / 1000)}
+                          </small>
+                        </button>
+                        <span className="album-card-artists">
+                          {item.artists.length
+                            ? item.artists.map((name, artistIndex) => (
+                                <span key={`${name}-${artistIndex}`}>
+                                  {artistIndex > 0 && <span aria-hidden="true"> / </span>}
+                                  <button
+                                    type="button"
+                                    className="album-artist-link"
+                                    onClick={() => void openArtistName(name)}
+                                  >
+                                    {name}
+                                  </button>
+                                </span>
+                              ))
+                            : '未知艺人'}
+                        </span>
+                      </div>
                     ))}
                   </div>
                 ) : (
@@ -1525,6 +1567,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
                       revision={revision}
                       operations={operations}
                       onPlay={(track) => void completeCollection(track)}
+                      onOpenArtist={(name) => void openArtistName(name)}
                       showStats={view === 'listening'}
                       statsSort={statsSort}
                       albumTracks={!!album}
@@ -1569,6 +1612,13 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
             )}
           </div>
         </main>
+        {queueOpen && (
+          <button
+            className="queue-dismiss-scrim"
+            aria-label="关闭播放队列"
+            onClick={() => setQueueOpen(false)}
+          />
+        )}
         {queueOpen && (
           <QueuePanel player={player} onClose={() => setQueueOpen(false)} onNotice={setNotice} />
         )}

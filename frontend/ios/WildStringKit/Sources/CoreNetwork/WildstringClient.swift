@@ -13,7 +13,7 @@ public struct APIError: Error, Equatable, Sendable {
 public struct User: Decodable, Equatable, Sendable {
     public let id: String
     public let username: String
-    public let role: String
+    public let profile: String
     public let version: Int
     public let enabled: Bool
 }

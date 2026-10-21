@@ -85,7 +85,7 @@ internal fun FeatureDialog(vm: MusicViewModel, route: String, track: Track? = nu
                         "order" -> playlist?.let { PlaylistOrder(vm, it, dismiss) }
                         "multi" -> MultiSelectPanel(vm, dismiss)
                         "gain" -> track?.let { PlaybackGainPanel(vm, it) }
-                        else -> if (account.account?.role == "admin") when (route) {
+                        else -> if (account.account?.isOwner == true) when (route) {
                             "metadata" -> track?.let { MetadataPanel(vm, it) }
                             "lyrics" -> track?.let { LyricsEditorPanel(vm, it) }
                             "suggestions" -> track?.let { SuggestionsPanel(vm, it) }

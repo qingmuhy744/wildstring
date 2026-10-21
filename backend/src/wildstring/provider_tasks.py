@@ -32,7 +32,7 @@ WITH pending AS (
 ), reviewed AS (
     SELECT j.*,t.title,r.acknowledged_at,r.hidden_at,
         COALESCE(p.pending_count,0) AS pending_count,
-        (j.status IN ('failed','stale') OR j.error IS NOT NULL
+        (j.status IN ('failed','stale') OR (j.error IS NOT NULL AND j.error <> 'cancelled_by_user')
             OR json_array_length(j.warnings)>0) AS has_issue
     FROM provider_jobs j JOIN tracks t ON t.id=j.track_id
     LEFT JOIN pending p ON p.job_id=j.id

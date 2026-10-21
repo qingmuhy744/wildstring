@@ -543,7 +543,7 @@ class MusicSources:
 
     def router(self, auth):
         router = APIRouter(prefix="/api/v1")
-        admin = Depends(auth.require_admin)
+        admin = Depends(auth.require_owner)
         mutation = [Depends(auth.require_client)]
 
         @router.get("/manage/source-plugins")

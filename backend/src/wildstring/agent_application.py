@@ -7,6 +7,7 @@ from fastapi import HTTPException
 from wildstring.agent_common import encoded
 from wildstring.agent_models import Apply, NotificationPreferences
 from wildstring.library.repository import now
+from wildstring.permissions import profile_for
 
 KINDS = ("playlist", "metadata", "metadata_batch", "cover", "lyrics", "intake")
 
@@ -20,7 +21,7 @@ class Application:
             "SELECT value FROM agent_preferences WHERE user_id=?", (actor.user_id,)
         ).fetchone()
         saved = json.loads(row[0]).get("application_policy", {}) if row else {}
-        allowed = list(KINDS) if actor.role == "admin" else ["playlist"]
+        allowed = list(KINDS) if actor.profile == "owner" else ["playlist"]
         return {
             "mode": saved.get("mode", "manual"),
             "kinds": [kind for kind in saved.get("kinds", allowed) if kind in allowed],
@@ -61,10 +62,10 @@ class Application:
 
     def check_application_actor(self, actor, connection):
         user = connection.execute(
-            "SELECT version,role FROM users WHERE id=? AND enabled=1 AND password_hash IS NOT NULL",
+            "SELECT version,profile FROM users WHERE id=? AND enabled=1 AND password_hash IS NOT NULL",
             (actor.user_id,),
         ).fetchone()
-        if user is None or user["version"] != actor.version or user["role"] != actor.role:
+        if user is None or user["version"] != actor.version or profile_for(user) != actor.profile:
             raise HTTPException(403, "agent_authorization_changed")
         if actor.credential_id:
             credential = connection.execute(

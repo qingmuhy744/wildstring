@@ -69,7 +69,7 @@ import kotlinx.coroutines.launch
         }
         record?.let { data ->
             Text("请求 ${data.get("requested_db").asFloat} dB · 实际 ${data.get("applied_db").asFloat} dB${if (data.flag("limited")) "（受峰值保护限制）" else ""}")
-            if (account.account?.role == "admin") TextButton({ scope.launch { action.run {
+            if (account.account?.isOwner == true) TextButton({ scope.launch { action.run {
                 vm.repository.feature("manage/tracks/${track.id}/analyze-loudness", "POST"); load(false); action.message = "已加入后台分析，文件不会修改。"
             } } }, enabled = !action.busy && !scanning) { Text(if (scanning) "后台正在分析…" else "分析本曲响度与峰值") }
             data.getAsJsonObject("analysis").text("error").takeIf { it.isNotBlank() }?.let { Text("分析未完成：$it") }

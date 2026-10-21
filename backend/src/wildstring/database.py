@@ -9,7 +9,7 @@ from pathlib import Path
 from wildstring.library.albums import album_key
 from wildstring.provider_schema import SCHEMA as PROVIDER_SCHEMA
 
-SCHEMA_VERSION = 26
+SCHEMA_VERSION = 30
 TRANSCODING_SCHEMA = """
 BEGIN IMMEDIATE;
 CREATE TABLE transcoding_settings (
@@ -456,6 +456,59 @@ class Database:
                 from wildstring.provider_refresh_schema import SCHEMA as PROVIDER_REFRESH_SCHEMA
 
                 connection.executescript(PROVIDER_REFRESH_SCHEMA)
+            if current < 27:
+                if "profile" not in {
+                    row[1] for row in connection.execute("PRAGMA table_info(users)")
+                }:
+                    connection.execute("BEGIN IMMEDIATE")
+                    connection.execute(
+                        "ALTER TABLE users ADD COLUMN profile TEXT NOT NULL DEFAULT 'listener' "
+                        "CHECK(profile IN ('owner', 'librarian', 'editor', 'listener'))"
+                    )
+                    connection.execute("UPDATE users SET profile='owner' WHERE role='admin'")
+                    connection.execute("PRAGMA user_version = 27")
+                    connection.commit()
+                else:
+                    connection.execute("PRAGMA user_version = 27")
+            if current < 28:
+                connection.executescript(
+                    """
+                    BEGIN IMMEDIATE;
+                    CREATE TABLE IF NOT EXISTS library_trash (
+                        id TEXT PRIMARY KEY,
+                        library_id TEXT NOT NULL REFERENCES libraries(id),
+                        album_id TEXT NOT NULL,
+                        entries TEXT NOT NULL,
+                        created_at TEXT NOT NULL,
+                        created_by TEXT NOT NULL,
+                        status TEXT NOT NULL DEFAULT 'trashed'
+                            CHECK(status IN ('trashed', 'restored', 'purged'))
+                    );
+                    CREATE INDEX IF NOT EXISTS library_trash_album ON library_trash(library_id, album_id, created_at);
+                    PRAGMA user_version = 28;
+                    COMMIT;
+                    """
+                )
+            if current < 29:
+                columns = {row[1] for row in connection.execute("PRAGMA table_info(admin_jobs)")}
+                if "scope_path" not in columns:
+                    connection.execute("BEGIN IMMEDIATE")
+                    connection.execute(
+                        "ALTER TABLE admin_jobs ADD COLUMN scope_path TEXT NOT NULL DEFAULT '.'"
+                    )
+                    connection.execute("PRAGMA user_version = 29")
+                    connection.commit()
+                else:
+                    connection.execute("PRAGMA user_version = 29")
+            if current < 30:
+                columns = {row[1] for row in connection.execute("PRAGMA table_info(users)")}
+                if "role" in columns:
+                    connection.execute("BEGIN IMMEDIATE")
+                    connection.execute("ALTER TABLE users DROP COLUMN role")
+                    connection.execute("PRAGMA user_version = 30")
+                    connection.commit()
+                else:
+                    connection.execute("PRAGMA user_version = 30")
             connection.execute("PRAGMA journal_mode = WAL")
 
     def check_ready(self) -> bool:

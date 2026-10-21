@@ -149,7 +149,7 @@ const messages: Record<string, string> = {
   username_taken: '这个用户名已被使用。',
   user_not_found: '账号不存在，请刷新列表。',
   user_version_conflict: '账号已变化，请重新读取后操作。',
-  cannot_change_self_role: '不能停用或修改当前账号的角色。',
+  cannot_change_self_profile: '不能停用或修改当前账号的档案。',
   use_self_password_change: '请到账号设置修改自己的密码。',
   lyrics_version_conflict: '歌词或文件已经变化，请重新读取后再保存。',
   draft_preview_required: '请使用新版客户端查看完整图片或逐曲差异后，再批准此草案。',
@@ -167,7 +167,7 @@ const messages: Record<string, string> = {
   playlist_track_limit: '每个普通歌单最多保存 5000 首歌曲。',
   invalid_credentials: '账号或密码不正确。',
   login_throttled: '尝试次数较多，请稍后一分钟再试。',
-  admin_setup_required: '请先在服务端设置管理员密码。',
+  owner_setup_required: '请先在服务端设置所有者密码。',
   authentication_required: '登录已过期，请重新登录。',
 };
 
@@ -295,7 +295,7 @@ export const listeningTime = (milliseconds: number) => {
 export interface User {
   id: string;
   username: string;
-  role: 'admin' | 'user';
+  profile: 'owner' | 'librarian' | 'editor' | 'listener';
   enabled: boolean;
   version: number;
 }

@@ -357,7 +357,7 @@ class LyricScans:
             ).rowcount
             platform = getattr(self.sources.providers, "platform", None)
             if changed and platform:
-                from wildstring.task_notifications import admins
+                from wildstring.task_notifications import owners
 
                 counts = Counter(
                     {
@@ -368,7 +368,7 @@ class LyricScans:
                         )
                     }
                 )
-                for owner in admins(db):
+                for owner in owners(db):
                     platform.emit(
                         db,
                         owner,
@@ -753,7 +753,10 @@ class LyricScans:
 
     def router(self, auth):
         router = APIRouter(prefix="/api/v1/manage")
-        admin, mutation = Depends(auth.require_admin), [Depends(auth.require_client)]
+        admin, mutation = (
+            Depends(auth.require_permission("tasks:control")),
+            [Depends(auth.require_client)],
+        )
 
         @router.get("/lyric-scan-settings")
         def read_settings(user=admin):

@@ -51,7 +51,7 @@ class ContinuousCatalogTest {
                     return json(mapOf("items" to items.drop(offset).take(limit), "total" to items.size, "limit" to limit, "offset" to offset))
                 }
                 return when {
-                    path == "/api/v1/auth/status" -> json(mapOf("configured" to true, "authenticated" to login.get(), "user" to if (login.get()) Account("browse-user", "listener", "admin") else null))
+                    path == "/api/v1/auth/status" -> json(mapOf("configured" to true, "authenticated" to login.get(), "user" to if (login.get()) Account("browse-user", "listener", "owner") else null))
                     path == "/api/v1/auth/login" -> { login.set(true); json(emptyMap<String, String>()).setHeader("Set-Cookie", "wildstring_session=browse-test; Path=/; HttpOnly") }
                     path == "/api/v1/browse-index" -> {
                         val keys = listOf("0–9") + ('A'..'Z').map { it.toString() } + "#"
