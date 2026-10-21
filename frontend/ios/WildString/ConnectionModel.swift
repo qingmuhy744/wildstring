@@ -25,7 +25,7 @@ final class ConnectionModel {
     private(set) var playback: PlaybackService?
     private(set) var favorites: FavoritesModel?
     private(set) var offline: OfflineModel?
-    private(set) var role: String?
+    private(set) var profile: String?
     private(set) var servers: [SavedServer] = []
     private(set) var sharing: PlaybackSharingModel?
     let demoAutoPlay: Bool
@@ -91,7 +91,7 @@ final class ConnectionModel {
                         client: client,
                         address: address,
                         username: user.username,
-                        role: user.role
+                        profile: user.profile
                     )
                     return
                 }
@@ -118,7 +118,7 @@ final class ConnectionModel {
                 client: client,
                 address: address,
                 username: user.username,
-                role: user.role
+                profile: user.profile
             )
         } catch {
             errorMessage = Self.message(for: error)
@@ -141,7 +141,7 @@ final class ConnectionModel {
         }
         offline = nil
         favorites = nil
-        role = nil
+        profile = nil
         if let client {
             try? await client.logout()
         }
@@ -173,7 +173,7 @@ final class ConnectionModel {
                         client: client,
                         address: address,
                         username: user.username,
-                        role: user.role
+                        profile: user.profile
                     )
                     return
                 }
@@ -247,7 +247,7 @@ final class ConnectionModel {
         client: WildstringClient,
         address: ServerAddress,
         username: String,
-        role: String
+        profile: String
     ) async {
         self.client = client
         let space = Self.spaceName(for: address)
@@ -293,7 +293,7 @@ final class ConnectionModel {
         self.playback = playback
         self.favorites = FavoritesModel(client: client)
         self.offline = OfflineModel(downloads: downloads)
-        self.role = role
+        self.profile = profile
         self.sharing = PlaybackSharingModel(client: client, playback: playback)
         SavedServersStore.upsert(
             SavedServer(address: address.description, username: username, lastUsedAt: .now)
@@ -315,7 +315,7 @@ final class ConnectionModel {
             switch error.code {
             case "invalid_credentials": return "用户名或密码错误"
             case "login_throttled": return "尝试次数过多，请稍后再试"
-            case "admin_setup_required": return "服务器尚未初始化管理员，请先在服务端完成设置"
+            case "owner_setup_required": return "服务器尚未初始化所有者，请先在服务端完成设置"
             case "client_header_required": return "服务器版本过旧，暂不支持 iOS 客户端"
             case "invalid_account_input": return "输入内容不符合要求"
             default: return "服务器返回错误（\(error.statusCode)）"

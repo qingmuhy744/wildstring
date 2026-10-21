@@ -73,14 +73,13 @@ class Core:
                 raise HTTPException(401, "agent_credential_invalid")
             with self.database.connect() as connection:
                 row = connection.execute(
-                    "SELECT c.*,u.role,u.profile,u.version AS auth_version FROM agent_credentials c JOIN users u ON u.id=c.user_id WHERE c.token_hash=? AND c.revoked_at IS NULL AND c.expires_at>? AND u.enabled=1 AND u.password_hash IS NOT NULL",
+                    "SELECT c.*,u.profile,u.version AS auth_version FROM agent_credentials c JOIN users u ON u.id=c.user_id WHERE c.token_hash=? AND c.revoked_at IS NULL AND c.expires_at>? AND u.enabled=1 AND u.password_hash IS NOT NULL",
                     (digest(authorization[7:]), now()),
                 ).fetchone()
             if row is None:
                 raise HTTPException(401, "agent_credential_invalid")
             return Actor(
                 row["user_id"],
-                row["role"],
                 row["auth_version"],
                 frozenset(json.loads(row["scopes"])).intersection(scopes_for(row)),
                 row["id"],
@@ -99,7 +98,6 @@ class Core:
             raise HTTPException(403, "agent_authorization_revoked")
         return Actor(
             user_id,
-            row["role"],
             row["version"],
             frozenset(SCOPES if scopes is None else scopes).intersection(scopes_for(row)),
             credential_id,

@@ -34,7 +34,6 @@ def validate(model, value):
 @dataclass(frozen=True)
 class Actor:
     user_id: str
-    role: str
     version: int
     scopes: frozenset[str] = frozenset(SCOPES)
     credential_id: str | None = None

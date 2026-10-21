@@ -13,8 +13,7 @@ const profileLabels: Record<Profile, string> = {
   editor: '资料编辑员',
   listener: '听众',
 };
-const userProfile = (user: User): Profile =>
-  user.profile || (user.role === 'admin' ? 'owner' : 'listener');
+const userProfile = (user: User): Profile => user.profile;
 
 export function AccountDialog({ user, onClose }: { user: User; onClose: () => void }) {
   const dialog = useRef<HTMLDialogElement>(null);
@@ -195,7 +194,6 @@ export function UsersPanel() {
               username,
               password,
               profile,
-              role: profile === 'owner' ? 'admin' : 'user',
             }),
           }),
         '账号已创建。',
@@ -213,7 +211,6 @@ export function UsersPanel() {
           method: 'PUT',
           body: JSON.stringify({
             version: user.version,
-            role: (values.profile ?? userProfile(user)) === 'owner' ? 'admin' : 'user',
             profile: values.profile ?? userProfile(user),
             enabled: values.enabled ?? user.enabled,
           }),

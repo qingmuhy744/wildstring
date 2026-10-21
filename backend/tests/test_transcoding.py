@@ -344,7 +344,11 @@ def test_expiry_lru_disk_limit_restart_and_permission(settings, authenticated_cl
         assert (
             client.post(
                 "/api/v1/manage/users",
-                json={"username": "listener", "password": "a-disposable-password", "role": "user"},
+                json={
+                    "username": "listener",
+                    "password": "a-disposable-password",
+                    "profile": "listener",
+                },
                 headers=HEADERS,
             ).status_code
             == 201

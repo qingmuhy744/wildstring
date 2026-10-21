@@ -68,7 +68,7 @@ function DraftDetail({
     [values, setValues] = useState<Record<string, string>>({}),
     [tracks, setTracks] = useState<Track[]>([]);
   const original = useWorkspaceResource<{ effective: Record<string, unknown> }>(
-    draft.kind === 'metadata' && user.role === 'admin'
+    draft.kind === 'metadata' && user.profile !== 'listener'
       ? `/manage/tracks/${encodeURIComponent(String(draft.payload.track_id))}/metadata`
       : null,
   );
@@ -165,7 +165,7 @@ function DraftDetail({
       setBusy(false);
     }
   }
-  const permitted = draft.kind === 'playlist' || user.role === 'admin';
+  const permitted = draft.kind === 'playlist' || user.profile === 'owner';
   return (
     <article className="workspace-card" aria-label="草案详情">
       <div className="workspace-card-head">

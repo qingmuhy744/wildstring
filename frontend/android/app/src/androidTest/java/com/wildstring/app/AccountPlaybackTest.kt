@@ -89,7 +89,7 @@ class AccountPlaybackTest {
                     fun json(body: String) = MockResponse().setHeader("Content-Type", "application/json").setBody(body)
                     val owner = account.get()
                     val authenticated = owner != null && request.getHeader("Cookie")?.contains("wildstring_session=$owner") == true
-                    fun user(name: String) = """{"id":"user-$name","username":"$name","role":"user","enabled":true,"version":1}"""
+                    fun user(name: String) = """{"id":"user-$name","username":"$name","profile":"listener","enabled":true,"version":1}"""
                     if (path.endsWith("/auth/status")) return json("""{"configured":true,"authenticated":$authenticated,"user":${if (authenticated) user(owner!!) else "null"}}""")
                     if (path.endsWith("/auth/login")) {
                         val body = gson.fromJson(request.body.readUtf8(), Map::class.java)

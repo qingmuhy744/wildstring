@@ -475,7 +475,7 @@ test('真实后端：切换账号后推荐偏好与私人连接隔离', async ({
     password = 'synthetic-private-password';
   const created = await page.request.post('/api/v1/manage/users', {
     headers,
-    data: { username, password, role: 'user' },
+    data: { username, password, profile: 'listener' },
   });
   expect(created.ok()).toBe(true);
   const model = await page.request.post('/api/v1/agent/connections', {

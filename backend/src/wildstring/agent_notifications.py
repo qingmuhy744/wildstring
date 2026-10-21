@@ -424,7 +424,7 @@ class Notifications:
                 return False
             item = dict(row)
             target = connection.execute(
-                "SELECT t.*,u.enabled AS account_enabled,u.role AS account_role FROM agent_telegram_targets t JOIN users u ON u.id=t.user_id WHERE t.id=?",
+                "SELECT t.*,u.enabled AS account_enabled,u.profile AS account_profile FROM agent_telegram_targets t JOIN users u ON u.id=t.user_id WHERE t.id=?",
                 (row["target_id"],),
             ).fetchone()
             prefrow = connection.execute(
@@ -437,7 +437,7 @@ class Notifications:
                 or not target["enabled"]
                 or not target["account_enabled"]
                 or target["chat_id"].startswith("-")
-                and target["account_role"] != "admin"
+                and target["account_profile"] != "owner"
                 or target["deleted_at"]
                 or target["version"] != item["target_version"]
                 or not pref.get("telegram_enabled")
@@ -456,7 +456,7 @@ class Notifications:
             event = connection.execute(
                 "SELECT * FROM agent_events WHERE id=?", (item["event_id"],)
             ).fetchone()
-            if target["account_role"] != "admin" and event["kind"] in {
+            if target["account_profile"] != "owner" and event["kind"] in {
                 "library.task.completed",
                 "metadata.refresh.completed",
             }:

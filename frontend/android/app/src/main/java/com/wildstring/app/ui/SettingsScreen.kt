@@ -61,7 +61,7 @@ private val LocalSettingsFeedback = staticCompositionLocalOf<() -> Unit> { {} }
     CompositionLocalProvider(LocalSettingsFeedback provides tactile {}) {
         SettingsPage(back, bottomBar) {
             SettingsGroup("账号") {
-                ListItem(headlineContent = { Text(state.account?.let { "${it.username} · ${if (it.role == "admin") "管理员" else "普通用户"}" } ?: "已连接") },
+                ListItem(headlineContent = { Text(state.account?.let { "${it.username} · ${it.profileLabel}" } ?: "已连接") },
                     supportingContent = { Text(state.server) }, leadingContent = { Icon(Icons.Default.AccountCircle, null) })
                 SettingsAction("服务器 / 切换服务器", Icons.Default.Dns) { servers = true }
                 if (state.account != null) AvatarSettings(vm)
@@ -76,7 +76,7 @@ private val LocalSettingsFeedback = staticCompositionLocalOf<() -> Unit> { {} }
                 SettingsAction("联网与记忆", Icons.Default.TravelExplore) { feature = "research" }
                 SettingsAction("通知设置", Icons.Default.Notifications) { feature = "channels" }
             }
-            if (state.account?.role == "admin") SettingsGroup("资料来源与维护") {
+            if (state.account?.isOwner == true) SettingsGroup("资料来源与维护") {
                 SettingsAction("曲库管理", Icons.Default.LibraryMusic) { feature = "management" }
                 SettingsAction("歌词补全与洗版", Icons.Default.Lyrics) { feature = "lyric-scans" }
                 SettingsAction("数据源插件", Icons.Default.Extension) { feature = "source-plugins" }

@@ -99,7 +99,9 @@ def test_group_telegram_is_cancelled_after_administrator_demotion(settings, auth
                 "UPDATE agent_telegram_targets SET verified=1,enabled=1 WHERE id=?", (target["id"],)
             )
             platform.emit(connection, "admin", "task.completed", uuid4().hex, "完成", "合成结果")
-            connection.execute("UPDATE users SET role='user',version=version+1 WHERE id='admin'")
+            connection.execute(
+                "UPDATE users SET profile='listener',version=version+1 WHERE id='admin'"
+            )
         sent = []
         platform.transport = lambda *_args, **_kwargs: sent.append(True)
         assert platform.deliver_one()

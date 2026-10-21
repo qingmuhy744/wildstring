@@ -470,7 +470,7 @@ def test_user_isolation_role_demote_and_personal_endpoint_policy(agent):
     draft = playlist_draft(client, track)
     user = client.post(
         "/api/v1/manage/users",
-        json={"username": "normal", "password": "normal-password-123", "role": "user"},
+        json={"username": "normal", "password": "normal-password-123", "profile": "listener"},
         headers=HEADERS,
     ).json()
     user_id = user["id"]
@@ -653,7 +653,7 @@ def test_connection_scope_and_secret_rotation_are_versioned(agent):
     configuration = service.connection_for(actor, connection["id"])
     service.transport = lambda *_args, **_kwargs: {"choices": [{"message": {"content": "ok"}}]}
     with pytest.raises(HTTPException) as failure:
-        service.model_request(actor, configuration, [{"role": "user", "content": "test"}])
+        service.model_request(actor, configuration, [{"profile": "listener", "content": "test"}])
     assert failure.value.detail == "ai_daily_budget_exhausted"
     updated = client.patch(
         BASE + "/connections/" + connection["id"],
@@ -668,7 +668,7 @@ def test_connection_scope_and_secret_rotation_are_versioned(agent):
     ).json()
     assert updated["version"] == 2
     with pytest.raises(HTTPException) as failure:
-        service.model_request(actor, configuration, [{"role": "user", "content": "test"}])
+        service.model_request(actor, configuration, [{"profile": "listener", "content": "test"}])
     assert failure.value.detail == "ai_connection_version_changed"
     secret_dir = service.database.path.parent / "agent-secrets"
     assert len(list(secret_dir.iterdir())) == 1
@@ -816,7 +816,7 @@ def test_real_v16_migration_preserves_library_people_accounts_and_credentials(ag
     monkeypatch.setattr(wildstring.agent_schema, "SCHEMA", schema)
     service.database.initialize()
     service.database.initialize()
-    assert snapshot() == original and SCHEMA_VERSION == 29
+    assert snapshot() == original and SCHEMA_VERSION == 30
     assert legacy_secret.read_text() == "synthetic-original-private-secret"
     assert service.database.check_ready()
 

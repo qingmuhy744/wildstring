@@ -1,6 +1,6 @@
 """Bridge shared-library task results to the common transactional inbox.
 
-Historical jobs have no personal owner. Only active administrators receive
+Historical jobs have no personal owner. Only active owners receive
 their shared-library summaries; individual listening or other users' data never
 enters these events. Metadata is summarized once per explicitly requested batch.
 """
@@ -8,11 +8,11 @@ enters these events. Metadata is summarized once per explicitly requested batch.
 from collections import Counter
 
 
-def admins(connection):
+def owners(connection):
     return [
         row[0]
         for row in connection.execute(
-            "SELECT id FROM users WHERE enabled=1 AND role='admin' AND password_hash IS NOT NULL"
+            "SELECT id FROM users WHERE enabled=1 AND profile='owner' AND password_hash IS NOT NULL"
         )
     ]
 
@@ -21,7 +21,7 @@ def management_result(service, connection, job, status):
     platform = getattr(service, "platform", None)
     if platform is None:
         return
-    for owner in admins(connection):
+    for owner in owners(connection):
         platform.emit(
             connection,
             owner,
@@ -58,7 +58,7 @@ def metadata_result(service, connection, job_id):
         summary = f"查询结束：建议已生成 {counts['completed']} 首，未匹配 {counts['no_match']} 首，失败 {counts['failed']} 首，已变化 {counts['stale']} 首。建议需要确认后应用。"
         if warnings:
             summary += f"其中 {warnings} 首有来源警告。"
-        for owner in admins(connection):
+        for owner in owners(connection):
             platform.emit(
                 connection,
                 owner,

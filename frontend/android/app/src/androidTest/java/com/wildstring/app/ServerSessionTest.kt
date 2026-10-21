@@ -31,11 +31,11 @@ class ServerSessionTest {
         val original = SessionStore(context)
         original.configure("http://127.0.0.1:1234/", true)
         original.write("wildstring_session=legacy-private; Path=/; Max-Age=3600")
-        original.bindAccount(Account("old-account", "legacy", "user"))
+        original.bindAccount(Account("old-account", "legacy", "listener"))
         val owner = original.storageScope()!!; val id = original.activeServerId!!
         val ciphertext = prefs.getString("server:$id:session_ciphertext", null)!!
         // Reproduce the old format independently of the current encrypted writer.
-        val account = """{"id":"old-account","username":"legacy","role":"user","enabled":true,"version":1}"""
+        val account = """{"id":"old-account","username":"legacy","profile":"listener","enabled":true,"version":1}"""
         prefs.edit().clear().putString("server", "http://127.0.0.1:1234/").putBoolean("local_http", true)
             .putString("session_ciphertext", ciphertext).putString("cache_profile", owner).putString("account", account).commit()
         BoundedFileStore(File(context.cacheDir, "private-metadata-v1")).put("$owner:lyrics:old", "legacy lyrics".toByteArray(), 1024)
@@ -83,14 +83,14 @@ class ServerSessionTest {
             a.dispatcher = dispatcher; b.dispatcher = dispatcher; a.start(); b.start()
             try {
                 session.configure(a.url("/").toString(), true)
-                session.write("wildstring_session=alice; Path=/; Max-Age=3600"); session.bindAccount(Account("alice", "alice", "user"))
+                session.write("wildstring_session=alice; Path=/; Max-Age=3600"); session.bindAccount(Account("alice", "alice", "listener"))
                 val first = session.activeServerId!!; val firstToken = session.cacheScope()!!; val firstStorage = session.storageScope()
                 val track = Track("same-id", "A 的音乐", listOf("A"), album = null, durationMs = 12000, format = "mp3", status = "available")
                 cache.put("lyrics:same", "A 的歌词".toByteArray(), firstToken)
                 downloads.enqueue(listOf(track)); downloads.run {}; assertNotNull(downloads.file(track.id))
                 session.configure(b.url("/").toString(), true)
                 assertNull(session.read()); assertNull(session.account); assertNull(cache.read("lyrics:same")); assertNull(downloads.file(track.id))
-                session.write("wildstring_session=bob; Path=/; Max-Age=3600"); session.bindAccount(Account("bob", "bob", "user"))
+                session.write("wildstring_session=bob; Path=/; Max-Age=3600"); session.bindAccount(Account("bob", "bob", "listener"))
                 val second = session.activeServerId!!; val secondToken = session.cacheScope()!!
                 cache.put("lyrics:same", "B 的歌词".toByteArray(), secondToken)
                 downloads.enqueue(listOf(track.copy(title = "B 的音乐"))); downloads.run {}; assertNotNull(downloads.file(track.id))

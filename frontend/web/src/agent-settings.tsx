@@ -32,8 +32,7 @@ const empty = {
   native_search: false,
   stream_output: true,
 };
-const isOwner = (user: User) =>
-  (user.profile || (user.role === 'admin' ? 'owner' : 'listener')) === 'owner';
+const isOwner = (user: User) => user.profile === 'owner';
 export function AgentConnections({ user }: { user: User }) {
   const list = useModelConnections(),
     policy = useWorkspaceResource<{ allowed_hosts: string[]; allow_private: boolean }>(

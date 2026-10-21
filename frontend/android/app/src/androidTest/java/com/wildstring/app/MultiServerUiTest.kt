@@ -63,7 +63,7 @@ class MultiServerUiTest {
                 val token = if (name == "甲") "first" else "second"
                 fun json(body: String) = MockResponse().setHeader("Content-Type", "application/json").setBody(body)
                 val authenticated = request.getHeader("Cookie")?.contains("wildstring_session=$token") == true
-                val user = """{"id":"$name-user","username":"$name","role":"user","enabled":true,"version":1}"""
+                val user = """{"id":"$name-user","username":"$name","profile":"listener","enabled":true,"version":1}"""
                 if (path.endsWith("/auth/status")) return if (revoked.get()) MockResponse().setResponseCode(401) else json("""{"configured":true,"authenticated":$authenticated,"user":${if (authenticated) user else "null"}}""")
                 if (path.endsWith("/auth/login")) return json(user).setHeader("Set-Cookie", "wildstring_session=$token; Max-Age=3600; Path=/; HttpOnly")
                 if (path.endsWith("/auth/logout")) return MockResponse().setResponseCode(204)

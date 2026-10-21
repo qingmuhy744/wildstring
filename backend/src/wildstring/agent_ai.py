@@ -162,7 +162,7 @@ class Assistant:
     def connections(self, actor):
         with self.database.connect() as connection:
             rows = connection.execute(
-                "SELECT c.* FROM agent_connections c JOIN users u ON u.id=c.user_id WHERE c.user_id=? OR (c.scope='instance' AND c.shared=1 AND u.enabled=1 AND u.role='admin') ORDER BY c.created_at DESC",
+                "SELECT c.* FROM agent_connections c JOIN users u ON u.id=c.user_id WHERE c.user_id=? OR (c.scope='instance' AND c.shared=1 AND u.enabled=1 AND u.profile='owner') ORDER BY c.created_at DESC",
                 (actor.user_id,),
             ).fetchall()
         result = [
@@ -215,7 +215,7 @@ class Assistant:
         else:
             with self.database.connect() as connection:
                 row = connection.execute(
-                    "SELECT c.* FROM agent_connections c JOIN users u ON u.id=c.user_id WHERE c.id=? AND u.enabled=1 AND (c.user_id=? OR (c.scope='instance' AND c.shared=1 AND u.role='admin'))",
+                    "SELECT c.* FROM agent_connections c JOIN users u ON u.id=c.user_id WHERE c.id=? AND u.enabled=1 AND (c.user_id=? OR (c.scope='instance' AND c.shared=1 AND u.profile='owner'))",
                     (identity, actor.user_id),
                 ).fetchone()
             if row is None:

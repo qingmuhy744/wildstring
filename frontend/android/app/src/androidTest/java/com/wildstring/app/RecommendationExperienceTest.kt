@@ -33,7 +33,7 @@ class RecommendationExperienceTest {
                     val path = request.requestUrl!!.encodedPath; val query = request.requestUrl!!.encodedQuery.orEmpty()
                     val body = request.body.readUtf8(); requests += "${request.method} $path?$query" to body
                     fun json(value: String) = MockResponse().setHeader("Content-Type", "application/json").setBody(value)
-                    val user = """{"id":"experience-user","username":"alice","role":"admin","enabled":true,"version":1}"""
+                    val user = """{"id":"experience-user","username":"alice","profile":"owner","enabled":true,"version":1}"""
                     if (path.endsWith("/auth/login")) return@synchronized json(user).setHeader("Set-Cookie", "wildstring_session=experience; Path=/; Max-Age=3600; HttpOnly")
                     if (path.endsWith("/auth/status")) { val connected = request.getHeader("Cookie")?.contains("experience") == true; return@synchronized json("""{"configured":true,"authenticated":$connected,"user":${if (connected) user else "null"}}""") }
                     if (path.endsWith("/agent/connections")) return@synchronized json("""{"items":[{"id":"personal-one","name":"我的模型","model":"synthetic-one","scope":"personal","enabled":true,"daily_call_budget":20,"daily_calls_used":20},{"id":"shared-one","name":"共享模型","model":"synthetic-two","scope":"instance","enabled":true,"daily_call_budget":30,"daily_calls_used":4}],"total":2}""")

@@ -529,7 +529,7 @@ internal fun connectionBudget(connection: JsonObject): String {
     var budget by remember { mutableStateOf((original?.number("daily_call_budget") ?: 100).toString()) }; var enabled by remember { mutableStateOf(original?.flag("enabled") ?: true) }
     var background by remember { mutableStateOf(original?.flag("background_allowed") ?: false) }; var instance by remember { mutableStateOf(original?.text("scope") == "instance") }; var shared by remember { mutableStateOf(original?.flag("shared") ?: false) }
     val account by vm.state.collectAsStateWithLifecycle()
-    val scope = rememberCoroutineScope(); val action = remember { FeatureAction() }; val admin = account.account?.role == "admin"
+    val scope = rememberCoroutineScope(); val action = remember { FeatureAction() }; val admin = account.account?.isOwner == true
     AlertDialog(onDismissRequest = { if (!action.busy) dismiss() }, title = { Text(if (original == null) "添加 AI 连接" else "编辑 AI 连接") }, text = {
         Column(Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             OutlinedTextField(name, { name = it }, label = { Text("名称") }, singleLine = true)

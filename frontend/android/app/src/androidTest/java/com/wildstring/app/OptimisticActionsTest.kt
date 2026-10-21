@@ -37,7 +37,7 @@ class OptimisticActionsTest {
                 override fun dispatch(request: RecordedRequest): MockResponse {
                     fun json(value: String) = MockResponse().setHeader("Content-Type", "application/json").setBody(value)
                     return when {
-                        request.path!!.contains("/auth/status") -> json("""{"configured":true,"authenticated":${loggedIn.get()},"user":${if (loggedIn.get()) """{"id":"optimistic-user","username":"listener","role":"user"}""" else "null"}}""")
+                        request.path!!.contains("/auth/status") -> json("""{"configured":true,"authenticated":${loggedIn.get()},"user":${if (loggedIn.get()) """{"id":"optimistic-user","username":"listener","profile":"listener"}""" else "null"}}""")
                         request.path!!.contains("/auth/login") -> { loggedIn.set(true); json("{}").setHeader("Set-Cookie", "wildstring_session=test-session; Path=/; HttpOnly") }
                         request.path!!.contains("/favorite") -> { received.set(true); gate.await(10, TimeUnit.SECONDS); json("{}").setResponseCode(if (success.get()) 200 else 503) }
                         request.path!!.contains("/tracks") && holdTracks.get() -> {

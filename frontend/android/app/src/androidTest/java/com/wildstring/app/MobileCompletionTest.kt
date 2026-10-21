@@ -101,7 +101,7 @@ class MobileCompletionTest {
                     val url = request.requestUrl!!; val path = url.encodedPath
                     requests += request.method + " " + path + "?" + url.encodedQuery.orEmpty()
                     fun json(value: String) = MockResponse().setHeader("Content-Type", "application/json").setBody(value)
-                    val user = """{"id":"completion-user","username":"mobile-admin","role":"admin","enabled":true,"version":1}"""
+                    val user = """{"id":"completion-user","username":"mobile-admin","profile":"owner","enabled":true,"version":1}"""
                     if (path.endsWith("/auth/status")) { val authenticated = request.getHeader("Cookie")?.contains("wildstring_session=completion") == true; return json("""{"configured":true,"authenticated":$authenticated,"user":${if (authenticated) user else "null"}}""") }
                     if (path.endsWith("/auth/login")) return json(user).setHeader("Set-Cookie", "wildstring_session=completion; Path=/; Max-Age=3600; HttpOnly")
                     if (request.method in listOf("POST", "PUT", "DELETE")) mutations += path to request.body.clone().readUtf8()

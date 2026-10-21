@@ -1,7 +1,7 @@
 """Shared account profiles and capability checks.
 
-The legacy ``role`` column remains part of the API for compatibility. New
-authorization decisions use the more explicit profile and capability names.
+``profile`` is the only account classification. Authorization decisions use
+the explicit profile and capability names; there is no legacy role fallback.
 """
 
 from fastapi import HTTPException, Request
@@ -93,15 +93,15 @@ PROFILE_SCOPES = {
 
 
 def profile_for(row_or_user) -> str:
-    """Return a valid profile while reading old rows without the new column."""
+    """Return the account profile, rejecting rows that do not carry a valid one."""
 
     try:
         profile = row_or_user["profile"]
     except (KeyError, IndexError, TypeError):
         profile = getattr(row_or_user, "profile", None)
-    if profile in PROFILES:
-        return profile
-    return "owner" if row_or_user["role"] == "admin" else "listener"
+    if profile not in PROFILES:
+        raise ValueError("invalid account profile")
+    return profile
 
 
 def scopes_for(row_or_user) -> frozenset[str]:

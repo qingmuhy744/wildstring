@@ -361,8 +361,8 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
                                     edit = { featurePlaylist = state.activePlaylist; feature = "playlist" },
                                     order = { featurePlaylist = state.activePlaylist; feature = "order" },
                                     delete = { deletingPlaylist = state.activePlaylist },
-                                    albumLyrics = if (state.account?.role == "admin" && (state.collection == "albums" || state.albumFilter != null)) ({ lyricScanAlbum = state.albumFilter ?: state.collectionId }) else null,
-                                    albumRefresh = if (state.account?.role == "admin" && (state.collection == "albums" || state.albumFilter != null)) ({ refreshAlbum = state.albumFilter ?: state.collectionId }) else null)
+                                    albumLyrics = if (state.account?.isOwner == true && (state.collection == "albums" || state.albumFilter != null)) ({ lyricScanAlbum = state.albumFilter ?: state.collectionId }) else null,
+                                    albumRefresh = if (state.account?.isOwner == true && (state.collection == "albums" || state.albumFilter != null)) ({ refreshAlbum = state.albumFilter ?: state.collectionId }) else null)
                             }
                         }
                         Box(Modifier.weight(1f)) {
@@ -467,7 +467,7 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
         }
         SongAction("离线保存", Icons.Default.Download) { vm.download(listOf(track)); actions = null }
         state.activePlaylist?.takeIf { it.kind == "manual" }?.let { playlist -> SongAction("从当前歌单移除", Icons.Default.RemoveCircleOutline, destructive = true) { actions = null; scope.launch { try { vm.removePlaylistTrack(track, playlist) } catch (e: Exception) { localError = friendlyError(e) } } } }
-        if (state.account?.role == "admin") {
+        if (state.account?.isOwner == true) {
             HorizontalDivider(Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
             listOf(Triple("metadata", "编辑歌曲信息", Icons.Default.Edit), Triple("lyrics", "编辑歌词与打点", Icons.Default.Lyrics), Triple("suggestions", "更新元数据与建议", Icons.Default.Refresh)).forEach { (route, title, icon) ->
                 SongAction(title, icon, navigate = true) { featureTrack = track; feature = route; actions = null }

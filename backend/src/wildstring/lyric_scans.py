@@ -357,7 +357,7 @@ class LyricScans:
             ).rowcount
             platform = getattr(self.sources.providers, "platform", None)
             if changed and platform:
-                from wildstring.task_notifications import admins
+                from wildstring.task_notifications import owners
 
                 counts = Counter(
                     {
@@ -368,7 +368,7 @@ class LyricScans:
                         )
                     }
                 )
-                for owner in admins(db):
+                for owner in owners(db):
                     platform.emit(
                         db,
                         owner,

@@ -141,7 +141,7 @@ type CatalogLocation = {
 };
 
 export function Library({ onLogout, user }: { onLogout: () => Promise<void>; user: User }) {
-  const profile = user.profile || (user.role === 'admin' ? 'owner' : 'listener');
+  const profile = user.profile;
   const canManage = profile !== 'listener';
   const canImport = profile === 'owner' || profile === 'librarian';
   const [accountOpen, setAccountOpen] = useState(false);

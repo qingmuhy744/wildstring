@@ -1,4 +1,4 @@
-"""Local users, two roles and revocable database-backed sessions."""
+"""Local users, account profiles and revocable database-backed sessions."""
 
 import hashlib
 import hmac
@@ -12,7 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, SecretStr, ValidationError
 
 from wildstring.config import Settings
 from wildstring.database import Database
-from wildstring.permissions import profile_for, require_owner, require_scope
+from wildstring.permissions import require_owner, require_scope
 
 COOKIE = "wildstring_session"
 SESSION_SECONDS = 7 * 24 * 60 * 60
@@ -49,15 +49,13 @@ class UserCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     username: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,31}$")
     password: SecretStr = Field(min_length=12, max_length=128)
-    role: Literal["admin", "user"] = "user"
-    profile: Literal["owner", "librarian", "editor", "listener"] | None = None
+    profile: Literal["owner", "librarian", "editor", "listener"] = "listener"
 
 
 class UserUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     version: int = Field(ge=1, strict=True)
-    role: Literal["admin", "user"]
-    profile: Literal["owner", "librarian", "editor", "listener"] | None = None
+    profile: Literal["owner", "librarian", "editor", "listener"]
     enabled: bool = Field(strict=True)
 
 
@@ -76,9 +74,8 @@ def validated(model, body):
 
 
 def public_user(row):
-    return {key: row[key] for key in ("id", "username", "role", "version")} | {
+    return {key: row[key] for key in ("id", "username", "profile", "version")} | {
         "enabled": bool(row["enabled"]),
-        "profile": profile_for(row),
     }
 
 
@@ -97,7 +94,7 @@ class Auth:
         with self.database.connect() as connection:
             return (
                 connection.execute(
-                    "SELECT 1 FROM users WHERE role='admin' AND enabled=1 AND password_hash IS NOT NULL"
+                    "SELECT 1 FROM users WHERE profile='owner' AND enabled=1 AND password_hash IS NOT NULL"
                 ).fetchone()
                 is not None
             )
@@ -107,7 +104,7 @@ class Auth:
         with self.database.connect(write=True) as connection:
             connection.execute("BEGIN IMMEDIATE")
             result = connection.execute(
-                "UPDATE users SET password_hash=?,role='admin',enabled=1,version=version+1 "
+                "UPDATE users SET password_hash=?,profile='owner',enabled=1,version=version+1 "
                 "WHERE id='admin' AND (?=0 OR password_hash IS NULL)",
                 (hashed, only_if_empty),
             )
@@ -139,12 +136,6 @@ class Auth:
         except HTTPException:
             return False
 
-    def require_admin(self, request: Request) -> dict:
-        user = self.require_session(request)
-        if user["role"] != "admin":
-            raise HTTPException(403, "admin_required")
-        return user
-
     def require_owner(self, request: Request) -> dict:
         return require_owner(self.require_session(request))
 
@@ -160,14 +151,14 @@ class Auth:
             raise HTTPException(403, "client_header_required")
 
     @staticmethod
-    def check_admin(connection, user):
+    def check_owner(connection, user):
         if (
             connection.execute(
-                "SELECT 1 FROM users WHERE id=? AND role='admin' AND enabled=1", (user["id"],)
+                "SELECT 1 FROM users WHERE id=? AND profile='owner' AND enabled=1", (user["id"],)
             ).fetchone()
             is None
         ):
-            raise HTTPException(403, "admin_required")
+            raise HTTPException(403, "owner_required")
 
     @staticmethod
     def verify_password(connection, hashed, password):
@@ -198,11 +189,11 @@ class Auth:
             connection.execute("BEGIN IMMEDIATE")
             if (
                 connection.execute(
-                    "SELECT 1 FROM users WHERE role='admin' AND enabled=1 AND password_hash IS NOT NULL"
+                    "SELECT 1 FROM users WHERE profile='owner' AND enabled=1 AND password_hash IS NOT NULL"
                 ).fetchone()
                 is None
             ):
-                raise HTTPException(503, "admin_setup_required")
+                raise HTTPException(503, "owner_setup_required")
             current = int(time.time())
             connection.execute("DELETE FROM sessions WHERE expires_at<=?", (current,))
             row = connection.execute(
@@ -295,7 +286,7 @@ class Auth:
 
     def users_router(self):
         router = APIRouter(
-            prefix="/api/v1/manage/users", dependencies=[Depends(self.require_admin)]
+            prefix="/api/v1/manage/users", dependencies=[Depends(self.require_owner)]
         )
 
         def target(connection, user_id, version):
@@ -321,21 +312,19 @@ class Auth:
 
         @router.post("", status_code=201, dependencies=[Depends(self.require_client)])
         def create(request: Request, body: object = Body(...)):
-            actor, value = self.require_admin(request), validated(UserCreate, body)
+            actor, value = self.require_owner(request), validated(UserCreate, body)
             hashed = secret_hash(value.password)
             with self.database.connect(write=True) as connection:
                 connection.execute("BEGIN IMMEDIATE")
-                self.check_admin(connection, actor)
+                self.check_owner(connection, actor)
                 if connection.execute(
                     "SELECT 1 FROM users WHERE username=?", (value.username,)
                 ).fetchone():
                     raise HTTPException(409, "username_taken")
                 user_id = uuid4().hex
-                profile = value.profile or ("owner" if value.role == "admin" else "listener")
-                role = "admin" if profile == "owner" else "user"
                 connection.execute(
-                    "INSERT INTO users(id,username,password_hash,role,profile) VALUES (?,?,?,?,?)",
-                    (user_id, value.username, hashed, role, profile),
+                    "INSERT INTO users(id,username,password_hash,profile) VALUES (?,?,?,?)",
+                    (user_id, value.username, hashed, value.profile),
                 )
                 return public_user(
                     connection.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
@@ -343,18 +332,16 @@ class Auth:
 
         @router.put("/{user_id}", dependencies=[Depends(self.require_client)])
         def update(user_id: str, request: Request, body: UserUpdate):
-            actor = self.require_admin(request)
+            actor = self.require_owner(request)
             with self.database.connect(write=True) as connection:
                 connection.execute("BEGIN IMMEDIATE")
-                self.check_admin(connection, actor)
+                self.check_owner(connection, actor)
                 target(connection, user_id, body.version)
                 if actor["id"] == user_id:
-                    raise HTTPException(409, "cannot_change_self_role")
-                profile = body.profile or ("owner" if body.role == "admin" else "listener")
-                role = "admin" if profile == "owner" else "user"
+                    raise HTTPException(409, "cannot_change_self_profile")
                 connection.execute(
-                    "UPDATE users SET role=?,profile=?,enabled=?,version=version+1 WHERE id=?",
-                    (role, profile, body.enabled, user_id),
+                    "UPDATE users SET profile=?,enabled=?,version=version+1 WHERE id=?",
+                    (body.profile, body.enabled, user_id),
                 )
                 connection.execute("DELETE FROM sessions WHERE user_id=?", (user_id,))
                 return public_user(
@@ -365,13 +352,13 @@ class Auth:
             "/{user_id}/password", status_code=204, dependencies=[Depends(self.require_client)]
         )
         def reset(user_id: str, request: Request, body: object = Body(...)):
-            actor, value = self.require_admin(request), validated(PasswordReset, body)
+            actor, value = self.require_owner(request), validated(PasswordReset, body)
             if actor["id"] == user_id:
                 raise HTTPException(409, "use_self_password_change")
             hashed = secret_hash(value.new_password)
             with self.database.connect(write=True) as connection:
                 connection.execute("BEGIN IMMEDIATE")
-                self.check_admin(connection, actor)
+                self.check_owner(connection, actor)
                 target(connection, user_id, value.version)
                 connection.execute(
                     "UPDATE users SET password_hash=?,version=version+1 WHERE id=?",

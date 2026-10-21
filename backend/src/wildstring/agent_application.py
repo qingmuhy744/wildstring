@@ -62,15 +62,10 @@ class Application:
 
     def check_application_actor(self, actor, connection):
         user = connection.execute(
-            "SELECT version,role,profile FROM users WHERE id=? AND enabled=1 AND password_hash IS NOT NULL",
+            "SELECT version,profile FROM users WHERE id=? AND enabled=1 AND password_hash IS NOT NULL",
             (actor.user_id,),
         ).fetchone()
-        if (
-            user is None
-            or user["version"] != actor.version
-            or user["role"] != actor.role
-            or profile_for(user) != actor.profile
-        ):
+        if user is None or user["version"] != actor.version or profile_for(user) != actor.profile:
             raise HTTPException(403, "agent_authorization_changed")
         if actor.credential_id:
             credential = connection.execute(

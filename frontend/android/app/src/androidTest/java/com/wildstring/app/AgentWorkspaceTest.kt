@@ -49,7 +49,7 @@ class AgentWorkspaceTest {
                 val body = request.body.readUtf8().takeIf { it.isNotBlank() }?.let { JsonParser.parseString(it).asJsonObject } ?: JsonObject()
                 requests += (request.method + " " + path) to body
                 if (request.method != "GET" && path.contains("/agent/")) writes.incrementAndGet()
-                if (path.endsWith("/auth/status")) return@synchronized json("""{"configured":true,"authenticated":${request.getHeader("Cookie") != null},"user":{"id":"agent-alice","username":"alice","role":"admin"}}""")
+                if (path.endsWith("/auth/status")) return@synchronized json("""{"configured":true,"authenticated":${request.getHeader("Cookie") != null},"user":{"id":"agent-alice","username":"alice","profile":"owner"}}""")
                 if (path.endsWith("/auth/login")) return@synchronized json("{}").setHeader("Set-Cookie", "wildstring_session=agent-alice; Path=/; Max-Age=3600")
                 if (path == "/api/v1/agent/application-policy") {
                     if (request.method == "PUT") { assertEquals(applicationVersion.toLong(), body.number("version")); applicationMode = body.text("mode"); applicationKinds = body.getAsJsonArray("kinds").map { it.asString }.toSet(); applicationVersion++ }
