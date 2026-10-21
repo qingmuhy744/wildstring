@@ -2685,6 +2685,15 @@ select {
   background: #191d17;
   color: inherit;
 }
+[data-theme='light'] .folder-metadata-toolbar input {
+  background: #faf9f5;
+  color: #30332a;
+  border-color: #c9cbbd;
+}
+.folder-metadata-toolbar input::placeholder {
+  color: var(--muted);
+  opacity: 1;
+}
 .folder-metadata-toolbar button,
 .folder-metadata-more {
   padding: 9px 12px;
