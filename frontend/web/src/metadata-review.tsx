@@ -468,7 +468,10 @@ export function MetadataReviewWorkbench({
         </div>
         <div className="review-heading-actions">
           <button disabled={disabled} onClick={() => page && void load(pageQuery(page), active)}>
-            重新读取
+            重新读取候选
+          </button>
+          <button disabled={disabled || !current} onClick={() => setRefresh(true)}>
+            重新查询
           </button>
           {onClose && (
             <button aria-label="关闭批量核对" disabled={busy} onClick={onClose}>
@@ -709,7 +712,7 @@ export function MetadataReviewWorkbench({
                     />
                     只看变化字段
                   </label>
-                  {candidate ? (
+                  {candidate && !candidateStale(candidate, current) ? (
                     <>
                       <p className="muted">
                         来源：{page?.provider_names[candidate.provider] || candidate.provider} ·
@@ -815,6 +818,13 @@ export function MetadataReviewWorkbench({
                         <pre>{JSON.stringify(candidate.match, null, 2)}</pre>
                       </details>
                     </>
+                  ) : current.suggestions.length ? (
+                    <p className="review-stale-notice" role="status">
+                      当前候选的歌曲信息版本或查询依据已经变化，不能直接应用。请重新查询生成新的候选。
+                      <button disabled={disabled} onClick={() => setRefresh(true)}>
+                        重新查询本专辑
+                      </button>
+                    </p>
                   ) : (
                     <p>当前没有有效候选，可以查询新资料或跳过。</p>
                   )}

@@ -591,6 +591,19 @@ class Providers:
         record_event("provider.tasks.queued", count=added, batch_id=batch_id)
         return result
 
+    def clear_queued(self):
+        """Cancel queued metadata lookups without interrupting the active request."""
+        library_id = self.repository.library_id()
+        with self.database.connect(write=True) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            result = connection.execute(
+                "UPDATE provider_jobs SET status='cancelled',error='cancelled_by_user',updated_at=? "
+                "WHERE status='queued' AND track_id IN "
+                "(SELECT id FROM tracks WHERE library_id=?)",
+                (time.time(), library_id),
+            )
+        return {"cancelled": result.rowcount}
+
     def identify(self, track, *, force=False):
         audio = calculate(self.repository, track["id"], self.exit)
         result = self.cached(
@@ -1366,6 +1379,10 @@ class Providers:
         @router.post("/manage/providers/tasks/history/clear", dependencies=mutation)
         def clear_tasks(body: HistoryClear, user: admin):
             return clear_history(self.repository, body.through)
+
+        @router.post("/manage/providers/tasks/clear-queued", dependencies=mutation)
+        def clear_queued_tasks(user: admin):
+            return self.clear_queued()
 
         @router.post("/manage/providers/tasks/tracks/{track_id}/review", dependencies=mutation)
         def review_track_tasks(track_id: str, body: ReviewTasks, user: admin):

@@ -102,6 +102,18 @@ def test_query_completion_preserves_pending_then_apply_archives_without_changing
         assert client.get(BASE + "/jobs").json()["items"][0]["status"] == "completed"
 
 
+def test_clear_queued_refreshes_keeps_running_and_results_separate(settings, authenticated_client):
+    seed(settings)
+    with authenticated_client(settings) as client:
+        service, _ = setup_service(client)
+        refresh(client)
+        response = client.post(BASE + "/tasks/clear-queued", headers=HEADERS)
+        assert response.status_code == 200 and response.json() == {"cancelled": 1}
+        assert page(client, "active")["total"] == 0
+        assert page(client, "history")["total"] == 1
+        assert client.post(BASE + "/tasks/clear-queued", headers=HEADERS).json() == {"cancelled": 0}
+
+
 def test_grouped_review_is_durable_and_does_not_ignore_later_results(
     settings, authenticated_client
 ):
