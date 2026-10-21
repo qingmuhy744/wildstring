@@ -9,7 +9,7 @@ from pathlib import Path
 from wildstring.library.albums import album_key
 from wildstring.provider_schema import SCHEMA as PROVIDER_SCHEMA
 
-SCHEMA_VERSION = 28
+SCHEMA_VERSION = 29
 TRANSCODING_SCHEMA = """
 BEGIN IMMEDIATE;
 CREATE TABLE transcoding_settings (
@@ -489,6 +489,17 @@ class Database:
                     COMMIT;
                     """
                 )
+            if current < 29:
+                columns = {row[1] for row in connection.execute("PRAGMA table_info(admin_jobs)")}
+                if "scope_path" not in columns:
+                    connection.execute("BEGIN IMMEDIATE")
+                    connection.execute(
+                        "ALTER TABLE admin_jobs ADD COLUMN scope_path TEXT NOT NULL DEFAULT '.'"
+                    )
+                    connection.execute("PRAGMA user_version = 29")
+                    connection.commit()
+                else:
+                    connection.execute("PRAGMA user_version = 29")
             connection.execute("PRAGMA journal_mode = WAL")
 
     def check_ready(self) -> bool:

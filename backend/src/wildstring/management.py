@@ -35,6 +35,12 @@ class JobRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     kind: Literal["import", "scan"]
     full: bool = Field(default=False, strict=True)
+    path: str = "."
+
+    @field_validator("path")
+    @classmethod
+    def valid_path(cls, value: str) -> str:
+        return validate_folder(value) if value != "." else "."
 
 
 class PreferencesUpdate(BaseModel):
@@ -149,13 +155,17 @@ class Management:
                 (library_id,),
             ).fetchone()
             if active:
-                if active["kind"] == body.kind and bool(active["full"]) == body.full:
+                if (
+                    active["kind"] == body.kind
+                    and bool(active["full"]) == body.full
+                    and active["scope_path"] == body.path
+                ):
                     return self.job(active["id"])
                 raise HTTPException(409, "library_task_busy")
             job_id = uuid4().hex
             connection.execute(
-                "INSERT INTO admin_jobs(id,library_id,kind,full,status,created_at,automatic) VALUES (?,?,?,?,'queued',?,?)",
-                (job_id, library_id, body.kind, body.full, now(), automatic),
+                "INSERT INTO admin_jobs(id,library_id,kind,full,status,created_at,automatic,scope_path) VALUES (?,?,?,?,'queued',?,?,?)",
+                (job_id, library_id, body.kind, body.full, now(), automatic, body.path),
             )
         return self.job(job_id)
 
@@ -548,6 +558,7 @@ class Management:
                 import_music(
                     self.settings,
                     full=bool(job["full"]),
+                    relative_root=job.get("scope_path", "."),
                     on_import=lambda run_id: self.link(job["id"], import_id=run_id),
                     on_scan=on_scan,
                     automatic=bool(job["automatic"]),
@@ -862,9 +873,7 @@ def management_router(service, auth, providers=None):
         ],
     )
     def library_import(body: SourcePathRequest):
-        # The importer remains the single source of truth and scans the whole
-        # read-only source. The path is returned for the UI's batch context.
-        return service.submit(JobRequest(kind="import")) | {
+        return service.submit(JobRequest(kind="import", path=body.path)) | {
             "source_id": body.source_id,
             "path": body.path,
         }

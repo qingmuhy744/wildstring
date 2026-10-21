@@ -13,6 +13,7 @@ import { IntakePanel } from './intake-panel';
 import { MetadataJobs } from './metadata-tasks';
 import { MetadataReviewDialog } from './metadata-review';
 import { FolderMetadataEditor } from './folder-metadata';
+import { LibrarySources } from './library-sources';
 
 type Directory = {
   path: string;
@@ -321,7 +322,17 @@ export function Management({
         overview && (
           <>
             {tab === 'diagnostics' && <SystemDiagnostics />}
-            {tab === 'intake' && <IntakePanel />}
+            {tab === 'intake' && (
+              <>
+                <LibrarySources
+                  canImport={canImport}
+                  canDelete={canImport}
+                  canPurge={canOwner}
+                  onChanged={onChanged}
+                />
+                <IntakePanel />
+              </>
+            )}
             {tab === 'users' && <UsersPanel />}
             {tab === 'overview' && (
               <>

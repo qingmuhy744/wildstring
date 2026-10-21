@@ -237,10 +237,23 @@ class MusicImporter:
                     "UPDATE scan_runs SET library_id=? WHERE library_id=?", (new, old[0])
                 )
 
-    def run(self, *, full=False, on_import=None, on_scan=None, automatic=False):
+    def run(
+        self,
+        *,
+        full=False,
+        on_import=None,
+        on_scan=None,
+        automatic=False,
+        relative_root=None,
+    ):
         repository = LibraryRepository(self.database, self.root)
         repository.library_id(create=True)
         intake = Intake(self.settings, repository)
+        source_root = (
+            self.settings.music_dir
+            if relative_root in {None, "."}
+            else self.settings.music_dir / relative_root
+        ).resolve()
         with self.database.connect(write=True) as connection:
             connection.execute(
                 "UPDATE import_runs SET status='interrupted', finished_at=? WHERE status='running'",
@@ -253,14 +266,19 @@ class MusicImporter:
         if on_import is not None:
             on_import(self.run_id)
         try:
-            with os.scandir(self.settings.music_dir) as entries:
+            if (
+                not source_root.is_relative_to(self.settings.music_dir.resolve())
+                or not source_root.is_dir()
+            ):
+                raise OSError("Source folder is unavailable")
+            with os.scandir(source_root) as entries:
                 next(entries, None)
 
             def walk_error(error):
                 self.error(Path("."), "source_directory_unreadable")
 
             for directory, folders, files in os.walk(
-                self.settings.music_dir, followlinks=False, onerror=walk_error
+                source_root, followlinks=False, onerror=walk_error
             ):
                 folders[:] = sorted(
                     name
@@ -317,7 +335,15 @@ class MusicImporter:
         }
 
 
-def import_music(settings: Settings, *, full=False, on_import=None, on_scan=None, automatic=False):
+def import_music(
+    settings: Settings,
+    *,
+    full=False,
+    on_import=None,
+    on_scan=None,
+    automatic=False,
+    relative_root=None,
+):
     settings.data_dir.mkdir(parents=True, exist_ok=True)
     settings.library_dir.mkdir(parents=True, exist_ok=True)
     try:
@@ -325,7 +351,11 @@ def import_music(settings: Settings, *, full=False, on_import=None, on_scan=None
             database = Database(settings.data_dir)
             database.initialize()
             return MusicImporter(settings, database).run(
-                full=full, on_import=on_import, on_scan=on_scan, automatic=automatic
+                full=full,
+                on_import=on_import,
+                on_scan=on_scan,
+                automatic=automatic,
+                relative_root=relative_root,
             )
     except Timeout as error:
         raise ScanBusyError from error

@@ -233,6 +233,8 @@ def test_profiles_source_browser_and_safe_album_trash(settings, authenticated_cl
     music(settings, "库内.flac", ["曲库艺人"], ["曲库艺人"], album="待替换专辑")
     shutil.copyfile(settings.library_dir / "库内.flac", settings.music_dir / "库内.flac")
     (settings.music_dir / "未完成.flac.part").write_bytes(b"partial")
+    (settings.music_dir / "待下载").mkdir()
+    (settings.music_dir / "待下载" / "新专辑.flac.part").write_bytes(b"partial")
     scan_library(settings)
     with authenticated_client(settings) as admin:
         created = admin.post(
@@ -270,6 +272,23 @@ def test_profiles_source_browser_and_safe_album_trash(settings, authenticated_cl
             ).json()["count"]
             == 1
         )
+        scoped_preview = admin.post(
+            "/api/v1/manage/library/import/preview",
+            headers=HEADERS,
+            json={"source_id": "import", "path": "待下载"},
+        )
+        assert scoped_preview.status_code == 200
+        assert scoped_preview.json()["count"] == 0
+        scoped_job = admin.post(
+            "/api/v1/manage/library/import",
+            headers=HEADERS,
+            json={"source_id": "import", "path": "待下载"},
+        )
+        assert scoped_job.status_code == 202
+        assert (
+            admin.get(f"/api/v1/manage/jobs/{scoped_job.json()['id']}").json()["scope_path"]
+            == "待下载"
+        )
         assert (
             admin.post(f"/api/v1/manage/albums/{album_id}/trash", headers=HEADERS).status_code
             == 202
@@ -291,6 +310,8 @@ def test_profiles_source_browser_and_safe_album_trash(settings, authenticated_cl
         assert librarian.get("/api/v1/manage/overview").status_code == 200
         assert librarian.get("/api/v1/manage/ai").status_code == 403
         assert librarian.get("/api/v1/manage/library/sources").status_code == 200
+        assert librarian.get("/api/v1/scans").status_code == 200
+        assert librarian.get("/api/v1/manage/transcoding").status_code == 403
         assert (
             librarian.delete(
                 f"/api/v1/manage/library/trash/{identity}", headers=HEADERS
@@ -301,6 +322,8 @@ def test_profiles_source_browser_and_safe_album_trash(settings, authenticated_cl
         assert login(editor, "editor", "editor-password-123").status_code == 200
         assert editor.get("/api/v1/manage/metadata/folders").status_code == 200
         assert editor.get("/api/v1/manage/ai").status_code == 403
+        assert editor.get("/api/v1/scans").status_code == 200
+        assert editor.get("/api/v1/manage/lyric-scans").status_code == 403
     with TestClient(create_app(settings)) as listener:
         assert login(listener, "listener", "listener-password-123").status_code == 200
         assert listener.get("/api/v1/manage/overview").status_code == 403

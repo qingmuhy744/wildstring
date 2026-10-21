@@ -753,7 +753,10 @@ class LyricScans:
 
     def router(self, auth):
         router = APIRouter(prefix="/api/v1/manage")
-        admin, mutation = Depends(auth.require_admin), [Depends(auth.require_client)]
+        admin, mutation = (
+            Depends(auth.require_permission("tasks:control")),
+            [Depends(auth.require_client)],
+        )
 
         @router.get("/lyric-scan-settings")
         def read_settings(user=admin):

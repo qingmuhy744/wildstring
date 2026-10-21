@@ -625,7 +625,7 @@ class Transcoding:
 
     def router(self, auth):
         router = APIRouter(
-            prefix="/api/v1/manage/transcoding", dependencies=[Depends(auth.require_admin)]
+            prefix="/api/v1/manage/transcoding", dependencies=[Depends(auth.require_owner)]
         )
 
         @router.get("")

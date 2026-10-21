@@ -64,7 +64,7 @@ class SiteAccess:
 
     def router(self, auth):
         router = APIRouter(
-            prefix="/api/v1/manage/access", dependencies=[Depends(auth.require_admin)]
+            prefix="/api/v1/manage/access", dependencies=[Depends(auth.require_owner)]
         )
 
         @router.get("")

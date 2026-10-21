@@ -32,10 +32,12 @@ const empty = {
   native_search: false,
   stream_output: true,
 };
+const isOwner = (user: User) =>
+  (user.profile || (user.role === 'admin' ? 'owner' : 'listener')) === 'owner';
 export function AgentConnections({ user }: { user: User }) {
   const list = useModelConnections(),
     policy = useWorkspaceResource<{ allowed_hosts: string[]; allow_private: boolean }>(
-      user.role === 'admin' ? '/agent/endpoint-policy' : null,
+      isOwner(user) ? '/agent/endpoint-policy' : null,
     );
   const [form, setForm] = useState({ ...empty }),
     [editing, setEditing] = useState<AgentConnection | null>(null),
@@ -305,7 +307,7 @@ export function AgentConnections({ user }: { user: User }) {
                   onChange={(e) => setForm({ ...form, name: e.target.value })}
                 />
               </label>
-              {user.role === 'admin' && (
+              {isOwner(user) && (
                 <label>
                   连接归属
                   <select
@@ -406,7 +408,7 @@ export function AgentConnections({ user }: { user: User }) {
                   <HelpLabel hint="backgroundAI">允许自动巡检使用</HelpLabel>
                 </label>
                 <p className="muted">用于定时巡检等自动任务；手动开始无需开启。</p>
-                {user.role === 'admin' && form.scope === 'instance' && (
+                {isOwner(user) && form.scope === 'instance' && (
                   <label className="workspace-check">
                     <input
                       type="checkbox"
@@ -439,7 +441,7 @@ export function AgentConnections({ user }: { user: User }) {
               </div>
             </div>
           </form>
-          {user.role === 'admin' && (
+          {isOwner(user) && (
             <details className="legacy-ai-compatibility">
               <summary>原有实例连接（兼容配置）</summary>
               <p className="muted">
@@ -449,7 +451,7 @@ export function AgentConnections({ user }: { user: User }) {
               <AISettings />
             </details>
           )}
-          {user.role === 'admin' && (
+          {isOwner(user) && (
             <details>
               <summary>个人连接的端点规则</summary>
               <p className="muted">
@@ -637,8 +639,7 @@ export function ToolCredentials({ user }: { user: User }) {
                   {Object.entries(scopes)
                     .filter(
                       ([key]) =>
-                        user.role === 'admin' ||
-                        !['diagnostics:read', 'library:manage'].includes(key),
+                        isOwner(user) || !['diagnostics:read', 'library:manage'].includes(key),
                     )
                     .map(([key, label]) => (
                       <label className="workspace-check" key={key}>

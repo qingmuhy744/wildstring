@@ -1213,7 +1213,7 @@ class Providers:
 
     def router(self, auth):
         router = APIRouter(prefix="/api/v1")
-        admin = Annotated[dict, Depends(auth.require_admin)]
+        admin = Annotated[dict, Depends(auth.require_owner)]
         member = Annotated[dict, Depends(auth.require_session)]
         mutation = [Depends(auth.require_client)]
 
