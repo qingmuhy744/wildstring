@@ -1535,6 +1535,9 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
                             size={320}
                           />
                           <strong>{item.title}</strong>
+                          <small>
+                            {item.track_count} 首 · {time(item.duration_ms / 1000)}
+                          </small>
                         </button>
                         <span className="album-card-artists">
                           {item.artists.length
@@ -1552,9 +1555,6 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
                               ))
                             : '未知艺人'}
                         </span>
-                        <small>
-                          {item.track_count} 首 · {time(item.duration_ms / 1000)}
-                        </small>
                       </div>
                     ))}
                   </div>
