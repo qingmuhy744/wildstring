@@ -38,9 +38,10 @@ class Actor:
     version: int
     scopes: frozenset[str] = frozenset(SCOPES)
     credential_id: str | None = None
+    profile: str = "listener"
 
     def require(self, scope, *, admin=False):
-        if scope not in self.scopes or (admin and self.role != "admin"):
+        if scope not in self.scopes or (admin and self.profile != "owner"):
             raise HTTPException(
                 403, "agent_scope_required" if scope not in self.scopes else "admin_required"
             )

@@ -1,5 +1,6 @@
 """Real multi-session role checks, personal data isolation and password revocation."""
 
+import shutil
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
@@ -225,6 +226,84 @@ def test_account_validation_secrets_and_no_self_promotion(settings, authenticate
                     "SELECT password_hash FROM users WHERE username='Listener'"
                 ).fetchone()[0]
             )
+
+
+def test_profiles_source_browser_and_safe_album_trash(settings, authenticated_client):
+    settings.music_dir.mkdir()
+    music(settings, "库内.flac", ["曲库艺人"], ["曲库艺人"], album="待替换专辑")
+    shutil.copyfile(settings.library_dir / "库内.flac", settings.music_dir / "库内.flac")
+    (settings.music_dir / "未完成.flac.part").write_bytes(b"partial")
+    scan_library(settings)
+    with authenticated_client(settings) as admin:
+        created = admin.post(
+            "/api/v1/manage/users",
+            headers=HEADERS,
+            json={
+                "username": "librarian",
+                "password": "librarian-password-123",
+                "profile": "librarian",
+            },
+        )
+        assert created.status_code == 201, created.text
+        assert created.json()["profile"] == "librarian"
+        for username, profile in (("editor", "editor"), ("listener", "listener")):
+            response = admin.post(
+                "/api/v1/manage/users",
+                headers=HEADERS,
+                json={
+                    "username": username,
+                    "password": f"{username}-password-123",
+                    "profile": profile,
+                },
+            )
+            assert response.status_code == 201, response.text
+        track = admin.get("/api/v1/tracks").json()["items"][0]
+        album_id = track["album_id"]
+        assert admin.get("/api/v1/manage/library/sources").status_code == 200
+        folders = admin.get("/api/v1/manage/library/folders").json()["items"]
+        assert any(item["name"] == "未完成.flac.part" and item["pending"] for item in folders)
+        assert (
+            admin.post(
+                "/api/v1/manage/library/import/preview",
+                headers=HEADERS,
+                json={"source_id": "import", "path": "."},
+            ).json()["count"]
+            == 1
+        )
+        assert (
+            admin.post(f"/api/v1/manage/albums/{album_id}/trash", headers=HEADERS).status_code
+            == 202
+        )
+        assert admin.get("/api/v1/tracks").json()["total"] == 0
+        trash = admin.get("/api/v1/manage/library/trash").json()["items"]
+        assert len(trash) == 1 and trash[0]["status"] == "trashed"
+        identity = trash[0]["id"]
+        assert (
+            admin.post(
+                f"/api/v1/manage/library/trash/{identity}/restore", headers=HEADERS
+            ).status_code
+            == 200
+        )
+        assert admin.get("/api/v1/tracks").json()["total"] == 1
+
+    with TestClient(create_app(settings)) as librarian:
+        assert login(librarian, "librarian", "librarian-password-123").status_code == 200
+        assert librarian.get("/api/v1/manage/overview").status_code == 200
+        assert librarian.get("/api/v1/manage/ai").status_code == 403
+        assert librarian.get("/api/v1/manage/library/sources").status_code == 200
+        assert (
+            librarian.delete(
+                f"/api/v1/manage/library/trash/{identity}", headers=HEADERS
+            ).status_code
+            == 403
+        )
+    with TestClient(create_app(settings)) as editor:
+        assert login(editor, "editor", "editor-password-123").status_code == 200
+        assert editor.get("/api/v1/manage/metadata/folders").status_code == 200
+        assert editor.get("/api/v1/manage/ai").status_code == 403
+    with TestClient(create_app(settings)) as listener:
+        assert login(listener, "listener", "listener-password-123").status_code == 200
+        assert listener.get("/api/v1/manage/overview").status_code == 403
 
 
 def test_v7_upgrade_preserves_password_cookie_ids_and_existing_personal_data(

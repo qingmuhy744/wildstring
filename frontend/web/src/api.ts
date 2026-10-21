@@ -296,6 +296,7 @@ export interface User {
   id: string;
   username: string;
   role: 'admin' | 'user';
+  profile: 'owner' | 'librarian' | 'editor' | 'listener';
   enabled: boolean;
   version: number;
 }

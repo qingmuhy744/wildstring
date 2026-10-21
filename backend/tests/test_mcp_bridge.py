@@ -12,6 +12,7 @@ import pytest
 from mcp import Client
 from mcp.client.stdio import StdioServerParameters
 
+from wildstring.database import SCHEMA_VERSION
 from wildstring.mcp_bridge import Bridge, BridgeError
 
 TOKEN = "ws_" + "fixture" * 6
@@ -222,7 +223,7 @@ def test_stdio_real_backend_draft_approval_apply_diagnostics_and_revoke(
                 notices = await client.call_tool("list_notifications", {})
                 assert notices.structured_content["result"]["unread_count"] >= 2
                 status = await client.call_tool("get_system_status", {})
-                assert status.structured_content["result"]["schema_version"] == 26
+                assert status.structured_content["result"]["schema_version"] == SCHEMA_VERSION
                 deletion_response = api.delete(
                     "/api/v1/agent/credentials/" + credential["id"], headers=HEADERS
                 )

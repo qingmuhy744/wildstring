@@ -15,7 +15,7 @@ from test_personal_library import music
 from test_providers import HEADERS
 from test_source_plugins import MANIFEST
 
-from wildstring.database import Database
+from wildstring.database import SCHEMA_VERSION, Database
 from wildstring.library.repository import LibraryRepository
 from wildstring.library.scanner import scan_library
 from wildstring.lyric_quality import improves, quality, reaches
@@ -289,7 +289,7 @@ def test_schema20_upgrade_keeps_existing_library(settings):
         before = connection.execute("SELECT count(*) FROM users").fetchone()[0]
     db.initialize()
     with db.connect() as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 26
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
         assert connection.execute("SELECT count(*) FROM users").fetchone()[0] == before
 
 

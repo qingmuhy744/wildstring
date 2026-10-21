@@ -104,7 +104,7 @@ class Assistant:
             raise HTTPException(422, "invalid_ai_endpoint")
         # Instance admins explicitly choose their own endpoint; non-admin users need an
         # exact host allowlist before DNS or any network request can be attempted.
-        if actor.role == "admin" or legacy:
+        if actor.profile == "owner" or legacy:
             return
         policy = self.endpoint_policy()
         if host.lower() not in policy["allowed_hosts"]:

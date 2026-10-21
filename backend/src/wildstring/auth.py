@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, SecretStr, ValidationError
 
 from wildstring.config import Settings
 from wildstring.database import Database
+from wildstring.permissions import profile_for, require_owner, require_scope
 
 COOKIE = "wildstring_session"
 SESSION_SECONDS = 7 * 24 * 60 * 60
@@ -49,12 +50,14 @@ class UserCreate(BaseModel):
     username: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,31}$")
     password: SecretStr = Field(min_length=12, max_length=128)
     role: Literal["admin", "user"] = "user"
+    profile: Literal["owner", "librarian", "editor", "listener"] | None = None
 
 
 class UserUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     version: int = Field(ge=1, strict=True)
     role: Literal["admin", "user"]
+    profile: Literal["owner", "librarian", "editor", "listener"] | None = None
     enabled: bool = Field(strict=True)
 
 
@@ -74,7 +77,8 @@ def validated(model, body):
 
 def public_user(row):
     return {key: row[key] for key in ("id", "username", "role", "version")} | {
-        "enabled": bool(row["enabled"])
+        "enabled": bool(row["enabled"]),
+        "profile": profile_for(row),
     }
 
 
@@ -140,6 +144,15 @@ class Auth:
         if user["role"] != "admin":
             raise HTTPException(403, "admin_required")
         return user
+
+    def require_owner(self, request: Request) -> dict:
+        return require_owner(self.require_session(request))
+
+    def require_permission(self, scope: str):
+        def dependency(request: Request) -> dict:
+            return require_scope(self.require_session(request), scope)
+
+        return dependency
 
     @staticmethod
     def require_client(request: Request) -> None:
@@ -318,9 +331,11 @@ class Auth:
                 ).fetchone():
                     raise HTTPException(409, "username_taken")
                 user_id = uuid4().hex
+                profile = value.profile or ("owner" if value.role == "admin" else "listener")
+                role = "admin" if profile == "owner" else "user"
                 connection.execute(
-                    "INSERT INTO users(id,username,password_hash,role) VALUES (?,?,?,?)",
-                    (user_id, value.username, hashed, value.role),
+                    "INSERT INTO users(id,username,password_hash,role,profile) VALUES (?,?,?,?,?)",
+                    (user_id, value.username, hashed, role, profile),
                 )
                 return public_user(
                     connection.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
@@ -335,9 +350,11 @@ class Auth:
                 target(connection, user_id, body.version)
                 if actor["id"] == user_id:
                     raise HTTPException(409, "cannot_change_self_role")
+                profile = body.profile or ("owner" if body.role == "admin" else "listener")
+                role = "admin" if profile == "owner" else "user"
                 connection.execute(
-                    "UPDATE users SET role=?,enabled=?,version=version+1 WHERE id=?",
-                    (body.role, body.enabled, user_id),
+                    "UPDATE users SET role=?,profile=?,enabled=?,version=version+1 WHERE id=?",
+                    (role, profile, body.enabled, user_id),
                 )
                 connection.execute("DELETE FROM sessions WHERE user_id=?", (user_id,))
                 return public_user(

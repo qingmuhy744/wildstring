@@ -6,6 +6,16 @@ import { PlaybackStyleControl } from './playback-style';
 import { TrackListSizeControl } from './track-list-size';
 import { AvatarEditor } from './avatar';
 
+type Profile = User['profile'];
+const profileLabels: Record<Profile, string> = {
+  owner: '所有者',
+  librarian: '曲库管理员',
+  editor: '资料编辑员',
+  listener: '听众',
+};
+const userProfile = (user: User): Profile =>
+  user.profile || (user.role === 'admin' ? 'owner' : 'listener');
+
 export function AccountDialog({ user, onClose }: { user: User; onClose: () => void }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const [current, setCurrent] = useState(''),
@@ -58,7 +68,7 @@ export function AccountDialog({ user, onClose }: { user: User; onClose: () => vo
           <span className="eyebrow">YOUR ACCOUNT</span>
           <h2>账号设置</h2>
           <p className="muted">
-            {user.username} · {user.role === 'admin' ? '管理员' : '普通用户'}
+            {user.username} · {profileLabels[userProfile(user)]}
           </p>
         </div>
         <button className="icon-button" aria-label="关闭账号设置" disabled={busy} onClick={onClose}>
@@ -131,7 +141,7 @@ export function UsersPanel() {
   const [username, setUsername] = useState(''),
     [password, setPassword] = useState(''),
     [confirmation, setConfirmation] = useState(''),
-    [role, setRole] = useState<'admin' | 'user'>('user');
+    [profile, setProfile] = useState<Profile>('listener');
   const [resetting, setResetting] = useState<User | null>(null),
     [resetPassword, setResetPassword] = useState(''),
     [resetConfirm, setResetConfirm] = useState('');
@@ -181,7 +191,12 @@ export function UsersPanel() {
         () =>
           api('/manage/users', {
             method: 'POST',
-            body: JSON.stringify({ username, password, role }),
+            body: JSON.stringify({
+              username,
+              password,
+              profile,
+              role: profile === 'owner' ? 'admin' : 'user',
+            }),
           }),
         '账号已创建。',
       )
@@ -191,14 +206,15 @@ export function UsersPanel() {
       setConfirmation('');
     }
   }
-  function update(user: User, values: { role?: User['role']; enabled?: boolean }) {
+  function update(user: User, values: { profile?: Profile; enabled?: boolean }) {
     void act(
       () =>
         api(`/manage/users/${user.id}`, {
           method: 'PUT',
           body: JSON.stringify({
             version: user.version,
-            role: values.role ?? user.role,
+            role: (values.profile ?? userProfile(user)) === 'owner' ? 'admin' : 'user',
+            profile: values.profile ?? userProfile(user),
             enabled: values.enabled ?? user.enabled,
           }),
         }),
@@ -257,18 +273,20 @@ export function UsersPanel() {
               <div>
                 <strong>{user.username}</strong>
                 <small>
-                  {user.enabled ? '已启用' : '已停用'}
+                  {profileLabels[userProfile(user)]} · {user.enabled ? '已启用' : '已停用'}
                   {self?.id === user.id ? ' · 当前账号' : ''}
                 </small>
               </div>
               <select
                 aria-label={`${user.username} 的角色`}
                 disabled={busy || !self || self.id === user.id}
-                value={user.role}
-                onChange={(e) => update(user, { role: e.target.value as User['role'] })}
+                value={userProfile(user)}
+                onChange={(e) => update(user, { profile: e.target.value as Profile })}
               >
-                <option value="user">普通用户</option>
-                <option value="admin">管理员</option>
+                <option value="listener">听众</option>
+                <option value="editor">资料编辑员</option>
+                <option value="librarian">曲库管理员</option>
+                <option value="owner">所有者</option>
               </select>
               <button
                 disabled={busy || !self || self.id === user.id}
@@ -357,9 +375,11 @@ export function UsersPanel() {
         <span className="muted">1–32 位英文字母、数字、点、下划线或连字符；首位为字母或数字。</span>
         <label>
           角色
-          <select value={role} onChange={(e) => setRole(e.target.value as User['role'])}>
-            <option value="user">普通用户</option>
-            <option value="admin">管理员</option>
+          <select value={profile} onChange={(e) => setProfile(e.target.value as Profile)}>
+            <option value="listener">听众</option>
+            <option value="editor">资料编辑员</option>
+            <option value="librarian">曲库管理员</option>
+            <option value="owner">所有者</option>
           </select>
         </label>
         <label>

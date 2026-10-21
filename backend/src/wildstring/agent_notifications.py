@@ -231,7 +231,7 @@ class Notifications:
         return dict(row)
 
     def create_target(self, actor, body):
-        if body.chat_id.startswith("-") and actor.role != "admin":
+        if body.chat_id.startswith("-") and actor.profile != "owner":
             raise HTTPException(403, "admin_required")
         identity = uuid4().hex
         secret_ref = self.put_secret(identity, body.bot_token.get_secret_value())
