@@ -99,17 +99,15 @@ export function MetadataRefreshDialog({
           force,
         }),
       });
+      const upgraded = (result as { upgraded?: number }).upgraded || 0;
+      const intents = (result as { refresh_intents?: number }).refresh_intents || 0;
       setMessage(
         result.total
-          ? `已加入 ${result.queued} 首（新增排队 ${result.queued} 首，已有任务 ${result.already_active} 首${
-              (result as { upgraded?: number; refresh_intents?: number }).upgraded ||
-              (result as { upgraded?: number; refresh_intents?: number }).refresh_intents
-                ? `，刷新意图已更新 ${
-                    ((result as { upgraded?: number }).upgraded || 0) +
-                    ((result as { refresh_intents?: number }).refresh_intents || 0)
-                  } 首`
-                : ''
-            }）。`
+          ? result.queued === 0 && result.already_active === result.total && !upgraded && !intents
+            ? `本批 ${result.total} 首已有查询在队列中，本次没有重复排队。查询完成后点击“重新读取”查看候选。`
+            : `已加入 ${result.queued} 首（新增排队 ${result.queued} 首，已有任务 ${result.already_active} 首${
+                upgraded || intents ? `，刷新意图已更新 ${upgraded + intents} 首` : ''
+              }）。`
           : '当前范围没有可更新的歌曲。',
       );
       setDone(true);

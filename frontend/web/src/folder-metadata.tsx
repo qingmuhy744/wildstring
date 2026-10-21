@@ -24,6 +24,9 @@ export function FolderMetadataEditor({ onChanged }: { onChanged: () => void }) {
   const [selected, setSelected] = useState<FolderDetail | null>(null);
   const [album, setAlbum] = useState('');
   const [artists, setArtists] = useState('');
+  const [query, setQuery] = useState('');
+  const [warningsOnly, setWarningsOnly] = useState(false);
+  const [showAll, setShowAll] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
@@ -93,6 +96,16 @@ export function FolderMetadataEditor({ onChanged }: { onChanged: () => void }) {
     }
   }
 
+  const filteredFolders = folders.filter((item) => {
+    const haystack = `${item.folder} ${item.album_variants.join(' ')} ${item.album_artist_variants.join(' ')}`;
+    return (
+      haystack.toLowerCase().includes(query.trim().toLowerCase()) && (!warningsOnly || item.warning)
+    );
+  });
+  const visibleFolders = showAll ? filteredFolders : filteredFolders.slice(0, 8);
+  const warningCount = folders.filter((item) => item.warning).length;
+  const trackCount = folders.reduce((total, item) => total + item.track_count, 0);
+
   return (
     <section className="management-card" aria-label="按文件夹批量整理">
       <div className="management-section-heading">
@@ -116,66 +129,138 @@ export function FolderMetadataEditor({ onChanged }: { onChanged: () => void }) {
       {!folders.length ? (
         <p className="muted">暂时没有可批量整理的文件夹。</p>
       ) : (
-        <div className="management-task-actions">
-          <div>
-            <h3>文件夹分组</h3>
-            <ul className="manage-track-list">
-              {folders.map((item) => (
-                <li key={item.folder}>
-                  <div>
-                    <strong>{item.folder}</strong>
-                    <span>
-                      {item.track_count} 首 · {item.album_variants.join(' / ') || '未命名专辑'}
-                    </span>
-                    {item.warning && (
-                      <small className="metadata-task-warning">发现多个专辑版本，建议先核对</small>
-                    )}
-                  </div>
-                  <button disabled={busy} onClick={() => void open(item.folder)}>
-                    查看并编辑
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </div>
-          {selected && (
+        <>
+          <div className="folder-metadata-summary" aria-label="文件夹整理概览">
             <div>
-              <h3>{selected.folder}</h3>
-              <p className="muted">
-                将应用到 {selected.tracks.length} 首：
-                {selected.tracks.map((track) => track.title).join('、')}
-              </p>
-              {selected.warning && (
-                <p className="error">
-                  这个文件夹包含多个现有专辑或专辑艺人值，确认后会统一为下面的值。
-                </p>
-              )}
-              <label className="metadata-field">
-                <span>专辑</span>
-                <input
-                  value={album}
-                  onChange={(event) => setAlbum(event.target.value)}
-                  maxLength={1000}
-                />
-              </label>
-              <label className="metadata-field">
-                <span>专辑艺人（用 / 分隔）</span>
-                <input
-                  value={artists}
-                  onChange={(event) => setArtists(event.target.value)}
-                  maxLength={1000}
-                />
-              </label>
-              <button
-                className="primary"
-                disabled={busy || (!album.trim() && !artists.trim())}
-                onClick={() => void apply()}
-              >
-                {busy ? '正在更新…' : '应用到整组歌曲'}
-              </button>
+              <strong>{folders.length}</strong>
+              <span>个文件夹</span>
             </div>
-          )}
-        </div>
+            <div>
+              <strong>{trackCount}</strong>
+              <span>首歌曲</span>
+            </div>
+            <div className={warningCount ? 'has-warning' : ''}>
+              <strong>{warningCount}</strong>
+              <span>个待核对</span>
+            </div>
+          </div>
+          <div className="folder-metadata-layout">
+            <div className="folder-metadata-browser">
+              <div className="folder-metadata-toolbar">
+                <input
+                  value={query}
+                  onChange={(event) => {
+                    setQuery(event.target.value);
+                    setShowAll(false);
+                  }}
+                  placeholder="搜索文件夹、专辑或艺人"
+                  aria-label="搜索文件夹"
+                />
+                <button
+                  className={warningsOnly ? 'active' : ''}
+                  onClick={() => {
+                    setWarningsOnly((value) => !value);
+                    setShowAll(false);
+                  }}
+                >
+                  {warningsOnly ? '显示全部' : `仅看问题 ${warningCount}`}
+                </button>
+              </div>
+              <div className="folder-metadata-list-heading">
+                <h3>文件夹分组</h3>
+                <span>{filteredFolders.length} 个结果</span>
+              </div>
+              <ul className="manage-track-list folder-metadata-list">
+                {visibleFolders.map((item) => (
+                  <li
+                    key={item.folder}
+                    className={selected?.folder === item.folder ? 'selected' : ''}
+                  >
+                    <div>
+                      <strong>{item.folder}</strong>
+                      <span>
+                        {item.track_count} 首 · {item.album_variants.join(' / ') || '未命名专辑'}
+                      </span>
+                      {item.warning && (
+                        <small className="metadata-task-warning">
+                          发现多个专辑版本，建议先核对
+                        </small>
+                      )}
+                    </div>
+                    <button disabled={busy} onClick={() => void open(item.folder)}>
+                      {selected?.folder === item.folder ? '已选中' : '编辑'}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+              {!visibleFolders.length && (
+                <p className="muted folder-metadata-empty">没有符合条件的文件夹。</p>
+              )}
+              {filteredFolders.length > 8 && (
+                <button
+                  className="folder-metadata-more"
+                  onClick={() => setShowAll((value) => !value)}
+                >
+                  {showAll ? '收起列表' : `显示全部 ${filteredFolders.length} 个文件夹`}
+                </button>
+              )}
+            </div>
+            <div className="folder-metadata-editor">
+              {selected ? (
+                <>
+                  <div className="folder-metadata-editor-heading">
+                    <div>
+                      <span className="eyebrow">当前选中</span>
+                      <h3>{selected.folder}</h3>
+                    </div>
+                    <span>{selected.tracks.length} 首歌曲</span>
+                  </div>
+                  <p className="muted">
+                    将应用到：
+                    {selected.tracks
+                      .slice(0, 5)
+                      .map((track) => track.title)
+                      .join('、')}
+                    {selected.tracks.length > 5 ? ` 等 ${selected.tracks.length} 首` : ''}
+                  </p>
+                  {selected.warning && (
+                    <p className="error">
+                      这个文件夹包含多个现有专辑或专辑艺人值，确认后会统一为下面的值。
+                    </p>
+                  )}
+                  <label className="metadata-field">
+                    <span>专辑</span>
+                    <input
+                      value={album}
+                      onChange={(event) => setAlbum(event.target.value)}
+                      maxLength={1000}
+                    />
+                  </label>
+                  <label className="metadata-field">
+                    <span>专辑艺人（用 / 分隔）</span>
+                    <input
+                      value={artists}
+                      onChange={(event) => setArtists(event.target.value)}
+                      maxLength={1000}
+                    />
+                  </label>
+                  <button
+                    className="primary"
+                    disabled={busy || (!album.trim() && !artists.trim())}
+                    onClick={() => void apply()}
+                  >
+                    {busy ? '正在更新…' : '应用到整组歌曲'}
+                  </button>
+                </>
+              ) : (
+                <div className="folder-metadata-editor-empty">
+                  <strong>选择一个文件夹开始整理</strong>
+                  <span>先看左侧分组和警告，再统一修改整组歌曲。</span>
+                </div>
+              )}
+            </div>
+          </div>
+        </>
       )}
     </section>
   );

@@ -40,6 +40,7 @@ import kotlin.math.roundToInt
     vm: MusicViewModel, state: MusicState, header: @Composable () -> Unit,
     play: (Track) -> Unit, actions: (Track) -> Unit,
     playlistActions: (Playlist) -> Unit = {},
+    albumActions: (Album) -> Unit = {},
 ) {
     val list = rememberLazyListState()
     val grid = rememberLazyGridState()
@@ -80,7 +81,12 @@ import kotlin.math.roundToInt
             items(state.total, key = { "album-position-$it" }) { index ->
                 val album = state.window.albumAt(index)
                 if (album == null) CatalogPlaceholder(vm, state, index, grid = true)
-                else Column(Modifier.testTag("catalog-item-$index").clickable { vm.openAlbum(album) }) {
+                else Column(Modifier.testTag("catalog-item-$index").combinedClickable(
+                    onClick = { vm.openAlbum(album) },
+                    hapticFeedbackEnabled = false,
+                    onLongClickLabel = "专辑操作",
+                    onLongClick = { playlistFeedback(TactileKind.DragStart); albumActions(album) },
+                )) {
                     Cover(vm, album.coverTrackId, album.title, Modifier.fillMaxWidth().aspectRatio(1f))
                     Text(album.title, Modifier.padding(top = 8.dp), maxLines = 2, overflow = TextOverflow.Ellipsis)
                     Text(album.artists.joinToString(" / "), color = MaterialTheme.colorScheme.onSurfaceVariant,

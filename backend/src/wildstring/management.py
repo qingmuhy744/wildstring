@@ -67,6 +67,13 @@ class FolderMetadataUpdate(BaseModel):
         return validate_folder(value)
 
 
+class AlbumMetadataUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    album_id: str = Field(min_length=1, max_length=128)
+    tracks: list[FolderTrackUpdate] = Field(min_length=1, max_length=1000)
+    overrides: Overrides
+
+
 class Management:
     def __init__(self, settings, repository):
         self.settings, self.repository = settings, repository
@@ -272,6 +279,69 @@ class Management:
             "updated": len(requested),
             "album_variants": self.metadata_folders(folder=body.folder)["album_variants"],
         }
+
+    def metadata_album(self, album_id):
+        library_id = self.repository.library_id()
+        with self.database.connect() as connection:
+            rows = connection.execute(
+                """SELECT t.id,t.path,t.title,t.album,t.album_artists,t.artists,t.track_number,
+                t.disc_number,m.version,m.observed,m.overrides
+                FROM tracks t JOIN track_metadata m ON m.track_id=t.id
+                WHERE t.library_id=? AND t.album_id=? AND t.status='available'
+                ORDER BY t.disc_number,t.track_number,t.path,t.id""",
+                (library_id, album_id),
+            ).fetchall()
+        if not rows:
+            return None
+        tracks = []
+        albums = set()
+        album_artists = set()
+        for row in rows:
+            current = json.loads(row["observed"]) | json.loads(row["overrides"])
+            tracks.append(
+                {
+                    "track_id": row["id"],
+                    "title": row["title"],
+                    "album": row["album"],
+                    "album_artists": json.loads(row["album_artists"]),
+                    "artists": json.loads(row["artists"]),
+                    "track_number": row["track_number"],
+                    "disc_number": row["disc_number"],
+                    "metadata_version": row["version"],
+                    "metadata": current,
+                }
+            )
+            if row["album"]:
+                albums.add(row["album"])
+            album_artists.update(json.loads(row["album_artists"]))
+        return {
+            "album_id": album_id,
+            "tracks": tracks,
+            "album_variants": sorted(albums),
+            "album_artist_variants": sorted(album_artists),
+            "warning": len(albums) > 1 or len(album_artists) > 1,
+        }
+
+    def update_metadata_album(self, body, *, user_id="admin"):
+        group = self.metadata_album(body.album_id)
+        if group is None:
+            raise HTTPException(404, "album_not_found")
+        requested = {item.track_id: item.version for item in body.tracks}
+        available = {item["track_id"]: item for item in group["tracks"]}
+        if set(requested) - set(available):
+            raise HTTPException(409, "album_membership_changed")
+        editor = MetadataEditor(self.repository)
+        with self.database.connect(write=True) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            for track_id, version_number in requested.items():
+                editor.save_in_transaction(
+                    connection,
+                    track_id,
+                    MetadataUpdate(version=version_number, overrides=body.overrides),
+                    user_id=user_id,
+                    source="album-batch",
+                )
+        return {"album_id": body.album_id, "updated": len(requested)}
 
     def link(self, job_id, *, import_id=None, scan_id=None):
         with self.database.connect(write=True) as connection:
@@ -568,6 +638,19 @@ def management_router(service, auth, providers=None):
         body: FolderMetadataUpdate, user: Annotated[dict, Depends(auth.require_admin)]
     ):
         return service.update_metadata_folder(body, user_id=user["id"])
+
+    @router.get("/metadata/albums")
+    def metadata_album(album_id: Annotated[str, Query(min_length=1, max_length=128)]):
+        result = service.metadata_album(album_id)
+        if result is None:
+            raise HTTPException(404, "album_not_found")
+        return result
+
+    @router.put("/metadata/albums", dependencies=[Depends(auth.require_client)])
+    def update_metadata_album(
+        body: AlbumMetadataUpdate, user: Annotated[dict, Depends(auth.require_admin)]
+    ):
+        return service.update_metadata_album(body, user_id=user["id"])
 
     @router.get("/tracks/{track_id}/metadata")
     def metadata(track_id: str):

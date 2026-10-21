@@ -73,6 +73,9 @@ def test_batches_are_isolated_track_all_thirty_members_and_reuse_active_jobs(
         assert (second["queued"], second["already_active"], second["total"]) == (6, 0, 6)
         shared = refresh(client, scope="track", id=target["id"], force=True)
         assert (shared["queued"], shared["already_active"], shared["total"]) == (0, 1, 1)
+        repeated = refresh(client, scope="track", id=target["id"], force=True)
+        assert "batch_id" not in repeated
+        assert (repeated["queued"], repeated["already_active"], repeated["total"]) == (0, 1, 1)
         initial = progress(client, first)
         assert initial["total"] == initial["queued"] == 30 and len(initial["items"]) == 30
         assert initial["truncated"] is False
