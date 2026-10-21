@@ -150,7 +150,7 @@ class AccountPlaybackTest {
             }
             compose.waitUntil(5_000) { compose.onAllNodesWithContentDescription("设置").fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithContentDescription("设置").performClick()
-            compose.onNodeWithText("alice · 普通用户").assertExists()
+            compose.onNodeWithText("alice · 听众").assertExists()
             compose.onNodeWithTag("setting-播放音质").performScrollTo().performClick()
             compose.onNodeWithText("AAC · 192 kbps").performClick()
             try {
@@ -216,7 +216,7 @@ class AccountPlaybackTest {
             assertTrue(vm.state.value.queue.isEmpty())
             assertTrue(runBlocking { vm.repository.database.queue().entries().isEmpty() })
             compose.onNodeWithContentDescription("设置").performClick()
-            compose.onNodeWithText("bob · 普通用户").assertExists()
+            compose.onNodeWithText("bob · 听众").assertExists()
             capture("account-settings.png")
             compose.onNodeWithText("修改密码").performClick()
             compose.onNodeWithText("当前密码").performTextInput("wrong-password")
