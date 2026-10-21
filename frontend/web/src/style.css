@@ -2632,6 +2632,138 @@ select {
 .management-task-actions button {
   margin-top: 8px;
 }
+.folder-metadata-summary {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 20px 0 16px;
+}
+.folder-metadata-summary > div {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  min-width: 112px;
+  padding: 12px 14px;
+  border: 1px solid #353b2d;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--workspace-bg) 72%, transparent);
+}
+.folder-metadata-summary strong {
+  font-size: 20px;
+  font-weight: 500;
+}
+.folder-metadata-summary span {
+  color: var(--muted);
+  font-size: 12px;
+}
+.folder-metadata-summary .has-warning strong,
+.folder-metadata-summary .has-warning span {
+  color: var(--accent);
+}
+.folder-metadata-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(320px, 0.95fr);
+  gap: 26px;
+  align-items: start;
+}
+.folder-metadata-browser,
+.folder-metadata-editor {
+  min-width: 0;
+}
+.folder-metadata-toolbar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 14px;
+}
+.folder-metadata-toolbar input {
+  flex: 1;
+  min-width: 0;
+  padding: 11px 12px;
+  border: 1px solid #4b5141;
+  border-radius: 7px;
+  background: #191d17;
+  color: inherit;
+}
+.folder-metadata-toolbar button,
+.folder-metadata-more {
+  padding: 9px 12px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.folder-metadata-toolbar button.active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.folder-metadata-list-heading,
+.folder-metadata-editor-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.folder-metadata-list-heading h3,
+.folder-metadata-editor-heading h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.folder-metadata-list-heading span,
+.folder-metadata-editor-heading > span {
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.folder-metadata-list {
+  max-height: 520px;
+  overflow-y: auto;
+  margin: 8px 0 0;
+  padding-right: 8px;
+}
+.folder-metadata-list li {
+  padding: 14px 8px;
+  border-top-color: color-mix(in srgb, var(--border) 72%, transparent);
+}
+.folder-metadata-list li.selected {
+  padding-left: 12px;
+  border-left: 3px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+.folder-metadata-list button {
+  margin-top: 0;
+}
+.folder-metadata-empty,
+.folder-metadata-editor-empty {
+  display: grid;
+  gap: 8px;
+  min-height: 180px;
+  place-content: center;
+  text-align: center;
+  color: var(--muted);
+}
+.folder-metadata-editor {
+  min-height: 260px;
+  padding: 20px;
+  border: 1px solid #353b2d;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--workspace-bg) 78%, transparent);
+}
+.folder-metadata-editor-heading .eyebrow {
+  display: block;
+  margin-bottom: 6px;
+}
+.folder-metadata-editor .metadata-field {
+  margin-top: 16px;
+}
+.folder-metadata-editor .primary {
+  margin-top: 18px;
+}
+.folder-metadata-more {
+  display: block;
+  width: 100%;
+  margin-top: 12px;
+}
 .management-checkbox {
   display: flex;
   align-items: center;
@@ -2927,8 +3059,12 @@ select {
   }
   .library-locations,
   .management-task-actions,
+  .folder-metadata-layout,
   .metadata-fields {
     grid-template-columns: 1fr;
+  }
+  .folder-metadata-list {
+    max-height: 360px;
   }
   .management-section-heading {
     flex-direction: column;

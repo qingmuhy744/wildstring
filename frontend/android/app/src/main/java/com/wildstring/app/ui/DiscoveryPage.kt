@@ -1,6 +1,7 @@
 package com.wildstring.app.ui
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -14,9 +15,11 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.wildstring.app.data.Album
 
 /** The reference layout, backed by actual albums and listening history rather than invented picks. */
-@Composable internal fun DiscoveryPage(vm: MusicViewModel, state: MusicState, play: (Int) -> Unit, recent: () -> Unit, header: @Composable () -> Unit = {}) {
+@Composable internal fun DiscoveryPage(vm: MusicViewModel, state: MusicState, play: (Int) -> Unit, recent: () -> Unit, header: @Composable () -> Unit = {}, albumActions: (Album) -> Unit = {}) {
+    val feedback = LocalTactileFeedback.current
     Box(Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.TopCenter) {
         LazyColumn(Modifier.widthIn(max = 1040.dp).fillMaxSize().testTag("discovery-page"), contentPadding = PaddingValues(bottom = 16.dp)) {
             item(key = "discovery-header") { header() }
@@ -27,7 +30,12 @@ import androidx.compose.ui.unit.dp
                 if (state.albums.isNotEmpty()) LazyRow(Modifier.testTag("discovery-albums"),
                     contentPadding = PaddingValues(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                     items(state.albums, key = { it.id }) { album ->
-                        Column(Modifier.width(140.dp).clickable { vm.openAlbum(album) }) {
+                        Column(Modifier.width(140.dp).combinedClickable(
+                            onClick = { vm.openAlbum(album) },
+                            hapticFeedbackEnabled = false,
+                            onLongClickLabel = "专辑操作",
+                            onLongClick = { feedback(TactileKind.DragStart); albumActions(album) },
+                        )) {
                             Cover(vm, album.coverTrackId, album.title, Modifier.fillMaxWidth().aspectRatio(1f))
                             Text(album.title, Modifier.padding(top = 10.dp), style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             Text(album.artists.joinToString(" / "), Modifier.padding(top = 3.dp), style = MaterialTheme.typography.bodySmall,

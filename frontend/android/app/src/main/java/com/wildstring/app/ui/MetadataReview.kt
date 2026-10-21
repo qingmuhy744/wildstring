@@ -43,7 +43,7 @@ private fun reviewCandidateLabel(source: JsonObject, track: JsonObject, names: J
 }
 private val reviewLabels = mapOf("title" to "歌名", "artists" to "歌曲艺人", "album" to "专辑", "album_artists" to "专辑艺人", "track_number" to "曲序", "disc_number" to "碟号", "track_total" to "总曲数", "disc_total" to "总碟数", "release_date" to "发行日期", "original_date" to "首次发行日期", "composers" to "作曲", "lyricists" to "作词", "arrangers" to "编曲", "vocalists" to "演唱", "genres" to "风格", "external_ids" to "外部标识", "description" to "简介")
 
-@Composable internal fun MetadataReviewPanel(vm: MusicViewModel, initialTrack: Track? = null, initialBatchId: String? = null) {
+@Composable internal fun MetadataReviewPanel(vm: MusicViewModel, initialTrack: Track? = null, initialBatchId: String? = null, initialAlbumId: String? = null) {
     val action = remember { FeatureAction() }; val scope = rememberCoroutineScope(); val uri = LocalUriHandler.current
     var albums by remember { mutableStateOf<List<JsonObject>>(emptyList()) }; var albumTotal by remember { mutableIntStateOf(0) }
     var page by remember { mutableStateOf<JsonObject?>(null) }; var active by remember { mutableStateOf("") }
@@ -101,7 +101,7 @@ private val reviewLabels = mapOf("title" to "歌名", "artists" to "歌曲艺人
         val nextId = if (single) tracks.getOrNull((tracks.indexOfFirst { it.text("id") == active } + 1) % tracks.size.coerceAtLeast(1))?.text("id") else null
         page?.let { load(currentQuery(it), nextId) }; loadAlbums(); vm.load(); action.message = "已应用 ${chosen.size} 首的所选资料${if (snapshot != null) "及固定封面" else ""}。"
     }
-    LaunchedEffect(initialTrack?.id, initialBatchId) { action.run { val list = loadAlbums(); load(when { initialTrack != null -> mapOf("track_id" to initialTrack.id); initialBatchId != null -> mapOf("batch_id" to initialBatchId); else -> mapOf("album_id" to list.firstOrNull()?.text("id").orEmpty()) }, initialTrack?.id) }; if (action.message == "已完成") action.message = null }
+    LaunchedEffect(initialTrack?.id, initialBatchId, initialAlbumId) { action.run { val list = loadAlbums(); load(when { initialTrack != null -> mapOf("track_id" to initialTrack.id); initialBatchId != null -> mapOf("batch_id" to initialBatchId); initialAlbumId != null -> mapOf("album_id" to initialAlbumId); else -> mapOf("album_id" to list.firstOrNull()?.text("id").orEmpty()) }, initialTrack?.id) }; if (action.message == "已完成") action.message = null }
     Column(Modifier.fillMaxSize().testTag("metadata-review")) {
         if (action.busy && page == null) {
             ActionStatus(action)

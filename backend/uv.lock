@@ -1068,7 +1068,7 @@ wheels = [
 
 [[package]]
 name = "wildstring-backend"
-version = "0.5.14"
+version = "0.5.15"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },

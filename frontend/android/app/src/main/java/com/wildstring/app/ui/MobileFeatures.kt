@@ -50,7 +50,7 @@ internal fun FeatureDialog(vm: MusicViewModel, route: String, track: Track? = nu
         "connections" -> "模型连接"; "research" -> "联网与记忆"; "channels" -> "通知设置"
         "external" -> "发现新音乐"; "rankings" -> "收听排行"; "daily" -> "每日推荐"; "ai" -> "AI 找歌与歌单"; "offline" -> "离线保存"; "statistics" -> "收听统计"; "devices" -> "其他设备继续"
         "playlist" -> if (playlist == null) "新建歌单" else "编辑歌单"; "order" -> "歌单排序"; "multi" -> "多选加入歌单"
-        "lyric-scans" -> "歌词补全与洗版"; "gain" -> "响度均衡与手动调整"; "source-plugins" -> "数据源 ZIP 插件"; "management" -> "曲库管理"
+        "lyric-scans" -> "歌词补全与洗版"; "gain" -> "响度均衡与手动调整"; "source-plugins" -> "数据源 ZIP 插件"; "management" -> "曲库管理"; "album-edit" -> "编辑专辑信息"
         "metadata" -> "编辑歌曲信息"; "lyrics" -> "编辑歌词"; "suggestions" -> "更新元数据与建议"; else -> "曲库管理"
     }
     Dialog(onDismissRequest = dismiss, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
@@ -91,7 +91,8 @@ internal fun FeatureDialog(vm: MusicViewModel, route: String, track: Track? = nu
                             "suggestions" -> track?.let { SuggestionsPanel(vm, it) }
                             "source-plugins" -> SourcePluginsPanel(vm)
                             "lyric-scans" -> LyricScansPanel(vm, albumId, initialBatchId)
-                            else -> ManagementPanel(vm, initialBatchId)
+                            "album-edit" -> albumId?.let { AlbumMetadataPanel(vm, it, dismiss) }
+                            else -> ManagementPanel(vm, initialBatchId, albumId)
                         } else Text("需要管理员权限。", Modifier.padding(24.dp))
                     }
                 }
@@ -133,7 +134,14 @@ internal class FeatureAction {
 }
 @Composable internal fun ActionStatus(action: FeatureAction) {
     if (action.busy) LinearProgressIndicator(Modifier.fillMaxWidth())
-    action.message?.let { androidx.compose.foundation.text.selection.SelectionContainer { Text(it, Modifier.padding(vertical = 8.dp), style = MaterialTheme.typography.bodySmall) } }
+    // Loading surfaces already provide the visual progress cue. Keep transient
+    // "正在处理…" text from competing with skeletons and the wave indicator;
+    // final messages and errors remain visible after the operation settles.
+    action.message?.takeIf { !action.busy }?.let {
+        androidx.compose.foundation.text.selection.SelectionContainer {
+            Text(it, Modifier.padding(vertical = 8.dp), style = MaterialTheme.typography.bodySmall)
+        }
+    }
 }
 
 @Composable

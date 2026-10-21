@@ -575,7 +575,11 @@ class Providers:
             connection.executemany(
                 "INSERT OR IGNORE INTO provider_seen VALUES (?)", [(row["id"],) for row in rows]
             )
-            if track_batch:
+            # Do not create another batch snapshot when a repeated click did
+            # not add or upgrade any job. The active task is already visible
+            # in the task list; duplicate empty batches make the history look
+            # like duplicate work.
+            if track_batch and (added or upgraded or intents or not force):
                 batch_id = record_batch(connection, library_id, rows)
         result = {"queued": added, "already_active": len(rows) - added, "total": len(rows)}
         if upgraded:
@@ -1003,8 +1007,12 @@ class Providers:
                 self.enqueue(unseen)
         with self.database.connect(write=True) as connection:
             connection.execute("BEGIN IMMEDIATE")
+            # A user-requested fresh lookup must not sit behind a large
+            # automatic/backfill queue.  Keep FIFO ordering within each class,
+            # while letting explicit `force` refreshes provide timely feedback.
             job = connection.execute(
-                "SELECT * FROM provider_jobs WHERE status='queued' ORDER BY created_at LIMIT 1"
+                "SELECT * FROM provider_jobs WHERE status='queued' "
+                "ORDER BY force DESC, created_at, id LIMIT 1"
             ).fetchone()
             if job:
                 connection.execute(

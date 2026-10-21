@@ -378,6 +378,29 @@ def test_auto_queries_only_new_tracks_after_enable(settings, authenticated_clien
             assert [(r[0], r[1]) for r in jobs] == [("no_match", "new.flac")]
 
 
+def test_force_refresh_is_served_before_automatic_backlog(settings, authenticated_client):
+    music(settings, "旧队列.flac", ["A"], ["A"])
+    music(settings, "手动重查.flac", ["A"], ["A"])
+    scan_library(settings)
+    with authenticated_client(settings) as client:
+        providers = client.app.state.providers
+        providers.stop()
+        assert enable(client, auto_new=False).status_code == 200
+        tracks = client.get("/api/v1/tracks?sort=title").json()["items"]
+        providers.suggestions = lambda _, **_kwargs: ([], [])
+        providers.enqueue([tracks[0]["id"]], force=False)
+        providers.enqueue([tracks[1]["id"]], mode="all", force=True)
+        providers.step()
+        with providers.database.connect() as connection:
+            statuses = dict(
+                connection.execute(
+                    "SELECT t.title,j.status FROM provider_jobs j JOIN tracks t ON t.id=j.track_id"
+                ).fetchall()
+            )
+        assert statuses["手动重查.flac"] == "no_match"
+        assert statuses["旧队列.flac"] == "queued"
+
+
 def test_caa_cover_requires_fresh_confirmation_and_survives_rescan(settings, authenticated_client):
     music(settings, "cover.flac", ["A"], ["A"])
     scan_library(settings)

@@ -25,6 +25,7 @@ internal fun obj(vararg values: Pair<String, Any?>): JsonObject = JsonObject().a
 } }
 internal fun JsonObject.text(key: String): String = get(key)?.takeUnless { it.isJsonNull }?.let { if (it.isJsonPrimitive) it.asString else it.toString() }.orEmpty()
 private fun fieldText(value: JsonElement?): String = when { value == null || value.isJsonNull -> ""; value.isJsonArray -> value.asJsonArray.joinToString("\n") { it.asString }; value.isJsonPrimitive -> value.asString; else -> value.toString() }
+private fun JsonObject.arrayText(key: String, separator: String = " / "): String = getAsJsonArray(key)?.joinToString(separator) { it.asString }.orEmpty()
 private val metadataFields = listOf("title" to "歌曲名称", "artists" to "歌曲艺人（每行一位）", "album" to "专辑", "album_artists" to "专辑艺人（每行一位）",
     "vocalists" to "演唱", "lyricists" to "作词", "composers" to "作曲", "arrangers" to "编曲", "track_number" to "曲号", "disc_number" to "碟号")
 private val arrayFields = setOf("artists", "album_artists", "vocalists", "lyricists", "composers", "arrangers")
@@ -135,9 +136,9 @@ internal fun SuggestionsPanel(vm: MusicViewModel, track: Track) { MetadataReview
 internal fun statusName(value: String): String = when(value) { "queued" -> "等待中"; "running" -> "执行中"; "completed" -> "已完成"; "completed_with_errors" -> "完成，部分文件需处理"; "failed" -> "失败"; "interrupted" -> "已中断"; "review" -> "待确认"; "conflict" -> "存在冲突"; "ready" -> "准备就绪"; "waiting" -> "等待文件稳定"; "no_match" -> "没有匹配结果"; else -> value }
 
 @Composable
-internal fun ManagementPanel(vm: MusicViewModel, initialBatchId: String? = null) {
-    var reviewOpen by remember { mutableStateOf(initialBatchId != null) }
-    if (reviewOpen) { Column(Modifier.fillMaxSize()) { TextButton({ reviewOpen = false }) { Text("返回曲库管理") }; MetadataReviewPanel(vm, initialBatchId = initialBatchId) }; return }
+internal fun ManagementPanel(vm: MusicViewModel, initialBatchId: String? = null, initialAlbumId: String? = null) {
+    var reviewOpen by remember { mutableStateOf(initialBatchId != null || initialAlbumId != null) }
+    if (reviewOpen) { Column(Modifier.fillMaxSize()) { TextButton({ reviewOpen = false }) { Text("返回曲库管理") }; MetadataReviewPanel(vm, initialBatchId = initialBatchId, initialAlbumId = initialAlbumId) }; return }
     val scope = rememberCoroutineScope(); val action = remember { FeatureAction() }
     var overview by remember { mutableStateOf<JsonObject?>(null) }; var jobs by remember { mutableStateOf<JsonObject?>(null) }
     var intake by remember { mutableStateOf<JsonObject?>(null) }; var automatic by remember { mutableStateOf<JsonObject?>(null) }
@@ -145,17 +146,52 @@ internal fun ManagementPanel(vm: MusicViewModel, initialBatchId: String? = null)
     var pendingOffset by remember { mutableIntStateOf(0) }
     var jobOffset by remember { mutableIntStateOf(0) }
     var editImport by remember { mutableStateOf(false) }
+    var folders by remember { mutableStateOf<List<JsonObject>>(emptyList()) }
+    var folderDetail by remember { mutableStateOf<JsonObject?>(null) }
+    var folderPicker by remember { mutableStateOf(false) }
+    var folderConfirm by remember { mutableStateOf(false) }
+    var folderAlbum by remember { mutableStateOf("") }
+    var folderArtists by remember { mutableStateOf("") }
+    val folderAction = remember { FeatureAction() }
     suspend fun load() {
         overview = vm.repository.api().objectGet(vm.repository.url("api", "v1", "manage", "overview"))
         jobs = vm.repository.api().objectGet(vm.repository.url("api", "v1", "manage", "jobs") + "?limit=20&offset=$jobOffset")
         intake = vm.repository.api().objectGet(vm.repository.url("api", "v1", "manage", "intake", "items") + "?limit=20&offset=$pendingOffset")
         automatic = vm.repository.api().objectGet(vm.repository.url("api", "v1", "manage", "intake", "settings"))
     }
+    suspend fun loadFolders() {
+        folders = vm.repository.api().objectGet(vm.repository.url("api", "v1", "manage", "metadata", "folders") + "?limit=200")
+            .getAsJsonArray("items")?.map { it.asJsonObject }.orEmpty()
+    }
+    suspend fun openFolder(folder: String) {
+        val detail = vm.repository.api().objectGet(vm.repository.url("api", "v1", "manage", "metadata", "folders") + "?folder=${java.net.URLEncoder.encode(folder, "UTF-8")}")
+        folderDetail = detail
+        folderAlbum = detail.getAsJsonArray("album_variants")?.firstOrNull()?.asString.orEmpty()
+        folderArtists = detail.getAsJsonArray("album_artist_variants")?.joinToString(" / ") { it.asString }.orEmpty()
+    }
     LaunchedEffect(pendingOffset, jobOffset) { action.run { load() }; while (true) { delay(4000); if (!action.busy && selected == null) runCatching { load() } } }
+    LaunchedEffect(Unit) { folderAction.run { loadFolders() }; folderAction.message = null }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("曲库概览", style = MaterialTheme.typography.titleLarge)
         Button({ reviewOpen = true }) { Text("批量核对资料") }
         overview?.let { info -> val counts = info.getAsJsonObject("counts"); Text("${counts?.text("tracks")} 首 · ${info.text("albums")} 张专辑 · ${info.text("artists")} 位艺人"); Text("音频 ${counts?.get("size_bytes")?.asLong?.div(1024 * 1024) ?: 0} MiB") }
+        Text("按文件夹快速整理", style = MaterialTheme.typography.titleMedium)
+        Text("适合把同一文件夹里的歌曲统一改成同一专辑。复杂候选对比和发行版本锁定请在 Web 工作台完成。", style = MaterialTheme.typography.bodySmall)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(if (folders.isEmpty()) "正在读取文件夹…" else "已发现 ${folders.size} 个文件夹", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+            TextButton({ folderPicker = true }, enabled = !folderAction.busy && folders.isNotEmpty()) { Text("选择文件夹") }
+        }
+        ActionStatus(folderAction)
+        folderDetail?.let { detail ->
+            val tracks = detail.getAsJsonArray("tracks")?.map { it.asJsonObject }.orEmpty()
+            Text(detail.text("folder"), style = MaterialTheme.typography.titleSmall)
+            Text("${tracks.size} 首 · ${detail.arrayText("album_variants").ifBlank { "未命名专辑" }}", style = MaterialTheme.typography.bodySmall)
+            if (detail.get("warning")?.asBoolean == true) Text("该文件夹存在多个专辑或专辑艺人值，确认后会统一覆盖。", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+            OutlinedTextField(folderAlbum, { folderAlbum = it.take(1000) }, Modifier.fillMaxWidth(), label = { Text("统一专辑") }, enabled = !folderAction.busy)
+            OutlinedTextField(folderArtists, { folderArtists = it.take(1000) }, Modifier.fillMaxWidth(), label = { Text("统一专辑艺人（用 / 分隔）") }, enabled = !folderAction.busy)
+            Text("歌曲：${tracks.take(8).joinToString("、") { it.text("title") }}${if (tracks.size > 8) " 等 ${tracks.size} 首" else ""}", style = MaterialTheme.typography.bodySmall)
+            Button({ folderConfirm = true }, enabled = !folderAction.busy && (folderAlbum.isNotBlank() || folderArtists.isNotBlank())) { Text("应用到整组歌曲") }
+        }
         Row { Button({ confirmJob = "import" }, enabled = !action.busy) { Text("导入音乐") }; Spacer(Modifier.width(12.dp)); OutlinedButton({ confirmJob = "scan" }, enabled = !action.busy) { Text("扫描曲库") } }
         TextButton({ scope.launch { action.run { val result = vm.repository.api().objectPost(vm.repository.url("api", "v1", "manage", "providers", "refresh"), obj("scope" to "library", "mode" to "missing", "force" to false)); action.message = "已排队 ${result.text("queued")} 首；完成后可批量核对资料" } } }, enabled = !action.busy) { Text("更新整库缺失元数据") }
         automatic?.let { options -> Row(verticalAlignment = Alignment.CenterVertically) {
@@ -198,6 +234,92 @@ internal fun ManagementPanel(vm: MusicViewModel, initialBatchId: String? = null)
     confirmJob?.let { kind -> AlertDialog(onDismissRequest = { confirmJob = null }, title = { Text(if (kind == "import") "导入服务端音乐？" else "扫描托管曲库？") }, text = { Text(if (kind == "import") "从服务器配置的导入源复制新音乐，原文件保持不变。" else "重新读取托管音乐的文件信息，保留人工修正。") }, confirmButton = { TextButton({ scope.launch { action.run { vm.repository.api().objectPost(vm.repository.url("api", "v1", "manage", "jobs"), obj("kind" to kind, "full" to false)); confirmJob = null; load(); action.message = "任务已提交，可以继续听歌" } } }, enabled = !action.busy) { Text("开始") } }, dismissButton = { TextButton({ confirmJob = null }) { Text("取消") } }) }
     if (editImport) automatic?.let { options -> ImportSettingsDialog(vm, options, { editImport = false }) { result -> automatic = result; editImport = false } }
     selected?.let { item -> IntakeApprovalDialog(vm, item, { selected = null }) { scope.launch { action.run { load() } } } }
+    if (folderPicker) AlertDialog(
+        onDismissRequest = { folderPicker = false },
+        title = { Text("选择文件夹") },
+        text = {
+            LazyColumn(Modifier.heightIn(max = 420.dp)) {
+                items(folders, key = { it.text("folder") }) { item ->
+                    TextButton({ folderPicker = false; scope.launch { folderAction.run { openFolder(item.text("folder")) } } }, enabled = !folderAction.busy, modifier = Modifier.fillMaxWidth()) {
+                        Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.Start) {
+                            Text(item.text("folder"))
+                            Text("${item.text("track_count")} 首 · ${item.asJsonObject.arrayText("album_variants").ifBlank { "未命名专辑" }}", style = MaterialTheme.typography.bodySmall)
+                            if (item.get("warning")?.asBoolean == true) Text("多个专辑版本，建议核对", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton({ folderPicker = false }) { Text("关闭") } },
+    )
+    if (folderConfirm) {
+        val detail = folderDetail
+        AlertDialog(
+            onDismissRequest = { if (!folderAction.busy) folderConfirm = false },
+            title = { Text("统一修改这一文件夹？") },
+            text = { Text("将把 ${detail?.getAsJsonArray("tracks")?.size() ?: 0} 首歌曲的${listOfNotNull(folderAlbum.takeIf { it.isNotBlank() }?.let { "专辑" }, folderArtists.takeIf { it.isNotBlank() }?.let { "专辑艺人" }).joinToString("和")}统一修改。现有元数据历史会保留。") },
+            confirmButton = { TextButton({
+                scope.launch { folderAction.run {
+                    val current = detail ?: return@run
+                    val overrides = JsonObject()
+                    folderAlbum.trim().takeIf { it.isNotBlank() }?.let { overrides.addProperty("album", it) }
+                    folderArtists.split(Regex("[/,，、]")).map { it.trim() }.filter { it.isNotBlank() }.takeIf { it.isNotEmpty() }?.let { values -> overrides.add("album_artists", JsonArray().apply { values.forEach(::add) }) }
+                    val tracks = current.getAsJsonArray("tracks") ?: JsonArray()
+                    vm.repository.api().objectPut(vm.repository.url("api", "v1", "manage", "metadata", "folders"), obj("folder" to current.text("folder"), "tracks" to JsonArray().apply { tracks.forEach { track -> add(obj("track_id" to track.asJsonObject.text("track_id"), "version" to track.asJsonObject.get("metadata_version"))) } }, "overrides" to overrides))
+                    openFolder(current.text("folder")); loadFolders(); vm.load(); folderConfirm = false; folderAction.message = "已更新 ${tracks.size()} 首，历史版本已保留。"
+                } }
+            }, enabled = !folderAction.busy) { Text("确认修改") } },
+            dismissButton = { TextButton({ folderConfirm = false }, enabled = !folderAction.busy) { Text("取消") } },
+        )
+    }
+}
+
+@Composable
+internal fun AlbumMetadataPanel(vm: MusicViewModel, albumId: String, dismiss: () -> Unit) {
+    val action = remember { FeatureAction() }
+    var detail by remember { mutableStateOf<JsonObject?>(null) }
+    var album by remember { mutableStateOf("") }
+    var artists by remember { mutableStateOf("") }
+    val scope = rememberCoroutineScope()
+    suspend fun load() {
+        detail = vm.repository.api().objectGet(vm.repository.url("api", "v1", "manage", "metadata", "albums") + "?album_id=${java.net.URLEncoder.encode(albumId, "UTF-8")}")
+        album = detail!!.arrayText("album_variants").substringBefore(" / ")
+        artists = detail!!.arrayText("album_artist_variants")
+    }
+    LaunchedEffect(albumId) { action.run { load() }; if (action.message == "已完成") action.message = null }
+    Column(Modifier.fillMaxSize()) {
+        Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("快速统一专辑信息", style = MaterialTheme.typography.titleLarge)
+            detail?.let { current ->
+                val tracks = current.getAsJsonArray("tracks") ?: JsonArray()
+                Text("${tracks.size()} 首 · ${current.arrayText("album_variants").ifBlank { "未命名专辑" }}", style = MaterialTheme.typography.bodySmall)
+                if (current.get("warning")?.asBoolean == true) Text("检测到多个专辑或专辑艺人值，确认后会统一覆盖。", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                OutlinedTextField(album, { album = it.take(1000) }, Modifier.fillMaxWidth(), label = { Text("专辑") }, enabled = !action.busy)
+                OutlinedTextField(artists, { artists = it.take(1000) }, Modifier.fillMaxWidth(), label = { Text("专辑艺人（用 / 分隔）") }, enabled = !action.busy)
+                Text("安卓端只处理整张专辑的共享信息；逐曲差异请使用 Web 工作台。", style = MaterialTheme.typography.bodySmall)
+                Text("歌曲：${tracks.take(10).joinToString("、") { it.asJsonObject.text("title") }}${if (tracks.size() > 10) " 等 ${tracks.size()} 首" else ""}", style = MaterialTheme.typography.bodySmall)
+            }
+            ActionStatus(action)
+        }
+        Surface(tonalElevation = 2.dp) {
+            Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedButton(dismiss, enabled = !action.busy, modifier = Modifier.weight(1f)) { Text("关闭") }
+                Button({ scope.launch { action.run {
+                    val current = detail ?: return@run
+                    val overrides = JsonObject()
+                    album.trim().takeIf { it.isNotBlank() }?.let { overrides.addProperty("album", it) }
+                    artists.split(Regex("[/,，、]")).map { it.trim() }.filter { it.isNotBlank() }.takeIf { it.isNotEmpty() }?.let { values -> overrides.add("album_artists", JsonArray().apply { values.forEach(::add) }) }
+                    val tracks = current.getAsJsonArray("tracks") ?: JsonArray()
+                    vm.repository.api().objectPut(vm.repository.url("api", "v1", "manage", "metadata", "albums"), obj(
+                        "album_id" to albumId,
+                        "tracks" to JsonArray().apply { tracks.forEach { track -> add(obj("track_id" to track.asJsonObject.text("track_id"), "version" to track.asJsonObject.get("metadata_version"))) } },
+                        "overrides" to overrides,
+                    ))
+                    load(); vm.load(); action.message = "已更新 ${tracks.size()} 首，历史版本已保留。"
+                } } }, enabled = detail != null && !action.busy && (album.isNotBlank() || artists.isNotBlank()), modifier = Modifier.weight(1f)) { Text(if (action.busy) "保存中…" else "保存整张专辑") }
+            }
+        }
+    }
 }
 
 @Composable
@@ -234,7 +356,11 @@ internal fun MetadataRefreshPrompt(vm: MusicViewModel, scopeName: String, id: St
     }, confirmButton = { TextButton({ scope.launch { action.run {
         val result = vm.repository.api().objectPost(vm.repository.url("api", "v1", "manage", "providers", "refresh"), obj("scope" to scopeName, "id" to id, "mode" to if (missing) "missing" else "all", "force" to force))
         val queued = result.number("queued").toInt(); val active = result.number("already_active").toInt(); val upgraded = result.number("upgraded").toInt(); val intents = result.number("refresh_intents").toInt()
-        action.message = "新增排队 $queued 首 · 已有任务 $active 首" + if (upgraded + intents > 0) " · 已更新刷新意图 ${upgraded + intents} 首" else ""; vm.notify(action.message!!); dismiss()
+        action.message = if (queued == 0 && active == result.number("total").toInt() && upgraded + intents == 0) {
+            "本批 ${result.number("total").toInt()} 首已有查询在队列中，本次没有重复排队；完成后重新读取即可。"
+        } else {
+            "新增排队 $queued 首 · 已有任务 $active 首" + if (upgraded + intents > 0) " · 已更新刷新意图 ${upgraded + intents} 首" else ""
+        }; vm.notify(action.message!!); dismiss()
     } } }, enabled = !action.busy) { Text(if (action.busy) "正在提交…" else "开始更新") } }, dismissButton = { TextButton(dismiss, enabled = !action.busy) { Text("取消") } })
 }
 
