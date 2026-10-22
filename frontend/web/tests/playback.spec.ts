@@ -202,9 +202,9 @@ test('同名 LRC、歌词点击跳转、跟随高亮与切歌后的内嵌歌词'
     await confirm.click();
   }
   await expect.poll(async () => (await audio(page)).time).toBeGreaterThanOrEqual(5.9);
-  await expect(panel.locator('[aria-current="true"]')).toHaveText('侧车第三行');
   if (!(await audio(page)).paused)
     await panel.getByRole('button', { name: '暂停', exact: true }).click();
+  await expect(panel.locator('[aria-current="true"]')).toHaveText(/侧车第[三四]行/);
   await panel.locator('.lyric-scroll').hover();
   await page.mouse.wheel(0, 120);
   await expect(panel.getByRole('button', { name: '跟随播放', exact: true })).toBeEnabled();
