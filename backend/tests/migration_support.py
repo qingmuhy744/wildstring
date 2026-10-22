@@ -15,6 +15,8 @@ def pre18(connection):
             "connection_id",
             "sources",
             "lastfm_tags",
+            "daily_enabled",
+            "daily_time",
             "external_enabled",
             "external_refresh_days",
             "external_sources",

@@ -295,6 +295,8 @@ export const listeningTime = (milliseconds: number) => {
 export interface User {
   id: string;
   username: string;
+  display_name?: string;
+  email?: string;
   profile: 'owner' | 'librarian' | 'editor' | 'listener';
   enabled: boolean;
   version: number;

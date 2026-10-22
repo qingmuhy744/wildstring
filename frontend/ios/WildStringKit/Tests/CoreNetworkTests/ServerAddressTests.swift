@@ -43,14 +43,16 @@ struct ServerAddressTests {
         }
     }
 
-    @Test func rejectsInsecureLANAddressEvenWhenOptedIn() {
+    @Test func allowsInsecureRemoteHTTPOnlyWhenOptedIn() throws {
+        let address = try ServerAddress(input: "http://192.168.1.10:8080", allowsInsecureHTTP: true)
+        #expect(address.url.absoluteString == "http://192.168.1.10:8080")
         #expect(throws: ServerAddress.ValidationError.insecureHTTPNotAllowed) {
-            try ServerAddress(input: "http://192.168.1.10:8080", allowsInsecureLocalhost: true)
+            try ServerAddress(input: "http://192.168.1.10:8080")
         }
     }
 
-    @Test func allowsLocalhostHTTPOnlyWhenOptedIn() throws {
-        let address = try ServerAddress(input: "http://127.0.0.1:18780", allowsInsecureLocalhost: true)
+    @Test func allowsLoopbackHTTPOnlyWhenOptedIn() throws {
+        let address = try ServerAddress(input: "http://127.0.0.1:18780", allowsInsecureHTTP: true)
         #expect(address.url.absoluteString == "http://127.0.0.1:18780")
         #expect(throws: ServerAddress.ValidationError.insecureHTTPNotAllowed) {
             try ServerAddress(input: "http://127.0.0.1:18780")

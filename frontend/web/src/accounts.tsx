@@ -15,13 +15,26 @@ const profileLabels: Record<Profile, string> = {
 };
 const userProfile = (user: User): Profile => user.profile;
 
-export function AccountDialog({ user, onClose }: { user: User; onClose: () => void }) {
+export function AccountDialog({
+  user,
+  onClose,
+  onUserChange,
+}: {
+  user: User;
+  onClose: () => void;
+  onUserChange?: (user: User) => void;
+}) {
   const dialog = useRef<HTMLDialogElement>(null);
   const [current, setCurrent] = useState(''),
     [password, setPassword] = useState(''),
     [confirm, setConfirm] = useState('');
   const [busy, setBusy] = useState(false),
     [error, setError] = useState('');
+  const [username, setUsername] = useState(user.username);
+  const [displayName, setDisplayName] = useState(user.display_name || '');
+  const [email, setEmail] = useState(user.email || '');
+  const [profileError, setProfileError] = useState('');
+  const [profileSuccess, setProfileSuccess] = useState('');
   useEffect(() => {
     const node = dialog.current;
     node?.showModal();
@@ -52,6 +65,32 @@ export function AccountDialog({ user, onClose }: { user: User; onClose: () => vo
       setBusy(false);
     }
   }
+  async function saveProfile(event: FormEvent) {
+    event.preventDefault();
+    setProfileError('');
+    setProfileSuccess('');
+    setBusy(true);
+    try {
+      const updated = await api<User>('/auth/profile', {
+        method: 'PUT',
+        body: JSON.stringify({
+          version: user.version,
+          username,
+          display_name: displayName,
+          email,
+        }),
+      });
+      setUsername(updated.username);
+      setDisplayName(updated.display_name || '');
+      setEmail(updated.email || '');
+      setProfileSuccess('个人资料已保存。');
+      onUserChange?.(updated);
+    } catch (reason) {
+      setProfileError(reason instanceof Error ? reason.message : '资料保存未完成，请重试。');
+    } finally {
+      setBusy(false);
+    }
+  }
   return (
     <dialog
       ref={dialog}
@@ -75,6 +114,57 @@ export function AccountDialog({ user, onClose }: { user: User; onClose: () => vo
         </button>
       </div>
       <AvatarEditor user={user} disabled={busy} onBusy={setBusy} />
+      <form className="account-form" onSubmit={saveProfile} aria-label="个人资料">
+        <h3>个人资料</h3>
+        <label>
+          登录 ID
+          <input
+            value={username}
+            onChange={(event) => setUsername(event.target.value)}
+            pattern="[A-Za-z0-9][A-Za-z0-9_.-]{0,31}"
+            maxLength={32}
+            required
+            autoComplete="username"
+          />
+        </label>
+        <label>
+          昵称
+          <input
+            value={displayName}
+            onChange={(event) => setDisplayName(event.target.value)}
+            maxLength={80}
+            placeholder="显示给自己和设备的名称"
+          />
+        </label>
+        <label>
+          邮箱（仅作资料）
+          <input
+            type="email"
+            value={email}
+            onChange={(event) => setEmail(event.target.value)}
+            maxLength={254}
+            placeholder="暂不用于找回密码"
+            autoComplete="email"
+          />
+        </label>
+        <p className="muted">邮箱当前只保存为账号资料，不会发送邮件或用于找回密码。</p>
+        {profileError && (
+          <p className="error" role="alert">
+            {profileError}
+          </p>
+        )}
+        {profileSuccess && (
+          <p className="notice" role="status">
+            {profileSuccess}
+          </p>
+        )}
+        <div className="editor-footer">
+          <span />
+          <button className="primary" disabled={busy}>
+            {busy ? '保存中…' : '保存个人资料'}
+          </button>
+        </div>
+      </form>
       <ThemeControl />
       <PlaybackStyleControl />
       <TrackListSizeControl />

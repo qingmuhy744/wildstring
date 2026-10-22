@@ -8,7 +8,7 @@ from typing import Literal
 from uuid import uuid4
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, Response
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, ValidationError, field_validator
 
 from wildstring.config import Settings
 from wildstring.database import Database
@@ -45,6 +45,21 @@ class PasswordChange(BaseModel):
     new_password: SecretStr = Field(min_length=12, max_length=128)
 
 
+class ProfileUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    version: int = Field(ge=1, strict=True)
+    username: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,31}$")
+    display_name: str = Field(default="", max_length=80)
+    email: str = Field(default="", max_length=254)
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, value: str) -> str:
+        if value and ("@" not in value or any(char.isspace() for char in value)):
+            raise ValueError("invalid_email")
+        return value
+
+
 class UserCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     username: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,31}$")
@@ -74,7 +89,9 @@ def validated(model, body):
 
 
 def public_user(row):
-    return {key: row[key] for key in ("id", "username", "profile", "version")} | {
+    return {
+        key: row[key] for key in ("id", "username", "profile", "version", "display_name", "email")
+    } | {
         "enabled": bool(row["enabled"]),
     }
 
@@ -268,6 +285,33 @@ class Auth:
                 )
                 connection.execute("DELETE FROM sessions WHERE user_id=?", (user["id"],))
             return self.logout_response()
+
+        @router.put("/profile")
+        def update_profile(request: Request, body: object = Body(...)):
+            self.require_client(request)
+            actor = self.require_session(request)
+            value = validated(ProfileUpdate, body)
+            with self.database.connect(write=True) as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                row = connection.execute(
+                    "SELECT * FROM users WHERE id=?", (actor["id"],)
+                ).fetchone()
+                if row is None or row["version"] != value.version:
+                    raise HTTPException(409, "user_version_conflict")
+                duplicate = connection.execute(
+                    "SELECT 1 FROM users WHERE username=? COLLATE NOCASE AND id<>?",
+                    (value.username, actor["id"]),
+                ).fetchone()
+                if duplicate:
+                    raise HTTPException(409, "username_taken")
+                connection.execute(
+                    "UPDATE users SET username=?,display_name=?,email=?,version=version+1 WHERE id=?",
+                    (value.username, value.display_name, value.email, actor["id"]),
+                )
+                updated = connection.execute(
+                    "SELECT * FROM users WHERE id=?", (actor["id"],)
+                ).fetchone()
+                return public_user(updated)
 
         @router.post("/logout", status_code=204)
         def logout(request: Request):

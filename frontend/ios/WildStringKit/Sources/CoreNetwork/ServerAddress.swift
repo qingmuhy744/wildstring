@@ -12,7 +12,7 @@ public struct ServerAddress: Hashable, Sendable, CustomStringConvertible {
     /// Stable storage key: scheme://host[:port], without the base path.
     public let origin: String
 
-    public init(input: String, allowsInsecureLocalhost: Bool = false) throws {
+    public init(input: String, allowsInsecureHTTP: Bool = false) throws {
         let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { throw ValidationError.invalidURL }
         let candidate = trimmed.contains("://") ? trimmed : "https://\(trimmed)"
@@ -37,8 +37,7 @@ public struct ServerAddress: Hashable, Sendable, CustomStringConvertible {
             port = nil
         }
         if scheme == "http" {
-            let loopback = host == "localhost" || host == "127.0.0.1" || host == "::1"
-            guard allowsInsecureLocalhost && loopback else {
+            guard allowsInsecureHTTP else {
                 throw ValidationError.insecureHTTPNotAllowed
             }
         }

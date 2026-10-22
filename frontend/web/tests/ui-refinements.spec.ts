@@ -98,3 +98,26 @@ test('迟到的设置回读不会覆盖已输入的保留天数', async ({ page 
   await expect(page.getByRole('button', { name: '保存保留时间', exact: true })).toBeEnabled();
   await expect(input).toHaveValue('21');
 });
+
+test('用户可以在账号设置中修改个人资料（登录 ID、昵称和邮箱）', async ({ page }, info) => {
+  await login(page);
+  if (info.project.name === 'mobile') {
+    await page.getByLabel('浏览方式', { exact: true }).selectOption({ label: '账号设置' });
+  } else {
+    await page.getByRole('button', { name: '账号设置', exact: true }).click();
+  }
+  const dialog = page.getByRole('dialog', { name: '账号设置', exact: true });
+  await expect(dialog).toBeVisible();
+  const form = dialog.getByRole('form', { name: '个人资料', exact: true });
+  await expect(form).toBeVisible();
+  const usernameInput = form.getByLabel('登录 ID');
+  const displayNameInput = form.getByLabel('昵称');
+  const emailInput = form.getByLabel('邮箱（仅作资料）');
+  await expect(usernameInput).toHaveValue('admin');
+  await displayNameInput.fill('管理员野弦');
+  await emailInput.fill('admin@example.com');
+  await form.getByRole('button', { name: '保存个人资料', exact: true }).click();
+  await expect(form.getByRole('status')).toHaveText('个人资料已保存。');
+  await dialog.getByRole('button', { name: '关闭账号设置', exact: true }).click();
+  await expect(dialog).toBeHidden();
+});

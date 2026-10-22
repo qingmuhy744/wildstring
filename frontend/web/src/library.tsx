@@ -93,6 +93,19 @@ type Result =
   | { kind: 'albums'; page: AlbumPage }
   | { kind: 'artists'; page: ArtistPage }
   | { kind: 'playlists'; page: PlaylistPage };
+
+function AlbumSkeleton() {
+  return (
+    <div className="album-view-skeleton" role="status" aria-label="正在加载专辑">
+      <span className="skeleton-block skeleton-cover" />
+      <div className="skeleton-track-list">
+        {Array.from({ length: 6 }, (_, index) => (
+          <span className="skeleton-block skeleton-track" key={index} />
+        ))}
+      </div>
+    </div>
+  );
+}
 const labels: Record<View, string> = {
   tracks: '全部歌曲',
   albums: '专辑',
@@ -141,7 +154,8 @@ type CatalogLocation = {
 };
 
 export function Library({ onLogout, user }: { onLogout: () => Promise<void>; user: User }) {
-  const profile = user.profile;
+  const [currentUser, setCurrentUser] = useState(user);
+  const profile = currentUser.profile;
   const canManage = profile !== 'listener';
   const canImport = profile === 'owner' || profile === 'librarian';
   const [accountOpen, setAccountOpen] = useState(false);
@@ -163,7 +177,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
     'notifications',
     'assistant-settings',
   ].includes(view);
-  const inbox = useNotifications(user.id);
+  const inbox = useNotifications(currentUser.id);
   const [selectedAgentItem, setSelectedAgentItem] = useState<{
     kind: 'drafts' | 'tasks';
     id: string;
@@ -207,6 +221,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
   }, [manageOpen]);
   const refreshLibrary = useCallback(() => setRevision((value) => value + 1), []);
   const [album, setAlbum] = useState<Album | null>(null);
+  const [albumLoading, setAlbumLoading] = useState(false);
   const [lyricScanAlbum, setLyricScanAlbum] = useState<string | null>(null);
   const [lyricScanBatch, setLyricScanBatch] = useState<string | null>(null);
   const [selectedArtist, setSelectedArtist] = useState<Artist | null>(null);
@@ -236,11 +251,11 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
     null,
   );
   const closePlaylistMenu = useCallback(() => setPlaylistMenu(null), []);
-  useOfflinePlaylistSync(user.id);
+  useOfflinePlaylistSync(currentUser.id);
   const [bulkTarget, setBulkTarget] = useState(''),
     [bulkBusy, setBulkBusy] = useState(false);
   const closePlayer = useCallback(() => setLyricsOpen(false), []);
-  const player = usePlayer(user.id),
+  const player = usePlayer(currentUser.id),
     motto = useLibraryMotto(),
     favorites = useFavorites(revision, setNotice);
   const favoritesPlaylist = catalog.find((item) => item.kind === 'favorites');
@@ -269,7 +284,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
           ? 'recent'
           : 'tracks';
   const { selection: catalogSort, change: changeCatalogSort } = useCatalogSorting(
-    user.id,
+    currentUser.id,
     sortContext,
   );
   const statsSort = catalogSort.sort;
@@ -373,7 +388,10 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
   const visible = browse.page;
   const result = visible ? ({ kind, page: visible } as Result) : null;
   const page = kind === 'tracks' ? (visible as TrackPage | null) : null;
-  const loading = browse.loading || (view === 'favorites' && !activePlaylist && collectionsLoading);
+  const loading =
+    browse.loading ||
+    albumLoading ||
+    (view === 'favorites' && !activePlaylist && collectionsLoading);
   const error =
     localError ||
     browse.error ||
@@ -526,20 +544,11 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
       queueOpen,
     };
     setNavigation((items) => [...items, location]);
+    return location;
   }
-  function backToLocation() {
-    const previous = navigation.at(-1);
-    if (!previous) {
-      if (album) {
-        setAlbum(null);
-        clearSearch();
-      } else if (selectedArtist) switchView('artists');
-      else switchView('playlists');
-      return;
-    }
-    albumRequest.current?.abort();
-    setNavigation((items) => items.slice(0, -1));
+  function restoreLocation(previous: CatalogLocation) {
     setView(previous.view);
+    setAlbumLoading(false);
     setAlbum(previous.album);
     setSelectedArtist(previous.selectedArtist);
     setArtistRole(previous.artistRole);
@@ -551,6 +560,21 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
     setQueueOpen(previous.queueOpen);
     setError('');
     scrollToRestore.current = previous.scroll;
+  }
+  function backToLocation() {
+    const previous = navigation.at(-1);
+    if (!previous) {
+      if (album) {
+        setAlbumLoading(false);
+        setAlbum(null);
+        clearSearch();
+      } else if (selectedArtist) switchView('artists');
+      else switchView('playlists');
+      return;
+    }
+    albumRequest.current?.abort();
+    setNavigation((items) => items.slice(0, -1));
+    restoreLocation(previous);
   }
   function clearSearch() {
     albumRequest.current?.abort();
@@ -567,6 +591,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
     if (resetHistory) setNavigation([]);
     window.scrollTo(0, 0);
     setView(target);
+    setAlbumLoading(false);
     setAlbum(null);
     setSelectedArtist(null);
     setPlaylist(null);
@@ -596,6 +621,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
     window.scrollTo(0, 0);
     setSelectedArtist(item);
     setArtistView('tracks');
+    setAlbumLoading(false);
     setAlbum(null);
     clearSearch();
   }
@@ -618,6 +644,8 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
         setNotice(`没有找到艺人“${query}”，可以用顶部搜索查看。`);
         return;
       }
+      setLyricsOpen(false);
+      setQueueOpen(false);
       openArtist(item);
     } catch (error) {
       setNotice(error instanceof ApiError ? error.message : '艺人暂时无法打开，请稍后重试。');
@@ -629,29 +657,47 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
     setView(item.kind === 'favorites' ? 'favorites' : 'playlists');
     setPlaylist(item.kind === 'favorites' ? null : item);
     setSelectedArtist(null);
+    setAlbumLoading(false);
     setAlbum(null);
     clearSearch();
   }
   async function openTrackAlbum(track: Track) {
     if (!track.album_id) return;
     albumRequest.current?.abort();
+    const previousLocation = rememberLocation();
+    switchView('albums', false);
     const controller = new AbortController();
     albumRequest.current = controller;
-    setNotice('正在打开专辑…');
+    setAlbum({
+      id: track.album_id,
+      title: track.album || '未知专辑',
+      artists: track.artists,
+      track_count: 0,
+      duration_ms: 0,
+      cover_track_id: track.id,
+    });
+    setAlbumLoading(true);
+    setLyricsOpen(false);
+    setQueueOpen(false);
     try {
       const target = await api<Album>(`/albums/${encodeURIComponent(track.album_id)}`, {
         signal: controller.signal,
       });
       if (controller.signal.aborted) return;
-      rememberLocation();
-      switchView('albums', false);
       setAlbum(target);
-      setLyricsOpen(false);
-      setQueueOpen(false);
-      setNotice('');
-    } catch (reason) {
-      if (!controller.signal.aborted)
-        setNotice(reason instanceof ApiError ? reason.message : '专辑暂时无法打开，请重试。');
+      setAlbumLoading(false);
+    } catch {
+      if (!controller.signal.aborted) {
+        setAlbumLoading(false);
+        // A missing album should leave the caller where they were and offer a
+        // stable, user-facing retry message. In particular, callers opened
+        // from the player need the player dialog restored so the message is
+        // visible there instead of being hidden behind the album view.
+        albumRequest.current?.abort();
+        setNavigation((items) => items.slice(0, -1));
+        restoreLocation(previousLocation);
+        setNotice('所属专辑已变化或不可用');
+      }
     } finally {
       if (albumRequest.current === controller) albumRequest.current = null;
     }
@@ -662,6 +708,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
     setNavigation([]);
     setError('');
     window.scrollTo(0, 0);
+    setAlbumLoading(false);
     setAlbum(null);
     setQuery(draft.trim());
     setRevision((value) => value + 1);
@@ -827,7 +874,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
         method: 'DELETE',
       });
       switchView('playlists');
-      followPlaylist(user.id, target.id, false);
+      followPlaylist(currentUser.id, target.id, false);
       setCollectionRevision((value) => value + 1);
     } catch (reason) {
       setNotice(reason instanceof ApiError ? reason.message : '歌单未删除，请重试。');
@@ -969,7 +1016,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
               </button>
             )}
             <button className="nav-button account-entry" onClick={() => setAccountOpen(true)}>
-              <AccountAvatar user={user} />
+              <AccountAvatar user={currentUser} />
               账号设置
             </button>
             <ThemeControl />
@@ -1076,8 +1123,8 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
               }}
             />
           )}
-          {view === 'offline' && <OfflinePanel player={player} userId={user.id} />}
-          {view === 'devices' && <Devices player={player} user={user} />}
+          {view === 'offline' && <OfflinePanel player={player} userId={currentUser.id} />}
+          {view === 'devices' && <Devices player={player} user={currentUser} />}
           <Suspense
             fallback={
               <p role="status" className="workspace-empty">
@@ -1093,7 +1140,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
             )}
             {view === 'drafts' && (
               <Drafts
-                user={user}
+                user={currentUser}
                 selectedId={selectedAgentItem?.kind === 'drafts' ? selectedAgentItem.id : undefined}
                 onChanged={() => {
                   refreshLibrary();
@@ -1112,7 +1159,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
               <Notifications inbox={inbox} onOpen={openNotificationAction} />
             )}
             {view === 'assistant-settings' && (
-              <AssistantSettings key={connectionSettingsRevision} user={user} />
+              <AssistantSettings key={connectionSettingsRevision} user={currentUser} />
             )}
           </Suspense>
           <div hidden={specialView}>
@@ -1394,9 +1441,13 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
                 </button>
               </div>
             ) : loading ? (
-              <div className="empty" role="status">
-                正在读取你的音乐…
-              </div>
+              albumLoading ? (
+                <AlbumSkeleton />
+              ) : (
+                <div className="empty" role="status">
+                  正在读取你的音乐…
+                </div>
+              )
             ) : !visible?.items.length ? (
               <div className="empty">
                 <span className="empty-symbol">≋</span>
@@ -1525,6 +1576,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
                             albumRequest.current?.abort();
                             rememberLocation();
                             window.scrollTo(0, 0);
+                            setAlbumLoading(false);
                             setAlbum(item);
                           }}
                         >
@@ -1649,6 +1701,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
           onClose={closePlayer}
           favorites={favorites}
           onOpenAlbum={(track) => void openTrackAlbum(track)}
+          onOpenArtist={(name) => void openArtistName(name)}
           statusMessage={notice}
         />
       )}
@@ -1661,13 +1714,13 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
       {metadataRefresh && (
         <MetadataRefreshDialog target={metadataRefresh} onClose={() => setMetadataRefresh(null)} />
       )}
-      <PlaybackSync player={player} userId={user.id} />
+      <PlaybackSync player={player} userId={currentUser.id} />
       {playlistMenu && (
         <PlaylistMenu
           playlist={playlistMenu.item}
           x={playlistMenu.x}
           y={playlistMenu.y}
-          following={followedPlaylists(user.id).includes(playlistMenu.item.id)}
+          following={followedPlaylists(currentUser.id).includes(playlistMenu.item.id)}
           onClose={closePlaylistMenu}
           onOpen={() => {
             openPlaylist(playlistMenu.item);
@@ -1684,8 +1737,8 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
             closePlaylistMenu();
           }}
           onFollow={() => {
-            const enabled = !followedPlaylists(user.id).includes(playlistMenu.item.id);
-            followPlaylist(user.id, playlistMenu.item.id, enabled);
+            const enabled = !followedPlaylists(currentUser.id).includes(playlistMenu.item.id);
+            followPlaylist(currentUser.id, playlistMenu.item.id, enabled);
             setNotice(
               enabled
                 ? '已开启歌单自动下载，可在离线音乐中设置网络和音质。'
@@ -1703,7 +1756,13 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
           onSaved={saveEditor}
         />
       )}
-      {accountOpen && <AccountDialog user={user} onClose={() => setAccountOpen(false)} />}
+      {accountOpen && (
+        <AccountDialog
+          user={currentUser}
+          onUserChange={setCurrentUser}
+          onClose={() => setAccountOpen(false)}
+        />
+      )}
       {editingTrack && (
         <MetadataEditor
           track={editingTrack}

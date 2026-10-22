@@ -35,6 +35,8 @@ export interface RecommendationPreferences {
   external_refresh_days?: number;
   external_sources?: string[];
   external_use_ai?: boolean;
+  daily_enabled?: boolean;
+  daily_time?: string;
 }
 export const recommendationSources: Record<string, string> = {
   ai: '模型编排',

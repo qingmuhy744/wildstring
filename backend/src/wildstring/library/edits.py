@@ -191,7 +191,7 @@ class MetadataEditor:
     def read(self, track_id):
         with self.repository.database.connect() as connection:
             row = connection.execute(
-                """SELECT m.* FROM track_metadata m
+                """SELECT m.*, t.path FROM track_metadata m
                 JOIN tracks t ON t.id=m.track_id WHERE t.id=? AND t.library_id=?""",
                 (track_id, self.repository.library_id()),
             ).fetchone()
@@ -209,6 +209,7 @@ class MetadataEditor:
         )
         return {
             "track_id": track_id,
+            "path": row["path"],
             "version": row["version"],
             "observed": observed,
             "overrides": overrides,

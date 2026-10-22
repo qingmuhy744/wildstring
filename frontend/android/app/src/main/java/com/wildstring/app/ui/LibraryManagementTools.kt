@@ -53,6 +53,9 @@ internal fun MetadataPanel(vm: MusicViewModel, track: Track) {
       Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(track.title, style = MaterialTheme.typography.titleLarge)
         Text("保存为人工修正。音乐文件不会被自动改写；“恢复文件值”可撤销该字段的人工覆盖。", style = MaterialTheme.typography.bodySmall)
+        original?.text("path")?.takeIf { it.isNotBlank() }?.let { path ->
+            Text("文件路径：$path", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
         if (original != null) metadataFields.forEach { (key, label) ->
             OutlinedTextField(fields[key].orEmpty(), { fields[key] = it.take(8000); restore = restore - key }, Modifier.fillMaxWidth(), label = { Text(label) }, enabled = !action.busy && key !in restore, minLines = if (key in arrayFields) 2 else 1)
             if (original!!.getAsJsonObject("overrides")?.has(key) == true) Row(verticalAlignment = Alignment.CenterVertically) {

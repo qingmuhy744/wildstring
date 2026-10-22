@@ -146,7 +146,7 @@ import kotlin.math.roundToInt
                             withStyle(SpanStyle(color = color)) { append(word.text) }
                         }
                     }
-                    val selectLine = { follow = false; interaction++; scope.launch { centerLine(index) }; Unit }
+                    val selectLine = { onBlank(); Unit }
                     val selection = if (line.timeMs != null) Modifier.combinedClickable(
                         onClickLabel = "选择歌词时间", onLongClickLabel = "查看大封面",
                         onLongClick = onArtwork, hapticFeedbackEnabled = false, onClick = selectLine) else Modifier

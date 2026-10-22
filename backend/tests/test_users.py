@@ -201,6 +201,35 @@ def test_password_reset_self_change_disable_and_admin_self_change(settings, auth
         assert login(admin, "admin", "new-admin-password").status_code == 200
 
 
+def test_account_profile_updates_login_id_nickname_and_email(settings, authenticated_client):
+    with authenticated_client(settings) as admin:
+        current = admin.get("/api/v1/auth/status").json()["user"]
+        response = admin.put(
+            "/api/v1/auth/profile",
+            headers=HEADERS,
+            json={
+                "version": current["version"],
+                "username": "renamed-admin",
+                "display_name": "我的昵称",
+                "email": "admin@example.com",
+            },
+        )
+        assert response.status_code == 200
+        updated = response.json()
+        assert updated["username"] == "renamed-admin"
+        assert updated["display_name"] == "我的昵称"
+        assert updated["email"] == "admin@example.com"
+        assert admin.get("/api/v1/auth/status").json()["user"] == updated
+        assert (
+            admin.post(
+                "/api/v1/auth/login",
+                headers=HEADERS,
+                json={"username": "renamed-admin", "password": "test-admin-password-123"},
+            ).status_code
+            == 200
+        )
+
+
 def test_account_validation_secrets_and_no_self_promotion(settings, authenticated_client):
     with authenticated_client(settings) as admin:
         new_user(admin, "Listener")

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type PointerEvent } from 'react';
 import { api, artist, time, type Lyrics } from './api';
 import { Cover, coverUrl } from './cover';
 import { PlaybackVisual, usePlaybackStyle } from './playback-style';
@@ -60,6 +60,7 @@ export function NowPlaying({
   onClose,
   favorites,
   onOpenAlbum,
+  onOpenArtist,
   statusMessage,
 }: {
   active?: boolean;
@@ -67,18 +68,35 @@ export function NowPlaying({
   onClose: () => void;
   favorites: Favorites;
   onOpenAlbum: (track: NonNullable<Player['current']>) => void;
+  onOpenArtist: (name: string) => void;
   statusMessage: string;
 }) {
   const dialog = useRef<HTMLElement>(null);
   const close = useRef<HTMLButtonElement>(null);
   const queueToggle = useRef<HTMLButtonElement>(null);
-  const gesture = useRef({ x: 0, y: 0, moved: false, held: false, pointer: -1 });
+  const gesture = useRef<{
+    x: number;
+    y: number;
+    moved: boolean;
+    held: boolean;
+    pointer: number;
+    blank: boolean;
+  }>({ x: 0, y: 0, moved: false, held: false, pointer: -1, blank: false });
   const holdTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const artworkDialog = useRef<HTMLDialogElement>(null);
   const [artwork, setArtwork] = useState(false);
-  const cancelHold = () => clearTimeout(holdTimer.current);
+  const cancelHold = () => {
+    clearTimeout(holdTimer.current);
+    gesture.current.held = false;
+  };
   const canPreview = (target: EventTarget | null) =>
     target instanceof Element && !!target.closest('.playback-visual, .lyric-scroll');
+  const isBlank = (target: EventTarget | null) =>
+    target instanceof Element &&
+    !!target.closest('.fullscreen-content') &&
+    !target.closest(
+      'button, a, input, select, textarea, .playback-visual, .lyric-scroll, .fullscreen-controls',
+    );
   const [landscape, setLandscape] = useState(
     () => matchMedia('(orientation: landscape) and (max-height: 540px)').matches,
   );
@@ -185,6 +203,7 @@ export function NowPlaying({
             moved: false,
             held: false,
             pointer: event.pointerId,
+            blank: isBlank(event.target),
           };
           if (current && canPreview(event.target)) {
             holdTimer.current = setTimeout(() => {
@@ -202,16 +221,36 @@ export function NowPlaying({
             cancelHold();
           }
         }}
-        onPointerUp={cancelHold}
+        onPointerUp={(event) => {
+          const currentGesture = gesture.current;
+          cancelHold();
+          if (
+            event.pointerId === currentGesture.pointer &&
+            currentGesture.blank &&
+            currentGesture.moved &&
+            event.clientY - currentGesture.y > 72 &&
+            event.clientY - currentGesture.y > Math.abs(event.clientX - currentGesture.x) * 1.15
+          ) {
+            onClose();
+          }
+        }}
         onPointerCancel={cancelHold}
         onPointerLeave={cancelHold}
+        onTouchEnd={cancelHold}
+        onTouchCancel={cancelHold}
         onContextMenu={(event) => {
           if (canPreview(event.target)) event.preventDefault();
         }}
         onClickCapture={(event) => {
-          if (event.detail > 0 && (gesture.current.moved || gesture.current.held)) {
+          if (
+            event.detail > 0 &&
+            ((gesture.current.blank && gesture.current.moved) || gesture.current.held)
+          ) {
             event.preventDefault();
             event.stopPropagation();
+          } else if (event.detail > 0 && isBlank(event.target)) {
+            event.preventDefault();
+            onClose();
           }
         }}
         style={
@@ -273,7 +312,20 @@ export function NowPlaying({
               <div className="fullscreen-metadata">
                 <FavoriteButton track={current} favorites={favorites} />
                 <h1>{current.title}</h1>
-                <p>{artist(current)}</p>
+                <p className="fullscreen-artists">
+                  {current.artists.map((name, index) => (
+                    <span key={`${name}-${index}`}>
+                      {index > 0 && <span aria-hidden="true"> / </span>}
+                      <button
+                        type="button"
+                        className="player-artist-link"
+                        onClick={() => onOpenArtist(name)}
+                      >
+                        {name}
+                      </button>
+                    </span>
+                  ))}
+                </p>
                 <span>
                   {current.album_id ? (
                     <AlbumLink track={current} onOpen={onOpenAlbum} />
@@ -283,7 +335,9 @@ export function NowPlaying({
                 </span>
               </div>
             </div>
-            {panel === 'lyrics' && <LyricsPanel key={current.id} player={player} />}
+            {panel === 'lyrics' && (
+              <LyricsPanel key={current.id} player={player} onTogglePanel={() => setPanel(null)} />
+            )}
             {panel === 'queue' && (
               <QueuePanel
                 player={player}
@@ -397,7 +451,9 @@ export function NowPlaying({
   );
 }
 
-function LyricsPanel({ player }: { player: Player }) {
+type LyricSize = 'small' | 'medium' | 'large';
+
+function LyricsPanel({ player, onTogglePanel }: { player: Player; onTogglePanel: () => void }) {
   const current = player.current;
   const [lyrics, setLyrics] = useState<Lyrics | null>(null);
   const [error, setError] = useState(false);
@@ -407,8 +463,43 @@ function LyricsPanel({ player }: { player: Player }) {
   const [preview, setPreview] = useState<number | null>(null);
   const [showTranslation, setShowTranslation] = useState(true);
   const [showRomanization, setShowRomanization] = useState(false);
+  const [lyricSize, setLyricSize] = useState<LyricSize>(() => {
+    try {
+      const value = localStorage.getItem('wildstring-lyric-size');
+      return value === 'small' || value === 'large' ? value : 'medium';
+    } catch {
+      return 'medium';
+    }
+  });
   const scroll = useRef<HTMLDivElement>(null);
   const lines = useRef<(HTMLButtonElement | null)[]>([]);
+  const drag = useRef<{ pointer: number; y: number; scrollTop: number; moved: boolean } | null>(
+    null,
+  );
+  const [displayPosition, setDisplayPosition] = useState(player.position);
+  useEffect(() => {
+    try {
+      localStorage.setItem('wildstring-lyric-size', lyricSize);
+    } catch {
+      /* Private browsing may deny local storage; the in-session value still works. */
+    }
+  }, [lyricSize]);
+  useEffect(() => {
+    if (!player.playing) {
+      setDisplayPosition(player.position);
+      return;
+    }
+    const anchor = player.position;
+    const started = performance.now();
+    let frame = 0;
+    const tick = () => {
+      setDisplayPosition(anchor + (performance.now() - started) / 1000);
+      frame = requestAnimationFrame(tick);
+    };
+    setDisplayPosition(anchor);
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, [current?.id, player.playing, player.position]);
   useEffect(() => {
     const query = matchMedia('(pointer: coarse)');
     const changed = () => setCoarse(query.matches);
@@ -431,6 +522,46 @@ function LyricsPanel({ player }: { player: Player }) {
       }
     });
     setPreview(closest);
+  }
+  function startPointerDrag(event: PointerEvent<HTMLDivElement>) {
+    if (event.pointerType !== 'mouse' || event.button !== 0) return;
+    drag.current = {
+      pointer: event.pointerId,
+      y: event.clientY,
+      scrollTop: event.currentTarget.scrollTop,
+      moved: false,
+    };
+    setFollow(false);
+  }
+  function movePointerDrag(event: PointerEvent<HTMLDivElement>) {
+    const currentDrag = drag.current;
+    if (!currentDrag || currentDrag.pointer !== event.pointerId) return;
+    const delta = event.clientY - currentDrag.y;
+    if (Math.abs(delta) < 4) return;
+    if (!currentDrag.moved) {
+      currentDrag.moved = true;
+      try {
+        event.currentTarget.setPointerCapture(event.pointerId);
+      } catch {
+        /* Ignore if pointer cannot be captured */
+      }
+    }
+    event.currentTarget.scrollTop = Math.max(0, currentDrag.scrollTop - delta);
+    selectCentered();
+    event.preventDefault();
+  }
+  function endPointerDrag(event: PointerEvent<HTMLDivElement>) {
+    const currentDrag = drag.current;
+    if (!currentDrag || currentDrag.pointer !== event.pointerId) return;
+    if (currentDrag.moved) {
+      try {
+        if (event.currentTarget.hasPointerCapture(event.pointerId))
+          event.currentTarget.releasePointerCapture(event.pointerId);
+      } catch {
+        /* Ignore */
+      }
+    }
+    drag.current = null;
   }
   useEffect(() => {
     const changed = (event: Event) => {
@@ -461,7 +592,7 @@ function LyricsPanel({ player }: { player: Player }) {
       high = lyrics.lines.length - 1;
     while (low <= high) {
       const middle = Math.floor((low + high) / 2);
-      if ((lyrics.lines[middle].time_ms ?? Infinity) <= player.position * 1000) {
+      if ((lyrics.lines[middle].time_ms ?? Infinity) <= displayPosition * 1000) {
         active = middle;
         low = middle + 1;
       } else high = middle - 1;
@@ -483,7 +614,7 @@ function LyricsPanel({ player }: { player: Player }) {
     const observer = new ResizeObserver(center);
     observer.observe(container);
     return () => observer.disconnect();
-  }, [active, follow, lyrics, showTranslation, showRomanization]);
+  }, [active, follow, lyrics, showTranslation, showRomanization, lyricSize]);
 
   const source =
     lyrics?.source === 'sidecar_lrc'
@@ -496,14 +627,16 @@ function LyricsPanel({ player }: { player: Player }) {
             ? `歌词 · ${lyrics.source}`
             : '内嵌歌词';
   return (
-    <div className="fullscreen-lyrics">
+    <div className={`fullscreen-lyrics lyric-size-${lyricSize}`}>
       <div className="lyrics-toolbar">
         {lyrics?.source_url ? (
-          <a href={lyrics.source_url} target="_blank" rel="noreferrer">
+          <a className="lyrics-source" href={lyrics.source_url} target="_blank" rel="noreferrer">
             {source}
           </a>
         ) : (
-          <span>{lyrics && lyrics.kind !== 'none' ? source : '歌词'}</span>
+          <span className="lyrics-source">
+            {lyrics && lyrics.kind !== 'none' ? source : '歌词'}
+          </span>
         )}
         {lyrics?.lines.some((line) => line.translation) && (
           <button
@@ -523,6 +656,19 @@ function LyricsPanel({ player }: { player: Player }) {
             音译
           </button>
         )}
+        <span className="lyrics-size-control" role="group" aria-label="歌词大小">
+          {(['small', 'medium', 'large'] as LyricSize[]).map((size) => (
+            <button
+              key={size}
+              className="text-button"
+              aria-label={`歌词大小：${size === 'small' ? '小' : size === 'medium' ? '中' : '大'}`}
+              aria-pressed={lyricSize === size}
+              onClick={() => setLyricSize(size)}
+            >
+              {size === 'small' ? '小' : size === 'medium' ? '中' : '大'}
+            </button>
+          ))}
+        </span>
         <button
           className="text-button"
           onClick={() => setFollow(true)}
@@ -542,13 +688,20 @@ function LyricsPanel({ player }: { player: Player }) {
         <div
           className="lyric-scroll"
           ref={scroll}
-          onWheel={() => setFollow(false)}
+          onPointerDown={startPointerDrag}
+          onPointerMove={movePointerDrag}
+          onPointerUp={endPointerDrag}
+          onPointerCancel={endPointerDrag}
+          onWheel={() => {
+            setFollow(false);
+            requestAnimationFrame(selectCentered);
+          }}
           onTouchMove={() => {
             setFollow(false);
             selectCentered();
           }}
           onScroll={() => {
-            if (coarse && !follow) selectCentered();
+            if (!follow) selectCentered();
           }}
         >
           {error ? (
@@ -585,25 +738,8 @@ function LyricsPanel({ player }: { player: Player }) {
                       }}
                       className={`lyric-line ${active === index ? 'active-line' : ''}`}
                       aria-current={active === index ? 'true' : undefined}
-                      aria-label={`${coarse ? '选择' : '跳转到'} ${time(line.time_ms / 1000)}：${line.text || '间奏'}`}
-                      disabled={!player.duration}
-                      onClick={() => {
-                        if (coarse) {
-                          setFollow(false);
-                          setPreview(index);
-                          const container = scroll.current;
-                          const row = lines.current[index];
-                          if (container && row)
-                            container.scrollTo({
-                              top:
-                                row.offsetTop - container.clientHeight / 2 + row.clientHeight / 2,
-                              behavior: 'instant',
-                            });
-                        } else {
-                          player.seek(line.time_ms! / 1000);
-                          setFollow(true);
-                        }
-                      }}
+                      aria-label={`切换到封面 ${time(line.time_ms / 1000)}：${line.text || '间奏'}`}
+                      onClick={onTogglePanel}
                     >
                       {line.words?.length
                         ? line.words.map((word, wordIndex) => {
@@ -612,7 +748,7 @@ function LyricsPanel({ player }: { player: Player }) {
                                 0,
                                 Math.min(
                                   1,
-                                  (player.position * 1000 - word.start_ms) /
+                                  (displayPosition * 1000 - word.start_ms) /
                                     Math.max(1, word.end_ms - word.start_ms),
                                 ),
                               ) * 100;
@@ -642,7 +778,7 @@ function LyricsPanel({ player }: { player: Player }) {
             </ol>
           )}
         </div>
-        {coarse && !follow && preview !== null && lyrics?.lines[preview]?.time_ms != null && (
+        {!follow && preview !== null && lyrics?.lines[preview]?.time_ms != null && (
           <div className="lyric-seek-preview" role="group" aria-label="歌词跳转预览">
             <span>{time(lyrics.lines[preview].time_ms! / 1000)}</span>
             <hr />
@@ -650,6 +786,7 @@ function LyricsPanel({ player }: { player: Player }) {
               aria-label={`确认跳转到 ${time(lyrics.lines[preview].time_ms! / 1000)}`}
               onClick={() => {
                 player.seek(lyrics.lines[preview!].time_ms! / 1000);
+                setPreview(null);
                 setFollow(true);
               }}
             >

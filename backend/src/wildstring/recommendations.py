@@ -59,6 +59,8 @@ class Preferences(BaseModel):
     )
     external_use_ai: bool = False
     external_call_limit: int = Field(default=6, ge=1, le=8)
+    daily_enabled: bool = False
+    daily_time: str = Field(default="00:00", pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d$")
 
     @field_validator("external_refresh_days", mode="before")
     @classmethod
@@ -138,7 +140,13 @@ class Recommendations(ExternalRecommendations):
         result = {key: row[key] for key in row.keys() if key not in {"user_id", "library_id"}}
         for field in ("sources", "lastfm_tags", "external_sources"):
             result[field] = json.loads(result[field])
-        for field in ("use_ai", "use_lastfm", "external_enabled", "external_use_ai"):
+        for field in (
+            "use_ai",
+            "use_lastfm",
+            "external_enabled",
+            "external_use_ai",
+            "daily_enabled",
+        ):
             result[field] = bool(result[field])
         return result
 
@@ -173,7 +181,7 @@ class Recommendations(ExternalRecommendations):
             if body.version != (row["version"] if row else 1):
                 raise HTTPException(409, "recommendation_version_conflict")
             connection.execute(
-                "INSERT INTO recommendation_preferences(user_id,library_id,version,use_ai,use_lastfm,count,connection_id,sources,lastfm_tags,external_enabled,external_refresh_days,external_sources,external_use_ai,external_call_limit) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(user_id,library_id) DO UPDATE SET version=excluded.version,use_ai=excluded.use_ai,use_lastfm=excluded.use_lastfm,count=excluded.count,connection_id=excluded.connection_id,sources=excluded.sources,lastfm_tags=excluded.lastfm_tags,external_enabled=excluded.external_enabled,external_refresh_days=excluded.external_refresh_days,external_sources=excluded.external_sources,external_use_ai=excluded.external_use_ai,external_call_limit=excluded.external_call_limit",
+                "INSERT INTO recommendation_preferences(user_id,library_id,version,use_ai,use_lastfm,count,connection_id,sources,lastfm_tags,external_enabled,external_refresh_days,external_sources,external_use_ai,external_call_limit,daily_enabled,daily_time) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(user_id,library_id) DO UPDATE SET version=excluded.version,use_ai=excluded.use_ai,use_lastfm=excluded.use_lastfm,count=excluded.count,connection_id=excluded.connection_id,sources=excluded.sources,lastfm_tags=excluded.lastfm_tags,external_enabled=excluded.external_enabled,external_refresh_days=excluded.external_refresh_days,external_sources=excluded.external_sources,external_use_ai=excluded.external_use_ai,external_call_limit=excluded.external_call_limit,daily_enabled=excluded.daily_enabled,daily_time=excluded.daily_time",
                 (
                     repository.database.user_id,
                     library_id,
@@ -189,6 +197,8 @@ class Recommendations(ExternalRecommendations):
                     json.dumps(result["external_sources"]),
                     result["external_use_ai"],
                     result["external_call_limit"],
+                    result["daily_enabled"],
+                    result["daily_time"],
                 ),
             )
         return self.preferences(repository)

@@ -9,7 +9,7 @@ from pathlib import Path
 from wildstring.library.albums import album_key
 from wildstring.provider_schema import SCHEMA as PROVIDER_SCHEMA
 
-SCHEMA_VERSION = 30
+SCHEMA_VERSION = 31
 TRANSCODING_SCHEMA = """
 BEGIN IMMEDIATE;
 CREATE TABLE transcoding_settings (
@@ -509,6 +509,31 @@ class Database:
                     connection.commit()
                 else:
                     connection.execute("PRAGMA user_version = 30")
+            if current < 31:
+                columns = {row[1] for row in connection.execute("PRAGMA table_info(users)")}
+                connection.execute("BEGIN IMMEDIATE")
+                if "display_name" not in columns:
+                    connection.execute(
+                        "ALTER TABLE users ADD COLUMN display_name TEXT NOT NULL DEFAULT ''"
+                    )
+                if "email" not in columns:
+                    connection.execute(
+                        "ALTER TABLE users ADD COLUMN email TEXT NOT NULL DEFAULT ''"
+                    )
+                columns = {
+                    row[1]
+                    for row in connection.execute("PRAGMA table_info(recommendation_preferences)")
+                }
+                if "daily_enabled" not in columns:
+                    connection.execute(
+                        "ALTER TABLE recommendation_preferences ADD COLUMN daily_enabled INTEGER NOT NULL DEFAULT 0"
+                    )
+                if "daily_time" not in columns:
+                    connection.execute(
+                        "ALTER TABLE recommendation_preferences ADD COLUMN daily_time TEXT NOT NULL DEFAULT '00:00'"
+                    )
+                connection.execute("PRAGMA user_version = 31")
+                connection.commit()
             connection.execute("PRAGMA journal_mode = WAL")
 
     def check_ready(self) -> bool:

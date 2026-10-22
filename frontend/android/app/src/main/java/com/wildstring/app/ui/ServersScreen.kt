@@ -17,7 +17,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.wildstring.app.BuildConfig
 import com.wildstring.app.data.ServerConfiguration
 import com.wildstring.app.data.friendlyError
 import kotlinx.coroutines.launch
@@ -70,7 +69,7 @@ import kotlinx.coroutines.launch
         Column(Modifier.heightIn(max = 480.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             OutlinedTextField(name, { name = it.take(80) }, Modifier.fillMaxWidth().testTag("server-name"), label = { Text("名称（可选）") }, singleLine = true, enabled = !busy)
             OutlinedTextField(url, { url = it }, Modifier.fillMaxWidth().testTag("server-url"), label = { Text("服务器地址") }, singleLine = true, enabled = !busy)
-            if (BuildConfig.DEBUG) Row { Checkbox(local, { local = it }, enabled = !busy, modifier = Modifier.testTag("server-local-http")); Text("允许本机调试 HTTP") }
+            Row { Checkbox(local, { local = it }, enabled = !busy, modifier = Modifier.testTag("server-local-http")); Text("允许此服务器使用未加密 HTTP") }
             if (server != null) Text("修改地址后需要重新登录，并清除此配置原有的本地缓存。", style = MaterialTheme.typography.bodySmall)
             error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         }

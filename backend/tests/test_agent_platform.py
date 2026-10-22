@@ -816,7 +816,7 @@ def test_real_v16_migration_preserves_library_people_accounts_and_credentials(ag
     monkeypatch.setattr(wildstring.agent_schema, "SCHEMA", schema)
     service.database.initialize()
     service.database.initialize()
-    assert snapshot() == original and SCHEMA_VERSION == 30
+    assert snapshot() == original and SCHEMA_VERSION == 31
     assert legacy_secret.read_text() == "synthetic-original-private-secret"
     assert service.database.check_ready()
 

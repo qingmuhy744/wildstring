@@ -26,6 +26,7 @@ export type MetadataFields = Pick<
 >;
 interface MetadataRecord {
   track_id: string;
+  path: string;
   version: number;
   observed: MetadataFields;
   effective: MetadataFields;
@@ -210,6 +211,9 @@ export function MetadataEditor({
           <>
             <p className="muted">
               保存后曲库信息立即生效，重新扫描会保留。本次保存不写入音乐标签。
+            </p>
+            <p className="metadata-file-path" title="托管曲库中的相对路径">
+              文件路径：<code>{record.path}</code>
             </p>
             {!preview ? (
               <div className="metadata-fields">

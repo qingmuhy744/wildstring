@@ -4,8 +4,28 @@ struct SavedServer: Codable, Equatable, Identifiable {
     var address: String
     var username: String
     var lastUsedAt: Date
+    var allowInsecureHTTP: Bool
 
     var id: String { address }
+
+    init(address: String, username: String, lastUsedAt: Date, allowInsecureHTTP: Bool = false) {
+        self.address = address
+        self.username = username
+        self.lastUsedAt = lastUsedAt
+        self.allowInsecureHTTP = allowInsecureHTTP
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case address, username, lastUsedAt, allowInsecureHTTP
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        address = try values.decode(String.self, forKey: .address)
+        username = try values.decode(String.self, forKey: .username)
+        lastUsedAt = try values.decode(Date.self, forKey: .lastUsedAt)
+        allowInsecureHTTP = try values.decodeIfPresent(Bool.self, forKey: .allowInsecureHTTP) ?? false
+    }
 }
 
 /// Non-sensitive server list (address + account name) in UserDefaults; the
