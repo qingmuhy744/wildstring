@@ -38,7 +38,7 @@ class LyricGestureTest {
 
     @Test fun longerPreferenceKeepsTheSelectionBeyondTheDefaultDelay() {
         show(followDelayMs = 5_000)
-        compose.onNodeWithTag("lyric-line-0").performClick()
+        compose.onNodeWithTag("lyric-scroll").performTouchInput { swipeUp(durationMillis = 450) }
         val started = android.os.SystemClock.elapsedRealtime()
         compose.waitUntil(3_000) { android.os.SystemClock.elapsedRealtime() - started >= 2_200 }
         compose.onNodeWithTag("lyric-seek-preview").assertExists()
