@@ -376,7 +376,7 @@ class MusicViewModel @Inject constructor(
     fun cancelAlbumNavigation() { albumNavigationJob?.cancel() }
     fun openTrackAlbum(track: Track, fromPlayer: Boolean = false, onOpened: () -> Unit = {}) {
         albumNavigationJob?.cancel()
-        mutable.update { it.copy(mutationMessage = "正在打开专辑…", error = null) }
+        mutable.update { it.copy(error = null) }
         albumNavigationJob = viewModelScope.launch {
             val owner = repository.session.cacheScope()
             val generation = authGeneration
@@ -606,13 +606,13 @@ class MusicViewModel @Inject constructor(
         if (mutable.value.collecting) return@launch
         val request = query()
         val profile = repository.session.cacheScope()
-        mutable.update { it.copy(collecting = true, mutationMessage = "正在准备完整播放列表…") }
+        mutable.update { it.copy(collecting = true) }
         try {
             val tracks = repository.collectionTracks(request)
             if (profile != repository.session.cacheScope()) return@launch
             if (tracks.isEmpty()) { mutable.update { it.copy(mutationMessage = "集合中没有可播放的音乐") }; return@launch }
             play(tracks, startId?.let { id -> tracks.indexOfFirst { it.id == id }.coerceAtLeast(0) } ?: 0)
-            mutable.update { it.copy(mutationMessage = "已载入 ${tracks.size} 首歌曲") }; onStarted()
+            onStarted()
         } catch (error: CancellationException) { throw error }
         catch (error: Exception) { mutable.update { it.copy(error = friendlyError(error), mutationMessage = null) } }
         finally { mutable.update { it.copy(collecting = false) } }

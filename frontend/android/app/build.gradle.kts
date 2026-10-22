@@ -10,6 +10,7 @@ android {
     buildToolsVersion = "36.1.0"
     defaultConfig {
         applicationId = "com.wildstring.app"
+        manifestPlaceholders["appName"] = "野弦"
         minSdk = 26
         targetSdk = 36
         versionCode = 31
@@ -28,8 +29,12 @@ android {
         keyPassword = signingValues[3]
     }
     buildTypes {
-        debug { applicationIdSuffix = ".debug" }
+        debug {
+            applicationIdSuffix = ".dev"
+            manifestPlaceholders["appName"] = "野弦 Dev"
+        }
         release {
+            manifestPlaceholders["appName"] = "野弦"
             signingConfig = signingConfigs.findByName("release")
             isMinifyEnabled = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")

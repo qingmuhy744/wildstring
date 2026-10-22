@@ -273,6 +273,21 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
             expanded = false; queue = false; lyrics = false; settings = false; playerFromSettings = false
         }
     }
+    fun openTrackArtist(name: String) {
+        actions = null
+        val fromPlayer = expanded
+        val originalLyrics = lyrics
+        val originalQueue = queue
+        val originalSettings = playerFromSettings
+        vm.openArtistName(name) {
+            if (fromPlayer) {
+                playerReturnDepth = vm.state.value.navigationDepth - 1
+                playerReturnTab = vm.state.value.tab
+                returnLyrics = originalLyrics; returnQueue = originalQueue; returnFromSettings = originalSettings
+            }
+            expanded = false; queue = false; lyrics = false; settings = false; playerFromSettings = false
+        }
+    }
     LaunchedEffect(state.tab, state.navigationDepth) {
         if (playerReturnDepth >= 0) {
             if (state.tab != playerReturnTab) playerReturnDepth = -1
@@ -326,7 +341,7 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
                 onBack = { if (lyrics && !wide) lyrics = false else collapsePlayer() },
                 onLyrics = { lyrics = !lyrics; queue = false }, onQueue = { queue = !queue },
                 onAlbum = { state.current?.let(::openTrackAlbum) },
-                onArtist = { name -> vm.openArtistName(name) { expanded = false; lyrics = false; queue = false } },
+                onArtist = ::openTrackArtist,
                 onAdd = { actions = state.current }, onSleep = { sleepDialog = true })
         } else {
             Row(Modifier.fillMaxSize()) {
@@ -523,7 +538,7 @@ private fun AlbumActionsSheet(
         tab = "library", kind = "tracks", title = album.title, collection = "albums", collectionId = album.id, sort = "title"
     ))
     fun withTracks(next: Boolean = false, append: (List<Track>) -> Unit) {
-        scope.launch { action.run { val items = tracks(); append(items); if (next) vm.notify("已排到下一首") else vm.notify("已处理 ${items.size} 首") } }
+        scope.launch { action.run { val items = tracks(); append(items) } }
     }
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -546,13 +561,13 @@ private fun AlbumActionsSheet(
             }
             ActionStatus(action)
             SongAction("播放专辑", Icons.Default.PlayArrow, onClick = tactile {
-                withTracks { items -> vm.play(items); vm.notify("正在播放：${album.title}"); onDismiss() }
+                withTracks { items -> vm.play(items); onDismiss() }
             })
             SongAction("下一首播放", Icons.AutoMirrored.Filled.PlaylistPlay, onClick = tactile {
-                withTracks(next = true) { items -> vm.addToQueue(items, next = true); onDismiss() }
+                withTracks(next = true) { items -> vm.addToQueue(items, next = true); vm.notify("已排到下一首"); onDismiss() }
             })
             SongAction("加入播放队列", Icons.AutoMirrored.Filled.QueueMusic, onClick = tactile {
-                withTracks { items -> vm.addToQueue(items); onDismiss() }
+                withTracks { items -> vm.addToQueue(items); vm.notify("已加入播放队列"); onDismiss() }
             })
             SongAction("离线保存专辑", Icons.Default.Download, onClick = tactile {
                 withTracks { items -> vm.download(items); onDismiss() }
@@ -806,8 +821,10 @@ private fun PlaybackControls(vm: MusicViewModel, state: MusicState, onQueue: () 
                 else Row(Modifier.horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically) {
                     track.artists.forEachIndexed { index, name ->
                         if (index > 0) Text(" / ", color = Muted, fontSize = 13.sp)
-                        TextButton(onClick = { onArtist(name) }, contentPadding = PaddingValues(0.dp), modifier = Modifier.heightIn(min = 32.dp)) {
+                        TextButton(onClick = { onArtist(name) }, contentPadding = PaddingValues(0.dp), modifier = Modifier.heightIn(min = 32.dp).testTag("player-artist-$name")) {
                             Text(name, color = Muted, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Spacer(Modifier.width(2.dp))
+                            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, Modifier.size(14.dp), tint = Muted)
                         }
                     }
                 }
