@@ -4126,14 +4126,16 @@ select {
 }
 .check-label {
   display: flex;
-  align-items: flex-start;
-  gap: 0.65rem;
+  align-items: center;
+  gap: 0.55rem;
   margin-block: 0.7rem;
+  line-height: 1.4;
 }
 .check-label input {
-  width: auto;
+  width: 16px;
+  height: 16px;
   flex: 0 0 auto;
-  margin-top: 0.3rem;
+  margin: 0;
 }
 .settings-section fieldset {
   display: grid;
@@ -4452,6 +4454,7 @@ select {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 12px;
+  align-items: end;
 }
 .lyric-scan-options label {
   display: flex;
@@ -4461,6 +4464,13 @@ select {
 .lyric-scan-options label.check {
   flex-direction: row;
   align-items: center;
+  min-height: 38px;
+}
+.lyric-scan-options select,
+.lyric-scan-options input:not([type='checkbox']),
+.lyric-scan-options button {
+  min-height: 38px;
+  box-sizing: border-box;
 }
 .lyric-scan-options input[type='number'] {
   width: 100%;

@@ -47,6 +47,7 @@ import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.platform.testTag
@@ -537,22 +538,83 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
                 BaseDestination(currentDestination)
             }
         }
-        if (queue && ((!wide && !landscape) || !expanded)) {
-            ModalBottomSheet(
-                onDismissRequest = { queue = false },
-                sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-                sheetGesturesEnabled = false,
-                dragHandle = {
-                    Box(
-                        Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 4.dp)
-                            .dismissPlayerSwipe(true, onDismiss = { queue = false }),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Box(Modifier.size(width = 36.dp, height = 4.dp).clip(RoundedCornerShape(2.dp)).background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)))
-                    }
-                },
+        val usePhoneQueueSheet = (!wide && !landscape) || !expanded
+        val density = LocalDensity.current
+        val defaultMaxQueueSheetPx = with(density) { 560.dp.toPx() }
+        var measuredQueueSheetPx by remember { mutableFloatStateOf(0f) }
+        val maxQueueSheetPx = if (measuredQueueSheetPx > 1f) measuredQueueSheetPx else defaultMaxQueueSheetPx
+        var rawQueueDragY by remember { mutableFloatStateOf(0f) }
+        var queueDragging by remember { mutableStateOf(false) }
+        LaunchedEffect(queue) {
+            if (!queue) {
+                rawQueueDragY = 0f
+                queueDragging = false
+            }
+        }
+        val isActivelyDraggingQueue = usePhoneQueueSheet && (
+            (!queue && destination == "player" && playerDraggingDown && rawPlayerDragY < 0f) ||
+            (queue && queueDragging)
+        )
+        val targetQueueRevealPx = when {
+            !usePhoneQueueSheet -> 0f
+            queue -> (maxQueueSheetPx - rawQueueDragY.coerceAtLeast(0f)).coerceIn(0f, maxQueueSheetPx)
+            destination == "player" && playerDraggingDown && rawPlayerDragY < 0f -> (-rawPlayerDragY).coerceIn(0f, maxQueueSheetPx)
+            else -> 0f
+        }
+        val animatedQueueRevealPx = animateFloatAsState(
+            targetValue = targetQueueRevealPx,
+            animationSpec = if (isActivelyDraggingQueue) snap() else spring(stiffness = Spring.StiffnessMediumLow),
+            label = "queue-sheet-reveal",
+        )
+        if (usePhoneQueueSheet && (queue || animatedQueueRevealPx.value > 0.5f)) {
+            val revealPx = animatedQueueRevealPx.value.coerceIn(0f, maxQueueSheetPx)
+            val scrimAlpha = (revealPx / maxQueueSheetPx.coerceAtLeast(1f)).coerceIn(0f, 1f) * 0.45f
+            val queueDismissModifier = Modifier.dismissPlayerSwipe(
+                enabled = queue,
+                onDismiss = { queue = false },
+                onDragOffset = { offset, active -> rawQueueDragY = offset; queueDragging = active },
+                onThresholdCrossed = { feedback(TactileKind.Tap) },
+            )
+            Box(
+                Modifier.fillMaxSize()
+                    .then(if (!queue) Modifier.clearAndSetSemantics {} else Modifier)
+                    .background(Color.Black.copy(alpha = scrimAlpha))
+                    .pointerInput(queue) {
+                        if (queue) {
+                            detectTapGestures { queue = false }
+                        }
+                    },
+                contentAlignment = Alignment.BottomCenter,
             ) {
-                QueuePanel(vm, state, Modifier.fillMaxWidth().heightIn(max = 560.dp), onClose = { queue = false })
+                Surface(
+                    Modifier.fillMaxWidth().heightIn(min = 280.dp, max = 560.dp)
+                        .onSizeChanged { if (it.height > 0) measuredQueueSheetPx = it.height.toFloat() }
+                        .graphicsLayer {
+                            val sheetH = if (size.height > 1f) size.height else maxQueueSheetPx
+                            translationY = (sheetH - animatedQueueRevealPx.value).coerceAtLeast(0f)
+                        }
+                        .pointerInput(Unit) { detectTapGestures {} },
+                    shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerLow,
+                    shadowElevation = 12.dp,
+                ) {
+                    Column(Modifier.fillMaxWidth().navigationBarsPadding()) {
+                        Box(
+                            Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 4.dp)
+                                .then(queueDismissModifier),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Box(Modifier.size(width = 36.dp, height = 4.dp).clip(RoundedCornerShape(2.dp)).background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)))
+                        }
+                        QueuePanel(
+                            vm = vm,
+                            state = state,
+                            modifier = Modifier.fillMaxWidth(),
+                            headerModifier = queueDismissModifier,
+                            onClose = { queue = false },
+                        )
+                    }
+                }
             }
         }
     }
@@ -973,36 +1035,6 @@ private fun PlayerScreen(vm: MusicViewModel, state: MusicState, wide: Boolean, l
             }
             PlaybackControls(vm, state, onQueue, onAlbum, onArtist,
                 modifier = Modifier.dismissPlayerSwipe(true, onDismiss, onUpdateDrag, thresholdTick, openQueueOnSwipeUp))
-        }
-    }
-    if (!wide && !landscape && !queue && dragOffset.value < -1f) {
-        val density = LocalDensity.current
-        val maxSheetPx = with(density) { 560.dp.toPx() }
-        val revealPx = (-dragOffset.value).coerceIn(0f, maxSheetPx)
-        val scrimAlpha = (revealPx / maxSheetPx).coerceIn(0f, 1f) * 0.45f
-        Box(
-            Modifier.fillMaxSize()
-                .clearAndSetSemantics {}
-                .background(Color.Black.copy(alpha = scrimAlpha)),
-            contentAlignment = Alignment.BottomCenter,
-        ) {
-            Surface(
-                Modifier.fillMaxWidth().height(560.dp)
-                    .graphicsLayer { translationY = maxSheetPx - revealPx },
-                shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
-                color = MaterialTheme.colorScheme.surfaceContainerLow,
-                shadowElevation = 12.dp,
-            ) {
-                Column(Modifier.fillMaxSize().navigationBarsPadding()) {
-                    Box(
-                        Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 4.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Box(Modifier.size(width = 36.dp, height = 4.dp).clip(RoundedCornerShape(2.dp)).background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)))
-                    }
-                    QueuePanel(vm, state, Modifier.fillMaxWidth().weight(1f))
-                }
-            }
         }
     }
     }
