@@ -88,14 +88,15 @@ class BilingualLyricTest {
 
     @Test fun adjacentLineFollowsInOneContinuousMotionWithoutAMidwayStop() {
         compose.mainClock.autoAdvance = false
+        position.longValue = 5_000L
         show(Lyrics("synced", (0..19).map { LyricLine(it * 1000L, "合成歌词第 $it 行") }))
         compose.mainClock.advanceTimeBy(2_000)
         val center = compose.onNodeWithTag("lyrics-viewport").fetchSemanticsNode().boundsInRoot.center.y
-        compose.runOnIdle { position.longValue = 1_000L }
+        compose.runOnIdle { position.longValue = 6_000L }
         val distances = mutableListOf<Float>()
         repeat(110) {
             compose.mainClock.advanceTimeByFrame()
-            distances += compose.onNodeWithTag("lyric-line-1").fetchSemanticsNode().boundsInRoot.center.y - center
+            distances += compose.onNodeWithTag("lyric-line-6").fetchSemanticsNode().boundsInRoot.center.y - center
         }
         assertTrue("active line ends at the viewport center", abs(distances.last()) < 2f)
         var moving = false

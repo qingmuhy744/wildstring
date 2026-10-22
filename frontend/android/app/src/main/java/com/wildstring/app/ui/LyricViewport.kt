@@ -92,6 +92,10 @@ import kotlin.math.roundToInt
         customActions = listOf(CustomAccessibilityAction("切换歌词与播放动画") { onBlank(); true },
             CustomAccessibilityAction("查看大封面") { onArtwork(); true })
     }) {
+        val hasLanguageChips = remember(lines) { lines.any { !it.translation.isNullOrBlank() || !it.romanization.isNullOrBlank() } }
+        val topPadding = if (hasLanguageChips) 48.dp else 24.dp
+        val topPaddingPx = with(density) { topPadding.toPx() }
+        val halfViewportPx = with(density) { (maxHeight / 2).toPx() } - topPaddingPx
         val textWidth = with(density) { (maxWidth - 80.dp).coerceAtLeast(1.dp).roundToPx() }
         fun measuredHeight(index: Int): Int {
             val line = lines[index]
@@ -104,10 +108,17 @@ import kotlin.math.roundToInt
                 constraints = Constraints(maxWidth = textWidth)).size.height } +
                 with(density) { (28.dp + 6.dp * extra.size).roundToPx() }
         }
+        fun lineCenterFromTop(index: Int): Float {
+            var sum = 0
+            for (i in 0 until index) sum += measuredHeight(i)
+            return sum + measuredHeight(index) / 2f
+        }
         val list = remember(lyrics) {
-            val initialIndex = active.coerceAtLeast(0)
-            val initialOffset = if (active in lines.indices) (measuredHeight(active) / 2f).roundToInt() else 0
-            LazyListState(initialIndex, initialOffset)
+            if (active > 0 && active in lines.indices && lineCenterFromTop(active) > halfViewportPx) {
+                LazyListState(active, (measuredHeight(active) / 2f - halfViewportPx).roundToInt())
+            } else {
+                LazyListState(0, 0)
+            }
         }
         val candidate by remember(list) {
             derivedStateOf {
@@ -120,6 +131,18 @@ import kotlin.math.roundToInt
         suspend fun centerLine(index: Int, animate: Boolean = true) {
             val layout = snapshotFlow { list.layoutInfo }.first { it.visibleItemsInfo.isNotEmpty() }
             val center = (layout.viewportStartOffset + layout.viewportEndOffset) / 2f
+            val shouldStayAtTop = index <= 0 || lineCenterFromTop(index) <= halfViewportPx
+            if (shouldStayAtTop) {
+                if (list.firstVisibleItemIndex == 0 && list.firstVisibleItemScrollOffset == 0) return
+                if (!animate) {
+                    list.scrollToItem(0, 0)
+                } else if (list.firstVisibleItemIndex == 0) {
+                    list.animateScrollBy(-list.firstVisibleItemScrollOffset.toFloat(), tween(480, easing = FastOutSlowInEasing))
+                } else {
+                    list.animateScrollToItem(0, 0)
+                }
+                return
+            }
             val item = layout.visibleItemsInfo.firstOrNull { it.index == index }
             if (!animate) {
                 if (item != null) {
@@ -155,21 +178,23 @@ import kotlin.math.roundToInt
                 centerLine(active, animate = initialPlaced)
                 initialPlaced = true
             } else if (active < 0) {
+                if (follow) centerLine(0, animate = false)
                 initialPlaced = true
             }
         }
         val fadeEdge = with(density) { 44.dp.toPx() }
-        LazyColumn(state = list, contentPadding = PaddingValues(vertical = maxHeight / 2),
+        val showTopFade = list.canScrollBackward
+        LazyColumn(state = list, contentPadding = PaddingValues(top = topPadding, bottom = maxHeight / 2),
             modifier = Modifier.fillMaxSize().testTag("lyric-scroll")
                 .graphicsLayer(compositingStrategy = CompositingStrategy.Offscreen)
                 .drawWithContent {
                     drawContent()
                     if (size.height > fadeEdge * 2) {
-                        val topRatio = (fadeEdge / size.height).coerceIn(0f, 0.25f)
-                        val bottomRatio = (1f - topRatio).coerceIn(0.75f, 1f)
+                        val topRatio = if (showTopFade) (fadeEdge / size.height).coerceIn(0f, 0.25f) else 0f
+                        val bottomRatio = (1f - (fadeEdge / size.height).coerceIn(0f, 0.25f)).coerceIn(0.75f, 1f)
                         drawRect(
                             brush = Brush.verticalGradient(
-                                0f to Color.Transparent,
+                                0f to if (showTopFade) Color.Transparent else Color.Black,
                                 topRatio to Color.Black,
                                 bottomRatio to Color.Black,
                                 1f to Color.Transparent,
@@ -180,7 +205,8 @@ import kotlin.math.roundToInt
                 }) {
             items(lines.size) { index ->
                 val line = lines[index]
-                val highlighted = if (follow) active == index else candidate == index
+                val effectiveActive = if (lyrics.kind == "synced") active.coerceAtLeast(0) else -1
+                val highlighted = if (follow) effectiveActive == index else candidate == index
                 Column(Modifier.fillMaxWidth().testTag("lyric-row-$index").padding(horizontal = 40.dp, vertical = 14.dp),
                     horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     val text = buildAnnotatedString {
