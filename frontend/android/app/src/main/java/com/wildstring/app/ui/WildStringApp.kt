@@ -42,6 +42,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.input.pointer.pointerInput
@@ -95,22 +96,39 @@ internal fun Modifier.trackSwipeGestures(
     )
 }
 
-/** A downward swipe on the visual stage collapses the player; lyric and queue views stay scrollable. */
+/** A downward swipe on the visual stage or top bar collapses the player with live drag follow. */
 internal fun Modifier.dismissPlayerSwipe(
     enabled: Boolean,
     onDismiss: () -> Unit,
+    onDragOffset: (Float, Boolean) -> Unit = { _, _ -> },
+    onThresholdCrossed: () -> Unit = {},
 ): Modifier = if (!enabled) this else pointerInput(enabled) {
     var distance = 0f
+    var crossed = false
+    val threshold = 52.dp.toPx()
     detectVerticalDragGestures(
-        onDragStart = { distance = 0f },
+        onDragStart = {
+            distance = 0f
+            crossed = false
+            onDragOffset(0f, true)
+        },
         onVerticalDrag = { change, amount ->
-            distance += amount
+            distance = (distance + amount).coerceAtLeast(0f)
+            onDragOffset(distance, true)
+            if (distance >= threshold && !crossed) {
+                crossed = true
+                onThresholdCrossed()
+            }
             change.consume()
         },
         onDragEnd = {
-            if (distance >= 96.dp.toPx()) onDismiss()
+            if (distance >= threshold) onDismiss()
+            else onDragOffset(0f, false)
         },
-        onDragCancel = { distance = 0f },
+        onDragCancel = {
+            distance = 0f
+            onDragOffset(0f, false)
+        },
     )
 }
 internal val classicDarkColors = darkColorScheme(primary = Color(0xFFE98A6D), onPrimary = Color(0xFF291E17), background = Color(0xFF191A17),
@@ -333,6 +351,8 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
         AnimatedContent(destination, transitionSpec = {
             if (targetState == "settings" || initialState == "settings") {
                 (fadeIn(tween(180)) + slideInHorizontally(tween(240)) { if (targetState == "settings") it / 6 else -it / 12 }) togetherWith fadeOut(tween(120))
+            } else if (initialState == "player") {
+                fadeIn(tween(180)) togetherWith (fadeOut(tween(180)) + slideOutVertically(tween(240, easing = FastOutSlowInEasing)) { it / 4 })
             } else (fadeIn(tween(220)) + slideInVertically(tween(280, easing = FastOutSlowInEasing)) { it / 12 }) togetherWith fadeOut(tween(140))
         }, label = "app-destination") { destination ->
         if (destination == "settings") savedPages.SaveableStateProvider("settings") { SettingsScreen(vm, bottomBar = {
@@ -746,9 +766,28 @@ private fun PlayerScreen(vm: MusicViewModel, state: MusicState, wide: Boolean, l
     val showArtwork = remember { { artworkPreview = true } }
     val dismissArtwork = remember { { artworkPreview = false } }
     val spinning = state.playing && !state.buffering && state.playbackError == null && !artworkPreview
+    var rawDragY by remember { mutableFloatStateOf(0f) }
+    var draggingDown by remember { mutableStateOf(false) }
+    val animatedDragY by animateFloatAsState(
+        targetValue = if (draggingDown) rawDragY else 0f,
+        animationSpec = if (draggingDown) snap() else spring(stiffness = Spring.StiffnessMediumLow),
+        label = "player-dismiss-drag",
+    )
+    val updateDrag: (Float, Boolean) -> Unit = { offset, active -> rawDragY = offset; draggingDown = active }
+    val thresholdTick = { feedback(TactileKind.Tap) }
     Box(Modifier.fillMaxSize()) {
-    Column(Modifier.testTag(if (wide) "player-tablet" else if (landscape) "player-landscape" else "player-phone").fillMaxSize().padding(horizontal = if (wide) 34.dp else 20.dp)) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+    Column(Modifier.testTag(if (wide) "player-tablet" else if (landscape) "player-landscape" else "player-phone")
+        .fillMaxSize()
+        .graphicsLayer {
+            translationY = animatedDragY
+            val dragProgress = (animatedDragY / 900f).coerceIn(0f, 1f)
+            val scale = 1f - dragProgress * 0.05f
+            scaleX = scale
+            scaleY = scale
+            alpha = 1f - dragProgress * 0.35f
+        }
+        .padding(horizontal = if (wide) 34.dp else 20.dp)) {
+        Row(Modifier.fillMaxWidth().dismissPlayerSwipe(true, onBack, updateDrag, thresholdTick), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
             IconButton(onBack) {
                 Icon(
                     Icons.Default.KeyboardArrowDown,
@@ -768,7 +807,7 @@ private fun PlayerScreen(vm: MusicViewModel, state: MusicState, wide: Boolean, l
                         onTap = { onLyrics() },
                     )
                 }
-                .dismissPlayerSwipe(!queue && !lyrics, onBack)
+                .dismissPlayerSwipe(!queue && !lyrics, onBack, updateDrag, thresholdTick)
                 .trackSwipeGestures(!queue && !lyrics,
                     onPrevious = { feedback(TactileKind.Tap); vm.previous() },
                     onNext = { feedback(TactileKind.Tap); vm.next() }), contentAlignment = Alignment.Center) {
@@ -785,7 +824,7 @@ private fun PlayerScreen(vm: MusicViewModel, state: MusicState, wide: Boolean, l
         } else if (wide) Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(48.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(.9f).fillMaxHeight().widthIn(max = 380.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()
-                    .dismissPlayerSwipe(!lyrics && !queue, onBack)
+                    .dismissPlayerSwipe(!lyrics && !queue, onBack, updateDrag, thresholdTick)
                     .trackSwipeGestures(!lyrics && !queue,
                         onPrevious = { feedback(TactileKind.Tap); vm.previous() },
                         onNext = { feedback(TactileKind.Tap); vm.next() }), contentAlignment = Alignment.Center) {
@@ -810,7 +849,7 @@ private fun PlayerScreen(vm: MusicViewModel, state: MusicState, wide: Boolean, l
                         onTap = { onLyrics() },
                     )
                 }
-                .dismissPlayerSwipe(!lyrics, onBack)
+                .dismissPlayerSwipe(!lyrics, onBack, updateDrag, thresholdTick)
                 .trackSwipeGestures(!lyrics,
                     onPrevious = { feedback(TactileKind.Tap); vm.previous() },
                     onNext = { feedback(TactileKind.Tap); vm.next() }), contentAlignment = Alignment.Center) {
