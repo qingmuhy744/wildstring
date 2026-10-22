@@ -40,20 +40,18 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.layer.GraphicsLayer
-import androidx.compose.ui.graphics.layer.drawLayer
-import androidx.compose.ui.graphics.rememberGraphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.selected
@@ -153,8 +151,14 @@ internal fun Modifier.dismissPlayerSwipe(
         },
     )
 }
-internal val classicDarkColors = darkColorScheme(primary = Color(0xFFE98A6D), onPrimary = Color(0xFF291E17), background = Color(0xFF191A17),
-    surface = Color(0xFF191A17), surfaceVariant = Color(0xFF2B2E25), onSurface = Color(0xFFEEEAE2), onSurfaceVariant = Color(0xFFA8AA9D))
+internal val classicDarkColors = darkColorScheme(
+    primary = Color(0xFFE98A6D), onPrimary = Color(0xFF291E17),
+    background = Color(0xFF191A17), surface = Color(0xFF191A17),
+    surfaceVariant = Color(0xFF2B2E25), onSurface = Color(0xFFEEEAE2), onSurfaceVariant = Color(0xFFA8AA9D),
+    surfaceContainerLowest = Color(0xFF141512), surfaceContainerLow = Color(0xFF1D1E1A),
+    surfaceContainer = Color(0xFF22241F), surfaceContainerHigh = Color(0xFF292B25),
+    surfaceContainerHighest = Color(0xFF33362E),
+)
 internal val redColors = darkColorScheme(
     primary = Color(0xFFFFF3E7), onPrimary = Color(0xFF9D0011), primaryContainer = Color(0xFF8E0010), onPrimaryContainer = Color(0xFFFFF3E7),
     secondary = Color(0xFFFFD4C7), onSecondary = Color(0xFF7F000A), secondaryContainer = Color(0xFFD51A27), onSecondaryContainer = Color.White,
@@ -355,7 +359,6 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
         if (savedKeys.size > 32) savedPages.removeState(savedKeys.removeFirst())
     }
     val destination = when { settings -> "settings"; expanded && state.current != null -> "player"; else -> "catalog" }
-    val baseLayer = rememberGraphicsLayer()
     var rawPlayerDragY by remember { mutableFloatStateOf(0f) }
     var playerDraggingDown by remember { mutableStateOf(false) }
     LaunchedEffect(destination) {
@@ -371,30 +374,22 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
     )
     val baseIsSettings = settings || (destination == "player" && playerFromSettings)
     val baseSurfaceColor = if (baseIsSettings) MaterialTheme.colorScheme.surfaceContainerLow else Background
-    // Draw the base surface behind system bars; translate the outer atmosphere in the draw phase without recomposing.
     Box(Modifier.fillMaxSize().background(baseSurfaceColor))
-    if (destination == "player") {
-        state.current?.let { track ->
-            Box(Modifier.fillMaxSize().graphicsLayer { translationY = animatedPlayerDragY.value }) {
-                ArtworkBackdrop(vm, track, LocalRedCloth.current, includeTestTag = false)
-            }
-        }
-    }
-    BoxWithConstraints(Modifier.fillMaxSize().safeDrawingPadding()) {
-        val wide = maxWidth >= 840.dp && maxHeight >= 480.dp
-        val landscape = maxWidth > maxHeight && !wide
-        val rail = maxWidth >= 600.dp && maxHeight >= 480.dp
-        val compact = maxHeight < 600.dp
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val insets = WindowInsets.safeDrawing.asPaddingValues()
+        val safeWidth = (maxWidth - insets.calculateLeftPadding(androidx.compose.ui.unit.LayoutDirection.Ltr) - insets.calculateRightPadding(androidx.compose.ui.unit.LayoutDirection.Ltr)).coerceAtLeast(0.dp)
+        val safeHeight = (maxHeight - insets.calculateTopPadding() - insets.calculateBottomPadding()).coerceAtLeast(0.dp)
+        val wide = safeWidth >= 840.dp && safeHeight >= 480.dp
+        val landscape = safeWidth > safeHeight && !wide
+        val rail = safeWidth >= 600.dp && safeHeight >= 480.dp
+        val compact = safeHeight < 600.dp
         var wasWide by remember { mutableStateOf(wide) }
         LaunchedEffect(wide) { if (wasWide && !wide && expanded && !queue) lyrics = true; wasWide = wide }
         BackHandler(enabled = !settings && (expanded || queue || state.canGoBack || state.tab != "search")) {
             when { queue && !wide -> queue = false; lyrics && !wide -> lyrics = false; expanded -> collapsePlayer(); state.canGoBack -> vm.back(); else -> vm.navigate("search") }
         }
         @Composable fun BaseDestination(target: String) {
-            Box(Modifier.fillMaxSize().drawWithContent {
-                baseLayer.record { this@drawWithContent.drawContent() }
-                drawLayer(baseLayer)
-            }) {
+            Box(Modifier.fillMaxSize().safeDrawingPadding()) {
             if (target == "settings") savedPages.SaveableStateProvider("settings") { SettingsScreen(vm, bottomBar = {
                 MiniPlayer(vm, state, onQueue = { queue = true }) { playerFromSettings = true; settings = false; expanded = true; lyrics = false; queue = false }
             }) { settings = false } }
@@ -490,17 +485,31 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
             } else (fadeIn(tween(220)) + slideInVertically(tween(280, easing = FastOutSlowInEasing)) { it / 12 }) togetherWith fadeOut(tween(140))
         }, label = "app-destination") { currentDestination ->
             if (currentDestination == "player") {
-                PlayerScreen(vm, state, wide, landscape, lyrics, queue, rotation,
-                    dragOffset = animatedPlayerDragY,
-                    baseLayer = baseLayer,
-                    baseSurfaceColor = baseSurfaceColor,
-                    onUpdateDrag = { offset, active -> rawPlayerDragY = offset; playerDraggingDown = active },
-                    onBack = { if (lyrics && !wide) lyrics = false else collapsePlayer() },
-                    onDismiss = ::collapsePlayer,
-                    onLyrics = { lyrics = !lyrics; queue = false }, onQueue = { queue = !queue },
-                    onAlbum = { state.current?.let(::openTrackAlbum) },
-                    onArtist = ::openTrackArtist,
-                    onAdd = { actions = state.current }, onSleep = { sleepDialog = true })
+                Box(Modifier.fillMaxSize()) {
+                    if (this@AnimatedContent.transition.currentState == EnterExitState.Visible &&
+                        this@AnimatedContent.transition.targetState == EnterExitState.Visible) {
+                        Box(
+                            Modifier.fillMaxSize()
+                                .clearAndSetSemantics {}
+                                .drawWithContent {
+                                    if (animatedPlayerDragY.value > 0.5f) {
+                                        drawContent()
+                                    }
+                                }
+                        ) {
+                            BaseDestination(if (playerFromSettings) "settings" else "catalog")
+                        }
+                    }
+                    PlayerScreen(vm, state, wide, landscape, lyrics, queue, rotation,
+                        dragOffset = animatedPlayerDragY,
+                        onUpdateDrag = { offset, active -> rawPlayerDragY = offset; playerDraggingDown = active },
+                        onBack = ::collapsePlayer,
+                        onDismiss = ::collapsePlayer,
+                        onLyrics = { lyrics = !lyrics; queue = false }, onQueue = { queue = !queue },
+                        onAlbum = { state.current?.let(::openTrackAlbum) },
+                        onArtist = ::openTrackArtist,
+                        onAdd = { actions = state.current }, onSleep = { sleepDialog = true })
+                }
             } else {
                 BaseDestination(currentDestination)
             }
@@ -820,7 +829,7 @@ internal fun CatalogToolbar(state: MusicState, play: () -> Unit, sort: (String) 
 }
 @Composable
 private fun PlayerScreen(vm: MusicViewModel, state: MusicState, wide: Boolean, landscape: Boolean, lyrics: Boolean, queue: Boolean, rotation: PlaybackRotation,
-    dragOffset: State<Float>, baseLayer: GraphicsLayer, baseSurfaceColor: Color, onUpdateDrag: (Float, Boolean) -> Unit,
+    dragOffset: State<Float>, onUpdateDrag: (Float, Boolean) -> Unit,
     onBack: () -> Unit, onDismiss: () -> Unit, onLyrics: () -> Unit, onQueue: () -> Unit, onAlbum: () -> Unit, onArtist: (String) -> Unit,
     onAdd: () -> Unit, onSleep: () -> Unit) {
     val preferences by vm.settings.state.collectAsStateWithLifecycle()
@@ -832,23 +841,19 @@ private fun PlayerScreen(vm: MusicViewModel, state: MusicState, wide: Boolean, l
     val dismissArtwork = remember { { artworkPreview = false } }
     val spinning = state.playing && !state.buffering && state.playbackError == null && !artworkPreview
     val thresholdTick = { feedback(TactileKind.Tap) }
-    Box(Modifier.fillMaxSize().drawWithCache {
-        onDrawBehind {
-            if (dragOffset.value > 0.5f) {
-                drawRect(baseSurfaceColor)
-                drawLayer(baseLayer)
-            }
-        }
-    }) {
+    // Translate only in the canvas draw phase so pointerInput hit-test coordinates never shift mid-drag.
     Box(
         Modifier.fillMaxSize()
-            .graphicsLayer {
-                translationY = dragOffset.value
+            .drawWithContent {
+                withTransform({ translate(top = dragOffset.value) }) {
+                    this@drawWithContent.drawContent()
+                }
             }
     ) {
     ArtworkBackdrop(vm, track, LocalRedCloth.current)
     Column(Modifier.testTag(if (wide) "player-tablet" else if (landscape) "player-landscape" else "player-phone")
         .fillMaxSize()
+        .safeDrawingPadding()
         .padding(horizontal = if (wide) 34.dp else 20.dp)) {
         Row(Modifier.fillMaxWidth().dismissPlayerSwipe(true, onDismiss, onUpdateDrag, thresholdTick), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
             IconButton(onBack) {
@@ -928,7 +933,6 @@ private fun PlayerScreen(vm: MusicViewModel, state: MusicState, wide: Boolean, l
             PlaybackControls(vm, state, onQueue, onAlbum, onArtist,
                 modifier = Modifier.dismissPlayerSwipe(true, onDismiss, onUpdateDrag, thresholdTick, openQueueOnSwipeUp))
         }
-    }
     }
     }
     if (artworkPreview) ArtworkPreview(vm, track, dismissArtwork)

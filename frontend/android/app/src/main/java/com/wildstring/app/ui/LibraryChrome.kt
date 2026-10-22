@@ -42,10 +42,14 @@ import androidx.compose.ui.unit.dp
             }
         }
     }
+    val barColors = TopAppBarDefaults.topAppBarColors(
+        containerColor = androidx.compose.ui.graphics.Color.Transparent,
+        scrolledContainerColor = androidx.compose.ui.graphics.Color.Transparent,
+    )
     if (state.canGoBack || compact) TopAppBar(title, navigationIcon = {
         if (state.canGoBack) IconButton(back) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回上一页") }
-    }, actions = actions, windowInsets = WindowInsets(0, 0, 0, 0))
-    else MediumTopAppBar(title, actions = actions, windowInsets = WindowInsets(0, 0, 0, 0))
+    }, actions = actions, colors = barColors, windowInsets = WindowInsets(0, 0, 0, 0))
+    else MediumTopAppBar(title, actions = actions, colors = barColors, windowInsets = WindowInsets(0, 0, 0, 0))
 }
 
 @Composable internal fun LibraryTabs(kind: String, change: (String) -> Unit) {
