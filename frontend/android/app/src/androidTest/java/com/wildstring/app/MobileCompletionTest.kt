@@ -297,6 +297,7 @@ class MobileCompletionTest {
                 compose.onNodeWithText("保存歌单").performClick()
                 compose.waitUntil(10_000) { fixture.mutations.any { it.first.endsWith("/playlists/manual/tracks") } }
                 compose.onAllNodesWithContentDescription("返回").onLast().performClick()
+                compose.waitUntil(10_000) { compose.onAllNodesWithTag("feature-daily").fetchSemanticsNodes().isEmpty() }
                 compose.onNodeWithText("AI 找歌", substring = false).performClick()
                 // A new Dialog window can attach after the shortcut's click becomes idle.
                 compose.waitUntil(10_000) { compose.onAllNodes(hasText("想听什么？") and hasSetTextAction()).fetchSemanticsNodes().size == 1 }

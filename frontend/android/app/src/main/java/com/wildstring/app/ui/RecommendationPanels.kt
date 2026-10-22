@@ -160,6 +160,24 @@ internal fun recommendationIssue(code: String): String = when {
                 Text(name, Modifier.weight(1f))
             } }
             if ("lastfm_tags" in value.sources) OutlinedTextField(tags, { tags = it.take(200) }, label = { Text("公共标签（逗号分隔，最多 3 个）") }, modifier = Modifier.fillMaxWidth())
+            Text("每日定时生成", style = MaterialTheme.typography.titleSmall)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(value.dailyEnabled, { checked -> value = value.copy(dailyEnabled = checked) })
+                Text("按设定时间自动生成每日推荐", Modifier.weight(1f))
+            }
+            if (value.dailyEnabled) {
+                OutlinedTextField(
+                    value.dailyTime,
+                    { input ->
+                        val clean = input.filter { it.isDigit() || it == ':' }.take(5)
+                        value = value.copy(dailyTime = clean)
+                    },
+                    label = { Text("每天生成时间 (HH:MM)") },
+                    placeholder = { Text("00:00") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
             Text("AI 编排", style = MaterialTheme.typography.titleSmall)
             AgentConnectionChoice(connections, value.connectionId.takeUnless { it == "local" }) { selected -> value = value.copy(connectionId = selected ?: "local", useAi = selected != null) }
             error?.let { Text(it, style = MaterialTheme.typography.bodySmall) }

@@ -1,5 +1,6 @@
 """Isolated filesystem settings shared by backend tests."""
 
+import os
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -9,6 +10,16 @@ from pydantic import SecretStr
 
 from wildstring.config import Settings
 from wildstring.main import create_app
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    for _key in ("no_proxy", "NO_PROXY"):
+        _current = os.environ.get(_key, "")
+        _items = [item.strip() for item in _current.split(",") if item.strip()]
+        for _host in ("127.0.0.1", "localhost"):
+            if _host not in _items:
+                _items.append(_host)
+        os.environ[_key] = ",".join(_items)
 
 
 @pytest.fixture

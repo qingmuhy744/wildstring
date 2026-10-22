@@ -239,7 +239,7 @@ class MusicViewModel @Inject constructor(
     }
     suspend fun saveServer(id: String?, url: String, name: String, localHttp: Boolean): ServerConfiguration {
         val old = repository.session.servers.value.firstOrNull { it.id == id }
-        val canonical = ServerAddress.normalize(url, com.wildstring.app.BuildConfig.DEBUG && localHttp).toString()
+        val canonical = ServerAddress.normalize(url, localHttp).toString()
         require(repository.session.servers.value.none { it.url == canonical && it.id != id }) { "这个服务器已经保存，请直接选择。" }
         val changedActive = id != null && id == repository.session.activeServerId && old?.url != canonical
         if (changedActive) { selectionJob?.cancel(); stopForServerChange() }
@@ -265,7 +265,7 @@ class MusicViewModel @Inject constructor(
         return viewModelScope.launch {
             var generation = authGeneration
             try {
-                ServerAddress.normalize(server, com.wildstring.app.BuildConfig.DEBUG && localHttp)
+                ServerAddress.normalize(server, localHttp)
                 stopForServerChange(); repository.session.configure(server, localHttp)
                 repository.session.write(null)
                 repository.downloads.switchScope()
@@ -296,6 +296,11 @@ class MusicViewModel @Inject constructor(
             runCatching { repository.logout() }
             if (generation == authGeneration) mutable.value = connectionState()
         }.also { selectionJob = it }
+    }
+
+    suspend fun updateProfile(username: String, displayName: String, email: String) {
+        val updated = repository.updateProfile(username, displayName, email)
+        mutable.update { it.copy(account = updated) }
     }
 
     suspend fun changePassword(current: String, next: String) {
@@ -407,6 +412,28 @@ class MusicViewModel @Inject constructor(
         }
     }
     fun openArtist(artist: Artist) = open(query().copy(kind = "tracks", albumFilter = null, collection = "artists", collectionId = artist.id, title = artist.name, query = "", offset = 0, playlist = null))
+    fun openArtistName(name: String, onOpened: () -> Unit = {}) {
+        val query = name.trim()
+        if (query.isBlank()) return
+        viewModelScope.launch {
+            try {
+                val result = repository.api().artists(query, limit = 20, offset = 0)
+                val item = result.items.firstOrNull { it.name == query }
+                    ?: result.items.firstOrNull { it.name.equals(query, ignoreCase = true) }
+                    ?: result.items.singleOrNull()
+                if (item == null) {
+                    mutable.update { it.copy(error = "没有找到艺人“$query”。") }
+                    return@launch
+                }
+                openArtist(item)
+                onOpened()
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                mutable.update { it.copy(error = friendlyError(error)) }
+            }
+        }
+    }
     fun openPlaylist(playlist: Playlist) = open(query().copy(kind = "tracks", collection = "playlists", collectionId = playlist.id, playlist = playlist, title = playlist.name, query = "", offset = 0))
     fun recent() = open(query().copy(kind = "recent", title = "最近听过", collection = null, collectionId = null, offset = 0, query = "",
         sort = "last_played_at", playlist = null, albumFilter = null))

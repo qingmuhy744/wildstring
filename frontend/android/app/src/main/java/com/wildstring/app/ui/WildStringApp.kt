@@ -25,10 +25,12 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.QueueMusic
+import androidx.compose.material.icons.automirrored.filled.FactCheck
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material.icons.automirrored.filled.PlaylistPlay
+import androidx.compose.material.icons.automirrored.filled.QueueMusic
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
@@ -178,6 +180,14 @@ fun ConnectionScreen(state: MusicState, connect: (String, String, String, Boolea
     var username by rememberSaveable { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var localHttp by rememberSaveable { mutableStateOf(state.localHttp) }
+    var insecureHttpWarning by rememberSaveable { mutableStateOf(false) }
+    fun submit() {
+        if (server.trim().startsWith("http://", ignoreCase = true) && !localHttp) {
+            insecureHttpWarning = true
+        } else {
+            connect(server, username, password, localHttp)
+        }
+    }
     Box(Modifier.fillMaxSize().safeDrawingPadding(), contentAlignment = Alignment.Center) {
         Column(Modifier.widthIn(max = 440.dp).fillMaxWidth().verticalScroll(rememberScrollState()).padding(28.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
             Icon(painterResource(R.drawable.ic_wildstring), null, Modifier.size(64.dp), tint = Color.Unspecified)
@@ -187,18 +197,26 @@ fun ConnectionScreen(state: MusicState, connect: (String, String, String, Boolea
             OutlinedTextField(server, { server = it }, Modifier.fillMaxWidth(), label = { Text("服务器地址") }, placeholder = { Text("https://music.your-domain.com") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri), enabled = !state.connecting)
             OutlinedTextField(username, { username = it }, Modifier.fillMaxWidth(), label = { Text("账号") }, singleLine = true, enabled = !state.connecting)
             OutlinedTextField(password, { password = it }, Modifier.fillMaxWidth(), label = { Text("密码") }, visualTransformation = PasswordVisualTransformation(), singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password), enabled = !state.connecting)
-            if (BuildConfig.DEBUG) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 Checkbox(localHttp, { localHttp = it }, enabled = !state.connecting)
-                Text("允许本机调试 HTTP（仅 localhost / 127.0.0.1 / 10.0.2.2）", fontSize = 12.sp, color = Muted)
+                Spacer(Modifier.width(8.dp))
+                Text("允许此服务器使用未加密 HTTP", fontSize = 13.sp)
             }
             state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-            Button(onClick = { connect(server, username, password, localHttp) }, Modifier.fillMaxWidth().heightIn(min = 48.dp), enabled = !state.connecting && server.isNotBlank() && username.isNotBlank()) {
+            Button(onClick = ::submit, Modifier.fillMaxWidth().heightIn(min = 48.dp), enabled = !state.connecting && server.isNotBlank() && username.isNotBlank()) {
                 if (state.connecting) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
                 else Text("连接并登录")
             }
-            Text("首次使用请在服务端设置管理员。服务器需提供可访问的 HTTPS 地址。", color = Muted, fontSize = 12.sp)
+            Text("首次使用请在服务端设置管理员。HTTP 仅在你明确确认风险后使用。", color = Muted, fontSize = 12.sp)
         }
     }
+    if (insecureHttpWarning) AlertDialog(
+        onDismissRequest = { insecureHttpWarning = false },
+        title = { Text("使用未加密 HTTP？") },
+        text = { Text("账号密码、播放记录和音频会以明文传输。请只在你信任的网络中使用；公网 HTTP 也不会被自动阻挡，但风险由你确认。") },
+        confirmButton = { TextButton({ insecureHttpWarning = false; localHttp = true; connect(server, username, password, true) }) { Text("我了解风险，继续") } },
+        dismissButton = { TextButton({ insecureHttpWarning = false }) { Text("取消") } },
+    )
 }
 
 @Composable
@@ -308,6 +326,7 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
                 onBack = { if (lyrics && !wide) lyrics = false else collapsePlayer() },
                 onLyrics = { lyrics = !lyrics; queue = false }, onQueue = { queue = !queue },
                 onAlbum = { state.current?.let(::openTrackAlbum) },
+                onArtist = { name -> vm.openArtistName(name) { expanded = false; lyrics = false; queue = false } },
                 onAdd = { actions = state.current }, onSleep = { sleepDialog = true })
         } else {
             Row(Modifier.fillMaxSize()) {
@@ -455,7 +474,7 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
             }
         }
         SongAction("查看所属专辑", Icons.Default.Album, navigate = true) { openTrackAlbum(track) }
-        SongAction("响度均衡与手动调整", Icons.Default.VolumeUp) { feature = "gain"; featureTrack = track; actions = null }
+        SongAction("响度均衡与手动调整", Icons.AutoMirrored.Filled.VolumeUp) { feature = "gain"; featureTrack = track; actions = null }
         if (track.id == state.current?.id) SongAction("播放诊断", Icons.Default.Troubleshoot) { diagnostics = true; actions = null }
         HorizontalDivider(Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
         SongAction("下一首播放", Icons.AutoMirrored.Filled.PlaylistPlay, onClick = tactile { vm.addToQueue(track, true); actions = null })
@@ -543,7 +562,7 @@ private fun AlbumActionsSheet(
             })
             HorizontalDivider(Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
             SongAction("编辑专辑信息", Icons.Default.Edit, navigate = true, onClick = onEdit)
-            SongAction("批量核对资料", Icons.Default.FactCheck, navigate = true, onClick = onReview)
+            SongAction("批量核对资料", Icons.AutoMirrored.Filled.FactCheck, navigate = true, onClick = onReview)
             SongAction("更新专辑元数据", Icons.Default.Refresh, onClick = onRefresh)
             Spacer(Modifier.height(24.dp))
         }
@@ -676,7 +695,8 @@ internal fun CatalogToolbar(state: MusicState, play: () -> Unit, sort: (String) 
 }
 @Composable
 private fun PlayerScreen(vm: MusicViewModel, input: MusicState, wide: Boolean, landscape: Boolean, lyrics: Boolean, queue: Boolean, rotation: PlaybackRotation,
-    onBack: () -> Unit, onLyrics: () -> Unit, onQueue: () -> Unit, onAlbum: () -> Unit, onAdd: () -> Unit, onSleep: () -> Unit) {
+    onBack: () -> Unit, onLyrics: () -> Unit, onQueue: () -> Unit, onAlbum: () -> Unit, onArtist: (String) -> Unit,
+    onAdd: () -> Unit, onSleep: () -> Unit) {
     val position by vm.position.collectAsStateWithLifecycle()
     val state = input.copy(position = position)
     val preferences by vm.settings.state.collectAsStateWithLifecycle()
@@ -723,7 +743,7 @@ private fun PlayerScreen(vm: MusicViewModel, input: MusicState, wide: Boolean, l
                 }
             }
             Column(Modifier.weight(1.15f).fillMaxHeight().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.Center) {
-                PlaybackControls(vm, state, onQueue, onAlbum, compact = true)
+                    PlaybackControls(vm, state, onQueue, onAlbum, onArtist, compact = true)
             }
         } else if (wide) Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(48.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(.9f).fillMaxHeight().widthIn(max = 380.dp), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -736,7 +756,7 @@ private fun PlayerScreen(vm: MusicViewModel, input: MusicState, wide: Boolean, l
                     PlaybackVisual(vm, track, preferences.playbackStyle, spinning, true, progress, rotation,
                         Modifier.size(visualSize), showArtwork) { if (queue) onQueue() }
                 }
-                Spacer(Modifier.height(20.dp)); PlaybackControls(vm, state, onQueue, onAlbum)
+                Spacer(Modifier.height(20.dp)); PlaybackControls(vm, state, onQueue, onAlbum, onArtist)
             }
             Column(Modifier.weight(1.1f).fillMaxHeight().padding(top = 24.dp, bottom = 16.dp)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -759,15 +779,13 @@ private fun PlayerScreen(vm: MusicViewModel, input: MusicState, wide: Boolean, l
                     onPrevious = { feedback(TactileKind.Tap); vm.previous() },
                     onNext = { feedback(TactileKind.Tap); vm.next() }), contentAlignment = Alignment.Center) {
                 val visualSize = minOf(370.dp, maxWidth, maxHeight)
-                Crossfade(lyrics, Modifier.fillMaxSize(), animationSpec = tween(240), label = "lyrics-cover") { showingLyrics ->
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        if (showingLyrics) LyricsPanel(vm, state, Modifier.fillMaxSize().padding(top = 8.dp, bottom = 32.dp), onLyrics, showArtwork)
-                        else PlaybackVisual(vm, track, preferences.playbackStyle, spinning, !lyrics, progress, rotation,
-                            Modifier.size(visualSize), showArtwork, onLyrics)
-                    }
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    if (lyrics) LyricsPanel(vm, state, Modifier.fillMaxSize().padding(top = 8.dp, bottom = 32.dp), onLyrics, showArtwork)
+                    else PlaybackVisual(vm, track, preferences.playbackStyle, spinning, true, progress, rotation,
+                        Modifier.size(visualSize), showArtwork, onLyrics)
                 }
             }
-            PlaybackControls(vm, state, onQueue, onAlbum)
+            PlaybackControls(vm, state, onQueue, onAlbum, onArtist)
         }
     }
     }
@@ -775,7 +793,8 @@ private fun PlayerScreen(vm: MusicViewModel, input: MusicState, wide: Boolean, l
 }
 
 @Composable
-private fun PlaybackControls(vm: MusicViewModel, state: MusicState, onQueue: () -> Unit, onAlbum: () -> Unit, compact: Boolean = false) {
+private fun PlaybackControls(vm: MusicViewModel, state: MusicState, onQueue: () -> Unit, onAlbum: () -> Unit,
+    onArtist: (String) -> Unit = {}, compact: Boolean = false) {
     var scrub by remember { mutableStateOf<Float?>(null) }
     val feedback = LocalTactileFeedback.current
     val track = state.current ?: return
@@ -783,7 +802,15 @@ private fun PlaybackControls(vm: MusicViewModel, state: MusicState, onQueue: () 
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text(track.title, fontSize = if (compact) 20.sp else 23.sp, fontWeight = FontWeight.Medium, maxLines = if (compact) 1 else 2, overflow = TextOverflow.Ellipsis)
-                Text(track.artist, color = Muted, fontSize = 13.sp, maxLines = if (compact) 1 else 2, overflow = TextOverflow.Ellipsis)
+                if (track.artists.isEmpty()) Text("未知艺人", color = Muted, fontSize = 13.sp)
+                else Row(Modifier.horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically) {
+                    track.artists.forEachIndexed { index, name ->
+                        if (index > 0) Text(" / ", color = Muted, fontSize = 13.sp)
+                        TextButton(onClick = { onArtist(name) }, contentPadding = PaddingValues(0.dp), modifier = Modifier.heightIn(min = 32.dp)) {
+                            Text(name, color = Muted, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                    }
+                }
             }
             FavoriteControl(track.loved, track.id in state.pendingFavorites, tactile { vm.favorite(track) })
         }
@@ -821,13 +848,15 @@ private fun LyricsPanel(vm: MusicViewModel, state: MusicState, modifier: Modifie
             state.lyricsLoading && state.lyrics.lines.isEmpty() -> LyricsSkeleton()
             state.lyricsLoading -> {
                 LyricViewport(state.lyrics, state.position, vm::seek, onBlank, Modifier.fillMaxSize(), onArtwork,
-                    followDelayMs = preferences.lyricFollowSeconds * 1_000L)
+                    followDelayMs = preferences.lyricFollowSeconds * 1_000L, playing = state.playing,
+                    lyricSize = preferences.lyricSize)
                 LinearProgressIndicator(Modifier.fillMaxWidth().align(Alignment.TopCenter))
             }
             state.lyricsError != null -> Text(state.lyricsError, color = Muted)
             state.lyrics.lines.isEmpty() -> Text("暂无歌词", color = Muted)
             else -> LyricViewport(state.lyrics, state.position, vm::seek, onBlank, Modifier.fillMaxSize(), onArtwork,
-                followDelayMs = preferences.lyricFollowSeconds * 1_000L)
+                followDelayMs = preferences.lyricFollowSeconds * 1_000L, playing = state.playing,
+                lyricSize = preferences.lyricSize)
         }
     }
 }

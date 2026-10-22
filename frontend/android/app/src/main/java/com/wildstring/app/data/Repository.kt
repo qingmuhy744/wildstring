@@ -121,6 +121,15 @@ class Repository @Inject constructor(val session: SessionStore, val client: OkHt
         }
         return changed
     }
+    suspend fun updateProfile(username: String, displayName: String, email: String): Account {
+        val owner = session.cacheScope() ?: throw IOException("登录已失效。")
+        val endpoint = session.endpoint
+        val account = session.account ?: throw IOException("尚未获取账号信息。")
+        val updated = api().updateProfile(ProfileUpdate(version = account.version, username = username, displayName = displayName, email = email))
+        if (owner != session.cacheScope() || endpoint != session.endpoint) throw CancellationException("会话已变化。")
+        session.bindAccount(updated)
+        return updated
+    }
     suspend fun changePassword(current: String, next: String) {
         val owner = session.cacheScope() ?: throw IOException("登录已失效。")
         val request = session.requestState() ?: throw IOException("尚未连接服务器。")

@@ -5,7 +5,10 @@ import com.google.gson.annotations.SerializedName
 data class DiscSummary(val number: Int, @SerializedName("track_count") val trackCount: Int,
     @SerializedName("duration_ms") val durationMs: Long, val offset: Int)
 data class Page<T>(val items: List<T>, val total: Int, val limit: Int, val offset: Int, val discs: List<DiscSummary>? = null)
-data class Account(val id: String, val username: String, val profile: String = "listener", val enabled: Boolean = true, val version: Int = 1) {
+data class Account(val id: String, val username: String,
+    val profile: String = "listener", val enabled: Boolean = true, val version: Int = 1,
+    @SerializedName("display_name") val displayName: String? = null,
+    val email: String? = null) {
     val isOwner: Boolean get() = profile == "owner"
     val profileLabel: String get() = when (profile) {
         "owner" -> "所有者"
@@ -14,6 +17,12 @@ data class Account(val id: String, val username: String, val profile: String = "
         else -> "听众"
     }
 }
+data class ProfileUpdate(
+    val version: Int,
+    val username: String,
+    @SerializedName("display_name") val displayName: String = "",
+    val email: String = ""
+)
 data class AuthStatus(val configured: Boolean, val authenticated: Boolean, val user: Account? = null)
 data class PasswordChange(@SerializedName("current_password") val currentPassword: String, @SerializedName("new_password") val newPassword: String)
 data class LoginRequest(val username: String, val password: String)
@@ -94,6 +103,8 @@ data class RecommendationPreferences(val version: Int = 1, @SerializedName("use_
     @SerializedName("connection_id") val connectionId: String = "local",
     val sources: List<String> = listOf("personal", "community", "discovery", "revisit"),
     @SerializedName("lastfm_tags") val lastfmTags: List<String> = emptyList(),
+    @SerializedName("daily_enabled") val dailyEnabled: Boolean = false,
+    @SerializedName("daily_time") val dailyTime: String = "00:00",
     @SerializedName("external_enabled") val externalEnabled: Boolean = false,
     @SerializedName("external_refresh_days") val externalRefreshDays: Int = 7,
     @SerializedName("external_sources") val externalSources: List<String> = listOf("lastfm_charts", "lastfm_tags", "lastfm_artists"),

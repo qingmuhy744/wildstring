@@ -57,8 +57,8 @@ android-design: ## Preview the Android design at http://127.0.0.1:18782/android-
 android-check: ## Run Android Lint (requires JDK 21 and Android SDK 37)
 	$(ANDROID) :app:lintDebug
 
-android-test: ## Run Android unit tests
-	$(ANDROID) :app:testDebugUnitTest
+android-test: ## Run Android unit tests and compile instrumented tests
+	$(ANDROID) :app:testDebugUnitTest :app:compileDebugAndroidTestKotlin
 
 android-assemble: ## Build an installable debug APK
 	$(ANDROID) :app:assembleDebug

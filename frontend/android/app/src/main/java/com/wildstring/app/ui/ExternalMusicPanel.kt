@@ -9,13 +9,15 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
 import com.google.gson.JsonObject
 import com.wildstring.app.data.*
@@ -36,7 +38,9 @@ internal fun musicSourceUrl(value: String?): String? = value?.takeIf {
     var connections by remember { mutableStateOf<List<JsonObject>>(emptyList()) }; var connectionsError by remember { mutableStateOf<String?>(null) }
     var settings by remember { mutableStateOf(false) }; var wantedOnly by remember { mutableStateOf(false) }
     val action = remember { FeatureAction() }; val scope = rememberCoroutineScope()
-    val clipboard = LocalClipboardManager.current; val links = LocalUriHandler.current
+    val context = LocalContext.current
+    val clipboard = remember(context) { context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager }
+    val links = LocalUriHandler.current
     LaunchedEffect(Unit) {
         action.run {
             preferences = vm.repository.api().recommendationPreferences()
@@ -77,7 +81,7 @@ internal fun musicSourceUrl(value: String?): String? = value?.takeIf {
                     item.evidence.forEach { Text("${externalSourceLabels[it.source] ?: recommendationSource(it.source)} · ${it.summary}", style = MaterialTheme.typography.labelSmall) }
                     Text(if (item.localTrack == null) "库外音乐 · 需自行获取后导入" else "已在曲库", style = MaterialTheme.typography.labelMedium)
                     Row {
-                        TextButton({ clipboard.setText(AnnotatedString(item.artists.joinToString(" / ") + " - " + item.name)); action.message = "已复制艺人和歌名" }) { Text("复制歌名") }
+                        TextButton({ clipboard?.setPrimaryClip(ClipData.newPlainText("track", item.artists.joinToString(" / ") + " - " + item.name)); action.message = "已复制艺人和歌名" }) { Text("复制歌名") }
                         musicSourceUrl(item.sourceUrl)?.let { url -> TextButton({ runCatching { links.openUri(url) }.onFailure { action.message = "无法打开来源，请稍后重试。" } }) { Text("查看来源") } }
                         item.localTrack?.let { track -> TextButton({ vm.play(listOf(track)) }) { Text("播放") } }
                     }

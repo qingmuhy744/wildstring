@@ -18,6 +18,8 @@ final class ConnectionModel {
     var serverText = ""
     var username = ""
     var password = ""
+    var allowInsecureHTTP = false
+    var showInsecureHTTPWarning = false
     var isBusy = false
     var errorMessage: String?
 
@@ -75,13 +77,14 @@ final class ConnectionModel {
             }
         #endif
         guard let last = servers.max(by: { $0.lastUsedAt < $1.lastUsedAt }),
-            let address = try? makeAddress(last.address)
+            let address = try? makeAddress(last.address, allowInsecureHTTP: last.allowInsecureHTTP)
         else {
             phase = .connect
             return
         }
         serverText = last.address
         username = last.username
+        allowInsecureHTTP = last.allowInsecureHTTP
         let client = WildstringClient(server: address, store: store)
         if await client.storedSessionExists() {
             do {
@@ -105,11 +108,15 @@ final class ConnectionModel {
 
     func login() async {
         guard !isBusy else { return }
+        if serverText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased().hasPrefix("http://") && !allowInsecureHTTP {
+            showInsecureHTTPWarning = true
+            return
+        }
         isBusy = true
         errorMessage = nil
         defer { isBusy = false }
         do {
-            let address = try makeAddress(serverText)
+            let address = try makeAddress(serverText, allowInsecureHTTP: allowInsecureHTTP)
             let client = WildstringClient(server: address, store: store)
             let user = try await client.login(username: username, password: password)
             serverText = address.description
@@ -123,6 +130,12 @@ final class ConnectionModel {
         } catch {
             errorMessage = Self.message(for: error)
         }
+    }
+
+    func confirmInsecureHTTP() {
+        allowInsecureHTTP = true
+        showInsecureHTTPWarning = false
+        Task { await login() }
     }
 
     func logout() async {
@@ -158,7 +171,13 @@ final class ConnectionModel {
         errorMessage = nil
         serverText = server.address
         username = server.username
-        guard let address = try? makeAddress(server.address) else {
+        allowInsecureHTTP = server.allowInsecureHTTP
+        if server.address.lowercased().hasPrefix("http://") && !allowInsecureHTTP {
+            showInsecureHTTPWarning = true
+            phase = .connect
+            return
+        }
+        guard let address = try? makeAddress(server.address, allowInsecureHTTP: allowInsecureHTTP) else {
             errorMessage = "服务器地址已失效"
             return
         }
@@ -192,6 +211,7 @@ final class ConnectionModel {
         serverText = ""
         username = ""
         password = ""
+        allowInsecureHTTP = false
         errorMessage = nil
         phase = .connect
     }
@@ -203,7 +223,7 @@ final class ConnectionModel {
 
     /// Deletes a server and its session, caches, offline copies and queue space.
     func deleteServer(_ server: SavedServer) async {
-        if let address = try? makeAddress(server.address) {
+        if let address = try? makeAddress(server.address, allowInsecureHTTP: server.allowInsecureHTTP) {
             try? store.clearSession(origin: address.origin)
             let space = Self.spaceName(for: address)
             try? FileManager.default.removeItem(
@@ -296,18 +316,18 @@ final class ConnectionModel {
         self.profile = profile
         self.sharing = PlaybackSharingModel(client: client, playback: playback)
         SavedServersStore.upsert(
-            SavedServer(address: address.description, username: username, lastUsedAt: .now)
+            SavedServer(address: address.description, username: username, lastUsedAt: .now, allowInsecureHTTP: allowInsecureHTTP)
         )
         servers = SavedServersStore.load()
         phase = .connected(server: address.description, username: username)
     }
 
     private func makeAddress(_ raw: String) throws -> ServerAddress {
-        #if DEBUG
-            try ServerAddress(input: raw, allowsInsecureLocalhost: true)
-        #else
-            try ServerAddress(input: raw, allowsInsecureLocalhost: false)
-        #endif
+        try makeAddress(raw, allowInsecureHTTP: false)
+    }
+
+    private func makeAddress(_ raw: String, allowInsecureHTTP: Bool) throws -> ServerAddress {
+        try ServerAddress(input: raw, allowsInsecureHTTP: allowInsecureHTTP)
     }
 
     private static func message(for error: Error) -> String {
@@ -325,7 +345,7 @@ final class ConnectionModel {
             switch error {
             case .invalidURL: return "服务器地址格式不正确"
             case .unsupportedScheme: return "仅支持 http 或 https 地址"
-            case .insecureHTTPNotAllowed: return "需要 HTTPS 地址（开发版仅允许本机 HTTP）"
+            case .insecureHTTPNotAllowed: return "需要 HTTPS 地址，或先确认使用未加密 HTTP"
             }
         }
         if let error = error as? URLError {

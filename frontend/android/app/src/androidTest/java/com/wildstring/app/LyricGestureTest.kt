@@ -29,24 +29,16 @@ class LyricGestureTest {
         } }
     }
 
-    @Test fun idleReturnsToCurrentLyricsWithoutSeekingAndAnotherTapRestartsTheTimer() {
+    @Test fun tappingALyricTogglesTheCoverWithoutSeeking() {
         show()
         compose.onNodeWithTag("lyric-line-0").performClick()
-        val first = android.os.SystemClock.elapsedRealtime()
-        compose.waitUntil(1_500) { android.os.SystemClock.elapsedRealtime() - first >= 1_000 }
-        compose.onNodeWithTag("lyric-seek-preview").assertExists()
-        compose.onNodeWithTag("lyric-line-0").performClick()
-        val second = android.os.SystemClock.elapsedRealtime()
-        compose.waitUntil(1_500) { android.os.SystemClock.elapsedRealtime() - second >= 1_000 }
-        compose.onNodeWithTag("lyric-seek-preview").assertExists()
-        compose.waitUntil(3_000) { compose.onAllNodesWithTag("lyric-seek-preview").fetchSemanticsNodes().isEmpty() }
         compose.onNodeWithTag("lyric-seek-preview").assertDoesNotExist()
-        compose.runOnIdle { assertTrue(seeks.isEmpty()) }
+        compose.runOnIdle { assertTrue(seeks.isEmpty()); assertEquals(1, toggles) }
     }
 
     @Test fun longerPreferenceKeepsTheSelectionBeyondTheDefaultDelay() {
         show(followDelayMs = 5_000)
-        compose.onNodeWithTag("lyric-line-0").performClick()
+        compose.onNodeWithTag("lyric-scroll").performTouchInput { swipeUp(durationMillis = 450) }
         val started = android.os.SystemClock.elapsedRealtime()
         compose.waitUntil(3_000) { android.os.SystemClock.elapsedRealtime() - started >= 2_200 }
         compose.onNodeWithTag("lyric-seek-preview").assertExists()
@@ -65,13 +57,13 @@ class LyricGestureTest {
         compose.onNodeWithTag("lyric-seek-preview").assertDoesNotExist()
     }
 
-    @Test fun tappingTextSelectsWithoutSeekingAndBlankSpaceToggles() {
+    @Test fun tappingTextTogglesWithoutSeekingAndBlankSpaceToggles() {
         show()
         compose.onNodeWithTag("lyric-line-0").performTouchInput { click(center) }
-        compose.onNodeWithTag("lyric-seek-confirm").assertIsDisplayed()
-        compose.runOnIdle { assertTrue(seeks.isEmpty()); assertEquals(0, toggles) }
-        compose.onNodeWithTag("lyrics-viewport").performTouchInput { click(Offset(8f, 8f)) }
+        compose.onNodeWithTag("lyric-seek-confirm").assertDoesNotExist()
         compose.runOnIdle { assertTrue(seeks.isEmpty()); assertEquals(1, toggles) }
+        compose.onNodeWithTag("lyrics-viewport").performTouchInput { click(Offset(8f, 8f)) }
+        compose.runOnIdle { assertTrue(seeks.isEmpty()); assertEquals(2, toggles) }
     }
 
     @Test fun plainLyricsScrollWithoutSeekingOrToggling() {

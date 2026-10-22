@@ -130,24 +130,81 @@ test('歌曲与专辑切换、真实封面和专辑曲号顺序', async ({ page 
   expect((await audio(page)).paused).toBe(false);
 });
 
+test('播放页艺人入口和专辑加载反馈可用', async ({ page }) => {
+  await login(page);
+  await page.getByRole('button', { name: '播放 晴天测试曲', exact: true }).click();
+  await page.getByRole('button', { name: '全屏播放', exact: true }).click();
+  const player = page.getByRole('dialog', { name: '全屏播放', exact: true });
+  await expect(player.getByRole('button', { name: '野弦测试', exact: true })).toBeVisible();
+  await player.getByRole('button', { name: '野弦测试', exact: true }).click();
+  await expect(page.getByRole('heading', { name: '野弦测试', exact: true })).toBeVisible();
+
+  await page.getByRole('button', { name: '播放 晴天测试曲', exact: true }).click();
+  await page.getByRole('button', { name: '全屏播放', exact: true }).click();
+  await page.route('**/api/v1/albums/*', async (route) => {
+    if (!route.request().url().includes('/tracks?')) await page.waitForTimeout(300);
+    await route.continue();
+  });
+  const albumResponse = page.waitForResponse((response) => {
+    const pathname = new URL(response.url()).pathname;
+    return /\/api\/v1\/albums\/[^/]+$/.test(pathname) && response.ok();
+  });
+  await page
+    .getByRole('dialog', { name: '全屏播放', exact: true })
+    .getByRole('button', { name: '查看所属专辑 合成测试专辑', exact: true })
+    .click();
+  const skeleton = page.getByRole('status', { name: '正在加载专辑', exact: true });
+  await expect(skeleton).toBeVisible();
+  await albumResponse;
+  await expect(skeleton).toBeHidden();
+  await expect(page.getByRole('heading', { name: '合成测试专辑', exact: true })).toBeVisible();
+  await expect(page.getByRole('table').getByRole('row')).toHaveCount(3);
+  await page.unrouteAll({ behavior: 'ignoreErrors' });
+});
+
 test('同名 LRC、歌词点击跳转、跟随高亮与切歌后的内嵌歌词', async ({ page }, testInfo) => {
   await login(page);
   await page.getByRole('button', { name: '播放 晴天测试曲', exact: true }).click();
   await page.getByRole('button', { name: '显示歌词', exact: true }).click();
   const panel = page.getByRole('dialog', { name: '全屏播放', exact: true });
-  await expect(panel.locator('.lyrics-toolbar > span')).toHaveText('同名 LRC');
+  await expect(panel.locator('.lyrics-toolbar .lyrics-source')).toHaveText('同名 LRC');
   await expect(panel.locator('[aria-current="true"]')).toHaveText('侧车第一行');
-  await panel
-    .getByRole('button', {
-      name: `${testInfo.project.name === 'mobile' ? '选择' : '跳转到'} 0:06：侧车第三行`,
-      exact: true,
-    })
-    .click();
-  if (testInfo.project.name === 'mobile')
-    await panel.getByRole('button', { name: '确认跳转到 0:06', exact: true }).click();
+  if (!(await audio(page)).paused)
+    await panel.getByRole('button', { name: '暂停', exact: true }).click();
+  if (testInfo.project.name === 'mobile') {
+    const viewport = panel.locator('.lyric-scroll');
+    const bounds = (await viewport.boundingBox())!;
+    const session = await page.context().newCDPSession(page);
+    const x = bounds.x + bounds.width * 0.5;
+    const y = bounds.y + bounds.height * 0.8;
+    await session.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] });
+    for (let step = 1; step <= 8; step++)
+      await session.send('Input.dispatchTouchEvent', {
+        type: 'touchMove',
+        touchPoints: [{ x, y: y - (bounds.height * 0.65 * step) / 8 }],
+      });
+    await session.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await session.detach();
+    const confirm = panel.getByRole('group', { name: '歌词跳转预览' }).getByRole('button');
+    await expect(confirm).toBeVisible();
+    await confirm.click();
+  } else {
+    const viewport = panel.locator('.lyric-scroll');
+    const bounds = (await viewport.boundingBox())!;
+    await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height * 0.75);
+    await page.mouse.down();
+    await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height * 0.45, {
+      steps: 5,
+    });
+    await page.mouse.up();
+    const confirm = panel.getByRole('group', { name: '歌词跳转预览' }).getByRole('button');
+    await expect(confirm).toBeVisible();
+    await confirm.click();
+  }
   await expect.poll(async () => (await audio(page)).time).toBeGreaterThanOrEqual(5.9);
-  await expect(panel.locator('[aria-current="true"]')).toHaveText('侧车第三行');
-  await panel.getByRole('button', { name: '暂停', exact: true }).click();
+  if (!(await audio(page)).paused)
+    await panel.getByRole('button', { name: '暂停', exact: true }).click();
+  await expect(panel.locator('[aria-current="true"]')).toHaveText(/侧车第[三四]行/);
   await panel.locator('.lyric-scroll').hover();
   await page.mouse.wheel(0, 120);
   await expect(panel.getByRole('button', { name: '跟随播放', exact: true })).toBeEnabled();
@@ -157,7 +214,7 @@ test('同名 LRC、歌词点击跳转、跟随高亮与切歌后的内嵌歌词'
   await panel.getByRole('button', { name: '收起全屏播放' }).click();
   await page.getByRole('button', { name: '播放 夜晚测试曲', exact: true }).click();
   await page.getByRole('button', { name: '全屏播放', exact: true }).click();
-  await expect(panel.locator('.lyrics-toolbar > span')).toHaveText('内嵌歌词');
+  await expect(panel.locator('.lyrics-toolbar .lyrics-source')).toHaveText('内嵌歌词');
   await expect(panel.locator('[aria-current="true"]')).toHaveText('内嵌第一行');
   await expect(panel).not.toContainText('侧车第一行');
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
@@ -178,7 +235,7 @@ test('纯文本和缺失歌词不阻断播放', async ({ page }) => {
   await page.getByRole('button', { name: '播放全部', exact: true }).click();
   await page.getByRole('button', { name: '显示歌词', exact: true }).click();
   const panel = page.getByRole('dialog', { name: '全屏播放', exact: true });
-  await expect(panel.locator('.lyrics-toolbar > span')).toHaveText('内嵌歌词');
+  await expect(panel.locator('.lyrics-toolbar .lyrics-source')).toHaveText('内嵌歌词');
   await expect(panel).toContainText('纯文本没有虚构时间轴');
   await expect(panel.locator('[aria-current="true"]')).toHaveCount(0);
   await page.unroute('**/tracks/*/lyrics');
@@ -269,7 +326,7 @@ test('全屏展开收起连续播放、切歌、焦点边界与 Esc 返回', asy
   expect(await page.evaluate(() => !!document.activeElement?.closest('[role="dialog"]'))).toBe(
     true,
   );
-  await expect(dialog.locator('.lyrics-toolbar > span')).toHaveText('内嵌歌词');
+  await expect(dialog.locator('.lyrics-toolbar .lyrics-source')).toHaveText('内嵌歌词');
   await dialog.getByRole('button', { name: '暂停', exact: true }).click();
   await dialog.getByLabel('播放进度').focus();
   await dialog.getByLabel('播放进度').press('Home');

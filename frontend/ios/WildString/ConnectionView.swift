@@ -16,7 +16,7 @@ struct ConnectionView: View {
                 } header: {
                     Text("服务器地址")
                 } footer: {
-                    Text("填写自托管实例的地址；开发版允许 http://127.0.0.1。")
+                    Text("填写自托管实例的地址。HTTP 仅在你明确确认风险后使用。")
                 }
 
                 Section("账号") {
@@ -63,6 +63,12 @@ struct ConnectionView: View {
                         }
                     }
                 }
+            }
+            .alert("使用未加密 HTTP？", isPresented: $model.showInsecureHTTPWarning) {
+                Button("我了解风险，继续") { model.confirmInsecureHTTP() }
+                Button("取消", role: .cancel) {}
+            } message: {
+                Text("账号密码、播放记录和音频会以明文传输。请只在你信任的网络中使用；公网 HTTP 也不会被自动阻挡，但风险由你确认。")
             }
         }
     }

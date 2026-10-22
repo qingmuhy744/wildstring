@@ -6,6 +6,7 @@ import os
 import shutil
 import sqlite3
 import time
+from datetime import datetime
 from importlib.metadata import version
 from pathlib import Path, PurePosixPath
 from threading import Event, Thread
@@ -26,6 +27,7 @@ from wildstring.library.intake import INPUT_SUFFIXES, Intake, IntakeApproval, In
 from wildstring.library.lyric_edits import LyricsEditor, LyricsText, LyricsUpdate
 from wildstring.library.repository import now
 from wildstring.library.scanner import ScanBusyError, scan_library
+from wildstring.recommendations import DAY_ZONE, Recommendations
 from wildstring.task_notifications import management_result
 
 logger = logging.getLogger(__name__)
@@ -104,6 +106,8 @@ class Management:
         self.storage_identity = None
         self.intake = Intake(settings, repository)
         self.next_discovery = 0
+        self.next_recommendation = 0
+        self.recommendation_inflight: set[str] = set()
 
     def start(self):
         self.repository.library_id(create=True)
@@ -640,6 +644,9 @@ class Management:
                                 self.next_discovery = time.monotonic() + 1
                             except OSError:
                                 logger.warning("Automatic import source is unavailable; will retry")
+                        if time.monotonic() >= self.next_recommendation:
+                            self.next_recommendation = time.monotonic() + 30
+                            self.generate_scheduled_recommendations()
                         self.stopping.wait(0.5)
                 finally:
                     self.worker_lock.release(force=True)
@@ -649,6 +656,42 @@ class Management:
                 logger.exception("Library worker temporarily unavailable")
                 self.stopping.wait(1)
         self.worker_lock.release(force=True)
+
+    def generate_scheduled_recommendations(self):
+        """Generate each account's opted-in daily list after its local clock time."""
+        platform = getattr(self, "platform", None)
+        providers = getattr(platform, "providers", None) if platform else None
+        if platform is None or providers is None:
+            return
+        current = datetime.now(DAY_ZONE)
+        day = current.date().isoformat()
+        clock = current.strftime("%H:%M")
+        with self.database.connect() as connection:
+            rows = connection.execute(
+                """SELECT p.user_id,p.library_id,p.daily_time FROM recommendation_preferences p
+                JOIN users u ON u.id=p.user_id
+                WHERE p.library_id=? AND p.daily_enabled=1 AND u.enabled=1""",
+                (self.repository.library_id(),),
+            ).fetchall()
+        for row in rows:
+            identity = row["user_id"]
+            if identity in self.recommendation_inflight or clock < row["daily_time"]:
+                continue
+            with self.database.connect() as connection:
+                cached = connection.execute(
+                    "SELECT day FROM recommendation_daily WHERE user_id=? AND library_id=?",
+                    (identity, row["library_id"]),
+                ).fetchone()
+            if cached and cached["day"] == day:
+                continue
+            self.recommendation_inflight.add(identity)
+            try:
+                repository = self.repository.for_user(identity)
+                Recommendations(repository, providers, platform).daily(repository, refresh=True)
+            except Exception:
+                logger.exception("Scheduled daily recommendation failed for account %s", identity)
+            finally:
+                self.recommendation_inflight.discard(identity)
 
     def check_storage(self):
         info = self.settings.data_dir.stat()

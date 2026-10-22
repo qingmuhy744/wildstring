@@ -14,7 +14,7 @@ struct IntegrationTests {
         let password = try #require(environment["WILDSTRING_INTEGRATION_PASSWORD"])
         let username = environment["WILDSTRING_INTEGRATION_USERNAME"] ?? "admin"
         let store = InMemorySessionStore()
-        let address = try ServerAddress(input: url, allowsInsecureLocalhost: true)
+        let address = try ServerAddress(input: url, allowsInsecureHTTP: true)
         let client = WildstringClient(server: address, store: store)
 
         let initial = try await client.authStatus()
@@ -41,7 +41,7 @@ struct IntegrationTests {
     func wrongPasswordSurfacesStableCode() async throws {
         let url = try #require(environment["WILDSTRING_INTEGRATION_URL"])
         let client = WildstringClient(
-            server: try ServerAddress(input: url, allowsInsecureLocalhost: true),
+            server: try ServerAddress(input: url, allowsInsecureHTTP: true),
             store: InMemorySessionStore()
         )
         await #expect(throws: APIError(statusCode: 401, code: "invalid_credentials")) {

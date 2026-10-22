@@ -9,8 +9,8 @@ packages:
 settings:
   base:
     SWIFT_VERSION: "6.0"
-    MARKETING_VERSION: "0.6.0"
-    CURRENT_PROJECT_VERSION: "1"
+    MARKETING_VERSION: "0.6.1"
+    CURRENT_PROJECT_VERSION: "31"
 targets:
   WildString:
     type: application
@@ -43,6 +43,7 @@ targets:
         UIBackgroundModes:
           - audio
         NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
           NSAllowsLocalNetworking: true
         NSLocalNetworkUsageDescription: "用于连接您局域网中的野弦服务器。"
     settings:

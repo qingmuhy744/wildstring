@@ -12,6 +12,7 @@ import androidx.compose.ui.unit.dp
 import androidx.test.platform.app.InstrumentationRegistry
 import com.google.gson.Gson
 import com.wildstring.app.data.LyricLine
+import com.wildstring.app.data.LyricSize
 import com.wildstring.app.data.Lyrics
 import com.wildstring.app.ui.LyricViewport
 import org.junit.Assert.*
@@ -24,11 +25,24 @@ class BilingualLyricTest {
     private val position = mutableLongStateOf(0L)
     private val seeks = mutableListOf<Long>()
 
-    private fun show(lyrics: Lyrics) {
+    private fun show(lyrics: Lyrics, lyricSize: LyricSize = LyricSize.MEDIUM) {
         compose.setContent { MaterialTheme {
             LyricViewport(lyrics, position.longValue, { seeks += it }, {},
-                Modifier.width(360.dp).height(400.dp))
+                Modifier.width(360.dp).height(400.dp), lyricSize = lyricSize)
         } }
+    }
+
+    @Test fun lyricSizePresetsChangeTheRenderedTypography() {
+        val lyrics = Lyrics("synced", listOf(LyricLine(0, "A lyric line that is long enough to measure")))
+        val lyricSize = androidx.compose.runtime.mutableStateOf(LyricSize.SMALL)
+        compose.setContent { MaterialTheme {
+            LyricViewport(lyrics, position.longValue, { seeks += it }, {},
+                Modifier.width(360.dp).height(400.dp), lyricSize = lyricSize.value)
+        } }
+        val small = compose.onNodeWithTag("lyric-line-0").fetchSemanticsNode().boundsInRoot.height
+        compose.runOnIdle { lyricSize.value = LyricSize.LARGE }
+        val large = compose.onNodeWithTag("lyric-line-0").fetchSemanticsNode().boundsInRoot.height
+        assertTrue("large lyric preset must render taller text", large > small)
     }
 
     private fun languageFixture(): Lyrics {

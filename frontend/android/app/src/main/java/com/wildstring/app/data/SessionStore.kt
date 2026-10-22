@@ -7,7 +7,6 @@ import android.util.Base64
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import dagger.hilt.android.qualifiers.ApplicationContext
-import com.wildstring.app.BuildConfig
 import java.security.KeyStore
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
@@ -114,15 +113,16 @@ class SessionStore @Inject constructor(@ApplicationContext context: Context) : C
         else edit.putString(field("account_ciphertext"), encrypt(gson.toJson(account)))
         check(edit.commit()); publish(); return changed
     }
-    val localHttp: Boolean get() = BuildConfig.DEBUG && records().firstOrNull { it.id == activeServerId }?.allowLocalHttp == true
+    /** Explicit per-server consent for cleartext HTTP; retained name keeps old preferences compatible. */
+    val localHttp: Boolean get() = records().firstOrNull { it.id == activeServerId }?.allowLocalHttp == true
     val endpoint: HttpUrl? get() = records().firstOrNull { it.id == activeServerId }?.let { runCatching { ServerAddress.normalize(it.url, localHttp) }.getOrNull() }
     @Synchronized fun saveServer(id: String?, raw: String, name: String, allowLocalHttp: Boolean): ServerConfiguration {
-        val base = ServerAddress.normalize(raw, BuildConfig.DEBUG && allowLocalHttp).toString()
+        val base = ServerAddress.normalize(raw, allowLocalHttp).toString()
         val records = records()
         val existing = id?.let { key -> records.firstOrNull { it.id == key } ?: error("服务器配置不存在。") }
         require(records.none { it.url == base && it.id != id }) { "这个服务器已经保存，请直接选择。" }
         require(name.trim().length <= 80) { "服务器名称最多 80 个字符。" }
-        val value = ServerConfiguration(existing?.id ?: UUID.randomUUID().toString(), base, name.trim(), BuildConfig.DEBUG && allowLocalHttp)
+        val value = ServerConfiguration(existing?.id ?: UUID.randomUUID().toString(), base, name.trim(), allowLocalHttp)
         val edit = prefs.edit().putString("servers_v1", gson.toJson(if (existing == null) records + value else records.map { if (it.id == id) value else it }))
         if (existing != null && existing.url != base) {
             listOf("session_ciphertext", "cache_profile", "account", "account_ciphertext").forEach { edit.remove(field(it, existing.id)) }
@@ -143,7 +143,7 @@ class SessionStore @Inject constructor(@ApplicationContext context: Context) : C
         check(edit.commit()); publish()
     }
     @Synchronized fun configure(raw: String, allowLocalHttp: Boolean) {
-        val base = ServerAddress.normalize(raw, BuildConfig.DEBUG && allowLocalHttp).toString()
+        val base = ServerAddress.normalize(raw, allowLocalHttp).toString()
         val existing = records().firstOrNull { it.url == base }
         selectServer((existing ?: saveServer(null, raw, "", allowLocalHttp)).id)
     }

@@ -49,6 +49,7 @@ private val LocalSettingsFeedback = staticCompositionLocalOf<() -> Unit> { {} }
     var usage by remember { mutableStateOf(Triple(0L, 0L, 0L)) }
     var message by remember { mutableStateOf<String?>(null) }
     var clearing by remember { mutableStateOf(false) }
+    var profile by remember { mutableStateOf(false) }
     var password by remember { mutableStateOf(false) }
     var servers by remember { mutableStateOf(false) }
     var logout by remember { mutableStateOf(false) }
@@ -61,9 +62,15 @@ private val LocalSettingsFeedback = staticCompositionLocalOf<() -> Unit> { {} }
     CompositionLocalProvider(LocalSettingsFeedback provides tactile {}) {
         SettingsPage(back, bottomBar) {
             SettingsGroup("账号") {
-                ListItem(headlineContent = { Text(state.account?.let { "${it.username} · ${it.profileLabel}" } ?: "已连接") },
+                val acc = state.account
+                val header = if (acc != null) {
+                    if (!acc.displayName.isNullOrBlank()) "${acc.displayName} (${acc.username}) · ${acc.profileLabel}"
+                    else "${acc.username} · ${acc.profileLabel}"
+                } else "已连接"
+                ListItem(headlineContent = { Text(header) },
                     supportingContent = { Text(state.server) }, leadingContent = { Icon(Icons.Default.AccountCircle, null) })
                 SettingsAction("服务器 / 切换服务器", Icons.Default.Dns) { servers = true }
+                if (state.account != null) SettingsAction("个人资料", Icons.Default.Badge) { profile = true }
                 if (state.account != null) AvatarSettings(vm)
                 if (state.account != null) SettingsAction("修改密码", Icons.Default.Lock) { password = true }
             }
@@ -94,6 +101,9 @@ private val LocalSettingsFeedback = staticCompositionLocalOf<() -> Unit> { {} }
                 SettingsChoice("歌词恢复跟随", "${preferences.lyricFollowSeconds} 秒", Icons.Default.Lyrics,
                     listOf(1, 2, 3, 5, 10).map { it to "$it 秒" }, preferences.lyricFollowSeconds,
                     "滑动或点选歌词后，停止操作多久恢复当前歌词。滚动过程中不计时。", vm.settings::lyricFollowSeconds)
+                SettingsChoice("歌词大小", preferences.lyricSize.label, Icons.Default.FormatSize,
+                    com.wildstring.app.data.LyricSize.entries.map { it to it.label }, preferences.lyricSize,
+                    "调整全屏歌词和逐字高亮的字号，只影响本机播放页。", vm.settings::lyricSize)
             }
             SettingsGroup("外观与触感") {
                 SettingsChoice("歌曲列表大小", preferences.songListSize.label, Icons.Default.FormatSize,
@@ -139,6 +149,7 @@ private val LocalSettingsFeedback = staticCompositionLocalOf<() -> Unit> { {} }
     if (diagnostics) PlaybackDiagnosticsDialog(vm) { diagnostics = false }
     feature?.let { route -> FeatureDialog(vm, route) { feature = null } }
     if (logout) AlertDialog(onDismissRequest = { logout = false }, title = { Text("退出当前服务器？") }, text = { Text("将清除当前服务器在本机的登录和私密缓存，其他服务器的登录保留。") }, confirmButton = { TextButton({ logout = false; back(); vm.logout() }) { Text("退出登录") } }, dismissButton = { TextButton({ logout = false }) { Text("取消") } })
+    if (profile) ProfileDialog(vm) { profile = false }
     if (password) PasswordDialog(vm) { password = false }
 }
 
@@ -201,6 +212,48 @@ private val LocalSettingsFeedback = staticCompositionLocalOf<() -> Unit> { {} }
                 finally { busy = false }
             }
         }, enabled = !busy && current.isNotEmpty() && count in 12..128 && confirm == next) { Text(if (busy) "正在修改…" else "保存新密码") } },
+        dismissButton = { TextButton(dismiss, enabled = !busy) { Text("取消") } })
+}
+
+@Composable private fun ProfileDialog(vm: MusicViewModel, dismiss: () -> Unit) {
+    val account = vm.state.value.account ?: return
+    var username by remember { mutableStateOf(account.username) }
+    var displayName by remember { mutableStateOf(account.displayName.orEmpty()) }
+    var email by remember { mutableStateOf(account.email.orEmpty()) }
+    var busy by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
+    val usernameValid = username.trim().length in 1..32 && username.trim().all { it.isLetterOrDigit() || it in "_-." }
+    val emailValid = email.isBlank() || (email.contains('@') && email.length <= 254)
+    val changed = username.trim() != account.username || displayName.trim() != account.displayName.orEmpty() || email.trim() != account.email.orEmpty()
+
+    AlertDialog(onDismissRequest = { if (!busy) dismiss() }, title = { Text("修改个人资料") },
+        text = { Column(Modifier.heightIn(max = 480.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("登录 ID 用于账号登录，昵称用于界面展示与活动记录。邮箱仅作为账号资料保存。", fontSize = 12.sp)
+            OutlinedTextField(username, { username = it.take(32) }, label = { Text("登录 ID") },
+                singleLine = true, enabled = !busy)
+            OutlinedTextField(displayName, { displayName = it.take(50) }, label = { Text("昵称") },
+                singleLine = true, enabled = !busy)
+            OutlinedTextField(email, { email = it.take(254) }, label = { Text("邮箱（仅资料保存）") },
+                singleLine = true, enabled = !busy,
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Email))
+            error?.let { Text(it, color = MaterialTheme.colorScheme.error, fontSize = 12.sp) }
+        } },
+        confirmButton = { TextButton({
+            busy = true; error = null
+            scope.launch {
+                try {
+                    vm.updateProfile(username.trim(), displayName.trim(), email.trim())
+                    dismiss()
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    error = com.wildstring.app.data.friendlyError(e)
+                } finally {
+                    busy = false
+                }
+            }
+        }, enabled = !busy && usernameValid && emailValid && changed) { Text(if (busy) "正在保存…" else "保存资料") } },
         dismissButton = { TextButton(dismiss, enabled = !busy) { Text("取消") } })
 }
 

@@ -43,6 +43,7 @@ def test_edit_rescan_restore_and_all_views(settings, authenticated_client):
         track = client.get("/api/v1/tracks").json()["items"][0]
         endpoint = metadata_url(track)
         observed = client.get(endpoint).json()
+        assert observed["path"] == "旧歌.flac"
         loved = client.put(
             f"/api/v1/tracks/{track['id']}/favorite", headers=HEADERS, json={"loved": True}
         )

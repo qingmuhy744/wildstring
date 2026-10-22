@@ -7,14 +7,13 @@ import okhttp3.Interceptor
 import okhttp3.Response
 
 object ServerAddress {
-    private val localHosts = setOf("10.0.2.2", "127.0.0.1", "localhost")
-    fun normalize(raw: String, allowLocalHttp: Boolean = false): HttpUrl {
-        val url = raw.trim().toHttpUrlOrNull() ?: throw IllegalArgumentException("请输入完整的 HTTPS 服务器地址。")
+    fun normalize(raw: String, allowInsecureHttp: Boolean = false): HttpUrl {
+        val url = raw.trim().toHttpUrlOrNull() ?: throw IllegalArgumentException("请输入完整的 HTTP 或 HTTPS 服务器地址。")
         require(url.username.isEmpty() && url.password.isEmpty() && url.query == null && url.fragment == null) {
             "服务器地址不能包含账号、密码、查询参数或片段。"
         }
-        require(url.isHttps || (allowLocalHttp && url.host in localHosts)) {
-            "请使用 HTTPS。HTTP 仅支持已明确启用的本机调试地址。"
+        require(url.isHttps || allowInsecureHttp) {
+            "请使用 HTTPS，或先明确允许此服务器使用未加密 HTTP。"
         }
         return url.newBuilder().encodedPath(url.encodedPath.trimEnd('/') + "/").build()
     }

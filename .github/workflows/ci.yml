@@ -16,6 +16,45 @@ concurrency:
 
 jobs:
   quality:
+    name: Code Quality & Packaging
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: frontend/web/package-lock.json
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: "0.13.1"
+      - run: make setup
+      - name: Run code checks, source plugins and dependency audit
+        run: |
+          make check source-plugins dependency-audit
+          uv lock --check --project backend
+
+  backend:
+    name: Backend Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: "0.13.1"
+      - name: Install system dependencies for audio decoding
+        run: sudo apt-get update --error-on=any && sudo apt-get install -y --no-install-recommends ffmpeg libchromaprint-tools
+      - name: Run backend pytest suite
+        run: |
+          uv sync --frozen --project backend --extra community-sources
+          make test
+
+  web:
+    name: Web E2E Tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -32,7 +71,8 @@ jobs:
       - run: make setup
       - run: sudo apt-get update --error-on=any && sudo apt-get install -y --no-install-recommends ffmpeg libchromaprint-tools
       - run: npm --prefix frontend/web exec -- playwright install --with-deps chromium
-      - run: make ci
+      - name: Run Web tests and browser regressions
+        run: make test-web test-large-web test-browse-web test-catalog-web test-transcoding-web
       - name: Upload browser visual evidence
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -46,6 +86,7 @@ jobs:
           retention-days: 7
 
   container:
+    name: Container Smoke & Test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

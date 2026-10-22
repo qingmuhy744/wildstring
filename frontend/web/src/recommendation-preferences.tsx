@@ -100,6 +100,34 @@ export function RecommendationPreferencesForm({
               </div>
             </fieldset>
             <fieldset className="recommendation-source-group">
+              <legend>每日推荐自动生成</legend>
+              <div className="recommendation-settings-grid">
+                <label className="workspace-check">
+                  <input
+                    type="checkbox"
+                    checked={!!value.daily_enabled}
+                    onChange={(event) =>
+                      onChange({ ...value, daily_enabled: event.target.checked })
+                    }
+                  />
+                  按时自动生成新的每日推荐
+                </label>
+                <label>
+                  生成时间
+                  <input
+                    aria-label="每日推荐生成时间"
+                    type="time"
+                    value={value.daily_time || '00:00'}
+                    onChange={(event) => onChange({ ...value, daily_time: event.target.value })}
+                  />
+                </label>
+              </div>
+              <p className="muted">
+                服务端按 Asia/Shanghai
+                时间检查；错过设定时间后会在下一次后台检查补生成，每天最多一份。
+              </p>
+            </fieldset>
+            <fieldset className="recommendation-source-group">
               <legend>可选 Last.fm 资料</legend>
               <div className="workspace-check-grid">
                 {['lastfm_similar', 'lastfm_charts', 'lastfm_tags'].map((id) => (

@@ -17,11 +17,11 @@ class NetworkPolicyTest {
         assertEquals("https://music.example.com/music/", base.toString())
         assertTrue(ServerAddress.contains(base, base.resolve("api/v1/tracks")!!))
         assertFalse(ServerAddress.contains(base, base.resolve("/other")!!))
-        listOf("http://music.example.com", "https://user:secret@music.example.com", "https://music.example.com/?token=bad", "https://music.example.com/#bad").forEach {
+        listOf("https://user:secret@music.example.com", "https://music.example.com/?token=bad", "https://music.example.com/#bad").forEach {
             assertThrows(IllegalArgumentException::class.java) { ServerAddress.normalize(it, true) }
         }
-        assertThrows(IllegalArgumentException::class.java) { ServerAddress.normalize("http://127.0.0.1") }
-        assertEquals("127.0.0.1", ServerAddress.normalize("http://127.0.0.1", true).host)
+        assertThrows(IllegalArgumentException::class.java) { ServerAddress.normalize("http://music.example.com") }
+        assertEquals("music.example.com", ServerAddress.normalize("http://music.example.com", true).host)
     }
     @Test fun cookieScopedToSelectedServerAndExpires() {
         val vault = Vault(); val base = ServerAddress.normalize("https://music.example.com/music/")

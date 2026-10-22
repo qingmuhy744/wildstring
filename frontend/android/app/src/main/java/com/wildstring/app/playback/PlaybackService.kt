@@ -348,7 +348,7 @@ private class AuthenticatedBitmapLoader(private val client: OkHttpClient, privat
     override fun loadBitmap(uri: Uri): ListenableFuture<Bitmap> = executor.submit<Bitmap> {
         client.newCall(Request.Builder().url(uri.toString()).build()).execute().use { response ->
             if (!response.isSuccessful) throw IOException("Cover unavailable")
-            val body = response.body ?: throw IOException("Cover unavailable")
+            val body = response.body
             if (body.contentLength() > 2 * 1024 * 1024) throw IOException("Cover too large")
             val source = body.source()
             source.request(2 * 1024 * 1024L + 1)
