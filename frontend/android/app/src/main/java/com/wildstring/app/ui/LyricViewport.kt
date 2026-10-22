@@ -93,9 +93,9 @@ import kotlin.math.roundToInt
             CustomAccessibilityAction("查看大封面") { onArtwork(); true })
     }) {
         val hasLanguageChips = remember(lines) { lines.any { !it.translation.isNullOrBlank() || !it.romanization.isNullOrBlank() } }
-        val topPadding = if (hasLanguageChips) 48.dp else 24.dp
-        val topPaddingPx = with(density) { topPadding.toPx() }
-        val halfViewportPx = with(density) { (maxHeight / 2).toPx() } - topPaddingPx
+        val baseTopPadding = if (hasLanguageChips) 48.dp else 24.dp
+        val baseTopPaddingPx = with(density) { baseTopPadding.toPx() }
+        val viewportHeightPx = with(density) { maxHeight.toPx() }
         val textWidth = with(density) { (maxWidth - 80.dp).coerceAtLeast(1.dp).roundToPx() }
         fun measuredHeight(index: Int): Int {
             val line = lines[index]
@@ -108,6 +108,18 @@ import kotlin.math.roundToInt
                 constraints = Constraints(maxWidth = textWidth)).size.height } +
                 with(density) { (28.dp + 6.dp * extra.size).roundToPx() }
         }
+        val totalContentHeightPx = remember(lines, showTranslation, showRomanization, textWidth, scale) {
+            (0 until lines.size).sumOf { measuredHeight(it) }
+        }
+        val isShortLyrics = totalContentHeightPx in 1 until (viewportHeightPx - baseTopPaddingPx * 2f).roundToInt().coerceAtLeast(1)
+        val topPadding = if (isShortLyrics) {
+            with(density) { ((viewportHeightPx - totalContentHeightPx) / 2f).coerceAtLeast(baseTopPaddingPx).toDp() }
+        } else {
+            baseTopPadding
+        }
+        val bottomPadding = if (isShortLyrics) topPadding else maxHeight / 2
+        val topPaddingPx = with(density) { topPadding.toPx() }
+        val halfViewportPx = with(density) { (maxHeight / 2).toPx() } - topPaddingPx
         fun lineCenterFromTop(index: Int): Float {
             var sum = 0
             for (i in 0 until index) sum += measuredHeight(i)
@@ -131,7 +143,7 @@ import kotlin.math.roundToInt
         suspend fun centerLine(index: Int, animate: Boolean = true) {
             val layout = snapshotFlow { list.layoutInfo }.first { it.visibleItemsInfo.isNotEmpty() }
             val center = (layout.viewportStartOffset + layout.viewportEndOffset) / 2f
-            val shouldStayAtTop = index <= 0 || lineCenterFromTop(index) <= halfViewportPx
+            val shouldStayAtTop = isShortLyrics || index <= 0 || lineCenterFromTop(index) <= halfViewportPx
             if (shouldStayAtTop) {
                 if (list.firstVisibleItemIndex == 0 && list.firstVisibleItemScrollOffset == 0) return
                 if (!animate) {
@@ -184,7 +196,7 @@ import kotlin.math.roundToInt
         }
         val fadeEdge = with(density) { 44.dp.toPx() }
         val showTopFade = list.canScrollBackward
-        LazyColumn(state = list, contentPadding = PaddingValues(top = topPadding, bottom = maxHeight / 2),
+        LazyColumn(state = list, contentPadding = PaddingValues(top = topPadding, bottom = bottomPadding),
             modifier = Modifier.fillMaxSize().testTag("lyric-scroll")
                 .graphicsLayer(compositingStrategy = CompositingStrategy.Offscreen)
                 .drawWithContent {

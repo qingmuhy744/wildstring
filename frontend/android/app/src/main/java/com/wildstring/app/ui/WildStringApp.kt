@@ -296,7 +296,6 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
     var featurePlaylist by remember { mutableStateOf<Playlist?>(null) }
     var featureBatchId by remember { mutableStateOf<String?>(null) }
     var sleepDialog by remember { mutableStateOf(false) }
-    var diagnostics by remember { mutableStateOf(false) }
     var refreshAlbum by remember { mutableStateOf<String?>(null) }
     var lyricScanAlbum by remember { mutableStateOf<String?>(null) }
     var deletingPlaylist by remember { mutableStateOf<Playlist?>(null) }
@@ -441,7 +440,7 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
                                     if (state.kind == "artists" && state.collection == null) {
                                         Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                                             Row(Modifier.weight(1f).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                                listOf("artist" to "艺人", "album_artist" to "专辑艺人", "vocalist" to "演唱", "lyricist" to "作词", "composer" to "作曲", "arranger" to "编曲").forEach { (key, name) -> FilterChip(state.role == key, { vm.role(key) }, label = { Text(name) }) }
+                                                listOf("album_artist" to "专辑艺人", "artist" to "艺人", "vocalist" to "演唱", "lyricist" to "作词", "composer" to "作曲", "arranger" to "编曲").forEach { (key, name) -> FilterChip(state.role == key, { vm.role(key) }, label = { Text(name) }) }
                                             }
                                             Spacer(Modifier.width(8.dp))
                                             Text("${state.total} 位艺人", color = Muted, style = MaterialTheme.typography.labelMedium, maxLines = 1, softWrap = false)
@@ -659,7 +658,6 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
     lyricScanAlbum?.let { albumId -> FeatureDialog(vm, "lyric-scans", albumId = albumId, dismiss = { lyricScanAlbum = null }) }
     refreshAlbum?.let { albumId -> MetadataRefreshPrompt(vm, "album", albumId) { refreshAlbum = null } }
     if (sleepDialog) SleepDialog(vm) { sleepDialog = false }
-    if (diagnostics) PlaybackDiagnosticsDialog(vm) { diagnostics = false }
     deletingPlaylist?.let { playlist -> AlertDialog(onDismissRequest = { if (!playlistAction.busy) deletingPlaylist = null }, title = { Text("删除歌单？") }, text = { Column { Text(playlist.name); ActionStatus(playlistAction) } }, confirmButton = { TextButton({ scope.launch { playlistAction.run { vm.deletePlaylist(playlist); deletingPlaylist = null } } }, enabled = !playlistAction.busy) { Text("删除") } }, dismissButton = { TextButton({ deletingPlaylist = null }, enabled = !playlistAction.busy) { Text("取消") } }) }
     actions?.let { track -> ModalBottomSheet(
         onDismissRequest = { actions = null },
@@ -689,7 +687,6 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
         SongAction("响度均衡与手动调整", Icons.AutoMirrored.Filled.VolumeUp) { feature = "gain"; featureTrack = track; actions = null }
         if (track.id == state.current?.id) {
             SongAction("刷新歌词", Icons.Default.Refresh) { vm.refreshLyrics(); actions = null }
-            SongAction("播放诊断", Icons.Default.Troubleshoot) { diagnostics = true; actions = null }
         }
         HorizontalDivider(Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
         SongAction("下一首播放", Icons.AutoMirrored.Filled.PlaylistPlay, onClick = tactile { vm.addToQueue(track, true); actions = null })

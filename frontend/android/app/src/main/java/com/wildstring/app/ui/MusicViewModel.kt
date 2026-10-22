@@ -36,7 +36,7 @@ data class MusicState(
     val entryId: String? = null, val repeatMode: Int = Player.REPEAT_MODE_OFF, val shuffle: Boolean = false,
     val playbackError: String? = null, val lyrics: Lyrics = Lyrics(), val lyricsLoading: Boolean = false,
     val lyricsError: String? = null, val offline: Boolean = false, val hasContent: Boolean = false,
-    val discs: List<DiscSummary> = emptyList(), val order: String = "asc", val role: String = "artist", val sort: String = "title", val albumFilter: String? = null, val collecting: Boolean = false,
+    val discs: List<DiscSummary> = emptyList(), val order: String = "asc", val role: String = "album_artist", val sort: String = "title", val albumFilter: String? = null, val collecting: Boolean = false,
     val contentKey: String = "", val canGoBack: Boolean = false, val navigationDepth: Int = 0,
     val window: CatalogWindow = CatalogWindow(), val rangeLoading: Set<Int> = emptySet(),
     val rangeErrors: Map<Int, String> = emptyMap(), val browseIndex: BrowseIndex? = null,
@@ -425,7 +425,7 @@ class MusicViewModel @Inject constructor(
                     mutable.update { it.copy(error = "没有找到艺人“$query”。") }
                     return@launch
                 }
-                openArtist(item)
+                open(query().copy(kind = "albums", role = "artist", albumFilter = null, collection = "artists", collectionId = item.id, title = item.name, query = "", offset = 0, playlist = null))
                 onOpened()
             } catch (error: CancellationException) {
                 throw error

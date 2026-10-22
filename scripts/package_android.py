@@ -17,7 +17,7 @@ def main() -> None:
     root = Path(__file__).resolve().parents[1]
     output = root / f"frontend/android/app/build/outputs/apk/{variant}"
     metadata = json.loads((output / "output-metadata.json").read_text())
-    expected_id = "com.wildstring.app" + (".debug" if variant == "debug" else "")
+    expected_id = "com.wildstring.app" + (".dev" if variant == "debug" else "")
     if metadata["applicationId"] != expected_id or metadata["variantName"] != variant:
         raise ValueError("Unexpected WildString application or build variant")
     elements = metadata["elements"]

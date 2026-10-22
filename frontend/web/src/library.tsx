@@ -1282,8 +1282,8 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
                       }}
                     >
                       <option value="">全部角色</option>
-                      <option value="artist">歌曲艺人</option>
                       <option value="album_artist">专辑艺人</option>
+                      <option value="artist">歌曲艺人</option>
                       <option value="vocalist">演唱</option>
                       <option value="lyricist">作词</option>
                       <option value="composer">作曲</option>
