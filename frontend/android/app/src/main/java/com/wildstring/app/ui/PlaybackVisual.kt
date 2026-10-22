@@ -12,6 +12,7 @@ import androidx.compose.animation.core.withInfiniteAnimationFrameNanos
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -38,6 +39,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.wildstring.app.data.Track
 import kotlinx.coroutines.delay
 
@@ -70,7 +72,7 @@ internal val playbackStyles = listOf("cover" to "封面", "vinyl" to "黑胶", "
 }
 
 @Composable internal fun PlaybackVisual(vm: MusicViewModel, track: Track, style: String, playing: Boolean,
-    visible: Boolean, progress: Float, phase: PlaybackRotation, modifier: Modifier, onArtwork: () -> Unit, onLyrics: () -> Unit) {
+    visible: Boolean, duration: Long, phase: PlaybackRotation, modifier: Modifier, onArtwork: () -> Unit, onLyrics: () -> Unit) {
     val moving = playing && visible && style != "cover" && playbackMotionAllowed()
     LaunchedEffect(moving) {
         if (!moving) return@LaunchedEffect
@@ -85,8 +87,15 @@ internal val playbackStyles = listOf("cover" to "封面", "vinyl" to "黑胶", "
     val arm by animateFloatAsState(if (playing && settled) 24f else -12f, tween(350), label = "tonearm")
     Crossfade(style, modifier.testTag("playback-visual-$style").semantics {
         stateDescription = if (moving) "正在转动" else "静止"
-    }.combinedClickable(onClickLabel = "查看歌词", onDoubleClick = { /* Cover double-tap is intentionally unused. */ }, onLongClickLabel = "查看大封面", onLongClick = onArtwork,
-        hapticFeedbackEnabled = false, onClick = onLyrics), tween(200), label = "playback-style") { selection ->
+    }.combinedClickable(
+        interactionSource = remember { MutableInteractionSource() },
+        indication = null,
+        onClickLabel = "查看歌词",
+        onLongClickLabel = "查看大封面",
+        onLongClick = onArtwork,
+        hapticFeedbackEnabled = false,
+        onClick = onLyrics,
+    ), tween(200), label = "playback-style") { selection ->
         BoxWithConstraints(Modifier.fillMaxSize()) {
             val side = minOf(maxWidth, maxHeight)
             when (selection) {
@@ -131,7 +140,7 @@ internal val playbackStyles = listOf("cover" to "封面", "vinyl" to "黑胶", "
                         }
                     }
                     Cover(vm, track.id.takeIf { track.hasCover }, track.title, Modifier.offset(side * .09f, side * .28f).size(side * .13f))
-                    TapeWindow(phase, progress.coerceIn(0f, 1f), Modifier.offset(side * .15f, side * .488f).width(side * .7f).height(side * .198f))
+                    TapeWindow(vm, phase, duration.takeIf { it > 0 } ?: track.durationMs, Modifier.offset(side * .15f, side * .488f).width(side * .7f).height(side * .198f))
                 }
                 else -> Cover(vm, track.id.takeIf { track.hasCover }, track.title, Modifier.size(side))
             }
@@ -158,7 +167,9 @@ internal val playbackStyles = listOf("cover" to "封面", "vinyl" to "黑胶", "
     }
 }
 
-@Composable private fun TapeWindow(phase: PlaybackRotation, progress: Float, modifier: Modifier) {
+@Composable private fun TapeWindow(vm: MusicViewModel, phase: PlaybackRotation, duration: Long, modifier: Modifier) {
+    val position by vm.position.collectAsStateWithLifecycle()
+    val progress = if (duration > 0) (position.toFloat() / duration).coerceIn(0f, 1f) else 0f
     Canvas(modifier.clip(RoundedCornerShape(14.dp))) {
         val w = size.width; val h = size.height
         drawRect(Color(0xFF0D1409))

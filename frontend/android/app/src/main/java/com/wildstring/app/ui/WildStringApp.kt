@@ -40,14 +40,19 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.withTransform
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.selected
@@ -78,43 +83,94 @@ internal fun Modifier.trackSwipeGestures(
     enabled: Boolean,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
+    onDragOffset: (Float, Boolean) -> Unit = { _, _ -> },
 ): Modifier = if (!enabled) this else pointerInput(enabled) {
     var distance = 0f
     detectHorizontalDragGestures(
-        onDragStart = { distance = 0f },
+        onDragStart = {
+            distance = 0f
+            onDragOffset(0f, false)
+        },
         onHorizontalDrag = { change, amount ->
             distance += amount
+            onDragOffset(distance, true)
             change.consume()
         },
         onDragEnd = {
+            onDragOffset(0f, false)
             if (abs(distance) >= 72.dp.toPx()) {
                 if (distance < 0) onNext() else onPrevious()
             }
         },
-        onDragCancel = { distance = 0f },
+        onDragCancel = {
+            distance = 0f
+            onDragOffset(0f, false)
+        },
     )
 }
 
-/** A downward swipe on the visual stage collapses the player; lyric and queue views stay scrollable. */
+/** A vertical swipe collapses the player on downward drag or opens the queue on upward drag. */
 internal fun Modifier.dismissPlayerSwipe(
     enabled: Boolean,
     onDismiss: () -> Unit,
-): Modifier = if (!enabled) this else pointerInput(enabled) {
+    onDragOffset: (Float, Boolean) -> Unit = { _, _ -> },
+    onThresholdCrossed: () -> Unit = {},
+    onSwipeUp: (() -> Unit)? = null,
+): Modifier = if (!enabled) this else pointerInput(enabled, onSwipeUp != null) {
     var distance = 0f
+    var crossedDown = false
+    var crossedUp = false
+    val threshold = 52.dp.toPx()
     detectVerticalDragGestures(
-        onDragStart = { distance = 0f },
+        onDragStart = {
+            distance = 0f
+            crossedDown = false
+            crossedUp = false
+            onDragOffset(0f, false)
+        },
         onVerticalDrag = { change, amount ->
             distance += amount
+            if (distance > 0f) {
+                onDragOffset(distance, true)
+                if (distance >= threshold && !crossedDown) {
+                    crossedDown = true
+                    onThresholdCrossed()
+                }
+            } else if (onSwipeUp != null && distance < 0f) {
+                onDragOffset(distance, true)
+                if (distance <= -threshold && !crossedUp) {
+                    crossedUp = true
+                    onThresholdCrossed()
+                }
+            } else {
+                onDragOffset(0f, false)
+            }
             change.consume()
         },
         onDragEnd = {
-            if (distance >= 96.dp.toPx()) onDismiss()
+            when {
+                distance >= threshold -> onDismiss()
+                onSwipeUp != null && distance <= -threshold -> {
+                    onDragOffset(0f, false)
+                    onSwipeUp()
+                }
+                else -> onDragOffset(0f, false)
+            }
         },
-        onDragCancel = { distance = 0f },
+        onDragCancel = {
+            distance = 0f
+            onDragOffset(0f, false)
+        },
     )
 }
-internal val classicDarkColors = darkColorScheme(primary = Color(0xFFE98A6D), onPrimary = Color(0xFF291E17), background = Color(0xFF191A17),
-    surface = Color(0xFF191A17), surfaceVariant = Color(0xFF2B2E25), onSurface = Color(0xFFEEEAE2), onSurfaceVariant = Color(0xFFA8AA9D))
+internal val classicDarkColors = darkColorScheme(
+    primary = Color(0xFFE98A6D), onPrimary = Color(0xFF291E17),
+    background = Color(0xFF191A17), surface = Color(0xFF191A17),
+    surfaceVariant = Color(0xFF2B2E25), onSurface = Color(0xFFEEEAE2), onSurfaceVariant = Color(0xFFA8AA9D),
+    surfaceContainerLowest = Color(0xFF141512), surfaceContainerLow = Color(0xFF1D1E1A),
+    surfaceContainer = Color(0xFF22241F), surfaceContainerHigh = Color(0xFF292B25),
+    surfaceContainerHighest = Color(0xFF33362E),
+)
 internal val redColors = darkColorScheme(
     primary = Color(0xFFFFF3E7), onPrimary = Color(0xFF9D0011), primaryContainer = Color(0xFF8E0010), onPrimaryContainer = Color(0xFFFFF3E7),
     secondary = Color(0xFFFFD4C7), onSecondary = Color(0xFF7F000A), secondaryContainer = Color(0xFFD51A27), onSecondaryContainer = Color.White,
@@ -197,14 +253,14 @@ fun ConnectionScreen(state: MusicState, connect: (String, String, String, Boolea
             OutlinedTextField(server, { server = it }, Modifier.fillMaxWidth(), label = { Text("服务器地址") }, placeholder = { Text("https://music.your-domain.com") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri), enabled = !state.connecting)
             OutlinedTextField(username, { username = it }, Modifier.fillMaxWidth(), label = { Text("账号") }, singleLine = true, enabled = !state.connecting)
             OutlinedTextField(password, { password = it }, Modifier.fillMaxWidth(), label = { Text("密码") }, visualTransformation = PasswordVisualTransformation(), singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password), enabled = !state.connecting)
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.fillMaxWidth().clickable(enabled = !state.connecting) { localHttp = !localHttp }, verticalAlignment = Alignment.CenterVertically) {
                 Checkbox(localHttp, { localHttp = it }, enabled = !state.connecting)
                 Spacer(Modifier.width(8.dp))
                 Text("允许此服务器使用未加密 HTTP", fontSize = 13.sp)
             }
             state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             Button(onClick = ::submit, Modifier.fillMaxWidth().heightIn(min = 48.dp), enabled = !state.connecting && server.isNotBlank() && username.isNotBlank()) {
-                if (state.connecting) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                if (state.connecting) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp, color = LocalContentColor.current)
                 else Text("连接并登录")
             }
             Text("首次使用请在服务端设置管理员。HTTP 仅在你明确确认风险后使用。", color = Muted, fontSize = 12.sp)
@@ -240,7 +296,6 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
     var featurePlaylist by remember { mutableStateOf<Playlist?>(null) }
     var featureBatchId by remember { mutableStateOf<String?>(null) }
     var sleepDialog by remember { mutableStateOf(false) }
-    var diagnostics by remember { mutableStateOf(false) }
     var refreshAlbum by remember { mutableStateOf<String?>(null) }
     var lyricScanAlbum by remember { mutableStateOf<String?>(null) }
     var deletingPlaylist by remember { mutableStateOf<Playlist?>(null) }
@@ -252,11 +307,13 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
     var albumPlaylistTracks by remember { mutableStateOf<List<Track>?>(null) }
     var featureAlbumId by remember { mutableStateOf<String?>(null) }
     var chooseTrack by remember { mutableStateOf<Track?>(null) }
+    var createAndAddOpen by remember { mutableStateOf(false) }
     var localError by remember { mutableStateOf<String?>(null) }
     fun collapsePlayer() {
         vm.cancelAlbumNavigation()
         expanded = false
-        if (playerFromSettings) { settings = true; playerFromSettings = false }
+        queue = false
+        if (playerFromSettings) settings = true
     }
     fun openTrackAlbum(track: Track) {
         actions = null
@@ -265,6 +322,21 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
         val originalQueue = queue
         val originalSettings = playerFromSettings
         vm.openTrackAlbum(track, fromPlayer = fromPlayer) {
+            if (fromPlayer) {
+                playerReturnDepth = vm.state.value.navigationDepth - 1
+                playerReturnTab = vm.state.value.tab
+                returnLyrics = originalLyrics; returnQueue = originalQueue; returnFromSettings = originalSettings
+            }
+            expanded = false; queue = false; lyrics = false; settings = false; playerFromSettings = false
+        }
+    }
+    fun openTrackArtist(name: String) {
+        actions = null
+        val fromPlayer = expanded
+        val originalLyrics = lyrics
+        val originalQueue = queue
+        val originalSettings = playerFromSettings
+        vm.openArtistName(name) {
             if (fromPlayer) {
                 playerReturnDepth = vm.state.value.navigationDepth - 1
                 playerReturnTab = vm.state.value.tab
@@ -298,116 +370,254 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
         if (savedKeys.size > 32) savedPages.removeState(savedKeys.removeFirst())
     }
     val destination = when { settings -> "settings"; expanded && state.current != null -> "player"; else -> "catalog" }
-    // Draw the atmosphere behind system bars; only interactive content consumes the safe area.
-    Crossfade(destination, animationSpec = tween(220), label = "destination-background") { screen ->
-        if (screen == "player") state.current?.let { ArtworkBackdrop(vm, it, LocalRedCloth.current) }
-        else Box(Modifier.fillMaxSize().background(if (screen == "settings") MaterialTheme.colorScheme.surfaceContainerLow else Background))
+    var rawPlayerDragY by remember { mutableFloatStateOf(0f) }
+    var playerDraggingDown by remember { mutableStateOf(false) }
+    LaunchedEffect(destination) {
+        if (destination != "player") {
+            rawPlayerDragY = 0f
+            playerDraggingDown = false
+            playerFromSettings = false
+        }
     }
-    BoxWithConstraints(Modifier.fillMaxSize().safeDrawingPadding()) {
-        val wide = maxWidth >= 840.dp && maxHeight >= 480.dp
-        val landscape = maxWidth > maxHeight && !wide
-        val rail = maxWidth >= 600.dp && maxHeight >= 480.dp
-        val compact = maxHeight < 600.dp
+    val animatedPlayerDragY = animateFloatAsState(
+        targetValue = if (playerDraggingDown) rawPlayerDragY else 0f,
+        animationSpec = if (playerDraggingDown) snap() else spring(stiffness = Spring.StiffnessMediumLow),
+        label = "player-dismiss-drag",
+    )
+    val baseIsSettings = settings || (destination == "player" && playerFromSettings)
+    val baseSurfaceColor = if (baseIsSettings) MaterialTheme.colorScheme.surfaceContainerLow else Background
+    Box(Modifier.fillMaxSize().background(baseSurfaceColor))
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val insets = WindowInsets.safeDrawing.asPaddingValues()
+        val safeWidth = (maxWidth - insets.calculateLeftPadding(androidx.compose.ui.unit.LayoutDirection.Ltr) - insets.calculateRightPadding(androidx.compose.ui.unit.LayoutDirection.Ltr)).coerceAtLeast(0.dp)
+        val safeHeight = (maxHeight - insets.calculateTopPadding() - insets.calculateBottomPadding()).coerceAtLeast(0.dp)
+        val wide = safeWidth >= 840.dp && safeHeight >= 480.dp
+        val landscape = safeWidth > safeHeight && !wide
+        val rail = safeWidth >= 600.dp && safeHeight >= 480.dp
+        val compact = safeHeight < 600.dp
         var wasWide by remember { mutableStateOf(wide) }
         LaunchedEffect(wide) { if (wasWide && !wide && expanded && !queue) lyrics = true; wasWide = wide }
         BackHandler(enabled = !settings && (expanded || queue || state.canGoBack || state.tab != "search")) {
-            when { queue -> queue = false; lyrics && !wide -> lyrics = false; expanded -> collapsePlayer(); state.canGoBack -> vm.back(); else -> vm.navigate("search") }
+            when { queue && !wide -> queue = false; lyrics && !wide -> lyrics = false; expanded -> collapsePlayer(); state.canGoBack -> vm.back(); else -> vm.navigate("search") }
         }
-        AnimatedContent(destination, transitionSpec = {
-            if (targetState == "settings" || initialState == "settings") {
-                (fadeIn(tween(180)) + slideInHorizontally(tween(240)) { if (targetState == "settings") it / 6 else -it / 12 }) togetherWith fadeOut(tween(120))
-            } else (fadeIn(tween(220)) + slideInVertically(tween(280, easing = FastOutSlowInEasing)) { it / 12 }) togetherWith fadeOut(tween(140))
-        }, label = "app-destination") { destination ->
-        if (destination == "settings") savedPages.SaveableStateProvider("settings") { SettingsScreen(vm, bottomBar = {
-            MiniPlayer(vm, state, onQueue = { queue = true }) { playerFromSettings = true; settings = false; expanded = true; lyrics = false; queue = false }
-        }) { settings = false } }
-        else if (destination == "player") {
-            PlayerScreen(vm, state, wide, landscape, lyrics, queue, rotation,
-                onBack = { if (lyrics && !wide) lyrics = false else collapsePlayer() },
-                onLyrics = { lyrics = !lyrics; queue = false }, onQueue = { queue = !queue },
-                onAlbum = { state.current?.let(::openTrackAlbum) },
-                onArtist = { name -> vm.openArtistName(name) { expanded = false; lyrics = false; queue = false } },
-                onAdd = { actions = state.current }, onSleep = { sleepDialog = true })
-        } else {
-            Row(Modifier.fillMaxSize()) {
-                if (rail) NavigationRail(windowInsets = WindowInsets(0, 0, 0, 0), modifier = Modifier.testTag("navigation-rail")) {
-                    Icon(painterResource(R.drawable.ic_wildstring), null, Modifier.padding(vertical = 24.dp).size(36.dp), tint = Color.Unspecified)
-                    RailItems(state, vm)
-                }
-                Scaffold(
-                    contentWindowInsets = WindowInsets(0, 0, 0, 0),
-                    topBar = { CatalogTopBar(state, vm::back, { settings = true }, compact = true, unread = unread,
-                        notifications = { feature = "notifications" },
-                        queue = if (state.kind !in listOf("tracks", "recent")) ({ queue = true }) else null,
-                        recent = if (state.kind !in listOf("tracks", "recent")) vm::recent else null,
-                        offline = if (state.kind !in listOf("tracks", "recent")) ({ feature = "offline" }) else null) },
-                    bottomBar = { Column {
-                        if (state.current != null) MiniPlayer(vm, state, onQueue = { queue = true }) { playerReturnDepth = -1; playerFromSettings = false; expanded = true; lyrics = false; queue = false }
-                        if (!rail) NavigationBar(windowInsets = WindowInsets(0, 0, 0, 0), modifier = Modifier.testTag("bottom-navigation")) { BottomItems(state, vm) }
-                    } },
-                ) { padding ->
-                    Column(Modifier.fillMaxSize().padding(padding)) {
-                        if (state.tab == "library" && state.collection == null) LibraryTabs(state.kind, vm::kind)
-                        // Keep the editor outside query-keyed pages and discover/result branches.
-                        if (state.tab == "search" && state.collection == null && state.kind != "recent") CatalogSearch(state.query, vm::search)
-                        val header: @Composable () -> Unit = {
-                            Column(Modifier.fillMaxWidth()) {
-                                if (state.tab == "mine" && state.collection == null && state.kind != "recent") {
-                                    PersonalHeader(vm, state, { vm.recent() }, compact = compact)
-                                    MobileShortcuts { feature = it }
-                                    Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                                        Text("我的歌单", style = MaterialTheme.typography.titleMedium)
-                                        IconButton({ featurePlaylist = null; feature = "playlist" }) { Icon(Icons.Default.Add, "新建歌单") }
+        @Composable fun BaseDestination(target: String) {
+            Box(Modifier.fillMaxSize().safeDrawingPadding()) {
+            if (target == "settings") savedPages.SaveableStateProvider("settings") { SettingsScreen(vm, bottomBar = {
+                MiniPlayer(vm, state, onQueue = { queue = true }) { playerFromSettings = true; settings = false; expanded = true; lyrics = false; queue = false }
+            }) { settings = false } }
+            else {
+                Row(Modifier.fillMaxSize()) {
+                    if (rail) NavigationRail(windowInsets = WindowInsets(0, 0, 0, 0), modifier = Modifier.testTag("navigation-rail")) {
+                        Icon(painterResource(R.drawable.ic_wildstring), null, Modifier.padding(vertical = 24.dp).size(36.dp), tint = Color.Unspecified)
+                        RailItems(state, vm)
+                    }
+                    val showGlobalMore = state.tab == "search" && state.collection == null && state.kind != "recent"
+                    Scaffold(
+                        contentWindowInsets = WindowInsets(0, 0, 0, 0),
+                        topBar = { CatalogTopBar(state, vm::back, { settings = true }, compact = true, unread = unread,
+                            notifications = { feature = "notifications" },
+                            queue = if (showGlobalMore) ({ queue = true }) else null,
+                            recent = if (showGlobalMore) vm::recent else null,
+                            offline = if (showGlobalMore) ({ feature = "offline" }) else null) },
+                        bottomBar = { Column {
+                            if (state.current != null) MiniPlayer(vm, state, onQueue = { queue = true }) { playerReturnDepth = -1; playerFromSettings = false; expanded = true; lyrics = false; queue = false }
+                            if (!rail) NavigationBar(windowInsets = WindowInsets(0, 0, 0, 0), modifier = Modifier.testTag("bottom-navigation")) { BottomItems(state, vm) }
+                        } },
+                    ) { padding ->
+                        Column(Modifier.fillMaxSize().padding(padding)) {
+                            if (state.tab == "library" && state.collection == null) LibraryTabs(state.kind, vm::kind)
+                            // Keep the editor outside query-keyed pages and discover/result branches.
+                            if (state.tab == "search" && state.collection == null && state.kind != "recent") CatalogSearch(state.query, vm::search)
+                            val header: @Composable () -> Unit = {
+                                Column(Modifier.fillMaxWidth()) {
+                                    if (state.tab == "mine" && state.collection == null && state.kind != "recent") {
+                                        PersonalHeader(vm, state, { vm.recent() }, compact = compact)
+                                        MobileShortcuts { feature = it }
+                                        Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                            Text("我的歌单", style = MaterialTheme.typography.titleMedium)
+                                            IconButton({ featurePlaylist = null; feature = "playlist" }) { Icon(Icons.Default.Add, "新建歌单") }
+                                        }
                                     }
+                                    if (state.kind == "artists" && state.collection == null) {
+                                        Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                                            Row(Modifier.weight(1f).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                listOf("album_artist" to "专辑艺人", "artist" to "艺人", "vocalist" to "演唱", "lyricist" to "作词", "composer" to "作曲", "arranger" to "编曲").forEach { (key, name) -> FilterChip(state.role == key, { vm.role(key) }, label = { Text(name) }) }
+                                            }
+                                            Spacer(Modifier.width(8.dp))
+                                            Text("${state.total} 位艺人", color = Muted, style = MaterialTheme.typography.labelMedium, maxLines = 1, softWrap = false)
+                                        }
+                                    }
+                                    if (state.collection == "artists" && state.albumFilter == null) Row(Modifier.padding(horizontal = if (state.kind == "albums") 0.dp else 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        FilterChip(state.kind == "albums", { vm.kind("albums") }, label = { Text("专辑") })
+                                        FilterChip(state.kind == "tracks", { vm.kind("tracks") }, label = { Text("歌曲") })
+                                    }
+                                    if (state.tab == "search" && state.kind == "discover") MobileShortcuts(discovery = true) { feature = it }
+                                    state.error?.let { ErrorMessage(it, vm::load) }
+                                    if (state.offline) Text("网络暂不可用 · 显示本机缓存", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(horizontal = if (state.kind == "albums") 0.dp else 16.dp, vertical = 6.dp))
+                                    if (state.kind == "albums") Row(Modifier.fillMaxWidth().padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        Text("${state.total} 张专辑", Modifier.weight(1f), color = Muted, style = MaterialTheme.typography.labelMedium, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
+                                        CatalogSortControls(state, vm::sort, vm::toggleSortOrder)
+                                    }
+                                    if (state.kind == "tracks" || state.kind == "recent") CatalogToolbar(state,
+                                        play = tactile { vm.playCollection { playerReturnDepth = -1; expanded = true; lyrics = false; queue = false } }, sort = vm::sort, reverse = vm::toggleSortOrder,
+                                        multi = { feature = "multi" }, download = { vm.downloadCollection() },
+                                        edit = { featurePlaylist = state.activePlaylist; feature = "playlist" },
+                                        order = { featurePlaylist = state.activePlaylist; feature = "order" },
+                                        delete = { deletingPlaylist = state.activePlaylist },
+                                        albumLyrics = if (state.account?.isOwner == true && (state.collection == "albums" || state.albumFilter != null)) ({ lyricScanAlbum = state.albumFilter ?: state.collectionId }) else null,
+                                        albumRefresh = if (state.account?.isOwner == true && (state.collection == "albums" || state.albumFilter != null)) ({ refreshAlbum = state.albumFilter ?: state.collectionId }) else null)
                                 }
-                                if (state.kind == "artists" && state.collection == null) Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    listOf("artist" to "艺人", "album_artist" to "专辑艺人", "vocalist" to "演唱", "lyricist" to "作词", "composer" to "作曲", "arranger" to "编曲").forEach { (key, name) -> FilterChip(state.role == key, { vm.role(key) }, label = { Text(name) }) }
-                                }
-                                if (state.collection == "artists" && state.albumFilter == null) Row(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    FilterChip(state.kind == "tracks", { vm.kind("tracks") }, label = { Text("歌曲") })
-                                    FilterChip(state.kind == "albums", { vm.kind("albums") }, label = { Text("专辑") })
-                                }
-                                if (state.tab == "search" && state.kind == "discover") MobileShortcuts(discovery = true) { feature = it }
-                                state.error?.let { ErrorMessage(it, vm::load) }
-                                if (state.offline) Text("网络暂不可用 · 显示本机缓存", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
-                                if (state.kind == "albums") Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    Text("${state.total} 张专辑", Modifier.weight(1f), color = Muted, style = MaterialTheme.typography.labelMedium, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
-                                    CatalogSortControls(state, vm::sort, vm::toggleSortOrder)
-                                }
-                                if (state.kind == "tracks" || state.kind == "recent") CatalogToolbar(state,
-                                    play = tactile { vm.playCollection { playerReturnDepth = -1; expanded = true; lyrics = false; queue = false } }, sort = vm::sort, reverse = vm::toggleSortOrder,
-                                    multi = { feature = "multi" }, download = { vm.downloadCollection() },
-                                    edit = { featurePlaylist = state.activePlaylist; feature = "playlist" },
-                                    order = { featurePlaylist = state.activePlaylist; feature = "order" },
-                                    delete = { deletingPlaylist = state.activePlaylist },
-                                    albumLyrics = if (state.account?.isOwner == true && (state.collection == "albums" || state.albumFilter != null)) ({ lyricScanAlbum = state.albumFilter ?: state.collectionId }) else null,
-                                    albumRefresh = if (state.account?.isOwner == true && (state.collection == "albums" || state.albumFilter != null)) ({ refreshAlbum = state.albumFilter ?: state.collectionId }) else null)
                             }
-                        }
-                        Box(Modifier.weight(1f)) {
-                            PullToRefreshBox(isRefreshing = state.loading, onRefresh = { if (!state.loading) vm.load() },
-                                modifier = Modifier.fillMaxSize().testTag("catalog-refresh-area").semantics {
-                                    customActions = listOf(CustomAccessibilityAction("刷新当前页面") {
-                                        if (state.loading) false else { vm.load(); true }
-                                    })
-                                }, state = pullRefresh,
-                                indicator = { WildRefreshIndicator(state.loading, pullRefresh, Modifier.align(Alignment.TopCenter)) }) {
-                                savedPages.SaveableStateProvider(state.contentKey.ifBlank { "initial" }) {
-                                    if (state.kind == "discover") DiscoveryPage(vm, state,
-                                        play = { index -> vm.play(state.tracks, index); playerReturnDepth = -1; expanded = true; lyrics = false; queue = false }, recent = vm::recent, header = header,
-                                        albumActions = { albumActions = it })
-                                    else CatalogBrowser(vm, state, header,
-                                        play = { track -> vm.playCollection(track.id) { playerReturnDepth = -1; expanded = true; lyrics = false; queue = false } },
-                                        actions = { actions = it }, playlistActions = { playlistActions = it }, albumActions = { albumActions = it })
+                            var manualRefresh by remember { mutableStateOf(false) }
+                            LaunchedEffect(state.loading) {
+                                if (!state.loading) manualRefresh = false
+                            }
+                            val showRefreshIndicator = if (manualRefresh) state.loading else delayed(state.loading && state.hasContent, 320)
+                            Box(Modifier.weight(1f)) {
+                                PullToRefreshBox(isRefreshing = showRefreshIndicator, onRefresh = { if (!state.loading) { manualRefresh = true; vm.load() } },
+                                    modifier = Modifier.fillMaxSize().testTag("catalog-refresh-area").semantics {
+                                        customActions = listOf(CustomAccessibilityAction("刷新当前页面") {
+                                            if (state.loading) false else { manualRefresh = true; vm.load(); true }
+                                        })
+                                    }, state = pullRefresh,
+                                    indicator = { WildRefreshIndicator(showRefreshIndicator, pullRefresh, Modifier.align(Alignment.TopCenter)) }) {
+                                    savedPages.SaveableStateProvider(state.contentKey.ifBlank { "initial" }) {
+                                        if (state.kind == "discover") DiscoveryPage(vm, state,
+                                            play = { index -> vm.play(state.tracks, index); playerReturnDepth = -1; expanded = true; lyrics = false; queue = false }, recent = vm::recent, header = header,
+                                            albumActions = { albumActions = it })
+                                        else CatalogBrowser(vm, state, header,
+                                            play = { track -> vm.playCollection(track.id) { playerReturnDepth = -1; expanded = true; lyrics = false; queue = false } },
+                                            actions = { actions = it }, playlistActions = { playlistActions = it }, albumActions = { albumActions = it })
+                                    }
                                 }
                             }
                         }
                     }
                 }
             }
+            }
         }
+        AnimatedContent(destination, transitionSpec = {
+            if (targetState == "settings" || initialState == "settings") {
+                (fadeIn(tween(180)) + slideInHorizontally(tween(240)) { if (targetState == "settings") it / 6 else -it / 12 }) togetherWith fadeOut(tween(120))
+            } else if (initialState == "player") {
+                ContentTransform(
+                    targetContentEnter = EnterTransition.None,
+                    initialContentExit = fadeOut(tween(180)) + slideOutVertically(tween(220, easing = FastOutSlowInEasing)) { it },
+                    targetContentZIndex = -1f,
+                )
+            } else (fadeIn(tween(220)) + slideInVertically(tween(280, easing = FastOutSlowInEasing)) { it / 12 }) togetherWith fadeOut(tween(140))
+        }, label = "app-destination") { currentDestination ->
+            if (currentDestination == "player") {
+                Box(Modifier.fillMaxSize()) {
+                    if (this@AnimatedContent.transition.currentState == EnterExitState.Visible &&
+                        this@AnimatedContent.transition.targetState == EnterExitState.Visible &&
+                        (playerDraggingDown || animatedPlayerDragY.value > 0.5f)) {
+                        Box(
+                            Modifier.fillMaxSize()
+                                .clearAndSetSemantics {}
+                                .drawWithContent {
+                                    if (animatedPlayerDragY.value > 0.5f) {
+                                        drawContent()
+                                    }
+                                }
+                        ) {
+                            BaseDestination(if (playerFromSettings) "settings" else "catalog")
+                        }
+                    }
+                    PlayerScreen(vm, state, wide, landscape, lyrics, queue, rotation,
+                        dragOffset = animatedPlayerDragY,
+                        onUpdateDrag = { offset, active -> rawPlayerDragY = offset; playerDraggingDown = active },
+                        onBack = ::collapsePlayer,
+                        onDismiss = ::collapsePlayer,
+                        onLyrics = { lyrics = !lyrics; queue = false }, onQueue = { queue = !queue },
+                        onAlbum = { state.current?.let(::openTrackAlbum) },
+                        onArtist = ::openTrackArtist,
+                        onAdd = { actions = state.current }, onSleep = { sleepDialog = true })
+                }
+            } else {
+                BaseDestination(currentDestination)
+            }
         }
-        if (queue && ((!wide && !landscape) || !expanded)) ModalBottomSheet(onDismissRequest = { queue = false }) { QueuePanel(vm, state, Modifier.fillMaxWidth().heightIn(max = 560.dp)) }
+        val usePhoneQueueSheet = (!wide && !landscape) || !expanded
+        val density = LocalDensity.current
+        val defaultMaxQueueSheetPx = with(density) { 560.dp.toPx() }
+        var measuredQueueSheetPx by remember { mutableFloatStateOf(0f) }
+        val maxQueueSheetPx = if (measuredQueueSheetPx > 1f) measuredQueueSheetPx else defaultMaxQueueSheetPx
+        var rawQueueDragY by remember { mutableFloatStateOf(0f) }
+        var queueDragging by remember { mutableStateOf(false) }
+        LaunchedEffect(queue) {
+            if (!queue) {
+                rawQueueDragY = 0f
+                queueDragging = false
+            }
+        }
+        val isActivelyDraggingQueue = usePhoneQueueSheet && (
+            (!queue && destination == "player" && playerDraggingDown && rawPlayerDragY < 0f) ||
+            (queue && queueDragging)
+        )
+        val targetQueueRevealPx = when {
+            !usePhoneQueueSheet -> 0f
+            queue -> (maxQueueSheetPx - rawQueueDragY.coerceAtLeast(0f)).coerceIn(0f, maxQueueSheetPx)
+            destination == "player" && playerDraggingDown && rawPlayerDragY < 0f -> (-rawPlayerDragY).coerceIn(0f, maxQueueSheetPx)
+            else -> 0f
+        }
+        val animatedQueueRevealPx = animateFloatAsState(
+            targetValue = targetQueueRevealPx,
+            animationSpec = if (isActivelyDraggingQueue) snap() else spring(stiffness = Spring.StiffnessMediumLow),
+            label = "queue-sheet-reveal",
+        )
+        if (usePhoneQueueSheet && (queue || animatedQueueRevealPx.value > 0.5f)) {
+            val revealPx = animatedQueueRevealPx.value.coerceIn(0f, maxQueueSheetPx)
+            val scrimAlpha = (revealPx / maxQueueSheetPx.coerceAtLeast(1f)).coerceIn(0f, 1f) * 0.45f
+            val queueDismissModifier = Modifier.dismissPlayerSwipe(
+                enabled = queue,
+                onDismiss = { queue = false },
+                onDragOffset = { offset, active -> rawQueueDragY = offset; queueDragging = active },
+                onThresholdCrossed = { feedback(TactileKind.Tap) },
+            )
+            Box(
+                Modifier.fillMaxSize()
+                    .then(if (!queue) Modifier.clearAndSetSemantics {} else Modifier)
+                    .background(Color.Black.copy(alpha = scrimAlpha))
+                    .pointerInput(queue) {
+                        if (queue) {
+                            detectTapGestures { queue = false }
+                        }
+                    },
+                contentAlignment = Alignment.BottomCenter,
+            ) {
+                Surface(
+                    Modifier.fillMaxWidth().heightIn(min = 280.dp, max = 560.dp)
+                        .onSizeChanged { if (it.height > 0) measuredQueueSheetPx = it.height.toFloat() }
+                        .graphicsLayer {
+                            val sheetH = if (size.height > 1f) size.height else maxQueueSheetPx
+                            translationY = (sheetH - animatedQueueRevealPx.value).coerceAtLeast(0f)
+                        }
+                        .pointerInput(Unit) { detectTapGestures {} },
+                    shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerLow,
+                    shadowElevation = 12.dp,
+                ) {
+                    Column(Modifier.fillMaxWidth().navigationBarsPadding()) {
+                        Box(
+                            Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 4.dp)
+                                .then(queueDismissModifier),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Box(Modifier.size(width = 36.dp, height = 4.dp).clip(RoundedCornerShape(2.dp)).background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)))
+                        }
+                        QueuePanel(
+                            vm = vm,
+                            state = state,
+                            modifier = Modifier.fillMaxWidth(),
+                            headerModifier = queueDismissModifier,
+                            onClose = { queue = false },
+                        )
+                    }
+                }
+            }
+        }
     }
     val playerFeedback = expanded && state.current != null && !settings
     Box(Modifier.fillMaxSize().safeDrawingPadding(), contentAlignment = if (playerFeedback) Alignment.TopCenter else Alignment.BottomCenter) {
@@ -450,7 +660,6 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
     lyricScanAlbum?.let { albumId -> FeatureDialog(vm, "lyric-scans", albumId = albumId, dismiss = { lyricScanAlbum = null }) }
     refreshAlbum?.let { albumId -> MetadataRefreshPrompt(vm, "album", albumId) { refreshAlbum = null } }
     if (sleepDialog) SleepDialog(vm) { sleepDialog = false }
-    if (diagnostics) PlaybackDiagnosticsDialog(vm) { diagnostics = false }
     deletingPlaylist?.let { playlist -> AlertDialog(onDismissRequest = { if (!playlistAction.busy) deletingPlaylist = null }, title = { Text("删除歌单？") }, text = { Column { Text(playlist.name); ActionStatus(playlistAction) } }, confirmButton = { TextButton({ scope.launch { playlistAction.run { vm.deletePlaylist(playlist); deletingPlaylist = null } } }, enabled = !playlistAction.busy) { Text("删除") } }, dismissButton = { TextButton({ deletingPlaylist = null }, enabled = !playlistAction.busy) { Text("取消") } }) }
     actions?.let { track -> ModalBottomSheet(
         onDismissRequest = { actions = null },
@@ -474,8 +683,13 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
             }
         }
         SongAction("查看所属专辑", Icons.Default.Album, navigate = true) { openTrackAlbum(track) }
+        track.artists.filter { it.isNotBlank() }.forEach { artist ->
+            SongAction(if (track.artists.size > 1) "查看艺人 · $artist" else "查看艺人", Icons.Default.Person, navigate = true) { openTrackArtist(artist) }
+        }
         SongAction("响度均衡与手动调整", Icons.AutoMirrored.Filled.VolumeUp) { feature = "gain"; featureTrack = track; actions = null }
-        if (track.id == state.current?.id) SongAction("播放诊断", Icons.Default.Troubleshoot) { diagnostics = true; actions = null }
+        if (track.id == state.current?.id) {
+            SongAction("刷新歌词", Icons.Default.Refresh) { vm.refreshLyrics(); actions = null }
+        }
         HorizontalDivider(Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
         SongAction("下一首播放", Icons.AutoMirrored.Filled.PlaylistPlay, onClick = tactile { vm.addToQueue(track, true); actions = null })
         SongAction("加入播放队列", Icons.AutoMirrored.Filled.QueueMusic, onClick = tactile { vm.addToQueue(track); actions = null })
@@ -496,14 +710,35 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
         }
     } }
     playlistChoices?.let { choices -> AlertDialog(onDismissRequest = { playlistChoices = null; albumPlaylistTracks = null }, title = { Text("加入歌单") }, text = {
-        if (choices.isEmpty()) Text("请先创建普通歌单。") else Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {
-            choices.forEach { p -> TextButton({
-                val selectedAlbumTracks = albumPlaylistTracks
-                if (selectedAlbumTracks != null) scope.launch { try { vm.addTracksToPlaylist(selectedAlbumTracks, p) } catch (e: Exception) { localError = friendlyError(e) } finally { albumPlaylistTracks = null; playlistChoices = null } }
-                else { feedback(TactileKind.Tap); chooseTrack?.let { vm.addToPlaylist(it, p) }; playlistChoices = null }
-            }) { Text(p.name) } }
+        Column(Modifier.heightIn(max = 380.dp).verticalScroll(rememberScrollState())) {
+            if (choices.isEmpty()) Text("暂无普通歌单，可直接新建歌单并加入。", color = Muted, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(vertical = 8.dp))
+            choices.forEach { p ->
+                ListItem(
+                    headlineContent = { Text(p.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                    supportingContent = { Text("${p.trackCount} 首", fontSize = 12.sp, color = Muted) },
+                    leadingContent = { Icon(Icons.AutoMirrored.Filled.QueueMusic, null, tint = Muted) },
+                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable {
+                        val selectedAlbumTracks = albumPlaylistTracks
+                        if (selectedAlbumTracks != null) scope.launch { try { vm.addTracksToPlaylist(selectedAlbumTracks, p) } catch (e: Exception) { localError = friendlyError(e) } finally { albumPlaylistTracks = null; playlistChoices = null } }
+                        else { feedback(TactileKind.Tap); chooseTrack?.let { vm.addToPlaylist(it, p) }; playlistChoices = null }
+                    },
+                )
+            }
         }
-    }, confirmButton = { TextButton({ playlistChoices = null }) { Text("关闭") } }) }
+    }, dismissButton = {
+        TextButton({ createAndAddOpen = true }) {
+            Icon(Icons.Default.Add, null, Modifier.size(18.dp))
+            Spacer(Modifier.width(4.dp))
+            Text("新建歌单")
+        }
+    }, confirmButton = { TextButton({ playlistChoices = null; albumPlaylistTracks = null }) { Text("关闭") } }) }
+    if (createAndAddOpen) NameDialog("新建歌单并加入", "", { createAndAddOpen = false }) { name ->
+        createAndAddOpen = false
+        val tracksToAdd = albumPlaylistTracks ?: listOfNotNull(chooseTrack)
+        albumPlaylistTracks = null; playlistChoices = null
+        scope.launch { try { vm.createPlaylistAndAdd(name, tracksToAdd) } catch (e: Exception) { localError = friendlyError(e) } }
+    }
     localError?.let { text -> AlertDialog(onDismissRequest = { localError = null }, text = { Text(text) }, confirmButton = { TextButton({ localError = null }) { Text("关闭") } }) }
 }
 
@@ -523,7 +758,7 @@ private fun AlbumActionsSheet(
         tab = "library", kind = "tracks", title = album.title, collection = "albums", collectionId = album.id, sort = "title"
     ))
     fun withTracks(next: Boolean = false, append: (List<Track>) -> Unit) {
-        scope.launch { action.run { val items = tracks(); append(items); if (next) vm.notify("已排到下一首") else vm.notify("已处理 ${items.size} 首") } }
+        scope.launch { action.run { val items = tracks(); append(items) } }
     }
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -546,13 +781,13 @@ private fun AlbumActionsSheet(
             }
             ActionStatus(action)
             SongAction("播放专辑", Icons.Default.PlayArrow, onClick = tactile {
-                withTracks { items -> vm.play(items); vm.notify("正在播放：${album.title}"); onDismiss() }
+                withTracks { items -> vm.play(items); onDismiss() }
             })
             SongAction("下一首播放", Icons.AutoMirrored.Filled.PlaylistPlay, onClick = tactile {
-                withTracks(next = true) { items -> vm.addToQueue(items, next = true); onDismiss() }
+                withTracks(next = true) { items -> vm.addToQueue(items, next = true); vm.notify("已排到下一首"); onDismiss() }
             })
             SongAction("加入播放队列", Icons.AutoMirrored.Filled.QueueMusic, onClick = tactile {
-                withTracks { items -> vm.addToQueue(items); onDismiss() }
+                withTracks { items -> vm.addToQueue(items); vm.notify("已加入播放队列"); onDismiss() }
             })
             SongAction("离线保存专辑", Icons.Default.Download, onClick = tactile {
                 withTracks { items -> vm.download(items); onDismiss() }
@@ -694,23 +929,35 @@ internal fun CatalogToolbar(state: MusicState, play: () -> Unit, sort: (String) 
     }
 }
 @Composable
-private fun PlayerScreen(vm: MusicViewModel, input: MusicState, wide: Boolean, landscape: Boolean, lyrics: Boolean, queue: Boolean, rotation: PlaybackRotation,
-    onBack: () -> Unit, onLyrics: () -> Unit, onQueue: () -> Unit, onAlbum: () -> Unit, onArtist: (String) -> Unit,
+private fun PlayerScreen(vm: MusicViewModel, state: MusicState, wide: Boolean, landscape: Boolean, lyrics: Boolean, queue: Boolean, rotation: PlaybackRotation,
+    dragOffset: State<Float>, onUpdateDrag: (Float, Boolean) -> Unit,
+    onBack: () -> Unit, onDismiss: () -> Unit, onLyrics: () -> Unit, onQueue: () -> Unit, onAlbum: () -> Unit, onArtist: (String) -> Unit,
     onAdd: () -> Unit, onSleep: () -> Unit) {
-    val position by vm.position.collectAsStateWithLifecycle()
-    val state = input.copy(position = position)
     val preferences by vm.settings.state.collectAsStateWithLifecycle()
     val sleep by vm.sleep.state.collectAsStateWithLifecycle()
     val feedback = LocalTactileFeedback.current
     val track = state.current ?: return
-    val progress = if (state.duration > 0) state.position.toFloat() / state.duration else 0f
     var artworkPreview by rememberSaveable { mutableStateOf(false) }
     val showArtwork = remember { { artworkPreview = true } }
     val dismissArtwork = remember { { artworkPreview = false } }
     val spinning = state.playing && !state.buffering && state.playbackError == null && !artworkPreview
-    Box(Modifier.fillMaxSize()) {
-    Column(Modifier.testTag(if (wide) "player-tablet" else if (landscape) "player-landscape" else "player-phone").fillMaxSize().padding(horizontal = if (wide) 34.dp else 20.dp)) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+    val thresholdTick = { feedback(TactileKind.Tap) }
+    // Translate only in the canvas draw phase on downward drag so pointerInput hit-test coordinates never shift mid-drag.
+    Box(
+        Modifier.fillMaxSize()
+            .drawWithContent {
+                val ty = dragOffset.value.coerceAtLeast(0f)
+                withTransform({ translate(top = ty) }) {
+                    this@drawWithContent.drawContent()
+                }
+            }
+    ) {
+    ArtworkBackdrop(vm, track, LocalRedCloth.current)
+    Column(Modifier.testTag(if (wide) "player-tablet" else if (landscape) "player-landscape" else "player-phone")
+        .fillMaxSize()
+        .safeDrawingPadding()
+        .padding(horizontal = if (wide) 34.dp else 20.dp)) {
+        Row(Modifier.fillMaxWidth().dismissPlayerSwipe(true, onDismiss, onUpdateDrag, thresholdTick), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
             IconButton(onBack) {
                 Icon(
                     Icons.Default.KeyboardArrowDown,
@@ -719,26 +966,25 @@ private fun PlayerScreen(vm: MusicViewModel, input: MusicState, wide: Boolean, l
             }
             Spacer(Modifier.weight(1f))
             IconButton(onSleep) { Icon(Icons.Default.Bedtime, "睡眠定时", tint = if (sleep.deadline != null || sleep.entryId != null) Accent else Muted) }
-            IconButton(vm::refreshLyrics) { Icon(Icons.Default.Refresh, "刷新歌词") }
             IconButton(onAdd) { Icon(Icons.Default.MoreVert, "当前歌曲操作") }
         }
+        val openQueueOnSwipeUp = { if (!queue) onQueue() }
         if (landscape) Row(Modifier.weight(1f).fillMaxWidth().padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
             BoxWithConstraints(Modifier.weight(1f).fillMaxHeight().testTag("player-visual-stage")
                 .pointerInput(onLyrics, showArtwork, queue) {
                     detectTapGestures(
-                        onDoubleTap = { /* Deliberately no double-tap action on the cover. */ },
                         onLongPress = { if (!queue) showArtwork() },
                         onTap = { onLyrics() },
                     )
                 }
-                .dismissPlayerSwipe(!queue && !lyrics, onBack)
+                .dismissPlayerSwipe(!queue && !lyrics, onDismiss, onUpdateDrag, thresholdTick, openQueueOnSwipeUp)
                 .trackSwipeGestures(!queue && !lyrics,
                     onPrevious = { feedback(TactileKind.Tap); vm.previous() },
                     onNext = { feedback(TactileKind.Tap); vm.next() }), contentAlignment = Alignment.Center) {
                 when {
                     queue -> QueuePanel(vm, state, Modifier.fillMaxSize())
                     lyrics -> LyricsPanel(vm, state, Modifier.fillMaxSize(), onLyrics, showArtwork)
-                    else -> PlaybackVisual(vm, track, preferences.playbackStyle, spinning, true, progress, rotation,
+                    else -> PlaybackVisual(vm, track, preferences.playbackStyle, spinning, true, state.duration, rotation,
                         Modifier.size(minOf(maxWidth, maxHeight)), showArtwork, onLyrics)
                 }
             }
@@ -748,15 +994,17 @@ private fun PlayerScreen(vm: MusicViewModel, input: MusicState, wide: Boolean, l
         } else if (wide) Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(48.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(.9f).fillMaxHeight().widthIn(max = 380.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()
-                    .dismissPlayerSwipe(!lyrics && !queue, onBack)
+                    .dismissPlayerSwipe(!lyrics && !queue, onDismiss, onUpdateDrag, thresholdTick, openQueueOnSwipeUp)
                     .trackSwipeGestures(!lyrics && !queue,
                         onPrevious = { feedback(TactileKind.Tap); vm.previous() },
                         onNext = { feedback(TactileKind.Tap); vm.next() }), contentAlignment = Alignment.Center) {
                     val visualSize = minOf(300.dp, maxWidth, maxHeight)
-                    PlaybackVisual(vm, track, preferences.playbackStyle, spinning, true, progress, rotation,
+                    PlaybackVisual(vm, track, preferences.playbackStyle, spinning, true, state.duration, rotation,
                         Modifier.size(visualSize), showArtwork) { if (queue) onQueue() }
                 }
-                Spacer(Modifier.height(20.dp)); PlaybackControls(vm, state, onQueue, onAlbum, onArtist)
+                Spacer(Modifier.height(20.dp))
+                PlaybackControls(vm, state, onQueue, onAlbum, onArtist,
+                    modifier = Modifier.dismissPlayerSwipe(true, onDismiss, onUpdateDrag, thresholdTick, openQueueOnSwipeUp))
             }
             Column(Modifier.weight(1.1f).fillMaxHeight().padding(top = 24.dp, bottom = 16.dp)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -769,23 +1017,23 @@ private fun PlayerScreen(vm: MusicViewModel, input: MusicState, wide: Boolean, l
             BoxWithConstraints(Modifier.weight(1f).fillMaxWidth().testTag("player-visual-stage")
                 .pointerInput(onLyrics, showArtwork, lyrics) {
                     detectTapGestures(
-                        onDoubleTap = { /* Deliberately no double-tap action on the cover. */ },
                         onLongPress = { showArtwork() },
                         onTap = { onLyrics() },
                     )
                 }
-                .dismissPlayerSwipe(!lyrics, onBack)
+                .dismissPlayerSwipe(!lyrics, onDismiss, onUpdateDrag, thresholdTick, openQueueOnSwipeUp)
                 .trackSwipeGestures(!lyrics,
                     onPrevious = { feedback(TactileKind.Tap); vm.previous() },
                     onNext = { feedback(TactileKind.Tap); vm.next() }), contentAlignment = Alignment.Center) {
                 val visualSize = minOf(370.dp, maxWidth, maxHeight)
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     if (lyrics) LyricsPanel(vm, state, Modifier.fillMaxSize().padding(top = 8.dp, bottom = 32.dp), onLyrics, showArtwork)
-                    else PlaybackVisual(vm, track, preferences.playbackStyle, spinning, true, progress, rotation,
+                    else PlaybackVisual(vm, track, preferences.playbackStyle, spinning, true, state.duration, rotation,
                         Modifier.size(visualSize), showArtwork, onLyrics)
                 }
             }
-            PlaybackControls(vm, state, onQueue, onAlbum, onArtist)
+            PlaybackControls(vm, state, onQueue, onAlbum, onArtist,
+                modifier = Modifier.dismissPlayerSwipe(true, onDismiss, onUpdateDrag, thresholdTick, openQueueOnSwipeUp))
         }
     }
     }
@@ -794,11 +1042,9 @@ private fun PlayerScreen(vm: MusicViewModel, input: MusicState, wide: Boolean, l
 
 @Composable
 private fun PlaybackControls(vm: MusicViewModel, state: MusicState, onQueue: () -> Unit, onAlbum: () -> Unit,
-    onArtist: (String) -> Unit = {}, compact: Boolean = false) {
-    var scrub by remember { mutableStateOf<Float?>(null) }
-    val feedback = LocalTactileFeedback.current
+    onArtist: (String) -> Unit = {}, compact: Boolean = false, modifier: Modifier = Modifier) {
     val track = state.current ?: return
-    Column(Modifier.fillMaxWidth()) {
+    Column(modifier.fillMaxWidth()) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text(track.title, fontSize = if (compact) 20.sp else 23.sp, fontWeight = FontWeight.Medium, maxLines = if (compact) 1 else 2, overflow = TextOverflow.Ellipsis)
@@ -806,32 +1052,48 @@ private fun PlaybackControls(vm: MusicViewModel, state: MusicState, onQueue: () 
                 else Row(Modifier.horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically) {
                     track.artists.forEachIndexed { index, name ->
                         if (index > 0) Text(" / ", color = Muted, fontSize = 13.sp)
-                        TextButton(onClick = { onArtist(name) }, contentPadding = PaddingValues(0.dp), modifier = Modifier.heightIn(min = 32.dp)) {
+                        TextButton(onClick = { onArtist(name) }, contentPadding = PaddingValues(vertical = 2.dp), modifier = Modifier.heightIn(min = 28.dp).testTag("player-artist-$name")) {
                             Text(name, color = Muted, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Spacer(Modifier.width(2.dp))
+                            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, Modifier.size(14.dp), tint = Muted)
                         }
                     }
                 }
             }
             FavoriteControl(track.loved, track.id in state.pendingFavorites, tactile { vm.favorite(track) })
         }
-        TextButton(onAlbum, Modifier.testTag("player-album").heightIn(min = 40.dp), contentPadding = PaddingValues(0.dp)) {
-            Text("专辑 · ${track.album ?: "未知专辑"}", color = Muted, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, Modifier.size(16.dp), tint = Muted)
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+            TextButton(onAlbum, Modifier.weight(1f, fill = false).testTag("player-album").heightIn(min = 32.dp), contentPadding = PaddingValues(vertical = 2.dp)) {
+                Text("专辑 · ${track.album ?: "未知专辑"}", color = Muted, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, Modifier.size(16.dp), tint = Muted)
+            }
+            if (state.playbackQuality.isNotBlank()) {
+                Spacer(Modifier.width(8.dp))
+                Surface(shape = RoundedCornerShape(6.dp), color = MaterialTheme.colorScheme.onSurface.copy(alpha = .08f)) {
+                    Text(state.playbackQuality, color = Muted, fontSize = 10.sp, maxLines = 1,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp).testTag("playback-quality"))
+                }
+            }
         }
-        if (state.playbackQuality.isNotBlank()) Text(state.playbackQuality, color = Muted, fontSize = 11.sp, modifier = Modifier.padding(top = 6.dp).testTag("playback-quality"))
-        Slider(value = scrub ?: state.position.coerceAtMost(state.duration).toFloat(), onValueChange = { scrub = it },
-            onValueChangeFinished = { scrub?.let { feedback(TactileKind.Tap); vm.seek(it.toLong()) }; scrub = null }, valueRange = 0f..state.duration.coerceAtLeast(1).toFloat(), enabled = state.duration > 0,
-            colors = SliderDefaults.colors(thumbColor = Accent, activeTrackColor = Accent,
-                inactiveTrackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = .14f),
-                activeTickColor = Color.Transparent, inactiveTickColor = Color.Transparent))
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text(formatTime(scrub?.toLong() ?: state.position), color = Muted, fontSize = 11.sp); Text(formatTime(state.duration), color = Muted, fontSize = 11.sp) }
+        PlaybackSeekSection(vm, state.duration)
         Row(Modifier.fillMaxWidth().padding(vertical = if (compact) 4.dp else 12.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             val modeIcon = if (state.shuffle) Icons.Default.Shuffle else if (state.repeatMode == Player.REPEAT_MODE_ONE) Icons.Default.RepeatOne else Icons.Default.Repeat
             IconButton(tactile(vm::cycleMode)) { Icon(modeIcon, "切换播放模式", tint = if (state.shuffle || state.repeatMode != Player.REPEAT_MODE_OFF) Accent else Muted) }
             IconButton(tactile(vm::previous)) { Icon(Icons.Default.SkipPrevious, "上一首", Modifier.size(30.dp)) }
             FilledIconButton(tactile(vm::toggle), Modifier.size(if (compact) 56.dp else 64.dp)) {
-                if (delayed(state.buffering, 500)) CircularProgressIndicator(Modifier.size(25.dp), strokeWidth = 2.dp)
-                else Crossfade(state.playing, animationSpec = tween(130), label = "play-pause") { playing -> Icon(if (playing) Icons.Default.Pause else Icons.Default.PlayArrow, if (playing) "暂停" else "播放", Modifier.size(34.dp)) }
+                Box(contentAlignment = Alignment.Center) {
+                    if (delayed(state.buffering, 300)) {
+                        CircularProgressIndicator(
+                            Modifier.size(if (compact) 46.dp else 52.dp),
+                            color = LocalContentColor.current.copy(alpha = 0.88f),
+                            trackColor = LocalContentColor.current.copy(alpha = 0.2f),
+                            strokeWidth = 2.dp,
+                        )
+                    }
+                    Crossfade(state.playing, animationSpec = tween(130), label = "play-pause") { playing ->
+                        Icon(if (playing) Icons.Default.Pause else Icons.Default.PlayArrow, if (playing) "暂停" else "播放", Modifier.size(if (compact) 28.dp else 32.dp))
+                    }
+                }
             }
             IconButton(tactile(vm::next)) { Icon(Icons.Default.SkipNext, "下一首", Modifier.size(30.dp)) }
             IconButton(tactile(onQueue)) { Icon(Icons.AutoMirrored.Filled.QueueMusic, "播放队列") }
@@ -841,20 +1103,37 @@ private fun PlaybackControls(vm: MusicViewModel, state: MusicState, onQueue: () 
 }
 
 @Composable
+private fun PlaybackSeekSection(vm: MusicViewModel, duration: Long) {
+    val position by vm.position.collectAsStateWithLifecycle()
+    var scrub by remember { mutableStateOf<Float?>(null) }
+    val feedback = LocalTactileFeedback.current
+    Slider(value = scrub ?: position.coerceAtMost(duration).toFloat(), onValueChange = { scrub = it },
+        onValueChangeFinished = { scrub?.let { feedback(TactileKind.Tap); vm.seek(it.toLong()) }; scrub = null }, valueRange = 0f..duration.coerceAtLeast(1).toFloat(), enabled = duration > 0,
+        colors = SliderDefaults.colors(thumbColor = Accent, activeTrackColor = Accent,
+            inactiveTrackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = .14f),
+            activeTickColor = Color.Transparent, inactiveTickColor = Color.Transparent))
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        Text(formatTime(scrub?.toLong() ?: position), color = Muted, fontSize = 11.sp)
+        Text(formatTime(duration), color = Muted, fontSize = 11.sp)
+    }
+}
+
+@Composable
 private fun LyricsPanel(vm: MusicViewModel, state: MusicState, modifier: Modifier, onBlank: () -> Unit = {}, onArtwork: () -> Unit = {}) {
+    val position by vm.position.collectAsStateWithLifecycle()
     val preferences by vm.settings.state.collectAsStateWithLifecycle()
     Box(modifier, contentAlignment = Alignment.Center) {
         when {
             state.lyricsLoading && state.lyrics.lines.isEmpty() -> LyricsSkeleton()
             state.lyricsLoading -> {
-                LyricViewport(state.lyrics, state.position, vm::seek, onBlank, Modifier.fillMaxSize(), onArtwork,
+                LyricViewport(state.lyrics, position, vm::seek, onBlank, Modifier.fillMaxSize(), onArtwork,
                     followDelayMs = preferences.lyricFollowSeconds * 1_000L, playing = state.playing,
                     lyricSize = preferences.lyricSize)
                 LinearProgressIndicator(Modifier.fillMaxWidth().align(Alignment.TopCenter))
             }
             state.lyricsError != null -> Text(state.lyricsError, color = Muted)
             state.lyrics.lines.isEmpty() -> Text("暂无歌词", color = Muted)
-            else -> LyricViewport(state.lyrics, state.position, vm::seek, onBlank, Modifier.fillMaxSize(), onArtwork,
+            else -> LyricViewport(state.lyrics, position, vm::seek, onBlank, Modifier.fillMaxSize(), onArtwork,
                 followDelayMs = preferences.lyricFollowSeconds * 1_000L, playing = state.playing,
                 lyricSize = preferences.lyricSize)
         }

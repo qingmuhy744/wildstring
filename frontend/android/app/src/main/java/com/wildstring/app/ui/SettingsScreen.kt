@@ -57,7 +57,7 @@ private val LocalSettingsFeedback = staticCompositionLocalOf<() -> Unit> { {} }
     var diagnostics by remember { mutableStateOf(false) }
     var feature by remember { mutableStateOf<String?>(null) }
     val inbox by vm.agent.inbox.collectAsStateWithLifecycle()
-    LaunchedEffect(preferences, clearing) { while (true) { usage = vm.cacheUsage(); delay(2_000) } }
+    LaunchedEffect(preferences, clearing, assistant, feature, servers, state.current?.id) { usage = vm.cacheUsage() }
     fun mb(bytes: Long) = "%.1f MB".format(bytes / 1048576.0)
     CompositionLocalProvider(LocalSettingsFeedback provides tactile {}) {
         SettingsPage(back, bottomBar) {
@@ -121,7 +121,12 @@ private val LocalSettingsFeedback = staticCompositionLocalOf<() -> Unit> { {} }
                     })
                 ListItem(headlineContent = { Text("轻触反馈") }, supportingContent = { Text("播放与关键操作轻反馈，遵循系统设置") },
                     leadingContent = { Icon(Icons.Default.Vibration, null) },
-                    trailingContent = { Switch(preferences.haptics, { enabled -> vm.settings.haptics(enabled); if (enabled) feedback(TactileKind.Tap) }) })
+                    trailingContent = { Switch(preferences.haptics, { enabled -> vm.settings.haptics(enabled); if (enabled) feedback(TactileKind.Tap) }) },
+                    modifier = Modifier.clickable {
+                        val enabled = !preferences.haptics
+                        vm.settings.haptics(enabled)
+                        if (enabled) feedback(TactileKind.Tap)
+                    })
             }
             SettingsGroup("本机缓存") {
                 CacheLimit("曲库与歌词", usage.first, preferences.metadataMb, listOf(0, 8, 32, 64)) { vm.settings.limits(it, preferences.artworkMb, preferences.audioMb) }

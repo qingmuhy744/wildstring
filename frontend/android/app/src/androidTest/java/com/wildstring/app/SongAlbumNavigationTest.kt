@@ -70,7 +70,7 @@ class SongAlbumNavigationTest {
             try {
                 compose.runOnIdle { vm.settings.quality(0); vm.settings.appearance("light"); vm.connect(address, "listener", "test-password-original", true) }
                 compose.waitUntil(15_000) { vm.state.value.account?.id == "album-user" && !vm.state.value.loading }
-                compose.runOnIdle { vm.openArtist(Artist("guest", "客席", 1, null)) }
+                compose.runOnIdle { vm.openArtist(Artist("guest", "客席", 1, null)); vm.kind("tracks") }
                 compose.waitUntil(10_000) { vm.state.value.tracks.size == 1 && !vm.state.value.loading }
                 compose.onNodeWithContentDescription("第一首的操作").performClick()
                 compose.onNodeWithTag("song-action-离线保存").assertIsDisplayed()

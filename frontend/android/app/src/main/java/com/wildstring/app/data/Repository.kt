@@ -21,7 +21,7 @@ import retrofit2.converter.gson.GsonConverterFactory
 
 data class CatalogQuery(val tab: String = "search", val kind: String = "discover", val title: String = "发现",
     val query: String = "", val offset: Int = 0, val collection: String? = null, val collectionId: String? = null,
-    val playlist: Playlist? = null, val role: String = "artist", val sort: String = "title", val albumFilter: String? = null, val order: String = "asc") {
+    val playlist: Playlist? = null, val role: String = "album_artist", val sort: String = "title", val albumFilter: String? = null, val order: String = "asc") {
     val indexed: Boolean get() = kind in listOf("tracks", "albums", "artists") && sort in listOf("title", "name") && order == "asc" &&
         collection != "playlists" && collection != "albums" && albumFilter == null
     val key: String get() = Gson().toJson(listOf(tab, kind, query, offset, collection, collectionId, role, sort, albumFilter, order))

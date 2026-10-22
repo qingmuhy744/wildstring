@@ -42,7 +42,7 @@ class LyricGestureTest {
         val started = android.os.SystemClock.elapsedRealtime()
         compose.waitUntil(3_000) { android.os.SystemClock.elapsedRealtime() - started >= 2_200 }
         compose.onNodeWithTag("lyric-seek-preview").assertExists()
-        compose.waitUntil(4_500) { compose.onAllNodesWithTag("lyric-seek-preview").fetchSemanticsNodes().isEmpty() }
+        compose.waitUntil(10_000) { compose.onAllNodesWithTag("lyric-seek-preview").fetchSemanticsNodes().isEmpty() }
         compose.onNodeWithTag("lyric-seek-preview").assertDoesNotExist()
         compose.runOnIdle { assertTrue(seeks.isEmpty()) }
     }

@@ -42,16 +42,33 @@ import androidx.compose.ui.unit.dp
             }
         }
     }
+    val barColors = TopAppBarDefaults.topAppBarColors(
+        containerColor = androidx.compose.ui.graphics.Color.Transparent,
+        scrolledContainerColor = androidx.compose.ui.graphics.Color.Transparent,
+    )
     if (state.canGoBack || compact) TopAppBar(title, navigationIcon = {
         if (state.canGoBack) IconButton(back) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回上一页") }
-    }, actions = actions, windowInsets = WindowInsets(0, 0, 0, 0))
-    else MediumTopAppBar(title, actions = actions, windowInsets = WindowInsets(0, 0, 0, 0))
+    }, actions = actions, colors = barColors, windowInsets = WindowInsets(0, 0, 0, 0))
+    else MediumTopAppBar(title, actions = actions, colors = barColors, windowInsets = WindowInsets(0, 0, 0, 0))
 }
 
 @Composable internal fun LibraryTabs(kind: String, change: (String) -> Unit) {
     val tabs = listOf("albums" to "专辑", "tracks" to "歌曲", "artists" to "艺人")
-    PrimaryTabRow(tabs.indexOfFirst { it.first == kind }.coerceAtLeast(0)) {
-        tabs.forEach { (id, label) -> Tab(kind == id, { change(id) }, text = { Text(label) }, modifier = Modifier.testTag("catalog-$id")) }
+    val feedback = LocalTactileFeedback.current
+    CompositionLocalProvider(LocalRippleConfiguration provides null) {
+        PrimaryTabRow(tabs.indexOfFirst { it.first == kind }.coerceAtLeast(0)) {
+            tabs.forEach { (id, label) ->
+                Tab(
+                    selected = kind == id,
+                    onClick = {
+                        if (kind != id) feedback(TactileKind.Tap)
+                        change(id)
+                    },
+                    text = { Text(label) },
+                    modifier = Modifier.testTag("catalog-$id"),
+                )
+            }
+        }
     }
 }
 

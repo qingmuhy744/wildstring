@@ -6,10 +6,12 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.interaction.DragInteraction
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.*
@@ -18,6 +20,12 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalDensity
@@ -48,7 +56,6 @@ import kotlin.math.roundToInt
 @Composable internal fun LyricViewport(lyrics: Lyrics, position: Long, onSeek: (Long) -> Unit,
     onBlank: () -> Unit, modifier: Modifier = Modifier, onArtwork: () -> Unit = {}, followDelayMs: Long = 2_000,
     playing: Boolean = false, lyricSize: LyricSize = LyricSize.MEDIUM) {
-    val list = rememberLazyListState()
     val scope = rememberCoroutineScope()
     val feedback = LocalTactileFeedback.current
     var follow by remember(lyrics) { mutableStateOf(true) }
@@ -79,19 +86,16 @@ import kotlin.math.roundToInt
     val secondaryStyle = MaterialTheme.typography.bodyMedium.copy(fontSize = (15 * scale).sp, lineHeight = (23 * scale).sp,
         textAlign = TextAlign.Center)
     val active = if (lyrics.kind == "synced") lines.indexOfLast { (it.timeMs ?: Long.MAX_VALUE) <= renderPosition } else -1
-    val candidate by remember {
-        derivedStateOf {
-            val layout = list.layoutInfo
-            val center = (layout.viewportStartOffset + layout.viewportEndOffset) / 2
-            layout.visibleItemsInfo.minByOrNull { abs(it.offset + it.size / 2 - center) }?.index
-        }
-    }
     BoxWithConstraints(modifier.testTag("lyrics-viewport").clipToBounds().pointerInput(onBlank, onArtwork) {
         detectTapGestures(onLongPress = { onArtwork() }, onTap = { onBlank() })
     }.semantics {
         customActions = listOf(CustomAccessibilityAction("切换歌词与播放动画") { onBlank(); true },
             CustomAccessibilityAction("查看大封面") { onArtwork(); true })
     }) {
+        val hasLanguageChips = remember(lines) { lines.any { !it.translation.isNullOrBlank() || !it.romanization.isNullOrBlank() } }
+        val baseTopPadding = if (hasLanguageChips) 48.dp else 24.dp
+        val baseTopPaddingPx = with(density) { baseTopPadding.toPx() }
+        val viewportHeightPx = with(density) { maxHeight.toPx() }
         val textWidth = with(density) { (maxWidth - 80.dp).coerceAtLeast(1.dp).roundToPx() }
         fun measuredHeight(index: Int): Int {
             val line = lines[index]
@@ -104,10 +108,63 @@ import kotlin.math.roundToInt
                 constraints = Constraints(maxWidth = textWidth)).size.height } +
                 with(density) { (28.dp + 6.dp * extra.size).roundToPx() }
         }
-        suspend fun centerLine(index: Int) {
+        val totalContentHeightPx = remember(lines, showTranslation, showRomanization, textWidth, scale) {
+            (0 until lines.size).sumOf { measuredHeight(it) }
+        }
+        val isShortLyrics = totalContentHeightPx in 1 until (viewportHeightPx - baseTopPaddingPx * 2f).roundToInt().coerceAtLeast(1)
+        val topPadding = if (isShortLyrics) {
+            with(density) { ((viewportHeightPx - totalContentHeightPx) / 2f).coerceAtLeast(baseTopPaddingPx).toDp() }
+        } else {
+            baseTopPadding
+        }
+        val bottomPadding = if (isShortLyrics) topPadding else maxHeight / 2
+        val topPaddingPx = with(density) { topPadding.toPx() }
+        val halfViewportPx = with(density) { (maxHeight / 2).toPx() } - topPaddingPx
+        fun lineCenterFromTop(index: Int): Float {
+            var sum = 0
+            for (i in 0 until index) sum += measuredHeight(i)
+            return sum + measuredHeight(index) / 2f
+        }
+        val list = remember(lyrics) {
+            if (active > 0 && active in lines.indices && lineCenterFromTop(active) > halfViewportPx) {
+                LazyListState(active, (measuredHeight(active) / 2f - halfViewportPx).roundToInt())
+            } else {
+                LazyListState(0, 0)
+            }
+        }
+        val candidate by remember(list) {
+            derivedStateOf {
+                val layout = list.layoutInfo
+                val center = (layout.viewportStartOffset + layout.viewportEndOffset) / 2
+                layout.visibleItemsInfo.minByOrNull { abs(it.offset + it.size / 2 - center) }?.index
+            }
+        }
+        var initialPlaced by remember(lyrics) { mutableStateOf(false) }
+        suspend fun centerLine(index: Int, animate: Boolean = true) {
             val layout = snapshotFlow { list.layoutInfo }.first { it.visibleItemsInfo.isNotEmpty() }
             val center = (layout.viewportStartOffset + layout.viewportEndOffset) / 2f
+            val shouldStayAtTop = isShortLyrics || index <= 0 || lineCenterFromTop(index) <= halfViewportPx
+            if (shouldStayAtTop) {
+                if (list.firstVisibleItemIndex == 0 && list.firstVisibleItemScrollOffset == 0) return
+                if (!animate) {
+                    list.scrollToItem(0, 0)
+                } else if (list.firstVisibleItemIndex == 0) {
+                    list.animateScrollBy(-list.firstVisibleItemScrollOffset.toFloat(), tween(480, easing = FastOutSlowInEasing))
+                } else {
+                    list.animateScrollToItem(0, 0)
+                }
+                return
+            }
             val item = layout.visibleItemsInfo.firstOrNull { it.index == index }
+            if (!animate) {
+                if (item != null) {
+                    val distance = item.offset + item.size / 2f - center
+                    if (abs(distance) > .5f) list.scrollBy(distance)
+                } else {
+                    list.scrollToItem(index, (measuredHeight(index) / 2f - center).roundToInt())
+                }
+                return
+            }
             if (item != null) {
                 val distance = item.offset + item.size / 2f - center
                 if (abs(distance) > .5f)
@@ -129,17 +186,43 @@ import kotlin.math.roundToInt
             }
         }
         LaunchedEffect(active, follow, lyrics, showTranslation, showRomanization, textWidth, maxHeight) {
-            if (follow && active >= 0) centerLine(active)
+            if (follow && active >= 0) {
+                centerLine(active, animate = initialPlaced)
+                initialPlaced = true
+            } else if (active < 0) {
+                if (follow) centerLine(0, animate = false)
+                initialPlaced = true
+            }
         }
-        LazyColumn(state = list, contentPadding = PaddingValues(vertical = maxHeight / 2),
-            modifier = Modifier.fillMaxSize().testTag("lyric-scroll")) {
+        val fadeEdge = with(density) { 44.dp.toPx() }
+        val showTopFade = list.canScrollBackward
+        LazyColumn(state = list, contentPadding = PaddingValues(top = topPadding, bottom = bottomPadding),
+            modifier = Modifier.fillMaxSize().testTag("lyric-scroll")
+                .graphicsLayer(compositingStrategy = CompositingStrategy.Offscreen)
+                .drawWithContent {
+                    drawContent()
+                    if (size.height > fadeEdge * 2) {
+                        val topRatio = if (showTopFade) (fadeEdge / size.height).coerceIn(0f, 0.25f) else 0f
+                        val bottomRatio = (1f - (fadeEdge / size.height).coerceIn(0f, 0.25f)).coerceIn(0.75f, 1f)
+                        drawRect(
+                            brush = Brush.verticalGradient(
+                                0f to if (showTopFade) Color.Transparent else Color.Black,
+                                topRatio to Color.Black,
+                                bottomRatio to Color.Black,
+                                1f to Color.Transparent,
+                            ),
+                            blendMode = BlendMode.DstIn,
+                        )
+                    }
+                }) {
             items(lines.size) { index ->
                 val line = lines[index]
-                val highlighted = if (follow) active == index else candidate == index
+                val effectiveActive = if (lyrics.kind == "synced") active.coerceAtLeast(0) else -1
+                val highlighted = if (follow) effectiveActive == index else candidate == index
                 Column(Modifier.fillMaxWidth().testTag("lyric-row-$index").padding(horizontal = 40.dp, vertical = 14.dp),
                     horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     val text = buildAnnotatedString {
-                        if (line.words.isNullOrEmpty()) append(line.text.ifBlank { "♪" })
+                        if (line.words.isNullOrEmpty() || !highlighted) append(line.text.ifBlank { "♪" })
                         else line.words.forEach { word ->
                             val progress = ((renderPosition - word.startMs).toFloat() / (word.endMs - word.startMs).coerceAtLeast(1)).coerceIn(0f, 1f)
                             val color = androidx.compose.ui.graphics.lerp(MaterialTheme.colorScheme.onSurface.copy(alpha = .45f), MaterialTheme.colorScheme.primary, progress)
@@ -148,6 +231,8 @@ import kotlin.math.roundToInt
                     }
                     val selectLine = { onBlank(); Unit }
                     val selection = if (line.timeMs != null) Modifier.combinedClickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
                         onClickLabel = "选择歌词时间", onLongClickLabel = "查看大封面",
                         onLongClick = onArtwork, hapticFeedbackEnabled = false, onClick = selectLine) else Modifier
                     val translation = line.translation?.takeIf { showTranslation && it.isNotBlank() }

@@ -351,8 +351,8 @@ internal fun MetadataRefreshPrompt(vm: MusicViewModel, scopeName: String, id: St
     val action = remember { FeatureAction() }; val scope = rememberCoroutineScope()
     AlertDialog(onDismissRequest = { if (!action.busy) dismiss() }, title = { Text("更新元数据") }, text = {
         Column {
-            Row(verticalAlignment = Alignment.CenterVertically) { Checkbox(missing, { missing = it }); Text("只补缺失信息") }
-            Row(verticalAlignment = Alignment.CenterVertically) { Checkbox(force, { force = it }); Text("重新联网查询") }
+            Row(Modifier.fillMaxWidth().clickable { missing = !missing }, verticalAlignment = Alignment.CenterVertically) { Checkbox(missing, { missing = it }); Text("只补缺失信息") }
+            Row(Modifier.fillMaxWidth().clickable { force = !force }, verticalAlignment = Alignment.CenterVertically) { Checkbox(force, { force = it }); Text("重新联网查询") }
             Text("联网结果生成建议，确认后应用。", style = MaterialTheme.typography.bodySmall)
             ActionStatus(action)
         }
@@ -379,7 +379,7 @@ private fun ImportSettingsDialog(vm: MusicViewModel, initial: JsonObject, dismis
         Column(Modifier.heightIn(max = 480.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             OutlinedTextField(interval, { interval = it }, label = { Text("检查间隔（15–86400 秒）") })
             OutlinedTextField(stable, { stable = it }, label = { Text("稳定期（5–86400 秒）") })
-            Row(verticalAlignment = Alignment.CenterVertically) { Checkbox(waitAlbum, { waitAlbum = it }); Text("同专辑有下载标记时整张等待") }
+            Row(Modifier.fillMaxWidth().clickable { waitAlbum = !waitAlbum }, verticalAlignment = Alignment.CenterVertically) { Checkbox(waitAlbum, { waitAlbum = it }); Text("同专辑有下载标记时整张等待") }
             OutlinedTextField(suffixes, { suffixes = it }, label = { Text("下载后缀，空格或逗号分隔") })
             Text("建议下载器使用独立未完成目录，完成后移入导入源。导入只复制，原件可继续做种。", style = MaterialTheme.typography.bodySmall)
             ActionStatus(action)

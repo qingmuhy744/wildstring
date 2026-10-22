@@ -501,7 +501,7 @@ class NativePlaybackTest {
                 runCatching { captureFailure("phone-queue-failure.png") }
                 throw failure
             }
-            waitForDialogWindow("phone queue")
+            waitForActivityWindow()
             val queuePosition = compose.runOnIdle { player.currentPosition }
             dragEntry(playingEntry, originalOrder.last())
             compose.waitUntil(10_000) { vm.state.value.queue.last().entryId == playingEntry }

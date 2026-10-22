@@ -6,7 +6,7 @@
   display: flex;
   justify-content: space-between;
   gap: 16px;
-  align-items: start;
+  align-items: center;
 }
 .review-layout {
   display: grid;
@@ -17,9 +17,19 @@
   border-right: 1px solid var(--border);
   padding-right: 12px;
 }
+.review-layout aside > label {
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--muted);
+}
 .review-layout aside input {
   box-sizing: border-box;
   width: 100%;
+  min-height: 38px;
+  padding: 8px 12px;
+  border-radius: 7px;
+  border: 1px solid var(--border);
   background: var(--workspace-panel);
   color: inherit;
 }
@@ -95,12 +105,15 @@
   vertical-align: top;
 }
 .review-diff th label {
-  display: flex;
+  display: inline-flex;
   gap: 8px;
-  align-items: start;
+  align-items: center;
+  line-height: 1.4;
 }
 .review-diff th small {
   display: block;
+  margin-top: 4px;
+  padding-left: 24px;
   color: var(--accent);
 }
 .review-diff td button {
@@ -109,14 +122,23 @@
 }
 .metadata-review input[type='checkbox'] {
   accent-color: var(--accent);
+  width: 16px;
+  height: 16px;
+  margin: 0;
   padding: 0;
   flex-shrink: 0;
 }
 .metadata-review select {
   max-width: 100%;
+  min-height: 38px;
+  box-sizing: border-box;
+  font: inherit;
+  font-size: 13px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
   background: var(--workspace-panel);
   color: inherit;
-  padding: 8px;
+  padding: 8px 12px;
 }
 .metadata-review details {
   margin: 18px 0;
@@ -320,12 +342,25 @@
 .review-song-toggle {
   margin: 12px 0;
 }
+.review-detail .workspace-actions {
+  align-items: flex-end;
+  margin-bottom: 14px;
+}
 .review-detail .workspace-actions > label {
   display: grid;
   gap: 6px;
   flex: 1 1 320px;
   min-width: 0;
   max-width: 100%;
+  font-size: 13px;
+  color: var(--muted);
+}
+.review-detail .workspace-actions > button {
+  min-height: 38px;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 .review-detail select {
   width: 100%;
@@ -368,18 +403,23 @@
 
 .review-heading-actions {
   display: flex;
+  align-items: center;
   gap: 8px;
   flex-shrink: 0;
 }
 .metadata-review-dialog .review-album h3 {
-  flex: 1 1 140px;
+  flex: 0 1 auto;
   width: auto;
   font-size: 1.05rem;
 }
 .metadata-review-dialog .review-album p {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
   margin: 0;
-  white-space: nowrap;
   font-size: 0.85rem;
+  line-height: 1.4;
 }
 .metadata-review-dialog .review-song-toggle {
   margin: 0;
