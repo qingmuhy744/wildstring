@@ -22,6 +22,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.wildstring.app.BuildConfig
+import com.wildstring.app.ui.AssistantMarkdown
 import java.io.File
 import kotlinx.coroutines.launch
 
@@ -80,10 +81,32 @@ object UpdateInstaller {
         confirm = { updater.dismissPrompt(); updater.requestDownload() }, dismiss = updater::dismissPrompt)
 }
 @Composable private fun ReleaseDialog(release: AppRelease, confirm: () -> Unit, dismiss: () -> Unit) {
-    AlertDialog(onDismissRequest = dismiss, title = { Text("发现新版本 ${release.version}") },
-        text = { Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text(release.notes)
-            Text("安装包约 ${"%.1f".format(release.apk.size / 1048576.0)} MB，下载前请留意流量。完成 SHA-256、包名、签名和版本校验后，由你确认安装。", style = MaterialTheme.typography.bodySmall)
-            if (BuildConfig.DEBUG) Text("当前是调试包，不能覆盖正式包。请从项目仓库安装正式版本。", style = MaterialTheme.typography.bodySmall)
-        } }, confirmButton = { TextButton(confirm, enabled = !BuildConfig.DEBUG) { Text("确认下载") } }, dismissButton = { TextButton(dismiss) { Text("稍后") } })
+    AlertDialog(
+        onDismissRequest = dismiss,
+        title = { Text("发现新版本 ${release.version}") },
+        text = {
+            Column(
+                Modifier
+                    .heightIn(max = 420.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                AssistantMarkdown(release.notes)
+                Text(
+                    "安装包约 ${"%.1f".format(release.apk.size / 1048576.0)} MB，下载前请留意流量。完成 SHA-256、包名、签名和版本校验后，由你确认安装。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (BuildConfig.DEBUG) {
+                    Text(
+                        "当前是调试包，不能覆盖正式包。请从项目仓库安装正式版本。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            }
+        },
+        confirmButton = { TextButton(confirm, enabled = !BuildConfig.DEBUG) { Text("确认下载") } },
+        dismissButton = { TextButton(dismiss) { Text("稍后") } },
+    )
 }
