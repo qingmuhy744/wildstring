@@ -35,13 +35,13 @@ internal fun PlaylistEditor(vm: MusicViewModel, existing: Playlist?, dismiss: ()
     }
     Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         OutlinedTextField(name, { name = it.take(100) }, Modifier.fillMaxWidth(), label = { Text("歌单名称") }, singleLine = true, enabled = !action.busy)
-        if (existing == null) Row(verticalAlignment = Alignment.CenterVertically) { Switch(smart, { smart = it }); Text("规则歌单", Modifier.padding(start = 12.dp)) }
+        if (existing == null) Row(Modifier.fillMaxWidth().clickable { smart = !smart }, verticalAlignment = Alignment.CenterVertically) { Switch(smart, { smart = it }); Text("规则歌单", Modifier.padding(start = 12.dp)) }
         if (smart) {
             Text("根据当前曲库自动选歌；修改规则不打断已有播放。", style = MaterialTheme.typography.bodySmall)
-            Row(verticalAlignment = Alignment.CenterVertically) { Switch(advanced, { advanced = it }); Text("高级规则 JSON", Modifier.padding(start = 12.dp)) }
+            Row(Modifier.fillMaxWidth().clickable { advanced = !advanced }, verticalAlignment = Alignment.CenterVertically) { Switch(advanced, { advanced = it }); Text("高级规则 JSON", Modifier.padding(start = 12.dp)) }
             if (advanced) OutlinedTextField(definition, { definition = it.take(32000) }, Modifier.fillMaxWidth().heightIn(min = 220.dp), label = { Text("规则（all / any、排序与数量）") })
             else {
-                Row(verticalAlignment = Alignment.CenterVertically) { Checkbox(onlyLoved, { onlyLoved = it }); Text("只选我喜欢的音乐") }
+                Row(Modifier.fillMaxWidth().clickable { onlyLoved = !onlyLoved }, verticalAlignment = Alignment.CenterVertically) { Checkbox(onlyLoved, { onlyLoved = it }); Text("只选我喜欢的音乐") }
                 OutlinedTextField(artist, { artist = it.take(200) }, Modifier.fillMaxWidth(), label = { Text("艺人包含（可留空）") })
                 OutlinedTextField(days, { days = it.filter(Char::isDigit).take(4) }, Modifier.fillMaxWidth(), label = { Text("多少天没有听过（留空不限）") })
                 Text("按最近播放从旧到新，最多 100 首。", style = MaterialTheme.typography.bodySmall)
@@ -112,7 +112,16 @@ internal fun MultiSelectPanel(vm: MusicViewModel, dismiss: () -> Unit) {
     choices?.let { playlists -> AlertDialog(onDismissRequest = { choices = null }, title = { Text("选择歌单") }, text = {
         Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {
             if (playlists.isEmpty()) Text("请先创建普通歌单。")
-            playlists.forEach { item -> TextButton({ scope.launch { action.run { vm.addTracksToPlaylist(tracks.filter { it.id in selected }, item); choices = null; dismiss() } } }, enabled = !action.busy) { Text(item.name) } }
+            playlists.forEach { item ->
+                ListItem(
+                    headlineContent = { Text(item.name) },
+                    supportingContent = { Text("${item.trackCount} 首") },
+                    colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
+                    modifier = Modifier.fillMaxWidth().clickable(enabled = !action.busy) {
+                        scope.launch { action.run { vm.addTracksToPlaylist(tracks.filter { it.id in selected }, item); choices = null; dismiss() } }
+                    },
+                )
+            }
         }
     }, confirmButton = { TextButton({ choices = null }) { Text("关闭") } }) }
 }

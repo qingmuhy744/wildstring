@@ -19,6 +19,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -43,6 +44,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import kotlin.math.abs
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 @Composable
 internal fun QueuePanel(vm: MusicViewModel, state: MusicState, modifier: Modifier) {
@@ -50,7 +52,8 @@ internal fun QueuePanel(vm: MusicViewModel, state: MusicState, modifier: Modifie
     QueueList(state.queue, state.entryId, modifier,
         onPlay = { feedback(TactileKind.Tap); vm.playQueue(it.index) },
         onRemove = { feedback(TactileKind.Tap); vm.removeQueue(it.index) },
-        onMove = vm::moveQueue, onHaptic = feedback, playing = state.playing, buffering = state.buffering)
+        onMove = vm::moveQueue, onHaptic = feedback, playing = state.playing, buffering = state.buffering,
+        onClear = if (state.queue.isNotEmpty()) ({ feedback(TactileKind.Tap); vm.clearQueue() }) else null)
 }
 
 /** Only the handle starts a reorder; the rest of the row keeps ordinary tap/scroll behavior. */
@@ -59,9 +62,10 @@ internal fun QueueList(
     rows: List<QueueRow>, currentEntry: String?, modifier: Modifier = Modifier,
     onPlay: (QueueRow) -> Unit, onRemove: (QueueRow) -> Unit,
     onMove: (String, Int) -> Unit, onHaptic: (TactileKind) -> Unit, allowRemove: Boolean = true, title: String = "播放队列 · ${rows.size}",
-    playing: Boolean = false, buffering: Boolean = false,
+    playing: Boolean = false, buffering: Boolean = false, onClear: (() -> Unit)? = null,
 ) {
     val list = rememberLazyListState()
+    val scope = rememberCoroutineScope()
     val drag = remember(list) { QueueDragState(list) }
     val ids = remember(rows) { rows.map { it.entryId } }
     val currentRows by rememberUpdatedState(rows)
@@ -73,6 +77,17 @@ internal fun QueueList(
     val edge = with(density) { 64.dp.toPx() }
     val speed = with(density) { 900.dp.toPx() }
     val elevation = with(density) { 6.dp.toPx() }
+
+    LaunchedEffect(Unit) {
+        val currentIdx = rows.indexOfFirst { it.entryId == currentEntry }
+        if (currentIdx > 2) list.scrollToItem((currentIdx - 1).coerceAtLeast(0))
+    }
+    val currentOffscreen by remember(currentEntry, rows) {
+        derivedStateOf {
+            val idx = rows.indexOfFirst { it.entryId == currentEntry }
+            idx >= 0 && list.layoutInfo.visibleItemsInfo.isNotEmpty() && list.layoutInfo.visibleItemsInfo.none { it.index == idx }
+        }
+    }
 
     // An external add/remove/replace cancels the gesture, rather than applying a stale index.
     LaunchedEffect(ids) { if (drag.entryId != null && drag.originalIds != ids) drag.cancel() }
@@ -96,9 +111,22 @@ internal fun QueueList(
         }
     }
     Column(modifier) {
-        Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(title, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
-            Text("拖动排序", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
+        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(title, style = MaterialTheme.typography.titleMedium)
+                Text("长按右侧手柄拖动排序", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
+            }
+            if (currentOffscreen) {
+                TextButton({
+                    val idx = rows.indexOfFirst { it.entryId == currentEntry }
+                    if (idx >= 0) scope.launch { list.animateScrollToItem((idx - 1).coerceAtLeast(0)) }
+                }, contentPadding = PaddingValues(horizontal = 8.dp)) { Text("定位当前", fontSize = 12.sp) }
+            }
+            if (onClear != null && rows.isNotEmpty()) {
+                TextButton(onClear, contentPadding = PaddingValues(horizontal = 8.dp), modifier = Modifier.testTag("queue-clear")) {
+                    Text("清空", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
         }
         LazyColumn(
             Modifier.weight(1f, fill = false).testTag("playback-queue")

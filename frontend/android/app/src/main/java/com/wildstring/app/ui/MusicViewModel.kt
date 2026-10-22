@@ -661,7 +661,7 @@ class MusicViewModel @Inject constructor(
     }
     fun downloadCollection() = viewModelScope.launch {
         if (mutable.value.collecting) return@launch
-        mutable.update { it.copy(collecting = true, mutationMessage = "正在准备离线保存…") }
+        mutable.update { it.copy(collecting = true) }
         try { download(repository.collectionTracks(query())) }
         catch (e: CancellationException) { throw e }
         catch (e: Exception) { mutable.update { it.copy(error = friendlyError(e)) } }
@@ -702,6 +702,7 @@ class MusicViewModel @Inject constructor(
     fun addToQueue(track: Track, next: Boolean = false) = addToQueue(listOf(track), next)
     fun playQueue(index: Int) { localPlaybackEpoch++; controller?.let { it.seekToDefaultPosition(index); it.prepare(); it.play() } }
     fun removeQueue(index: Int) { localPlaybackEpoch++; controller?.removeMediaItem(index) }
+    fun clearQueue() { localPlaybackEpoch++; controller?.let { it.stop(); it.clearMediaItems(); rebuildQueue(); refreshPlayer() } }
     fun moveQueue(entryId: String, toIndex: Int) {
         localPlaybackEpoch++
         controller?.let { c ->
@@ -748,7 +749,6 @@ class MusicViewModel @Inject constructor(
         val generation = authGeneration
         val profile = repository.session.cacheScope()
         if (!playlistJobs.add("create")) return@launch
-        mutable.update { it.copy(mutationMessage = "正在建立歌单…") }
         try {
             repository.api().createPlaylist(PlaylistRequest(name.trim()))
             if (generation == authGeneration && profile == repository.session.cacheScope()) {
@@ -760,6 +760,18 @@ class MusicViewModel @Inject constructor(
         catch (e: CancellationException) { throw e }
         catch (e: Exception) { if (generation == authGeneration && profile == repository.session.cacheScope()) mutable.update { it.copy(mutationMessage = null, error = friendlyError(e)) } }
         finally { playlistJobs.remove("create") }
+    }
+    suspend fun createPlaylistAndAdd(name: String, tracks: List<Track>) {
+        val owner = repository.session.cacheScope(); requireOwner(owner)
+        val created = repository.api().createPlaylist(PlaylistRequest(name.trim(), "manual"))
+        requireOwner(owner)
+        if (tracks.isNotEmpty()) {
+            repository.api().addTracks(repository.url("api", "v1", "playlists", created.id, "tracks"), AddTracks(created.version, tracks.map { it.id }.distinct()))
+            requireOwner(owner)
+        }
+        invalidateCatalog(owner); tabs.remove("mine")
+        if (mutable.value.tab == "mine") load()
+        notify("已加入：${created.name}")
     }
     fun renamePlaylist(playlist: Playlist, name: String) = viewModelScope.launch {
         if (!playlistJobs.add(playlist.id)) return@launch
@@ -819,7 +831,6 @@ class MusicViewModel @Inject constructor(
         if (!playlistJobs.add(playlist.id)) return@launch
         val generation = authGeneration
         val profile = repository.session.cacheScope()
-        mutable.update { it.copy(mutationMessage = "正在加入：${playlist.name}") }
         try {
             repository.api().addTracks(repository.url("api", "v1", "playlists", playlist.id, "tracks"), AddTracks(playlist.version, listOf(track.id)))
             if (generation == authGeneration && profile == repository.session.cacheScope()) {

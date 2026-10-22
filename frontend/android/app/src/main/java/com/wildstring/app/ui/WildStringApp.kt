@@ -197,7 +197,7 @@ fun ConnectionScreen(state: MusicState, connect: (String, String, String, Boolea
             OutlinedTextField(server, { server = it }, Modifier.fillMaxWidth(), label = { Text("服务器地址") }, placeholder = { Text("https://music.your-domain.com") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri), enabled = !state.connecting)
             OutlinedTextField(username, { username = it }, Modifier.fillMaxWidth(), label = { Text("账号") }, singleLine = true, enabled = !state.connecting)
             OutlinedTextField(password, { password = it }, Modifier.fillMaxWidth(), label = { Text("密码") }, visualTransformation = PasswordVisualTransformation(), singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password), enabled = !state.connecting)
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.fillMaxWidth().clickable(enabled = !state.connecting) { localHttp = !localHttp }, verticalAlignment = Alignment.CenterVertically) {
                 Checkbox(localHttp, { localHttp = it }, enabled = !state.connecting)
                 Spacer(Modifier.width(8.dp))
                 Text("允许此服务器使用未加密 HTTP", fontSize = 13.sp)
@@ -252,10 +252,12 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
     var albumPlaylistTracks by remember { mutableStateOf<List<Track>?>(null) }
     var featureAlbumId by remember { mutableStateOf<String?>(null) }
     var chooseTrack by remember { mutableStateOf<Track?>(null) }
+    var createAndAddOpen by remember { mutableStateOf(false) }
     var localError by remember { mutableStateOf<String?>(null) }
     fun collapsePlayer() {
         vm.cancelAlbumNavigation()
         expanded = false
+        queue = false
         if (playerFromSettings) { settings = true; playerFromSettings = false }
     }
     fun openTrackAlbum(track: Track) {
@@ -326,7 +328,7 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
         var wasWide by remember { mutableStateOf(wide) }
         LaunchedEffect(wide) { if (wasWide && !wide && expanded && !queue) lyrics = true; wasWide = wide }
         BackHandler(enabled = !settings && (expanded || queue || state.canGoBack || state.tab != "search")) {
-            when { queue -> queue = false; lyrics && !wide -> lyrics = false; expanded -> collapsePlayer(); state.canGoBack -> vm.back(); else -> vm.navigate("search") }
+            when { queue && !wide -> queue = false; lyrics && !wide -> lyrics = false; expanded -> collapsePlayer(); state.canGoBack -> vm.back(); else -> vm.navigate("search") }
         }
         AnimatedContent(destination, transitionSpec = {
             if (targetState == "settings" || initialState == "settings") {
@@ -489,6 +491,9 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
             }
         }
         SongAction("查看所属专辑", Icons.Default.Album, navigate = true) { openTrackAlbum(track) }
+        track.artists.filter { it.isNotBlank() }.forEach { artist ->
+            SongAction(if (track.artists.size > 1) "查看艺人 · $artist" else "查看艺人", Icons.Default.Person, navigate = true) { openTrackArtist(artist) }
+        }
         SongAction("响度均衡与手动调整", Icons.AutoMirrored.Filled.VolumeUp) { feature = "gain"; featureTrack = track; actions = null }
         if (track.id == state.current?.id) SongAction("播放诊断", Icons.Default.Troubleshoot) { diagnostics = true; actions = null }
         HorizontalDivider(Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
@@ -511,14 +516,35 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
         }
     } }
     playlistChoices?.let { choices -> AlertDialog(onDismissRequest = { playlistChoices = null; albumPlaylistTracks = null }, title = { Text("加入歌单") }, text = {
-        if (choices.isEmpty()) Text("请先创建普通歌单。") else Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {
-            choices.forEach { p -> TextButton({
-                val selectedAlbumTracks = albumPlaylistTracks
-                if (selectedAlbumTracks != null) scope.launch { try { vm.addTracksToPlaylist(selectedAlbumTracks, p) } catch (e: Exception) { localError = friendlyError(e) } finally { albumPlaylistTracks = null; playlistChoices = null } }
-                else { feedback(TactileKind.Tap); chooseTrack?.let { vm.addToPlaylist(it, p) }; playlistChoices = null }
-            }) { Text(p.name) } }
+        Column(Modifier.heightIn(max = 380.dp).verticalScroll(rememberScrollState())) {
+            if (choices.isEmpty()) Text("暂无普通歌单，可直接新建歌单并加入。", color = Muted, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(vertical = 8.dp))
+            choices.forEach { p ->
+                ListItem(
+                    headlineContent = { Text(p.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                    supportingContent = { Text("${p.trackCount} 首", fontSize = 12.sp, color = Muted) },
+                    leadingContent = { Icon(Icons.AutoMirrored.Filled.QueueMusic, null, tint = Muted) },
+                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable {
+                        val selectedAlbumTracks = albumPlaylistTracks
+                        if (selectedAlbumTracks != null) scope.launch { try { vm.addTracksToPlaylist(selectedAlbumTracks, p) } catch (e: Exception) { localError = friendlyError(e) } finally { albumPlaylistTracks = null; playlistChoices = null } }
+                        else { feedback(TactileKind.Tap); chooseTrack?.let { vm.addToPlaylist(it, p) }; playlistChoices = null }
+                    },
+                )
+            }
         }
-    }, confirmButton = { TextButton({ playlistChoices = null }) { Text("关闭") } }) }
+    }, dismissButton = {
+        TextButton({ createAndAddOpen = true }) {
+            Icon(Icons.Default.Add, null, Modifier.size(18.dp))
+            Spacer(Modifier.width(4.dp))
+            Text("新建歌单")
+        }
+    }, confirmButton = { TextButton({ playlistChoices = null; albumPlaylistTracks = null }) { Text("关闭") } }) }
+    if (createAndAddOpen) NameDialog("新建歌单并加入", "", { createAndAddOpen = false }) { name ->
+        createAndAddOpen = false
+        val tracksToAdd = albumPlaylistTracks ?: listOfNotNull(chooseTrack)
+        albumPlaylistTracks = null; playlistChoices = null
+        scope.launch { try { vm.createPlaylistAndAdd(name, tracksToAdd) } catch (e: Exception) { localError = friendlyError(e) } }
+    }
     localError?.let { text -> AlertDialog(onDismissRequest = { localError = null }, text = { Text(text) }, confirmButton = { TextButton({ localError = null }) { Text("关闭") } }) }
 }
 
@@ -709,16 +735,13 @@ internal fun CatalogToolbar(state: MusicState, play: () -> Unit, sort: (String) 
     }
 }
 @Composable
-private fun PlayerScreen(vm: MusicViewModel, input: MusicState, wide: Boolean, landscape: Boolean, lyrics: Boolean, queue: Boolean, rotation: PlaybackRotation,
+private fun PlayerScreen(vm: MusicViewModel, state: MusicState, wide: Boolean, landscape: Boolean, lyrics: Boolean, queue: Boolean, rotation: PlaybackRotation,
     onBack: () -> Unit, onLyrics: () -> Unit, onQueue: () -> Unit, onAlbum: () -> Unit, onArtist: (String) -> Unit,
     onAdd: () -> Unit, onSleep: () -> Unit) {
-    val position by vm.position.collectAsStateWithLifecycle()
-    val state = input.copy(position = position)
     val preferences by vm.settings.state.collectAsStateWithLifecycle()
     val sleep by vm.sleep.state.collectAsStateWithLifecycle()
     val feedback = LocalTactileFeedback.current
     val track = state.current ?: return
-    val progress = if (state.duration > 0) state.position.toFloat() / state.duration else 0f
     var artworkPreview by rememberSaveable { mutableStateOf(false) }
     val showArtwork = remember { { artworkPreview = true } }
     val dismissArtwork = remember { { artworkPreview = false } }
@@ -753,7 +776,7 @@ private fun PlayerScreen(vm: MusicViewModel, input: MusicState, wide: Boolean, l
                 when {
                     queue -> QueuePanel(vm, state, Modifier.fillMaxSize())
                     lyrics -> LyricsPanel(vm, state, Modifier.fillMaxSize(), onLyrics, showArtwork)
-                    else -> PlaybackVisual(vm, track, preferences.playbackStyle, spinning, true, progress, rotation,
+                    else -> PlaybackVisual(vm, track, preferences.playbackStyle, spinning, true, state.duration, rotation,
                         Modifier.size(minOf(maxWidth, maxHeight)), showArtwork, onLyrics)
                 }
             }
@@ -768,7 +791,7 @@ private fun PlayerScreen(vm: MusicViewModel, input: MusicState, wide: Boolean, l
                         onPrevious = { feedback(TactileKind.Tap); vm.previous() },
                         onNext = { feedback(TactileKind.Tap); vm.next() }), contentAlignment = Alignment.Center) {
                     val visualSize = minOf(300.dp, maxWidth, maxHeight)
-                    PlaybackVisual(vm, track, preferences.playbackStyle, spinning, true, progress, rotation,
+                    PlaybackVisual(vm, track, preferences.playbackStyle, spinning, true, state.duration, rotation,
                         Modifier.size(visualSize), showArtwork) { if (queue) onQueue() }
                 }
                 Spacer(Modifier.height(20.dp)); PlaybackControls(vm, state, onQueue, onAlbum, onArtist)
@@ -796,7 +819,7 @@ private fun PlayerScreen(vm: MusicViewModel, input: MusicState, wide: Boolean, l
                 val visualSize = minOf(370.dp, maxWidth, maxHeight)
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     if (lyrics) LyricsPanel(vm, state, Modifier.fillMaxSize().padding(top = 8.dp, bottom = 32.dp), onLyrics, showArtwork)
-                    else PlaybackVisual(vm, track, preferences.playbackStyle, spinning, true, progress, rotation,
+                    else PlaybackVisual(vm, track, preferences.playbackStyle, spinning, true, state.duration, rotation,
                         Modifier.size(visualSize), showArtwork, onLyrics)
                 }
             }
@@ -810,8 +833,6 @@ private fun PlayerScreen(vm: MusicViewModel, input: MusicState, wide: Boolean, l
 @Composable
 private fun PlaybackControls(vm: MusicViewModel, state: MusicState, onQueue: () -> Unit, onAlbum: () -> Unit,
     onArtist: (String) -> Unit = {}, compact: Boolean = false) {
-    var scrub by remember { mutableStateOf<Float?>(null) }
-    val feedback = LocalTactileFeedback.current
     val track = state.current ?: return
     Column(Modifier.fillMaxWidth()) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -821,7 +842,7 @@ private fun PlaybackControls(vm: MusicViewModel, state: MusicState, onQueue: () 
                 else Row(Modifier.horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically) {
                     track.artists.forEachIndexed { index, name ->
                         if (index > 0) Text(" / ", color = Muted, fontSize = 13.sp)
-                        TextButton(onClick = { onArtist(name) }, contentPadding = PaddingValues(0.dp), modifier = Modifier.heightIn(min = 32.dp).testTag("player-artist-$name")) {
+                        TextButton(onClick = { onArtist(name) }, contentPadding = PaddingValues(vertical = 2.dp), modifier = Modifier.heightIn(min = 28.dp).testTag("player-artist-$name")) {
                             Text(name, color = Muted, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             Spacer(Modifier.width(2.dp))
                             Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, Modifier.size(14.dp), tint = Muted)
@@ -831,17 +852,20 @@ private fun PlaybackControls(vm: MusicViewModel, state: MusicState, onQueue: () 
             }
             FavoriteControl(track.loved, track.id in state.pendingFavorites, tactile { vm.favorite(track) })
         }
-        TextButton(onAlbum, Modifier.testTag("player-album").heightIn(min = 40.dp), contentPadding = PaddingValues(0.dp)) {
-            Text("专辑 · ${track.album ?: "未知专辑"}", color = Muted, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, Modifier.size(16.dp), tint = Muted)
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+            TextButton(onAlbum, Modifier.weight(1f, fill = false).testTag("player-album").heightIn(min = 32.dp), contentPadding = PaddingValues(vertical = 2.dp)) {
+                Text("专辑 · ${track.album ?: "未知专辑"}", color = Muted, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, Modifier.size(16.dp), tint = Muted)
+            }
+            if (state.playbackQuality.isNotBlank()) {
+                Spacer(Modifier.width(8.dp))
+                Surface(shape = RoundedCornerShape(6.dp), color = MaterialTheme.colorScheme.onSurface.copy(alpha = .08f)) {
+                    Text(state.playbackQuality, color = Muted, fontSize = 10.sp, maxLines = 1,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp).testTag("playback-quality"))
+                }
+            }
         }
-        if (state.playbackQuality.isNotBlank()) Text(state.playbackQuality, color = Muted, fontSize = 11.sp, modifier = Modifier.padding(top = 6.dp).testTag("playback-quality"))
-        Slider(value = scrub ?: state.position.coerceAtMost(state.duration).toFloat(), onValueChange = { scrub = it },
-            onValueChangeFinished = { scrub?.let { feedback(TactileKind.Tap); vm.seek(it.toLong()) }; scrub = null }, valueRange = 0f..state.duration.coerceAtLeast(1).toFloat(), enabled = state.duration > 0,
-            colors = SliderDefaults.colors(thumbColor = Accent, activeTrackColor = Accent,
-                inactiveTrackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = .14f),
-                activeTickColor = Color.Transparent, inactiveTickColor = Color.Transparent))
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text(formatTime(scrub?.toLong() ?: state.position), color = Muted, fontSize = 11.sp); Text(formatTime(state.duration), color = Muted, fontSize = 11.sp) }
+        PlaybackSeekSection(vm, state.duration)
         Row(Modifier.fillMaxWidth().padding(vertical = if (compact) 4.dp else 12.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             val modeIcon = if (state.shuffle) Icons.Default.Shuffle else if (state.repeatMode == Player.REPEAT_MODE_ONE) Icons.Default.RepeatOne else Icons.Default.Repeat
             IconButton(tactile(vm::cycleMode)) { Icon(modeIcon, "切换播放模式", tint = if (state.shuffle || state.repeatMode != Player.REPEAT_MODE_OFF) Accent else Muted) }
@@ -858,20 +882,37 @@ private fun PlaybackControls(vm: MusicViewModel, state: MusicState, onQueue: () 
 }
 
 @Composable
+private fun PlaybackSeekSection(vm: MusicViewModel, duration: Long) {
+    val position by vm.position.collectAsStateWithLifecycle()
+    var scrub by remember { mutableStateOf<Float?>(null) }
+    val feedback = LocalTactileFeedback.current
+    Slider(value = scrub ?: position.coerceAtMost(duration).toFloat(), onValueChange = { scrub = it },
+        onValueChangeFinished = { scrub?.let { feedback(TactileKind.Tap); vm.seek(it.toLong()) }; scrub = null }, valueRange = 0f..duration.coerceAtLeast(1).toFloat(), enabled = duration > 0,
+        colors = SliderDefaults.colors(thumbColor = Accent, activeTrackColor = Accent,
+            inactiveTrackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = .14f),
+            activeTickColor = Color.Transparent, inactiveTickColor = Color.Transparent))
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        Text(formatTime(scrub?.toLong() ?: position), color = Muted, fontSize = 11.sp)
+        Text(formatTime(duration), color = Muted, fontSize = 11.sp)
+    }
+}
+
+@Composable
 private fun LyricsPanel(vm: MusicViewModel, state: MusicState, modifier: Modifier, onBlank: () -> Unit = {}, onArtwork: () -> Unit = {}) {
+    val position by vm.position.collectAsStateWithLifecycle()
     val preferences by vm.settings.state.collectAsStateWithLifecycle()
     Box(modifier, contentAlignment = Alignment.Center) {
         when {
             state.lyricsLoading && state.lyrics.lines.isEmpty() -> LyricsSkeleton()
             state.lyricsLoading -> {
-                LyricViewport(state.lyrics, state.position, vm::seek, onBlank, Modifier.fillMaxSize(), onArtwork,
+                LyricViewport(state.lyrics, position, vm::seek, onBlank, Modifier.fillMaxSize(), onArtwork,
                     followDelayMs = preferences.lyricFollowSeconds * 1_000L, playing = state.playing,
                     lyricSize = preferences.lyricSize)
                 LinearProgressIndicator(Modifier.fillMaxWidth().align(Alignment.TopCenter))
             }
             state.lyricsError != null -> Text(state.lyricsError, color = Muted)
             state.lyrics.lines.isEmpty() -> Text("暂无歌词", color = Muted)
-            else -> LyricViewport(state.lyrics, state.position, vm::seek, onBlank, Modifier.fillMaxSize(), onArtwork,
+            else -> LyricViewport(state.lyrics, position, vm::seek, onBlank, Modifier.fillMaxSize(), onArtwork,
                 followDelayMs = preferences.lyricFollowSeconds * 1_000L, playing = state.playing,
                 lyricSize = preferences.lyricSize)
         }

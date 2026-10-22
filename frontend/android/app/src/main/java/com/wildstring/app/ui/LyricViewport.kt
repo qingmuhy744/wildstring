@@ -18,6 +18,12 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalDensity
@@ -131,15 +137,33 @@ import kotlin.math.roundToInt
         LaunchedEffect(active, follow, lyrics, showTranslation, showRomanization, textWidth, maxHeight) {
             if (follow && active >= 0) centerLine(active)
         }
+        val fadeEdge = with(density) { 44.dp.toPx() }
         LazyColumn(state = list, contentPadding = PaddingValues(vertical = maxHeight / 2),
-            modifier = Modifier.fillMaxSize().testTag("lyric-scroll")) {
+            modifier = Modifier.fillMaxSize().testTag("lyric-scroll")
+                .graphicsLayer(compositingStrategy = CompositingStrategy.Offscreen)
+                .drawWithContent {
+                    drawContent()
+                    if (size.height > fadeEdge * 2) {
+                        val topRatio = (fadeEdge / size.height).coerceIn(0f, 0.25f)
+                        val bottomRatio = (1f - topRatio).coerceIn(0.75f, 1f)
+                        drawRect(
+                            brush = Brush.verticalGradient(
+                                0f to Color.Transparent,
+                                topRatio to Color.Black,
+                                bottomRatio to Color.Black,
+                                1f to Color.Transparent,
+                            ),
+                            blendMode = BlendMode.DstIn,
+                        )
+                    }
+                }) {
             items(lines.size) { index ->
                 val line = lines[index]
                 val highlighted = if (follow) active == index else candidate == index
                 Column(Modifier.fillMaxWidth().testTag("lyric-row-$index").padding(horizontal = 40.dp, vertical = 14.dp),
                     horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     val text = buildAnnotatedString {
-                        if (line.words.isNullOrEmpty()) append(line.text.ifBlank { "♪" })
+                        if (line.words.isNullOrEmpty() || !highlighted) append(line.text.ifBlank { "♪" })
                         else line.words.forEach { word ->
                             val progress = ((renderPosition - word.startMs).toFloat() / (word.endMs - word.startMs).coerceAtLeast(1)).coerceIn(0f, 1f)
                             val color = androidx.compose.ui.graphics.lerp(MaterialTheme.colorScheme.onSurface.copy(alpha = .45f), MaterialTheme.colorScheme.primary, progress)

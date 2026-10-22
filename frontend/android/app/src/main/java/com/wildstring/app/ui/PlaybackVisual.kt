@@ -38,6 +38,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.wildstring.app.data.Track
 import kotlinx.coroutines.delay
 
@@ -70,7 +71,7 @@ internal val playbackStyles = listOf("cover" to "封面", "vinyl" to "黑胶", "
 }
 
 @Composable internal fun PlaybackVisual(vm: MusicViewModel, track: Track, style: String, playing: Boolean,
-    visible: Boolean, progress: Float, phase: PlaybackRotation, modifier: Modifier, onArtwork: () -> Unit, onLyrics: () -> Unit) {
+    visible: Boolean, duration: Long, phase: PlaybackRotation, modifier: Modifier, onArtwork: () -> Unit, onLyrics: () -> Unit) {
     val moving = playing && visible && style != "cover" && playbackMotionAllowed()
     LaunchedEffect(moving) {
         if (!moving) return@LaunchedEffect
@@ -131,7 +132,7 @@ internal val playbackStyles = listOf("cover" to "封面", "vinyl" to "黑胶", "
                         }
                     }
                     Cover(vm, track.id.takeIf { track.hasCover }, track.title, Modifier.offset(side * .09f, side * .28f).size(side * .13f))
-                    TapeWindow(phase, progress.coerceIn(0f, 1f), Modifier.offset(side * .15f, side * .488f).width(side * .7f).height(side * .198f))
+                    TapeWindow(vm, phase, duration.takeIf { it > 0 } ?: track.durationMs, Modifier.offset(side * .15f, side * .488f).width(side * .7f).height(side * .198f))
                 }
                 else -> Cover(vm, track.id.takeIf { track.hasCover }, track.title, Modifier.size(side))
             }
@@ -158,7 +159,9 @@ internal val playbackStyles = listOf("cover" to "封面", "vinyl" to "黑胶", "
     }
 }
 
-@Composable private fun TapeWindow(phase: PlaybackRotation, progress: Float, modifier: Modifier) {
+@Composable private fun TapeWindow(vm: MusicViewModel, phase: PlaybackRotation, duration: Long, modifier: Modifier) {
+    val position by vm.position.collectAsStateWithLifecycle()
+    val progress = if (duration > 0) (position.toFloat() / duration).coerceIn(0f, 1f) else 0f
     Canvas(modifier.clip(RoundedCornerShape(14.dp))) {
         val w = size.width; val h = size.height
         drawRect(Color(0xFF0D1409))

@@ -440,7 +440,7 @@ internal fun connectionBudget(connection: JsonObject): String {
         Column(Modifier.heightIn(max = 500.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             if (schedule) OutlinedTextField(name, { name = it }, label = { Text("计划名称") }, singleLine = true)
             OutlinedTextField(maxTracks, { maxTracks = it.filter(Char::isDigit) }, label = { Text("最多检查歌曲数") }, singleLine = true)
-            Row(verticalAlignment = Alignment.CenterVertically) { Text("使用 AI 分析", Modifier.weight(1f)); Switch(ai, { ai = it }, modifier = Modifier.testTag("inspection-use-ai")) }
+            Row(Modifier.fillMaxWidth().clickable { ai = !ai }, verticalAlignment = Alignment.CenterVertically) { Text("使用 AI 分析", Modifier.weight(1f)); Switch(ai, { ai = it }, modifier = Modifier.testTag("inspection-use-ai")) }
             if (ai) {
                 AgentConnectionChoice(available, connection, !action.busy, emptyLabel = "请选择 AI 连接") { connection = it }
                 if (!selectedAvailable && !action.busy) Text(
@@ -456,7 +456,7 @@ internal fun connectionBudget(connection: JsonObject): String {
             if (schedule) {
                 OutlinedTextField(hours, { hours = it.filter(Char::isDigit) }, label = { Text("间隔小时（1–720）") }, singleLine = true)
                 OutlinedTextField(timezone, { timezone = it }, label = { Text("时区") }, singleLine = true)
-                Row(verticalAlignment = Alignment.CenterVertically) { Text("启用计划", Modifier.weight(1f)); Switch(enabled, { enabled = it }) }
+                Row(Modifier.fillMaxWidth().clickable { enabled = !enabled }, verticalAlignment = Alignment.CenterVertically) { Text("启用计划", Modifier.weight(1f)); Switch(enabled, { enabled = it }) }
             }
             Text("应用方式由你的整理设置决定；检查不会改动音乐文件。", style = MaterialTheme.typography.bodySmall)
             ActionStatus(action)
@@ -542,14 +542,14 @@ internal fun connectionBudget(connection: JsonObject): String {
             OutlinedTextField(budget, { budget = it.filter(Char::isDigit) }, label = { Text("每日调用预算") }, singleLine = true)
             ResearchChoice("推理强度", effort, listOf("auto" to "沿用模型默认", "none" to "none", "low" to "low", "medium" to "medium", "high" to "high", "max" to "max", "xhigh" to "xhigh")) { effort = it }
             OutlinedTextField(outputLimit, { outputLimit = it.filter(Char::isDigit) }, label = { Text("单次输出 Token 上限") }, singleLine = true)
-            if (protocol == "responses" && provider in listOf("openai", "deepseek", "qwen")) { Row(verticalAlignment = Alignment.CenterVertically) { Text("模型原生联网搜索", Modifier.weight(1f)); Switch(nativeSearch, { nativeSearch = it }) }; Text("按供应商规则计费，单次模型请求可能多次搜索，不受独立搜索请求额度限制。", style = MaterialTheme.typography.bodySmall) }
-            Row(verticalAlignment = Alignment.CenterVertically) { Text("逐步显示回答", Modifier.weight(1f)); Switch(streamOutput, { streamOutput = it }) }
+            if (protocol == "responses" && provider in listOf("openai", "deepseek", "qwen")) { Row(Modifier.fillMaxWidth().clickable { nativeSearch = !nativeSearch }, verticalAlignment = Alignment.CenterVertically) { Text("模型原生联网搜索", Modifier.weight(1f)); Switch(nativeSearch, { nativeSearch = it }) }; Text("按供应商规则计费，单次模型请求可能多次搜索，不受独立搜索请求额度限制。", style = MaterialTheme.typography.bodySmall) }
+            Row(Modifier.fillMaxWidth().clickable { streamOutput = !streamOutput }, verticalAlignment = Alignment.CenterVertically) { Text("逐步显示回答", Modifier.weight(1f)); Switch(streamOutput, { streamOutput = it }) }
             Text("兼容接口不支持流式响应时可关闭。", style = MaterialTheme.typography.bodySmall)
-            Row(verticalAlignment = Alignment.CenterVertically) { Text("启用连接", Modifier.weight(1f)); Switch(enabled, { enabled = it }) }
-            Row(verticalAlignment = Alignment.CenterVertically) { Text("允许自动巡检使用", Modifier.weight(1f)); Switch(background, { background = it }) }
+            Row(Modifier.fillMaxWidth().clickable { enabled = !enabled }, verticalAlignment = Alignment.CenterVertically) { Text("启用连接", Modifier.weight(1f)); Switch(enabled, { enabled = it }) }
+            Row(Modifier.fillMaxWidth().clickable { background = !background }, verticalAlignment = Alignment.CenterVertically) { Text("允许自动巡检使用", Modifier.weight(1f)); Switch(background, { background = it }) }
             Text("用于定时巡检等自动任务；手动开始无需开启。", style = MaterialTheme.typography.bodySmall)
-            if (admin && original == null) Row(verticalAlignment = Alignment.CenterVertically) { Text("实例连接", Modifier.weight(1f)); Switch(instance, { instance = it }) }
-            if (admin && instance) Row(verticalAlignment = Alignment.CenterVertically) { Text("共享给其他用户", Modifier.weight(1f)); Switch(shared, { shared = it }) }
+            if (admin && original == null) Row(Modifier.fillMaxWidth().clickable { instance = !instance }, verticalAlignment = Alignment.CenterVertically) { Text("实例连接", Modifier.weight(1f)); Switch(instance, { instance = it }) }
+            if (admin && instance) Row(Modifier.fillMaxWidth().clickable { shared = !shared }, verticalAlignment = Alignment.CenterVertically) { Text("共享给其他用户", Modifier.weight(1f)); Switch(shared, { shared = it }) }
             Text("个人端点受管理员的域名策略约束，保存后可单独检测能力。检测会进行少量实际模型请求。", style = MaterialTheme.typography.bodySmall)
             ActionStatus(action)
         }
@@ -628,7 +628,7 @@ internal fun connectionBudget(connection: JsonObject): String {
             OutlinedTextField(token, { token = it }, label = { Text("Bot Token") }, singleLine = true, visualTransformation = PasswordVisualTransformation())
             OutlinedTextField(chat, { chat = it }, label = { Text("Chat ID") }, singleLine = true)
             OutlinedTextField(topic, { topic = it.filter(Char::isDigit) }, label = { Text("Topic ID（可选）") }, singleLine = true)
-            Row(verticalAlignment = Alignment.CenterVertically) { Text("直接连接 Telegram", Modifier.weight(1f)); Switch(direct, { direct = it }) }
+            Row(Modifier.fillMaxWidth().clickable { direct = !direct }, verticalAlignment = Alignment.CenterVertically) { Text("直接连接 Telegram", Modifier.weight(1f)); Switch(direct, { direct = it }) }
             Text(if (direct) "直接连接，不经过服务端代理。" else "沿用服务端网络与代理设置。", style = MaterialTheme.typography.bodySmall)
             Text("保存后需显式发送验证码并回填；验证前不会发送私人结果。", style = MaterialTheme.typography.bodySmall)
             ActionStatus(action)
@@ -645,9 +645,9 @@ internal fun connectionBudget(connection: JsonObject): String {
     val action = remember { FeatureAction() }; val scope = rememberCoroutineScope()
     AlertDialog(onDismissRequest = { if (!action.busy) dismiss() }, title = { Text("Telegram 订阅") }, text = {
         Column(Modifier.heightIn(max = 500.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) { Text("接收 Telegram 通知", Modifier.weight(1f)); Switch(enabled, { enabled = it }) }
+            Row(Modifier.fillMaxWidth().clickable { enabled = !enabled }, verticalAlignment = Alignment.CenterVertically) { Text("接收 Telegram 通知", Modifier.weight(1f)); Switch(enabled, { enabled = it }) }
             Text("事件类型（未选择时接收全部）", style = MaterialTheme.typography.labelLarge)
-            choices.forEach { (id, title) -> Row(verticalAlignment = Alignment.CenterVertically) { Checkbox(id in events, { checked -> events = if (checked) events + id else events - id }); Text(title) } }
+            choices.forEach { (id, title) -> Row(Modifier.fillMaxWidth().clickable { events = if (id in events) events - id else events + id }, verticalAlignment = Alignment.CenterVertically) { Checkbox(id in events, { checked -> events = if (checked) events + id else events - id }); Text(title) } }
             Row { listOf("info" to "全部", "warning" to "提醒与错误", "error" to "仅错误").forEach { (id, title) -> FilterChip(severity == id, { severity = id }, label = { Text(title) }, modifier = Modifier.padding(end = 4.dp)) } }
             OutlinedTextField(start, { start = it }, label = { Text("静默开始 HH:mm（可选）") }, singleLine = true)
             OutlinedTextField(end, { end = it }, label = { Text("静默结束 HH:mm（可选）") }, singleLine = true)

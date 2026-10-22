@@ -155,13 +155,17 @@ internal fun recommendationIssue(code: String): String = when {
                 IconButton({ value = value.copy(count = (value.count + 5).coerceAtMost(50)) }) { Icon(Icons.Default.Add, "增加推荐数量") }
             }
             Text("推荐来源", style = MaterialTheme.typography.titleSmall)
-            recommendationSourceLabels.forEach { (id, name) -> Row(verticalAlignment = Alignment.CenterVertically) {
-                Checkbox(id in value.sources, { checked -> value = value.copy(sources = if (checked) (value.sources + id).distinct() else value.sources - id) }, modifier = Modifier.testTag("recommendation-source-$id"))
-                Text(name, Modifier.weight(1f))
-            } }
+            recommendationSourceLabels.forEach { (id, name) ->
+                val checked = id in value.sources
+                val toggle = { next: Boolean -> value = value.copy(sources = if (next) (value.sources + id).distinct() else value.sources - id) }
+                Row(Modifier.fillMaxWidth().clickable { toggle(!checked) }, verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(checked, toggle, modifier = Modifier.testTag("recommendation-source-$id"))
+                    Text(name, Modifier.weight(1f))
+                }
+            }
             if ("lastfm_tags" in value.sources) OutlinedTextField(tags, { tags = it.take(200) }, label = { Text("公共标签（逗号分隔，最多 3 个）") }, modifier = Modifier.fillMaxWidth())
             Text("每日定时生成", style = MaterialTheme.typography.titleSmall)
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.fillMaxWidth().clickable { value = value.copy(dailyEnabled = !value.dailyEnabled) }, verticalAlignment = Alignment.CenterVertically) {
                 Checkbox(value.dailyEnabled, { checked -> value = value.copy(dailyEnabled = checked) })
                 Text("按设定时间自动生成每日推荐", Modifier.weight(1f))
             }

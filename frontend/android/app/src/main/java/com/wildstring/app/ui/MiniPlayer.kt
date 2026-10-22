@@ -12,7 +12,9 @@ import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
@@ -53,7 +55,18 @@ import androidx.compose.ui.unit.dp
                 IconButton(tactile(vm::toggle)) { Icon(if (state.playing) Icons.Default.Pause else Icons.Default.PlayArrow, if (state.playing) "暂停" else "播放") }
                 IconButton(tactile(onQueue), Modifier.testTag("mini-player-queue")) { Icon(Icons.AutoMirrored.Filled.QueueMusic, "播放队列") }
             }
+                MiniPlayerProgress(vm, state.duration, colors.primary, Modifier.align(Alignment.BottomCenter))
             }
+        }
+    }
+}
+
+@Composable private fun MiniPlayerProgress(vm: MusicViewModel, duration: Long, color: Color, modifier: Modifier = Modifier) {
+    val position by vm.position.collectAsStateWithLifecycle()
+    val fraction = if (duration > 0L) (position.toFloat() / duration.toFloat()).coerceIn(0f, 1f) else 0f
+    if (fraction > 0f) {
+        Box(modifier.fillMaxWidth().padding(horizontal = 24.dp).height(2.dp).clip(RoundedCornerShape(1.dp)).background(color.copy(alpha = 0.14f))) {
+            Box(Modifier.fillMaxHeight().fillMaxWidth(fraction).background(color.copy(alpha = 0.68f)))
         }
     }
 }
