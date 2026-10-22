@@ -96,34 +96,51 @@ internal fun Modifier.trackSwipeGestures(
     )
 }
 
-/** A downward swipe on the visual stage or top bar collapses the player with live drag follow. */
+/** A vertical swipe collapses the player on downward drag or opens the queue on upward drag. */
 internal fun Modifier.dismissPlayerSwipe(
     enabled: Boolean,
     onDismiss: () -> Unit,
     onDragOffset: (Float, Boolean) -> Unit = { _, _ -> },
     onThresholdCrossed: () -> Unit = {},
-): Modifier = if (!enabled) this else pointerInput(enabled) {
+    onSwipeUp: (() -> Unit)? = null,
+): Modifier = if (!enabled) this else pointerInput(enabled, onSwipeUp != null) {
     var distance = 0f
-    var crossed = false
+    var crossedDown = false
+    var crossedUp = false
     val threshold = 52.dp.toPx()
     detectVerticalDragGestures(
         onDragStart = {
             distance = 0f
-            crossed = false
-            onDragOffset(0f, true)
+            crossedDown = false
+            crossedUp = false
+            onDragOffset(0f, false)
         },
         onVerticalDrag = { change, amount ->
-            distance = (distance + amount).coerceAtLeast(0f)
-            onDragOffset(distance, true)
-            if (distance >= threshold && !crossed) {
-                crossed = true
-                onThresholdCrossed()
+            distance += amount
+            if (distance > 0f) {
+                onDragOffset(distance, true)
+                if (distance >= threshold && !crossedDown) {
+                    crossedDown = true
+                    onThresholdCrossed()
+                }
+            } else {
+                onDragOffset(0f, false)
+                if (onSwipeUp != null && distance <= -threshold && !crossedUp) {
+                    crossedUp = true
+                    onThresholdCrossed()
+                }
             }
             change.consume()
         },
         onDragEnd = {
-            if (distance >= threshold) onDismiss()
-            else onDragOffset(0f, false)
+            when {
+                distance >= threshold -> onDismiss()
+                onSwipeUp != null && distance <= -threshold -> {
+                    onDragOffset(0f, false)
+                    onSwipeUp()
+                }
+                else -> onDragOffset(0f, false)
+            }
         },
         onDragCancel = {
             distance = 0f
@@ -826,6 +843,7 @@ private fun PlayerScreen(vm: MusicViewModel, state: MusicState, wide: Boolean, l
             IconButton(onSleep) { Icon(Icons.Default.Bedtime, "睡眠定时", tint = if (sleep.deadline != null || sleep.entryId != null) Accent else Muted) }
             IconButton(onAdd) { Icon(Icons.Default.MoreVert, "当前歌曲操作") }
         }
+        val openQueueOnSwipeUp = { if (!queue) onQueue() }
         if (landscape) Row(Modifier.weight(1f).fillMaxWidth().padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
             BoxWithConstraints(Modifier.weight(1f).fillMaxHeight().testTag("player-visual-stage")
                 .pointerInput(onLyrics, showArtwork, queue) {
@@ -834,7 +852,7 @@ private fun PlayerScreen(vm: MusicViewModel, state: MusicState, wide: Boolean, l
                         onTap = { onLyrics() },
                     )
                 }
-                .dismissPlayerSwipe(!queue && !lyrics, onDismiss, updateDrag, thresholdTick)
+                .dismissPlayerSwipe(!queue && !lyrics, onDismiss, updateDrag, thresholdTick, openQueueOnSwipeUp)
                 .trackSwipeGestures(!queue && !lyrics,
                     onPrevious = { feedback(TactileKind.Tap); vm.previous() },
                     onNext = { feedback(TactileKind.Tap); vm.next() }), contentAlignment = Alignment.Center) {
@@ -851,7 +869,7 @@ private fun PlayerScreen(vm: MusicViewModel, state: MusicState, wide: Boolean, l
         } else if (wide) Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(48.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(.9f).fillMaxHeight().widthIn(max = 380.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()
-                    .dismissPlayerSwipe(!lyrics && !queue, onDismiss, updateDrag, thresholdTick)
+                    .dismissPlayerSwipe(!lyrics && !queue, onDismiss, updateDrag, thresholdTick, openQueueOnSwipeUp)
                     .trackSwipeGestures(!lyrics && !queue,
                         onPrevious = { feedback(TactileKind.Tap); vm.previous() },
                         onNext = { feedback(TactileKind.Tap); vm.next() }), contentAlignment = Alignment.Center) {
@@ -859,7 +877,9 @@ private fun PlayerScreen(vm: MusicViewModel, state: MusicState, wide: Boolean, l
                     PlaybackVisual(vm, track, preferences.playbackStyle, spinning, true, state.duration, rotation,
                         Modifier.size(visualSize), showArtwork) { if (queue) onQueue() }
                 }
-                Spacer(Modifier.height(20.dp)); PlaybackControls(vm, state, onQueue, onAlbum, onArtist)
+                Spacer(Modifier.height(20.dp))
+                PlaybackControls(vm, state, onQueue, onAlbum, onArtist,
+                    modifier = Modifier.dismissPlayerSwipe(true, onDismiss, updateDrag, thresholdTick, openQueueOnSwipeUp))
             }
             Column(Modifier.weight(1.1f).fillMaxHeight().padding(top = 24.dp, bottom = 16.dp)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -876,7 +896,7 @@ private fun PlayerScreen(vm: MusicViewModel, state: MusicState, wide: Boolean, l
                         onTap = { onLyrics() },
                     )
                 }
-                .dismissPlayerSwipe(!lyrics, onDismiss, updateDrag, thresholdTick)
+                .dismissPlayerSwipe(!lyrics, onDismiss, updateDrag, thresholdTick, openQueueOnSwipeUp)
                 .trackSwipeGestures(!lyrics,
                     onPrevious = { feedback(TactileKind.Tap); vm.previous() },
                     onNext = { feedback(TactileKind.Tap); vm.next() }), contentAlignment = Alignment.Center) {
@@ -887,7 +907,8 @@ private fun PlayerScreen(vm: MusicViewModel, state: MusicState, wide: Boolean, l
                         Modifier.size(visualSize), showArtwork, onLyrics)
                 }
             }
-            PlaybackControls(vm, state, onQueue, onAlbum, onArtist)
+            PlaybackControls(vm, state, onQueue, onAlbum, onArtist,
+                modifier = Modifier.dismissPlayerSwipe(true, onDismiss, updateDrag, thresholdTick, openQueueOnSwipeUp))
         }
     }
     }
@@ -897,9 +918,9 @@ private fun PlayerScreen(vm: MusicViewModel, state: MusicState, wide: Boolean, l
 
 @Composable
 private fun PlaybackControls(vm: MusicViewModel, state: MusicState, onQueue: () -> Unit, onAlbum: () -> Unit,
-    onArtist: (String) -> Unit = {}, compact: Boolean = false) {
+    onArtist: (String) -> Unit = {}, compact: Boolean = false, modifier: Modifier = Modifier) {
     val track = state.current ?: return
-    Column(Modifier.fillMaxWidth()) {
+    Column(modifier.fillMaxWidth()) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text(track.title, fontSize = if (compact) 20.sp else 23.sp, fontWeight = FontWeight.Medium, maxLines = if (compact) 1 else 2, overflow = TextOverflow.Ellipsis)
