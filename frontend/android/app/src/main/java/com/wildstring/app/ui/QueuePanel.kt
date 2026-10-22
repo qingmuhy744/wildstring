@@ -48,13 +48,14 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 @Composable
-internal fun QueuePanel(vm: MusicViewModel, state: MusicState, modifier: Modifier) {
+internal fun QueuePanel(vm: MusicViewModel, state: MusicState, modifier: Modifier, onClose: (() -> Unit)? = null) {
     val feedback = LocalTactileFeedback.current
     QueueList(state.queue, state.entryId, modifier,
         onPlay = { feedback(TactileKind.Tap); vm.playQueue(it.index) },
         onRemove = { feedback(TactileKind.Tap); vm.removeQueue(it.index) },
         onMove = vm::moveQueue, onHaptic = feedback, playing = state.playing, buffering = state.buffering,
-        onClear = if (state.queue.isNotEmpty()) ({ feedback(TactileKind.Tap); vm.clearQueue() }) else null)
+        onClear = if (state.queue.isNotEmpty()) ({ feedback(TactileKind.Tap); vm.clearQueue() }) else null,
+        onClose = onClose)
 }
 
 /** Only the handle starts a reorder; the rest of the row keeps ordinary tap/scroll behavior. */
@@ -64,6 +65,7 @@ internal fun QueueList(
     onPlay: (QueueRow) -> Unit, onRemove: (QueueRow) -> Unit,
     onMove: (String, Int) -> Unit, onHaptic: (TactileKind) -> Unit, allowRemove: Boolean = true, title: String = "播放队列 · ${rows.size}",
     playing: Boolean = false, buffering: Boolean = false, onClear: (() -> Unit)? = null,
+    onClose: (() -> Unit)? = null,
 ) {
     val list = rememberLazyListState()
     val scope = rememberCoroutineScope()
@@ -127,6 +129,9 @@ internal fun QueueList(
                 TextButton(onClear, contentPadding = PaddingValues(horizontal = 8.dp), modifier = Modifier.testTag("queue-clear")) {
                     Text("清空", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
+            }
+            if (onClose != null) {
+                IconButton(onClose) { Icon(Icons.Default.Close, "关闭播放队列") }
             }
         }
         LazyColumn(

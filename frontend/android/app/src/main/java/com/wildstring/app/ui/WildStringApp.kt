@@ -82,20 +82,29 @@ internal fun Modifier.trackSwipeGestures(
     enabled: Boolean,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
+    onDragOffset: (Float, Boolean) -> Unit = { _, _ -> },
 ): Modifier = if (!enabled) this else pointerInput(enabled) {
     var distance = 0f
     detectHorizontalDragGestures(
-        onDragStart = { distance = 0f },
+        onDragStart = {
+            distance = 0f
+            onDragOffset(0f, false)
+        },
         onHorizontalDrag = { change, amount ->
             distance += amount
+            onDragOffset(distance, true)
             change.consume()
         },
         onDragEnd = {
+            onDragOffset(0f, false)
             if (abs(distance) >= 72.dp.toPx()) {
                 if (distance < 0) onNext() else onPrevious()
             }
         },
-        onDragCancel = { distance = 0f },
+        onDragCancel = {
+            distance = 0f
+            onDragOffset(0f, false)
+        },
     )
 }
 
@@ -126,12 +135,14 @@ internal fun Modifier.dismissPlayerSwipe(
                     crossedDown = true
                     onThresholdCrossed()
                 }
-            } else {
-                onDragOffset(0f, false)
-                if (onSwipeUp != null && distance <= -threshold && !crossedUp) {
+            } else if (onSwipeUp != null && distance < 0f) {
+                onDragOffset(distance, true)
+                if (distance <= -threshold && !crossedUp) {
                     crossedUp = true
                     onThresholdCrossed()
                 }
+            } else {
+                onDragOffset(0f, false)
             }
             change.consume()
         },
@@ -248,7 +259,7 @@ fun ConnectionScreen(state: MusicState, connect: (String, String, String, Boolea
             }
             state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             Button(onClick = ::submit, Modifier.fillMaxWidth().heightIn(min = 48.dp), enabled = !state.connecting && server.isNotBlank() && username.isNotBlank()) {
-                if (state.connecting) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                if (state.connecting) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp, color = LocalContentColor.current)
                 else Text("连接并登录")
             }
             Text("首次使用请在服务端设置管理员。HTTP 仅在你明确确认风险后使用。", color = Muted, fontSize = 12.sp)
@@ -399,13 +410,14 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
                         Icon(painterResource(R.drawable.ic_wildstring), null, Modifier.padding(vertical = 24.dp).size(36.dp), tint = Color.Unspecified)
                         RailItems(state, vm)
                     }
+                    val showGlobalMore = state.tab == "search" && state.collection == null && state.kind != "recent"
                     Scaffold(
                         contentWindowInsets = WindowInsets(0, 0, 0, 0),
                         topBar = { CatalogTopBar(state, vm::back, { settings = true }, compact = true, unread = unread,
                             notifications = { feature = "notifications" },
-                            queue = if (state.kind !in listOf("tracks", "recent")) ({ queue = true }) else null,
-                            recent = if (state.kind !in listOf("tracks", "recent")) vm::recent else null,
-                            offline = if (state.kind !in listOf("tracks", "recent")) ({ feature = "offline" }) else null) },
+                            queue = if (showGlobalMore) ({ queue = true }) else null,
+                            recent = if (showGlobalMore) vm::recent else null,
+                            offline = if (showGlobalMore) ({ feature = "offline" }) else null) },
                         bottomBar = { Column {
                             if (state.current != null) MiniPlayer(vm, state, onQueue = { queue = true }) { playerReturnDepth = -1; playerFromSettings = false; expanded = true; lyrics = false; queue = false }
                             if (!rail) NavigationBar(windowInsets = WindowInsets(0, 0, 0, 0), modifier = Modifier.testTag("bottom-navigation")) { BottomItems(state, vm) }
@@ -425,17 +437,23 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
                                             IconButton({ featurePlaylist = null; feature = "playlist" }) { Icon(Icons.Default.Add, "新建歌单") }
                                         }
                                     }
-                                    if (state.kind == "artists" && state.collection == null) Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                        listOf("artist" to "艺人", "album_artist" to "专辑艺人", "vocalist" to "演唱", "lyricist" to "作词", "composer" to "作曲", "arranger" to "编曲").forEach { (key, name) -> FilterChip(state.role == key, { vm.role(key) }, label = { Text(name) }) }
+                                    if (state.kind == "artists" && state.collection == null) {
+                                        Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                                            Row(Modifier.weight(1f).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                listOf("artist" to "艺人", "album_artist" to "专辑艺人", "vocalist" to "演唱", "lyricist" to "作词", "composer" to "作曲", "arranger" to "编曲").forEach { (key, name) -> FilterChip(state.role == key, { vm.role(key) }, label = { Text(name) }) }
+                                            }
+                                            Spacer(Modifier.width(8.dp))
+                                            Text("${state.total} 位艺人", color = Muted, style = MaterialTheme.typography.labelMedium, maxLines = 1, softWrap = false)
+                                        }
                                     }
-                                    if (state.collection == "artists" && state.albumFilter == null) Row(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                        FilterChip(state.kind == "tracks", { vm.kind("tracks") }, label = { Text("歌曲") })
+                                    if (state.collection == "artists" && state.albumFilter == null) Row(Modifier.padding(horizontal = if (state.kind == "albums") 0.dp else 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                         FilterChip(state.kind == "albums", { vm.kind("albums") }, label = { Text("专辑") })
+                                        FilterChip(state.kind == "tracks", { vm.kind("tracks") }, label = { Text("歌曲") })
                                     }
                                     if (state.tab == "search" && state.kind == "discover") MobileShortcuts(discovery = true) { feature = it }
                                     state.error?.let { ErrorMessage(it, vm::load) }
-                                    if (state.offline) Text("网络暂不可用 · 显示本机缓存", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
-                                    if (state.kind == "albums") Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    if (state.offline) Text("网络暂不可用 · 显示本机缓存", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(horizontal = if (state.kind == "albums") 0.dp else 16.dp, vertical = 6.dp))
+                                    if (state.kind == "albums") Row(Modifier.fillMaxWidth().padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                                         Text("${state.total} 张专辑", Modifier.weight(1f), color = Muted, style = MaterialTheme.typography.labelMedium, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
                                         CatalogSortControls(state, vm::sort, vm::toggleSortOrder)
                                     }
@@ -449,14 +467,19 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
                                         albumRefresh = if (state.account?.isOwner == true && (state.collection == "albums" || state.albumFilter != null)) ({ refreshAlbum = state.albumFilter ?: state.collectionId }) else null)
                                 }
                             }
+                            var manualRefresh by remember { mutableStateOf(false) }
+                            LaunchedEffect(state.loading) {
+                                if (!state.loading) manualRefresh = false
+                            }
+                            val showRefreshIndicator = if (manualRefresh) state.loading else delayed(state.loading && state.hasContent, 320)
                             Box(Modifier.weight(1f)) {
-                                PullToRefreshBox(isRefreshing = state.loading, onRefresh = { if (!state.loading) vm.load() },
+                                PullToRefreshBox(isRefreshing = showRefreshIndicator, onRefresh = { if (!state.loading) { manualRefresh = true; vm.load() } },
                                     modifier = Modifier.fillMaxSize().testTag("catalog-refresh-area").semantics {
                                         customActions = listOf(CustomAccessibilityAction("刷新当前页面") {
-                                            if (state.loading) false else { vm.load(); true }
+                                            if (state.loading) false else { manualRefresh = true; vm.load(); true }
                                         })
                                     }, state = pullRefresh,
-                                    indicator = { WildRefreshIndicator(state.loading, pullRefresh, Modifier.align(Alignment.TopCenter)) }) {
+                                    indicator = { WildRefreshIndicator(showRefreshIndicator, pullRefresh, Modifier.align(Alignment.TopCenter)) }) {
                                     savedPages.SaveableStateProvider(state.contentKey.ifBlank { "initial" }) {
                                         if (state.kind == "discover") DiscoveryPage(vm, state,
                                             play = { index -> vm.play(state.tracks, index); playerReturnDepth = -1; expanded = true; lyrics = false; queue = false }, recent = vm::recent, header = header,
@@ -514,7 +537,24 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
                 BaseDestination(currentDestination)
             }
         }
-        if (queue && ((!wide && !landscape) || !expanded)) ModalBottomSheet(onDismissRequest = { queue = false }) { QueuePanel(vm, state, Modifier.fillMaxWidth().heightIn(max = 560.dp)) }
+        if (queue && ((!wide && !landscape) || !expanded)) {
+            ModalBottomSheet(
+                onDismissRequest = { queue = false },
+                sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+                sheetGesturesEnabled = false,
+                dragHandle = {
+                    Box(
+                        Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 4.dp)
+                            .dismissPlayerSwipe(true, onDismiss = { queue = false }),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Box(Modifier.size(width = 36.dp, height = 4.dp).clip(RoundedCornerShape(2.dp)).background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)))
+                    }
+                },
+            ) {
+                QueuePanel(vm, state, Modifier.fillMaxWidth().heightIn(max = 560.dp), onClose = { queue = false })
+            }
+        }
     }
     val playerFeedback = expanded && state.current != null && !settings
     Box(Modifier.fillMaxSize().safeDrawingPadding(), contentAlignment = if (playerFeedback) Alignment.TopCenter else Alignment.BottomCenter) {
@@ -845,7 +885,9 @@ private fun PlayerScreen(vm: MusicViewModel, state: MusicState, wide: Boolean, l
     Box(
         Modifier.fillMaxSize()
             .drawWithContent {
-                withTransform({ translate(top = dragOffset.value) }) {
+                val offset = dragOffset.value
+                val ty = if (offset >= 0f) offset else offset * 0.28f
+                withTransform({ translate(top = ty) }) {
                     this@drawWithContent.drawContent()
                 }
             }
@@ -934,6 +976,28 @@ private fun PlayerScreen(vm: MusicViewModel, state: MusicState, wide: Boolean, l
                 modifier = Modifier.dismissPlayerSwipe(true, onDismiss, onUpdateDrag, thresholdTick, openQueueOnSwipeUp))
         }
     }
+    if (!wide && !landscape && !queue && dragOffset.value < -1f) {
+        val density = LocalDensity.current
+        val maxPreviewPx = with(density) { 180.dp.toPx() }
+        val revealPx = (-dragOffset.value).coerceIn(0f, maxPreviewPx)
+        Surface(
+            Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(180.dp)
+                .graphicsLayer { translationY = maxPreviewPx - revealPx },
+            shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            shadowElevation = 12.dp,
+        ) {
+            Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Box(Modifier.size(width = 36.dp, height = 4.dp).clip(RoundedCornerShape(2.dp)).background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)))
+                Spacer(Modifier.height(12.dp))
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.AutoMirrored.Filled.QueueMusic, null, tint = MaterialTheme.colorScheme.primary)
+                    Spacer(Modifier.width(10.dp))
+                    Text("播放队列 · ${state.queue.size}", style = MaterialTheme.typography.titleMedium)
+                }
+            }
+        }
+    }
     }
     if (artworkPreview) ArtworkPreview(vm, track, dismissArtwork)
 }
@@ -979,8 +1043,19 @@ private fun PlaybackControls(vm: MusicViewModel, state: MusicState, onQueue: () 
             IconButton(tactile(vm::cycleMode)) { Icon(modeIcon, "切换播放模式", tint = if (state.shuffle || state.repeatMode != Player.REPEAT_MODE_OFF) Accent else Muted) }
             IconButton(tactile(vm::previous)) { Icon(Icons.Default.SkipPrevious, "上一首", Modifier.size(30.dp)) }
             FilledIconButton(tactile(vm::toggle), Modifier.size(if (compact) 56.dp else 64.dp)) {
-                if (delayed(state.buffering, 500)) CircularProgressIndicator(Modifier.size(25.dp), strokeWidth = 2.dp)
-                else Crossfade(state.playing, animationSpec = tween(130), label = "play-pause") { playing -> Icon(if (playing) Icons.Default.Pause else Icons.Default.PlayArrow, if (playing) "暂停" else "播放", Modifier.size(34.dp)) }
+                Box(contentAlignment = Alignment.Center) {
+                    if (delayed(state.buffering, 300)) {
+                        CircularProgressIndicator(
+                            Modifier.size(if (compact) 46.dp else 52.dp),
+                            color = LocalContentColor.current.copy(alpha = 0.88f),
+                            trackColor = LocalContentColor.current.copy(alpha = 0.2f),
+                            strokeWidth = 2.dp,
+                        )
+                    }
+                    Crossfade(state.playing, animationSpec = tween(130), label = "play-pause") { playing ->
+                        Icon(if (playing) Icons.Default.Pause else Icons.Default.PlayArrow, if (playing) "暂停" else "播放", Modifier.size(if (compact) 28.dp else 32.dp))
+                    }
+                }
             }
             IconButton(tactile(vm::next)) { Icon(Icons.Default.SkipNext, "下一首", Modifier.size(30.dp)) }
             IconButton(tactile(onQueue)) { Icon(Icons.AutoMirrored.Filled.QueueMusic, "播放队列") }

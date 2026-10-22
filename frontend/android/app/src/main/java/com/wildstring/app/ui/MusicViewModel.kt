@@ -411,7 +411,7 @@ class MusicViewModel @Inject constructor(
             }
         }
     }
-    fun openArtist(artist: Artist) = open(query().copy(kind = "tracks", albumFilter = null, collection = "artists", collectionId = artist.id, title = artist.name, query = "", offset = 0, playlist = null))
+    fun openArtist(artist: Artist) = open(query().copy(kind = "albums", albumFilter = null, collection = "artists", collectionId = artist.id, title = artist.name, query = "", offset = 0, playlist = null))
     fun openArtistName(name: String, onOpened: () -> Unit = {}) {
         val query = name.trim()
         if (query.isBlank()) return
