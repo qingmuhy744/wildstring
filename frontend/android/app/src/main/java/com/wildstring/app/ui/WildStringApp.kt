@@ -40,9 +40,14 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.layer.GraphicsLayer
+import androidx.compose.ui.graphics.layer.drawLayer
+import androidx.compose.ui.graphics.rememberGraphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.input.pointer.pointerInput
@@ -350,13 +355,30 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
         if (savedKeys.size > 32) savedPages.removeState(savedKeys.removeFirst())
     }
     val destination = when { settings -> "settings"; expanded && state.current != null -> "player"; else -> "catalog" }
-    var playerDragging by remember { mutableStateOf(false) }
-    LaunchedEffect(destination) { if (destination != "player") playerDragging = false }
+    val baseLayer = rememberGraphicsLayer()
+    var rawPlayerDragY by remember { mutableFloatStateOf(0f) }
+    var playerDraggingDown by remember { mutableStateOf(false) }
+    LaunchedEffect(destination) {
+        if (destination != "player") {
+            rawPlayerDragY = 0f
+            playerDraggingDown = false
+        }
+    }
+    val animatedPlayerDragY = animateFloatAsState(
+        targetValue = if (playerDraggingDown) rawPlayerDragY else 0f,
+        animationSpec = if (playerDraggingDown) snap() else spring(stiffness = Spring.StiffnessMediumLow),
+        label = "player-dismiss-drag",
+    )
     val baseIsSettings = settings || (destination == "player" && playerFromSettings)
-    // Draw the atmosphere behind system bars when stationary; reveal the underlying page surface while dragging down.
-    Box(Modifier.fillMaxSize().background(if (baseIsSettings) MaterialTheme.colorScheme.surfaceContainerLow else Background))
-    if (destination == "player" && !playerDragging) {
-        state.current?.let { ArtworkBackdrop(vm, it, LocalRedCloth.current, includeTestTag = false) }
+    val baseSurfaceColor = if (baseIsSettings) MaterialTheme.colorScheme.surfaceContainerLow else Background
+    // Draw the base surface behind system bars; translate the outer atmosphere in the draw phase without recomposing.
+    Box(Modifier.fillMaxSize().background(baseSurfaceColor))
+    if (destination == "player") {
+        state.current?.let { track ->
+            Box(Modifier.fillMaxSize().graphicsLayer { translationY = animatedPlayerDragY.value }) {
+                ArtworkBackdrop(vm, track, LocalRedCloth.current, includeTestTag = false)
+            }
+        }
     }
     BoxWithConstraints(Modifier.fillMaxSize().safeDrawingPadding()) {
         val wide = maxWidth >= 840.dp && maxHeight >= 480.dp
@@ -369,6 +391,10 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
             when { queue && !wide -> queue = false; lyrics && !wide -> lyrics = false; expanded -> collapsePlayer(); state.canGoBack -> vm.back(); else -> vm.navigate("search") }
         }
         @Composable fun BaseDestination(target: String) {
+            Box(Modifier.fillMaxSize().drawWithContent {
+                baseLayer.record { this@drawWithContent.drawContent() }
+                drawLayer(baseLayer)
+            }) {
             if (target == "settings") savedPages.SaveableStateProvider("settings") { SettingsScreen(vm, bottomBar = {
                 MiniPlayer(vm, state, onQueue = { queue = true }) { playerFromSettings = true; settings = false; expanded = true; lyrics = false; queue = false }
             }) { settings = false } }
@@ -450,6 +476,7 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
                     }
                 }
             }
+            }
         }
         AnimatedContent(destination, transitionSpec = {
             if (targetState == "settings" || initialState == "settings") {
@@ -463,19 +490,17 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
             } else (fadeIn(tween(220)) + slideInVertically(tween(280, easing = FastOutSlowInEasing)) { it / 12 }) togetherWith fadeOut(tween(140))
         }, label = "app-destination") { currentDestination ->
             if (currentDestination == "player") {
-                Box(Modifier.fillMaxSize()) {
-                    if (this@AnimatedContent.transition.targetState == EnterExitState.Visible && playerDragging) {
-                        BaseDestination(if (playerFromSettings) "settings" else "catalog")
-                    }
-                    PlayerScreen(vm, state, wide, landscape, lyrics, queue, rotation,
-                        onBack = { if (lyrics && !wide) lyrics = false else collapsePlayer() },
-                        onDismiss = ::collapsePlayer,
-                        onDraggingChange = { playerDragging = it },
-                        onLyrics = { lyrics = !lyrics; queue = false }, onQueue = { queue = !queue },
-                        onAlbum = { state.current?.let(::openTrackAlbum) },
-                        onArtist = ::openTrackArtist,
-                        onAdd = { actions = state.current }, onSleep = { sleepDialog = true })
-                }
+                PlayerScreen(vm, state, wide, landscape, lyrics, queue, rotation,
+                    dragOffset = animatedPlayerDragY,
+                    baseLayer = baseLayer,
+                    baseSurfaceColor = baseSurfaceColor,
+                    onUpdateDrag = { offset, active -> rawPlayerDragY = offset; playerDraggingDown = active },
+                    onBack = { if (lyrics && !wide) lyrics = false else collapsePlayer() },
+                    onDismiss = ::collapsePlayer,
+                    onLyrics = { lyrics = !lyrics; queue = false }, onQueue = { queue = !queue },
+                    onAlbum = { state.current?.let(::openTrackAlbum) },
+                    onArtist = ::openTrackArtist,
+                    onAdd = { actions = state.current }, onSleep = { sleepDialog = true })
             } else {
                 BaseDestination(currentDestination)
             }
@@ -795,7 +820,8 @@ internal fun CatalogToolbar(state: MusicState, play: () -> Unit, sort: (String) 
 }
 @Composable
 private fun PlayerScreen(vm: MusicViewModel, state: MusicState, wide: Boolean, landscape: Boolean, lyrics: Boolean, queue: Boolean, rotation: PlaybackRotation,
-    onBack: () -> Unit, onDismiss: () -> Unit, onDraggingChange: (Boolean) -> Unit, onLyrics: () -> Unit, onQueue: () -> Unit, onAlbum: () -> Unit, onArtist: (String) -> Unit,
+    dragOffset: State<Float>, baseLayer: GraphicsLayer, baseSurfaceColor: Color, onUpdateDrag: (Float, Boolean) -> Unit,
+    onBack: () -> Unit, onDismiss: () -> Unit, onLyrics: () -> Unit, onQueue: () -> Unit, onAlbum: () -> Unit, onArtist: (String) -> Unit,
     onAdd: () -> Unit, onSleep: () -> Unit) {
     val preferences by vm.settings.state.collectAsStateWithLifecycle()
     val sleep by vm.sleep.state.collectAsStateWithLifecycle()
@@ -805,34 +831,26 @@ private fun PlayerScreen(vm: MusicViewModel, state: MusicState, wide: Boolean, l
     val showArtwork = remember { { artworkPreview = true } }
     val dismissArtwork = remember { { artworkPreview = false } }
     val spinning = state.playing && !state.buffering && state.playbackError == null && !artworkPreview
-    var rawDragY by remember { mutableFloatStateOf(0f) }
-    var draggingDown by remember { mutableStateOf(false) }
-    val animatedDragY by animateFloatAsState(
-        targetValue = if (draggingDown) rawDragY else 0f,
-        animationSpec = if (draggingDown) snap() else spring(stiffness = Spring.StiffnessMediumLow),
-        label = "player-dismiss-drag",
-    )
-    val isOffsetActive = draggingDown || animatedDragY > 0.5f
-    LaunchedEffect(isOffsetActive) { onDraggingChange(isOffsetActive) }
-    DisposableEffect(Unit) { onDispose { onDraggingChange(false) } }
-    val updateDrag: (Float, Boolean) -> Unit = { offset, active -> rawDragY = offset; draggingDown = active }
     val thresholdTick = { feedback(TactileKind.Tap) }
-    val dragCorner = if (isOffsetActive) 24.dp else 0.dp
-    Box(Modifier.fillMaxSize()) {
+    Box(Modifier.fillMaxSize().drawWithCache {
+        onDrawBehind {
+            if (dragOffset.value > 0.5f) {
+                drawRect(baseSurfaceColor)
+                drawLayer(baseLayer)
+            }
+        }
+    }) {
     Box(
         Modifier.fillMaxSize()
             .graphicsLayer {
-                translationY = animatedDragY
-                shape = RoundedCornerShape(topStart = dragCorner, topEnd = dragCorner)
-                clip = isOffsetActive
-                shadowElevation = if (isOffsetActive) 16.dp.toPx() else 0f
+                translationY = dragOffset.value
             }
     ) {
     ArtworkBackdrop(vm, track, LocalRedCloth.current)
     Column(Modifier.testTag(if (wide) "player-tablet" else if (landscape) "player-landscape" else "player-phone")
         .fillMaxSize()
         .padding(horizontal = if (wide) 34.dp else 20.dp)) {
-        Row(Modifier.fillMaxWidth().dismissPlayerSwipe(true, onDismiss, updateDrag, thresholdTick), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+        Row(Modifier.fillMaxWidth().dismissPlayerSwipe(true, onDismiss, onUpdateDrag, thresholdTick), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
             IconButton(onBack) {
                 Icon(
                     Icons.Default.KeyboardArrowDown,
@@ -852,7 +870,7 @@ private fun PlayerScreen(vm: MusicViewModel, state: MusicState, wide: Boolean, l
                         onTap = { onLyrics() },
                     )
                 }
-                .dismissPlayerSwipe(!queue && !lyrics, onDismiss, updateDrag, thresholdTick, openQueueOnSwipeUp)
+                .dismissPlayerSwipe(!queue && !lyrics, onDismiss, onUpdateDrag, thresholdTick, openQueueOnSwipeUp)
                 .trackSwipeGestures(!queue && !lyrics,
                     onPrevious = { feedback(TactileKind.Tap); vm.previous() },
                     onNext = { feedback(TactileKind.Tap); vm.next() }), contentAlignment = Alignment.Center) {
@@ -869,7 +887,7 @@ private fun PlayerScreen(vm: MusicViewModel, state: MusicState, wide: Boolean, l
         } else if (wide) Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(48.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(.9f).fillMaxHeight().widthIn(max = 380.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()
-                    .dismissPlayerSwipe(!lyrics && !queue, onDismiss, updateDrag, thresholdTick, openQueueOnSwipeUp)
+                    .dismissPlayerSwipe(!lyrics && !queue, onDismiss, onUpdateDrag, thresholdTick, openQueueOnSwipeUp)
                     .trackSwipeGestures(!lyrics && !queue,
                         onPrevious = { feedback(TactileKind.Tap); vm.previous() },
                         onNext = { feedback(TactileKind.Tap); vm.next() }), contentAlignment = Alignment.Center) {
@@ -879,7 +897,7 @@ private fun PlayerScreen(vm: MusicViewModel, state: MusicState, wide: Boolean, l
                 }
                 Spacer(Modifier.height(20.dp))
                 PlaybackControls(vm, state, onQueue, onAlbum, onArtist,
-                    modifier = Modifier.dismissPlayerSwipe(true, onDismiss, updateDrag, thresholdTick, openQueueOnSwipeUp))
+                    modifier = Modifier.dismissPlayerSwipe(true, onDismiss, onUpdateDrag, thresholdTick, openQueueOnSwipeUp))
             }
             Column(Modifier.weight(1.1f).fillMaxHeight().padding(top = 24.dp, bottom = 16.dp)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -896,7 +914,7 @@ private fun PlayerScreen(vm: MusicViewModel, state: MusicState, wide: Boolean, l
                         onTap = { onLyrics() },
                     )
                 }
-                .dismissPlayerSwipe(!lyrics, onDismiss, updateDrag, thresholdTick, openQueueOnSwipeUp)
+                .dismissPlayerSwipe(!lyrics, onDismiss, onUpdateDrag, thresholdTick, openQueueOnSwipeUp)
                 .trackSwipeGestures(!lyrics,
                     onPrevious = { feedback(TactileKind.Tap); vm.previous() },
                     onNext = { feedback(TactileKind.Tap); vm.next() }), contentAlignment = Alignment.Center) {
@@ -908,7 +926,7 @@ private fun PlayerScreen(vm: MusicViewModel, state: MusicState, wide: Boolean, l
                 }
             }
             PlaybackControls(vm, state, onQueue, onAlbum, onArtist,
-                modifier = Modifier.dismissPlayerSwipe(true, onDismiss, updateDrag, thresholdTick, openQueueOnSwipeUp))
+                modifier = Modifier.dismissPlayerSwipe(true, onDismiss, onUpdateDrag, thresholdTick, openQueueOnSwipeUp))
         }
     }
     }
