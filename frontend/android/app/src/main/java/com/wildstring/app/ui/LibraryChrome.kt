@@ -50,8 +50,21 @@ import androidx.compose.ui.unit.dp
 
 @Composable internal fun LibraryTabs(kind: String, change: (String) -> Unit) {
     val tabs = listOf("albums" to "专辑", "tracks" to "歌曲", "artists" to "艺人")
-    PrimaryTabRow(tabs.indexOfFirst { it.first == kind }.coerceAtLeast(0)) {
-        tabs.forEach { (id, label) -> Tab(kind == id, { change(id) }, text = { Text(label) }, modifier = Modifier.testTag("catalog-$id")) }
+    val feedback = LocalTactileFeedback.current
+    CompositionLocalProvider(LocalRippleConfiguration provides null) {
+        PrimaryTabRow(tabs.indexOfFirst { it.first == kind }.coerceAtLeast(0)) {
+            tabs.forEach { (id, label) ->
+                Tab(
+                    selected = kind == id,
+                    onClick = {
+                        if (kind != id) feedback(TactileKind.Tap)
+                        change(id)
+                    },
+                    text = { Text(label) },
+                    modifier = Modifier.testTag("catalog-$id"),
+                )
+            }
+        }
     }
 }
 
