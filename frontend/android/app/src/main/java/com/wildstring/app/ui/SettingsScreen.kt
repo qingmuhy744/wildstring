@@ -64,7 +64,7 @@ private val LocalSettingsFeedback = staticCompositionLocalOf<() -> Unit> { {} }
             SettingsGroup("账号") {
                 val acc = state.account
                 val header = if (acc != null) {
-                    if (acc.displayName.isNotBlank()) "${acc.displayName} (${acc.username}) · ${acc.profileLabel}"
+                    if (!acc.displayName.isNullOrBlank()) "${acc.displayName} (${acc.username}) · ${acc.profileLabel}"
                     else "${acc.username} · ${acc.profileLabel}"
                 } else "已连接"
                 ListItem(headlineContent = { Text(header) },
@@ -218,14 +218,14 @@ private val LocalSettingsFeedback = staticCompositionLocalOf<() -> Unit> { {} }
 @Composable private fun ProfileDialog(vm: MusicViewModel, dismiss: () -> Unit) {
     val account = vm.state.value.account ?: return
     var username by remember { mutableStateOf(account.username) }
-    var displayName by remember { mutableStateOf(account.displayName) }
-    var email by remember { mutableStateOf(account.email) }
+    var displayName by remember { mutableStateOf(account.displayName.orEmpty()) }
+    var email by remember { mutableStateOf(account.email.orEmpty()) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
     val usernameValid = username.trim().length in 1..32 && username.trim().all { it.isLetterOrDigit() || it in "_-." }
     val emailValid = email.isBlank() || (email.contains('@') && email.length <= 254)
-    val changed = username.trim() != account.username || displayName.trim() != account.displayName || email.trim() != account.email
+    val changed = username.trim() != account.username || displayName.trim() != account.displayName.orEmpty() || email.trim() != account.email.orEmpty()
 
     AlertDialog(onDismissRequest = { if (!busy) dismiss() }, title = { Text("修改个人资料") },
         text = { Column(Modifier.heightIn(max = 480.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {

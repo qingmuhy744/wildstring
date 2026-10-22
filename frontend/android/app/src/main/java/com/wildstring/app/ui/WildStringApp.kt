@@ -197,6 +197,11 @@ fun ConnectionScreen(state: MusicState, connect: (String, String, String, Boolea
             OutlinedTextField(server, { server = it }, Modifier.fillMaxWidth(), label = { Text("服务器地址") }, placeholder = { Text("https://music.your-domain.com") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri), enabled = !state.connecting)
             OutlinedTextField(username, { username = it }, Modifier.fillMaxWidth(), label = { Text("账号") }, singleLine = true, enabled = !state.connecting)
             OutlinedTextField(password, { password = it }, Modifier.fillMaxWidth(), label = { Text("密码") }, visualTransformation = PasswordVisualTransformation(), singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password), enabled = !state.connecting)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(localHttp, { localHttp = it }, enabled = !state.connecting)
+                Spacer(Modifier.width(8.dp))
+                Text("允许此服务器使用未加密 HTTP", fontSize = 13.sp)
+            }
             state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             Button(onClick = ::submit, Modifier.fillMaxWidth().heightIn(min = 48.dp), enabled = !state.connecting && server.isNotBlank() && username.isNotBlank()) {
                 if (state.connecting) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)

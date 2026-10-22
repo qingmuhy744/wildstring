@@ -34,9 +34,13 @@ class BilingualLyricTest {
 
     @Test fun lyricSizePresetsChangeTheRenderedTypography() {
         val lyrics = Lyrics("synced", listOf(LyricLine(0, "A lyric line that is long enough to measure")))
-        show(lyrics, LyricSize.SMALL)
+        val lyricSize = androidx.compose.runtime.mutableStateOf(LyricSize.SMALL)
+        compose.setContent { MaterialTheme {
+            LyricViewport(lyrics, position.longValue, { seeks += it }, {},
+                Modifier.width(360.dp).height(400.dp), lyricSize = lyricSize.value)
+        } }
         val small = compose.onNodeWithTag("lyric-line-0").fetchSemanticsNode().boundsInRoot.height
-        show(lyrics, LyricSize.LARGE)
+        compose.runOnIdle { lyricSize.value = LyricSize.LARGE }
         val large = compose.onNodeWithTag("lyric-line-0").fetchSemanticsNode().boundsInRoot.height
         assertTrue("large lyric preset must render taller text", large > small)
     }

@@ -7,8 +7,8 @@ data class DiscSummary(val number: Int, @SerializedName("track_count") val track
 data class Page<T>(val items: List<T>, val total: Int, val limit: Int, val offset: Int, val discs: List<DiscSummary>? = null)
 data class Account(val id: String, val username: String,
     val profile: String = "listener", val enabled: Boolean = true, val version: Int = 1,
-    @SerializedName("display_name") val displayName: String = "",
-    val email: String = "") {
+    @SerializedName("display_name") val displayName: String? = null,
+    val email: String? = null) {
     val isOwner: Boolean get() = profile == "owner"
     val profileLabel: String get() = when (profile) {
         "owner" -> "所有者"
