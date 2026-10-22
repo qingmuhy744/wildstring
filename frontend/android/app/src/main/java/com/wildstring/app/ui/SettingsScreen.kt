@@ -94,6 +94,9 @@ private val LocalSettingsFeedback = staticCompositionLocalOf<() -> Unit> { {} }
                 SettingsChoice("歌词恢复跟随", "${preferences.lyricFollowSeconds} 秒", Icons.Default.Lyrics,
                     listOf(1, 2, 3, 5, 10).map { it to "$it 秒" }, preferences.lyricFollowSeconds,
                     "滑动或点选歌词后，停止操作多久恢复当前歌词。滚动过程中不计时。", vm.settings::lyricFollowSeconds)
+                SettingsChoice("歌词大小", preferences.lyricSize.label, Icons.Default.FormatSize,
+                    com.wildstring.app.data.LyricSize.entries.map { it to it.label }, preferences.lyricSize,
+                    "调整全屏歌词和逐字高亮的字号，只影响本机播放页。", vm.settings::lyricSize)
             }
             SettingsGroup("外观与触感") {
                 SettingsChoice("歌曲列表大小", preferences.songListSize.label, Icons.Default.FormatSize,

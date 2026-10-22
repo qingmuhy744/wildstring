@@ -1,5 +1,8 @@
 package com.wildstring.app.ui
 
+import android.os.SystemClock
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -31,8 +34,10 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.Constraints
+import com.wildstring.app.data.LyricSize
 import com.wildstring.app.data.Lyrics
 import com.wildstring.app.data.formatTime
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
@@ -41,7 +46,8 @@ import kotlin.math.roundToInt
 
 /** Browsing only moves the viewport. The explicit preview button is the only seek action. */
 @Composable internal fun LyricViewport(lyrics: Lyrics, position: Long, onSeek: (Long) -> Unit,
-    onBlank: () -> Unit, modifier: Modifier = Modifier, onArtwork: () -> Unit = {}, followDelayMs: Long = 2_000) {
+    onBlank: () -> Unit, modifier: Modifier = Modifier, onArtwork: () -> Unit = {}, followDelayMs: Long = 2_000,
+    playing: Boolean = false, lyricSize: LyricSize = LyricSize.MEDIUM) {
     val list = rememberLazyListState()
     val scope = rememberCoroutineScope()
     val feedback = LocalTactileFeedback.current
@@ -53,11 +59,26 @@ import kotlin.math.roundToInt
     val lines = lyrics.lines
     val density = LocalDensity.current
     val measurer = rememberTextMeasurer()
-    val mainStyle = MaterialTheme.typography.bodyLarge.copy(fontSize = 22.sp, lineHeight = 34.sp,
+    val smoothPosition = remember(lyrics) { mutableLongStateOf(position) }
+    LaunchedEffect(lyrics, playing, position) {
+        if (!playing) {
+            smoothPosition.longValue = position
+            return@LaunchedEffect
+        }
+        smoothPosition.longValue = position
+        val anchor = SystemClock.elapsedRealtime()
+        while (isActive) {
+            smoothPosition.longValue = position + (SystemClock.elapsedRealtime() - anchor).coerceAtLeast(0)
+            delay(16)
+        }
+    }
+    val renderPosition = if (playing) smoothPosition.longValue else position
+    val scale = lyricSize.scale
+    val mainStyle = MaterialTheme.typography.bodyLarge.copy(fontSize = (22 * scale).sp, lineHeight = (34 * scale).sp,
         fontWeight = FontWeight.Medium, textAlign = TextAlign.Center)
-    val secondaryStyle = MaterialTheme.typography.bodyMedium.copy(fontSize = 15.sp, lineHeight = 23.sp,
+    val secondaryStyle = MaterialTheme.typography.bodyMedium.copy(fontSize = (15 * scale).sp, lineHeight = (23 * scale).sp,
         textAlign = TextAlign.Center)
-    val active = if (lyrics.kind == "synced") lines.indexOfLast { (it.timeMs ?: Long.MAX_VALUE) <= position } else -1
+    val active = if (lyrics.kind == "synced") lines.indexOfLast { (it.timeMs ?: Long.MAX_VALUE) <= renderPosition } else -1
     val candidate by remember {
         derivedStateOf {
             val layout = list.layoutInfo
@@ -89,7 +110,8 @@ import kotlin.math.roundToInt
             val item = layout.visibleItemsInfo.firstOrNull { it.index == index }
             if (item != null) {
                 val distance = item.offset + item.size / 2f - center
-                if (abs(distance) > .5f) list.animateScrollBy(distance)
+                if (abs(distance) > .5f)
+                    list.animateScrollBy(distance, tween(480, easing = FastOutSlowInEasing))
             } else {
                 // One animation, with the destination height measured before scrolling.
                 list.animateScrollToItem(index, (measuredHeight(index) / 2f - center).roundToInt())
@@ -119,7 +141,7 @@ import kotlin.math.roundToInt
                     val text = buildAnnotatedString {
                         if (line.words.isNullOrEmpty()) append(line.text.ifBlank { "♪" })
                         else line.words.forEach { word ->
-                            val progress = ((position - word.startMs).toFloat() / (word.endMs - word.startMs).coerceAtLeast(1)).coerceIn(0f, 1f)
+                            val progress = ((renderPosition - word.startMs).toFloat() / (word.endMs - word.startMs).coerceAtLeast(1)).coerceIn(0f, 1f)
                             val color = androidx.compose.ui.graphics.lerp(MaterialTheme.colorScheme.onSurface.copy(alpha = .45f), MaterialTheme.colorScheme.primary, progress)
                             withStyle(SpanStyle(color = color)) { append(word.text) }
                         }

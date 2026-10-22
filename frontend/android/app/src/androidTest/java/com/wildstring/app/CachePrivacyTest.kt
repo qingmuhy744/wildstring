@@ -24,10 +24,17 @@ class CachePrivacyTest {
                 settings.songListSize(size)
                 assertEquals(size, AppSettings(context).state.value.songListSize)
             }
+            assertEquals(LyricSize.MEDIUM, AppSettings(context).state.value.lyricSize)
+            LyricSize.entries.forEach { size ->
+                settings.lyricSize(size)
+                assertEquals(size, AppSettings(context).state.value.lyricSize)
+            }
             prefs.edit().putString("song_list_size", "unknown").commit()
             assertEquals(SongListSize.MEDIUM, AppSettings(context).state.value.songListSize)
             prefs.edit().putInt("song_list_size", 999).commit()
             assertEquals(SongListSize.MEDIUM, AppSettings(context).state.value.songListSize)
+            prefs.edit().putString("lyric_size", "unknown").commit()
+            assertEquals(LyricSize.MEDIUM, AppSettings(context).state.value.lyricSize)
         } finally { prefs.edit().clear().commit() }
     }
 

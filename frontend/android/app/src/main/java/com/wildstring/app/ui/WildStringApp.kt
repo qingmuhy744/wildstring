@@ -821,13 +821,15 @@ private fun LyricsPanel(vm: MusicViewModel, state: MusicState, modifier: Modifie
             state.lyricsLoading && state.lyrics.lines.isEmpty() -> LyricsSkeleton()
             state.lyricsLoading -> {
                 LyricViewport(state.lyrics, state.position, vm::seek, onBlank, Modifier.fillMaxSize(), onArtwork,
-                    followDelayMs = preferences.lyricFollowSeconds * 1_000L)
+                    followDelayMs = preferences.lyricFollowSeconds * 1_000L, playing = state.playing,
+                    lyricSize = preferences.lyricSize)
                 LinearProgressIndicator(Modifier.fillMaxWidth().align(Alignment.TopCenter))
             }
             state.lyricsError != null -> Text(state.lyricsError, color = Muted)
             state.lyrics.lines.isEmpty() -> Text("暂无歌词", color = Muted)
             else -> LyricViewport(state.lyrics, state.position, vm::seek, onBlank, Modifier.fillMaxSize(), onArtwork,
-                followDelayMs = preferences.lyricFollowSeconds * 1_000L)
+                followDelayMs = preferences.lyricFollowSeconds * 1_000L, playing = state.playing,
+                lyricSize = preferences.lyricSize)
         }
     }
 }
