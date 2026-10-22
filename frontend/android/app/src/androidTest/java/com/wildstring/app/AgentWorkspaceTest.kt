@@ -238,6 +238,7 @@ class AgentWorkspaceTest {
             compose.onNodeWithText("野弦助手 / 通知与草案").performScrollTo().performClick()
             compose.onNodeWithTag("agent-tab-tasks").performClick()
             compose.onNodeWithText("开始巡检", substring = false).performClick()
+            compose.waitUntil(15_000) { compose.onAllNodesWithTag("inspection-use-ai").fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithTag("inspection-use-ai").performClick()
             compose.waitUntil(15_000) { compose.onAllNodesWithText("请选择用于本次巡检的 AI 连接。").fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithText("开始", substring = false).assertIsNotEnabled()
@@ -254,6 +255,7 @@ class AgentWorkspaceTest {
             compose.waitUntil(15_000) { compose.onAllNodesWithText("开始曲库巡检", substring = false).fetchSemanticsNodes().isEmpty() }
             compose.waitUntil(15_000) { compose.onAllNodesWithText("新建计划", substring = false).fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithText("新建计划", substring = false).performScrollTo().performClick()
+            compose.waitUntil(15_000) { compose.onAllNodesWithTag("inspection-use-ai").fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithTag("inspection-use-ai").performScrollTo().performClick()
             compose.waitUntil(15_000) { compose.onAllNodesWithText("没有可用于定时巡检的连接。", substring = true).fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithText("保存计划", substring = false).assertIsNotEnabled()
@@ -261,8 +263,10 @@ class AgentWorkspaceTest {
             compose.onNodeWithText("实例 AI（已有配置） · synthetic", substring = false).assertDoesNotExist()
             compose.onAllNodesWithText("请选择 AI 连接", substring = false).onLast().performClick()
             compose.onNodeWithText("取消", substring = false).performClick()
+            compose.waitUntil(15_000) { compose.onAllNodesWithTag("inspection-use-ai").fetchSemanticsNodes().isEmpty() }
             fixture.connections = "[$legacy,{\"id\":\"automatic\",\"name\":\"自动巡检模型\",\"model\":\"synthetic\",\"enabled\":true,\"background_allowed\":true,\"daily_call_budget\":100}]"
             compose.onNodeWithText("新建计划", substring = false).performScrollTo().performClick()
+            compose.waitUntil(15_000) { compose.onAllNodesWithTag("inspection-use-ai").fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithTag("inspection-use-ai").performScrollTo().performClick()
             compose.waitUntil(15_000) { compose.onAllNodesWithText("请选择用于本次巡检的 AI 连接。").fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithTag("ai-connection-choice").performScrollTo().performClick()
