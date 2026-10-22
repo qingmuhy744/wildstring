@@ -2,6 +2,7 @@ package com.wildstring.app.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.scrollBy
@@ -187,7 +188,7 @@ internal fun QueueList(
                         if (row.entryId == currentEntry) PlaybackIndicator(playing, buffering)
                         else Text((index + 1).toString(), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
                     }
-                    Column(Modifier.weight(1f).clickable(enabled = drag.entryId == null) { onPlay(row) }.padding(vertical = 12.dp, horizontal = 8.dp)) {
+                    Column(Modifier.weight(1f).clickable(enabled = drag.entryId == null, interactionSource = remember { MutableInteractionSource() }, indication = null) { onPlay(row) }.padding(vertical = 12.dp, horizontal = 8.dp)) {
                         Text(row.title, color = if (row.entryId == currentEntry) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Text(row.artist, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }

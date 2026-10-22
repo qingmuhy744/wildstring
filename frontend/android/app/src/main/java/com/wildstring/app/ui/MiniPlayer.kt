@@ -3,6 +3,7 @@ package com.wildstring.app.ui
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -13,6 +14,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Modifier
@@ -44,7 +46,7 @@ import androidx.compose.ui.unit.dp
                     alpha = if (LocalRedCloth.current) .10f else if (dark) .18f else .20f, filterQuality = FilterQuality.Medium) }
             Row(Modifier.background(Brush.horizontalGradient(listOf(tint.copy(alpha = if (dark) .28f else .15f), Color.Transparent)))
                 .padding(start = 8.dp, end = 8.dp, top = 4.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                Row(Modifier.weight(1f).testTag("mini-player-open").clip(RoundedCornerShape(28.dp)).clickable(onClick = tactile(expand)),
+                Row(Modifier.weight(1f).testTag("mini-player-open").clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = tactile(expand)),
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     Box(Modifier.clip(CircleShape)) { Cover(vm, track.id.takeIf { track.hasCover }, track.title, Modifier.size(44.dp)) }
                     Column(Modifier.weight(1f).padding(vertical = 4.dp)) {

@@ -192,7 +192,8 @@ class AccountPlaybackTest {
             val positionBeforeRefresh = compose.runOnIdle { vm.controller!!.currentPosition }
             val streamsBeforeRefresh = requests.count { it.contains("/stream") }
             lyric.set("网页修改后的人工歌词")
-            compose.onNodeWithContentDescription("刷新歌词").performClick()
+            compose.onNodeWithContentDescription("当前歌曲操作").performClick()
+            compose.onNodeWithText("刷新歌词").performClick()
             try {
                 compose.waitUntil(10_000) { vm.state.value.lyrics.lines.first().text == "网页修改后的人工歌词" }
             } catch (failure: Throwable) {

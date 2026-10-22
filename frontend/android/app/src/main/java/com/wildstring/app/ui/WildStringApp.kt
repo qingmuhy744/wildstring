@@ -333,10 +333,13 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
         if (savedKeys.size > 32) savedPages.removeState(savedKeys.removeFirst())
     }
     val destination = when { settings -> "settings"; expanded && state.current != null -> "player"; else -> "catalog" }
-    // Draw the atmosphere behind system bars; only interactive content consumes the safe area.
-    Crossfade(destination, animationSpec = tween(220), label = "destination-background") { screen ->
-        if (screen == "player") state.current?.let { ArtworkBackdrop(vm, it, LocalRedCloth.current) }
-        else Box(Modifier.fillMaxSize().background(if (screen == "settings") MaterialTheme.colorScheme.surfaceContainerLow else Background))
+    var playerDragging by remember { mutableStateOf(false) }
+    LaunchedEffect(destination) { if (destination != "player") playerDragging = false }
+    val baseIsSettings = settings || (destination == "player" && playerFromSettings)
+    // Draw the atmosphere behind system bars when stationary; reveal the underlying page surface while dragging down.
+    Box(Modifier.fillMaxSize().background(if (baseIsSettings) MaterialTheme.colorScheme.surfaceContainerLow else Background))
+    if (destination == "player" && !playerDragging) {
+        state.current?.let { ArtworkBackdrop(vm, it, LocalRedCloth.current, includeTestTag = false) }
     }
     BoxWithConstraints(Modifier.fillMaxSize().safeDrawingPadding()) {
         val wide = maxWidth >= 840.dp && maxHeight >= 480.dp
@@ -348,94 +351,82 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
         BackHandler(enabled = !settings && (expanded || queue || state.canGoBack || state.tab != "search")) {
             when { queue && !wide -> queue = false; lyrics && !wide -> lyrics = false; expanded -> collapsePlayer(); state.canGoBack -> vm.back(); else -> vm.navigate("search") }
         }
-        AnimatedContent(destination, transitionSpec = {
-            if (targetState == "settings" || initialState == "settings") {
-                (fadeIn(tween(180)) + slideInHorizontally(tween(240)) { if (targetState == "settings") it / 6 else -it / 12 }) togetherWith fadeOut(tween(120))
-            } else if (initialState == "player") {
-                fadeIn(tween(180)) togetherWith (fadeOut(tween(180)) + slideOutVertically(tween(240, easing = FastOutSlowInEasing)) { it / 4 })
-            } else (fadeIn(tween(220)) + slideInVertically(tween(280, easing = FastOutSlowInEasing)) { it / 12 }) togetherWith fadeOut(tween(140))
-        }, label = "app-destination") { destination ->
-        if (destination == "settings") savedPages.SaveableStateProvider("settings") { SettingsScreen(vm, bottomBar = {
-            MiniPlayer(vm, state, onQueue = { queue = true }) { playerFromSettings = true; settings = false; expanded = true; lyrics = false; queue = false }
-        }) { settings = false } }
-        else if (destination == "player") {
-            PlayerScreen(vm, state, wide, landscape, lyrics, queue, rotation,
-                onBack = { if (lyrics && !wide) lyrics = false else collapsePlayer() },
-                onLyrics = { lyrics = !lyrics; queue = false }, onQueue = { queue = !queue },
-                onAlbum = { state.current?.let(::openTrackAlbum) },
-                onArtist = ::openTrackArtist,
-                onAdd = { actions = state.current }, onSleep = { sleepDialog = true })
-        } else {
-            Row(Modifier.fillMaxSize()) {
-                if (rail) NavigationRail(windowInsets = WindowInsets(0, 0, 0, 0), modifier = Modifier.testTag("navigation-rail")) {
-                    Icon(painterResource(R.drawable.ic_wildstring), null, Modifier.padding(vertical = 24.dp).size(36.dp), tint = Color.Unspecified)
-                    RailItems(state, vm)
-                }
-                Scaffold(
-                    contentWindowInsets = WindowInsets(0, 0, 0, 0),
-                    topBar = { CatalogTopBar(state, vm::back, { settings = true }, compact = true, unread = unread,
-                        notifications = { feature = "notifications" },
-                        queue = if (state.kind !in listOf("tracks", "recent")) ({ queue = true }) else null,
-                        recent = if (state.kind !in listOf("tracks", "recent")) vm::recent else null,
-                        offline = if (state.kind !in listOf("tracks", "recent")) ({ feature = "offline" }) else null) },
-                    bottomBar = { Column {
-                        if (state.current != null) MiniPlayer(vm, state, onQueue = { queue = true }) { playerReturnDepth = -1; playerFromSettings = false; expanded = true; lyrics = false; queue = false }
-                        if (!rail) NavigationBar(windowInsets = WindowInsets(0, 0, 0, 0), modifier = Modifier.testTag("bottom-navigation")) { BottomItems(state, vm) }
-                    } },
-                ) { padding ->
-                    Column(Modifier.fillMaxSize().padding(padding)) {
-                        if (state.tab == "library" && state.collection == null) LibraryTabs(state.kind, vm::kind)
-                        // Keep the editor outside query-keyed pages and discover/result branches.
-                        if (state.tab == "search" && state.collection == null && state.kind != "recent") CatalogSearch(state.query, vm::search)
-                        val header: @Composable () -> Unit = {
-                            Column(Modifier.fillMaxWidth()) {
-                                if (state.tab == "mine" && state.collection == null && state.kind != "recent") {
-                                    PersonalHeader(vm, state, { vm.recent() }, compact = compact)
-                                    MobileShortcuts { feature = it }
-                                    Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                                        Text("我的歌单", style = MaterialTheme.typography.titleMedium)
-                                        IconButton({ featurePlaylist = null; feature = "playlist" }) { Icon(Icons.Default.Add, "新建歌单") }
+        @Composable fun BaseDestination(target: String) {
+            if (target == "settings") savedPages.SaveableStateProvider("settings") { SettingsScreen(vm, bottomBar = {
+                MiniPlayer(vm, state, onQueue = { queue = true }) { playerFromSettings = true; settings = false; expanded = true; lyrics = false; queue = false }
+            }) { settings = false } }
+            else {
+                Row(Modifier.fillMaxSize()) {
+                    if (rail) NavigationRail(windowInsets = WindowInsets(0, 0, 0, 0), modifier = Modifier.testTag("navigation-rail")) {
+                        Icon(painterResource(R.drawable.ic_wildstring), null, Modifier.padding(vertical = 24.dp).size(36.dp), tint = Color.Unspecified)
+                        RailItems(state, vm)
+                    }
+                    Scaffold(
+                        contentWindowInsets = WindowInsets(0, 0, 0, 0),
+                        topBar = { CatalogTopBar(state, vm::back, { settings = true }, compact = true, unread = unread,
+                            notifications = { feature = "notifications" },
+                            queue = if (state.kind !in listOf("tracks", "recent")) ({ queue = true }) else null,
+                            recent = if (state.kind !in listOf("tracks", "recent")) vm::recent else null,
+                            offline = if (state.kind !in listOf("tracks", "recent")) ({ feature = "offline" }) else null) },
+                        bottomBar = { Column {
+                            if (state.current != null) MiniPlayer(vm, state, onQueue = { queue = true }) { playerReturnDepth = -1; playerFromSettings = false; expanded = true; lyrics = false; queue = false }
+                            if (!rail) NavigationBar(windowInsets = WindowInsets(0, 0, 0, 0), modifier = Modifier.testTag("bottom-navigation")) { BottomItems(state, vm) }
+                        } },
+                    ) { padding ->
+                        Column(Modifier.fillMaxSize().padding(padding)) {
+                            if (state.tab == "library" && state.collection == null) LibraryTabs(state.kind, vm::kind)
+                            // Keep the editor outside query-keyed pages and discover/result branches.
+                            if (state.tab == "search" && state.collection == null && state.kind != "recent") CatalogSearch(state.query, vm::search)
+                            val header: @Composable () -> Unit = {
+                                Column(Modifier.fillMaxWidth()) {
+                                    if (state.tab == "mine" && state.collection == null && state.kind != "recent") {
+                                        PersonalHeader(vm, state, { vm.recent() }, compact = compact)
+                                        MobileShortcuts { feature = it }
+                                        Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                            Text("我的歌单", style = MaterialTheme.typography.titleMedium)
+                                            IconButton({ featurePlaylist = null; feature = "playlist" }) { Icon(Icons.Default.Add, "新建歌单") }
+                                        }
                                     }
+                                    if (state.kind == "artists" && state.collection == null) Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        listOf("artist" to "艺人", "album_artist" to "专辑艺人", "vocalist" to "演唱", "lyricist" to "作词", "composer" to "作曲", "arranger" to "编曲").forEach { (key, name) -> FilterChip(state.role == key, { vm.role(key) }, label = { Text(name) }) }
+                                    }
+                                    if (state.collection == "artists" && state.albumFilter == null) Row(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        FilterChip(state.kind == "tracks", { vm.kind("tracks") }, label = { Text("歌曲") })
+                                        FilterChip(state.kind == "albums", { vm.kind("albums") }, label = { Text("专辑") })
+                                    }
+                                    if (state.tab == "search" && state.kind == "discover") MobileShortcuts(discovery = true) { feature = it }
+                                    state.error?.let { ErrorMessage(it, vm::load) }
+                                    if (state.offline) Text("网络暂不可用 · 显示本机缓存", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
+                                    if (state.kind == "albums") Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        Text("${state.total} 张专辑", Modifier.weight(1f), color = Muted, style = MaterialTheme.typography.labelMedium, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
+                                        CatalogSortControls(state, vm::sort, vm::toggleSortOrder)
+                                    }
+                                    if (state.kind == "tracks" || state.kind == "recent") CatalogToolbar(state,
+                                        play = tactile { vm.playCollection { playerReturnDepth = -1; expanded = true; lyrics = false; queue = false } }, sort = vm::sort, reverse = vm::toggleSortOrder,
+                                        multi = { feature = "multi" }, download = { vm.downloadCollection() },
+                                        edit = { featurePlaylist = state.activePlaylist; feature = "playlist" },
+                                        order = { featurePlaylist = state.activePlaylist; feature = "order" },
+                                        delete = { deletingPlaylist = state.activePlaylist },
+                                        albumLyrics = if (state.account?.isOwner == true && (state.collection == "albums" || state.albumFilter != null)) ({ lyricScanAlbum = state.albumFilter ?: state.collectionId }) else null,
+                                        albumRefresh = if (state.account?.isOwner == true && (state.collection == "albums" || state.albumFilter != null)) ({ refreshAlbum = state.albumFilter ?: state.collectionId }) else null)
                                 }
-                                if (state.kind == "artists" && state.collection == null) Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    listOf("artist" to "艺人", "album_artist" to "专辑艺人", "vocalist" to "演唱", "lyricist" to "作词", "composer" to "作曲", "arranger" to "编曲").forEach { (key, name) -> FilterChip(state.role == key, { vm.role(key) }, label = { Text(name) }) }
-                                }
-                                if (state.collection == "artists" && state.albumFilter == null) Row(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    FilterChip(state.kind == "tracks", { vm.kind("tracks") }, label = { Text("歌曲") })
-                                    FilterChip(state.kind == "albums", { vm.kind("albums") }, label = { Text("专辑") })
-                                }
-                                if (state.tab == "search" && state.kind == "discover") MobileShortcuts(discovery = true) { feature = it }
-                                state.error?.let { ErrorMessage(it, vm::load) }
-                                if (state.offline) Text("网络暂不可用 · 显示本机缓存", color = Muted, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
-                                if (state.kind == "albums") Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    Text("${state.total} 张专辑", Modifier.weight(1f), color = Muted, style = MaterialTheme.typography.labelMedium, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
-                                    CatalogSortControls(state, vm::sort, vm::toggleSortOrder)
-                                }
-                                if (state.kind == "tracks" || state.kind == "recent") CatalogToolbar(state,
-                                    play = tactile { vm.playCollection { playerReturnDepth = -1; expanded = true; lyrics = false; queue = false } }, sort = vm::sort, reverse = vm::toggleSortOrder,
-                                    multi = { feature = "multi" }, download = { vm.downloadCollection() },
-                                    edit = { featurePlaylist = state.activePlaylist; feature = "playlist" },
-                                    order = { featurePlaylist = state.activePlaylist; feature = "order" },
-                                    delete = { deletingPlaylist = state.activePlaylist },
-                                    albumLyrics = if (state.account?.isOwner == true && (state.collection == "albums" || state.albumFilter != null)) ({ lyricScanAlbum = state.albumFilter ?: state.collectionId }) else null,
-                                    albumRefresh = if (state.account?.isOwner == true && (state.collection == "albums" || state.albumFilter != null)) ({ refreshAlbum = state.albumFilter ?: state.collectionId }) else null)
                             }
-                        }
-                        Box(Modifier.weight(1f)) {
-                            PullToRefreshBox(isRefreshing = state.loading, onRefresh = { if (!state.loading) vm.load() },
-                                modifier = Modifier.fillMaxSize().testTag("catalog-refresh-area").semantics {
-                                    customActions = listOf(CustomAccessibilityAction("刷新当前页面") {
-                                        if (state.loading) false else { vm.load(); true }
-                                    })
-                                }, state = pullRefresh,
-                                indicator = { WildRefreshIndicator(state.loading, pullRefresh, Modifier.align(Alignment.TopCenter)) }) {
-                                savedPages.SaveableStateProvider(state.contentKey.ifBlank { "initial" }) {
-                                    if (state.kind == "discover") DiscoveryPage(vm, state,
-                                        play = { index -> vm.play(state.tracks, index); playerReturnDepth = -1; expanded = true; lyrics = false; queue = false }, recent = vm::recent, header = header,
-                                        albumActions = { albumActions = it })
-                                    else CatalogBrowser(vm, state, header,
-                                        play = { track -> vm.playCollection(track.id) { playerReturnDepth = -1; expanded = true; lyrics = false; queue = false } },
-                                        actions = { actions = it }, playlistActions = { playlistActions = it }, albumActions = { albumActions = it })
+                            Box(Modifier.weight(1f)) {
+                                PullToRefreshBox(isRefreshing = state.loading, onRefresh = { if (!state.loading) vm.load() },
+                                    modifier = Modifier.fillMaxSize().testTag("catalog-refresh-area").semantics {
+                                        customActions = listOf(CustomAccessibilityAction("刷新当前页面") {
+                                            if (state.loading) false else { vm.load(); true }
+                                        })
+                                    }, state = pullRefresh,
+                                    indicator = { WildRefreshIndicator(state.loading, pullRefresh, Modifier.align(Alignment.TopCenter)) }) {
+                                    savedPages.SaveableStateProvider(state.contentKey.ifBlank { "initial" }) {
+                                        if (state.kind == "discover") DiscoveryPage(vm, state,
+                                            play = { index -> vm.play(state.tracks, index); playerReturnDepth = -1; expanded = true; lyrics = false; queue = false }, recent = vm::recent, header = header,
+                                            albumActions = { albumActions = it })
+                                        else CatalogBrowser(vm, state, header,
+                                            play = { track -> vm.playCollection(track.id) { playerReturnDepth = -1; expanded = true; lyrics = false; queue = false } },
+                                            actions = { actions = it }, playlistActions = { playlistActions = it }, albumActions = { albumActions = it })
+                                    }
                                 }
                             }
                         }
@@ -443,6 +434,34 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
                 }
             }
         }
+        AnimatedContent(destination, transitionSpec = {
+            if (targetState == "settings" || initialState == "settings") {
+                (fadeIn(tween(180)) + slideInHorizontally(tween(240)) { if (targetState == "settings") it / 6 else -it / 12 }) togetherWith fadeOut(tween(120))
+            } else if (initialState == "player") {
+                ContentTransform(
+                    targetContentEnter = EnterTransition.None,
+                    initialContentExit = fadeOut(tween(180)) + slideOutVertically(tween(220, easing = FastOutSlowInEasing)) { it },
+                    targetContentZIndex = -1f,
+                )
+            } else (fadeIn(tween(220)) + slideInVertically(tween(280, easing = FastOutSlowInEasing)) { it / 12 }) togetherWith fadeOut(tween(140))
+        }, label = "app-destination") { currentDestination ->
+            if (currentDestination == "player") {
+                Box(Modifier.fillMaxSize()) {
+                    if (this@AnimatedContent.transition.targetState == EnterExitState.Visible && playerDragging) {
+                        BaseDestination(if (playerFromSettings) "settings" else "catalog")
+                    }
+                    PlayerScreen(vm, state, wide, landscape, lyrics, queue, rotation,
+                        onBack = { if (lyrics && !wide) lyrics = false else collapsePlayer() },
+                        onDismiss = ::collapsePlayer,
+                        onDraggingChange = { playerDragging = it },
+                        onLyrics = { lyrics = !lyrics; queue = false }, onQueue = { queue = !queue },
+                        onAlbum = { state.current?.let(::openTrackAlbum) },
+                        onArtist = ::openTrackArtist,
+                        onAdd = { actions = state.current }, onSleep = { sleepDialog = true })
+                }
+            } else {
+                BaseDestination(currentDestination)
+            }
         }
         if (queue && ((!wide && !landscape) || !expanded)) ModalBottomSheet(onDismissRequest = { queue = false }) { QueuePanel(vm, state, Modifier.fillMaxWidth().heightIn(max = 560.dp)) }
     }
@@ -515,7 +534,10 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
             SongAction(if (track.artists.size > 1) "查看艺人 · $artist" else "查看艺人", Icons.Default.Person, navigate = true) { openTrackArtist(artist) }
         }
         SongAction("响度均衡与手动调整", Icons.AutoMirrored.Filled.VolumeUp) { feature = "gain"; featureTrack = track; actions = null }
-        if (track.id == state.current?.id) SongAction("播放诊断", Icons.Default.Troubleshoot) { diagnostics = true; actions = null }
+        if (track.id == state.current?.id) {
+            SongAction("刷新歌词", Icons.Default.Refresh) { vm.refreshLyrics(); actions = null }
+            SongAction("播放诊断", Icons.Default.Troubleshoot) { diagnostics = true; actions = null }
+        }
         HorizontalDivider(Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
         SongAction("下一首播放", Icons.AutoMirrored.Filled.PlaylistPlay, onClick = tactile { vm.addToQueue(track, true); actions = null })
         SongAction("加入播放队列", Icons.AutoMirrored.Filled.QueueMusic, onClick = tactile { vm.addToQueue(track); actions = null })
@@ -756,7 +778,7 @@ internal fun CatalogToolbar(state: MusicState, play: () -> Unit, sort: (String) 
 }
 @Composable
 private fun PlayerScreen(vm: MusicViewModel, state: MusicState, wide: Boolean, landscape: Boolean, lyrics: Boolean, queue: Boolean, rotation: PlaybackRotation,
-    onBack: () -> Unit, onLyrics: () -> Unit, onQueue: () -> Unit, onAlbum: () -> Unit, onArtist: (String) -> Unit,
+    onBack: () -> Unit, onDismiss: () -> Unit, onDraggingChange: (Boolean) -> Unit, onLyrics: () -> Unit, onQueue: () -> Unit, onAlbum: () -> Unit, onArtist: (String) -> Unit,
     onAdd: () -> Unit, onSleep: () -> Unit) {
     val preferences by vm.settings.state.collectAsStateWithLifecycle()
     val sleep by vm.sleep.state.collectAsStateWithLifecycle()
@@ -773,21 +795,27 @@ private fun PlayerScreen(vm: MusicViewModel, state: MusicState, wide: Boolean, l
         animationSpec = if (draggingDown) snap() else spring(stiffness = Spring.StiffnessMediumLow),
         label = "player-dismiss-drag",
     )
+    val isOffsetActive = draggingDown || animatedDragY > 0.5f
+    LaunchedEffect(isOffsetActive) { onDraggingChange(isOffsetActive) }
+    DisposableEffect(Unit) { onDispose { onDraggingChange(false) } }
     val updateDrag: (Float, Boolean) -> Unit = { offset, active -> rawDragY = offset; draggingDown = active }
     val thresholdTick = { feedback(TactileKind.Tap) }
+    val dragCorner = if (isOffsetActive) 24.dp else 0.dp
     Box(Modifier.fillMaxSize()) {
+    Box(
+        Modifier.fillMaxSize()
+            .graphicsLayer {
+                translationY = animatedDragY
+                shape = RoundedCornerShape(topStart = dragCorner, topEnd = dragCorner)
+                clip = isOffsetActive
+                shadowElevation = if (isOffsetActive) 16.dp.toPx() else 0f
+            }
+    ) {
+    ArtworkBackdrop(vm, track, LocalRedCloth.current)
     Column(Modifier.testTag(if (wide) "player-tablet" else if (landscape) "player-landscape" else "player-phone")
         .fillMaxSize()
-        .graphicsLayer {
-            translationY = animatedDragY
-            val dragProgress = (animatedDragY / 900f).coerceIn(0f, 1f)
-            val scale = 1f - dragProgress * 0.05f
-            scaleX = scale
-            scaleY = scale
-            alpha = 1f - dragProgress * 0.35f
-        }
         .padding(horizontal = if (wide) 34.dp else 20.dp)) {
-        Row(Modifier.fillMaxWidth().dismissPlayerSwipe(true, onBack, updateDrag, thresholdTick), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+        Row(Modifier.fillMaxWidth().dismissPlayerSwipe(true, onDismiss, updateDrag, thresholdTick), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
             IconButton(onBack) {
                 Icon(
                     Icons.Default.KeyboardArrowDown,
@@ -796,7 +824,6 @@ private fun PlayerScreen(vm: MusicViewModel, state: MusicState, wide: Boolean, l
             }
             Spacer(Modifier.weight(1f))
             IconButton(onSleep) { Icon(Icons.Default.Bedtime, "睡眠定时", tint = if (sleep.deadline != null || sleep.entryId != null) Accent else Muted) }
-            IconButton(vm::refreshLyrics) { Icon(Icons.Default.Refresh, "刷新歌词") }
             IconButton(onAdd) { Icon(Icons.Default.MoreVert, "当前歌曲操作") }
         }
         if (landscape) Row(Modifier.weight(1f).fillMaxWidth().padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
@@ -807,7 +834,7 @@ private fun PlayerScreen(vm: MusicViewModel, state: MusicState, wide: Boolean, l
                         onTap = { onLyrics() },
                     )
                 }
-                .dismissPlayerSwipe(!queue && !lyrics, onBack, updateDrag, thresholdTick)
+                .dismissPlayerSwipe(!queue && !lyrics, onDismiss, updateDrag, thresholdTick)
                 .trackSwipeGestures(!queue && !lyrics,
                     onPrevious = { feedback(TactileKind.Tap); vm.previous() },
                     onNext = { feedback(TactileKind.Tap); vm.next() }), contentAlignment = Alignment.Center) {
@@ -824,7 +851,7 @@ private fun PlayerScreen(vm: MusicViewModel, state: MusicState, wide: Boolean, l
         } else if (wide) Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(48.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(.9f).fillMaxHeight().widthIn(max = 380.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()
-                    .dismissPlayerSwipe(!lyrics && !queue, onBack, updateDrag, thresholdTick)
+                    .dismissPlayerSwipe(!lyrics && !queue, onDismiss, updateDrag, thresholdTick)
                     .trackSwipeGestures(!lyrics && !queue,
                         onPrevious = { feedback(TactileKind.Tap); vm.previous() },
                         onNext = { feedback(TactileKind.Tap); vm.next() }), contentAlignment = Alignment.Center) {
@@ -849,7 +876,7 @@ private fun PlayerScreen(vm: MusicViewModel, state: MusicState, wide: Boolean, l
                         onTap = { onLyrics() },
                     )
                 }
-                .dismissPlayerSwipe(!lyrics, onBack, updateDrag, thresholdTick)
+                .dismissPlayerSwipe(!lyrics, onDismiss, updateDrag, thresholdTick)
                 .trackSwipeGestures(!lyrics,
                     onPrevious = { feedback(TactileKind.Tap); vm.previous() },
                     onNext = { feedback(TactileKind.Tap); vm.next() }), contentAlignment = Alignment.Center) {
@@ -862,6 +889,7 @@ private fun PlayerScreen(vm: MusicViewModel, state: MusicState, wide: Boolean, l
             }
             PlaybackControls(vm, state, onQueue, onAlbum, onArtist)
         }
+    }
     }
     }
     if (artworkPreview) ArtworkPreview(vm, track, dismissArtwork)

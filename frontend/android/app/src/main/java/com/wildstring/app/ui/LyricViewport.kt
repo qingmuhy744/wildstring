@@ -6,11 +6,12 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.interaction.DragInteraction
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.*
@@ -55,7 +56,6 @@ import kotlin.math.roundToInt
 @Composable internal fun LyricViewport(lyrics: Lyrics, position: Long, onSeek: (Long) -> Unit,
     onBlank: () -> Unit, modifier: Modifier = Modifier, onArtwork: () -> Unit = {}, followDelayMs: Long = 2_000,
     playing: Boolean = false, lyricSize: LyricSize = LyricSize.MEDIUM) {
-    val list = rememberLazyListState()
     val scope = rememberCoroutineScope()
     val feedback = LocalTactileFeedback.current
     var follow by remember(lyrics) { mutableStateOf(true) }
@@ -86,13 +86,6 @@ import kotlin.math.roundToInt
     val secondaryStyle = MaterialTheme.typography.bodyMedium.copy(fontSize = (15 * scale).sp, lineHeight = (23 * scale).sp,
         textAlign = TextAlign.Center)
     val active = if (lyrics.kind == "synced") lines.indexOfLast { (it.timeMs ?: Long.MAX_VALUE) <= renderPosition } else -1
-    val candidate by remember {
-        derivedStateOf {
-            val layout = list.layoutInfo
-            val center = (layout.viewportStartOffset + layout.viewportEndOffset) / 2
-            layout.visibleItemsInfo.minByOrNull { abs(it.offset + it.size / 2 - center) }?.index
-        }
-    }
     BoxWithConstraints(modifier.testTag("lyrics-viewport").clipToBounds().pointerInput(onBlank, onArtwork) {
         detectTapGestures(onLongPress = { onArtwork() }, onTap = { onBlank() })
     }.semantics {
@@ -111,10 +104,32 @@ import kotlin.math.roundToInt
                 constraints = Constraints(maxWidth = textWidth)).size.height } +
                 with(density) { (28.dp + 6.dp * extra.size).roundToPx() }
         }
-        suspend fun centerLine(index: Int) {
+        val list = remember(lyrics) {
+            val initialIndex = active.coerceAtLeast(0)
+            val initialOffset = if (active in lines.indices) (measuredHeight(active) / 2f).roundToInt() else 0
+            LazyListState(initialIndex, initialOffset)
+        }
+        val candidate by remember(list) {
+            derivedStateOf {
+                val layout = list.layoutInfo
+                val center = (layout.viewportStartOffset + layout.viewportEndOffset) / 2
+                layout.visibleItemsInfo.minByOrNull { abs(it.offset + it.size / 2 - center) }?.index
+            }
+        }
+        var initialPlaced by remember(lyrics) { mutableStateOf(false) }
+        suspend fun centerLine(index: Int, animate: Boolean = true) {
             val layout = snapshotFlow { list.layoutInfo }.first { it.visibleItemsInfo.isNotEmpty() }
             val center = (layout.viewportStartOffset + layout.viewportEndOffset) / 2f
             val item = layout.visibleItemsInfo.firstOrNull { it.index == index }
+            if (!animate) {
+                if (item != null) {
+                    val distance = item.offset + item.size / 2f - center
+                    if (abs(distance) > .5f) list.scrollBy(distance)
+                } else {
+                    list.scrollToItem(index, (measuredHeight(index) / 2f - center).roundToInt())
+                }
+                return
+            }
             if (item != null) {
                 val distance = item.offset + item.size / 2f - center
                 if (abs(distance) > .5f)
@@ -136,7 +151,12 @@ import kotlin.math.roundToInt
             }
         }
         LaunchedEffect(active, follow, lyrics, showTranslation, showRomanization, textWidth, maxHeight) {
-            if (follow && active >= 0) centerLine(active)
+            if (follow && active >= 0) {
+                centerLine(active, animate = initialPlaced)
+                initialPlaced = true
+            } else if (active < 0) {
+                initialPlaced = true
+            }
         }
         val fadeEdge = with(density) { 44.dp.toPx() }
         LazyColumn(state = list, contentPadding = PaddingValues(vertical = maxHeight / 2),
