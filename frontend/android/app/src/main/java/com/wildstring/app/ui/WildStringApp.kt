@@ -313,7 +313,7 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
         vm.cancelAlbumNavigation()
         expanded = false
         queue = false
-        if (playerFromSettings) { settings = true; playerFromSettings = false }
+        if (playerFromSettings) settings = true
     }
     fun openTrackAlbum(track: Track) {
         actions = null
@@ -376,6 +376,7 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
         if (destination != "player") {
             rawPlayerDragY = 0f
             playerDraggingDown = false
+            playerFromSettings = false
         }
     }
     val animatedPlayerDragY = animateFloatAsState(
@@ -510,7 +511,8 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
             if (currentDestination == "player") {
                 Box(Modifier.fillMaxSize()) {
                     if (this@AnimatedContent.transition.currentState == EnterExitState.Visible &&
-                        this@AnimatedContent.transition.targetState == EnterExitState.Visible) {
+                        this@AnimatedContent.transition.targetState == EnterExitState.Visible &&
+                        (playerDraggingDown || animatedPlayerDragY.value > 0.5f)) {
                         Box(
                             Modifier.fillMaxSize()
                                 .clearAndSetSemantics {}
