@@ -405,6 +405,15 @@ type LyricCandidate = {
   line_count: number;
   lyrics_version: number;
   file_version: string;
+  quality?: {
+    level: number;
+    label: string;
+    word_timed: boolean;
+    bilingual: boolean;
+    word_coverage: number;
+    translation_coverage: number;
+    lines: number;
+  };
   match: {
     title: string;
     artists: string[];
@@ -417,7 +426,7 @@ type LyricCandidate = {
     lines: {
       text: string;
       time_ms: number | null;
-      words?: unknown[];
+      words?: { text: string; start_ms?: number | null; end_ms?: number | null }[];
       translation?: string;
       romanization?: string;
     }[];
@@ -425,6 +434,54 @@ type LyricCandidate = {
     layers?: Record<string, unknown[]>;
   };
 };
+
+function inferCandidateQuality(candidate: LyricCandidate) {
+  if (candidate.quality) {
+    const hasRoman = candidate.normalized.lines.some((line) => Boolean(line.romanization?.trim()));
+    return { ...candidate.quality, romanized: hasRoman };
+  }
+  const lines = candidate.normalized.lines.filter((line) => line.text.trim().length > 0);
+  const count = Math.max(1, lines.length);
+  const timedRatio = lines.filter((line) => line.time_ms !== null).length / count;
+  const wordRatio = lines.filter((line) => (line.words?.length ?? 0) > 0).length / count;
+  const transRatio = lines.filter((line) => Boolean(line.translation?.trim())).length / count;
+  const hasRoman = lines.some((line) => Boolean(line.romanization?.trim()));
+  const synced = candidate.normalized.kind === 'synced' && timedRatio >= 0.8;
+  const wordTimed = synced && wordRatio >= 0.8;
+  const bilingual = synced && transRatio >= 0.8;
+  const label = wordTimed
+    ? bilingual
+      ? '双语逐字动态'
+      : '逐字动态'
+    : synced
+      ? bilingual
+        ? '双语逐行动态'
+        : '逐行动态'
+      : lines.length > 0
+        ? '静态歌词'
+        : '无歌词';
+  return {
+    level: wordTimed
+      ? bilingual
+        ? 5
+        : 4
+      : synced
+        ? bilingual
+          ? 3
+          : 2
+        : lines.length > 0
+          ? 1
+          : 0,
+    label,
+    word_timed: wordTimed,
+    bilingual,
+    word_coverage: wordRatio,
+    translation_coverage: transRatio,
+    lines: lines.length,
+    romanized: hasRoman,
+  };
+}
+
 export function OnlineLyrics({ trackId, applied }: { trackId: string; applied: () => void }) {
   const [result, setResult] = useState<{
     items: LyricCandidate[];
@@ -432,6 +489,8 @@ export function OnlineLyrics({ trackId, applied }: { trackId: string; applied: (
   } | null>(null);
   const [selected, setSelected] = useState<LyricCandidate | null>(null),
     [offset, setOffset] = useState(0);
+  const [filterMode, setFilterMode] = useState<'all' | 'word' | 'bilingual'>('all');
+  const [showWordSplits, setShowWordSplits] = useState(true);
   const [busy, setBusy] = useState(false),
     [message, setMessage] = useState('');
   async function load() {
@@ -487,88 +546,216 @@ export function OnlineLyrics({ trackId, applied }: { trackId: string; applied: (
           {value}
         </p>
       ))}
-      {result?.items.map((candidate) => (
-        <article className="suggestion-card" key={candidate.id}>
-          <a href={candidate.source_url} target="_blank" rel="noreferrer">
-            {candidate.plugin_id} · {candidate.match.title}
-          </a>
-          <p>
-            {candidate.match.artists.join(' / ')} · {candidate.normalized.format.toUpperCase()} ·{' '}
-            {candidate.line_count} 行 · 匹配 {Math.round(candidate.match.score * 100)}%
-          </p>
-          {candidate.match.version_mismatch && <p>版本标记不同，请试听核对。</p>}
-          <p>
-            时长差：
-            {candidate.match.duration_difference_ms === null
-              ? '未知'
-              : `${(candidate.match.duration_difference_ms / 1000).toFixed(1)} 秒`}{' '}
-            · 来源 ID：{candidate.source_id}
-          </p>
+      {result && result.items.length > 1 && (
+        <div className="button-row" style={{ marginBottom: 8 }}>
           <button
-            disabled={busy}
-            onClick={() => {
-              setSelected(candidate);
-              setOffset(0);
-            }}
+            type="button"
+            aria-pressed={filterMode === 'all'}
+            onClick={() => setFilterMode('all')}
           >
-            预览并选择歌词
+            全部（{result.items.length}）
           </button>
-        </article>
-      ))}
-      {selected && (
-        <div className="management-card">
-          <h4>核对歌词候选</h4>
-          <p>
-            {selected.match.title} · {selected.plugin_id}
-          </p>
-          <pre style={{ maxHeight: 240, overflow: 'auto', whiteSpace: 'pre-wrap' }}>
-            {selected.normalized.lines
-              .slice(0, 100)
-              .map(
-                (line) =>
-                  `${line.time_ms === null ? '' : (line.time_ms / 1000).toFixed(2)} ${line.text}` +
-                  (line.translation ? `\n${line.translation}` : '') +
-                  (line.romanization ? `\n${line.romanization}` : ''),
-              )
-              .join('\n')}
-          </pre>
-          <label>
-            播放偏移（毫秒，正值延后）
-            <input
-              type="number"
-              min="-60000"
-              max="60000"
-              step="100"
-              value={offset}
-              onChange={(e) => setOffset(Number(e.target.value))}
-            />
-          </label>
           <button
-            disabled={busy}
-            onClick={() =>
-              void run(async () => {
-                await api(`/manage/lyric-candidates/${selected.id}/apply`, {
-                  method: 'POST',
-                  body: JSON.stringify({
-                    version: selected.lyrics_version,
-                    file_version: selected.file_version,
-                    offset_ms: offset,
-                  }),
-                });
-                setSelected(null);
-                applied();
-                window.dispatchEvent(
-                  new CustomEvent('wildstring:lyrics-updated', { detail: trackId }),
-                );
-                setMessage('已保存选中的歌词，音乐文件未修改。');
-              })
-            }
+            type="button"
+            aria-pressed={filterMode === 'word'}
+            onClick={() => setFilterMode('word')}
           >
-            确认使用此歌词
+            仅看逐字（{result.items.filter((item) => inferCandidateQuality(item).word_timed).length}
+            ）
           </button>
-          <button onClick={() => setSelected(null)}>取消选择</button>
+          <button
+            type="button"
+            aria-pressed={filterMode === 'bilingual'}
+            onClick={() => setFilterMode('bilingual')}
+          >
+            仅看双语（{result.items.filter((item) => inferCandidateQuality(item).bilingual).length}
+            ）
+          </button>
         </div>
       )}
+      {result?.items
+        .filter((candidate) => {
+          const q = inferCandidateQuality(candidate);
+          if (filterMode === 'word') return q.word_timed;
+          if (filterMode === 'bilingual') return q.bilingual;
+          return true;
+        })
+        .map((candidate) => {
+          const q = inferCandidateQuality(candidate);
+          return (
+            <article className="suggestion-card" key={candidate.id}>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+                <a href={candidate.source_url} target="_blank" rel="noreferrer">
+                  {candidate.plugin_id} · {candidate.match.title}
+                </a>
+                <span
+                  style={{
+                    padding: '2px 8px',
+                    borderRadius: 999,
+                    fontSize: 12,
+                    fontWeight: 600,
+                    background: q.word_timed
+                      ? 'var(--accent, #d96b43)'
+                      : q.level >= 2
+                        ? 'rgba(128, 128, 128, 0.2)'
+                        : 'rgba(128, 128, 128, 0.12)',
+                    color: q.word_timed ? '#fff' : 'inherit',
+                  }}
+                >
+                  {q.word_timed
+                    ? `逐字动态 · ${Math.round(q.word_coverage * 100)}%`
+                    : q.level >= 2
+                      ? '逐行动态'
+                      : '静态歌词'}
+                </span>
+                {q.bilingual && (
+                  <span
+                    style={{
+                      padding: '2px 8px',
+                      borderRadius: 999,
+                      fontSize: 12,
+                      background: 'rgba(128, 128, 128, 0.18)',
+                    }}
+                  >
+                    双语 · {Math.round(q.translation_coverage * 100)}%
+                  </span>
+                )}
+                {q.romanized && (
+                  <span
+                    style={{
+                      padding: '2px 8px',
+                      borderRadius: 999,
+                      fontSize: 12,
+                      background: 'rgba(128, 128, 128, 0.18)',
+                    }}
+                  >
+                    音译
+                  </span>
+                )}
+                <span
+                  style={{
+                    padding: '2px 6px',
+                    borderRadius: 6,
+                    fontSize: 11,
+                    opacity: 0.75,
+                    border: '1px solid rgba(128, 128, 128, 0.3)',
+                  }}
+                >
+                  {candidate.normalized.format.toUpperCase()}
+                </span>
+              </div>
+              <p>
+                {candidate.match.artists.join(' / ')} · {q.label} ·{' '}
+                {candidate.normalized.format.toUpperCase()} · {candidate.line_count} 行 · 匹配{' '}
+                {Math.round(candidate.match.score * 100)}%
+              </p>
+              {candidate.match.version_mismatch && <p>版本标记不同，请试听核对。</p>}
+              <p>
+                时长差：
+                {candidate.match.duration_difference_ms === null
+                  ? '未知'
+                  : `${(candidate.match.duration_difference_ms / 1000).toFixed(1)} 秒`}{' '}
+                · 来源 ID：{candidate.source_id}
+              </p>
+              <button
+                disabled={busy}
+                onClick={() => {
+                  setSelected(candidate);
+                  setOffset(0);
+                }}
+              >
+                预览并选择歌词
+              </button>
+            </article>
+          );
+        })}
+      {selected &&
+        (() => {
+          const selectedQuality = inferCandidateQuality(selected);
+          const hasWords = selected.normalized.lines.some((line) => (line.words?.length ?? 0) > 0);
+          return (
+            <div className="management-card">
+              <h4>核对歌词候选</h4>
+              <p>
+                {selected.match.title} · {selected.plugin_id} ·{' '}
+                <strong>{selectedQuality.label}</strong>
+                {selectedQuality.word_timed &&
+                  `（逐字覆盖 ${Math.round(selectedQuality.word_coverage * 100)}%）`}
+                {selectedQuality.bilingual &&
+                  ` · 译文覆盖 ${Math.round(selectedQuality.translation_coverage * 100)}%`}
+              </p>
+              {hasWords && (
+                <label
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginBottom: 8 }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={showWordSplits}
+                    onChange={(e) => setShowWordSplits(e.target.checked)}
+                  />
+                  显示逐字时间切分标记
+                </label>
+              )}
+              <pre style={{ maxHeight: 240, overflow: 'auto', whiteSpace: 'pre-wrap' }}>
+                {selected.normalized.lines
+                  .slice(0, 100)
+                  .map((line) => {
+                    const body =
+                      hasWords && showWordSplits && line.words && line.words.length > 0
+                        ? line.words
+                            .map((w) =>
+                              w.start_ms !== undefined && w.start_ms !== null
+                                ? `${w.text}⟨${(w.start_ms / 1000).toFixed(2)}s⟩`
+                                : w.text,
+                            )
+                            .join(' ')
+                        : line.text;
+                    return (
+                      `${line.time_ms === null ? '' : (line.time_ms / 1000).toFixed(2)} ${body}` +
+                      (line.translation ? `\n${line.translation}` : '') +
+                      (line.romanization ? `\n${line.romanization}` : '')
+                    );
+                  })
+                  .join('\n')}
+              </pre>
+              <label>
+                播放偏移（毫秒，正值延后）
+                <input
+                  type="number"
+                  min="-60000"
+                  max="60000"
+                  step="100"
+                  value={offset}
+                  onChange={(e) => setOffset(Number(e.target.value))}
+                />
+              </label>
+              <button
+                disabled={busy}
+                onClick={() =>
+                  void run(async () => {
+                    await api(`/manage/lyric-candidates/${selected.id}/apply`, {
+                      method: 'POST',
+                      body: JSON.stringify({
+                        version: selected.lyrics_version,
+                        file_version: selected.file_version,
+                        offset_ms: offset,
+                      }),
+                    });
+                    setSelected(null);
+                    applied();
+                    window.dispatchEvent(
+                      new CustomEvent('wildstring:lyrics-updated', { detail: trackId }),
+                    );
+                    setMessage('已保存选中的歌词，音乐文件未修改。');
+                  })
+                }
+              >
+                确认使用此歌词
+              </button>
+              <button onClick={() => setSelected(null)}>取消选择</button>
+            </div>
+          );
+        })()}
     </section>
   );
 }

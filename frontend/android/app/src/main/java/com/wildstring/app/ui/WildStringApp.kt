@@ -881,12 +881,11 @@ private fun PlayerScreen(vm: MusicViewModel, state: MusicState, wide: Boolean, l
     val dismissArtwork = remember { { artworkPreview = false } }
     val spinning = state.playing && !state.buffering && state.playbackError == null && !artworkPreview
     val thresholdTick = { feedback(TactileKind.Tap) }
-    // Translate only in the canvas draw phase so pointerInput hit-test coordinates never shift mid-drag.
+    // Translate only in the canvas draw phase on downward drag so pointerInput hit-test coordinates never shift mid-drag.
     Box(
         Modifier.fillMaxSize()
             .drawWithContent {
-                val offset = dragOffset.value
-                val ty = if (offset >= 0f) offset else offset * 0.28f
+                val ty = dragOffset.value.coerceAtLeast(0f)
                 withTransform({ translate(top = ty) }) {
                     this@drawWithContent.drawContent()
                 }
@@ -978,22 +977,30 @@ private fun PlayerScreen(vm: MusicViewModel, state: MusicState, wide: Boolean, l
     }
     if (!wide && !landscape && !queue && dragOffset.value < -1f) {
         val density = LocalDensity.current
-        val maxPreviewPx = with(density) { 180.dp.toPx() }
-        val revealPx = (-dragOffset.value).coerceIn(0f, maxPreviewPx)
-        Surface(
-            Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(180.dp)
-                .graphicsLayer { translationY = maxPreviewPx - revealPx },
-            shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
-            color = MaterialTheme.colorScheme.surfaceContainerLow,
-            shadowElevation = 12.dp,
+        val maxSheetPx = with(density) { 560.dp.toPx() }
+        val revealPx = (-dragOffset.value).coerceIn(0f, maxSheetPx)
+        val scrimAlpha = (revealPx / maxSheetPx).coerceIn(0f, 1f) * 0.45f
+        Box(
+            Modifier.fillMaxSize()
+                .clearAndSetSemantics {}
+                .background(Color.Black.copy(alpha = scrimAlpha)),
+            contentAlignment = Alignment.BottomCenter,
         ) {
-            Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                Box(Modifier.size(width = 36.dp, height = 4.dp).clip(RoundedCornerShape(2.dp)).background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)))
-                Spacer(Modifier.height(12.dp))
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.AutoMirrored.Filled.QueueMusic, null, tint = MaterialTheme.colorScheme.primary)
-                    Spacer(Modifier.width(10.dp))
-                    Text("播放队列 · ${state.queue.size}", style = MaterialTheme.typography.titleMedium)
+            Surface(
+                Modifier.fillMaxWidth().height(560.dp)
+                    .graphicsLayer { translationY = maxSheetPx - revealPx },
+                shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerLow,
+                shadowElevation = 12.dp,
+            ) {
+                Column(Modifier.fillMaxSize().navigationBarsPadding()) {
+                    Box(
+                        Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 4.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Box(Modifier.size(width = 36.dp, height = 4.dp).clip(RoundedCornerShape(2.dp)).background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)))
+                    }
+                    QueuePanel(vm, state, Modifier.fillMaxWidth().weight(1f))
                 }
             }
         }

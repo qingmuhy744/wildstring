@@ -464,6 +464,8 @@ class MusicSources:
             key=lambda value: (
                 value["match"]["version_mismatch"],
                 -value["match"]["score"],
+                -value["quality"]["level"],
+                -value["quality"]["word_coverage"],
                 -value["created_at"],
             )
         )

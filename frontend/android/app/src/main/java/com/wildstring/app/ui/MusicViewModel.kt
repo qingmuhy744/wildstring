@@ -443,10 +443,24 @@ class MusicViewModel @Inject constructor(
         val generation = ++loadGeneration
         val request = query().copy(offset = 0)
         val owner = repository.session.cacheScope()
-        if (!preserveWindow) { windows.remove(request.key); browseIndices.remove(request.key) }
+        val sameRoute = mutable.value.contentKey == request.key
+        val keepVisualState = preserveWindow || sameRoute
+        if (!preserveWindow) {
+            browseIndices.remove(request.key)
+            if (!sameRoute) windows.remove(request.key)
+        }
         loadJob = viewModelScope.launch {
             if (!mutable.value.connected) return@launch
-            mutable.update { it.copy(loading = true, error = null, rangeErrors = emptyMap(), rangeLoading = emptySet(), browseIndex = if (preserveWindow) it.browseIndex else null, contentKey = request.key) }
+            mutable.update {
+                it.copy(
+                    loading = true,
+                    error = null,
+                    rangeErrors = emptyMap(),
+                    rangeLoading = emptySet(),
+                    browseIndex = if (keepVisualState && request.indexed) it.browseIndex else browseIndices[request.key],
+                    contentKey = request.key,
+                )
+            }
             try {
                 if (!mutable.value.hasContent) repository.cachedCatalog(request)?.let { cached ->
                     if (generation == loadGeneration) {
