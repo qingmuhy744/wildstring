@@ -12,6 +12,7 @@ import androidx.compose.animation.core.withInfiniteAnimationFrameNanos
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -86,8 +87,15 @@ internal val playbackStyles = listOf("cover" to "封面", "vinyl" to "黑胶", "
     val arm by animateFloatAsState(if (playing && settled) 24f else -12f, tween(350), label = "tonearm")
     Crossfade(style, modifier.testTag("playback-visual-$style").semantics {
         stateDescription = if (moving) "正在转动" else "静止"
-    }.combinedClickable(onClickLabel = "查看歌词", onDoubleClick = { /* Cover double-tap is intentionally unused. */ }, onLongClickLabel = "查看大封面", onLongClick = onArtwork,
-        hapticFeedbackEnabled = false, onClick = onLyrics), tween(200), label = "playback-style") { selection ->
+    }.combinedClickable(
+        interactionSource = remember { MutableInteractionSource() },
+        indication = null,
+        onClickLabel = "查看歌词",
+        onLongClickLabel = "查看大封面",
+        onLongClick = onArtwork,
+        hapticFeedbackEnabled = false,
+        onClick = onLyrics,
+    ), tween(200), label = "playback-style") { selection ->
         BoxWithConstraints(Modifier.fillMaxSize()) {
             val side = minOf(maxWidth, maxHeight)
             when (selection) {

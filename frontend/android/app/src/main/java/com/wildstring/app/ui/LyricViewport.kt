@@ -7,6 +7,7 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.DragInteraction
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -172,6 +173,8 @@ import kotlin.math.roundToInt
                     }
                     val selectLine = { onBlank(); Unit }
                     val selection = if (line.timeMs != null) Modifier.combinedClickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
                         onClickLabel = "选择歌词时间", onLongClickLabel = "查看大封面",
                         onLongClick = onArtwork, hapticFeedbackEnabled = false, onClick = selectLine) else Modifier
                     val translation = line.translation?.takeIf { showTranslation && it.isNotBlank() }

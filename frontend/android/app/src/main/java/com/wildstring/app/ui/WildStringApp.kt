@@ -764,7 +764,6 @@ private fun PlayerScreen(vm: MusicViewModel, state: MusicState, wide: Boolean, l
             BoxWithConstraints(Modifier.weight(1f).fillMaxHeight().testTag("player-visual-stage")
                 .pointerInput(onLyrics, showArtwork, queue) {
                     detectTapGestures(
-                        onDoubleTap = { /* Deliberately no double-tap action on the cover. */ },
                         onLongPress = { if (!queue) showArtwork() },
                         onTap = { onLyrics() },
                     )
@@ -807,7 +806,6 @@ private fun PlayerScreen(vm: MusicViewModel, state: MusicState, wide: Boolean, l
             BoxWithConstraints(Modifier.weight(1f).fillMaxWidth().testTag("player-visual-stage")
                 .pointerInput(onLyrics, showArtwork, lyrics) {
                     detectTapGestures(
-                        onDoubleTap = { /* Deliberately no double-tap action on the cover. */ },
                         onLongPress = { showArtwork() },
                         onTap = { onLyrics() },
                     )
