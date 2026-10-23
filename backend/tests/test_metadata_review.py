@@ -364,3 +364,48 @@ def test_rejection_does_not_hide_later_lookup_when_wall_clock_moves_back(curatio
     )
     refreshed = api.get(BASE, params={"track_id": track["id"]}).json()["items"][0]["suggestions"]
     assert len(refreshed) == 1 and refreshed[0]["id"] == later["id"]
+
+
+def test_rejection_by_album_id_ignores_all_pending_suggestions_for_album(curation):
+    api, token, service = curation
+    seed(api, service)
+    album = api.get(BASE + "/albums").json()["items"][0]
+    assert album["count"] == 2
+    response = api.post(BASE + "/reject", headers=HEADERS, json={"album_id": album["id"]})
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["status"] == "ignored"
+    assert data["ignored_count"] == 2
+    assert not data["already_ignored"]
+
+    # Pending album list is now empty
+    refreshed_albums = api.get(BASE + "/albums").json()
+    assert refreshed_albums["total"] == 0
+    assert len(refreshed_albums["items"]) == 0
+
+    # Repeat reject reports already_ignored
+    repeat = api.post(BASE + "/reject", headers=HEADERS, json={"album_id": album["id"]})
+    assert repeat.json()["already_ignored"] is True
+
+
+def test_purge_stale_metadata_suggestions(curation):
+    api, token, service = curation
+    seed(api, service)
+    album = api.get(BASE + "/albums").json()["items"][0]
+    track_id = api.get(BASE, params={"album_id": album["id"]}).json()["items"][0]["id"]
+
+    # Invalidate track metadata version in DB to make suggestion stale
+    with service.database.connect(write=True) as db:
+        db.execute(
+            "UPDATE track_metadata SET version = version + 1 WHERE track_id = ?", (track_id,)
+        )
+
+    response = api.post(BASE + "/stale/purge", headers=HEADERS)
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["status"] == "purged"
+    assert data["purged_count"] >= 1
+
+    # Repeat purge reports 0 purged
+    repeat = api.post(BASE + "/stale/purge", headers=HEADERS)
+    assert repeat.json()["purged_count"] == 0

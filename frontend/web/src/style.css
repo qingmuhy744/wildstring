@@ -830,13 +830,6 @@ a {
 .play-button:hover {
   background: var(--accent);
 }
-.play-state {
-  position: absolute;
-  left: calc(50% + 83px);
-  font-size: 9px;
-  color: #9caa88;
-  white-space: nowrap;
-}
 .timeline {
   display: flex;
   align-items: center;
@@ -1655,11 +1648,23 @@ a {
   font-size: 15px;
   color: #f4e8d9b3;
 }
-.fullscreen-artists {
+.fullscreen-subtitles {
   display: flex;
   flex-wrap: wrap;
+  align-items: baseline;
   gap: 0;
+  margin: 0 0 6px;
+  font-size: 15px;
+  line-height: 1.5;
+  color: #f4e8d9b3;
 }
+.fullscreen-artists,
+.fullscreen-album {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+}
+.player-meta-link,
 .player-artist-link {
   border: 0;
   padding: 0;
@@ -1667,12 +1672,32 @@ a {
   background: transparent;
   font: inherit;
   cursor: pointer;
+  transition:
+    color 150ms ease,
+    opacity 150ms ease;
 }
+.player-meta-link:hover,
+.player-meta-link:focus-visible,
 .player-artist-link:hover,
 .player-artist-link:focus-visible {
   color: #fff3e3;
   text-decoration: underline;
   text-underline-offset: 4px;
+}
+.fullscreen-subtitles .player-artist-link {
+  font-weight: 500;
+  color: #f4e8d9e6;
+}
+.fullscreen-subtitles .player-album-link {
+  color: #f4e8d9a6;
+}
+.fullscreen-subtitles .meta-dot {
+  margin: 0 7px;
+  opacity: 0.4;
+  user-select: none;
+}
+.fullscreen-subtitles .meta-sep {
+  opacity: 0.5;
 }
 .fullscreen-metadata > span {
   font-size: 12px;
@@ -1980,9 +2005,11 @@ a {
     font-size: 22px;
     margin-bottom: 6px;
   }
-  .fullscreen-metadata p {
+  .fullscreen-metadata p,
+  .fullscreen-subtitles {
     font-size: 13px;
     margin-bottom: 2px;
+    justify-content: center;
   }
   .fullscreen-metadata > span {
     font-size: 10px;
@@ -4052,6 +4079,22 @@ select {
   color: #eeeae2;
   background: #25241f;
 }
+.quality-passthrough-hint {
+  display: inline-block;
+  font-size: 0.68rem;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--tag-bg, rgba(255, 255, 255, 0.08));
+  color: var(--muted);
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.12));
+  opacity: 0.85;
+  user-select: none;
+}
+.fullscreen-options .quality-passthrough-hint {
+  background: #fff4df15;
+  color: #fff3dfaa;
+  border-color: #fff4de20;
+}
 .transport-buttons .playback-mode {
   display: grid;
   place-items: center;
@@ -4203,8 +4246,12 @@ select {
     white-space: nowrap;
     margin-bottom: 4px;
   }
-  .fullscreen-metadata > span {
+  .fullscreen-metadata > span,
+  .fullscreen-subtitles {
     display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .fullscreen-controls {
     grid-column: 2;

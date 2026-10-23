@@ -9,8 +9,8 @@ packages:
 settings:
   base:
     SWIFT_VERSION: "6.0"
-    MARKETING_VERSION: "0.6.2"
-    CURRENT_PROJECT_VERSION: "32"
+    MARKETING_VERSION: "0.6.3"
+    CURRENT_PROJECT_VERSION: "33"
 targets:
   WildString:
     type: application

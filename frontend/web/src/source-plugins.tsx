@@ -533,6 +533,12 @@ export function OnlineLyrics({ trackId, applied }: { trackId: string; applied: (
       >
         查找联网歌词
       </button>
+      {running && (
+        <progress
+          className="query-progress"
+          style={{ width: '100%', height: '4px', margin: '8px 0', display: 'block' }}
+        />
+      )}
       <p role="status">
         {message ||
           (running
@@ -547,9 +553,19 @@ export function OnlineLyrics({ trackId, applied }: { trackId: string; applied: (
         </p>
       ))}
       {result && result.items.length > 1 && (
-        <div className="button-row" style={{ marginBottom: 8 }}>
+        <div
+          className="button-row"
+          style={{
+            marginBottom: 8,
+            overflowX: 'auto',
+            display: 'flex',
+            gap: '8px',
+            flexWrap: 'nowrap',
+          }}
+        >
           <button
             type="button"
+            style={{ whiteSpace: 'nowrap' }}
             aria-pressed={filterMode === 'all'}
             onClick={() => setFilterMode('all')}
           >
@@ -557,6 +573,7 @@ export function OnlineLyrics({ trackId, applied }: { trackId: string; applied: (
           </button>
           <button
             type="button"
+            style={{ whiteSpace: 'nowrap' }}
             aria-pressed={filterMode === 'word'}
             onClick={() => setFilterMode('word')}
           >
@@ -565,6 +582,7 @@ export function OnlineLyrics({ trackId, applied }: { trackId: string; applied: (
           </button>
           <button
             type="button"
+            style={{ whiteSpace: 'nowrap' }}
             aria-pressed={filterMode === 'bilingual'}
             onClick={() => setFilterMode('bilingual')}
           >

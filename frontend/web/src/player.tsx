@@ -448,6 +448,7 @@ export function usePlayer(userId: string) {
     buffering,
     quality,
     changeQuality,
+    plan,
     mode,
     setMode,
     sleep,
@@ -466,7 +467,9 @@ export function usePlayer(userId: string) {
       ? '离线播放'
       : plan?.mode === 'transcode'
         ? `AAC ${plan.output.bitrate_kbps} kbps`
-        : '原音直放',
+        : plan?.reason === 'lossy_passthrough'
+          ? '原音直通'
+          : '原音直放',
     start,
     step,
     seek,
@@ -705,9 +708,11 @@ export function PlaybackControls({ player }: { player: Player }) {
             <path d="M17 5h2v14h-2zM5 5l11 7-11 7z" />
           </svg>
         </button>
-        <span className="play-state" role="status">
-          {player.buffering ? '缓冲中…' : playing ? player.playbackLabel : current ? '已暂停' : ''}
-        </span>
+        {player.buffering && (
+          <span className="sr-only" role="status">
+            缓冲中…
+          </span>
+        )}
       </div>
       <div className="timeline">
         <time>{time(position)}</time>
@@ -754,6 +759,8 @@ export function PlaybackError({ player }: { player: Player }) {
 }
 
 export function QualityControl({ player }: { player: Player }) {
+  const isPassthrough = player.plan?.reason === 'lossy_passthrough';
+  const format = (player.current?.format || '').toUpperCase();
   return (
     <label className="quality-control">
       <span>音质</span>
@@ -762,6 +769,11 @@ export function QualityControl({ player }: { player: Player }) {
         data-help={hints.playbackQuality}
         value={player.quality}
         onChange={(event) => player.changeQuality(event.target.value)}
+        title={
+          isPassthrough
+            ? `当前音频为 ${format || '有损'} 源，已自动原音直通播放，避免二次转码破坏音质`
+            : undefined
+        }
       >
         <option value="original">原音</option>
         {[128, 192, 256, 320].map((rate) => (
@@ -770,6 +782,14 @@ export function QualityControl({ player }: { player: Player }) {
           </option>
         ))}
       </select>
+      {isPassthrough && (
+        <span
+          className="quality-passthrough-hint"
+          title={`当前音频为 ${format || '有损'} 格式，已原音直通`}
+        >
+          {format ? `${format}直通` : '有损直通'}
+        </span>
+      )}
     </label>
   );
 }

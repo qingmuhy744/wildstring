@@ -18,6 +18,7 @@ jobs:
   quality:
     name: Code Quality & Packaging
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -39,6 +40,7 @@ jobs:
   backend:
     name: Backend Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -47,7 +49,10 @@ jobs:
         with:
           version: "0.13.1"
       - name: Install system dependencies for audio decoding
-        run: sudo apt-get update --error-on=any && sudo apt-get install -y --no-install-recommends ffmpeg libchromaprint-tools
+        run: |
+          sudo systemctl stop apt-daily.timer apt-daily-upgrade.timer unattended-upgrades.service 2>/dev/null || true
+          sudo apt-get update -o Acquire::Retries=3 -o Acquire::http::Timeout=20 --error-on=any
+          sudo apt-get install -y --no-install-recommends ffmpeg libchromaprint-tools
       - name: Run backend pytest suite
         run: |
           uv sync --frozen --project backend --extra community-sources
@@ -56,6 +61,7 @@ jobs:
   web:
     name: Web E2E Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -69,7 +75,11 @@ jobs:
         with:
           version: "0.13.1"
       - run: make setup
-      - run: sudo apt-get update --error-on=any && sudo apt-get install -y --no-install-recommends ffmpeg libchromaprint-tools
+      - name: Install system dependencies for audio decoding
+        run: |
+          sudo systemctl stop apt-daily.timer apt-daily-upgrade.timer unattended-upgrades.service 2>/dev/null || true
+          sudo apt-get update -o Acquire::Retries=3 -o Acquire::http::Timeout=20 --error-on=any
+          sudo apt-get install -y --no-install-recommends ffmpeg libchromaprint-tools
       - run: npm --prefix frontend/web exec -- playwright install --with-deps chromium
       - name: Run Web tests and browser regressions
         run: make test-web test-large-web test-browse-web test-catalog-web test-transcoding-web
@@ -88,6 +98,7 @@ jobs:
   container:
     name: Container Smoke & Test
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

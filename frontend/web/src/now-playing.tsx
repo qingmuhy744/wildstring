@@ -12,7 +12,6 @@ import {
   type Player,
 } from './player';
 import { QueuePanel } from './queue-panel';
-import { AlbumLink } from './album-link';
 
 function coverPalette(image: HTMLImageElement): string[] | null {
   try {
@@ -248,9 +247,6 @@ export function NowPlaying({
           ) {
             event.preventDefault();
             event.stopPropagation();
-          } else if (event.detail > 0 && isBlank(event.target)) {
-            event.preventDefault();
-            onClose();
           }
         }}
         style={
@@ -312,27 +308,41 @@ export function NowPlaying({
               <div className="fullscreen-metadata">
                 <FavoriteButton track={current} favorites={favorites} />
                 <h1>{current.title}</h1>
-                <p className="fullscreen-artists">
-                  {current.artists.map((name, index) => (
-                    <span key={`${name}-${index}`}>
-                      {index > 0 && <span aria-hidden="true"> / </span>}
+                <div className="fullscreen-subtitles">
+                  <span className="fullscreen-artists">
+                    {current.artists.map((name, index) => (
+                      <span key={`${name}-${index}`}>
+                        {index > 0 && <span aria-hidden="true"> / </span>}
+                        <button
+                          type="button"
+                          className="player-meta-link player-artist-link"
+                          onClick={() => onOpenArtist(name)}
+                        >
+                          {name}
+                        </button>
+                      </span>
+                    ))}
+                  </span>
+                  {current.album && (
+                    <span aria-hidden="true" className="meta-dot">
+                      {' '}
+                      ·{' '}
+                    </span>
+                  )}
+                  <span className="fullscreen-album">
+                    {current.album_id ? (
                       <button
                         type="button"
-                        className="player-artist-link"
-                        onClick={() => onOpenArtist(name)}
+                        className="player-meta-link player-album-link"
+                        onClick={() => onOpenAlbum(current)}
                       >
-                        {name}
+                        {current.album}
                       </button>
-                    </span>
-                  ))}
-                </p>
-                <span>
-                  {current.album_id ? (
-                    <AlbumLink track={current} onOpen={onOpenAlbum} />
-                  ) : (
-                    current.album || '未知专辑'
-                  )}
-                </span>
+                    ) : (
+                      <span>{current.album || '未知专辑'}</span>
+                    )}
+                  </span>
+                </div>
               </div>
             </div>
             {panel === 'lyrics' && (
@@ -738,8 +748,21 @@ function LyricsPanel({ player, onTogglePanel }: { player: Player; onTogglePanel:
                       }}
                       className={`lyric-line ${active === index ? 'active-line' : ''}`}
                       aria-current={active === index ? 'true' : undefined}
-                      aria-label={`切换到封面 ${time(line.time_ms / 1000)}：${line.text || '间奏'}`}
-                      onClick={onTogglePanel}
+                      aria-label={
+                        coarse
+                          ? `切换到封面 ${time(line.time_ms / 1000)}：${line.text || '间奏'}`
+                          : `跳转到 ${time(line.time_ms / 1000)}：${line.text || '间奏'}`
+                      }
+                      disabled={!player.duration}
+                      onClick={() => {
+                        if (coarse) {
+                          onTogglePanel();
+                        } else if (line.time_ms !== null) {
+                          player.seek(line.time_ms / 1000);
+                          setFollow(true);
+                          setPreview(null);
+                        }
+                      }}
                     >
                       {line.words?.length
                         ? line.words.map((word, wordIndex) => {

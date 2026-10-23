@@ -488,12 +488,9 @@ class MusicSources:
             "SELECT * FROM track_lyrics WHERE track_id=?", (row["track_id"],)
         ).fetchone()
         current_version = previous["version"] if previous else 1
-        if (
-            row["lyrics_version"] != body.version
-            or row["file_version"] != body.file_version
-            or file_version != body.file_version
-            or current_version != body.version
-        ):
+        if file_version != row["file_version"] or file_version != body.file_version:
+            raise HTTPException(409, "lyrics_version_conflict")
+        if scan_item and (row["lyrics_version"] != body.version or current_version != body.version):
             raise HTTPException(409, "lyrics_version_conflict")
         if scan_item:
             locked = db.execute(

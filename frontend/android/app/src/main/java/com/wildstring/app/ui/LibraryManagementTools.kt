@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -88,49 +89,97 @@ internal fun MetadataPanel(vm: MusicViewModel, track: Track) {
 internal fun LyricsEditorPanel(vm: MusicViewModel, track: Track) {
     val state by vm.state.collectAsStateWithLifecycle(); val position by vm.position.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope(); val action = remember { FeatureAction() }
+    var tabIndex by remember { mutableIntStateOf(0) }
     var record by remember { mutableStateOf<JsonObject?>(null) }; var text by remember { mutableStateOf("") }
     var timing by remember { mutableStateOf(false) }; var lines by remember { mutableStateOf<List<String>>(emptyList()) }
     var times by remember { mutableStateOf<List<Long?>>(emptyList()) }; var cursor by remember { mutableIntStateOf(0) }
-    suspend fun load() { record = vm.repository.api().objectGet(vm.repository.url("api", "v1", "manage", "tracks", track.id, "lyrics")); text = record!!.text("text") }
+    suspend fun load() {
+        record = vm.repository.api().objectGet(vm.repository.url("api", "v1", "manage", "tracks", track.id, "lyrics"))
+        text = record!!.text("text")
+    }
     LaunchedEffect(track.id) { action.run { load() } }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text(track.title, style = MaterialTheme.typography.titleMedium); ActionStatus(action)
-        if (!timing) {
-            OutlinedTextField(text, { text = it.take(500_000) }, Modifier.fillMaxWidth().heightIn(min = 240.dp), label = { Text("粘贴歌词，每句一行；也支持 LRC") }, enabled = record != null && !action.busy)
-            TextButton({
-                lines = text.lines().map { it.replace(Regex("\\[[^]]*]"), "").trim() }
-                times = lines.map { null }; cursor = 0; timing = true
-            }, enabled = text.isNotBlank() && record != null) { Text("开始逐行打点") }
-        } else {
-            Text("听到一句开始时，点击“标记下一句”。暂停或缓冲时不会记录时间。", style = MaterialTheme.typography.bodySmall)
-            if (state.current?.id != track.id) Button({ vm.play(listOf(track)) }) { Text("播放此曲以打点") }
-            else Row(verticalAlignment = Alignment.CenterVertically) { TextButton(vm::toggle) { Text(if (state.playing) "暂停" else "播放") }; Text(formatTime(position)); TextButton({ vm.seek(0) }) { Text("回到开头") } }
-            lines.forEachIndexed { index, line -> Row(Modifier.fillMaxWidth().clickable { cursor = index }.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                RadioButton(cursor == index, { cursor = index }); Text((times.getOrNull(index)?.let(::formatTime) ?: "未标记") + "  " + line.ifBlank { "（间奏）" }, Modifier.weight(1f), color = if (cursor == index) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
-            } }
-            Button({
-                if (cursor < lines.size) {
-                    val previous = times.take(cursor).filterNotNull().lastOrNull() ?: 0
-                    val next = times.drop(cursor + 1).filterNotNull().firstOrNull() ?: Long.MAX_VALUE
-                    if (position in previous..next) { times = times.toMutableList().apply { this[cursor] = position }; cursor = (cursor + 1).coerceAtMost(lines.size) }
-                    else action.message = "时间需按歌词顺序递增，请调整播放位置。"
+        Text(track.title, style = MaterialTheme.typography.titleMedium)
+        ActionStatus(action)
+
+        PrimaryTabRow(selectedTabIndex = tabIndex) {
+            Tab(selected = tabIndex == 0, onClick = { tabIndex = 0; action.message = null }, text = { Text("手动编辑与打点") })
+            Tab(selected = tabIndex == 1, onClick = { tabIndex = 1; action.message = null }, text = { Text("联网歌词匹配") })
+        }
+
+        if (tabIndex == 0) {
+            if (!timing) {
+                OutlinedTextField(text, { text = it.take(500_000) }, Modifier.fillMaxWidth().heightIn(min = 240.dp), label = { Text("粘贴歌词，每句一行；也支持 LRC") }, enabled = record != null && !action.busy)
+                TextButton({
+                    lines = text.lines().map { it.replace(Regex("\\[[^]]*]"), "").trim() }
+                    times = lines.map { null }; cursor = 0; timing = true
+                }, enabled = text.isNotBlank() && record != null) { Text("开始逐行打点") }
+            } else {
+                Text("听到一句开始时，点击“标记下一句”。暂停或缓冲时不会记录时间。", style = MaterialTheme.typography.bodySmall)
+                if (state.current?.id != track.id) Button({ vm.play(listOf(track)) }) { Text("播放此曲以打点") }
+                else Row(verticalAlignment = Alignment.CenterVertically) { TextButton(vm::toggle) { Text(if (state.playing) "暂停" else "播放") }; Text(formatTime(position)); TextButton({ vm.seek(0) }) { Text("回到开头") } }
+                lines.forEachIndexed { index, line -> Row(Modifier.fillMaxWidth().clickable { cursor = index }.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    RadioButton(cursor == index, { cursor = index }); Text((times.getOrNull(index)?.let(::formatTime) ?: "未标记") + "  " + line.ifBlank { "（间奏）" }, Modifier.weight(1f), color = if (cursor == index) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
+                } }
+                Button({
+                    if (cursor < lines.size) {
+                        val previous = times.take(cursor).filterNotNull().lastOrNull() ?: 0
+                        val next = times.drop(cursor + 1).filterNotNull().firstOrNull() ?: Long.MAX_VALUE
+                        if (position in previous..next) { times = times.toMutableList().apply { this[cursor] = position }; cursor = (cursor + 1).coerceAtMost(lines.size) }
+                        else action.message = "时间需按歌词顺序递增，请调整播放位置。"
+                    }
+                }, enabled = state.current?.id == track.id && state.playing && !state.buffering && cursor < lines.size) { Text("标记下一句（${cursor + 1} / ${lines.size}）") }
+                Row {
+                    TextButton({ val target = (cursor - 1).coerceAtLeast(0); times = times.toMutableList().apply { this[target] = null }; cursor = target }, enabled = times.any { it != null }) { Text("撤销上一句") }
+                    TextButton({ timing = false }) { Text("取消打点") }
                 }
-            }, enabled = state.current?.id == track.id && state.playing && !state.buffering && cursor < lines.size) { Text("标记下一句（${cursor + 1} / ${lines.size}）") }
-            Row {
-                TextButton({ val target = (cursor - 1).coerceAtLeast(0); times = times.toMutableList().apply { this[target] = null }; cursor = target }, enabled = times.any { it != null }) { Text("撤销上一句") }
-                TextButton({ timing = false }) { Text("取消打点") }
+                Button({ text = lines.mapIndexed { i, line -> val ms = times[i]!!; "[%02d:%02d.%03d]%s".format(ms / 60_000, ms / 1000 % 60, ms % 1000, line) }.joinToString("\n"); timing = false }, enabled = times.isNotEmpty() && times.all { it != null }) { Text("生成同步歌词") }
             }
-            Button({ text = lines.mapIndexed { i, line -> val ms = times[i]!!; "[%02d:%02d.%03d]%s".format(ms / 60_000, ms / 1000 % 60, ms % 1000, line) }.joinToString("\n"); timing = false }, enabled = times.isNotEmpty() && times.all { it != null }) { Text("生成同步歌词") }
+            if (!timing) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton({ scope.launch { action.run { val preview = vm.repository.api().objectPost(vm.repository.url("api", "v1", "manage", "tracks", track.id, "lyrics", "preview"), obj("text" to text)); action.message = "预览通过 · ${preview.getAsJsonArray("lines")?.size() ?: 0} 行" } } }, enabled = record != null && !action.busy) { Text("验证预览") }
+                    Button({ scope.launch { action.run {
+                        val r = record!!; vm.repository.api().objectPut(vm.repository.url("api", "v1", "manage", "tracks", track.id, "lyrics"), obj("version" to r.get("version"), "file_version" to r.get("file_version"), "text" to text))
+                        load(); vm.refreshLyrics(); action.message = "歌词已保存"
+                    } } }, enabled = record != null && !action.busy) { Text("保存歌词") }
+                }
+                TextButton({ scope.launch { action.run { val r = record!!; vm.repository.api().objectPut(vm.repository.url("api", "v1", "manage", "tracks", track.id, "lyrics"), obj("version" to r.get("version"), "file_version" to r.get("file_version"), "text" to null)); load(); vm.refreshLyrics(); action.message = "已恢复文件歌词" } } }, enabled = record != null && !action.busy) { Text("恢复文件歌词") }
+            }
+        } else {
+            val eff = record?.getAsJsonObject("effective")
+            val hasCandidate = record?.has("selected_candidate") == true && !record?.get("selected_candidate")?.isJsonNull!!
+            val hasOverride = record?.has("override") == true && !record?.get("override")?.isJsonNull!!
+            val kind = eff?.text("kind") ?: "none"
+            val hasWords = eff?.objects("lines")?.any { it.objects("words").isNotEmpty() } == true
+            val hasTrans = eff?.objects("lines")?.any { it.text("translation").isNotBlank() } == true
+
+            val statusText = if (hasCandidate) {
+                "当前生效：联网歌词 · " + (if (hasWords) "逐字动态" else if (kind == "synced") "逐行动态" else "纯文本") + if (hasTrans) " · 双语" else ""
+            } else if (hasOverride) {
+                "当前生效：手工编辑覆盖"
+            } else if (kind == "synced") {
+                "当前生效：音频文件内置同步歌词"
+            } else if (kind == "plain") {
+                "当前生效：音频文件内置纯文本歌词"
+            } else {
+                "当前状态：暂无歌词"
+            }
+
+            Surface(shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.surfaceVariant, modifier = Modifier.fillMaxWidth()) {
+                Row(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text(statusText, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    if (hasCandidate || hasOverride) {
+                        TextButton({ scope.launch { action.run {
+                            val r = record!!
+                            vm.repository.api().objectPut(vm.repository.url("api", "v1", "manage", "tracks", track.id, "lyrics"), obj("version" to r.get("version"), "file_version" to r.get("file_version"), "text" to null))
+                            load(); vm.refreshLyrics(); action.message = "已恢复音频文件原始歌词"
+                        } } }, enabled = !action.busy) { Text("恢复文件歌词") }
+                    }
+                }
+            }
+
+            OnlineLyricsPanel(vm, track) { scope.launch { load() } }
         }
-        if (!timing) Row {
-            TextButton({ scope.launch { action.run { val preview = vm.repository.api().objectPost(vm.repository.url("api", "v1", "manage", "tracks", track.id, "lyrics", "preview"), obj("text" to text)); action.message = "预览通过 · ${preview.getAsJsonArray("lines")?.size() ?: 0} 行" } } }, enabled = record != null && !action.busy) { Text("验证预览") }
-            Button({ scope.launch { action.run {
-                val r = record!!; vm.repository.api().objectPut(vm.repository.url("api", "v1", "manage", "tracks", track.id, "lyrics"), obj("version" to r.get("version"), "file_version" to r.get("file_version"), "text" to text))
-                load(); vm.refreshLyrics(); action.message = "歌词已保存"
-            } } }, enabled = record != null && !action.busy) { Text("保存歌词") }
-        }
-        TextButton({ scope.launch { action.run { val r = record!!; vm.repository.api().objectPut(vm.repository.url("api", "v1", "manage", "tracks", track.id, "lyrics"), obj("version" to r.get("version"), "file_version" to r.get("file_version"), "text" to null)); load(); vm.refreshLyrics(); action.message = "已恢复文件歌词" } } }, enabled = record != null && !action.busy && !timing) { Text("恢复文件歌词") }
-        if (!timing) OnlineLyricsPanel(vm, track) { scope.launch { load() } }
     }
 }
 

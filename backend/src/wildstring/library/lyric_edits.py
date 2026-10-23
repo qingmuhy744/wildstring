@@ -88,10 +88,11 @@ class LyricsEditor:
             "version": row["version"] if row else 1,
             "file_version": file_version,
             "override": override,
+            "selected_candidate": row["selected_candidate"] if row else None,
             "observed": observed,
             "observed_text": lyric_text(observed),
             "effective": effective,
-            "text": override if override is not None else lyric_text(observed),
+            "text": override if override is not None else lyric_text(effective),
         }
 
     def preview(self, track_id, body):
@@ -103,13 +104,25 @@ class LyricsEditor:
             connection.execute("BEGIN IMMEDIATE")
             _, signature = self.observed(track_id)
             row = connection.execute(
-                "SELECT version FROM track_lyrics WHERE track_id=?", (track_id,)
+                "SELECT version, text, selected_candidate FROM track_lyrics WHERE track_id=?",
+                (track_id,),
             ).fetchone()
-            if signature != body.file_version or (row[0] if row else 1) != body.version:
+            current_ver = row["version"] if row else 1
+            if signature != body.file_version or current_ver != body.version:
                 raise HTTPException(409, "lyrics_version_conflict")
+
+            keep_candidate = False
+            if row and row["selected_candidate"]:
+                from wildstring.library.online_lyrics import selected_lyrics
+
+                cand_lyrics = selected_lyrics(connection, row["selected_candidate"])
+                if cand_lyrics and lyric_text(cand_lyrics) == (body.text or ""):
+                    keep_candidate = True
+
+            cand_val = row["selected_candidate"] if (keep_candidate and row) else None
             connection.execute(
-                "INSERT INTO track_lyrics(track_id,text,version) VALUES (?,?,?) "
-                "ON CONFLICT(track_id) DO UPDATE SET text=excluded.text,version=excluded.version,selected_candidate=NULL",
-                (track_id, body.text, body.version + 1),
+                "INSERT INTO track_lyrics(track_id,text,version,selected_candidate) VALUES (?,?,?,?) "
+                "ON CONFLICT(track_id) DO UPDATE SET text=excluded.text,version=excluded.version,selected_candidate=excluded.selected_candidate",
+                (track_id, body.text, body.version + 1, cand_val),
             )
         return self.read(track_id)

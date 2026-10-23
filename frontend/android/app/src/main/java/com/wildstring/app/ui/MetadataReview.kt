@@ -85,7 +85,44 @@ private val reviewLabels = mapOf("title" to "歌名", "artists" to "歌曲艺人
         }
         loadAlbums(); rejectionNotice = "已拒绝当前候选，现有资料保持不变。"; action.message = rejectionNotice
     }
-    suspend fun accept(single: Boolean) {
+    suspend fun rejectAlbum() {
+        val albumId = page?.text("album_id")?.takeIf { it.isNotBlank() } ?: current?.text("album_id") ?: return
+        rejectionNotice = null
+        vm.agent.request("metadata-review/reject", "POST", jsonBody("album_id" to albumId))
+        val updatedAlbums = loadAlbums()
+        rejectionNotice = "已拒绝此专辑的所有建议；现有资料保持不变。"
+        action.message = rejectionNotice
+        val nextAlbum = updatedAlbums.firstOrNull { it.text("id") != albumId }
+        if (nextAlbum != null) {
+            load(mapOf("album_id" to nextAlbum.text("id")))
+        } else {
+            page = null
+        }
+    }
+    suspend fun rejectTrack(trackId: String) {
+        rejectionNotice = null
+        vm.agent.request("metadata-review/reject", "POST", jsonBody("track_id" to trackId))
+        page?.let { load(currentQuery(it)) }
+        loadAlbums()
+        rejectionNotice = "已拒绝该单曲的所有建议；现有资料保持不变。"
+        action.message = rejectionNotice
+    }
+    suspend fun purgeStale() {
+        action.run {
+            val res = vm.agent.request("metadata-review/stale/purge", "POST")
+            val count = res.number("purged_count").toLong()
+            val remaining = res.number("remaining_pending").toLong()
+            val msg = if (count > 0) "已清理 $count 个失效候选，剩余 $remaining 个待核对候选。" else "暂无失效候选，全部均为有效版本。"
+            action.message = msg
+            val updated = loadAlbums()
+            if (updated.isNotEmpty() && page != null) {
+                load(currentQuery(page!!), active)
+            } else if (updated.isEmpty()) {
+                page = null
+            }
+        }
+    }
+    suspend fun accept(single: Boolean, advanceAlbum: Boolean = false) {
         rejectionNotice = null
         val chosen = if (single) selected.filter { it.text("id") == active } else selected
         val items = JsonArray().apply { chosen.forEach { row -> val choice = choices[row.text("id")]!!; val c = candidate(row, choice)!!
@@ -98,8 +135,19 @@ private val reviewLabels = mapOf("title" to "歌名", "artists" to "歌曲艺人
             if (result.text("status") != "applied") { conflicts = result.objects("conflicts").map { it.text("track_id") }.toSet(); action.message = "此批次未应用：歌曲或候选已变化，请重新读取后核对。"; return }
         } else if (snapshot != null) vm.agent.request("drafts/${snapshot.text("id")}/accept", "POST", jsonBody("version" to snapshot.number("version"), "preview_digest" to snapshot.text("preview_digest"), "idempotency_key" to operationKey))
         else return
-        val nextId = if (single) tracks.getOrNull((tracks.indexOfFirst { it.text("id") == active } + 1) % tracks.size.coerceAtLeast(1))?.text("id") else null
-        page?.let { load(currentQuery(it), nextId) }; loadAlbums(); vm.load(); action.message = "已应用 ${chosen.size} 首的所选资料${if (snapshot != null) "及固定封面" else ""}。"
+        val currentAlbumId = page?.text("album_id")
+        val updatedAlbums = loadAlbums(); vm.load(); action.message = "已应用 ${chosen.size} 首的所选资料${if (snapshot != null) "及固定封面" else ""}。"
+        if (advanceAlbum) {
+            val nextAlbum = updatedAlbums.firstOrNull { it.text("id") != currentAlbumId }
+            if (nextAlbum != null) {
+                load(mapOf("album_id" to nextAlbum.text("id")))
+            } else {
+                page = null
+            }
+        } else {
+            val nextId = if (single) tracks.getOrNull((tracks.indexOfFirst { it.text("id") == active } + 1) % tracks.size.coerceAtLeast(1))?.text("id") else null
+            page?.let { load(currentQuery(it), nextId) }
+        }
     }
     LaunchedEffect(initialTrack?.id, initialBatchId, initialAlbumId) { action.run { val list = loadAlbums(); load(when { initialTrack != null -> mapOf("track_id" to initialTrack.id); initialBatchId != null -> mapOf("batch_id" to initialBatchId); initialAlbumId != null -> mapOf("album_id" to initialAlbumId); else -> mapOf("album_id" to list.firstOrNull()?.text("id").orEmpty()) }, initialTrack?.id) }; if (action.message == "已完成") action.message = null }
     Column(Modifier.fillMaxSize().testTag("metadata-review")) {
@@ -108,7 +156,11 @@ private val reviewLabels = mapOf("title" to "歌名", "artists" to "歌曲艺人
             ReviewSkeleton(Modifier.weight(1f))
         } else LazyColumn(Modifier.weight(1f).fillMaxWidth().testTag("review-scroll"), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             item { Text("批量核对资料", style = MaterialTheme.typography.titleLarge); Text("先对比，再接受。人工值默认保留，勾选后会替换该字段。", style = MaterialTheme.typography.bodySmall)
-                Row { TextButton({ showAlbums = true }, enabled = !action.busy) { Text("选择专辑") }; TextButton({ scope.launch { action.run { page?.let { load(currentQuery(it), active) } } } }, enabled = !action.busy) { Text("重新读取") } }
+                Row {
+                    TextButton({ showAlbums = true }, enabled = !action.busy) { Text("选择专辑") }
+                    TextButton({ scope.launch { action.run { page?.let { load(currentQuery(it), active) } } } }, enabled = !action.busy) { Text("重新读取") }
+                    TextButton({ scope.launch { purgeStale() } }, enabled = !action.busy) { Text("清理失效候选") }
+                }
                 Text(current?.text("album") ?: "暂无待核对专辑", style = MaterialTheme.typography.titleMedium)
                 Text("${page?.number("total") ?: 0} 首 · 本页 ${tracks.size} 首", style = MaterialTheme.typography.bodySmall); ActionStatus(action)
                 Row { TextButton({ choices = tracks.associate { it.text("id") to defaultReviewChoice(it) } }, enabled = !action.busy) { Text("勾选变化（保留人工值）") }; TextButton({ choices = choices.mapValues { it.value.copy(fields = emptySet()) } }, enabled = !action.busy) { Text("清空") } }
@@ -121,7 +173,11 @@ private val reviewLabels = mapOf("title" to "歌名", "artists" to "歌曲艺人
             if (page != null && page!!.number("total") > 500) item { Row { TextButton({ scope.launch { action.run { load(currentQuery(page!!, (page!!.number("offset") - 500).coerceAtLeast(0))) } } }, enabled = !action.busy && page!!.number("offset") > 0) { Text("上一页") }; TextButton({ scope.launch { action.run { load(currentQuery(page!!, page!!.number("offset") + 500)) } } }, enabled = !action.busy && page!!.number("offset") + 500 < page!!.number("total")) { Text("下一页") } } }
             if (current != null) {
                 item { Text(current.text("title"), style = MaterialTheme.typography.titleLarge); Text(current.getAsJsonArray("artists")?.joinToString(" / ") { it.asString }.orEmpty())
-                    Row { TextButton({ showSources = true }, enabled = !action.busy, modifier = Modifier.weight(1f).testTag("review-source")) { Text(source?.let { reviewCandidateLabel(it, current, names) } ?: "选择候选来源", maxLines = 3, overflow = TextOverflow.Ellipsis) }; TextButton({ refresh = true }, enabled = !action.busy) { Text("查询新资料") } }
+                    Row {
+                        TextButton({ showSources = true }, enabled = !action.busy, modifier = Modifier.weight(1f).testTag("review-source")) { Text(source?.let { reviewCandidateLabel(it, current, names) } ?: "选择候选来源", maxLines = 3, overflow = TextOverflow.Ellipsis) }
+                        TextButton({ refresh = true }, enabled = !action.busy) { Text("查询新资料") }
+                        TextButton({ scope.launch { action.run { rejectTrack(current.text("id")) } } }, enabled = !action.busy) { Text("拒绝本曲建议") }
+                    }
                     if (source != null && source.number("duplicate_count") > 1) Text("已合并 ${source.number("duplicate_count")} 条相同候选记录，不同版本分别保留。", style = MaterialTheme.typography.bodySmall)
                     Row { listOf("fields" to "文字资料", "cover" to "封面对比", "lyrics" to "歌词预览").forEach { (id, label) -> FilterChip(tab == id, { tab = id }, { Text(label) }, modifier = Modifier.padding(end = 6.dp)) } }
                 }
@@ -157,11 +213,15 @@ private val reviewLabels = mapOf("title" to "歌名", "artists" to "歌曲艺人
         }
         Surface(shadowElevation = 4.dp, color = MaterialTheme.colorScheme.surfaceContainer) { Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text("已选 ${selected.size} 首 · ${selected.sumOf { choices[it.text("id")]?.fields?.size ?: 0 }} 个字段${if (cover != null) " · 含固定封面" else ""}", style = MaterialTheme.typography.bodySmall)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { OutlinedButton({ choose(active, emptySet()); next() }, enabled = !action.busy && current != null) { Text("本次跳过") }; Button({ scope.launch { action.run { accept(false) } } }, enabled = !action.busy && (selected.isNotEmpty() || cover != null) && (cover == null || coverReady), modifier = Modifier.testTag("review-accept-selected")) { Text("接受选中项") } }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton({ choose(active, emptySet()); next() }, enabled = !action.busy && current != null) { Text("本次跳过") }
+                Button({ scope.launch { action.run { accept(false) } } }, enabled = !action.busy && (selected.isNotEmpty() || cover != null) && (cover == null || coverReady), modifier = Modifier.testTag("review-accept-selected")) { Text("接受选中项") }
+                Button({ scope.launch { action.run { accept(false, advanceAlbum = true) } } }, enabled = !action.busy && (selected.isNotEmpty() || cover != null) && (cover == null || coverReady), modifier = Modifier.testTag("review-accept-next-album")) { Text("接受并下一专辑") }
+            }
             rejectionNotice?.let { Text(it, style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("review-rejection-notice")) }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton({ scope.launch { action.run { rejectAlbum() } } }, enabled = !action.busy && (page?.text("album_id")?.isNotBlank() == true || current?.text("album_id")?.isNotBlank() == true), modifier = Modifier.weight(1f).testTag("review-reject-album")) { Text("拒绝此专辑所有建议") }
                 TextButton({ scope.launch { action.run { rejectCurrent() } } }, enabled = !action.busy && source != null, modifier = Modifier.weight(1f).testTag("review-reject-current")) { Text("拒绝当前建议") }
-                TextButton({ scope.launch { action.run { accept(true) } } }, enabled = !action.busy && (choices[active]?.fields?.isNotEmpty() == true || cover != null) && (cover == null || (coverReady && !coverAll)), modifier = Modifier.weight(1f)) { Text("接受本曲并下一首") }
             }
         } }
     }

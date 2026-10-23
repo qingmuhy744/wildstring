@@ -121,24 +121,30 @@ test('歌词浏览只在拖动后显式跳转，点击切换封面，空白不�
   expect((await audio(page)).paused).toBe(true);
   await expect(dialog.getByRole('button', { name: '跟随播放', exact: true })).toBeDisabled();
   await page.waitForTimeout(350);
-  await dialog
-    .getByRole('button', { name: /^切换到封面/ })
-    .first()
-    .click();
-  await expect(dialog.getByRole('list', { name: '歌词', exact: true })).toHaveCount(0);
-  await dialog.getByRole('button', { name: '显示歌词', exact: true }).click();
-  await expect(dialog.getByRole('list', { name: '歌词', exact: true })).toBeVisible();
+  if (info.project.name === 'mobile') {
+    await dialog
+      .getByRole('button', { name: /^切换到封面/ })
+      .first()
+      .click();
+    await expect(dialog.getByRole('list', { name: '歌词', exact: true })).toHaveCount(0);
+    await dialog.getByRole('button', { name: '显示歌词', exact: true }).click();
+    await expect(dialog.getByRole('list', { name: '歌词', exact: true })).toBeVisible();
+  } else {
+    const targetLine = dialog.getByRole('button', { name: /^跳转到/ }).last();
+    await targetLine.click();
+    await expect.poll(async () => (await audio(page)).time).toBeGreaterThanOrEqual(5.9);
+  }
   const blank = async () => {
     const bounds = (await viewport.boundingBox())!;
     await page.mouse.click(bounds.x + 2, bounds.y + 2);
   };
   await blank();
   await expect(dialog.getByRole('list', { name: '歌词', exact: true })).toBeVisible();
-  await dialog.getByRole('button', { name: '显示歌词', exact: true }).click();
-  await expect(dialog.getByRole('list', { name: '歌词', exact: true })).toHaveCount(0);
-  // Empty space beside the visual must not reopen the lyrics either.
+  // Empty space beside the visual or lyrics must not exit fullscreen
   const record = (await dialog.locator('.fullscreen-record').boundingBox())!;
   await page.mouse.click(record.x + 2, record.y + 2);
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole('button', { name: '收起全屏播放', exact: true }).click();
   await expect(dialog).toBeHidden();
   await page.getByRole('button', { name: '全屏播放', exact: true }).click();
   const reopened = page.getByRole('dialog', { name: '全屏播放', exact: true });

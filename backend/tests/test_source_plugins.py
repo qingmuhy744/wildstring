@@ -108,6 +108,43 @@ def test_zip_lifecycle_worker_matching_and_lyrics(settings, authenticated_client
         assert playing["source"] == "fixture-source" and playing["offset_ms"] == 250
         assert playing["lines"][0]["words"][1]["start_ms"] == 1750
         assert playing["lines"][0]["translation"] == "Synthetic translation"
+        # Saving unchanged text must not wipe out the active candidate
+        editor_after = client.get(f"/api/v1/manage/tracks/{track['id']}/lyrics").json()
+        saved = client.put(
+            f"/api/v1/manage/tracks/{track['id']}/lyrics",
+            headers=HEADERS,
+            json={
+                "version": editor_after["version"],
+                "file_version": editor_after["file_version"],
+                "text": editor_after["text"],
+            },
+        )
+        assert saved.status_code == 200
+        playing_after = client.get(f"/api/v1/tracks/{track['id']}/lyrics").json()
+        assert playing_after["source"] == "fixture-source"
+        assert len(playing_after["lines"][0]["words"]) > 0
+
+        # After version advances due to custom text edit, old candidate can still be re-applied
+        saved_custom = client.put(
+            f"/api/v1/manage/tracks/{track['id']}/lyrics",
+            headers=HEADERS,
+            json={
+                "version": saved.json()["version"],
+                "file_version": saved.json()["file_version"],
+                "text": "[00:01.000] Custom manual override line",
+            },
+        )
+        assert saved_custom.status_code == 200
+        reapplied = client.post(
+            f"/api/v1/manage/lyric-candidates/{candidate['id']}/apply",
+            headers=HEADERS,
+            json=choice,
+        )
+        assert reapplied.status_code == 200
+        playing_restored = client.get(f"/api/v1/tracks/{track['id']}/lyrics").json()
+        assert playing_restored["source"] == "fixture-source"
+        assert playing_restored["lines"][0]["translation"] == "Synthetic translation"
+
         deletion_response = client.delete(BASE + "/fixture-source?version=2", headers=HEADERS)
         assert deletion_response.status_code == 409
         assert (

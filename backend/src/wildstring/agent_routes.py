@@ -148,6 +148,10 @@ def agent_router(service):
     def reject_review(body: ReviewReject, actor: Annotated[object, Depends(session)]):
         return service.reject_metadata_review(actor, body)
 
+    @router.post("/metadata-review/stale/purge")
+    def purge_stale_review(actor: Annotated[object, Depends(session)]):
+        return service.purge_stale(actor)
+
     @router.post("/metadata-review/cover")
     def review_cover(body: DraftCreate, actor: Annotated[object, Depends(session)]):
         if body.kind != "cover":
