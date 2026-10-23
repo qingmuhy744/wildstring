@@ -38,7 +38,7 @@ export function LyricsEditor({
 }) {
   const [record, setRecord] = useState<Record | null>(null),
     [text, setText] = useState('');
-  const [panelTab, setPanelTab] = useState<'online' | 'manual'>('online');
+  const [panelTab, setPanelTab] = useState<'online' | 'manual'>('manual');
   const [restore, setRestore] = useState(false),
     [busy, setBusy] = useState(false),
     [error, setError] = useState(''),
@@ -297,9 +297,9 @@ export function LyricsEditor({
               type="button"
               disabled={busy}
               onClick={play}
-              aria-label={mine && player.playing ? '暂停歌曲' : '播放这首歌'}
+              aria-label={mine && player.playing ? '暂停打点歌曲' : '播放打点歌曲'}
             >
-              {mine && player.playing ? 'Ⅱ 暂停' : '▶ 播放这首歌'}
+              {mine && player.playing ? 'Ⅱ 暂停' : '▶ 播放打点歌曲'}
             </button>
             <span>
               {time(mine ? player.position : 0)} /{' '}
@@ -647,7 +647,7 @@ export function LyricsEditor({
                   }
                   onClick={() => (mode === 'preview' ? void save() : checkPreview())}
                 >
-                  {busy ? '处理中…' : mode === 'preview' ? '保存自定义歌词' : '预览歌词'}
+                  {busy ? '处理中…' : mode === 'preview' ? '保存歌词' : '预览歌词'}
                 </button>
               </div>
             </div>

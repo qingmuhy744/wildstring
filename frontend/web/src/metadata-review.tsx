@@ -1015,38 +1015,39 @@ export function MetadataReviewWorkbench({
           已选 {selected.length} 首 · {fieldCount} 个字段{cover ? ' · 含已预览封面' : ''}
         </span>
         <div>
-          <button disabled={disabled || !page} data-help={hints.reviewSkip} onClick={nextAlbum}>
-            跳过此专辑
+          <button
+            disabled={disabled || !current}
+            data-help={hints.reviewSkip}
+            onClick={() => {
+              if (current) choose(current.id, []);
+              nextItem();
+            }}
+          >
+            本次跳过 / 下一首
           </button>
           <button
             className="danger"
             disabled={disabled || !page?.album_id}
             onClick={() => void rejectAlbum()}
             data-help={hints.reviewReject}
+            title="一键拒绝整专所有建议"
           >
-            拒绝此专辑所有建议
+            拒绝整专建议
           </button>
           <button
             disabled={disabled || !candidate}
             onClick={() => void rejectCurrent()}
             data-help={hints.reviewReject}
           >
-            拒绝当前单条建议
-          </button>
-          <button
-            disabled={disabled || (!selected.length && !cover) || (!!cover && !coverReady)}
-            data-help={hints.reviewAccept}
-            onClick={() => void accept(false, false)}
-          >
-            仅接受选中项
+            拒绝当前建议
           </button>
           <button
             className="primary"
             disabled={disabled || (!selected.length && !cover) || (!!cover && !coverReady)}
             data-help={hints.reviewAccept}
-            onClick={() => void accept(false, true)}
+            onClick={() => void accept()}
           >
-            {busy ? '应用中…' : '接受并进入下一专辑'}
+            {busy ? '应用中…' : '接受选中项'}
           </button>
         </div>
       </footer>

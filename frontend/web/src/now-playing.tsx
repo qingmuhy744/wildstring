@@ -334,6 +334,7 @@ export function NowPlaying({
                       <button
                         type="button"
                         className="player-meta-link player-album-link"
+                        aria-label={`查看所属专辑 ${current.album || '未知专辑'}`}
                         onClick={() => onOpenAlbum(current)}
                       >
                         {current.album}
