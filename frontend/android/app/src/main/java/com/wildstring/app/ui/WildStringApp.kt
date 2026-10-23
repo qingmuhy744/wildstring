@@ -214,7 +214,7 @@ fun WildStringApp(model: MusicViewModel) {
                 } }
                 com.wildstring.app.update.UpdatePrompt()
                 LaunchedEffect(state.playing, state.handoff?.version) {
-                    if (state.playing && state.handoff != null) model.dismissHandoff()
+                    if (state.playing && state.current != null && state.handoff != null) model.dismissHandoff()
                 }
                 AnimatedVisibility(
                     visible = state.handoff != null && !state.playing,
