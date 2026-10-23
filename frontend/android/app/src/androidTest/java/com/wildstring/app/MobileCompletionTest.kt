@@ -479,10 +479,12 @@ class MobileCompletionTest {
         try {
             // The API/state update can finish before the first measured frame.
             // Wait for the actual notice and action to be visible, not just composed.
-            compose.waitUntil(10_000) {
+            // The handoff notice intentionally dismisses itself after 8 seconds;
+            // assert it before that lifecycle expires.
+            compose.waitUntil(5_000) {
                 vm.state.value.handoff?.version == version &&
                     compose.onNodeWithTag("playback-handoff-notice").isDisplayed() &&
-                    compose.onNodeWithText("其他设备有可接续的进度").isDisplayed() &&
+                    compose.onNodeWithText("其他设备有接续进度").isDisplayed() &&
                     compose.onNodeWithText("载入进度").isDisplayed()
             }
         } catch (error: Throwable) {
