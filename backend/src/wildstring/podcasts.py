@@ -66,6 +66,7 @@ class PodcastCreateRequest(BaseModel):
         "latest_3"
     )
     retention_policy: Literal["keep", "delete_after_played"] = "keep"
+    slow_download: bool = False
 
 
 class PodcastUpdateRequest(BaseModel):
@@ -77,6 +78,7 @@ class PodcastUpdateRequest(BaseModel):
         Literal["latest_3", "latest_5", "latest_10", "unplayed", "all", "none"] | None
     ) = None
     retention_policy: Literal["keep", "delete_after_played"] | None = None
+    slow_download: bool | None = None
 
 
 class PodcastStorageResponse(BaseModel):
@@ -126,6 +128,7 @@ class PodcastSummaryResponse(BaseModel):
     update_interval_minutes: int
     download_policy: str = "latest_3"
     retention_policy: str = "keep"
+    slow_download: bool = False
     last_updated_at: str | None
     created_at: str
     total_episodes: int
@@ -388,6 +391,10 @@ class PodcastManager:
                         conn.execute(
                             "ALTER TABLE podcasts ADD COLUMN retention_policy TEXT NOT NULL DEFAULT 'keep'"
                         )
+                    if "slow_download" not in p_cols:
+                        conn.execute(
+                            "ALTER TABLE podcasts ADD COLUMN slow_download INTEGER NOT NULL DEFAULT 0"
+                        )
 
                 columns = {r[1] for r in conn.execute("PRAGMA table_info(podcast_episodes)")}
                 if columns:
@@ -462,14 +469,16 @@ class PodcastManager:
             if not info:
                 info = self._get_episode_display_info(episode_id)
 
+            is_slow = bool(info.get("slow_download")) if info else False
             if info:
                 self._active_downloads[episode_id] = {
                     **info,
                     "status": "downloading",
+                    "slow_mode": is_slow,
                     "started_at": datetime.now(UTC).isoformat(),
                 }
             try:
-                success = self.download_episode(episode_id)
+                success = self.download_episode(episode_id, slow_download=is_slow)
                 item = self._active_downloads.pop(episode_id, info or {})
                 if success:
                     self._recent_completed.appendleft(
@@ -497,6 +506,12 @@ class PodcastManager:
                     "failed_at": datetime.now(UTC).isoformat(),
                 }
             finally:
+                if is_slow and not self.stopping.is_set():
+                    # 慢速防限流平缓模式：单集之间平缓延时 4 秒，防止源站并发触发频率限制
+                    for _ in range(40):
+                        if self.stopping.is_set():
+                            break
+                        time.sleep(0.1)
                 self._download_queue.task_done()
 
     def _scheduler_loop(self):
@@ -596,6 +611,7 @@ class PodcastManager:
         update_interval_minutes: int = 60,
         download_policy: str = "latest_3",
         retention_policy: str = "keep",
+        slow_download: bool = False,
     ) -> dict[str, Any]:
         with self.database.connect() as conn:
             existing = conn.execute(
@@ -617,8 +633,8 @@ class PodcastManager:
                 INSERT INTO podcasts (
                     id, title, author, description, feed_url, cover_url,
                     auto_update, update_interval_minutes, download_policy, retention_policy,
-                    last_updated_at, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    slow_download, last_updated_at, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     podcast_id,
@@ -631,6 +647,7 @@ class PodcastManager:
                     update_interval_minutes,
                     download_policy,
                     retention_policy,
+                    1 if slow_download else 0,
                     created_time,
                     created_time,
                 ),
@@ -677,6 +694,7 @@ class PodcastManager:
         update_interval_minutes: int | None = None,
         download_policy: str | None = None,
         retention_policy: str | None = None,
+        slow_download: bool | None = None,
     ) -> bool:
         with self.database.connect(write=True) as conn:
             row = conn.execute("SELECT * FROM podcasts WHERE id = ?", (podcast_id,)).fetchone()
@@ -699,15 +717,28 @@ class PodcastManager:
                 if retention_policy is not None
                 else (row["retention_policy"] if "retention_policy" in row.keys() else "keep")
             )
+            new_slow = (
+                (1 if slow_download else 0)
+                if slow_download is not None
+                else (row["slow_download"] if "slow_download" in row.keys() else 0)
+            )
 
             conn.execute(
                 """
                 UPDATE podcasts
                 SET title = ?, auto_update = ?, update_interval_minutes = ?,
-                    download_policy = ?, retention_policy = ?
+                    download_policy = ?, retention_policy = ?, slow_download = ?
                 WHERE id = ?
                 """,
-                (new_title, new_auto, new_interval, new_policy, new_retention, podcast_id),
+                (
+                    new_title,
+                    new_auto,
+                    new_interval,
+                    new_policy,
+                    new_retention,
+                    new_slow,
+                    podcast_id,
+                ),
             )
 
         if new_auto and new_policy != "none":
@@ -809,13 +840,14 @@ class PodcastManager:
         except Exception as e:
             logger.debug("Failed saving podcast metadata files: %s", e)
 
-    def download_episode(self, episode_id: str) -> bool:
+    def download_episode(self, episode_id: str, slow_download: bool | None = None) -> bool:
         with self.database.connect() as conn:
             row = conn.execute(
                 """
                 SELECT e.id, e.podcast_id, e.title, e.audio_url, e.pub_date, e.episode_number,
                        e.local_path, e.download_status, p.title as podcast_title, p.cover_url,
-                       p.author, p.feed_url, p.description
+                       p.author, p.feed_url, p.description,
+                       COALESCE(p.slow_download, 0) as slow_download
                 FROM podcast_episodes e
                 JOIN podcasts p ON p.id = e.podcast_id
                 WHERE e.id = ?
@@ -830,6 +862,7 @@ class PodcastManager:
             existing_path = row["local_path"]
             if existing_path and os.path.isfile(existing_path):
                 return True
+            is_slow = bool(row["slow_download"]) if slow_download is None else bool(slow_download)
 
         self.storage_dir.mkdir(parents=True, exist_ok=True)
         podcast_dir = self.storage_dir / sanitize_filename(podcast_title)
@@ -892,15 +925,29 @@ class PodcastManager:
                 last_sample_bytes = 0
                 speed_bps = 0.0
 
+                chunk_size = 32 * 1024 if is_slow else 64 * 1024
+                target_bps = 512 * 1024 if is_slow else None
+
                 with open(temp_path, "wb") as f:
                     while True:
                         if self.stopping.is_set():
                             raise Exception("下载已被停止")
-                        chunk = resp.read(64 * 1024)
+                        t_chunk_start = time.perf_counter()
+                        chunk = resp.read(chunk_size)
                         if not chunk:
                             break
                         f.write(chunk)
                         downloaded_bytes += len(chunk)
+
+                        if target_bps:
+                            min_duration = len(chunk) / target_bps
+                            elapsed = time.perf_counter() - t_chunk_start
+                            if min_duration > elapsed:
+                                sleep_time = min_duration - elapsed
+                                while sleep_time > 0 and not self.stopping.is_set():
+                                    step = min(sleep_time, 0.05)
+                                    time.sleep(step)
+                                    sleep_time -= step
 
                         now_t = time.time()
                         delta = now_t - last_sample_t
@@ -927,6 +974,7 @@ class PodcastManager:
                                             if total_bytes > 0
                                             else "未知大小"
                                         ),
+                                        "slow_mode": is_slow,
                                     }
                                 )
 
@@ -941,7 +989,12 @@ class PodcastManager:
             return True
         except urllib.error.HTTPError as e:
             if e.code == 429:
-                err_msg = "源站频繁请求限流 (HTTP 429 Too Many Requests)，请稍后重试"
+                err_msg = "源站频繁请求限流 (HTTP 429 Too Many Requests)，已启动防限流冷却"
+                # 冷却退避 15 秒，保护源站
+                for _ in range(150):
+                    if self.stopping.is_set():
+                        break
+                    time.sleep(0.1)
             elif e.code == 403:
                 err_msg = "源站防盗链或拒绝访问 (HTTP 403 Forbidden)"
             elif e.code == 404:
@@ -1082,7 +1135,8 @@ class PodcastManager:
                 row = conn.execute(
                     """
                     SELECT e.id, e.podcast_id, e.title, e.pub_date, e.episode_number,
-                           e.duration_seconds, e.download_status, p.title as podcast_title, p.cover_url
+                           e.duration_seconds, e.download_status, p.title as podcast_title, p.cover_url,
+                           COALESCE(p.slow_download, 0) as slow_download
                     FROM podcast_episodes e
                     JOIN podcasts p ON p.id = e.podcast_id
                     WHERE e.id = ?
@@ -1101,6 +1155,7 @@ class PodcastManager:
                     "episode_number": row["episode_number"],
                     "duration_seconds": row["duration_seconds"],
                     "download_status": row["download_status"],
+                    "slow_download": bool(row["slow_download"]),
                 }
         except Exception:
             return None
@@ -1201,6 +1256,7 @@ class PodcastManager:
                     p.auto_update, p.update_interval_minutes,
                     COALESCE(p.download_policy, 'latest_3') as download_policy,
                     COALESCE(p.retention_policy, 'keep') as retention_policy,
+                    COALESCE(p.slow_download, 0) as slow_download,
                     p.last_updated_at, p.created_at,
                     COUNT(e.id) AS total_episodes,
                     SUM(CASE WHEN COALESCE(pr.completed, 0) = 0 THEN 1 ELSE 0 END) AS unplayed_episodes,
@@ -1224,6 +1280,7 @@ class PodcastManager:
                     "update_interval_minutes": r["update_interval_minutes"],
                     "download_policy": r["download_policy"],
                     "retention_policy": r["retention_policy"],
+                    "slow_download": bool(r["slow_download"]),
                     "last_updated_at": r["last_updated_at"],
                     "created_at": r["created_at"],
                     "total_episodes": r["total_episodes"] or 0,
@@ -1243,6 +1300,7 @@ class PodcastManager:
                     p.auto_update, p.update_interval_minutes,
                     COALESCE(p.download_policy, 'latest_3') as download_policy,
                     COALESCE(p.retention_policy, 'keep') as retention_policy,
+                    COALESCE(p.slow_download, 0) as slow_download,
                     p.last_updated_at, p.created_at,
                     COUNT(e.id) AS total_episodes,
                     SUM(CASE WHEN COALESCE(pr.completed, 0) = 0 THEN 1 ELSE 0 END) AS unplayed_episodes,
@@ -1316,6 +1374,7 @@ class PodcastManager:
                     "update_interval_minutes": p["update_interval_minutes"],
                     "download_policy": p["download_policy"],
                     "retention_policy": p["retention_policy"],
+                    "slow_download": bool(p["slow_download"]),
                     "last_updated_at": p["last_updated_at"],
                     "created_at": p["created_at"],
                     "total_episodes": p["total_episodes"] or 0,
@@ -1444,6 +1503,7 @@ def podcast_router(manager: PodcastManager, auth: Auth) -> APIRouter:
             update_interval_minutes=payload.update_interval_minutes,
             download_policy=payload.download_policy,
             retention_policy=payload.retention_policy,
+            slow_download=payload.slow_download,
         )
 
     @router.put(
@@ -1463,6 +1523,7 @@ def podcast_router(manager: PodcastManager, auth: Auth) -> APIRouter:
             update_interval_minutes=payload.update_interval_minutes,
             download_policy=payload.download_policy,
             retention_policy=payload.retention_policy,
+            slow_download=payload.slow_download,
         )
         return manager.get_podcast_detail(podcast_id, user["id"])
 
@@ -1494,7 +1555,10 @@ def podcast_router(manager: PodcastManager, auth: Auth) -> APIRouter:
     def download_all_episodes(
         podcast_id: str,
         user: Annotated[dict, Depends(auth.require_session)],
+        slow_download: bool | None = None,
     ):
+        if slow_download is not None:
+            manager.update_podcast(podcast_id, slow_download=slow_download)
         manager._auto_download_by_policy(podcast_id, "all")
         return {"status": "queued", "id": podcast_id}
 

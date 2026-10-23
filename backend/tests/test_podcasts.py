@@ -150,10 +150,12 @@ def test_podcast_full_lifecycle(settings: Settings, authenticated_client):
                     "auto_update": True,
                     "download_policy": "latest_5",
                     "retention_policy": "keep",
+                    "slow_download": True,
                 },
             )
             assert update_settings_res.status_code == 200
             assert update_settings_res.json()["podcast"]["download_policy"] == "latest_5"
+            assert update_settings_res.json()["podcast"]["slow_download"] is True
 
             # 7.2 Check storage info
             storage_res = client.get(

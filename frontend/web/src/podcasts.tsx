@@ -14,6 +14,7 @@ export interface PodcastSummary {
   update_interval_minutes: number;
   download_policy: string;
   retention_policy: string;
+  slow_download?: boolean;
   last_updated_at: string | null;
   created_at: string;
   total_episodes: number;
@@ -77,6 +78,7 @@ export interface DownloadTaskItem {
   speed_human?: string;
   downloaded_human?: string;
   total_human?: string;
+  slow_mode?: boolean;
 }
 
 export interface DownloadQueueInfo {
@@ -171,6 +173,7 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({ onPlayTrack }) => {
   const [storageInfo, setStorageInfo] = useState<PodcastStorageInfo | null>(null);
   const [downloadPolicy, setDownloadPolicy] = useState('latest_5');
   const [retentionPolicy, setRetentionPolicy] = useState('keep_all');
+  const [slowDownload, setSlowDownload] = useState(false);
   const [savingSettings, setSavingSettings] = useState(false);
   const [cleaningDownloads, setCleaningDownloads] = useState(false);
 
@@ -331,6 +334,7 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({ onPlayTrack }) => {
     setSettingsPodcast(p);
     setDownloadPolicy(p.download_policy || 'latest_5');
     setRetentionPolicy(p.retention_policy || 'keep_all');
+    setSlowDownload(Boolean(p.slow_download));
     try {
       const info = await api<PodcastStorageInfo>(`/podcasts/${encodeURIComponent(p.id)}/storage`);
       setStorageInfo(info);
@@ -361,6 +365,7 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({ onPlayTrack }) => {
           body: JSON.stringify({
             download_policy: downloadPolicy,
             retention_policy: retentionPolicy,
+            slow_download: slowDownload,
           }),
         },
       );
@@ -1092,6 +1097,44 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({ onPlayTrack }) => {
                 </div>
               </div>
 
+              <div className="podcast-settings-section" style={{ marginTop: '1rem' }}>
+                <label style={{ fontSize: '0.85rem', fontWeight: 600 }}>防限流与平缓下载</label>
+                <div style={{ marginTop: '0.4rem' }}>
+                  <label
+                    className="podcast-radio-label"
+                    style={{
+                      display: 'flex',
+                      alignItems: 'flex-start',
+                      gap: '0.6rem',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={slowDownload}
+                      onChange={(e) => setSlowDownload(e.target.checked)}
+                      style={{ marginTop: '0.2rem' }}
+                    />
+                    <div>
+                      <div style={{ fontWeight: 500, fontSize: '0.88rem' }}>
+                        慢慢地下载（防限流平缓模式）
+                      </div>
+                      <div
+                        style={{
+                          fontSize: '0.78rem',
+                          color: 'var(--color-text-muted, #888)',
+                          marginTop: '0.2rem',
+                          lineHeight: 1.4,
+                        }}
+                      >
+                        单集之间增加 4 秒延时并平缓限速（约 512
+                        KB/s），避免自动下载全部单集时触发播客源站封禁或限流报错 (HTTP 429)。
+                      </div>
+                    </div>
+                  </label>
+                </div>
+              </div>
+
               <div
                 style={{
                   marginTop: '1.25rem',
@@ -1315,7 +1358,8 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({ onPlayTrack }) => {
                               </div>
                               <div className="queue-task-metrics">
                                 <span className="queue-task-speed">
-                                  ⚡ {task.speed_human || '正在拉取数据…'}
+                                  {task.slow_mode ? '🍃 平缓限速 · ' : '⚡ '}
+                                  {task.speed_human || '正在拉取数据…'}
                                 </span>
                                 <span>
                                   {task.downloaded_human

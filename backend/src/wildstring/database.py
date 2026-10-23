@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS podcasts (
     update_interval_minutes INTEGER NOT NULL DEFAULT 60,
     download_policy TEXT NOT NULL DEFAULT 'latest_3',
     retention_policy TEXT NOT NULL DEFAULT 'keep',
+    slow_download INTEGER NOT NULL DEFAULT 0,
     last_updated_at TEXT,
     created_at TEXT NOT NULL
 );

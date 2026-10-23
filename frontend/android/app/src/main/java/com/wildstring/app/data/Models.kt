@@ -159,6 +159,7 @@ data class PodcastSummary(
     @SerializedName("auto_update") val autoUpdate: Boolean = true,
     @SerializedName("update_interval_minutes") val updateIntervalMinutes: Int = 60,
     @SerializedName("last_updated_at") val lastUpdatedAt: String? = null,
+    @SerializedName("slow_download") val slowDownload: Boolean = false,
     @SerializedName("created_at") val createdAt: String = "",
     @SerializedName("total_episodes") val totalEpisodes: Int = 0,
     @SerializedName("unplayed_episodes") val unplayedEpisodes: Int = 0,
@@ -200,6 +201,7 @@ data class PodcastSubscribeRequest(
     @SerializedName("feed_url") val feedUrl: String,
     @SerializedName("auto_update") val autoUpdate: Boolean = true,
     @SerializedName("update_interval_minutes") val updateIntervalMinutes: Int = 60,
+    @SerializedName("slow_download") val slowDownload: Boolean = false,
 )
 
 data class PodcastProgressUpdate(
