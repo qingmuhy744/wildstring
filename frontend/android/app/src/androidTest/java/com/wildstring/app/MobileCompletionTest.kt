@@ -486,6 +486,11 @@ class MobileCompletionTest {
             // Wait for the actual notice and action to be visible, not just composed.
             // The handoff notice intentionally dismisses itself after 8 seconds;
             // assert it before that lifecycle expires.
+            if (vm.state.value.handoff?.version != version) {
+                // Media3 can finish its asynchronous stop just after the initial
+                // check; retry once after the controller has settled.
+                runBlocking { withContext(Dispatchers.Main) { vm.checkSharedPlayback() } }
+            }
             compose.waitUntil(5_000) {
                 vm.state.value.handoff?.version == version &&
                     compose.onNodeWithTag("playback-handoff-notice").isDisplayed() &&
