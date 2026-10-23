@@ -769,11 +769,6 @@ export function QualityControl({ player }: { player: Player }) {
         data-help={hints.playbackQuality}
         value={player.quality}
         onChange={(event) => player.changeQuality(event.target.value)}
-        title={
-          isPassthrough
-            ? `当前音频为 ${format || '有损'} 源，已自动原音直通播放，避免二次转码破坏音质`
-            : undefined
-        }
       >
         <option value="original">原音</option>
         {[128, 192, 256, 320].map((rate) => (
@@ -782,12 +777,9 @@ export function QualityControl({ player }: { player: Player }) {
           </option>
         ))}
       </select>
-      {isPassthrough && (
-        <span
-          className="quality-passthrough-hint"
-          title={`当前音频为 ${format || '有损'} 格式，已原音直通`}
-        >
-          {format ? `${format}直通` : '有损直通'}
+      {isPassthrough && format && (
+        <span className="quality-passthrough-hint" title={`当前音源：${format}`}>
+          {format}
         </span>
       )}
     </label>
