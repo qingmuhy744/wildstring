@@ -96,9 +96,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             await asyncio.to_thread(diagnostics.stop)
 
     development = current.environment != "production"
+    try:
+        app_version = version("wildstring-backend")
+    except Exception:
+        app_version = "0.7.0"
+
     app = FastAPI(
         title="WildString API",
-        version=version("wildstring-backend"),
+        version=app_version,
         lifespan=lifespan,
         docs_url="/docs" if development else None,
         redoc_url=None,
