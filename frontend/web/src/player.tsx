@@ -467,9 +467,7 @@ export function usePlayer(userId: string) {
       ? '离线播放'
       : plan?.mode === 'transcode'
         ? `AAC ${plan.output.bitrate_kbps} kbps`
-        : plan?.reason === 'lossy_passthrough'
-          ? '原音直通'
-          : '原音直放',
+        : '原音直放',
     start,
     step,
     seek,
