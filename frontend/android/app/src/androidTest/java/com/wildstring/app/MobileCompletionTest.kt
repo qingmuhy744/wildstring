@@ -207,6 +207,11 @@ class MobileCompletionTest {
         compose.waitUntil(20_000) { connection.isCompleted && vm.state.value.connected && vm.state.value.server == address && !vm.state.value.loading }
         compose.waitUntil(10_000) { compose.runOnIdle { vm.controller != null } }
         compose.runOnIdle { vm.controller?.pause(); vm.controller?.stop(); vm.controller?.clearMediaItems() }
+        compose.waitUntil(5_000) {
+            compose.runOnIdle {
+                vm.controller?.let { !it.isPlaying && !it.playWhenReady && it.mediaItemCount == 0 } == true
+            }
+        }
         return vm
     }
     private fun cleanup(vm: MusicViewModel) { compose.runOnIdle { vm.sleep.cancel(); vm.repository.session.invalidate(); vm.controller?.stop(); vm.controller?.clearMediaItems() } }
@@ -498,7 +503,7 @@ class MobileCompletionTest {
     @Test fun crossDevicePromptRestoresPausedAndPausePublishesWithoutManualClaim() {
         Fixture().use { fixture -> val vm = connect(fixture)
             try {
-                compose.runOnIdle { vm.sharing.mode("ask") }
+                compose.runOnIdle { vm.observeProgress(false); vm.sharing.mode("ask") }
                 for (ignored in listOf(remotePause(65, "playing"), remotePause(66, "unknown"), remotePause(67, eligible = false), remotePause(68, device = vm.deviceId()))) {
                     fixture.snapshot = ignored
                     runBlocking { withContext(Dispatchers.Main) { vm.checkSharedPlayback() } }
