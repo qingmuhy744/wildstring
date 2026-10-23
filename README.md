@@ -8,7 +8,21 @@
 
 0.5.2 更新：自定义头像、推荐临时歌单、紧凑对话菜单、角落通知与跨设备轻提示，整理导航并修复主题配色和面板滚动；新 AI 连接默认 8192 Token / low / 90 秒，Android 歌词默认 2 秒恢复跟随并可调整。见[发布说明](docs/releases/v0.5.2.md)。
 
-[![CI](https://github.com/qingmuhy744/wildstring/actions/workflows/ci.yml/badge.svg)](https://github.com/qingmuhy744/wildstring/actions/workflows/ci.yml)
+[![Latest Release](https://img.shields.io/github/v/release/qingmuhy744/wildstring?logo=github&color=5865F2)](https://github.com/qingmuhy744/wildstring/releases/latest)
+[![CI](https://img.shields.io/github/actions/workflow/status/qingmuhy744/wildstring/ci.yml?branch=main&label=CI&logo=githubactions&logoColor=white)](https://github.com/qingmuhy744/wildstring/actions)
+[![CodeQL](https://img.shields.io/github/actions/workflow/status/qingmuhy744/wildstring/codeql.yml?branch=main&label=CodeQL&logo=github&logoColor=white)](https://github.com/qingmuhy744/wildstring/security/code-scanning)
+[![Architecture](https://img.shields.io/badge/Architecture-Self--Hosted%20%7C%20AI--Native-E25A24.svg)](docs/product/scope.md)
+[![AI Engine](https://img.shields.io/badge/AI-NL%20Search%20%26%20Curation-9C27B0.svg?logo=openai&logoColor=white)](docs/product/scope.md)
+[![Audio Engine](https://img.shields.io/badge/Audio-Lossless%20%2F%20Hi--Res-00BCD4.svg)](docs/product/scope.md)
+[![Web](https://img.shields.io/badge/Web-React%20%7C%20TypeScript-61DAFB.svg?logo=react&logoColor=black)](frontend/web)
+[![Android](https://img.shields.io/badge/Android-Kotlin%20%7C%20Compose-3DDC84.svg?logo=android&logoColor=white)](frontend/android)
+[![iOS](https://img.shields.io/badge/iOS-SwiftUI-000000.svg?logo=apple&logoColor=white)](frontend/ios)
+[![Backend](https://img.shields.io/badge/Backend-Python%203.12%20%7C%20FastAPI-3776AB.svg?logo=python&logoColor=white)](backend)
+[![Database](https://img.shields.io/badge/Database-SQLite%20WAL-003B57.svg?logo=sqlite&logoColor=white)](backend/src/wildstring/database.py)
+[![Metadata](https://img.shields.io/badge/Metadata-MusicBrainz%20%7C%20AcoustID-EB743B.svg)](contracts/metadata-providers.md)
+[![Docker](https://img.shields.io/badge/Docker-Ready-2496ED.svg?logo=docker&logoColor=white)](deploy/Dockerfile)
+[![Vibe](https://img.shields.io/badge/Vibe-Rock%20%26%20Wild-ff69b4.svg)](#名字的来处)
+[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 **AI native 的私人音乐播放器。** 从自己的音乐收藏出发，用自然语言找歌、生成歌单，让收藏的音乐有新的回响。
 
