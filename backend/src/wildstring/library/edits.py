@@ -1,6 +1,8 @@
 """File observations and versioned overrides; never writes audio files."""
 
 import json
+import re
+from pathlib import Path
 from uuid import UUID, uuid4
 
 from fastapi import HTTPException
@@ -118,8 +120,24 @@ class Overrides(BaseModel):
     disc_total: int | None = Field(default=None, ge=1, le=99999)
     release_date: str | None = None
     original_date: str | None = None
+    label: str | None = Field(default=None, max_length=500)
+    catalog_number: str | None = Field(default=None, max_length=500)
     external_ids: dict | None = Field(default=None, max_length=20)
     description: str | None = Field(default=None, max_length=4096)
+
+    @model_validator(mode="before")
+    @classmethod
+    def sanitize_null_values(cls, data):
+        if not isinstance(data, dict):
+            return data
+        clean = dict(data)
+        if "genres" in clean and clean["genres"] is None:
+            clean["genres"] = []
+        if "tags" in clean and clean["tags"] is None:
+            clean["tags"] = []
+        if "description" in clean and clean["description"] is None:
+            clean["description"] = ""
+        return clean
 
     @model_validator(mode="after")
     def validate_values(self):
@@ -195,21 +213,33 @@ class MetadataEditor:
                 JOIN tracks t ON t.id=m.track_id WHERE t.id=? AND t.library_id=?""",
                 (track_id, self.repository.library_id()),
             ).fetchone()
+            if row is None:
+                raise HTTPException(404, "track_not_found")
             origins = {
                 r[0]: r[1]
                 for r in connection.execute(
                     "SELECT field,source FROM metadata_origins WHERE track_id=?", (track_id,)
                 )
             }
-        if row is None:
-            raise HTTPException(404, "track_not_found")
+            source_row = connection.execute(
+                "SELECT source_path FROM imported_files WHERE target_path=? LIMIT 1",
+                (row["path"],),
+            ).fetchone()
         observed, overrides = (
             DETAIL_DEFAULTS | json.loads(row["observed"]),
             json.loads(row["overrides"]),
         )
+        source_path = source_row["source_path"] if source_row else row["path"]
+        source_stem = Path(source_path).stem
+        clean_stem = (
+            re.sub(r"^(?:(?:未编号|\d{1,3})[\s.\-_]+)", "", source_stem).strip() or source_stem
+        )
         return {
             "track_id": track_id,
             "path": row["path"],
+            "source_path": source_row["source_path"] if source_row else None,
+            "source_filename": Path(source_path).name,
+            "source_stem": clean_stem,
             "version": row["version"],
             "observed": observed,
             "overrides": overrides,

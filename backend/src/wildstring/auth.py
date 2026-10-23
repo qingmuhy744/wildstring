@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import secrets
 import time
+from importlib.metadata import PackageNotFoundError, version
 from typing import Literal
 from uuid import uuid4
 
@@ -238,7 +239,15 @@ class Auth:
         def status(request: Request, response: Response):
             response.headers["Cache-Control"] = "no-store"
             authenticated = self.authenticated(request)
-            result = {"configured": self.configured(), "authenticated": authenticated}
+            try:
+                server_ver = version("wildstring-backend")
+            except PackageNotFoundError:
+                server_ver = "0.7.0"
+            result = {
+                "configured": self.configured(),
+                "authenticated": authenticated,
+                "version": server_ver,
+            }
             if authenticated:
                 result["user"] = self.require_session(request)
             return result

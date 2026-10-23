@@ -35,6 +35,14 @@ export function AccountDialog({
   const [email, setEmail] = useState(user.email || '');
   const [profileError, setProfileError] = useState('');
   const [profileSuccess, setProfileSuccess] = useState('');
+  const [serverVersion, setServerVersion] = useState('');
+  useEffect(() => {
+    api<{ version?: string }>('/auth/status')
+      .then((res) => {
+        if (res.version) setServerVersion(res.version);
+      })
+      .catch(() => {});
+  }, []);
   useEffect(() => {
     const node = dialog.current;
     node?.showModal();
@@ -165,9 +173,14 @@ export function AccountDialog({
           </button>
         </div>
       </form>
-      <ThemeControl />
-      <PlaybackStyleControl />
-      <TrackListSizeControl />
+      <section className="account-preferences-section" aria-label="界面与偏好">
+        <h3>界面与偏好</h3>
+        <div className="account-preferences-list">
+          <ThemeControl />
+          <PlaybackStyleControl />
+          <TrackListSizeControl />
+        </div>
+      </section>
       <LastfmAccount />
       <form className="account-form" onSubmit={submit}>
         <label>
@@ -220,6 +233,11 @@ export function AccountDialog({
           </button>
         </div>
       </form>
+      <div className="account-version-info">
+        <small className="muted">
+          WildString 网页端 v0.7.0{serverVersion ? ` · 服务端 v${serverVersion}` : ''}
+        </small>
+      </div>
     </dialog>
   );
 }

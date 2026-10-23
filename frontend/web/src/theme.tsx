@@ -20,6 +20,17 @@ function apply(theme: Theme) {
 }
 // Apply before React mounts; the small bootstrap in index.html also prevents a first-paint flash.
 apply(savedTheme());
+if (typeof window !== 'undefined') {
+  const systemMedia = window.matchMedia('(prefers-color-scheme: dark)');
+  systemMedia.addEventListener('change', () => {
+    if (savedTheme() === 'system') apply('system');
+  });
+  window.addEventListener('wildstring:theme-changed', (event: Event) => {
+    if (event instanceof CustomEvent && ['system', 'light', 'dark'].includes(event.detail)) {
+      apply(event.detail);
+    }
+  });
+}
 export function ThemeControl() {
   const [theme, setTheme] = useState<Theme>(savedTheme);
   useEffect(() => {
@@ -65,5 +76,45 @@ export function ThemeControl() {
         <option value="dark">深色</option>
       </select>
     </label>
+  );
+}
+
+export function ThemeToggleCompact() {
+  const [theme, setTheme] = useState<Theme>(savedTheme);
+  useEffect(() => {
+    const sync = () => setTheme(savedTheme());
+    window.addEventListener('wildstring:theme-changed', sync);
+    window.addEventListener('storage', sync);
+    return () => {
+      window.removeEventListener('wildstring:theme-changed', sync);
+      window.removeEventListener('storage', sync);
+    };
+  }, []);
+
+  const next = () => {
+    const cycle: Record<Theme, Theme> = { system: 'dark', dark: 'light', light: 'system' };
+    const target = cycle[theme] || 'dark';
+    setTheme(target);
+    apply(target);
+    try {
+      localStorage.setItem(KEY, target);
+    } catch {
+      /* Device storage may be disabled. */
+    }
+    window.dispatchEvent(new CustomEvent('wildstring:theme-changed', { detail: target }));
+  };
+
+  const label = theme === 'system' ? '跟随系统' : theme === 'dark' ? '深色' : '浅色';
+  return (
+    <button
+      type="button"
+      className="theme-toggle-compact"
+      onClick={next}
+      title={`当前外观：${label}，点击切换`}
+      aria-label={`外观：${label}`}
+    >
+      <span className="theme-toggle-dot" />
+      <span>{label}</span>
+    </button>
   );
 }

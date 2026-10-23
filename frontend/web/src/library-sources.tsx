@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from './api';
+import { MusicUploader } from './music-uploader';
 
 type SourceItem = {
   name: string;
@@ -153,6 +154,7 @@ export function LibrarySources({
 
   return (
     <>
+      <MusicUploader canImport={canImport} onUploaded={onChanged} />
       <section className="management-card" aria-label="导入来源工作台">
         <span className="eyebrow">SOURCE WORKSPACE</span>
         <h2>来源浏览与导入</h2>

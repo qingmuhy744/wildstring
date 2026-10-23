@@ -61,6 +61,12 @@ class HistoryClear(BaseModel):
     through: float = Field(ge=0, allow_inf_nan=False)
 
 
+class AttentionClear(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    through: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    batch_id: str | None = Field(default=None, max_length=128)
+
+
 def statement(tail, batch_id=None):
     """Compose fixed internal SQL fragments; every request value remains bound."""
     selection = SELECTION
@@ -204,6 +210,27 @@ def clear_history(repository, through):
         connection.executemany(
             "INSERT INTO provider_task_reviews(job_id,hidden_at) VALUES (?,?) "
             "ON CONFLICT(job_id) DO UPDATE SET hidden_at=excluded.hidden_at",
+            [(row["id"], clock) for row in jobs],
+        )
+    return {"cleared": len(jobs)}
+
+
+def clear_attention(repository, through: float | None = None, batch_id: str | None = None):
+    clock = time.time()
+    limit_time = min(through, clock) if through is not None else clock
+    prefix = (repository.library_id(), batch_id) if batch_id else (repository.library_id(),)
+    with repository.database.connect(write=True) as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        jobs = connection.execute(
+            statement(
+                "SELECT id FROM classified WHERE bucket='attention' AND updated_at<=?",
+                batch_id,
+            ),
+            (*prefix, limit_time),
+        ).fetchall()
+        connection.executemany(
+            "INSERT INTO provider_task_reviews(job_id,acknowledged_at) VALUES (?,?) "
+            "ON CONFLICT(job_id) DO UPDATE SET acknowledged_at=excluded.acknowledged_at",
             [(row["id"], clock) for row in jobs],
         )
     return {"cleared": len(jobs)}

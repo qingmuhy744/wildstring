@@ -339,3 +339,198 @@
   outline: 2px solid var(--accent);
   outline-offset: 4px;
 }
+
+/* Candidate Lyrics Audition */
+.candidate-audition-container {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 10px 0;
+}
+.candidate-audition-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: var(--surface-subtle, rgba(255, 255, 255, 0.04));
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+  border-radius: 12px;
+  padding: 8px 14px;
+}
+.audition-player-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.status-playing-pill {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.85rem;
+}
+.audition-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.audition-dot.playing {
+  background: #52c41a;
+  box-shadow: 0 0 6px rgba(82, 196, 26, 0.6);
+  animation: pulse-dot 1.8s infinite;
+}
+.audition-dot.paused {
+  background: #faad14;
+}
+@keyframes pulse-dot {
+  0% {
+    transform: scale(0.95);
+    opacity: 0.8;
+  }
+  50% {
+    transform: scale(1.2);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(0.95);
+    opacity: 0.8;
+  }
+}
+.audition-time {
+  font-family: monospace;
+  font-size: 0.82rem;
+  opacity: 0.75;
+}
+.audition-ctrl-btn,
+.audition-start-btn {
+  font-size: 0.82rem;
+  padding: 2px 8px;
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.15));
+  border-radius: 6px;
+}
+.audition-offset-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.offset-label {
+  font-size: 0.82rem;
+  opacity: 0.7;
+}
+.nudge-btn-group {
+  display: flex;
+  gap: 3px;
+}
+.nudge-btn-group button {
+  padding: 2px 6px;
+  font-size: 0.75rem;
+  border-radius: 6px;
+  background: var(--surface-subtle, rgba(255, 255, 255, 0.06));
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
+  cursor: pointer;
+  color: inherit;
+}
+.nudge-btn-group button:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+.nudge-btn-group button.nudge-zero-active {
+  border-color: var(--accent, #d96b43);
+  color: var(--accent, #d96b43);
+}
+.manual-offset-input {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.8rem;
+  margin-left: 4px;
+}
+.manual-offset-input input {
+  width: 68px;
+  padding: 2px 6px;
+  font-size: 0.8rem;
+  text-align: right;
+  border-radius: 6px;
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.15));
+  background: rgba(0, 0, 0, 0.2);
+  color: inherit;
+}
+.audition-hint {
+  font-size: 0.8rem;
+  opacity: 0.7;
+  margin: 0;
+  line-height: 1.4;
+}
+.candidate-lyric-list {
+  max-height: 280px;
+  overflow-y: auto;
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.1));
+  border-radius: 12px;
+  background: var(--surface-code, rgba(0, 0, 0, 0.18));
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  white-space: normal;
+  font-family: inherit;
+}
+.candidate-lyric-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+.candidate-lyric-row:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+.candidate-lyric-row.active {
+  background: color-mix(in srgb, var(--accent, #d96b43) 18%, transparent);
+  border-left: 3px solid var(--accent, #d96b43);
+  padding-left: 7px;
+}
+.candidate-lyric-time {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.78rem;
+  opacity: 0.55;
+  min-width: 54px;
+  flex-shrink: 0;
+  padding-top: 1px;
+}
+.candidate-lyric-row.active .candidate-lyric-time {
+  opacity: 1;
+  color: var(--accent, #d96b43);
+  font-weight: 600;
+}
+.candidate-lyric-body {
+  flex: 1;
+  min-width: 0;
+}
+.candidate-lyric-text {
+  font-size: 0.92rem;
+  line-height: 1.45;
+}
+.candidate-lyric-row.active .candidate-lyric-text {
+  font-weight: 600;
+  color: #fff;
+}
+.candidate-lyric-trans {
+  font-size: 0.8rem;
+  opacity: 0.72;
+  margin-top: 2px;
+}
+.candidate-lyric-roman {
+  font-size: 0.76rem;
+  opacity: 0.55;
+  margin-top: 1px;
+}
+.word-split-chip {
+  font-size: 0.7rem;
+  opacity: 0.55;
+  margin-left: 2px;
+}

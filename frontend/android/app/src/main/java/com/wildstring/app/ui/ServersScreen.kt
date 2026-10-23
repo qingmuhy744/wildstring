@@ -40,7 +40,7 @@ import kotlinx.coroutines.launch
                             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Text(server.label, style = MaterialTheme.typography.titleMedium)
                                 if (server.name.isNotBlank()) Text(server.url, style = MaterialTheme.typography.bodySmall)
-                                Text((if (active) "当前服务器 · " else "") + if (vm.repository.session.hasSession(server.id)) "已保存登录${vm.repository.session.accountFor(server.id)?.username?.let { " · $it" }.orEmpty()}" else "待登录", style = MaterialTheme.typography.bodySmall)
+                                Text((if (active) "当前服务器 · " else "") + (if (vm.repository.session.hasSession(server.id)) "已保存登录${vm.repository.session.accountFor(server.id)?.username?.let { " · $it" }.orEmpty()}" else "待登录") + (if (active && state.serverVersion != null) " · 服务端 v${state.serverVersion}" else ""), style = MaterialTheme.typography.bodySmall)
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                     Row { IconButton({ editing = server }, Modifier.testTag("server-edit-${server.id}")) { Icon(Icons.Default.Edit, "编辑${server.label}") }
                                         IconButton({ deleting = server }, Modifier.testTag("server-delete-${server.id}")) { Icon(Icons.Default.DeleteOutline, "删除${server.label}") } }

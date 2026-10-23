@@ -18,13 +18,16 @@ class Settings(BaseSettings):
     data_dir: Path = Path("runtime")
     music_dir: Path = Path("music")
     library_dir: Path | None = None
+    podcasts_dir: Path | None = None
     web_dir: Path | None = None
     admin_password: SecretStr | None = None
     cookie_secure: bool = False
 
-    @field_validator("data_dir", "music_dir")
+    @field_validator("data_dir", "music_dir", "podcasts_dir", "web_dir")
     @classmethod
-    def resolve_directory(cls, value: Path) -> Path:
+    def resolve_directory(cls, value: Path | None) -> Path | None:
+        if value is None:
+            return None
         return value.expanduser().resolve()
 
     @model_validator(mode="after")
@@ -32,8 +35,13 @@ class Settings(BaseSettings):
         if self.data_dir.is_relative_to(self.music_dir):
             raise ValueError("Runtime data directory must be outside the read-only music directory")
         self.library_dir = (self.library_dir or self.data_dir / "library").expanduser().resolve()
+        self.podcasts_dir = (self.podcasts_dir or self.data_dir / "podcasts").expanduser().resolve()
         if self.library_dir.is_relative_to(self.music_dir) or self.music_dir.is_relative_to(
             self.library_dir
         ):
             raise ValueError("Managed library and import source must be separate directories")
+        if self.web_dir is None and self.environment != "test":
+            candidate = Path("frontend/web/dist").resolve()
+            if candidate.is_dir() and (candidate / "index.html").is_file():
+                self.web_dir = candidate
         return self

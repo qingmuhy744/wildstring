@@ -42,7 +42,7 @@ data class MusicState(
     val rangeErrors: Map<Int, String> = emptyMap(), val browseIndex: BrowseIndex? = null,
 
     val pendingFavorites: Set<String> = emptySet(), val mutationMessage: String? = null,
-    val handoff: SharedPlayback? = null,
+    val handoff: SharedPlayback? = null, val serverVersion: String? = null,
 )
 
 @HiltViewModel
@@ -164,7 +164,7 @@ class MusicViewModel @Inject constructor(
                         pages.clear(); windows.clear(); browseIndices.clear(); cancelRanges(); controller?.stop(); controller?.clearMediaItems()
                         mutable.update { connectionState().copy(account = status.user, connected = true) }
                     }
-                    mutable.update { it.copy(connected = true, offline = false, account = status.user) }; load()
+                    mutable.update { it.copy(connected = true, offline = false, account = status.user, serverVersion = status.version) }; load()
                 } else repository.session.invalidate()
             } catch (e: CancellationException) { throw e }
             catch (e: Exception) { if (generation == authGeneration) mutable.update { it.copy(error = if (it.connected && e is IOException) null else friendlyError(e), offline = it.connected) } }
@@ -280,7 +280,7 @@ class MusicViewModel @Inject constructor(
                 check(authenticated.authenticated) { "登录未成功，请重试。" }
                 repository.acceptAccount(authenticated.user)
                 if (generation != authGeneration) return@launch
-                mutable.value = connectionState().copy(account = authenticated.user, connected = true)
+                mutable.value = connectionState().copy(account = authenticated.user, connected = true, serverVersion = authenticated.version)
                 load()
             } catch (e: CancellationException) { throw e }
             catch (e: Exception) { if (generation == authGeneration) mutable.update { it.copy(error = if (e is HttpException && e.code() == 401) "账号或密码不正确。" else if (e is IllegalStateException) e.message else friendlyError(e)) } }
@@ -323,8 +323,23 @@ class MusicViewModel @Inject constructor(
     fun navigate(tab: String) {
         if (tab == mutable.value.tab) return
         tabs[mutable.value.tab] = query()
-        val target = tabs[tab] ?: CatalogQuery(tab = tab, kind = if (tab == "mine") "playlists" else if (tab == "search") "discover" else "albums",
-            title = when (tab) { "mine" -> "我的"; "search" -> "发现"; else -> "曲库" })
+        val target = tabs[tab] ?: CatalogQuery(
+            tab = tab,
+            kind = when (tab) {
+                "mine" -> "playlists"
+                "search" -> "discover"
+                "podcast" -> "podcast"
+                "assistant" -> "assistant"
+                else -> "albums"
+            },
+            title = when (tab) {
+                "mine" -> "我的"
+                "search" -> "发现"
+                "podcast" -> "电台"
+                "assistant" -> "AI 助手"
+                else -> "音乐"
+            }
+        )
         show(target)
     }
     fun browseAlbums() {
@@ -451,6 +466,20 @@ class MusicViewModel @Inject constructor(
         }
         loadJob = viewModelScope.launch {
             if (!mutable.value.connected) return@launch
+            if (request.tab in listOf("podcast", "assistant")) {
+                mutable.update {
+                    it.copy(
+                        tab = request.tab,
+                        kind = request.kind,
+                        title = request.title,
+                        loading = false,
+                        hasContent = true,
+                        error = null,
+                        contentKey = request.key,
+                    )
+                }
+                return@launch
+            }
             mutable.update {
                 it.copy(
                     loading = true,

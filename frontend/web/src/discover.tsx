@@ -346,7 +346,7 @@ export function Discover({
             找歌或生成歌单
             <textarea
               aria-label="找歌或生成歌单"
-              placeholder="找几首许嵩的歌，组成半小时歌单"
+              placeholder="来几首节奏舒缓的歌，或按心情/流派组成半小时歌单…"
               value={prompt}
               maxLength={2000}
               required

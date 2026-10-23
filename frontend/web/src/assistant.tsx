@@ -272,30 +272,33 @@ export function Assistant({
           )}
           <div className="workspace-card">
             <div className="workspace-card-head">
-              <ModelConnectionChoice
-                items={connections.items}
-                value={connection}
-                onChange={setConnection}
-                label="助手模型连接"
-                disabled={busy || connections.loading}
-                onManage={onConnections}
-              />
+              <div className="workspace-connection-strip">
+                <ModelConnectionChoice
+                  items={connections.items}
+                  value={connection}
+                  onChange={setConnection}
+                  label="助手模型"
+                  disabled={busy || connections.loading}
+                  onManage={onConnections}
+                />
+                <span className="connection-subtle-hint">
+                  {activeConnection
+                    ? `已连接 ${activeConnection.model}`
+                    : connection === 'local'
+                      ? '本地检索模式 · 保护隐私且不消耗额度'
+                      : '模型连接不可用'}
+                </span>
+              </div>
               {conversation && (
                 <button
                   disabled={busy}
+                  className="text-button"
                   onClick={() => setHistoryAction({ kind: 'delete', session: conversation })}
                 >
                   删除对话
                 </button>
               )}
             </div>
-            <p className="muted">
-              {activeConnection
-                ? `使用 ${activeConnection.model}，每轮最多 4 次模型调用。`
-                : connection === 'local'
-                  ? '当前使用本地曲库检索，不会调用外部模型。'
-                  : '之前选择的连接已不可用，请重新选择。'}
-            </p>
             <div ref={messages} aria-busy={running}>
               {conversation?.context_summary && (
                 <details className="workspace-notice">
@@ -317,7 +320,33 @@ export function Assistant({
                 </details>
               )}
               {!conversation?.messages?.length && (
-                <div className="workspace-empty">试试“找出许嵩的歌，先给我一份歌单草案”。</div>
+                <div className="workspace-empty-guide">
+                  <div className="workspace-empty-icon">✦</div>
+                  <h3>聊聊想听的音乐</h3>
+                  <p className="muted">
+                    从本地曲库找歌、生成智能歌单或整理曲目。点击下方示例快速开始：
+                  </p>
+                  <div className="workspace-prompts">
+                    {[
+                      '来几首节奏舒缓的歌，适合现在听',
+                      '帮我整理一份摇滚风格的歌单草案',
+                      '推荐几首曲库里常听的好歌',
+                      '找出今天适合单曲循环的旋律',
+                    ].map((prompt) => (
+                      <button
+                        key={prompt}
+                        type="button"
+                        className="prompt-pill"
+                        disabled={busy}
+                        onClick={() => {
+                          setContent(prompt);
+                        }}
+                      >
+                        “{prompt}”
+                      </button>
+                    ))}
+                  </div>
+                </div>
               )}
               {conversation?.messages?.map((message) => (
                 <article className={`workspace-message ${message.role}`} key={message.id}>

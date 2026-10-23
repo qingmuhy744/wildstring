@@ -13,8 +13,8 @@ android {
         manifestPlaceholders["appName"] = "野弦"
         minSdk = 26
         targetSdk = 36
-        versionCode = 33
-        versionName = "0.6.3"
+        versionCode = 34
+        versionName = "0.7.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     val signingValues = listOf("ANDROID_KEYSTORE_PATH", "ANDROID_KEYSTORE_PASSWORD", "ANDROID_KEY_ALIAS", "ANDROID_KEY_PASSWORD")
@@ -48,6 +48,9 @@ android {
     sourceSets.getByName("androidTest").assets.srcDir(rootProject.file("../../tests/fixtures/audio"))
     packaging { resources.excludes += "/META-INF/{AL2.0,LGPL2.1}" }
     lint { abortOnError = true }
+}
+hilt {
+    enableAggregatingTask = false
 }
 kotlin { compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17) } }
 ksp { arg("room.schemaLocation", "$projectDir/schemas") }

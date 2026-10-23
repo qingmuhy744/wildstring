@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { api, type Track } from './api';
-import { MetadataSuggestions } from './providers';
+import { OnlineMetadataMatcher } from './online-metadata-matcher';
+import { TrackFileInfoDialog } from './track-file-info-dialog';
 import { LyricsEditor } from './lyrics-editor';
+import { splitMultiValue } from './metadata-parser';
 import type { Player } from './player';
 
 export type MetadataFields = Pick<
@@ -27,6 +29,9 @@ export type MetadataFields = Pick<
 interface MetadataRecord {
   track_id: string;
   path: string;
+  source_path?: string | null;
+  source_filename?: string;
+  source_stem?: string;
   version: number;
   observed: MetadataFields;
   effective: MetadataFields;
@@ -73,9 +78,51 @@ export function MetadataEditor({
   const [record, setRecord] = useState<MetadataRecord | null>(null);
   const [values, setValues] = useState<Record<string, string>>({});
   const [overridden, setOverridden] = useState<string[]>([]);
+  const [fillNotice, setFillNotice] = useState('');
   const [preview, setPreview] = useState(false),
     [busy, setBusy] = useState(false),
-    [error, setError] = useState('');
+    [error, setError] = useState(''),
+    [showFileInfo, setShowFileInfo] = useState(false);
+
+  const handleApplyOnlineSuggestion = (fieldsData: Record<string, unknown>) => {
+    const nextValues = { ...values };
+    const changedKeys: string[] = [];
+
+    const fieldMap: Record<string, string> = {
+      title: 'title',
+      artists: 'artists',
+      album: 'album',
+      album_artists: 'album_artists',
+      track_number: 'track_number',
+      disc_number: 'disc_number',
+      release_date: 'release_date',
+      original_date: 'original_date',
+      genres: 'genres',
+      composers: 'composers',
+      lyricists: 'lyricists',
+      arrangers: 'arrangers',
+      vocalists: 'vocalists',
+      track_total: 'track_total',
+      disc_total: 'disc_total',
+    };
+
+    for (const [key, targetKey] of Object.entries(fieldMap)) {
+      if (fieldsData[key] !== undefined && fieldsData[key] !== null) {
+        const val = fieldsData[key];
+        if (Array.isArray(val)) {
+          nextValues[targetKey] = val.join('\n');
+          changedKeys.push(targetKey);
+        } else if (typeof val === 'string' || typeof val === 'number') {
+          nextValues[targetKey] = String(val);
+          changedKeys.push(targetKey);
+        }
+      }
+    }
+
+    setValues(nextValues);
+    setOverridden((prev) => Array.from(new Set([...prev, ...changedKeys])));
+    setFillNotice('已成功填入网络元数据，请检查下方输入框，确认无误后点击保存。');
+  };
   function load() {
     request.current?.abort();
     const controller = new AbortController();
@@ -118,10 +165,7 @@ export function MetadataEditor({
       'vocalists',
       'genres',
     ].includes(key)
-      ? value
-          .split('\n')
-          .map((v) => v.trim())
-          .filter(Boolean)
+      ? splitMultiValue(value)
       : ['track_number', 'disc_number', 'track_total', 'disc_total'].includes(key)
         ? value.trim()
           ? Number(value)
@@ -189,32 +233,65 @@ export function MetadataEditor({
         <button aria-pressed={tab === 'metadata'} onClick={() => setTab('metadata')}>
           歌曲信息
         </button>
-        <button aria-pressed={tab === 'online'} onClick={() => setTab('online')}>
-          联网建议
-        </button>
         <button aria-pressed={tab === 'lyrics'} onClick={() => setTab('lyrics')}>
           歌词
         </button>
       </nav>
-      {tab === 'online' && record && (
-        <MetadataSuggestions
-          id={track.id}
-          version={record.version}
-          onApplied={async () => {
-            await onSaved(track.id);
-            load();
-          }}
-        />
-      )}
       <div hidden={tab !== 'metadata'}>
         {record ? (
           <>
             <p className="muted">
               保存后曲库信息立即生效，重新扫描会保留。本次保存不写入音乐标签。
             </p>
-            <p className="metadata-file-path" title="托管曲库中的相对路径">
-              文件路径：<code>{record.path}</code>
-            </p>
+            {fillNotice && (
+              <div
+                style={{
+                  background: 'rgba(144, 238, 144, 0.15)',
+                  border: '1px solid rgba(144, 238, 144, 0.4)',
+                  color: '#98fb98',
+                  padding: '8px 12px',
+                  borderRadius: '6px',
+                  fontSize: '12px',
+                  margin: '8px 0',
+                }}
+              >
+                ✓ {fillNotice}
+              </div>
+            )}
+            <OnlineMetadataMatcher
+              trackId={track.id}
+              currentTitle={values.title || track.title}
+              currentArtist={
+                values.artists?.split('\n')[0] || (track.artists && track.artists[0]) || ''
+              }
+              onApply={handleApplyOnlineSuggestion}
+            />
+            <div
+              className="metadata-file-row"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '8px',
+                margin: '8px 0 12px',
+              }}
+            >
+              <span
+                className="metadata-file-path"
+                title="托管曲库中的相对路径"
+                style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+              >
+                文件路径：<code>{record.path}</code>
+              </span>
+              <button
+                type="button"
+                className="text-button"
+                style={{ flexShrink: 0, padding: '2px 8px' }}
+                onClick={() => setShowFileInfo(true)}
+              >
+                查看文件属性与物理重排
+              </button>
+            </div>
             {!preview ? (
               <div className="metadata-fields">
                 {fields.map((key) => (
@@ -252,7 +329,7 @@ export function MetadataEditor({
                           setValues({ ...values, [key]: e.target.value });
                           setOverridden((keys) => [...new Set([...keys, key])]);
                         }}
-                        placeholder="每行一项"
+                        placeholder="每行一项，支持 /、逗号或顿号分隔"
                       />
                     ) : (
                       <input
@@ -271,6 +348,57 @@ export function MetadataEditor({
                     <span className="metadata-origin">
                       文件值：{display(record.observed[key]).replaceAll('\n', ' / ') || '未填写'}
                     </span>
+                    {key === 'title' &&
+                      record.source_stem &&
+                      record.source_stem !== values.title && (
+                        <button
+                          className="text-button"
+                          type="button"
+                          style={{
+                            color: 'var(--accent, #e57373)',
+                            fontSize: '12px',
+                            padding: '2px 6px',
+                            textAlign: 'left',
+                          }}
+                          onClick={() => {
+                            setValues({ ...values, title: record.source_stem! });
+                            setOverridden((keys) => [...new Set([...keys, 'title'])]);
+                          }}
+                        >
+                          从文件名填入歌名（{record.source_stem}）
+                        </button>
+                      )}
+                    {key === 'track_number' &&
+                      !values.track_number &&
+                      /^[a-zA-Z](\d{1,3})$/.test(String(record.observed.title || '')) && (
+                        <button
+                          className="text-button"
+                          type="button"
+                          style={{
+                            color: 'var(--accent, #e57373)',
+                            fontSize: '12px',
+                            padding: '2px 6px',
+                            textAlign: 'left',
+                          }}
+                          onClick={() => {
+                            const match = /^[a-zA-Z](\d{1,3})$/.exec(
+                              String(record.observed.title || ''),
+                            );
+                            if (match) {
+                              const num = String(parseInt(match[1], 10));
+                              setValues({ ...values, track_number: num });
+                              setOverridden((keys) => [...new Set([...keys, 'track_number'])]);
+                            }
+                          }}
+                        >
+                          从原标签代号填入曲号（
+                          {parseInt(
+                            /^[a-zA-Z](\d{1,3})$/.exec(String(record.observed.title || ''))![1],
+                            10,
+                          )}
+                          ）
+                        </button>
+                      )}
                     {overridden.includes(key) && (
                       <button
                         className="text-button"
@@ -351,6 +479,14 @@ export function MetadataEditor({
         )}
       </div>
       <LyricsEditor key={track.id} track={track} player={player} active={tab === 'lyrics'} />
+      {showFileInfo && (
+        <TrackFileInfoDialog
+          track={track}
+          canManage={true}
+          onClose={() => setShowFileInfo(false)}
+          onReorganized={load}
+        />
+      )}
     </dialog>
   );
 }

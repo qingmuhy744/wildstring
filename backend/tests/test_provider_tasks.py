@@ -259,6 +259,26 @@ def test_grouped_pending_keeps_older_warnings_and_retries_from_latest_representa
         assert page(client, "pending")["items"][0]["suggestion_count"] == 2
 
 
+def test_clear_attention(settings, authenticated_client):
+    seed(settings)
+    with authenticated_client(settings) as client:
+        service, track = setup_service(client)
+        now = time.time()
+        with service.database.connect(write=True) as connection:
+            connection.execute(
+                "INSERT INTO provider_jobs(id,track_id,metadata_version,status,error,warnings,created_at,updated_at) "
+                "VALUES ('job-fail', ?, 1, 'failed', 'http_error', '[]', ?, ?)",
+                (track["id"], now, now),
+            )
+        p = page(client, "attention")
+        assert p["total"] >= 1
+        res = client.post(BASE + "/tasks/attention/clear", headers=HEADERS, json={})
+        assert res.status_code == 200
+        assert res.json()["cleared"] >= 1
+        p2 = page(client, "attention")
+        assert p2["total"] == 0
+
+
 def test_permissions_pagination_library_scope_and_schema15_upgrade(settings, authenticated_client):
     seed(settings)
     with authenticated_client(settings) as client:

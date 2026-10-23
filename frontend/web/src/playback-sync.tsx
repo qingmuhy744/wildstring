@@ -1,4 +1,5 @@
 import { HelpLabel } from './desktop-help';
+import { Icon } from './icons';
 import { useEffect, useRef, useState } from 'react';
 import { api, ApiError, eventId, time, type Track } from './api';
 import { QUEUE_LIMIT, type PlaybackMode } from './playback-state';
@@ -58,14 +59,62 @@ export function SyncModeControl({ userId }: { userId: string }) {
   );
 }
 
+const COUNTDOWN_MS = 8000;
+
 export function PlaybackSync({ player, userId }: { player: Player; userId: string }) {
   const latest = useRef(player);
   latest.current = player;
   const [offer, setOffer] = useState<SharedPlayback | null>(null);
   const [busy, setBusy] = useState(false),
     [error, setError] = useState('');
+  const [isClosing, setIsClosing] = useState(false);
+  const [isHovered, setIsHovered] = useState(false);
+  const remainingRef = useRef(COUNTDOWN_MS);
+  const closingTimer = useRef<number | null>(null);
+  const prevVersionRef = useRef<number | null>(null);
   const accept = useRef<(saved: SharedPlayback) => Promise<void>>(async () => {});
   const dismiss = useRef<(version: number) => void>(() => {});
+
+  const triggerAutoDismiss = (version: number) => {
+    if (isClosing) return;
+    setIsClosing(true);
+    closingTimer.current = window.setTimeout(() => {
+      dismiss.current(version);
+      setIsClosing(false);
+    }, 220);
+  };
+
+  useEffect(() => {
+    if (offer && offer.version !== prevVersionRef.current) {
+      prevVersionRef.current = offer.version;
+      remainingRef.current = COUNTDOWN_MS;
+      setIsClosing(false);
+    } else if (!offer) {
+      prevVersionRef.current = null;
+      setIsClosing(false);
+    }
+  }, [offer]);
+
+  useEffect(() => {
+    if (!offer || isClosing || isHovered) return;
+    const start = Date.now();
+    const currentRemaining = remainingRef.current;
+    const timer = window.setTimeout(() => {
+      triggerAutoDismiss(offer.version);
+    }, currentRemaining);
+    return () => {
+      window.clearTimeout(timer);
+      remainingRef.current = Math.max(0, currentRemaining - (Date.now() - start));
+    };
+  }, [offer?.version, isHovered, isClosing]);
+
+  useEffect(() => {
+    return () => {
+      if (closingTimer.current !== null) {
+        window.clearTimeout(closingTimer.current);
+      }
+    };
+  }, []);
   useEffect(() => {
     const controller = new AbortController();
     const deviceKey = `wildstring:device:${userId}`;
@@ -97,11 +146,16 @@ export function PlaybackSync({ player, userId }: { player: Player; userId: strin
       localStorage.setItem(seenKey, String(seen));
     };
     dismiss.current = (value) => {
+      if (closingTimer.current !== null) {
+        window.clearTimeout(closingTimer.current);
+        closingTimer.current = null;
+      }
       seenVersion(value);
       offered = 0;
       offeredPause = null;
       setOffer(null);
       setError('');
+      setIsClosing(false);
     };
     accept.current = async (saved) => {
       if (applying) return;
@@ -277,6 +331,11 @@ export function PlaybackSync({ player, userId }: { player: Player; userId: strin
         offeredPause = event;
         if (playbackSyncMode(userId) === 'auto') await accept.current(state);
         else {
+          if (closingTimer.current !== null) {
+            window.clearTimeout(closingTimer.current);
+            closingTimer.current = null;
+          }
+          setIsClosing(false);
           rememberPause(state);
           setOffer(state);
         }
@@ -341,8 +400,25 @@ export function PlaybackSync({ player, userId }: { player: Player; userId: strin
     };
   }, [userId]);
   return offer ? (
-    <aside className="device-resume-notice" role="region" aria-label="跨设备接续">
-      <strong>其他设备有可接续的进度</strong>
+    <aside
+      className={`device-resume-notice ${isClosing ? 'is-closing' : ''}`}
+      role="region"
+      aria-label="跨设备接续"
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
+    >
+      <div className="device-resume-header">
+        <strong>其他设备有可接续的进度</strong>
+        <button
+          type="button"
+          className="device-resume-close"
+          aria-label="关闭提示"
+          disabled={busy}
+          onClick={() => dismiss.current(offer.version)}
+        >
+          <Icon name="close" />
+        </button>
+      </div>
       <p>
         {offer.track_ids.length} 首队列 · 第 {offer.index + 1} 首 · {time(offer.position_ms / 1000)}
       </p>
@@ -360,6 +436,13 @@ export function PlaybackSync({ player, userId }: { player: Player; userId: strin
           {busy ? '正在载入…' : '载入进度'}
         </button>
       </footer>
+      <div className="device-resume-progress" aria-hidden="true">
+        <div
+          key={offer.version}
+          className="device-resume-progress-bar"
+          style={{ animationDuration: `${COUNTDOWN_MS}ms` }}
+        />
+      </div>
     </aside>
   ) : null;
 }

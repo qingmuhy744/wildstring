@@ -20,6 +20,8 @@ DETAIL_DEFAULTS = {
     "disc_total": None,
     "release_date": None,
     "original_date": None,
+    "label": "",
+    "catalog_number": "",
     "external_ids": {},
     "description": "",
     "tags": [],
@@ -152,5 +154,7 @@ class TagReader:
             or valid_date(self.first("YEAR", "TYER")),
             "original_date": valid_date(self.first("ORIGINALDATE", "TDOR"))
             or valid_date(self.first("ORIGINALYEAR", "TORY")),
+            "label": self.first("LABEL", "TPUB") or self.first("ORGANIZATION") or "",
+            "catalog_number": self.first("CATALOGNUMBER") or self.first("CATALOG_NUMBER") or "",
             "external_ids": ids,
         }

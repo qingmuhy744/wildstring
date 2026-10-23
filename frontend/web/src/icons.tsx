@@ -1,6 +1,28 @@
 import type { CSSProperties } from 'react';
 
 const paths = {
+  music: (
+    <>
+      <path d="M9 18V5l12-2v13" />
+      <circle cx="6" cy="18" r="3" />
+      <circle cx="18" cy="16" r="3" />
+    </>
+  ),
+  podcast: (
+    <>
+      <circle cx="12" cy="11" r="1.5" />
+      <path d="M16.8 7.2a6.8 6.8 0 0 0-9.6 0" />
+      <path d="M19.6 4.4a10.8 10.8 0 0 0-15.2 0" />
+      <path d="M12 14v7" />
+      <path d="M10 21h4" />
+    </>
+  ),
+  history: (
+    <>
+      <circle cx="12" cy="12" r="9" />
+      <polyline points="12 7 12 12 15 15" />
+    </>
+  ),
   heart: (
     <path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1.1-1.1a5.5 5.5 0 0 0-7.8 7.8L12 21l8.8-8.6a5.5 5.5 0 0 0 0-7.8Z" />
   ),
@@ -57,6 +79,7 @@ const paths = {
       <path d="M3 12h18m-6-6 6 6-6 6" />
     </>
   ),
+  play: <polygon points="6 4 20 12 6 20 6 4" fill="currentColor" stroke="none" />,
   album: (
     <>
       <circle cx="12" cy="12" r="8.5" />
@@ -114,6 +137,18 @@ const paths = {
   remove: (
     <>
       <path d="M5 7h14M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5m4-5v5" />
+    </>
+  ),
+  info: (
+    <>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 8h.01M11 12h1v4h1" />
+    </>
+  ),
+  folder: <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" />,
+  close: (
+    <>
+      <path d="M18 6 6 18M6 6l12 12" />
     </>
   ),
 };

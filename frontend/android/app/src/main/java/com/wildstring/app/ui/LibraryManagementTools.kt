@@ -27,14 +27,247 @@ internal fun obj(vararg values: Pair<String, Any?>): JsonObject = JsonObject().a
 internal fun JsonObject.text(key: String): String = get(key)?.takeUnless { it.isJsonNull }?.let { if (it.isJsonPrimitive) it.asString else it.toString() }.orEmpty()
 private fun fieldText(value: JsonElement?): String = when { value == null || value.isJsonNull -> ""; value.isJsonArray -> value.asJsonArray.joinToString("\n") { it.asString }; value.isJsonPrimitive -> value.asString; else -> value.toString() }
 private fun JsonObject.arrayText(key: String, separator: String = " / "): String = getAsJsonArray(key)?.joinToString(separator) { it.asString }.orEmpty()
-private val metadataFields = listOf("title" to "歌曲名称", "artists" to "歌曲艺人（每行一位）", "album" to "专辑", "album_artists" to "专辑艺人（每行一位）",
-    "vocalists" to "演唱", "lyricists" to "作词", "composers" to "作曲", "arrangers" to "编曲", "track_number" to "曲号", "disc_number" to "碟号")
+private val metadataFields = listOf(
+    "title" to "歌曲名称",
+    "artists" to "歌曲艺人（多位用换行、/ 或逗号分隔）",
+    "album" to "专辑",
+    "album_artists" to "专辑艺人（多位用换行、/ 或逗号分隔）",
+    "vocalists" to "演唱（多位用换行、/ 或逗号分隔）",
+    "lyricists" to "作词（多位用换行、/ 或逗号分隔）",
+    "composers" to "作曲（多位用换行、/ 或逗号分隔）",
+    "arrangers" to "编曲（多位用换行、/ 或逗号分隔）",
+    "track_number" to "曲号",
+    "disc_number" to "碟号",
+)
 private val arrayFields = setOf("artists", "album_artists", "vocalists", "lyricists", "composers", "arrangers")
+private val multiValueRegex = Regex("""[\r\n/／\\,，、;；|]+""")
+private fun splitMultiValue(value: String): List<String> =
+    value.split(multiValueRegex).map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+
 private fun parseField(key: String, value: String): JsonElement = when {
-    key in arrayFields -> JsonArray().apply { value.lines().map { it.trim() }.filter { it.isNotEmpty() }.forEach { add(it) } }
+    key in arrayFields -> JsonArray().apply { splitMultiValue(value).forEach { add(it) } }
     key.endsWith("_number") -> if (value.isBlank()) JsonNull.INSTANCE else com.google.gson.JsonPrimitive((value.toIntOrNull() ?: throw IllegalArgumentException("编号应为 1–99999。")).also { require(it in 1..99999) { "编号应为 1–99999。" } })
     value.isBlank() && key != "title" -> JsonNull.INSTANCE
     else -> com.google.gson.JsonPrimitive(value.trim())
+}
+
+@Composable
+private fun OnlineMetadataMatcherCard(
+    vm: MusicViewModel,
+    track: Track,
+    onApply: (Map<String, String>) -> Unit,
+) {
+    val scope = rememberCoroutineScope()
+    var expanded by remember { mutableStateOf(false) }
+    var loading by remember { mutableStateOf(false) }
+    var searching by remember { mutableStateOf(false) }
+    var suggestions by remember { mutableStateOf<List<JsonObject>>(emptyList()) }
+    var providerNames by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+    var message by remember { mutableStateOf<String?>(null) }
+
+    suspend fun fetchSuggestions() {
+        loading = true
+        runCatching {
+            val res = vm.repository.api().objectGet(vm.repository.url("api", "v1", "manage", "providers", "tracks", track.id))
+            val list = res.getAsJsonArray("suggestions")?.mapNotNull { it.takeIf { elem -> elem.isJsonObject }?.asJsonObject }.orEmpty()
+            suggestions = list
+            val names = res.getAsJsonObject("provider_names")
+            if (names != null) {
+                providerNames = names.keySet().associateWith { names.text(it) }
+            }
+        }
+        loading = false
+    }
+
+    LaunchedEffect(expanded, track.id) {
+        if (expanded) {
+            fetchSuggestions()
+        }
+    }
+
+    fun triggerSearch() {
+        scope.launch {
+            searching = true
+            message = "正在联网查询元数据建议…"
+            runCatching {
+                vm.repository.api().objectPost(
+                    vm.repository.url("api", "v1", "manage", "providers", "query"),
+                    obj("track_ids" to JsonArray().apply { add(track.id) })
+                )
+                delay(1500)
+                fetchSuggestions()
+                message = if (suggestions.isEmpty()) "查询完成，暂无新匹配结果" else "已找到 ${suggestions.size} 条网络匹配结果"
+            }.onFailure {
+                message = "查询失败：${it.message}"
+            }
+            searching = false
+        }
+    }
+
+    OutlinedCard(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(10.dp),
+        colors = CardDefaults.outlinedCardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+        )
+    ) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth().clickable { expanded = !expanded },
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("联网匹配元数据", style = MaterialTheme.typography.titleSmall)
+                        if (suggestions.isNotEmpty()) {
+                            Surface(
+                                shape = RoundedCornerShape(4.dp),
+                                color = MaterialTheme.colorScheme.primaryContainer,
+                            ) {
+                                Text(
+                                    "${suggestions.size} 候选",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+                    }
+                    Text(
+                        if (expanded) "点击可折叠；支持一键填入表单输入框" else "从 MusicBrainz 等音源搜索元数据并一键填入",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                TextButton(
+                    onClick = {
+                        if (!expanded) expanded = true
+                        triggerSearch()
+                    },
+                    enabled = !searching && !loading
+                ) {
+                    Text(if (searching) "查询中…" else if (suggestions.isEmpty()) "在线匹配" else "重新查询")
+                }
+            }
+
+            if (searching || loading) {
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            }
+
+            if (message != null) {
+                Text(
+                    message!!,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+
+            if (expanded) {
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                if (suggestions.isEmpty() && !loading && !searching) {
+                    Text(
+                        "暂无网络匹配候选，点击上方「在线匹配」发起联网搜索。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(vertical = 4.dp)
+                    )
+                } else {
+                    suggestions.take(3).forEachIndexed { index, candidate ->
+                        val fieldsObj = candidate.getAsJsonObject("fields") ?: JsonObject()
+                        val matchObj = candidate.getAsJsonObject("match")
+                        val score = matchObj?.get("score")?.takeIf { !it.isJsonNull }?.asDouble ?: 0.0
+                        val scorePct = (score * 100).toInt()
+                        val providerKey = candidate.text("provider")
+                        val providerLabel = providerNames[providerKey] ?: providerKey
+
+                        val candTitle = fieldsObj.text("title").ifBlank { track.title }
+                        val candArtists = fieldsObj.getAsJsonArray("artists")?.mapNotNull { it.asString } ?: emptyList()
+                        val candAlbum = fieldsObj.text("album")
+                        val candYear = fieldsObj.text("release_date").take(4)
+
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = MaterialTheme.colorScheme.surface,
+                            tonalElevation = 1.dp,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        Surface(
+                                            shape = RoundedCornerShape(4.dp),
+                                            color = if (scorePct >= 90) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.secondaryContainer
+                                        ) {
+                                            Text(
+                                                "$scorePct% 匹配",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                            )
+                                        }
+                                        Text(providerLabel, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                    Button(
+                                        onClick = {
+                                            val updates = mutableMapOf<String, String>()
+                                            if (fieldsObj.text("title").isNotBlank()) updates["title"] = fieldsObj.text("title")
+                                            if (candArtists.isNotEmpty()) updates["artists"] = candArtists.joinToString("\n")
+                                            if (fieldsObj.text("album").isNotBlank()) updates["album"] = fieldsObj.text("album")
+                                            val candAlbumArtists = fieldsObj.getAsJsonArray("album_artists")?.mapNotNull { it.asString }.orEmpty()
+                                            if (candAlbumArtists.isNotEmpty()) updates["album_artists"] = candAlbumArtists.joinToString("\n")
+                                            val candTrackNo = fieldsObj.get("track_number")?.takeIf { !it.isJsonNull }?.toString()
+                                            if (!candTrackNo.isNullOrBlank()) updates["track_number"] = candTrackNo
+                                            val candDiscNo = fieldsObj.get("disc_number")?.takeIf { !it.isJsonNull }?.toString()
+                                            if (!candDiscNo.isNullOrBlank()) updates["disc_number"] = candDiscNo
+                                            val candVocalists = fieldsObj.getAsJsonArray("vocalists")?.mapNotNull { it.asString }.orEmpty()
+                                            if (candVocalists.isNotEmpty()) updates["vocalists"] = candVocalists.joinToString("\n")
+                                            val candLyricists = fieldsObj.getAsJsonArray("lyricists")?.mapNotNull { it.asString }.orEmpty()
+                                            if (candLyricists.isNotEmpty()) updates["lyricists"] = candLyricists.joinToString("\n")
+                                            val candComposers = fieldsObj.getAsJsonArray("composers")?.mapNotNull { it.asString }.orEmpty()
+                                            if (candComposers.isNotEmpty()) updates["composers"] = candComposers.joinToString("\n")
+                                            val candArrangers = fieldsObj.getAsJsonArray("arrangers")?.mapNotNull { it.asString }.orEmpty()
+                                            if (candArrangers.isNotEmpty()) updates["arrangers"] = candArrangers.joinToString("\n")
+
+                                            onApply(updates)
+                                            message = "已填入候选 #${index + 1} 的元数据，可在下方微调后保存"
+                                        },
+                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                        modifier = Modifier.height(32.dp)
+                                    ) {
+                                        Text("一键填入表单", style = MaterialTheme.typography.labelSmall)
+                                    }
+                                }
+
+                                Text(
+                                    candTitle,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
+                                    maxLines = 1
+                                )
+                                Text(
+                                    listOfNotNull(
+                                        candArtists.joinToString(" / ").takeIf { it.isNotBlank() },
+                                        candAlbum.takeIf { it.isNotBlank() },
+                                        candYear.takeIf { it.isNotBlank() }
+                                    ).joinToString(" · "),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 @Composable
@@ -54,6 +287,20 @@ internal fun MetadataPanel(vm: MusicViewModel, track: Track) {
       Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(track.title, style = MaterialTheme.typography.titleLarge)
         Text("保存为人工修正。音乐文件不会被自动改写；“恢复文件值”可撤销该字段的人工覆盖。", style = MaterialTheme.typography.bodySmall)
+
+        // 轻量在线元数据匹配卡片（方案 A）
+        OnlineMetadataMatcherCard(
+            vm = vm,
+            track = track,
+            onApply = { updates ->
+                updates.forEach { (key, value) ->
+                    fields[key] = value
+                    restore = restore - key
+                }
+                action.message = "已填入联网元数据建议，可在下方检查或微调后保存"
+            }
+        )
+
         original?.text("path")?.takeIf { it.isNotBlank() }?.let { path ->
             Text("文件路径：$path", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }

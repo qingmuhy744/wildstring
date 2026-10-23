@@ -7,11 +7,14 @@ import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import coil.request.ImageRequest
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.activity.compose.LocalActivity
 import androidx.core.view.WindowCompat
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.selection.selectable
@@ -45,6 +48,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -208,19 +214,101 @@ fun WildStringApp(model: MusicViewModel) {
                 LaunchedEffect(state.playing, state.handoff?.version) {
                     if (state.playing && state.handoff != null) model.dismissHandoff()
                 }
-                state.handoff?.takeIf { !state.playing }?.let { saved ->
-                    val action = remember(saved.version) { FeatureAction() }; val scope = rememberCoroutineScope()
-                    Box(Modifier.fillMaxSize().safeDrawingPadding().padding(horizontal = 16.dp).padding(bottom = 90.dp), contentAlignment = Alignment.BottomCenter) {
-                        Surface(Modifier.widthIn(max = 440.dp).fillMaxWidth().testTag("playback-handoff-notice"),
-                            shape = RoundedCornerShape(16.dp), tonalElevation = 6.dp, shadowElevation = 8.dp) {
-                            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Text("其他设备有可接续的进度", style = MaterialTheme.typography.titleSmall)
-                                Text("${saved.trackIds.size} 首 · 第 ${saved.index + 1} 首 · ${formatTime(saved.positionMs)} · 其他设备最近暂停，载入后保持暂停",
-                                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                if (action.message != "已完成") ActionStatus(action)
-                                Row(Modifier.align(Alignment.End)) {
-                                    TextButton(model::dismissHandoff, enabled = !action.busy) { Text("暂不") }
-                                    TextButton({ scope.launch { action.run { model.acceptHandoff() } } }, enabled = !action.busy) { Text("载入进度") }
+                AnimatedVisibility(
+                    visible = state.handoff != null && !state.playing,
+                    enter = fadeIn(tween(260, easing = FastOutSlowInEasing)) +
+                        scaleIn(
+                            initialScale = 0.86f,
+                            transformOrigin = TransformOrigin(0.5f, 1f),
+                            animationSpec = tween(260, easing = FastOutSlowInEasing),
+                        ) +
+                        slideInVertically(
+                            animationSpec = tween(260, easing = FastOutSlowInEasing),
+                        ) { it / 2 },
+                    exit = fadeOut(tween(240, easing = FastOutSlowInEasing)) +
+                        scaleOut(
+                            targetScale = 0.80f,
+                            transformOrigin = TransformOrigin(0.5f, 1f),
+                            animationSpec = tween(240, easing = FastOutSlowInEasing),
+                        ) +
+                        slideOutVertically(
+                            animationSpec = tween(240, easing = FastOutSlowInEasing),
+                        ) { it / 2 },
+                ) {
+                    state.handoff?.let { saved ->
+                        val action = remember(saved.version) { FeatureAction() }; val scope = rememberCoroutineScope()
+                        val countdown = remember(saved.version) { Animatable(1f) }
+                        LaunchedEffect(saved.version) {
+                            countdown.animateTo(0f, animationSpec = tween(durationMillis = 8000, easing = LinearEasing))
+                            model.dismissHandoff()
+                        }
+                        val navBarBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+                        val isTablet = LocalConfiguration.current.screenWidthDp >= 600
+                        val dockHeight = (if (state.current != null) 62.dp else 0.dp) + (if (!isTablet) 80.dp else 0.dp)
+                        val bottomPad = navBarBottom + dockHeight + 12.dp
+                        Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)).padding(horizontal = 16.dp).padding(bottom = bottomPad), contentAlignment = Alignment.BottomCenter) {
+                            Surface(
+                                Modifier.widthIn(max = 380.dp).fillMaxWidth().testTag("playback-handoff-notice"),
+                                shape = RoundedCornerShape(20.dp),
+                                color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                                border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)),
+                                tonalElevation = 3.dp,
+                                shadowElevation = 6.dp,
+                            ) {
+                                Row(
+                                    Modifier.padding(start = 14.dp, end = 10.dp, top = 6.dp, bottom = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                ) {
+                                    Icon(Icons.Default.Devices, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
+                                    Column(Modifier.weight(1f)) {
+                                        Text("其他设备有接续进度", style = MaterialTheme.typography.labelLarge)
+                                        Text(
+                                            "第 ${saved.index + 1}/${saved.trackIds.size} 首 · ${formatTime(saved.positionMs)}",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                    Button(
+                                        onClick = { scope.launch { action.run { model.acceptHandoff() } } },
+                                        enabled = !action.busy,
+                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp),
+                                        modifier = Modifier.height(32.dp),
+                                    ) {
+                                        Text("载入", style = MaterialTheme.typography.labelMedium)
+                                    }
+                                    Box(
+                                        modifier = Modifier.size(28.dp),
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        val trackColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
+                                        val progressColor = MaterialTheme.colorScheme.primary
+                                        Canvas(Modifier.fillMaxSize().padding(2.dp)) {
+                                            val stroke = Stroke(width = 1.8.dp.toPx(), cap = StrokeCap.Round)
+                                            drawCircle(color = trackColor, style = stroke)
+                                            if (countdown.value > 0.002f) {
+                                                drawArc(
+                                                    color = progressColor,
+                                                    startAngle = -90f,
+                                                    sweepAngle = 360f * countdown.value,
+                                                    useCenter = false,
+                                                    style = stroke,
+                                                )
+                                            }
+                                        }
+                                        IconButton(
+                                            onClick = model::dismissHandoff,
+                                            enabled = !action.busy,
+                                            modifier = Modifier.fillMaxSize(),
+                                        ) {
+                                            Icon(
+                                                Icons.Default.Close,
+                                                contentDescription = "关闭",
+                                                modifier = Modifier.size(13.dp),
+                                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -403,7 +491,7 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
             when { queue && !wide -> queue = false; lyrics && !wide -> lyrics = false; expanded -> collapsePlayer(); state.canGoBack -> vm.back(); else -> vm.navigate("search") }
         }
         @Composable fun BaseDestination(target: String) {
-            Box(Modifier.fillMaxSize().safeDrawingPadding()) {
+            Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))) {
             if (target == "settings") savedPages.SaveableStateProvider("settings") { SettingsScreen(vm, bottomBar = {
                 MiniPlayer(vm, state, onQueue = { queue = true }) { playerFromSettings = true; settings = false; expanded = true; lyrics = false; queue = false }
             }) { settings = false } }
@@ -421,16 +509,48 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
                             queue = if (showGlobalMore) ({ queue = true }) else null,
                             recent = if (showGlobalMore) vm::recent else null,
                             offline = if (showGlobalMore) ({ feature = "offline" }) else null) },
-                        bottomBar = { Column {
-                            if (state.current != null) MiniPlayer(vm, state, onQueue = { queue = true }) { playerReturnDepth = -1; playerFromSettings = false; expanded = true; lyrics = false; queue = false }
-                            if (!rail) NavigationBar(windowInsets = WindowInsets(0, 0, 0, 0), modifier = Modifier.testTag("bottom-navigation")) { BottomItems(state, vm) }
-                        } },
+                        bottomBar = {
+                            Surface(
+                                color = MaterialTheme.colorScheme.surfaceContainer,
+                                tonalElevation = 0.dp,
+                            ) {
+                                Column(Modifier.fillMaxWidth().windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Bottom))) {
+                                    if (state.current != null) {
+                                        MiniPlayer(vm, state, onQueue = { queue = true }) {
+                                            playerReturnDepth = -1; playerFromSettings = false; expanded = true; lyrics = false; queue = false
+                                        }
+                                    }
+                                    if (!rail) {
+                                        if (state.current != null) {
+                                            HorizontalDivider(
+                                                thickness = 0.5.dp,
+                                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f),
+                                            )
+                                        }
+                                        NavigationBar(
+                                            windowInsets = WindowInsets(0, 0, 0, 0),
+                                            containerColor = Color.Transparent,
+                                            tonalElevation = 0.dp,
+                                            modifier = Modifier.testTag("bottom-navigation"),
+                                        ) {
+                                            BottomItems(state, vm)
+                                        }
+                                    }
+                                }
+                            }
+                        },
                     ) { padding ->
-                        Column(Modifier.fillMaxSize().padding(padding)) {
-                            if (state.tab == "library" && state.collection == null) LibraryTabs(state.kind, vm::kind)
-                            // Keep the editor outside query-keyed pages and discover/result branches.
-                            if (state.tab == "search" && state.collection == null && state.kind != "recent") CatalogSearch(state.query, vm::search)
-                            val header: @Composable () -> Unit = {
+                        Box(Modifier.fillMaxSize().padding(padding)) {
+                            if (state.tab == "podcast") {
+                                PodcastChannelPage(vm)
+                            } else if (state.tab == "assistant") {
+                                MobileAssistantPage(vm)
+                            } else {
+                            Column(Modifier.fillMaxSize()) {
+                                if (state.tab == "library" && state.collection == null) LibraryTabs(state.kind, vm::kind)
+                                // Keep the editor outside query-keyed pages and discover/result branches.
+                                if (state.tab == "search" && state.collection == null && state.kind != "recent") CatalogSearch(state.query, vm::search)
+                                val header: @Composable () -> Unit = {
                                 Column(Modifier.fillMaxWidth()) {
                                     if (state.tab == "mine" && state.collection == null && state.kind != "recent") {
                                         PersonalHeader(vm, state, { vm.recent() }, compact = compact)
@@ -494,8 +614,10 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
                                 }
                             }
                         }
+                        }
                     }
                 }
+            }
             }
             }
         }
@@ -704,7 +826,10 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
         state.activePlaylist?.takeIf { it.kind == "manual" }?.let { playlist -> SongAction("从当前歌单移除", Icons.Default.RemoveCircleOutline, destructive = true) { actions = null; scope.launch { try { vm.removePlaylistTrack(track, playlist) } catch (e: Exception) { localError = friendlyError(e) } } } }
         if (state.account?.isOwner == true) {
             HorizontalDivider(Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
-            listOf(Triple("metadata", "编辑歌曲信息", Icons.Default.Edit), Triple("lyrics", "编辑歌词与打点", Icons.Default.Lyrics), Triple("suggestions", "更新元数据与建议", Icons.Default.Refresh)).forEach { (route, title, icon) ->
+            listOf(
+                Triple("metadata", "编辑歌曲信息", Icons.Default.Edit),
+                Triple("lyrics", "编辑歌词与打点", Icons.Default.Lyrics)
+            ).forEach { (route, title, icon) ->
                 SongAction(title, icon, navigate = true) { featureTrack = track; feature = route; actions = null }
             }
         }
@@ -751,7 +876,7 @@ private fun AlbumActionsSheet(
     onDismiss: () -> Unit,
     onAddPlaylist: (List<Track>) -> Unit,
     onEdit: () -> Unit,
-    onReview: () -> Unit,
+    onReview: () -> Unit = {},
     onRefresh: () -> Unit,
 ) {
     val action = remember { FeatureAction() }
@@ -799,7 +924,6 @@ private fun AlbumActionsSheet(
             })
             HorizontalDivider(Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
             SongAction("编辑专辑信息", Icons.Default.Edit, navigate = true, onClick = onEdit)
-            SongAction("批量核对资料", Icons.AutoMirrored.Filled.FactCheck, navigate = true, onClick = onReview)
             SongAction("更新专辑元数据", Icons.Default.Refresh, onClick = onRefresh)
             Spacer(Modifier.height(24.dp))
         }
@@ -818,18 +942,67 @@ private fun SongAction(label: String, icon: ImageVector, navigate: Boolean = fal
     )
 }
 
+
+@Composable
+private fun MobileAssistantPage(vm: MusicViewModel) {
+    Column(Modifier.fillMaxSize()) {
+        AgentChat(vm) { }
+    }
+}
+
 @Composable
 private fun RailItems(state: MusicState, vm: MusicViewModel) {
     val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
-    listOf(Triple("search", "发现", Icons.Default.Search), Triple("library", "音乐", Icons.Default.LibraryMusic), Triple("mine", "我的", Icons.Default.Person)).forEach { (id, label, icon) ->
+    listOf(
+        Triple("search", "发现", Icons.Default.Search),
+        Triple("podcast", "电台", Icons.Default.Podcasts),
+        Triple("assistant", "AI 助手", Icons.Default.AutoAwesome),
+        Triple("library", "音乐", Icons.Default.LibraryMusic),
+        Triple("mine", "我的", Icons.Default.Person),
+    ).forEach { (id, label, icon) ->
         NavigationRailItem(state.tab == id, { keyboard?.hide(); vm.navigate(id) }, modifier = Modifier.testTag("nav-$id"), icon = { Icon(icon, label) }, label = { Text(label) })
     }
 }
 @Composable
 private fun RowScope.BottomItems(state: MusicState, vm: MusicViewModel) {
     val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
-    listOf(Triple("search", "发现", Icons.Default.Search), Triple("library", "音乐", Icons.Default.LibraryMusic), Triple("mine", "我的", Icons.Default.Person)).forEach { (id, label, icon) ->
-        NavigationBarItem(state.tab == id, { keyboard?.hide(); vm.navigate(id) }, modifier = Modifier.testTag("nav-$id"), icon = { Icon(icon, label) }, label = { Text(label) })
+    listOf(
+        Triple("search", "发现", Icons.Default.Search),
+        Triple("podcast", "电台", Icons.Default.Podcasts),
+        Triple("assistant", "AI 助手", Icons.Default.AutoAwesome),
+        Triple("library", "音乐", Icons.Default.LibraryMusic),
+        Triple("mine", "我的", Icons.Default.Person),
+    ).forEach { (id, label, icon) ->
+        val isAssistant = id == "assistant"
+        NavigationBarItem(
+            selected = state.tab == id,
+            onClick = { keyboard?.hide(); vm.navigate(id) },
+            modifier = Modifier.testTag("nav-$id"),
+            icon = {
+                if (isAssistant) {
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = if (state.tab == id) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f),
+                        contentColor = if (state.tab == id) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onPrimaryContainer,
+                        modifier = Modifier.size(28.dp),
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(icon, label, modifier = Modifier.size(18.dp))
+                        }
+                    }
+                } else {
+                    Icon(icon, label)
+                }
+            },
+            label = {
+                Text(
+                    label,
+                    fontWeight = if (isAssistant && state.tab == id) androidx.compose.ui.text.font.FontWeight.Bold else androidx.compose.ui.text.font.FontWeight.Normal,
+                    maxLines = 1,
+                    softWrap = false,
+                )
+            },
+        )
     }
 }
 
@@ -1047,27 +1220,45 @@ private fun PlaybackControls(vm: MusicViewModel, state: MusicState, onQueue: () 
     onArtist: (String) -> Unit = {}, compact: Boolean = false, modifier: Modifier = Modifier) {
     val track = state.current ?: return
     Column(modifier.fillMaxWidth()) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text(track.title, fontSize = if (compact) 20.sp else 23.sp, fontWeight = FontWeight.Medium, maxLines = if (compact) 1 else 2, overflow = TextOverflow.Ellipsis)
-                if (track.artists.isEmpty()) Text("未知艺人", color = Muted, fontSize = 13.sp)
-                else Row(Modifier.horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+            Text(track.title, fontSize = if (compact) 20.sp else 23.sp, fontWeight = FontWeight.Medium, maxLines = if (compact) 1 else 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).padding(end = 8.dp))
+            FavoriteControl(track.loved, track.id in state.pendingFavorites, tactile { vm.favorite(track) })
+        }
+        Spacer(Modifier.height(if (compact) 2.dp else 4.dp))
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+            Row(Modifier.weight(1f, fill = false).horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically) {
+                if (track.artists.isEmpty()) {
+                    Text("未知艺人", color = Muted, fontSize = 13.sp)
+                } else {
                     track.artists.forEachIndexed { index, name ->
                         if (index > 0) Text(" / ", color = Muted, fontSize = 13.sp)
-                        TextButton(onClick = { onArtist(name) }, contentPadding = PaddingValues(vertical = 2.dp), modifier = Modifier.heightIn(min = 28.dp).testTag("player-artist-$name")) {
+                        Row(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(4.dp))
+                                .clickable { onArtist(name) }
+                                .padding(vertical = 2.dp)
+                                .testTag("player-artist-$name"),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
                             Text(name, color = Muted, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             Spacer(Modifier.width(2.dp))
-                            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, Modifier.size(14.dp), tint = Muted)
+                            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, Modifier.size(13.dp), tint = Muted)
                         }
                     }
                 }
-            }
-            FavoriteControl(track.loved, track.id in state.pendingFavorites, tactile { vm.favorite(track) })
-        }
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-            TextButton(onAlbum, Modifier.weight(1f, fill = false).testTag("player-album").heightIn(min = 32.dp), contentPadding = PaddingValues(vertical = 2.dp)) {
-                Text("专辑 · ${track.album ?: "未知专辑"}", color = Muted, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, Modifier.size(16.dp), tint = Muted)
+                Text(" · ", color = Muted, fontSize = 13.sp)
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(4.dp))
+                        .clickable { onAlbum() }
+                        .padding(vertical = 2.dp)
+                        .testTag("player-album"),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(track.album ?: "未知专辑", color = Muted, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Spacer(Modifier.width(2.dp))
+                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, Modifier.size(13.dp), tint = Muted)
+                }
             }
             if (state.playbackQuality.isNotBlank()) {
                 var qualityDialog by remember { mutableStateOf(false) }
@@ -1118,6 +1309,7 @@ private fun PlaybackControls(vm: MusicViewModel, state: MusicState, onQueue: () 
                 }
             }
         }
+        Spacer(Modifier.height(if (compact) 4.dp else 8.dp))
         PlaybackSeekSection(vm, state.duration)
         Row(Modifier.fillMaxWidth().padding(vertical = if (compact) 4.dp else 12.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             val modeIcon = if (state.shuffle) Icons.Default.Shuffle else if (state.repeatMode == Player.REPEAT_MODE_ONE) Icons.Default.RepeatOne else Icons.Default.Repeat

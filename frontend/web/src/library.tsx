@@ -34,6 +34,8 @@ import { NowPlaying } from './now-playing';
 import { PlayerBar, usePlayer } from './player';
 import { PlaylistEditor } from './playlist-editor';
 import { PlaylistMenu } from './playlist-menu';
+import { AlbumEditor } from './album-editor';
+import { AlbumMenu } from './album-menu';
 import { PlaybackSync } from './playback-sync';
 import { QueuePanel } from './queue-panel';
 import { Management } from './management';
@@ -41,7 +43,9 @@ import { MetadataEditor } from './metadata-editor';
 import { MetadataRefreshDialog, type RefreshTarget } from './metadata-refresh';
 import { LyricScanDialog } from './lyric-scans';
 import { AccountDialog } from './accounts';
-import { ThemeControl } from './theme';
+import { TrackFileInfoDialog } from './track-file-info-dialog';
+import { PodcastsPage } from './podcasts';
+import { ThemeControl, ThemeToggleCompact } from './theme';
 import { TrackList } from './track-list';
 import {
   AlphabetRail,
@@ -81,6 +85,7 @@ type View =
   | 'favorites'
   | 'listening'
   | 'discover'
+  | 'podcasts'
   | 'offline'
   | 'devices'
   | 'assistant'
@@ -111,9 +116,10 @@ const labels: Record<View, string> = {
   albums: '专辑',
   artists: '艺人',
   playlists: '歌单',
-  favorites: '♥ 我喜欢',
+  favorites: '我喜欢',
   listening: '收听记录',
   discover: '每日推荐 · AI',
+  podcasts: '电台 · 播客',
   offline: '离线音乐',
   devices: '跨设备继续',
   assistant: '音乐助手',
@@ -122,21 +128,38 @@ const labels: Record<View, string> = {
   notifications: '通知中心',
   'assistant-settings': '助手设置',
 };
-const icons: Record<View, string> = {
-  tracks: '▤',
-  albums: '▣',
-  artists: '◉',
-  playlists: '♫',
-  favorites: '♡',
-  listening: '◷',
-  discover: '✦',
-  offline: '↓',
-  devices: '⇄',
-  assistant: '✧',
-  drafts: '▧',
-  tasks: '◎',
-  notifications: '♧',
-  'assistant-settings': '⚙',
+const viewIcons: Record<
+  View,
+  | 'music'
+  | 'album'
+  | 'artist'
+  | 'playlist'
+  | 'heart'
+  | 'history'
+  | 'assistant'
+  | 'podcast'
+  | 'download'
+  | 'refresh'
+  | 'draft'
+  | 'task'
+  | 'bell'
+  | 'settings'
+> = {
+  tracks: 'music',
+  albums: 'album',
+  artists: 'artist',
+  playlists: 'playlist',
+  favorites: 'heart',
+  listening: 'history',
+  discover: 'assistant',
+  podcasts: 'podcast',
+  offline: 'download',
+  devices: 'refresh',
+  assistant: 'assistant',
+  drafts: 'draft',
+  tasks: 'task',
+  notifications: 'bell',
+  'assistant-settings': 'settings',
 };
 
 type CatalogLocation = {
@@ -164,11 +187,20 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
     setConnectionSettingsRevision((value) => value + 1);
     switchView('assistant-settings');
   }
-  const [view, setView] = useState<View>(
-    navigator.onLine && !usingOfflineAccess() ? 'tracks' : 'offline',
-  );
+  const [view, setView] = useState<View>(() => {
+    try {
+      const saved = localStorage.getItem('wildstring:active_view');
+      if (saved && Object.hasOwn(labels, saved)) {
+        return saved as View;
+      }
+    } catch {
+      // 忽略
+    }
+    return navigator.onLine && !usingOfflineAccess() ? 'tracks' : 'offline';
+  });
   const specialView = [
     'discover',
+    'podcasts',
     'offline',
     'devices',
     'assistant',
@@ -251,6 +283,10 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
     null,
   );
   const closePlaylistMenu = useCallback(() => setPlaylistMenu(null), []);
+  const [albumMenu, setAlbumMenu] = useState<{ item: Album; x: number; y: number } | null>(null);
+  const [editingAlbum, setEditingAlbum] = useState<Album | null>(null);
+  const [viewingFileTrack, setViewingFileTrack] = useState<Track | null>(null);
+  const closeAlbumMenu = useCallback(() => setAlbumMenu(null), []);
   useOfflinePlaylistSync(currentUser.id);
   const [bulkTarget, setBulkTarget] = useState(''),
     [bulkBusy, setBulkBusy] = useState(false);
@@ -291,7 +327,6 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
   const sortable = !specialView && !activePlaylist && !artistGrid && !playlistGrid;
   const unit =
     kind === 'artists' ? '位' : kind === 'albums' ? '张' : kind === 'playlists' ? '个' : '首';
-  const collectionsMetrics = view === 'playlists' || view === 'favorites' ? listeningRevision : 0;
   const liveRules = activePlaylist?.kind === 'smart' || activePlaylist?.kind === 'favorites';
   useEffect(
     () => () => {
@@ -344,14 +379,13 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
         if (!controller.signal.aborted) setCollectionsLoading(false);
       });
     return () => controller.abort();
-  }, [revision, collectionRevision, favorites.change, collectionsMetrics]);
+  }, [revision, collectionRevision, favorites.change]);
 
   useEffect(() => {
     const changed = () => setListeningRevision((value) => value + 1);
     window.addEventListener('wildstring:listening-updated', changed);
     return () => window.removeEventListener('wildstring:listening-updated', changed);
   }, []);
-  const metricsRevision = view === 'listening' || liveRules || playlistGrid ? listeningRevision : 0;
   useEffect(() => {
     if (view !== 'listening') return;
     const controller = new AbortController();
@@ -379,7 +413,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
     parameters.set('sort', catalogSort.sort);
     parameters.set('order', catalogSort.order);
   }
-  const browseIdentity = `${revision}|${view}|${browsePath}?${parameters}|${activePlaylist?.version || 0}|${playlistGrid ? collectionRevision : 0}|${metricsRevision}|${liveRules ? favorites.change : 0}`;
+  const browseIdentity = `${revision}|${view}|${browsePath}?${parameters}|${activePlaylist?.version || 0}|${playlistGrid ? collectionRevision : 0}|${liveRules ? favorites.change : 0}`;
   const browse = useContinuousBrowse<Track | Album | Artist | Playlist>({
     identity: browseIdentity,
     path: `${browsePath}?${parameters}`,
@@ -584,12 +618,18 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
   }
   function switchView(target: View, resetHistory = true) {
     if (!Object.hasOwn(labels, target)) return;
+    try {
+      localStorage.setItem('wildstring:active_view', target);
+    } catch {
+      // 忽略
+    }
     collectionRequest.current?.abort();
     collectionRequest.current = null;
     setCollectionBusy(false);
     setManageOpen(false);
     if (resetHistory) setNavigation([]);
     window.scrollTo(0, 0);
+    document.querySelector('.sidebar-navigation')?.scrollTo(0, 0);
     setView(target);
     setAlbumLoading(false);
     setAlbum(null);
@@ -841,6 +881,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
     onAdd: addToPlaylist,
     onCreate: (track) => setEditor({ initial: null, track }),
     onEdit: canManage ? setEditingTrack : undefined,
+    onFileInfo: setViewingFileTrack,
     onRefresh: canImport
       ? (track) => setMetadataRefresh({ scope: 'track', id: track.id, label: track.title })
       : undefined,
@@ -939,22 +980,10 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
       className={`nav-button ${view === target && !manageOpen ? 'nav-current' : ''}`}
       onClick={() => switchView(target)}
     >
-      <span aria-hidden="true">
-        {target === 'notifications' ? (
-          <Icon name="bell" />
-        ) : target === 'assistant' ? (
-          <Icon name="assistant" />
-        ) : target === 'drafts' ? (
-          <Icon name="draft" />
-        ) : target === 'tasks' ? (
-          <Icon name="task" />
-        ) : target === 'assistant-settings' ? (
-          <Icon name="settings" />
-        ) : (
-          icons[target]
-        )}
+      <span className="nav-icon" aria-hidden="true">
+        <Icon name={viewIcons[target]} />
       </span>
-      {labels[target]}
+      <span className="nav-label">{labels[target]}</span>
       {target === 'notifications' && inbox.unread > 0 ? (
         <small className="notification-count" aria-label={`${inbox.unread} 条未读通知`}>
           {inbox.unread > 99 ? '99+' : inbox.unread}
@@ -976,8 +1005,22 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
           <nav aria-label="主导航" className="sidebar-navigation">
             <p className="sidebar-group-label">曲库</p>
             {(['tracks', 'albums', 'artists', 'playlists', 'favorites'] as View[]).map(nav)}
-            <p className="sidebar-group-label">发现</p>
-            {(['discover', 'assistant'] as View[]).map(nav)}
+            <p className="sidebar-group-label">发现与电台</p>
+            {(['discover', 'podcasts', 'assistant'] as View[]).map(nav)}
+            <button
+              className={`nav-button ${queueOpen ? 'selected' : ''}`}
+              onClick={() => {
+                setQueueOpen(!queueOpen);
+                setLyricsOpen(false);
+              }}
+              aria-expanded={queueOpen}
+            >
+              <span className="nav-icon" aria-hidden="true">
+                <Icon name="queue" />
+              </span>
+              <span className="nav-label">播放队列</span>
+              <small>{player.queue.length}</small>
+            </button>
             <details
               className="sidebar-group"
               open={['listening', 'offline', 'devices'].includes(view) || undefined}
@@ -993,16 +1036,6 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
               {(['drafts', 'tasks', 'assistant-settings'] as View[]).map(nav)}
             </details>
           </nav>
-          <button
-            className={`nav-button ${queueOpen ? 'selected' : ''}`}
-            onClick={() => {
-              setQueueOpen(!queueOpen);
-              setLyricsOpen(false);
-            }}
-            aria-expanded={queueOpen}
-          >
-            <span>☷</span>播放队列 <small>{player.queue.length}</small>
-          </button>
           <div className="sidebar-bottom">
             {canManage && (
               <button
@@ -1012,18 +1045,24 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
                   setQueueOpen(false);
                 }}
               >
-                <span aria-hidden="true">⚙</span>管理
+                <span className="nav-icon" aria-hidden="true">
+                  <Icon name="settings" />
+                </span>
+                <span className="nav-label">管理</span>
               </button>
             )}
             <button className="nav-button account-entry" onClick={() => setAccountOpen(true)}>
-              <AccountAvatar user={currentUser} />
-              账号设置
+              <span className="nav-icon" aria-hidden="true">
+                <AccountAvatar user={currentUser} />
+              </span>
+              <span className="nav-label">账号设置</span>
             </button>
-            <ThemeControl />
-            <span className="local-dot" /> 私人曲库 · 原音直放
-            <button className="text-button" onClick={logout}>
-              退出登录 ↗
-            </button>
+            <div className="sidebar-bottom-actions">
+              <ThemeToggleCompact />
+              <button className="text-button logout-link" onClick={logout} title="退出登录">
+                退出登录 ↗
+              </button>
+            </div>
           </div>
         </aside>
         {manageOpen && (
@@ -1070,47 +1109,49 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
               {canManage && <option value="manage">管理</option>}
               <option value="account">账号设置</option>
             </select>
-            <form className="search" onSubmit={search} role="search" autoComplete="off">
-              <label className="sr-only" htmlFor="search">
-                搜索曲库
-              </label>
-              <span aria-hidden="true">⌕</span>
-              <input
-                id="search"
-                type="search"
-                name="wildstring-library-query"
-                autoComplete="off"
-                spellCheck={false}
-                placeholder={
-                  artistGrid
-                    ? '搜索艺人、乐队'
-                    : playlistGrid
-                      ? '搜索歌单'
-                      : selectedArtist
-                        ? `搜索 ${selectedArtist.name} 的歌曲、专辑`
-                        : '搜索歌曲、艺人、专辑'
-                }
-                maxLength={256}
-                value={draft}
-                onChange={(event) => setDraft(event.target.value)}
-              />
-              <button type="submit" aria-label="搜索">
-                ↵
+            <div className="topbar-actions">
+              <form className="search" onSubmit={search} role="search" autoComplete="off">
+                <label className="sr-only" htmlFor="search">
+                  搜索曲库
+                </label>
+                <span aria-hidden="true">⌕</span>
+                <input
+                  id="search"
+                  type="search"
+                  name="wildstring-library-query"
+                  autoComplete="off"
+                  spellCheck={false}
+                  placeholder={
+                    artistGrid
+                      ? '搜索艺人、乐队'
+                      : playlistGrid
+                        ? '搜索歌单'
+                        : selectedArtist
+                          ? `搜索 ${selectedArtist.name} 的歌曲、专辑`
+                          : '搜索歌曲、艺人、专辑'
+                  }
+                  maxLength={256}
+                  value={draft}
+                  onChange={(event) => setDraft(event.target.value)}
+                />
+                <button type="submit" aria-label="搜索">
+                  ↵
+                </button>
+              </form>
+              <button
+                className={`notification-entry icon-button ${view === 'notifications' ? 'selected' : ''}`}
+                aria-label="通知中心"
+                data-help={inbox.unread ? `${inbox.unread} 条未读通知` : '通知中心'}
+                onClick={() => switchView('notifications')}
+              >
+                <Icon name="bell" />
+                {inbox.unread > 0 && (
+                  <span aria-hidden="true" className="notification-corner-count">
+                    {inbox.unread > 99 ? '99+' : inbox.unread}
+                  </span>
+                )}
               </button>
-            </form>
-            <button
-              className={`notification-entry icon-button ${view === 'notifications' ? 'selected' : ''}`}
-              aria-label="通知中心"
-              data-help={inbox.unread ? `${inbox.unread} 条未读通知` : '通知中心'}
-              onClick={() => switchView('notifications')}
-            >
-              <Icon name="bell" />
-              {inbox.unread > 0 && (
-                <span aria-hidden="true" className="notification-corner-count">
-                  {inbox.unread > 99 ? '99+' : inbox.unread}
-                </span>
-              )}
-            </button>
+            </div>
           </header>
           {view === 'discover' && (
             <Discover
@@ -1132,6 +1173,14 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
               </p>
             }
           >
+            {view === 'podcasts' && (
+              <PodcastsPage
+                onPlayTrack={(track) => {
+                  player.start([track], 0);
+                  setNotice(`正在播放播客《${track.title}》`);
+                }}
+              />
+            )}
             {view === 'assistant' && (
               <Assistant
                 onDraft={(id) => openAgentItem('drafts', id)}
@@ -1324,6 +1373,17 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
                           <Icon name="download" />
                           保存整个集合离线
                         </button>
+                        {album && canManage && (
+                          <button
+                            onClick={(event) => {
+                              event.currentTarget.closest('details')?.removeAttribute('open');
+                              setEditingAlbum(album);
+                            }}
+                          >
+                            <Icon name="edit" />
+                            编辑专辑与封面
+                          </button>
+                        )}
                         {album && canImport && (
                           <button
                             onClick={(event) => {
@@ -1568,7 +1628,27 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
                 ) : kind === 'albums' ? (
                   <div className="album-grid" aria-label="专辑列表">
                     {(visible as AlbumPage).items.map((item) => (
-                      <div className="album-card" key={item.id} data-browse-id={item.id}>
+                      <div
+                        className="album-card"
+                        key={item.id}
+                        data-browse-id={item.id}
+                        onContextMenu={(event) => {
+                          event.preventDefault();
+                          setAlbumMenu({ item, x: event.clientX, y: event.clientY });
+                        }}
+                      >
+                        <button
+                          type="button"
+                          className="album-card-action"
+                          aria-label={`${item.title} 专辑操作`}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            const rect = event.currentTarget.getBoundingClientRect();
+                            setAlbumMenu({ item, x: rect.right - 220, y: rect.bottom + 4 });
+                          }}
+                        >
+                          <Icon name="more" />
+                        </button>
                         <button
                           className="album-card-main"
                           aria-label={`打开专辑 ${item.title}`}
@@ -1748,6 +1828,59 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
           }}
         />
       )}
+      {albumMenu && (
+        <AlbumMenu
+          album={albumMenu.item}
+          x={albumMenu.x}
+          y={albumMenu.y}
+          canManage={canManage}
+          onClose={closeAlbumMenu}
+          onOpen={() => {
+            albumRequest.current?.abort();
+            rememberLocation();
+            window.scrollTo(0, 0);
+            setAlbumLoading(false);
+            setAlbum(albumMenu.item);
+          }}
+          onPlay={async () => {
+            try {
+              setNotice(`正在读取专辑《${albumMenu.item.title}》歌曲…`);
+              const tracks = await collectTracks(
+                `/albums/${encodeURIComponent(albumMenu.item.id)}/tracks`,
+              );
+              if (tracks.length) {
+                player.start(tracks, 0);
+                setNotice(`正在播放《${albumMenu.item.title}》，共 ${tracks.length} 首。`);
+              }
+            } catch (err) {
+              setNotice(err instanceof Error ? err.message : '播放专辑失败');
+            }
+          }}
+          onEdit={() => {
+            setEditingAlbum(albumMenu.item);
+          }}
+        />
+      )}
+      {editingAlbum && (
+        <AlbumEditor
+          albumId={editingAlbum.id}
+          initialTitle={editingAlbum.title}
+          onClose={() => setEditingAlbum(null)}
+          onSaved={async () => {
+            refreshLibrary();
+            setRevision((v) => v + 1);
+            if (album && album.id === editingAlbum.id) {
+              try {
+                const updated = await api<Album>(`/albums/${encodeURIComponent(editingAlbum.id)}`);
+                setAlbum(updated);
+              } catch {
+                // ignore
+              }
+            }
+            setNotice('专辑元数据与封面已成功保存');
+          }}
+        />
+      )}
       {editor && (
         <PlaylistEditor
           key={editor.initial?.id || 'new'}
@@ -1761,6 +1894,17 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
           user={currentUser}
           onUserChange={setCurrentUser}
           onClose={() => setAccountOpen(false)}
+        />
+      )}
+      {viewingFileTrack && (
+        <TrackFileInfoDialog
+          track={viewingFileTrack}
+          canManage={canManage}
+          onClose={() => setViewingFileTrack(null)}
+          onReorganized={() => {
+            setRevision((v) => v + 1);
+            setNotice('歌曲文件已按标准命名重排。');
+          }}
         />
       )}
       {editingTrack && (

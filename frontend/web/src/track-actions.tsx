@@ -15,6 +15,7 @@ export interface TrackOperations {
   onDownload?: (track: Track) => void;
   onRemove?: (track: Track) => void;
   onMove?: (track: Track, direction: -1 | 1) => void;
+  onFileInfo?: (track: Track) => void;
 }
 export function TrackActions({
   track,
@@ -97,6 +98,17 @@ export function TrackActions({
           >
             <Icon name="refresh" />
             <span>更新元数据</span>
+          </button>
+        )}
+        {operations.onFileInfo && (
+          <button
+            onClick={() => {
+              operations.onFileInfo!(track);
+              hide();
+            }}
+          >
+            <Icon name="info" />
+            <span>文件属性与路径</span>
           </button>
         )}
         <button

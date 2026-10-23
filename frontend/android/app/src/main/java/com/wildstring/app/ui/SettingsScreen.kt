@@ -83,10 +83,14 @@ private val LocalSettingsFeedback = staticCompositionLocalOf<() -> Unit> { {} }
                 SettingsAction("联网与记忆", Icons.Default.TravelExplore) { feature = "research" }
                 SettingsAction("通知设置", Icons.Default.Notifications) { feature = "channels" }
             }
-            if (state.account?.isOwner == true) SettingsGroup("资料来源与维护") {
-                SettingsAction("曲库管理", Icons.Default.LibraryMusic) { feature = "management" }
-                SettingsAction("歌词补全与洗版", Icons.Default.Lyrics) { feature = "lyric-scans" }
+            if (state.account?.isOwner == true) SettingsGroup("资料来源与插件") {
                 SettingsAction("数据源插件", Icons.Default.Extension) { feature = "source-plugins" }
+                Text(
+                    "全库批量核对、目录整理等高级治理请在电脑网页端进行。",
+                    Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
             SettingsGroup("播放") {
                 SettingsAction("播放诊断", Icons.Default.Troubleshoot) { diagnostics = true }
@@ -119,6 +123,9 @@ private val LocalSettingsFeedback = staticCompositionLocalOf<() -> Unit> { {} }
                     listOf(false to "经典", true to "红布"), preferences.redIcon, "桌面可能需要片刻更新图标。", change = {
                         runCatching { vm.settings.icon(it) }.onFailure { message = "图标切换失败，请重试。" }
                     })
+                SettingsChoice("屏幕方向", when (preferences.orientation) { "portrait" -> "锁定竖屏"; "sensor" -> "自动旋转"; else -> "智能自适应" }, Icons.Default.ScreenRotation,
+                    listOf("auto" to "智能自适应（手机竖屏 · 平板自适应）", "portrait" to "锁定竖屏", "sensor" to "自动旋转（跟随重力感应）"), preferences.orientation,
+                    "手机设备默认锁定竖屏，避免倾斜误触发横屏；平板设备允许根据姿势自适应。也可开启自动旋转自由翻转。", change = vm.settings::orientation)
                 ListItem(headlineContent = { Text("轻触反馈") }, supportingContent = { Text("播放与关键操作轻反馈，遵循系统设置") },
                     leadingContent = { Icon(Icons.Default.Vibration, null) },
                     trailingContent = { Switch(preferences.haptics, { enabled -> vm.settings.haptics(enabled); if (enabled) feedback(TactileKind.Tap) }) },
@@ -142,7 +149,7 @@ private val LocalSettingsFeedback = staticCompositionLocalOf<() -> Unit> { {} }
             message?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
             SettingsGroup("关于") {
                 com.wildstring.app.update.UpdateSettings()
-                ListItem(headlineContent = { Text("野弦") }, supportingContent = { Text("WildString · ${BuildConfig.VERSION_NAME}") },
+                ListItem(headlineContent = { Text("野弦") }, supportingContent = { Text("WildString · 客户端 v${BuildConfig.VERSION_NAME}${state.serverVersion?.let { " · 服务端 v$it" } ?: ""}") },
                     leadingContent = { Icon(painterResource(R.drawable.ic_wildstring), null, Modifier.size(36.dp), tint = Color.Unspecified) })
                 SettingsAction("退出登录", Icons.AutoMirrored.Filled.Logout) { logout = true }
             }

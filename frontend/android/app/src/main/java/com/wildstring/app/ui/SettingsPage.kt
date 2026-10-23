@@ -27,7 +27,16 @@ import androidx.compose.ui.unit.dp
     Scaffold(modifier = Modifier.fillMaxSize().testTag("settings-page"),
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-        bottomBar = bottomBar,
+        bottomBar = {
+            Surface(
+                color = MaterialTheme.colorScheme.surfaceContainer,
+                tonalElevation = 0.dp,
+            ) {
+                Box(Modifier.fillMaxWidth().windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Bottom))) {
+                    bottomBar()
+                }
+            }
+        },
         topBar = {
             TopAppBar(title = { Text("设置") }, navigationIcon = {
                 IconButton(back, Modifier.testTag("settings-back")) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回") }
