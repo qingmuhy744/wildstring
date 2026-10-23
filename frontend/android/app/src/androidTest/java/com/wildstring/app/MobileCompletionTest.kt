@@ -205,7 +205,8 @@ class MobileCompletionTest {
         val address = fixture.server.url("/").newBuilder().host("127.0.0.1").build().toString()
         val connection = compose.runOnIdle { vm.repository.session.invalidate(); vm.settings.quality(0); vm.sharing.mode("off"); vm.connect(address, "mobile-admin", "test-password", true) }
         compose.waitUntil(20_000) { connection.isCompleted && vm.state.value.connected && vm.state.value.server == address && !vm.state.value.loading }
-        compose.waitUntil(10_000) { vm.controller != null }
+        compose.waitUntil(10_000) { compose.runOnIdle { vm.controller != null } }
+        compose.runOnIdle { vm.controller?.pause(); vm.controller?.stop(); vm.controller?.clearMediaItems() }
         return vm
     }
     private fun cleanup(vm: MusicViewModel) { compose.runOnIdle { vm.sleep.cancel(); vm.repository.session.invalidate(); vm.controller?.stop(); vm.controller?.clearMediaItems() } }
