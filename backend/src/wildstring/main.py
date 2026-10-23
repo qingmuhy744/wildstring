@@ -5,7 +5,6 @@ import logging
 import os
 import sqlite3
 from contextlib import asynccontextmanager
-from importlib.metadata import version
 from tempfile import TemporaryFile
 
 from fastapi import FastAPI
@@ -13,6 +12,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.routing import Route
 
+from wildstring import get_app_version
 from wildstring.agent_platform import AgentPlatform
 from wildstring.auth import Auth
 from wildstring.catalog_gaps import catalog_gaps_router
@@ -96,14 +96,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             await asyncio.to_thread(diagnostics.stop)
 
     development = current.environment != "production"
-    try:
-        app_version = version("wildstring-backend")
-    except Exception:
-        app_version = "0.7.0"
-
     app = FastAPI(
         title="WildString API",
-        version=app_version,
+        version=get_app_version(),
         lifespan=lifespan,
         docs_url="/docs" if development else None,
         redoc_url=None,

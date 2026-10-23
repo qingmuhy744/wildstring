@@ -9,7 +9,6 @@ import shutil
 import sqlite3
 import time
 from datetime import datetime
-from importlib.metadata import version
 from pathlib import Path, PurePosixPath
 from tempfile import NamedTemporaryFile
 from threading import Event, Thread
@@ -20,6 +19,7 @@ from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Query, 
 from filelock import FileLock, Timeout
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
+from wildstring import get_app_version
 from wildstring.ai_config import AIService, AIUpdate
 from wildstring.album_release_locks import ReleaseLockInput
 from wildstring.diagnostics import record_event, trace_context
@@ -885,7 +885,7 @@ class Management:
             ).fetchone()
         return {
             "active_job": active["id"] if active else None,
-            "version": version("wildstring-backend"),
+            "version": get_app_version(),
             "schema_version": schema,
             "preferences": self.preferences(),
             "counts": dict(counts),

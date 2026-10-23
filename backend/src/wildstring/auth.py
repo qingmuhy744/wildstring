@@ -4,13 +4,13 @@ import hashlib
 import hmac
 import secrets
 import time
-from importlib.metadata import PackageNotFoundError, version
 from typing import Literal
 from uuid import uuid4
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, ValidationError, field_validator
 
+from wildstring import get_app_version
 from wildstring.config import Settings
 from wildstring.database import Database
 from wildstring.permissions import require_owner, require_scope
@@ -239,14 +239,10 @@ class Auth:
         def status(request: Request, response: Response):
             response.headers["Cache-Control"] = "no-store"
             authenticated = self.authenticated(request)
-            try:
-                server_ver = version("wildstring-backend")
-            except PackageNotFoundError:
-                server_ver = "0.7.0"
             result = {
                 "configured": self.configured(),
                 "authenticated": authenticated,
-                "version": server_ver,
+                "version": get_app_version(),
             }
             if authenticated:
                 result["user"] = self.require_session(request)
