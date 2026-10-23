@@ -112,19 +112,24 @@ def handle_upload(
             matched_audio = find_matching_audio_target(
                 database, settings.library_dir, relative_path
             )
+            base_dir = settings.library_dir.resolve()
             if matched_audio:
                 stem = relative_path.stem.lower()
                 if stem in ("cover", "folder", "front") and suffix in IMAGE_SUFFIXES:
                     target_file = matched_audio.parent / f"cover{suffix}"
                 else:
                     target_file = matched_audio.with_suffix(suffix)
-                dest = settings.library_dir / target_file
+                dest = (settings.library_dir / target_file).resolve()
+                if not dest.is_relative_to(base_dir):
+                    raise HTTPException(400, "invalid_path_traversal")
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(temp_path, dest)
                 target_str = target_file.as_posix()
             else:
                 # Place in relative path inside library_dir
-                dest = settings.library_dir / relative_path
+                dest = (settings.library_dir / relative_path).resolve()
+                if not dest.is_relative_to(base_dir):
+                    raise HTTPException(400, "invalid_path_traversal")
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(temp_path, dest)
                 target_str = relative_path.as_posix()

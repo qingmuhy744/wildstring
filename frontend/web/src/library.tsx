@@ -45,7 +45,7 @@ import { LyricScanDialog } from './lyric-scans';
 import { AccountDialog } from './accounts';
 import { TrackFileInfoDialog } from './track-file-info-dialog';
 import { PodcastsPage } from './podcasts';
-import { ThemeControl, ThemeToggleCompact } from './theme';
+import { ThemeToggleCompact } from './theme';
 import { TrackList } from './track-list';
 import {
   AlphabetRail,

@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
 import { api, artist, type Track } from './api';
-import { Icon } from './icons';
 
 interface TrackFileInfo {
   track_id: string;

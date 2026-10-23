@@ -498,6 +498,7 @@ class Management:
                     cover_file = target_dir / "cover.jpg"
                     cover_file.write_bytes(file_bytes)
                 except OSError:
+                    # Ignore write failures when writing album covers to non-writable directories
                     pass
 
     def source_roots(self):

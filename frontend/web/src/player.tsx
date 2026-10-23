@@ -2,7 +2,6 @@ import { hints } from './help-content';
 import { useEffect, useId, useRef, useState } from 'react';
 import { api, eventId, artist, streamUrl, time, type PlaybackPlan, type Track } from './api';
 import { Cover } from './cover';
-import { DefaultArtwork } from './default-artwork';
 import { Icon } from './icons';
 import { FavoriteButton, type Favorites } from './favorites';
 import { ListeningTracker } from './listening';

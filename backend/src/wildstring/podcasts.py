@@ -419,6 +419,7 @@ class PodcastManager:
                             "ALTER TABLE podcast_episodes ADD COLUMN download_status TEXT NOT NULL DEFAULT 'none'"
                         )
         except Exception:
+            # Table or columns may already exist during initialization
             pass
 
     def get_network_policy(self) -> tuple[str, str | None]:
@@ -1016,7 +1017,6 @@ class PodcastManager:
                 start_t = time.time()
                 last_sample_t = start_t
                 last_sample_bytes = 0
-                speed_bps = 0.0
 
                 chunk_size = 32 * 1024 if is_slow else 64 * 1024
                 target_bps = 512 * 1024 if is_slow else None
@@ -1131,6 +1131,7 @@ class PodcastManager:
                     (episode_id,),
                 )
         except Exception:
+            # Best-effort database status update on download failure
             pass
         self._failed_downloads[episode_id] = {
             "episode_id": episode_id,
@@ -1168,6 +1169,7 @@ class PodcastManager:
                     try:
                         total_bytes += os.path.getsize(os.path.join(root, f))
                     except Exception:
+                        # Ignore unreadable or transient files during disk usage calculation
                         pass
 
         def human_size(n: int) -> str:
@@ -1208,6 +1210,7 @@ class PodcastManager:
                     f.unlink(missing_ok=True)
                     deleted_count += 1
                 except Exception:
+                    # Ignore files that could not be deleted
                     pass
 
         with self.database.connect(write=True) as conn:
@@ -1310,6 +1313,7 @@ class PodcastManager:
             if proxies:
                 opener = urllib.request.build_opener(urllib.request.ProxyHandler(proxies))
         except Exception:
+            # Fallback to direct connection if proxy opener creation fails
             pass
 
         try:
@@ -1453,8 +1457,6 @@ class PodcastManager:
                             pub_ts = 0.0
                 ep_num = ep_row["episode_number"] or 0
                 if not ep_num:
-                    import re
-
                     m = re.search(r"#(\d+)|第\s*(\d+)\s*期", ep_row["title"] or "")
                     if m:
                         try:

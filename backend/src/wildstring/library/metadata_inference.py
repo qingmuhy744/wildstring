@@ -19,10 +19,10 @@ DISC_DIR_PATTERN = re.compile(
     re.IGNORECASE,
 )
 TRACK_COMPOSITE_PATTERN = re.compile(
-    r"^(?:(?:cd|disc)[_.\s\-]*)?(\d{1,2})[-_](\d{1,3})[\s.\-_]+(.*)$",
+    r"^(?:(?:cd|disc)[_.\s\-]*)?(\d{1,2})[-_](\d{1,3})[-_.\s]+?(\S.*)$",
     re.IGNORECASE,
 )
-TRACK_LEADING_PATTERN = re.compile(r"^(\d{1,3})[\s.\-_]+(.*)$")
+TRACK_LEADING_PATTERN = re.compile(r"^(\d{1,3})[-_.\s]+?(\S.*)$")
 OLD_RIP_PATTERN = re.compile(r"^(.*?)\.-\.\[(\d{4})[-_]?(.*?)\](?:\.专辑)?", re.IGNORECASE)
 
 
@@ -106,7 +106,8 @@ def infer_track_and_title(stem: str) -> tuple[int | None, int | None, str]:
         return track, None, clean_title or stem
 
     # Multipart title: Artist - Album - 01 - Title
-    parts = [p.strip() for p in re.split(r"\s*[-－—]\s*", stem) if p.strip()]
+    normalized = stem.replace("－", "-").replace("—", "-")
+    parts = [p.strip() for p in normalized.split("-") if p.strip()]
     if len(parts) >= 3 and parts[-2].isdigit():
         track = int(parts[-2])
         clean_title = parts[-1]
