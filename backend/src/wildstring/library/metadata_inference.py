@@ -18,11 +18,6 @@ DISC_DIR_PATTERN = re.compile(
     r"^(?:cd|disc|disk|part|vol)[_.\s\-]*(\d{1,2})$",
     re.IGNORECASE,
 )
-TRACK_COMPOSITE_PATTERN = re.compile(
-    r"^(?:(?:cd|disc)[_.\s\-]*)?(\d{1,2})[-_](\d{1,3})[-_.\s]+?(\S.*)$",
-    re.IGNORECASE,
-)
-TRACK_LEADING_PATTERN = re.compile(r"^(\d{1,3})[-_.\s]+?(\S.*)$")
 OLD_RIP_PATTERN = re.compile(r"^(.*?)\.-\.\[(\d{4})[-_]?(.*?)\](?:\.专辑)?", re.IGNORECASE)
 
 
@@ -88,21 +83,60 @@ def parse_album_folder(folder_name: str) -> dict[str, str | None]:
     return {"artist": None, "album": None, "year": year}
 
 
+def _split_leading_track(s: str) -> tuple[int | None, str]:
+    """Extract leading track number (1-3 digits) and remainder title without regex."""
+    i = 0
+    while i < len(s) and s[i].isdigit() and i < 3:
+        i += 1
+    if i == 0:
+        return None, s
+    track = int(s[:i])
+    j = i
+    while j < len(s) and s[j] in " .-_":
+        j += 1
+    if j == i and len(s) > i:
+        return None, s
+    title = s[j:].strip()
+    return track, title or s
+
+
+def _split_composite_track(s: str) -> tuple[int | None, int | None, str]:
+    """Extract disc and track numbers (e.g. 1-01 or CD1-02) without regex."""
+    cur = s
+    lower = cur.lower()
+    prefix_len = 0
+    if lower.startswith("cd"):
+        prefix_len = 2
+    elif lower.startswith("disc"):
+        prefix_len = 4
+    if prefix_len > 0:
+        while prefix_len < len(cur) and cur[prefix_len] in " .-_":
+            prefix_len += 1
+        cur = cur[prefix_len:]
+
+    sep_idx = -1
+    for sep in ("-", "_"):
+        if sep in cur:
+            sep_idx = cur.index(sep)
+            break
+    if sep_idx > 0 and 1 <= sep_idx <= 2 and cur[:sep_idx].isdigit():
+        disc = int(cur[:sep_idx])
+        track, title = _split_leading_track(cur[sep_idx + 1 :])
+        if track is not None:
+            return track, disc, title
+    return None, None, s
+
+
 def infer_track_and_title(stem: str) -> tuple[int | None, int | None, str]:
     """Infer track number, disc number, and clean title from audio filename stem."""
     # Composite: 1-01 Song or CD1-02 Song
-    composite = TRACK_COMPOSITE_PATTERN.match(stem)
-    if composite:
-        disc = int(composite.group(1))
-        track = int(composite.group(2))
-        clean_title = composite.group(3).strip()
+    track, disc, clean_title = _split_composite_track(stem)
+    if track is not None and disc is not None:
         return track, disc, clean_title or stem
 
     # Standard leading number: 01. Song or 01 - Song or 01 Song
-    leading = TRACK_LEADING_PATTERN.match(stem)
-    if leading:
-        track = int(leading.group(1))
-        clean_title = leading.group(2).strip()
+    track, clean_title = _split_leading_track(stem)
+    if track is not None:
         return track, None, clean_title or stem
 
     # Multipart title: Artist - Album - 01 - Title

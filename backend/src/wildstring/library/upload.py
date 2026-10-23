@@ -24,15 +24,12 @@ LYRIC_SUFFIXES = {".lrc", ".lryc", ".txt"}
 
 
 def sanitize_relative_path(raw: str, filename: str | None) -> Path:
-    """Normalize client provided relative path and ensure it stays relative."""
+    """Normalize client provided relative path and ensure it stays strictly relative."""
     clean = (raw or "").replace("\\", "/").strip().lstrip("/")
-    path = Path(clean)
-    if ".." in path.parts:
-        safe_parts = [p for p in path.parts if p and p != ".." and p != "."]
-        path = Path(*safe_parts) if safe_parts else Path(filename or "unknown")
-    if not path.parts or path.as_posix() in ("", "."):
-        path = Path(filename or "unknown")
-    return path
+    parts = [os.path.basename(p) for p in clean.split("/") if p and p not in (".", "..")]
+    if not parts:
+        parts = [os.path.basename(filename or "unknown")]
+    return Path(*parts)
 
 
 def save_upload_to_temp(file: UploadFile, directory: Path, max_bytes: int) -> tuple[Path, str, int]:
@@ -120,7 +117,7 @@ def handle_upload(
                 else:
                     target_file = matched_audio.with_suffix(suffix)
                 dest = (settings.library_dir / target_file).resolve()
-                if not dest.is_relative_to(base_dir):
+                if os.path.commonpath([str(base_dir), str(dest)]) != str(base_dir):
                     raise HTTPException(400, "invalid_path_traversal")
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(temp_path, dest)
@@ -128,7 +125,7 @@ def handle_upload(
             else:
                 # Place in relative path inside library_dir
                 dest = (settings.library_dir / relative_path).resolve()
-                if not dest.is_relative_to(base_dir):
+                if os.path.commonpath([str(base_dir), str(dest)]) != str(base_dir):
                     raise HTTPException(400, "invalid_path_traversal")
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(temp_path, dest)
