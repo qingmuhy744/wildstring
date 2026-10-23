@@ -67,6 +67,8 @@ class PodcastCreateRequest(BaseModel):
     )
     retention_policy: Literal["keep", "delete_after_played"] = "keep"
     slow_download: bool = False
+    max_retries: int = Field(default=3, ge=0, le=10)
+    retry_backoff_base: int = Field(default=5, ge=1, le=60)
 
 
 class PodcastUpdateRequest(BaseModel):
@@ -79,6 +81,8 @@ class PodcastUpdateRequest(BaseModel):
     ) = None
     retention_policy: Literal["keep", "delete_after_played"] | None = None
     slow_download: bool | None = None
+    max_retries: int | None = Field(default=None, ge=0, le=10)
+    retry_backoff_base: int | None = Field(default=None, ge=1, le=60)
 
 
 class PodcastStorageResponse(BaseModel):
@@ -129,6 +133,8 @@ class PodcastSummaryResponse(BaseModel):
     download_policy: str = "latest_3"
     retention_policy: str = "keep"
     slow_download: bool = False
+    max_retries: int = 3
+    retry_backoff_base: int = 5
     last_updated_at: str | None
     created_at: str
     total_episodes: int
@@ -395,6 +401,14 @@ class PodcastManager:
                         conn.execute(
                             "ALTER TABLE podcasts ADD COLUMN slow_download INTEGER NOT NULL DEFAULT 0"
                         )
+                    if "max_retries" not in p_cols:
+                        conn.execute(
+                            "ALTER TABLE podcasts ADD COLUMN max_retries INTEGER NOT NULL DEFAULT 3"
+                        )
+                    if "retry_backoff_base" not in p_cols:
+                        conn.execute(
+                            "ALTER TABLE podcasts ADD COLUMN retry_backoff_base INTEGER NOT NULL DEFAULT 5"
+                        )
 
                 columns = {r[1] for r in conn.execute("PRAGMA table_info(podcast_episodes)")}
                 if columns:
@@ -470,15 +484,76 @@ class PodcastManager:
                 info = self._get_episode_display_info(episode_id)
 
             is_slow = bool(info.get("slow_download")) if info else False
+            max_retries = int(info.get("max_retries", 3)) if info else 3
+            backoff_base = int(info.get("retry_backoff_base", 5)) if info else 5
+
             if info:
                 self._active_downloads[episode_id] = {
                     **info,
                     "status": "downloading",
                     "slow_mode": is_slow,
+                    "attempt": 0,
+                    "max_retries": max_retries,
                     "started_at": datetime.now(UTC).isoformat(),
                 }
+
+            success = False
+            last_error = "下载失败"
+
             try:
-                success = self.download_episode(episode_id, slow_download=is_slow)
+                for attempt in range(max_retries + 1):
+                    if self.stopping.is_set():
+                        break
+
+                    if attempt > 0:
+                        # 指数回避：基准秒数 * 2^(attempt - 1)，最大上限 60 秒
+                        backoff_sec = min(backoff_base * (2 ** (attempt - 1)), 60)
+                        logger.info(
+                            "Episode %s download retry %d/%d with exponential backoff: waiting %ds...",
+                            episode_id,
+                            attempt,
+                            max_retries,
+                            backoff_sec,
+                        )
+                        if episode_id in self._active_downloads:
+                            self._active_downloads[episode_id].update(
+                                {
+                                    "status": "retrying",
+                                    "attempt": attempt,
+                                    "max_retries": max_retries,
+                                    "backoff_seconds": backoff_sec,
+                                    "error": f"第 {attempt}/{max_retries} 次重试等待中 ({backoff_sec}s): {last_error}",
+                                }
+                            )
+                        # 支持快速退出的平缓休眠
+                        for _ in range(int(backoff_sec * 10)):
+                            if self.stopping.is_set():
+                                break
+                            time.sleep(0.1)
+
+                        if self.stopping.is_set():
+                            break
+
+                    if episode_id in self._active_downloads:
+                        self._active_downloads[episode_id].update(
+                            {
+                                "status": "downloading",
+                                "attempt": attempt,
+                                "max_retries": max_retries,
+                                "error": None,
+                            }
+                        )
+
+                    try:
+                        success = self.download_episode(episode_id, slow_download=is_slow)
+                        if success:
+                            break
+                        fail_rec = self._failed_downloads.get(episode_id)
+                        if fail_rec and fail_rec.get("error"):
+                            last_error = fail_rec["error"]
+                    except Exception as exc:
+                        last_error = str(exc)
+
                 item = self._active_downloads.pop(episode_id, info or {})
                 if success:
                     self._recent_completed.appendleft(
@@ -490,13 +565,12 @@ class PodcastManager:
                     )
                     self._failed_downloads.pop(episode_id, None)
                 else:
-                    if episode_id not in self._failed_downloads:
-                        self._failed_downloads[episode_id] = {
-                            **item,
-                            "status": "failed",
-                            "error": "下载失败",
-                            "failed_at": datetime.now(UTC).isoformat(),
-                        }
+                    self._failed_downloads[episode_id] = {
+                        **item,
+                        "status": "failed",
+                        "error": last_error,
+                        "failed_at": datetime.now(UTC).isoformat(),
+                    }
             except Exception as e:
                 item = self._active_downloads.pop(episode_id, info or {})
                 self._failed_downloads[episode_id] = {
@@ -612,6 +686,8 @@ class PodcastManager:
         download_policy: str = "latest_3",
         retention_policy: str = "keep",
         slow_download: bool = False,
+        max_retries: int = 3,
+        retry_backoff_base: int = 5,
     ) -> dict[str, Any]:
         with self.database.connect() as conn:
             existing = conn.execute(
@@ -633,8 +709,8 @@ class PodcastManager:
                 INSERT INTO podcasts (
                     id, title, author, description, feed_url, cover_url,
                     auto_update, update_interval_minutes, download_policy, retention_policy,
-                    slow_download, last_updated_at, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    slow_download, max_retries, retry_backoff_base, last_updated_at, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     podcast_id,
@@ -648,6 +724,8 @@ class PodcastManager:
                     download_policy,
                     retention_policy,
                     1 if slow_download else 0,
+                    max_retries,
+                    retry_backoff_base,
                     created_time,
                     created_time,
                 ),
@@ -695,6 +773,8 @@ class PodcastManager:
         download_policy: str | None = None,
         retention_policy: str | None = None,
         slow_download: bool | None = None,
+        max_retries: int | None = None,
+        retry_backoff_base: int | None = None,
     ) -> bool:
         with self.database.connect(write=True) as conn:
             row = conn.execute("SELECT * FROM podcasts WHERE id = ?", (podcast_id,)).fetchone()
@@ -722,12 +802,23 @@ class PodcastManager:
                 if slow_download is not None
                 else (row["slow_download"] if "slow_download" in row.keys() else 0)
             )
+            new_retries = (
+                max_retries
+                if max_retries is not None
+                else (row["max_retries"] if "max_retries" in row.keys() else 3)
+            )
+            new_backoff = (
+                retry_backoff_base
+                if retry_backoff_base is not None
+                else (row["retry_backoff_base"] if "retry_backoff_base" in row.keys() else 5)
+            )
 
             conn.execute(
                 """
                 UPDATE podcasts
                 SET title = ?, auto_update = ?, update_interval_minutes = ?,
-                    download_policy = ?, retention_policy = ?, slow_download = ?
+                    download_policy = ?, retention_policy = ?, slow_download = ?,
+                    max_retries = ?, retry_backoff_base = ?
                 WHERE id = ?
                 """,
                 (
@@ -737,6 +828,8 @@ class PodcastManager:
                     new_policy,
                     new_retention,
                     new_slow,
+                    new_retries,
+                    new_backoff,
                     podcast_id,
                 ),
             )
@@ -1136,7 +1229,9 @@ class PodcastManager:
                     """
                     SELECT e.id, e.podcast_id, e.title, e.pub_date, e.episode_number,
                            e.duration_seconds, e.download_status, p.title as podcast_title, p.cover_url,
-                           COALESCE(p.slow_download, 0) as slow_download
+                           COALESCE(p.slow_download, 0) as slow_download,
+                           COALESCE(p.max_retries, 3) as max_retries,
+                           COALESCE(p.retry_backoff_base, 5) as retry_backoff_base
                     FROM podcast_episodes e
                     JOIN podcasts p ON p.id = e.podcast_id
                     WHERE e.id = ?
@@ -1156,6 +1251,8 @@ class PodcastManager:
                     "duration_seconds": row["duration_seconds"],
                     "download_status": row["download_status"],
                     "slow_download": bool(row["slow_download"]),
+                    "max_retries": int(row["max_retries"]),
+                    "retry_backoff_base": int(row["retry_backoff_base"]),
                 }
         except Exception:
             return None
@@ -1257,6 +1354,8 @@ class PodcastManager:
                     COALESCE(p.download_policy, 'latest_3') as download_policy,
                     COALESCE(p.retention_policy, 'keep') as retention_policy,
                     COALESCE(p.slow_download, 0) as slow_download,
+                    COALESCE(p.max_retries, 3) as max_retries,
+                    COALESCE(p.retry_backoff_base, 5) as retry_backoff_base,
                     p.last_updated_at, p.created_at,
                     COUNT(e.id) AS total_episodes,
                     SUM(CASE WHEN COALESCE(pr.completed, 0) = 0 THEN 1 ELSE 0 END) AS unplayed_episodes,
@@ -1281,6 +1380,8 @@ class PodcastManager:
                     "download_policy": r["download_policy"],
                     "retention_policy": r["retention_policy"],
                     "slow_download": bool(r["slow_download"]),
+                    "max_retries": int(r["max_retries"]),
+                    "retry_backoff_base": int(r["retry_backoff_base"]),
                     "last_updated_at": r["last_updated_at"],
                     "created_at": r["created_at"],
                     "total_episodes": r["total_episodes"] or 0,
@@ -1301,6 +1402,8 @@ class PodcastManager:
                     COALESCE(p.download_policy, 'latest_3') as download_policy,
                     COALESCE(p.retention_policy, 'keep') as retention_policy,
                     COALESCE(p.slow_download, 0) as slow_download,
+                    COALESCE(p.max_retries, 3) as max_retries,
+                    COALESCE(p.retry_backoff_base, 5) as retry_backoff_base,
                     p.last_updated_at, p.created_at,
                     COUNT(e.id) AS total_episodes,
                     SUM(CASE WHEN COALESCE(pr.completed, 0) = 0 THEN 1 ELSE 0 END) AS unplayed_episodes,
@@ -1375,6 +1478,8 @@ class PodcastManager:
                     "download_policy": p["download_policy"],
                     "retention_policy": p["retention_policy"],
                     "slow_download": bool(p["slow_download"]),
+                    "max_retries": int(p["max_retries"]),
+                    "retry_backoff_base": int(p["retry_backoff_base"]),
                     "last_updated_at": p["last_updated_at"],
                     "created_at": p["created_at"],
                     "total_episodes": p["total_episodes"] or 0,
@@ -1504,6 +1609,8 @@ def podcast_router(manager: PodcastManager, auth: Auth) -> APIRouter:
             download_policy=payload.download_policy,
             retention_policy=payload.retention_policy,
             slow_download=payload.slow_download,
+            max_retries=payload.max_retries,
+            retry_backoff_base=payload.retry_backoff_base,
         )
 
     @router.put(
@@ -1524,6 +1631,8 @@ def podcast_router(manager: PodcastManager, auth: Auth) -> APIRouter:
             download_policy=payload.download_policy,
             retention_policy=payload.retention_policy,
             slow_download=payload.slow_download,
+            max_retries=payload.max_retries,
+            retry_backoff_base=payload.retry_backoff_base,
         )
         return manager.get_podcast_detail(podcast_id, user["id"])
 

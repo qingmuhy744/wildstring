@@ -15,6 +15,8 @@ export interface PodcastSummary {
   download_policy: string;
   retention_policy: string;
   slow_download?: boolean;
+  max_retries?: number;
+  retry_backoff_base?: number;
   last_updated_at: string | null;
   created_at: string;
   total_episodes: number;
@@ -66,7 +68,7 @@ export interface DownloadTaskItem {
   pub_date?: string;
   episode_number?: number | null;
   duration_seconds?: number;
-  status: 'queued' | 'downloading' | 'downloaded' | 'failed';
+  status: 'queued' | 'downloading' | 'downloaded' | 'failed' | 'retrying';
   started_at?: string;
   completed_at?: string;
   failed_at?: string;
@@ -79,6 +81,9 @@ export interface DownloadTaskItem {
   downloaded_human?: string;
   total_human?: string;
   slow_mode?: boolean;
+  attempt?: number;
+  max_retries?: number;
+  backoff_seconds?: number;
 }
 
 export interface DownloadQueueInfo {
@@ -174,6 +179,8 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({ onPlayTrack }) => {
   const [downloadPolicy, setDownloadPolicy] = useState('latest_5');
   const [retentionPolicy, setRetentionPolicy] = useState('keep_all');
   const [slowDownload, setSlowDownload] = useState(false);
+  const [maxRetries, setMaxRetries] = useState(3);
+  const [retryBackoffBase, setRetryBackoffBase] = useState(5);
   const [savingSettings, setSavingSettings] = useState(false);
   const [cleaningDownloads, setCleaningDownloads] = useState(false);
 
@@ -335,6 +342,8 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({ onPlayTrack }) => {
     setDownloadPolicy(p.download_policy || 'latest_5');
     setRetentionPolicy(p.retention_policy || 'keep_all');
     setSlowDownload(Boolean(p.slow_download));
+    setMaxRetries(p.max_retries ?? 3);
+    setRetryBackoffBase(p.retry_backoff_base ?? 5);
     try {
       const info = await api<PodcastStorageInfo>(`/podcasts/${encodeURIComponent(p.id)}/storage`);
       setStorageInfo(info);
@@ -366,6 +375,8 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({ onPlayTrack }) => {
             download_policy: downloadPolicy,
             retention_policy: retentionPolicy,
             slow_download: slowDownload,
+            max_retries: maxRetries,
+            retry_backoff_base: retryBackoffBase,
           }),
         },
       );
@@ -1133,6 +1144,95 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({ onPlayTrack }) => {
                     </div>
                   </label>
                 </div>
+
+                {slowDownload && (
+                  <div
+                    style={{
+                      marginTop: '0.75rem',
+                      padding: '0.75rem',
+                      background: 'var(--color-surface-hover, rgba(255, 255, 255, 0.04))',
+                      borderRadius: '8px',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '0.6rem',
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                      }}
+                    >
+                      <label
+                        style={{ fontSize: '0.82rem', color: 'var(--color-text-secondary, #aaa)' }}
+                      >
+                        失败自动重试次数
+                      </label>
+                      <select
+                        value={maxRetries}
+                        onChange={(e) => setMaxRetries(Number(e.target.value))}
+                        style={{
+                          padding: '0.25rem 0.5rem',
+                          borderRadius: '4px',
+                          background: 'var(--color-surface, #222)',
+                          color: 'inherit',
+                          border: '1px solid var(--color-border, #444)',
+                          fontSize: '0.82rem',
+                        }}
+                      >
+                        <option value={0}>不自动重试 (0 次)</option>
+                        <option value={1}>重试 1 次</option>
+                        <option value={2}>重试 2 次</option>
+                        <option value={3}>重试 3 次 (推荐)</option>
+                        <option value={5}>重试 5 次</option>
+                      </select>
+                    </div>
+
+                    <div
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                      }}
+                    >
+                      <label
+                        style={{ fontSize: '0.82rem', color: 'var(--color-text-secondary, #aaa)' }}
+                      >
+                        指数回避基准延时
+                      </label>
+                      <select
+                        value={retryBackoffBase}
+                        onChange={(e) => setRetryBackoffBase(Number(e.target.value))}
+                        style={{
+                          padding: '0.25rem 0.5rem',
+                          borderRadius: '4px',
+                          background: 'var(--color-surface, #222)',
+                          color: 'inherit',
+                          border: '1px solid var(--color-border, #444)',
+                          fontSize: '0.82rem',
+                        }}
+                      >
+                        <option value={3}>温和回避 (3秒起步)</option>
+                        <option value={5}>标准回避 (5秒起步 · 推荐)</option>
+                        <option value={10}>稳健回避 (10秒起步)</option>
+                        <option value={15}>深度回避 (15秒起步)</option>
+                      </select>
+                    </div>
+
+                    <div
+                      style={{
+                        fontSize: '0.75rem',
+                        color: 'var(--color-text-muted, #777)',
+                        lineHeight: 1.35,
+                      }}
+                    >
+                      💡 指数回避原理：遇到 429 限流或超时时，等待时间按 {retryBackoffBase}s →{' '}
+                      {retryBackoffBase * 2}s → {retryBackoffBase * 4}s 逐次成倍拉长（上限
+                      60s），让源站计数器充分冷却后再自动重试。
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div
@@ -1370,8 +1470,19 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({ onPlayTrack }) => {
                               </div>
                             </div>
                           </div>
-                          <span className="queue-task-status downloading">
-                            {pct != null ? `${pct}%` : '下载中'}
+                          <span
+                            className={`queue-task-status ${task.status === 'retrying' ? 'queued' : 'downloading'}`}
+                            style={
+                              task.status === 'retrying'
+                                ? { background: 'rgba(234, 179, 8, 0.2)', color: '#eab308' }
+                                : undefined
+                            }
+                          >
+                            {task.status === 'retrying'
+                              ? `重试等待 (${task.attempt || 1}/${task.max_retries || 3})`
+                              : pct != null
+                                ? `${pct}%`
+                                : '下载中'}
                           </span>
                         </div>
                       );

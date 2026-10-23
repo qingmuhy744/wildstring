@@ -151,11 +151,15 @@ def test_podcast_full_lifecycle(settings: Settings, authenticated_client):
                     "download_policy": "latest_5",
                     "retention_policy": "keep",
                     "slow_download": True,
+                    "max_retries": 4,
+                    "retry_backoff_base": 10,
                 },
             )
             assert update_settings_res.status_code == 200
             assert update_settings_res.json()["podcast"]["download_policy"] == "latest_5"
             assert update_settings_res.json()["podcast"]["slow_download"] is True
+            assert update_settings_res.json()["podcast"]["max_retries"] == 4
+            assert update_settings_res.json()["podcast"]["retry_backoff_base"] == 10
 
             # 7.2 Check storage info
             storage_res = client.get(
