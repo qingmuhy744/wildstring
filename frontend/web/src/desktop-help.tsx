@@ -23,7 +23,7 @@ function findHelp(target: EventTarget | null): Target | null {
   const source =
     target.closest<HTMLElement>('[data-help]') || label?.querySelector<HTMLElement>('[data-help]');
   if (source?.dataset.help)
-    return { source, anchor: field || source, owner: field || source, text: source.dataset.help };
+    return { source, anchor: source, owner: field || source, text: source.dataset.help };
   const button = target.closest<HTMLElement>('button[aria-label],summary[aria-label]');
   // Give icon-only controls the same readable name they already expose to assistive technology.
   if (button && !/[\p{L}]/u.test(button.textContent || '') && button.getAttribute('aria-label'))
@@ -88,7 +88,7 @@ function Bubble({
       id={id}
       role="tooltip"
       popover="manual"
-      className="desktop-help-bubble"
+      className={`desktop-help-bubble${target.owner !== target.source ? ' field-help-bubble' : ''}`}
       style={{
         left: position?.left,
         top: position?.top,
@@ -167,13 +167,17 @@ export function DesktopHelpProvider({ children }: { children: ReactNode }) {
       const next = findHelp(event.target);
       if (next) {
         focused = null;
-        show(next, 400);
+        show(next, next.owner === document.activeElement ? 0 : 400);
       }
     }
     function out(event: PointerEvent) {
       if (focused && document.activeElement === focused.owner) return;
       const next = findHelp(event.relatedTarget);
       if (next && (next.source === active?.source || next.source === pending?.source)) return;
+      if (next) {
+        show(next, next.owner === document.activeElement ? 0 : 400);
+        return;
+      }
       if (event.relatedTarget instanceof Node && bubble.current?.contains(event.relatedTarget))
         return;
       dismissed = null;

@@ -22,7 +22,7 @@
 [![Metadata](https://img.shields.io/badge/Metadata-MusicBrainz%20%7C%20AcoustID-EB743B.svg)](contracts/metadata-providers.md)
 [![Docker](https://img.shields.io/badge/Docker-Ready-2496ED.svg?logo=docker&logoColor=white)](deploy/Dockerfile)
 [![Vibe](https://img.shields.io/badge/Vibe-Rock%20%26%20Wild-ff69b4.svg)](#名字的来处)
-[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![License](https://img.shields.io/badge/License-GPLv3-green.svg)](LICENSE)
 
 **AI native 的私人音乐播放器。** 从自己的音乐收藏出发，用自然语言找歌、生成歌单，让收藏的音乐有新的回响。
 

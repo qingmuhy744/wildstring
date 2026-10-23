@@ -260,29 +260,20 @@ class MobileCompletionTest {
         }
     }
 
-    @Test fun downloadCompletionPolicyCanBeConfiguredFromManagement() {
+    @Test fun advancedLibraryGovernanceRemainsWebOnlyOnPhone() {
         Fixture().use { fixture -> val vm = connect(fixture)
             try {
                 compose.onNodeWithContentDescription("设置").performClick()
-                compose.onNodeWithText("曲库管理", substring = false).performScrollTo().performClick()
-                compose.waitUntil(10_000) { compose.onAllNodesWithText("下载完成与自动导入设置").fetchSemanticsNodes().isNotEmpty() }
-                compose.onNodeWithText("下载完成与自动导入设置").performScrollTo().performClick()
-                compose.onNodeWithText("检查间隔（15–86400 秒）").performTextReplacement("30")
-                compose.onNodeWithText("稳定期（5–86400 秒）").performTextReplacement("10")
-                compose.onNodeWithText("下载后缀，空格或逗号分隔").performTextReplacement(".part, .uploading")
-                compose.onNodeWithText("保存设置").performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnClick) { click -> assertTrue(click()) }
-                compose.waitUntil(10_000) { fixture.mutations.any { it.first.endsWith("/manage/intake/settings") } }
-                val value = JsonParser.parseString(fixture.mutations.last { it.first.endsWith("/manage/intake/settings") }.second).asJsonObject
-                assertEquals(30, value.get("interval_seconds").asInt)
-                assertEquals(10, value.get("stable_seconds").asInt)
-                assertEquals(".uploading", value.getAsJsonObject("download_policy").getAsJsonArray("partial_suffixes")[1].asString)
-                assertEquals(1, value.get("version").asInt)
-                capture("download-policy-phone.png")
+                compose.onNodeWithText("资料来源与插件", substring = false).performScrollTo().assertIsDisplayed()
+                compose.onNodeWithText("全库批量核对、目录整理等高级治理请在电脑网页端进行。", substring = true)
+                    .performScrollTo().assertIsDisplayed()
+                compose.onNodeWithText("曲库管理", substring = false).assertDoesNotExist()
+                compose.onNodeWithText("歌词补全与洗版", substring = false).assertDoesNotExist()
             } finally { cleanup(vm) }
         }
     }
 
-    @Test fun phoneRecommendationAiPlaylistAndManagementEntriesHaveWorkingControls() {
+    @Test fun phoneRecommendationAssistantAndPlaylistEntriesHaveWorkingControls() {
         Fixture().use { fixture -> val vm = connect(fixture)
             try {
                 compose.onNodeWithTag("nav-mine").performClick()
@@ -299,17 +290,9 @@ class MobileCompletionTest {
                 compose.waitUntil(10_000) { fixture.mutations.any { it.first.endsWith("/playlists/manual/tracks") } }
                 compose.onAllNodesWithContentDescription("返回").onLast().performClick()
                 compose.waitUntil(10_000) { compose.onAllNodesWithTag("feature-daily").fetchSemanticsNodes().isEmpty() }
-                compose.onNodeWithText("AI 找歌", substring = false).performClick()
-                // A new Dialog window can attach after the shortcut's click becomes idle.
-                compose.waitUntil(10_000) { compose.onAllNodes(hasText("想听什么？") and hasSetTextAction()).fetchSemanticsNodes().size == 1 }
-                compose.onNodeWithText("想听什么？").performTextInput("想听摇滚")
-                compose.onNodeWithText("生成候选").performClick()
-                compose.waitUntil(10_000) { compose.onAllNodesWithText("手机 AI 歌单").fetchSemanticsNodes().isNotEmpty() }
-                capture("mobile-ai-preview.png")
-                compose.onNodeWithText("确认保存歌单").performClick()
-                try { compose.waitUntil(10_000) { fixture.mutations.count { it.first.endsWith("/playlists") } >= 2 } }
-                catch (error: Throwable) { capture("mobile-ui-failure.png"); compose.onRoot(useUnmergedTree = true).printToLog("MobileCompletionUI"); throw AssertionError("AI save requests=${fixture.requests.toList()} mutations=${fixture.mutations.toList()}", error) }
-                compose.onAllNodesWithContentDescription("返回").onLast().performClick()
+                compose.onNodeWithTag("nav-assistant").performClick()
+                compose.waitUntil(10_000) { compose.onAllNodesWithTag("agent-chat-input").fetchSemanticsNodes().isNotEmpty() }
+                compose.onNodeWithTag("agent-chat-input").assertIsDisplayed()
                 compose.onNodeWithTag("nav-mine").performClick()
                 compose.onNodeWithContentDescription("新建歌单").performClick()
                 compose.onNodeWithText("歌单名称").performTextInput("手机规则歌单")
@@ -319,14 +302,6 @@ class MobileCompletionTest {
                 compose.onNodeWithText("只选我喜欢的音乐").assertIsDisplayed()
                 compose.onNodeWithText("保存歌单").performScrollTo().performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnClick) { click -> assertTrue(click()) }
                 compose.waitUntil(10_000) { fixture.mutations.any { it.first.endsWith("/playlists") && it.second.contains("\"kind\":\"smart\"") } }
-                compose.onNodeWithContentDescription("设置").performClick()
-                compose.onNodeWithText("曲库管理", substring = false).performScrollTo().performClick()
-                compose.waitUntil(10_000) { compose.onAllNodesWithText("曲库概览").fetchSemanticsNodes().isNotEmpty() }
-                compose.waitUntil(10_000) { compose.onAllNodes(hasText("导入音乐") and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
-                compose.onNodeWithText("导入音乐").performClick(); compose.onNodeWithText("开始", substring = false).performClick()
-                compose.waitUntil(10_000) { fixture.mutations.any { it.first.endsWith("/manage/jobs") } }
-                compose.onAllNodesWithContentDescription("返回").onLast().performClick()
-                compose.onNodeWithContentDescription("返回").performClick()
                 compose.runOnIdle { vm.openAlbum(Album("completion-album", "手机测试专辑", listOf("测试艺人"), 3, null)) }
                 compose.waitUntil(10_000) { compose.onAllNodesWithContentDescription("手机测试歌曲 0的操作").fetchSemanticsNodes().isNotEmpty() }
                 compose.onNodeWithContentDescription("手机测试歌曲 0的操作").performClick(); compose.onNodeWithText("编辑歌曲信息").performScrollTo().performClick()
@@ -347,7 +322,7 @@ class MobileCompletionTest {
             } finally { cleanup(vm) }
         }
     }
-    @Test fun lyricsConflictPreservesDraftAndSuggestionsRespectStatusAndVersion() {
+    @Test fun lyricsConflictPreservesDraftAndSyncVersion() {
         Fixture().use { fixture -> val vm = connect(fixture)
             try {
                 compose.runOnIdle { vm.openAlbum(Album("completion-album", "手机测试专辑", listOf("测试艺人"), 3, null)) }
@@ -379,62 +354,18 @@ class MobileCompletionTest {
                 assertEquals(2, fixture.lyrics.lines().size)
                 assertTrue(fixture.lyrics.lines().all { it.matches(Regex("\\[\\d{2}:\\d{2}\\.\\d{3}].*")) })
                 compose.runOnIdle { vm.controller!!.pause() }
-                compose.onAllNodesWithContentDescription("返回").onLast().performClick()
-                fixture.showSuggestions.set(true)
-                compose.onNodeWithContentDescription("手机测试歌曲 0的操作").performClick()
-                compose.onNodeWithText("更新元数据与建议").performScrollTo().performClick()
-                compose.waitUntil(10_000) { compose.onAllNodesWithText("已选 2 首 · 2 个字段", substring = false).fetchSemanticsNodes().isNotEmpty() }
-                compose.onNodeWithTag("review-scroll").performScrollToNode(hasTestTag("review-field-title"))
-                compose.onNodeWithTag("review-field-title").assertIsOn()
-                compose.onNodeWithTag("review-field-album").performScrollTo().assertIsOff()
-                compose.onAllNodesWithText("当前值").onFirst().assertExists()
-                compose.onAllNodesWithText("建议值").onFirst().assertExists()
-                compose.onNodeWithText("建议标题").performScrollTo().assertExists()
-                capture("metadata-review-native.png")
-                compose.onNodeWithText("接受选中项").performClick()
-                compose.waitUntil(10_000) { fixture.applied.get() }
-                val apply = JsonParser.parseString(fixture.mutations.last { it.first.endsWith("/metadata-review/accept") }.second).asJsonObject
-                assertEquals(2, apply.getAsJsonArray("items").size())
-                apply.getAsJsonArray("items").forEach { item -> assertEquals("title", item.asJsonObject.getAsJsonArray("fields").single().asString) }
             } finally { cleanup(vm) }
         }
     }
-    @Test fun metadataReviewRejectsOnlyCurrentCandidateAndPreservesOtherChoices() {
+    @Test fun metadataReviewStaysOutOfTheAndroidTrackMenu() {
         Fixture().use { fixture -> val vm = connect(fixture)
             try {
-                fixture.showSuggestions.set(true)
                 compose.runOnIdle { vm.openAlbum(Album("completion-album", "手机测试专辑", listOf("测试艺人"), 3, null)) }
                 compose.waitUntil(10_000) { compose.onAllNodesWithContentDescription("手机测试歌曲 0的操作").fetchSemanticsNodes().isNotEmpty() }
                 compose.onNodeWithContentDescription("手机测试歌曲 0的操作").performClick()
-                compose.onNodeWithText("更新元数据与建议").performScrollTo().performClick()
-                compose.waitUntil(10_000) { compose.onAllNodesWithTag("review-source").fetchSemanticsNodes().isNotEmpty() }
-                compose.onNodeWithTag("review-scroll").performScrollToNode(hasTestTag("review-source"))
-                compose.onNodeWithTag("review-source").performClick()
-                compose.waitUntil(10_000) { compose.onAllNodesWithText("MusicBrainz · 建议标题 · 建议专辑 · 匹配度 98%", substring = true).fetchSemanticsNodes().isNotEmpty() }
-                compose.onAllNodesWithText("MusicBrainz · 建议标题 · 建议专辑 · 匹配度 98%", substring = true).onLast().assertIsDisplayed()
-                capture("metadata-review-candidates-native.png")
-                compose.onNodeWithText("关闭", substring = false).performClick()
-                compose.onNodeWithText("清空", substring = false).performScrollTo().performClick()
-                compose.onNodeWithTag("review-reject-current").assertIsEnabled()
-                fixture.failRejection.set(true)
-                compose.onNodeWithTag("review-reject-current").performClick()
-                compose.waitUntil(10_000) { compose.onAllNodesWithText("请刷新并重新核对", substring = true).fetchSemanticsNodes().isNotEmpty() }
-                assertTrue(fixture.rejected.isEmpty())
-                compose.onNodeWithTag("review-reject-current").performClick()
-                compose.waitUntil(10_000) { compose.onAllNodesWithTag("review-rejection-notice").fetchSemanticsNodes().isNotEmpty() }
-                assertEquals(setOf("pending-0"), fixture.rejected.toSet())
-                compose.onNodeWithText("已选 0 首 · 0 个字段", substring = false).assertIsDisplayed()
-                compose.onNodeWithTag("review-accept-selected").assertIsNotEnabled()
-                assertFalse(fixture.applied.get())
-                val attempts = fixture.mutations.filter { it.first.endsWith("/metadata-review/reject") }
-                assertEquals(2, attempts.size); assertEquals(attempts[0].second, attempts[1].second)
-                val body = JsonParser.parseString(attempts[0].second).asJsonObject
-                assertEquals("completion-0", body.text("track_id")); assertEquals("pending-0", body.text("suggestion_id"))
-                assertEquals("a".repeat(64), body.text("candidate_digest")); assertEquals(1, body.number("metadata_version").toInt())
-                capture("metadata-review-rejected-native.png")
-                compose.onNodeWithText("本次跳过", substring = false).performClick()
-                compose.onNodeWithTag("review-rejection-notice").assertDoesNotExist()
-                compose.onNodeWithTag("review-reject-current").assertIsEnabled()
+                compose.onNodeWithText("编辑歌曲信息").assertIsDisplayed()
+                compose.onNodeWithText("编辑歌词与打点").assertIsDisplayed()
+                compose.onNodeWithText("更新元数据与建议").assertDoesNotExist()
             } finally { cleanup(vm) }
         }
     }

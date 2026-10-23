@@ -341,7 +341,7 @@ class AgentWorkspaceTest {
             compose.onNodeWithTag("appearance-dark").assertExists()
             capture("agent-chat-dark-phone.png", dark = true)
             compose.runOnIdle { vm.settings.appearance("system") }
-            compose.onNodeWithText("查看生成的草案").performScrollTo().performClick()
+            compose.onNodeWithText("已生成歌单/整理草案 · 点击查看并一键应用").performScrollTo().performClick()
             compose.waitUntil(15_000) { compose.onAllNodesWithText("久未听的收藏").fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithTag("draft-open-draft-one").performClick()
             compose.waitUntil(15_000) { compose.onAllNodesWithText("1. 合成歌曲甲").fetchSemanticsNodes().isNotEmpty() }

@@ -257,6 +257,7 @@ test('在线撤权清离线内容，迟到下载不能在同账号重登后复�
   await page.unroute('**/api/v1/tracks/*/stream');
   await page.getByLabel('密码', { exact: true }).fill('disposable-browser-test-password');
   await page.getByRole('button', { name: '进入曲库' }).click();
+  await section(page, '全部歌曲');
   const source = (await allTracks(page))[0];
   let release!: () => void;
   const gate = new Promise<void>((r) => {
@@ -499,6 +500,7 @@ test('注销网络黑洞2秒后清本机，迟到清cookie不覆盖重新登录'
   expect(await downloads(page)).toBe(0);
   await page.getByLabel('密码', { exact: true }).fill('disposable-browser-test-password');
   await page.getByRole('button', { name: '进入曲库' }).click();
+  await section(page, '全部歌曲');
   await expect(page.getByRole('table', { name: '歌曲列表' })).toBeVisible();
   release();
   await page.waitForTimeout(100);

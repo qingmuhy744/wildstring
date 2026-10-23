@@ -160,8 +160,7 @@ test('专辑菜单打开歌词洗版并保持专辑范围', async ({ page }) => 
   const albums = await (await page.request.get('/api/v1/albums')).json();
   await page.getByRole('button', { name: '专辑', exact: true }).first().click();
   await page
-    .getByRole('button', { name: new RegExp(albums.items[0].title) })
-    .first()
+    .getByRole('button', { name: `打开专辑 ${albums.items[0].title}`, exact: true })
     .click();
   await page.getByLabel('集合更多操作').click();
   await page.getByRole('button', { name: '歌词补全与洗版', exact: true }).click();
