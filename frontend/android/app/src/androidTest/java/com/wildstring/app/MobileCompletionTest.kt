@@ -467,7 +467,8 @@ class MobileCompletionTest {
         }
     }
 
-    private fun remotePause(version: Int, state: String = "paused", at: String = "2026-10-19T10:00:00Z", eligible: Boolean = state == "paused", device: String = "other-device", ids: List<String> = listOf("completion-0"), index: Int = 0, position: Int = 2000): String =
+    private fun recentAt(minutesAgo: Long = 1) = java.time.Instant.now().minusSeconds(minutesAgo * 60).toString()
+    private fun remotePause(version: Int, state: String = "paused", at: String = recentAt(), eligible: Boolean = state == "paused", device: String = "other-device", ids: List<String> = listOf("completion-0"), index: Int = 0, position: Int = 2000): String =
         jsonBody("version" to version, "device_id" to device, "track_ids" to jsonStrings(ids), "index" to index, "position_ms" to position,
             "mode" to "repeat_all", "playback_state" to state, "paused_at" to if (state == "paused") at else null,
             "handoff_supported" to true, "handoff_eligible" to eligible, "updated_at" to at).toString()
@@ -531,7 +532,7 @@ class MobileCompletionTest {
                 compose.runOnIdle { assertNull(vm.state.value.handoff); vm.syncMode("off") }
                 runBlocking { withContext(Dispatchers.Main) { vm.checkSharedPlayback() } }
                 compose.runOnIdle { assertNull(vm.state.value.handoff); vm.sharing.mode("auto") }
-                fixture.snapshot = remotePause(91, at = "2026-10-19T10:05:00Z")
+                fixture.snapshot = remotePause(91, at = recentAt(5))
                 runBlocking { withContext(Dispatchers.Main) { vm.checkSharedPlayback() } }
                 compose.waitUntil(10_000) { vm.state.value.queue.size == 1 }
                 compose.waitUntil(10_000) { compose.runOnIdle { vm.controller!!.currentPosition == 2000L } }
@@ -552,14 +553,14 @@ class MobileCompletionTest {
                 fixture.snapshot = remotePause(122)
                 runBlocking { withContext(Dispatchers.Main) { vm.checkSharedPlayback() } }
                 compose.runOnIdle { assertNull(vm.state.value.handoff) }
-                fixture.snapshot = remotePause(123, at = "2026-10-19T10:10:00Z")
+                fixture.snapshot = remotePause(123, at = recentAt(10))
                 runBlocking { withContext(Dispatchers.Main) { vm.checkSharedPlayback() } }
                 awaitHandoffNotice(vm, 123)
                 fixture.snapshot = remotePause(124, "playing")
                 val queueBefore = vm.state.value.queue
                 runBlocking { withContext(Dispatchers.Main) { vm.acceptHandoff() } }
                 compose.runOnIdle { assertNull(vm.state.value.handoff); assertEquals(queueBefore, vm.state.value.queue) }
-                fixture.snapshot = remotePause(125, at = "2026-10-19T10:20:00Z")
+                fixture.snapshot = remotePause(125, at = recentAt(20))
                 runBlocking { withContext(Dispatchers.Main) { vm.checkSharedPlayback() } }
                 fixture.resumeAfterSnapshot = remotePause(126, "playing")
                 try {

@@ -240,12 +240,10 @@ class AgentWorkspaceTest {
             compose.onNodeWithText("开始巡检", substring = false).performClick()
             compose.waitUntil(15_000) { compose.onAllNodesWithTag("inspection-use-ai").fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithTag("inspection-use-ai").performClick()
-            compose.waitUntil(15_000) { compose.onAllNodesWithText("请选择用于本次巡检的 AI 连接。").fetchSemanticsNodes().isNotEmpty() }
-            compose.onNodeWithText("开始", substring = false).assertIsNotEnabled()
+            // A single enabled connection is selected automatically; only the
+            // multi-connection dropdown requires an explicit choice.
+            compose.waitUntil(15_000) { runCatching { compose.onNodeWithText("开始", substring = false).assertIsEnabled(); true }.getOrDefault(false) }
             compose.onNodeWithText("本地找歌（不使用模型）", substring = false).assertDoesNotExist()
-            compose.onNodeWithTag("ai-connection-choice").performClick()
-            compose.onNodeWithText("实例 AI（已有配置） · synthetic", substring = false).performClick()
-            compose.onNodeWithText("开始", substring = false).assertIsEnabled()
             capture("manual-ai-inspection-dark.png", dark = true)
             compose.onNodeWithText("开始", substring = false).performClick()
             compose.waitUntil(15_000) { fixture.requests.any { it.first == "POST /api/v1/agent/tasks" } }
@@ -259,19 +257,14 @@ class AgentWorkspaceTest {
             compose.onNodeWithTag("inspection-use-ai").performScrollTo().performClick()
             compose.waitUntil(15_000) { compose.onAllNodesWithText("没有可用于定时巡检的连接。", substring = true).fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithText("保存计划", substring = false).assertIsNotEnabled()
-            compose.onNodeWithTag("ai-connection-choice").performScrollTo().performClick()
             compose.onNodeWithText("实例 AI（已有配置） · synthetic", substring = false).assertDoesNotExist()
-            compose.onAllNodesWithText("请选择 AI 连接", substring = false).onLast().performClick()
             compose.onNodeWithText("取消", substring = false).performClick()
             compose.waitUntil(15_000) { compose.onAllNodesWithTag("inspection-use-ai").fetchSemanticsNodes().isEmpty() }
             fixture.connections = "[$legacy,{\"id\":\"automatic\",\"name\":\"自动巡检模型\",\"model\":\"synthetic\",\"enabled\":true,\"background_allowed\":true,\"daily_call_budget\":100}]"
             compose.onNodeWithText("新建计划", substring = false).performScrollTo().performClick()
             compose.waitUntil(15_000) { compose.onAllNodesWithTag("inspection-use-ai").fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithTag("inspection-use-ai").performScrollTo().performClick()
-            compose.waitUntil(15_000) { compose.onAllNodesWithText("请选择用于本次巡检的 AI 连接。").fetchSemanticsNodes().isNotEmpty() }
-            compose.onNodeWithTag("ai-connection-choice").performScrollTo().performClick()
-            compose.onNodeWithText("自动巡检模型 · synthetic", substring = false).performClick()
-            compose.onNodeWithText("保存计划", substring = false).assertIsEnabled()
+            compose.waitUntil(15_000) { runCatching { compose.onNodeWithText("保存计划", substring = false).assertIsEnabled(); true }.getOrDefault(false) }
             compose.onNodeWithText("取消", substring = false).performClick()
         } finally { compose.runOnIdle { vm.settings.appearance("system"); vm.repository.session.invalidate() } } }
     }

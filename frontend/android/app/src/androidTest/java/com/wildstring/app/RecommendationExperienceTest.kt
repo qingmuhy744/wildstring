@@ -105,7 +105,7 @@ class RecommendationExperienceTest {
                 compose.onNodeWithTag("recommendation-settings").performClick()
                 compose.onNodeWithTag("recommendation-source-community").performScrollTo().assertIsOn().performClick().assertIsOff()
                 compose.onNodeWithTag("ai-connection-choice").performScrollTo().performClick()
-                compose.onNodeWithText("我的模型 · synthetic-one").performClick()
+                compose.onAllNodesWithText("我的模型 · synthetic-one", useUnmergedTree = true).onLast().performClick()
                 compose.onNodeWithText("保存偏好").performClick()
                 compose.waitUntil(10_000) { fixture.requests.any { it.first.startsWith("PUT ") } }
                 val saved = JsonParser.parseString(fixture.preferences).asJsonObject
@@ -127,10 +127,10 @@ class RecommendationExperienceTest {
     @Test fun aiDiscoveryExplicitlySelectsSameConnectionAndShowsActualFallback() {
         Fixture().use { fixture -> val vm = connect(fixture)
             try {
-                open("AI 找歌")
+                open("AI 找歌与歌单")
                 compose.onNodeWithText("本地找歌（不使用模型）").assertExists()
                 compose.onNodeWithTag("ai-connection-choice").performClick()
-                compose.onNodeWithText("我的模型 · synthetic-one").performClick()
+                compose.onAllNodesWithText("我的模型 · synthetic-one", useUnmergedTree = true).onLast().performClick()
                 compose.onNodeWithText("个人连接 · 每日预算 20 次 · 已用 20 次").assertExists()
                 compose.onNodeWithText("想听什么？").performTextInput("想听摇滚")
                 compose.onNodeWithText("生成候选").performClick()

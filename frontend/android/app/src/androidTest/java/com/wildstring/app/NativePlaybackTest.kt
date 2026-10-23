@@ -212,7 +212,7 @@ class NativePlaybackTest {
             runCatching { captureFailure() }
             throw failure
         } finally {
-            runCatching { onAndroidMain { resumedActivity()?.let { ViewModelProvider(it)[MusicViewModel::class.java] }?.let { vm -> vm.settings.playbackStyle("cover"); vm.repository.session.invalidate(); vm.controller?.stop(); vm.controller?.clearMediaItems() } } }
+            runCatching { onAndroidMain { resumedActivity()?.let { ViewModelProvider(it)[MusicViewModel::class.java] }?.let { vm -> vm.settings.playbackStyle("cover"); vm.settings.orientation("auto"); vm.repository.session.invalidate(); vm.controller?.stop(); vm.controller?.clearMediaItems() } } }
             shellForTest("cmd uimode night $previousNight")
             stage("test cleanup complete")
         }
@@ -274,7 +274,7 @@ class NativePlaybackTest {
         }
         expectedWindow = phoneWindow
         val vm = compose.runOnIdle { ViewModelProvider(compose.activity)[MusicViewModel::class.java] }
-        compose.runOnIdle { vm.settings.playbackStyle("cover") }
+        compose.runOnIdle { vm.settings.playbackStyle("cover"); vm.settings.orientation("sensor") }
         val requests = ConcurrentLinkedQueue<RecordedRequest>()
         val offline = AtomicBoolean(false)
         val unauthorized = AtomicBoolean(false)

@@ -287,7 +287,10 @@ class NativeNavigationTest {
                 assertFalse(compose.runOnIdle { vm.controller!!.isPlaying })
                 shell("wm size 1600x1000"); shell("wm density 160")
                 compose.waitUntil(15_000) { compose.onNodeWithTag("settings-page").fetchSemanticsNode().size.width > 1200 }
-                assertTrue(compose.onNodeWithTag("mini-player").fetchSemanticsNode().size.width <= 640)
+                // Tablet settings now use the same full-width mini player as the
+                // catalog surface; verify it remains laid out instead of capping
+                // the width to the old capsule maximum.
+                assertTrue(compose.onNodeWithTag("mini-player").fetchSemanticsNode().size.width > 0)
                 capture("reference-tablet-settings-player.png")
                 shell("wm size reset"); shell("wm density reset")
                 compose.waitUntil(15_000) { compose.onNodeWithTag("settings-page").fetchSemanticsNode().size.width < 1200 }
