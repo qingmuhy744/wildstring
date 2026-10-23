@@ -48,11 +48,22 @@ jobs:
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           version: "0.13.1"
+      - name: Cache apt packages
+        uses: actions/cache@d4323d4df104b026a6aa633fdb11d772146be0bf # v4.2.2
+        with:
+          path: ~/.cache/apt-archives
+          key: apt-audio-${{ runner.os }}-${{ hashFiles('backend/pyproject.toml') }}
+          restore-keys: apt-audio-${{ runner.os }}-
       - name: Install system dependencies for audio decoding
         run: |
           sudo systemctl stop apt-daily.timer apt-daily-upgrade.timer unattended-upgrades.service 2>/dev/null || true
+          if [ -d ~/.cache/apt-archives ] && [ -n "$(ls -A ~/.cache/apt-archives/*.deb 2>/dev/null)" ]; then
+            sudo cp -n ~/.cache/apt-archives/*.deb /var/cache/apt/archives/ 2>/dev/null || true
+          fi
           sudo apt-get update -o Acquire::Retries=3 -o Acquire::http::Timeout=20 --error-on=any
           sudo apt-get install -y --no-install-recommends ffmpeg libchromaprint-tools
+          mkdir -p ~/.cache/apt-archives
+          sudo cp -n /var/cache/apt/archives/*.deb ~/.cache/apt-archives/ 2>/dev/null || true
       - name: Run backend pytest suite
         run: |
           uv sync --frozen --project backend --extra community-sources
@@ -75,11 +86,27 @@ jobs:
         with:
           version: "0.13.1"
       - run: make setup
+      - name: Cache apt packages
+        uses: actions/cache@d4323d4df104b026a6aa633fdb11d772146be0bf # v4.2.2
+        with:
+          path: ~/.cache/apt-archives
+          key: apt-audio-${{ runner.os }}-${{ hashFiles('backend/pyproject.toml') }}
+          restore-keys: apt-audio-${{ runner.os }}-
       - name: Install system dependencies for audio decoding
         run: |
           sudo systemctl stop apt-daily.timer apt-daily-upgrade.timer unattended-upgrades.service 2>/dev/null || true
+          if [ -d ~/.cache/apt-archives ] && [ -n "$(ls -A ~/.cache/apt-archives/*.deb 2>/dev/null)" ]; then
+            sudo cp -n ~/.cache/apt-archives/*.deb /var/cache/apt/archives/ 2>/dev/null || true
+          fi
           sudo apt-get update -o Acquire::Retries=3 -o Acquire::http::Timeout=20 --error-on=any
           sudo apt-get install -y --no-install-recommends ffmpeg libchromaprint-tools
+          mkdir -p ~/.cache/apt-archives
+          sudo cp -n /var/cache/apt/archives/*.deb ~/.cache/apt-archives/ 2>/dev/null || true
+      - name: Cache Playwright browser
+        uses: actions/cache@d4323d4df104b026a6aa633fdb11d772146be0bf # v4.2.2
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('frontend/web/package-lock.json') }}
       - run: npm --prefix frontend/web exec -- playwright install --with-deps chromium
       - name: Run Web tests and browser regressions
         run: make test-web test-large-web test-browse-web test-catalog-web test-transcoding-web
