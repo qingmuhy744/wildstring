@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "wildstring-backend"
-version = "0.6.2"
+version = "0.6.3"
 description = "WildString AI-native self-hosted music backend"
 requires-python = ">=3.12,<3.13"
 dependencies = [

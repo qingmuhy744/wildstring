@@ -2,11 +2,14 @@ package com.wildstring.app.ui
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
@@ -14,6 +17,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.google.gson.JsonObject
 import com.wildstring.app.data.*
 import kotlinx.coroutines.Dispatchers
@@ -208,12 +212,15 @@ private fun candidateQualitySummary(candidate: JsonObject): CandidateQualitySumm
         HorizontalDivider(); Text("联网歌词候选", style = MaterialTheme.typography.titleMedium)
         Text("先核对版本、歌手和时长。歌词来源可与元数据不同，确认后才替换数据库歌词。", style = MaterialTheme.typography.bodySmall)
         ActionStatus(action)
-        TextButton({ scope.launch { action.run { vm.repository.feature("manage/tracks/${track.id}/online-lyrics", "POST"); load() } } }, enabled = !action.busy && !running) { Text(if (running) "后台正在查询歌词…" else "查找联网歌词") }
+        TextButton({ scope.launch { action.run { vm.repository.feature("manage/tracks/${track.id}/online-lyrics", "POST"); load() } } }, enabled = !action.busy && !running) { Text(if (running) "正在联网查询歌词…" else "查找联网歌词") }
+        if (running) {
+            LinearProgressIndicator(Modifier.fillMaxWidth())
+        }
         if (allCandidates.size > 1) {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(filterMode == "all", { filterMode = "all" }, label = { Text("全部（${allCandidates.size}）") })
-                FilterChip(filterMode == "word", { filterMode = "word" }, label = { Text("仅看逐字（${allCandidates.count { candidateQualitySummary(it).wordTimed }}）") })
-                FilterChip(filterMode == "bilingual", { filterMode = "bilingual" }, label = { Text("仅看双语（${allCandidates.count { candidateQualitySummary(it).bilingual }}）") })
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(filterMode == "all", { filterMode = "all" }, label = { Text("全部（${allCandidates.size}）", maxLines = 1, softWrap = false) })
+                FilterChip(filterMode == "word", { filterMode = "word" }, label = { Text("仅看逐字（${allCandidates.count { candidateQualitySummary(it).wordTimed }}）", maxLines = 1, softWrap = false) })
+                FilterChip(filterMode == "bilingual", { filterMode = "bilingual" }, label = { Text("仅看双语（${allCandidates.count { candidateQualitySummary(it).bilingual }}）", maxLines = 1, softWrap = false) })
             }
         }
         filteredCandidates.forEach { candidate ->
@@ -259,12 +266,35 @@ private fun candidateQualitySummary(candidate: JsonObject): CandidateQualitySumm
         val q = candidateQualitySummary(candidate)
         val lines = candidate.getAsJsonObject("normalized").objects("lines").take(100)
         val hasWords = lines.any { it.objects("words").isNotEmpty() }
+        val state by vm.state.collectAsStateWithLifecycle()
+        val position by vm.position.collectAsStateWithLifecycle()
+        val isCurrentTrack = state.current?.id == track.id
         AlertDialog(onDismissRequest = { if (!action.busy) selected = null }, title = { Text("核对并使用歌词？") }, text = {
-            Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(Modifier.heightIn(max = 480.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     LyricBadgePill(q.label, highlighted = q.wordTimed)
                     if (q.wordTimed) LyricBadgePill("逐字覆盖 ${q.wordCoveragePct}%")
                     if (q.bilingual) LyricBadgePill("译文覆盖 ${q.translationCoveragePct}%")
+                }
+                Surface(shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.surfaceVariant, modifier = Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(horizontal = 12.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            if (!isCurrentTrack) {
+                                TextButton({ vm.play(listOf(track)) }) { Text("▶ 播放此曲以试听") }
+                            } else {
+                                TextButton(vm::toggle) { Text(if (state.playing) "Ⅱ 暂停" else "▶ 试听") }
+                                Text(formatTime(position) + " / " + formatTime(track.durationMs), style = MaterialTheme.typography.bodySmall)
+                            }
+                        }
+                        if (isCurrentTrack && track.durationMs > 0) {
+                            Slider(
+                                value = position.toFloat().coerceIn(0f, track.durationMs.toFloat()),
+                                onValueChange = { vm.seek(it.toLong()) },
+                                valueRange = 0f..track.durationMs.toFloat(),
+                                modifier = Modifier.fillMaxWidth().height(24.dp)
+                            )
+                        }
+                    }
                 }
                 if (hasWords) {
                     FilterChip(

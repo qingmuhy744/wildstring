@@ -448,6 +448,7 @@ export function usePlayer(userId: string) {
     buffering,
     quality,
     changeQuality,
+    plan,
     mode,
     setMode,
     sleep,
@@ -705,9 +706,11 @@ export function PlaybackControls({ player }: { player: Player }) {
             <path d="M17 5h2v14h-2zM5 5l11 7-11 7z" />
           </svg>
         </button>
-        <span className="play-state" role="status">
-          {player.buffering ? '缓冲中…' : playing ? player.playbackLabel : current ? '已暂停' : ''}
-        </span>
+        {player.buffering && (
+          <span className="sr-only" role="status">
+            缓冲中…
+          </span>
+        )}
       </div>
       <div className="timeline">
         <time>{time(position)}</time>
@@ -754,6 +757,8 @@ export function PlaybackError({ player }: { player: Player }) {
 }
 
 export function QualityControl({ player }: { player: Player }) {
+  const isPassthrough = player.plan?.reason === 'lossy_passthrough';
+  const format = (player.current?.format || '').toUpperCase();
   return (
     <label className="quality-control">
       <span>音质</span>
@@ -770,6 +775,11 @@ export function QualityControl({ player }: { player: Player }) {
           </option>
         ))}
       </select>
+      {isPassthrough && format && (
+        <span className="quality-passthrough-hint" title={`当前音源：${format}`}>
+          {format}
+        </span>
+      )}
     </label>
   );
 }

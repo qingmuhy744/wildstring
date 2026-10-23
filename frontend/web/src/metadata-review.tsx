@@ -288,6 +288,61 @@ export function MetadataReviewWorkbench({
     setCover(null);
     setCoverReady(false);
   }
+  function nextAlbum() {
+    if (!page || !albums.length) return;
+    const currentIndex = albums.findIndex((a) => a.id === page.album_id);
+    const next = albums[(currentIndex + 1) % albums.length];
+    if (next && next.id !== page.album_id) {
+      void load(`album_id=${encodeURIComponent(next.id)}`);
+    }
+  }
+  async function rejectAlbum() {
+    if (request.current || busy || loading || !page || !page.album_id) return;
+    request.current = true;
+    setBusy(true);
+    setError('');
+    setNotice('');
+    try {
+      await api('/agent/metadata-review/reject', {
+        method: 'POST',
+        body: JSON.stringify({ album_id: page.album_id }),
+      });
+      const updatedAlbums = await loadAlbums();
+      setNotice('已拒绝此专辑的所有建议；现有资料保持不变。');
+      const next = updatedAlbums.find((a) => a.id !== page.album_id);
+      if (next) {
+        await load(`album_id=${encodeURIComponent(next.id)}`);
+      } else {
+        setPage(null);
+      }
+    } catch (reason) {
+      setError(errorText(reason));
+    } finally {
+      request.current = false;
+      setBusy(false);
+    }
+  }
+  async function rejectTrack(trackId: string) {
+    if (request.current || busy || loading || !page) return;
+    request.current = true;
+    setBusy(true);
+    setError('');
+    setNotice('');
+    try {
+      await api('/agent/metadata-review/reject', {
+        method: 'POST',
+        body: JSON.stringify({ track_id: trackId }),
+      });
+      await load(pageQuery(page), undefined, true);
+      await loadAlbums();
+      setNotice('已拒绝该单曲的所有建议；现有资料保持不变。');
+    } catch (reason) {
+      setError(errorText(reason));
+    } finally {
+      request.current = false;
+      setBusy(false);
+    }
+  }
   async function rejectCurrent() {
     if (request.current || busy || loading || !current || !candidate || !page) return;
     request.current = true;
@@ -314,7 +369,7 @@ export function MetadataReviewWorkbench({
       setBusy(false);
     }
   }
-  async function accept(single = false) {
+  async function accept(single = false, goToNextAlbum = false) {
     if (request.current || busy || loading || !page || (cover && !coverReady)) return;
     const tracks = single ? selected.filter((t) => t.id === active) : selected;
     if (!tracks.length && !cover) return;
@@ -363,13 +418,22 @@ export function MetadataReviewWorkbench({
             idempotency_key: key.current.value,
           }),
         });
-      const next = single
-        ? page.items[(page.items.findIndex((t) => t.id === active) + 1) % page.items.length]?.id
-        : undefined;
       window.dispatchEvent(new Event('wildstring:artwork-updated'));
       await onApplied?.();
-      await load(pageQuery(page), next);
-      await loadAlbums();
+      const updatedAlbums = await loadAlbums();
+      if (goToNextAlbum) {
+        const next = updatedAlbums.find((a) => a.id !== page.album_id);
+        if (next) {
+          await load(`album_id=${encodeURIComponent(next.id)}`);
+        } else {
+          setPage(null);
+        }
+      } else {
+        const next = single
+          ? page.items[(page.items.findIndex((t) => t.id === active) + 1) % page.items.length]?.id
+          : undefined;
+        await load(pageQuery(page), next);
+      }
       setNotice(
         `已应用 ${tracks.length} 首的 ${items.reduce((n, i) => n + i.fields.length, 0)} 个字段${cover ? '及已预览封面' : ''}。`,
       );
@@ -458,6 +522,33 @@ export function MetadataReviewWorkbench({
       setLockBusy(false);
     }
   }
+  async function purgeStale() {
+    if (busy || loading) return;
+    setBusy(true);
+    setError('');
+    setNotice('');
+    try {
+      const res = await api<{ status: string; purged_count: number; remaining_pending: number }>(
+        '/agent/metadata-review/stale/purge',
+        { method: 'POST' },
+      );
+      setNotice(
+        res.purged_count > 0
+          ? `已成功清理 ${res.purged_count} 个失效候选，剩余 ${res.remaining_pending} 个待核对候选。`
+          : `当前暂无失效候选，全部待核对候选均为有效版本。`,
+      );
+      const updated = await loadAlbums();
+      if (updated.length && page) {
+        await load(pageQuery(page), active);
+      } else if (!updated.length) {
+        setPage(null);
+      }
+    } catch (e) {
+      setError(errorText(e));
+    } finally {
+      setBusy(false);
+    }
+  }
   const disabled = busy || loading;
   return (
     <section className="metadata-review" aria-label="批量核对工作台">
@@ -467,6 +558,13 @@ export function MetadataReviewWorkbench({
           <p className="muted">只勾选需要的变化。已有人工值默认保留；勾选后会替换该字段。</p>
         </div>
         <div className="review-heading-actions">
+          <button
+            disabled={disabled}
+            onClick={() => void purgeStale()}
+            title="清理歌曲信息已改变或查询依据失效的废弃候选，释放待办"
+          >
+            清理已失效候选
+          </button>
           <button disabled={disabled} onClick={() => page && void load(pageQuery(page), active)}>
             重新读取候选
           </button>
@@ -676,6 +774,14 @@ export function MetadataReviewWorkbench({
                 </label>
                 <button disabled={disabled} onClick={() => setRefresh(true)}>
                   更新元数据
+                </button>
+                <button
+                  disabled={disabled || !current}
+                  className="text-button danger"
+                  onClick={() => void rejectTrack(current.id)}
+                  title="拒绝该单曲的所有建议候选"
+                >
+                  拒绝此歌曲建议
                 </button>
               </div>
               {candidate && (candidate.duplicate_count || 1) > 1 && (
@@ -920,22 +1026,20 @@ export function MetadataReviewWorkbench({
             本次跳过 / 下一首
           </button>
           <button
+            className="danger"
+            disabled={disabled || !page?.album_id}
+            onClick={() => void rejectAlbum()}
+            data-help={hints.reviewReject}
+            title="一键拒绝整专所有建议"
+          >
+            拒绝整专建议
+          </button>
+          <button
             disabled={disabled || !candidate}
             onClick={() => void rejectCurrent()}
             data-help={hints.reviewReject}
           >
             拒绝当前建议
-          </button>
-          <button
-            disabled={
-              disabled ||
-              (!choices[active]?.fields.length && !cover) ||
-              (!!cover && (!coverReady || coverAll))
-            }
-            data-help={hints.reviewAccept}
-            onClick={() => void accept(true)}
-          >
-            接受本曲并下一首
           </button>
           <button
             className="primary"

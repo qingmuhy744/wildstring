@@ -47,10 +47,11 @@ def candidate_group(row):
 
 
 class ReviewReject(Input):
-    track_id: str = Field(min_length=1, max_length=128)
-    suggestion_id: str = Field(min_length=1, max_length=128)
-    metadata_version: int = Field(ge=1)
-    candidate_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    track_id: str | None = Field(default=None, max_length=128)
+    suggestion_id: str | None = Field(default=None, max_length=128)
+    metadata_version: int | None = Field(default=None, ge=1)
+    candidate_digest: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    album_id: str | None = Field(default=None, max_length=128)
 
 
 class ReviewItem(Input):
@@ -226,6 +227,37 @@ class Review:
         actor.require("library:manage", admin=True)
         with self.database.connect(write=True) as db:
             db.execute("BEGIN IMMEDIATE")
+            if body.album_id:
+                count = db.execute(
+                    "UPDATE metadata_suggestions SET status='ignored' WHERE status='pending' "
+                    "AND track_id IN (SELECT id FROM tracks WHERE album_id=? AND library_id=? AND status='available')",
+                    (body.album_id, self.library_id),
+                ).rowcount
+                return {
+                    "status": "ignored",
+                    "ignored_count": count,
+                    "album_id": body.album_id,
+                    "already_ignored": count == 0,
+                }
+            if body.track_id and not body.suggestion_id:
+                count = db.execute(
+                    "UPDATE metadata_suggestions SET status='ignored' WHERE status='pending' "
+                    "AND track_id=? AND track_id IN (SELECT id FROM tracks WHERE library_id=? AND status='available')",
+                    (body.track_id, self.library_id),
+                ).rowcount
+                return {
+                    "status": "ignored",
+                    "ignored_count": count,
+                    "track_id": body.track_id,
+                    "already_ignored": count == 0,
+                }
+            if (
+                not body.track_id
+                or not body.suggestion_id
+                or not body.metadata_version
+                or not body.candidate_digest
+            ):
+                raise HTTPException(422, "missing_reject_fields")
             row = db.execute(
                 "SELECT s.*,s.rowid AS observed_sequence,m.version AS current_version FROM metadata_suggestions s "
                 "JOIN tracks t ON t.id=s.track_id JOIN track_metadata m ON m.track_id=t.id "
@@ -255,6 +287,57 @@ class Review:
                 (encoded(identities),),
             )
         return {"status": "ignored", "ignored_count": len(identities), "already_ignored": False}
+
+    def purge_stale(self, actor):
+        actor.require("library:manage", admin=True)
+        with self.database.connect(write=True) as db:
+            db.execute("BEGIN IMMEDIATE")
+            c1 = db.execute(
+                "UPDATE metadata_suggestions SET status='ignored' WHERE status='pending' "
+                "AND track_id NOT IN (SELECT id FROM tracks WHERE library_id=? AND status='available')",
+                (self.library_id,),
+            ).rowcount
+            c2 = db.execute(
+                "UPDATE metadata_suggestions SET status='ignored' WHERE status='pending' "
+                "AND track_id IN (SELECT id FROM tracks WHERE library_id=? AND status='available') "
+                "AND metadata_version != (SELECT version FROM track_metadata WHERE track_id=metadata_suggestions.track_id)",
+                (self.library_id,),
+            ).rowcount
+            rows = db.execute(
+                "SELECT ms.id, ms.match, t.title, t.artists, t.album, t.duration_ms "
+                "FROM metadata_suggestions ms "
+                "JOIN tracks t ON t.id = ms.track_id "
+                "WHERE ms.status = 'pending' AND t.library_id = ? AND t.status = 'available'",
+                (self.library_id,),
+            ).fetchall()
+            stale_ids = []
+            for r in rows:
+                match = json.loads(r["match"]) if r["match"] else {}
+                track_info = {
+                    "title": r["title"],
+                    "artists": json.loads(r["artists"] or "[]"),
+                    "album": r["album"],
+                    "duration_ms": r["duration_ms"],
+                }
+                if not candidate_matches(track_info, match):
+                    stale_ids.append(r["id"])
+            c3 = 0
+            if stale_ids:
+                c3 = db.execute(
+                    "UPDATE metadata_suggestions SET status='ignored' WHERE id IN (SELECT value FROM json_each(?))",
+                    (encoded(stale_ids),),
+                ).rowcount
+            remaining = db.execute(
+                "SELECT count(*) FROM metadata_suggestions ms "
+                "JOIN tracks t ON t.id = ms.track_id "
+                "WHERE ms.status = 'pending' AND t.library_id = ? AND t.status = 'available'",
+                (self.library_id,),
+            ).fetchone()[0]
+            return {
+                "status": "purged",
+                "purged_count": c1 + c2 + c3,
+                "remaining_pending": remaining,
+            }
 
     def accept_metadata_review(self, actor, body):
         actor.require("library:manage", admin=True)

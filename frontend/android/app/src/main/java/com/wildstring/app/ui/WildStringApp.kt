@@ -14,6 +14,8 @@ import androidx.activity.compose.LocalActivity
 import androidx.core.view.WindowCompat
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -1068,10 +1070,51 @@ private fun PlaybackControls(vm: MusicViewModel, state: MusicState, onQueue: () 
                 Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, Modifier.size(16.dp), tint = Muted)
             }
             if (state.playbackQuality.isNotBlank()) {
+                var qualityDialog by remember { mutableStateOf(false) }
+                val feedback = tactile {}
                 Spacer(Modifier.width(8.dp))
-                Surface(shape = RoundedCornerShape(6.dp), color = MaterialTheme.colorScheme.onSurface.copy(alpha = .08f)) {
+                Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = .08f),
+                    modifier = Modifier.clickable { feedback(); qualityDialog = true }
+                ) {
                     Text(state.playbackQuality, color = Muted, fontSize = 10.sp, maxLines = 1,
                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp).testTag("playback-quality"))
+                }
+                if (qualityDialog) {
+                    val preferences by vm.settings.state.collectAsStateWithLifecycle()
+                    val choices = listOf(0 to "原音", 128 to "AAC · 128 kbps", 192 to "AAC · 192 kbps", 256 to "AAC · 256 kbps", 320 to "AAC · 320 kbps")
+                    val format = (track.format ?: "").uppercase().ifBlank { "MP3" }
+                    AlertDialog(
+                        onDismissRequest = { qualityDialog = false },
+                        title = { Text("播放音质") },
+                        text = {
+                            Column {
+                                Text(
+                                    "当前音源 · $format",
+                                    Modifier.padding(bottom = 12.dp),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Muted
+                                )
+                                choices.forEach { (rate, label) ->
+                                    Row(
+                                        Modifier.fillMaxWidth()
+                                            .selectable(preferences.aacBitrate == rate, role = Role.RadioButton, onClick = {
+                                                feedback()
+                                                vm.settings.quality(rate)
+                                                qualityDialog = false
+                                            })
+                                            .padding(vertical = 12.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        RadioButton(selected = preferences.aacBitrate == rate, onClick = null)
+                                        Text(label, Modifier.padding(start = 16.dp))
+                                    }
+                                }
+                            }
+                        },
+                        confirmButton = { TextButton({ qualityDialog = false }) { Text("关闭") } }
+                    )
                 }
             }
         }

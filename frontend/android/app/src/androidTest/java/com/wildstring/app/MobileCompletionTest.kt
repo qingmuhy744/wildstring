@@ -286,6 +286,7 @@ class MobileCompletionTest {
         Fixture().use { fixture -> val vm = connect(fixture)
             try {
                 compose.onNodeWithTag("nav-mine").performClick()
+                compose.waitUntil(10_000) { compose.onAllNodesWithTag("personal-shortcuts").fetchSemanticsNodes().isNotEmpty() }
                 compose.onNodeWithTag("personal-shortcuts").assertIsDisplayed()
                 compose.onNodeWithText("每日推荐", substring = false).assertDoesNotExist()
                 compose.onNodeWithText("数据源插件", substring = false).assertDoesNotExist()
@@ -314,6 +315,7 @@ class MobileCompletionTest {
                 compose.onNodeWithText("歌单名称").performTextInput("手机规则歌单")
                 dismissKeyboard()
                 compose.onNode(isToggleable()).performClick()
+                compose.waitUntil(10_000) { compose.onAllNodesWithText("只选我喜欢的音乐").fetchSemanticsNodes().isNotEmpty() }
                 compose.onNodeWithText("只选我喜欢的音乐").assertIsDisplayed()
                 compose.onNodeWithText("保存歌单").performScrollTo().performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnClick) { click -> assertTrue(click()) }
                 compose.waitUntil(10_000) { fixture.mutations.any { it.first.endsWith("/playlists") && it.second.contains("\"kind\":\"smart\"") } }
@@ -408,6 +410,7 @@ class MobileCompletionTest {
                 compose.waitUntil(10_000) { compose.onAllNodesWithTag("review-source").fetchSemanticsNodes().isNotEmpty() }
                 compose.onNodeWithTag("review-scroll").performScrollToNode(hasTestTag("review-source"))
                 compose.onNodeWithTag("review-source").performClick()
+                compose.waitUntil(10_000) { compose.onAllNodesWithText("MusicBrainz · 建议标题 · 建议专辑 · 匹配度 98%", substring = true).fetchSemanticsNodes().isNotEmpty() }
                 compose.onAllNodesWithText("MusicBrainz · 建议标题 · 建议专辑 · 匹配度 98%", substring = true).onLast().assertIsDisplayed()
                 capture("metadata-review-candidates-native.png")
                 compose.onNodeWithText("关闭", substring = false).performClick()
@@ -489,6 +492,7 @@ class MobileCompletionTest {
                 compose.runOnIdle { vm.navigate("mine") }
                 compose.waitUntil(10_000) { vm.state.value.playlists.isNotEmpty() && !vm.state.value.loading }
                 compose.onNodeWithText("测试歌单", useUnmergedTree = true).performTouchInput { longClick() }
+                compose.waitUntil(10_000) { compose.onAllNodesWithText("自动下载歌单").fetchSemanticsNodes().isNotEmpty() }
                 compose.onNodeWithText("自动下载歌单").assertIsDisplayed()
                 fixture.holdPlaylistDetails.set(true)
                 compose.onNodeWithText("编辑歌单").performClick()
