@@ -499,7 +499,16 @@ class MobileCompletionTest {
             }
         } catch (error: Throwable) {
             val tree = runCatching { compose.onRoot(useUnmergedTree = true).printToString() }.getOrDefault("UI unavailable")
-            throw AssertionError("Expected visible handoff $version; actual=${vm.state.value.handoff?.version}, playing=${vm.state.value.playing}\n$tree", error)
+            val controller = vm.controller
+            throw AssertionError(
+                "Expected visible handoff $version; actual=${vm.state.value.handoff?.version}, " +
+                    "playing=${vm.state.value.playing}, connected=${vm.state.value.connected}, " +
+                    "mode=${vm.sharing.mode.value}, seen=${vm.sharing.lastSeen()}, " +
+                    "offered=${vm.sharing.lastOfferedPause()}, " +
+                    "controllerPlaying=${controller?.isPlaying}, playWhenReady=${controller?.playWhenReady}, " +
+                    "mediaItems=${controller?.mediaItemCount}, error=${vm.state.value.error}\n$tree",
+                error,
+            )
         }
         compose.onNodeWithTag("playback-handoff-notice").assertIsDisplayed()
         compose.onNodeWithText("载入进度").assertIsEnabled()
