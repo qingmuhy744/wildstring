@@ -10,7 +10,6 @@ interface Record {
   version: number;
   file_version: string;
   override: string | null;
-  selected_candidate?: string | null;
   observed_text: string;
   text: string;
   effective: Lyrics;
@@ -38,7 +37,6 @@ export function LyricsEditor({
 }) {
   const [record, setRecord] = useState<Record | null>(null),
     [text, setText] = useState('');
-  const [panelTab, setPanelTab] = useState<'online' | 'manual'>('manual');
   const [restore, setRestore] = useState(false),
     [busy, setBusy] = useState(false),
     [error, setError] = useState(''),
@@ -224,19 +222,6 @@ export function LyricsEditor({
     preview.lines.forEach((line, index) => {
       if (line.time_ms! <= player.position * 1000) activeLine = index;
     });
-
-  const hasWords = record?.effective?.lines?.some((l) => l.words && l.words.length > 0);
-  const hasTranslation = record?.effective?.lines?.some((l) => !!l.translation);
-  const statusBadge = record?.selected_candidate
-    ? `在线歌词 · ${hasWords ? '逐字动态' : record.effective.kind === 'synced' ? '逐行动态' : '纯文本'}${hasTranslation ? ' · 双语' : ''}`
-    : record?.override !== null
-      ? '手工自定义歌词'
-      : record?.effective?.kind === 'synced'
-        ? '音频内置同步歌词'
-        : record?.effective?.kind === 'plain'
-          ? '音频内置纯文本歌词'
-          : '音频暂无歌词';
-
   return (
     <section
       hidden={!active}
@@ -264,42 +249,33 @@ export function LyricsEditor({
         </p>
       ) : (
         <>
-          <nav
-            className="workspace-tabs"
-            aria-label="歌词管理方式"
-            style={{ marginBottom: '1rem' }}
-          >
-            <button
-              type="button"
-              aria-pressed={panelTab === 'online'}
-              onClick={() => {
-                setPanelTab('online');
-                setError('');
-                setNotice('');
-              }}
-            >
-              在线歌词匹配
-            </button>
-            <button
-              type="button"
-              aria-pressed={panelTab === 'manual'}
-              onClick={() => {
-                setPanelTab('manual');
-                setError('');
-                setNotice('');
-              }}
-            >
-              手工编辑与打点
-            </button>
-          </nav>
-          <div className="lyric-editor-player" style={{ marginBottom: '1rem' }}>
+          <div className="lyrics-edit-heading">
+            <div>
+              <h3>
+                {mode === 'timing'
+                  ? '跟着音乐，逐句打点'
+                  : mode === 'preview'
+                    ? '歌词预览'
+                    : '编辑歌词'}
+              </h3>
+              <p className="muted">
+                {mode === 'timing'
+                  ? '听到下一句开始时按空格，记录时间并切到这一句。第一下从第一句开始。'
+                  : '每句一行，可粘贴纯文本或 LRC。保存后所有播放器都能读取。'}
+              </p>
+            </div>
+            <span className="metadata-source">
+              {record.override !== null ? '人工编辑' : '文件歌词'}
+            </span>
+          </div>
+          <div className="lyric-editor-player">
             <button
               type="button"
               disabled={busy}
               onClick={play}
               aria-label={mine && player.playing ? '暂停打点歌曲' : '播放打点歌曲'}
             >
-              {mine && player.playing ? 'Ⅱ 暂停' : '▶ 播放打点歌曲'}
+              {mine && player.playing ? 'Ⅱ 暂停' : '▶ 播放这首歌'}
             </button>
             <span>
               {time(mine ? player.position : 0)} /{' '}
@@ -321,339 +297,242 @@ export function LyricsEditor({
               {player.error}
             </p>
           )}
-          {panelTab === 'online' ? (
-            <div className="online-lyrics-panel">
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  padding: '8px 12px',
-                  background: 'var(--surface-color, rgba(255, 255, 255, 0.04))',
-                  borderRadius: '8px',
-                  marginBottom: '14px',
+          {mode === 'text' && (
+            <label className="metadata-field">
+              歌词内容
+              <textarea
+                aria-label="歌词内容"
+                rows={11}
+                maxLength={524288}
+                value={text}
+                onChange={(event) => {
+                  setText(event.target.value);
+                  setRestore(false);
+                  setLines([]);
+                  setHistory([]);
+                  setPreview(null);
+                  setNotice('');
                 }}
-              >
-                <div>
-                  <span
-                    style={{ fontSize: '0.85rem', color: 'var(--muted-color)', marginRight: '8px' }}
-                  >
-                    当前生效：
-                  </span>
-                  <span className="metadata-source">{statusBadge}</span>
-                </div>
-                {(record.override !== null || record.selected_candidate) && (
-                  <button
-                    type="button"
-                    className="text-button"
-                    disabled={busy}
-                    onClick={() => {
-                      void perform(async () => {
-                        const result = await api<Record>(endpoint, {
-                          method: 'PUT',
-                          body: JSON.stringify({
-                            version: record.version,
-                            file_version: record.file_version,
-                            text: null,
-                          }),
-                        });
-                        setRecord(result);
-                        setText(result.text);
-                        setNotice('已恢复音频文件内置歌词。');
-                        window.dispatchEvent(
-                          new CustomEvent('wildstring:lyrics-updated', { detail: track.id }),
-                        );
-                      });
-                    }}
-                  >
-                    恢复音频文件歌词
-                  </button>
-                )}
-              </div>
-              {error && (
-                <p className="error" role="alert">
-                  {error}{' '}
-                  <button className="text-button" disabled={busy} onClick={() => void load()}>
-                    重新读取歌词
-                  </button>
-                </p>
-              )}
-              {notice && (
-                <p className="ai-status" role="status" aria-label="歌词编辑状态">
-                  {notice}
-                </p>
-              )}
-              <OnlineLyrics
-                trackId={track.id}
-                applied={() => {
-                  void load();
-                }}
+                placeholder="把歌词放在这里，每句一行。"
               />
-            </div>
-          ) : (
-            <div className="manual-lyrics-panel">
-              <div className="lyrics-edit-heading">
-                <div>
-                  <h3>
-                    {mode === 'timing'
-                      ? '跟着音乐，逐句打点'
-                      : mode === 'preview'
-                        ? '歌词预览'
-                        : '编辑歌词'}
-                  </h3>
-                  <p className="muted">
-                    {mode === 'timing'
-                      ? '听到下一句开始时按空格，记录时间并切到这一句。第一下从第一句开始。'
-                      : '每句一行，可粘贴纯文本或 LRC。手工保存将作为自定义版本覆盖当前歌词。'}
-                  </p>
-                </div>
-                <span className="metadata-source">
-                  {record.override !== null
-                    ? '人工编辑'
-                    : record.selected_candidate
-                      ? '来自在线匹配'
-                      : '文件歌词'}
-                </span>
+            </label>
+          )}
+          {mode === 'timing' && (
+            <div
+              ref={workspace}
+              className="lyric-timing-workspace"
+              tabIndex={0}
+              aria-label="逐行打点工作区"
+            >
+              <div className="lyric-cue" aria-live="polite">
+                <small>当前句</small>
+                <p>{selected > 0 ? lines[selected - 1].text || '♪' : '前奏，准备第一句'}</p>
+                <small>下一句</small>
+                <p className="lyric-cue-next">
+                  {lines[selected]?.text || (selected >= lines.length ? '全部完成' : '♪')}
+                </p>
               </div>
-
-              {mode === 'text' && (
-                <label className="metadata-field">
-                  歌词内容
-                  <textarea
-                    aria-label="歌词内容"
-                    rows={11}
-                    maxLength={524288}
-                    value={text}
-                    onChange={(event) => {
-                      setText(event.target.value);
-                      setRestore(false);
-                      setLines([]);
-                      setHistory([]);
-                      setPreview(null);
-                      setNotice('');
-                    }}
-                    placeholder="把歌词放在这里，每句一行。"
-                  />
-                </label>
-              )}
-              {mode === 'timing' && (
-                <div
-                  ref={workspace}
-                  className="lyric-timing-workspace"
-                  tabIndex={0}
-                  aria-label="逐行打点工作区"
-                >
-                  <div className="lyric-cue" aria-live="polite">
-                    <small>当前句</small>
-                    <p>{selected > 0 ? lines[selected - 1].text || '♪' : '前奏，准备第一句'}</p>
-                    <small>下一句</small>
-                    <p className="lyric-cue-next">
-                      {lines[selected]?.text || (selected >= lines.length ? '全部完成' : '♪')}
-                    </p>
-                  </div>
-                  <div className="lyric-timing-actions">
-                    <button
-                      className="primary"
-                      disabled={
-                        busy ||
-                        !mine ||
-                        !player.playing ||
-                        player.buffering ||
-                        selected >= lines.length
-                      }
-                      onClick={stamp}
-                    >
-                      下一句（空格）
-                    </button>
-                    <button
-                      disabled={!history.length || busy}
-                      onClick={() => {
-                        const previous = history.at(-1)!;
-                        setLines(previous.lines);
-                        setSelected(previous.selected);
-                        setHistory((items) => items.slice(0, -1));
-                        setError('');
-                      }}
-                    >
-                      撤销打点
-                    </button>
-                    <span role="status">
-                      {lines.filter((line) => line.time_ms !== null).length} / {lines.length}{' '}
-                      句已标记
-                    </span>
-                  </div>
-                  <ol className="lyric-timing-lines" aria-label="打点歌词">
-                    {lines.map((line, index) => (
-                      <li
-                        key={index}
-                        ref={index === selected ? selectedRow : null}
-                        className={index === selected ? 'timing-current' : ''}
-                      >
-                        <button
-                          className="lyric-select"
-                          aria-current={index === selected ? 'step' : undefined}
-                          aria-label={`选择第 ${index + 1} 句：${line.text || '间奏'}`}
-                          onClick={() => setSelected(index)}
-                        >
-                          <small>{String(index + 1).padStart(2, '0')}</small>
-                          <span>{line.text || '♪'}</span>
-                        </button>
-                        <input
-                          type="number"
-                          aria-label={`第 ${index + 1} 句时间（秒）`}
-                          min={0}
-                          step={0.01}
-                          placeholder="未标记"
-                          value={line.time_ms === null ? '' : line.time_ms / 1000}
-                          onChange={(event) => {
-                            const raw = event.target.value,
-                              value = raw === '' ? null : Math.round(Number(raw) * 1000);
-                            if (value !== null && (!Number.isFinite(value) || value < 0)) return;
-                            change(
-                              lines.map((item, i) =>
-                                i === index ? { ...item, time_ms: value } : item,
-                              ),
-                              selected,
-                            );
-                          }}
-                        />
-                        <button
-                          className="text-button"
-                          aria-label={`试听第 ${index + 1} 句`}
-                          disabled={!mine || !player.duration || line.time_ms === null}
-                          onClick={() => {
-                            player.seek(line.time_ms! / 1000);
-                            if (!player.playing) player.toggle();
-                          }}
-                        >
-                          试听
-                        </button>
-                      </li>
-                    ))}
-                  </ol>
-                  <div className="lyric-shift">
-                    <label>
-                      <HelpLabel hint="lyricOffset">整体偏移（秒）</HelpLabel>
-                      <input
-                        type="number"
-                        step={0.1}
-                        value={shift}
-                        onChange={(event) => setShift(event.target.value)}
-                      />
-                    </label>
-                    <button
-                      disabled={!lines.some((line) => line.time_ms !== null) || busy}
-                      onClick={() => {
-                        const offset = Number(shift) * 1000;
-                        if (
-                          !Number.isFinite(offset) ||
-                          lines.some((line) => line.time_ms !== null && line.time_ms + offset < 0)
-                        ) {
-                          setError('偏移后时间不能小于 0。');
-                          return;
-                        }
-                        change(
-                          lines.map((line) => ({
-                            ...line,
-                            time_ms:
-                              line.time_ms === null ? null : Math.round(line.time_ms + offset),
-                          })),
-                          selected,
-                        );
-                      }}
-                    >
-                      应用偏移
-                    </button>
-                  </div>
-                </div>
-              )}
-              {mode === 'preview' && (
-                <div className="lyric-edit-preview" aria-label="歌词修改预览">
-                  <p className="muted">
-                    {restore
-                      ? '将恢复文件中的歌词。'
-                      : preview?.kind === 'synced'
-                        ? '同步歌词，可边播放边核对。'
-                        : preview?.kind === 'plain'
-                          ? '纯文本歌词，尚未打点。'
-                          : '将不显示歌词。'}
-                  </p>
-                  <ol>
-                    {preview?.lines.map((line, index) => (
-                      <li key={index} className={index === activeLine ? 'timing-current' : ''}>
-                        <span>{line.time_ms === null ? '—' : time(line.time_ms / 1000)}</span>
-                        <p>{line.text || '♪'}</p>
-                      </li>
-                    ))}
-                  </ol>
-                </div>
-              )}
-              {error && (
-                <p className="error" role="alert">
-                  {error}{' '}
-                  <button className="text-button" disabled={busy} onClick={() => void load()}>
-                    重新读取歌词
-                  </button>
-                </p>
-              )}
-              {notice && (
-                <p className="ai-status" role="status" aria-label="歌词编辑状态">
-                  {notice}
-                </p>
-              )}
-              <div className="editor-footer lyric-editor-footer">
-                <button
-                  disabled={busy}
-                  onClick={() => {
-                    if (mode === 'timing' && allTimed) setText(lrc(lines));
-                    setMode('text');
-                    setError('');
-                  }}
-                >
-                  文本编辑
-                </button>
-                <button disabled={busy || !text.trim()} onClick={prepare}>
-                  逐行打点
-                </button>
-                {mode === 'text' && (
-                  <button
-                    className="text-button"
-                    disabled={busy}
-                    onClick={() => {
-                      setText(record.observed_text);
-                      setRestore(true);
-                      setLines([]);
-                      setHistory([]);
-                      setNotice('');
-                    }}
-                  >
-                    恢复文件歌词
-                  </button>
-                )}
-                {mode === 'preview' && preview?.kind === 'synced' && (
-                  <button disabled={busy} onClick={exportLrc}>
-                    导出 LRC
-                  </button>
-                )}
+              <div className="lyric-timing-actions">
                 <button
                   className="primary"
                   disabled={
-                    busy ||
-                    (mode === 'timing' &&
-                      (!allTimed ||
-                        lines.some(
-                          (line, index) => index > 0 && line.time_ms! < lines[index - 1].time_ms!,
-                        )))
+                    busy || !mine || !player.playing || player.buffering || selected >= lines.length
                   }
-                  onClick={() => (mode === 'preview' ? void save() : checkPreview())}
+                  onClick={stamp}
                 >
-                  {busy ? '处理中…' : mode === 'preview' ? '保存歌词' : '预览歌词'}
+                  下一句（空格）
+                </button>
+                <button
+                  disabled={!history.length || busy}
+                  onClick={() => {
+                    const previous = history.at(-1)!;
+                    setLines(previous.lines);
+                    setSelected(previous.selected);
+                    setHistory((items) => items.slice(0, -1));
+                    setError('');
+                  }}
+                >
+                  撤销打点
+                </button>
+                <span role="status">
+                  {lines.filter((line) => line.time_ms !== null).length} / {lines.length} 句已标记
+                </span>
+              </div>
+              <ol className="lyric-timing-lines" aria-label="打点歌词">
+                {lines.map((line, index) => (
+                  <li
+                    key={index}
+                    ref={index === selected ? selectedRow : null}
+                    className={index === selected ? 'timing-current' : ''}
+                  >
+                    <button
+                      className="lyric-select"
+                      aria-current={index === selected ? 'step' : undefined}
+                      aria-label={`选择第 ${index + 1} 句：${line.text || '间奏'}`}
+                      onClick={() => setSelected(index)}
+                    >
+                      <small>{String(index + 1).padStart(2, '0')}</small>
+                      <span>{line.text || '♪'}</span>
+                    </button>
+                    <input
+                      type="number"
+                      aria-label={`第 ${index + 1} 句时间（秒）`}
+                      min={0}
+                      step={0.01}
+                      placeholder="未标记"
+                      value={line.time_ms === null ? '' : line.time_ms / 1000}
+                      onChange={(event) => {
+                        const raw = event.target.value,
+                          value = raw === '' ? null : Math.round(Number(raw) * 1000);
+                        if (value !== null && (!Number.isFinite(value) || value < 0)) return;
+                        change(
+                          lines.map((item, i) =>
+                            i === index ? { ...item, time_ms: value } : item,
+                          ),
+                          selected,
+                        );
+                      }}
+                    />
+                    <button
+                      className="text-button"
+                      aria-label={`试听第 ${index + 1} 句`}
+                      disabled={!mine || !player.duration || line.time_ms === null}
+                      onClick={() => {
+                        player.seek(line.time_ms! / 1000);
+                        if (!player.playing) player.toggle();
+                      }}
+                    >
+                      试听
+                    </button>
+                  </li>
+                ))}
+              </ol>
+              <div className="lyric-shift">
+                <label>
+                  <HelpLabel hint="lyricOffset">整体偏移（秒）</HelpLabel>
+                  <input
+                    type="number"
+                    step={0.1}
+                    value={shift}
+                    onChange={(event) => setShift(event.target.value)}
+                  />
+                </label>
+                <button
+                  disabled={!lines.some((line) => line.time_ms !== null) || busy}
+                  onClick={() => {
+                    const offset = Number(shift) * 1000;
+                    if (
+                      !Number.isFinite(offset) ||
+                      lines.some((line) => line.time_ms !== null && line.time_ms + offset < 0)
+                    ) {
+                      setError('偏移后时间不能小于 0。');
+                      return;
+                    }
+                    change(
+                      lines.map((line) => ({
+                        ...line,
+                        time_ms: line.time_ms === null ? null : Math.round(line.time_ms + offset),
+                      })),
+                      selected,
+                    );
+                  }}
+                >
+                  应用偏移
                 </button>
               </div>
             </div>
           )}
+          {mode === 'preview' && (
+            <div className="lyric-edit-preview" aria-label="歌词修改预览">
+              <p className="muted">
+                {restore
+                  ? '将恢复文件中的歌词。'
+                  : preview?.kind === 'synced'
+                    ? '同步歌词，可边播放边核对。'
+                    : preview?.kind === 'plain'
+                      ? '纯文本歌词，尚未打点。'
+                      : '将不显示歌词。'}
+              </p>
+              <ol>
+                {preview?.lines.map((line, index) => (
+                  <li key={index} className={index === activeLine ? 'timing-current' : ''}>
+                    <span>{line.time_ms === null ? '—' : time(line.time_ms / 1000)}</span>
+                    <p>{line.text || '♪'}</p>
+                  </li>
+                ))}
+              </ol>
+            </div>
+          )}
+          {error && (
+            <p className="error" role="alert">
+              {error}{' '}
+              <button className="text-button" disabled={busy} onClick={() => void load()}>
+                重新读取歌词
+              </button>
+            </p>
+          )}
+          {notice && (
+            <p className="ai-status" role="status" aria-label="歌词编辑状态">
+              {notice}
+            </p>
+          )}
+          <div className="editor-footer lyric-editor-footer">
+            <button
+              disabled={busy}
+              onClick={() => {
+                if (mode === 'timing' && allTimed) setText(lrc(lines));
+                setMode('text');
+                setError('');
+              }}
+            >
+              文本编辑
+            </button>
+            <button disabled={busy || !text.trim()} onClick={prepare}>
+              逐行打点
+            </button>
+            {mode === 'text' && (
+              <button
+                className="text-button"
+                disabled={busy}
+                onClick={() => {
+                  setText(record.observed_text);
+                  setRestore(true);
+                  setLines([]);
+                  setHistory([]);
+                  setNotice('');
+                }}
+              >
+                恢复文件歌词
+              </button>
+            )}
+            {mode === 'preview' && preview?.kind === 'synced' && (
+              <button disabled={busy} onClick={exportLrc}>
+                导出 LRC
+              </button>
+            )}
+            <button
+              className="primary"
+              disabled={
+                busy ||
+                (mode === 'timing' &&
+                  (!allTimed ||
+                    lines.some(
+                      (line, index) => index > 0 && line.time_ms! < lines[index - 1].time_ms!,
+                    )))
+              }
+              onClick={() => (mode === 'preview' ? void save() : checkPreview())}
+            >
+              {busy ? '处理中…' : mode === 'preview' ? '保存歌词' : '预览歌词'}
+            </button>
+          </div>
         </>
       )}
+      <OnlineLyrics
+        trackId={track.id}
+        applied={() => {
+          void load();
+        }}
+      />
     </section>
   );
 }
