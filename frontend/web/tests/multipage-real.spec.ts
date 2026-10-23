@@ -28,7 +28,7 @@ test('真实257首专辑：跨API分页收齐队列，从第201首连续播放�
       .getByRole('group', { name: '曲库显示方式' })
       .getByRole('button', { name: '专辑', exact: true })
       .click();
-  await page.getByRole('button', { name: /跨页连续专辑/ }).click();
+  await page.getByRole('button', { name: '打开专辑 跨页连续专辑', exact: true }).click();
   await expect(page.locator('.pagination')).toHaveCount(0);
   for (let attempt = 0; attempt < 6; attempt++) {
     if (await page.getByRole('button', { name: '播放 跨页测试曲 201', exact: true }).count()) break;
