@@ -548,6 +548,7 @@ class MobileCompletionTest {
                 assertNotNull(paused.pausedAt)
                 fixture.snapshot = remotePause(90)
                 runBlocking { withContext(Dispatchers.Main) { vm.checkSharedPlayback() } }
+                runBlocking { withContext(Dispatchers.Main) { vm.dismissHandoff() } }
                 compose.runOnIdle { assertNull(vm.state.value.handoff); vm.syncMode("off") }
                 runBlocking { withContext(Dispatchers.Main) { vm.checkSharedPlayback() } }
                 compose.runOnIdle { assertNull(vm.state.value.handoff); vm.sharing.mode("auto") }
@@ -571,6 +572,7 @@ class MobileCompletionTest {
                 compose.onNodeWithTag("playback-handoff-notice").assertDoesNotExist()
                 fixture.snapshot = remotePause(122)
                 runBlocking { withContext(Dispatchers.Main) { vm.checkSharedPlayback() } }
+                runBlocking { withContext(Dispatchers.Main) { vm.dismissHandoff() } }
                 compose.runOnIdle { assertNull(vm.state.value.handoff) }
                 fixture.snapshot = remotePause(123, at = recentAt(10))
                 runBlocking { withContext(Dispatchers.Main) { vm.checkSharedPlayback() } }
