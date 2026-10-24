@@ -621,12 +621,13 @@ private fun EpisodeRowItem(
     episode: PodcastEpisode,
     onPlay: () -> Unit,
 ) {
+    var details by remember { mutableStateOf(false) }
     val durationText = formatDuration(episode.durationSeconds)
 
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onPlay)
+            .clickable(onClick = { details = true })
             .padding(horizontal = 16.dp, vertical = 6.dp),
         shape = RoundedCornerShape(12.dp),
         color = MaterialTheme.colorScheme.surfaceContainerLow,
@@ -689,7 +690,25 @@ private fun EpisodeRowItem(
                     }
                 }
             }
+            IconButton(onClick = { details = true }) {
+                Icon(Icons.Default.Info, contentDescription = "查看单集详情", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
         }
+    }
+    if (details) {
+        AlertDialog(
+            onDismissRequest = { details = false },
+            title = { Text(episode.title) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(episode.description.replace(Regex("<[^>]+>"), " ").trim().ifBlank { "暂无单集简介" })
+                    if (episode.pubDate.isNotBlank()) Text("发布时间：${episode.pubDate}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    if (durationText.isNotBlank()) Text("时长：$durationText", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            },
+            confirmButton = { Button(onClick = { details = false; onPlay() }) { Text("播放单集") } },
+            dismissButton = { TextButton(onClick = { details = false }) { Text("关闭") } },
+        )
     }
 }
 

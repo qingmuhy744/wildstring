@@ -104,6 +104,8 @@ export function NowPlaying({
   );
   const [notice, setNotice] = useState('');
   const current = player.current;
+  const isPodcast = current?.id.startsWith('podcast_ep_') || false;
+  const [showPodcastDetails, setShowPodcastDetails] = useState(false);
   const style = usePlaybackStyle();
   const [palette, setPalette] = useState<{ track: string; colors: string[] } | null>(null);
   const colors = palette?.track === current?.id ? palette?.colors : null;
@@ -182,6 +184,10 @@ export function NowPlaying({
       close.current?.focus({ preventScroll: true });
     }
   }, [current?.id, active]);
+  useEffect(() => {
+    setShowPodcastDetails(false);
+    if (isPodcast) setPanel(null);
+  }, [current?.id, isPodcast]);
 
   return (
     <>
@@ -191,7 +197,8 @@ export function NowPlaying({
         ref={dialog}
         role="dialog"
         aria-modal="true"
-        aria-label="全屏播放"
+        aria-label={isPodcast ? '播客全屏播放' : '全屏播放'}
+        data-player-kind={isPodcast ? 'podcast' : 'music'}
         data-panel={panel || 'cover'}
         onPointerDown={(event) => {
           cancelHold();
@@ -306,9 +313,10 @@ export function NowPlaying({
                 }}
               />
               <div className="fullscreen-metadata">
-                <FavoriteButton track={current} favorites={favorites} />
+                {!isPodcast && <FavoriteButton track={current} favorites={favorites} />}
                 <h1>{current.title}</h1>
                 <div className="fullscreen-subtitles">
+                  {isPodcast && <span className="podcast-player-badge">播客单集</span>}
                   <span className="fullscreen-artists">
                     {current.artists.map((name, index) => (
                       <span key={`${name}-${index}`}>
@@ -344,9 +352,18 @@ export function NowPlaying({
                     )}
                   </span>
                 </div>
+                {isPodcast && current.description && (
+                  <button
+                    type="button"
+                    className="podcast-player-details-button"
+                    onClick={() => setShowPodcastDetails(true)}
+                  >
+                    查看单集简介 · 来源与发布时间
+                  </button>
+                )}
               </div>
             </div>
-            {panel === 'lyrics' && (
+            {!isPodcast && panel === 'lyrics' && (
               <LyricsPanel key={current.id} player={player} onTogglePanel={() => setPanel(null)} />
             )}
             {panel === 'queue' && (
@@ -377,17 +394,19 @@ export function NowPlaying({
           <PlaybackControls player={player} />
           <div className="fullscreen-options">
             <SleepControl player={player} />
-            <QualityControl player={player} />
+            {!isPodcast && <QualityControl player={player} />}
             <VolumeControl player={player} />
             <div className="fullscreen-panel-switches" role="group" aria-label="全屏显示内容">
-              <button
-                aria-label="显示歌词"
-                aria-pressed={panel === 'lyrics'}
-                data-help="查看同步歌词"
-                onClick={() => setPanel((current) => (current === 'lyrics' ? null : 'lyrics'))}
-              >
-                词
-              </button>
+              {!isPodcast && (
+                <button
+                  aria-label="显示歌词"
+                  aria-pressed={panel === 'lyrics'}
+                  data-help="查看同步歌词"
+                  onClick={() => setPanel((current) => (current === 'lyrics' ? null : 'lyrics'))}
+                >
+                  词
+                </button>
+              )}
               <button
                 ref={queueToggle}
                 aria-label="显示播放队列"
@@ -456,6 +475,18 @@ export function NowPlaying({
             ×
           </button>
           <Cover trackId={current.id} title={current.title} size={768} />
+        </dialog>
+      )}
+      {showPodcastDetails && current && (
+        <dialog className="podcast-player-details" open aria-label="播客单集详情">
+          <article>
+            <span className="podcast-detail-kicker">{current.album || '播客单集'}</span>
+            <h2>{current.title}</h2>
+            <p>{current.description || '暂无单集简介。'}</p>
+            <button type="button" className="primary" onClick={() => setShowPodcastDetails(false)}>
+              关闭
+            </button>
+          </article>
         </dialog>
       )}
     </>

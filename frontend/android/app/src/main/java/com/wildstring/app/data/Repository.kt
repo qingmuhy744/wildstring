@@ -110,7 +110,7 @@ class Repository @Inject constructor(val session: SessionStore, val client: OkHt
     }
     fun originalStream(id: String): String =
         if (id.startsWith("podcast_ep_")) {
-            url("api", "v1", "podcasts", "episodes", id.removePrefix("podcast_ep_"), "stream")
+            url("api", "v1", "podcasts", "episodes", id.removePrefix("podcast_ep_"), "stream") + "?proxy=1"
         } else {
             url("api", "v1", "tracks", id, "stream")
         }

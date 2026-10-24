@@ -157,6 +157,7 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({ onPlayTrack }) => {
   const [loading, setLoading] = useState(true);
   const [selectedPodcast, setSelectedPodcast] = useState<PodcastSummary | null>(null);
   const [selectedDetail, setSelectedDetail] = useState<PodcastDetail | null>(null);
+  const [selectedEpisode, setSelectedEpisode] = useState<PodcastEpisode | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [showSubscribeModal, setShowSubscribeModal] = useState(false);
   const [modalFeedUrl, setModalFeedUrl] = useState('');
@@ -826,7 +827,14 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({ onPlayTrack }) => {
                       ▶
                     </button>
                     <div className="episode-main-info">
-                      <div className="episode-title">{ep.title}</div>
+                      <button
+                        type="button"
+                        className="episode-title episode-title-button"
+                        onClick={() => setSelectedEpisode(ep)}
+                        title="查看单集详情"
+                      >
+                        {ep.title}
+                      </button>
                       <div className="episode-sub-meta">
                         {ep.pub_date && <span className="ep-date">{ep.pub_date.slice(0, 16)}</span>}
                         {ep.duration_seconds > 0 && (
@@ -1270,6 +1278,66 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({ onPlayTrack }) => {
               </div>
             </div>
           </div>
+        </div>
+      )}
+      {selectedEpisode && selectedPodcast && (
+        <div className="podcasts-modal-backdrop" onClick={() => setSelectedEpisode(null)}>
+          <article
+            className="podcasts-modal podcast-episode-detail"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="podcasts-modal-header">
+              <div>
+                <span className="podcast-detail-kicker">{selectedPodcast.title}</span>
+                <h3>{selectedEpisode.title}</h3>
+              </div>
+              <button
+                type="button"
+                className="modal-close-btn"
+                onClick={() => setSelectedEpisode(null)}
+                aria-label="关闭详情"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="podcast-episode-detail-body">
+              <div className="podcast-episode-detail-meta">
+                {selectedEpisode.pub_date && <span>{selectedEpisode.pub_date.slice(0, 16)}</span>}
+                {selectedEpisode.duration_seconds > 0 && (
+                  <span>{formatDuration(selectedEpisode.duration_seconds)}</span>
+                )}
+                {selectedEpisode.download_status === 'downloaded' ? (
+                  <span className="ep-download-badge">✓ 已存本地</span>
+                ) : (
+                  <span>在线串流</span>
+                )}
+              </div>
+              <p>{cleanHtmlDescription(selectedEpisode.description) || '暂无单集简介。'}</p>
+              <div className="podcast-episode-detail-actions">
+                <button
+                  type="button"
+                  className="podcasts-action-btn primary"
+                  onClick={() => {
+                    setSelectedEpisode(null);
+                    playEpisode(selectedEpisode, selectedPodcast);
+                  }}
+                >
+                  ▶ 播放单集
+                </button>
+                {selectedEpisode.download_status !== 'downloaded' && (
+                  <button
+                    type="button"
+                    className="podcasts-action-btn"
+                    onClick={(event) => {
+                      void handleDownloadSingleEpisode(selectedEpisode, event);
+                    }}
+                  >
+                    ⬇ 存入本地
+                  </button>
+                )}
+              </div>
+            </div>
+          </article>
         </div>
       )}
 

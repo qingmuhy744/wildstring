@@ -213,7 +213,7 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
 export const artist = (track: Track) => track.artists.join(' / ') || '未知艺人';
 export const streamUrl = (track: Track) => {
   if (track.id.startsWith('podcast_ep_')) {
-    return `/api/v1/podcasts/episodes/${encodeURIComponent(track.id.replace('podcast_ep_', ''))}/stream`;
+    return `/api/v1/podcasts/episodes/${encodeURIComponent(track.id.replace('podcast_ep_', ''))}/stream?proxy=1`;
   }
   return `/api/v1/tracks/${encodeURIComponent(track.id)}/stream`;
 };
