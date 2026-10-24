@@ -494,7 +494,7 @@ class MobileCompletionTest {
                 vm.state.value.handoff?.version == version &&
                     compose.onNodeWithTag("playback-handoff-notice").isDisplayed() &&
                     compose.onNodeWithText("其他设备有接续进度").isDisplayed() &&
-                    compose.onNodeWithText("载入进度").isDisplayed()
+                    compose.onNodeWithText("载入").isDisplayed()
             }
         } catch (error: Throwable) {
             val tree = runCatching { compose.onRoot(useUnmergedTree = true).printToString() }.getOrDefault("UI unavailable")
@@ -507,7 +507,7 @@ class MobileCompletionTest {
             )
         }
         compose.onNodeWithTag("playback-handoff-notice").assertIsDisplayed()
-        compose.onNodeWithText("载入进度").assertIsEnabled()
+        compose.onNodeWithText("载入").assertIsEnabled()
     }
 
     @Test fun crossDevicePromptRestoresPausedAndPausePublishesWithoutManualClaim() {
@@ -522,7 +522,7 @@ class MobileCompletionTest {
                 fixture.snapshot = remotePause(70, ids = listOf("completion-0", "completion-1"), index = 1, position = 3000)
                 runBlocking { withContext(Dispatchers.Main) { vm.checkSharedPlayback() } }
                 awaitHandoffNotice(vm, 70)
-                compose.onNodeWithText("载入进度").performClick()
+                compose.onNodeWithText("载入").performClick()
                 try { compose.waitUntil(10_000) { vm.state.value.handoff == null && vm.state.value.queue.size == 2 } }
                 catch (e: Throwable) {
                     val tree = runCatching { val roots = compose.onAllNodes(isRoot(), useUnmergedTree = true); (0 until roots.fetchSemanticsNodes().size).joinToString("\n") { roots[it].printToString() } }.getOrDefault("UI unavailable")
