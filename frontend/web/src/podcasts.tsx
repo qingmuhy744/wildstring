@@ -177,7 +177,7 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({ onPlayTrack }) => {
   const [settingsPodcast, setSettingsPodcast] = useState<PodcastSummary | null>(null);
   const [storageInfo, setStorageInfo] = useState<PodcastStorageInfo | null>(null);
   const [downloadPolicy, setDownloadPolicy] = useState('latest_5');
-  const [retentionPolicy, setRetentionPolicy] = useState('keep_all');
+  const [retentionPolicy, setRetentionPolicy] = useState('keep');
   const [slowDownload, setSlowDownload] = useState(false);
   const [maxRetries, setMaxRetries] = useState(3);
   const [retryBackoffBase, setRetryBackoffBase] = useState(5);
@@ -339,8 +339,8 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({ onPlayTrack }) => {
     if (e) e.stopPropagation();
     setContextMenu(null);
     setSettingsPodcast(p);
-    setDownloadPolicy(p.download_policy || 'latest_5');
-    setRetentionPolicy(p.retention_policy || 'keep_all');
+    setDownloadPolicy(p.download_policy || 'latest_3');
+    setRetentionPolicy(p.retention_policy || 'keep');
     setSlowDownload(Boolean(p.slow_download));
     setMaxRetries(p.max_retries ?? 3);
     setRetryBackoffBase(p.retry_backoff_base ?? 5);
@@ -367,7 +367,7 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({ onPlayTrack }) => {
     if (!settingsPodcast) return;
     try {
       setSavingSettings(true);
-      const updated = await api<PodcastSummary>(
+      const updated = await api<PodcastDetail>(
         `/podcasts/${encodeURIComponent(settingsPodcast.id)}/settings`,
         {
           method: 'PUT',
@@ -380,11 +380,12 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({ onPlayTrack }) => {
           }),
         },
       );
-      showNotice(`已更新《${updated.title}》的自动下载与存储策略`);
+      showNotice(`已更新《${updated.podcast.title}》的自动下载与存储策略`);
       setSettingsPodcast(null);
       await loadPodcasts();
-      if (selectedPodcast?.id === updated.id) {
-        setSelectedPodcast(updated);
+      if (selectedPodcast?.id === updated.podcast.id) {
+        setSelectedPodcast(updated.podcast);
+        setSelectedDetail(updated);
       }
     } catch (err) {
       showNotice(err instanceof Error ? err.message : '保存设置失败');
@@ -393,30 +394,27 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({ onPlayTrack }) => {
     }
   };
 
-  const handleCleanDownloads = async () => {
-    if (!settingsPodcast) return;
-    if (
-      !confirm(
-        `确定清理《${settingsPodcast.title}》的所有已下载本地音频吗？元数据和播放记录仍会保留。`,
-      )
-    )
+  const handleCleanDownloads = async (targetPodcast?: PodcastSummary) => {
+    const podcast = targetPodcast || settingsPodcast;
+    if (!podcast) return;
+    if (!confirm(`确定清理《${podcast.title}》的所有已下载本地音频吗？元数据和播放记录仍会保留。`))
       return;
     try {
       setCleaningDownloads(true);
-      const res = await api<{ removed_files: number; freed_bytes: number }>(
-        `/podcasts/${encodeURIComponent(settingsPodcast.id)}/clean-downloads`,
+      const res = await api<{ deleted_count: number; freed_bytes: number }>(
+        `/podcasts/${encodeURIComponent(podcast.id)}/clean-downloads`,
         { method: 'POST' },
       );
       showNotice(
-        `已清理 ${res.removed_files} 个音频文件，释放空间 ${(res.freed_bytes / 1024 / 1024).toFixed(1)} MB`,
+        `已清理 ${res.deleted_count} 个音频文件，释放空间 ${(res.freed_bytes / 1024 / 1024).toFixed(1)} MB`,
       );
       const info = await api<PodcastStorageInfo>(
-        `/podcasts/${encodeURIComponent(settingsPodcast.id)}/storage`,
+        `/podcasts/${encodeURIComponent(podcast.id)}/storage`,
       );
       setStorageInfo(info);
       await loadPodcasts();
-      if (selectedPodcast?.id === settingsPodcast.id) {
-        await openDetail(settingsPodcast);
+      if (selectedPodcast?.id === podcast.id) {
+        await openDetail(podcast);
       }
     } catch (err) {
       showNotice(err instanceof Error ? err.message : '清理音频失败');
@@ -1000,7 +998,7 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({ onPlayTrack }) => {
             onClick={() => {
               setContextMenu(null);
               setSettingsPodcast(contextMenu.podcast);
-              void handleCleanDownloads();
+              void handleCleanDownloads(contextMenu.podcast);
             }}
           >
             🧹 清理本地音频文件
@@ -1091,8 +1089,8 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({ onPlayTrack }) => {
                 <label style={{ fontSize: '0.85rem', fontWeight: 600 }}>保留与清理策略</label>
                 <div className="podcast-settings-radio-group">
                   {[
-                    { val: 'keep_all', label: '始终保留已下载单集' },
-                    { val: 'delete_completed', label: '单集听完后自动清理本地音频以释放空间' },
+                    { val: 'keep', label: '始终保留已下载单集' },
+                    { val: 'delete_after_played', label: '单集听完后自动清理本地音频以释放空间' },
                   ].map((opt) => (
                     <label key={opt.val} className="podcast-radio-label">
                       <input
@@ -1248,7 +1246,7 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({ onPlayTrack }) => {
                   type="button"
                   className="podcast-clean-btn"
                   disabled={cleaningDownloads}
-                  onClick={handleCleanDownloads}
+                  onClick={() => void handleCleanDownloads()}
                 >
                   {cleaningDownloads ? '清理中…' : '🧹 清理所有已下载音频'}
                 </button>
