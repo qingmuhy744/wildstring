@@ -189,8 +189,6 @@ internal val redColors = darkColorScheme(
     outline = Color(0xFFF9B7AD), outlineVariant = Color(0xFFCC4F51),
 )
 
-private const val HANDOFF_NOTICE_TIMEOUT_MS = 15_000
-
 @Composable
 fun WildStringApp(model: MusicViewModel) {
     val state by model.state.collectAsStateWithLifecycle()
@@ -240,10 +238,6 @@ fun WildStringApp(model: MusicViewModel) {
                     state.handoff?.let { saved ->
                         val action = remember(saved.version) { FeatureAction() }; val scope = rememberCoroutineScope()
                         val countdown = remember(saved.version) { Animatable(1f) }
-                        LaunchedEffect(saved.version) {
-                            countdown.animateTo(0f, animationSpec = tween(durationMillis = HANDOFF_NOTICE_TIMEOUT_MS, easing = LinearEasing))
-                            model.dismissHandoff()
-                        }
                         val navBarBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
                         val isTablet = LocalConfiguration.current.screenWidthDp >= 600
                         val dockHeight = (if (state.current != null) 62.dp else 0.dp) + (if (!isTablet) 80.dp else 0.dp)

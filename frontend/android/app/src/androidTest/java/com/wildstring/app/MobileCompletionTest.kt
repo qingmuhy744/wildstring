@@ -484,8 +484,7 @@ class MobileCompletionTest {
         try {
             // The API/state update can finish before the first measured frame.
             // Wait for the actual notice and action to be visible, not just composed.
-            // The handoff notice intentionally dismisses itself after 15 seconds;
-            // assert it before that lifecycle expires.
+            // The handoff notice stays until the test explicitly accepts or dismisses it.
             if (vm.state.value.handoff?.version != version) {
                 // Media3 can finish its asynchronous stop just after the initial
                 // check; retry once after the controller has settled.
