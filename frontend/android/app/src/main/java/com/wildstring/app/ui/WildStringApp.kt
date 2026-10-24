@@ -336,7 +336,7 @@ fun ConnectionScreen(state: MusicState, connect: (String, String, String, Boolea
             Text("野弦", fontSize = 32.sp, fontWeight = FontWeight.Medium)
             Text("连接自己的音乐收藏", color = Muted)
             TextButton(manageServers, Modifier.testTag("connection-servers")) { Icon(Icons.Default.Dns, null); Spacer(Modifier.width(8.dp)); Text("服务器 / 切换服务器") }
-            OutlinedTextField(server, { server = it }, Modifier.fillMaxWidth(), label = { Text("服务器地址") }, placeholder = { Text("https://music.your-domain.com") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri), enabled = !state.connecting)
+            OutlinedTextField(server, { server = it }, Modifier.fillMaxWidth(), label = { Text("服务器地址") }, placeholder = { Text("music.your-domain.com") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri), enabled = !state.connecting)
             OutlinedTextField(username, { username = it }, Modifier.fillMaxWidth(), label = { Text("账号") }, singleLine = true, enabled = !state.connecting)
             OutlinedTextField(password, { password = it }, Modifier.fillMaxWidth(), label = { Text("密码") }, visualTransformation = PasswordVisualTransformation(), singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password), enabled = !state.connecting)
             Row(Modifier.fillMaxWidth().clickable(enabled = !state.connecting) { localHttp = !localHttp }, verticalAlignment = Alignment.CenterVertically) {
@@ -349,7 +349,7 @@ fun ConnectionScreen(state: MusicState, connect: (String, String, String, Boolea
                 if (state.connecting) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp, color = LocalContentColor.current)
                 else Text("连接并登录")
             }
-            Text("首次使用请在服务端设置管理员。HTTP 仅在你明确确认风险后使用。", color = Muted, fontSize = 12.sp)
+            Text("未填写协议时默认使用 HTTPS；HTTP 仅在你明确确认风险后使用。", color = Muted, fontSize = 12.sp)
         }
     }
     if (insecureHttpWarning) AlertDialog(

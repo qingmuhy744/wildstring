@@ -8,7 +8,7 @@ struct ConnectionView: View {
         NavigationStack {
             Form {
                 Section {
-                    TextField("https://music.example.com", text: $model.serverText)
+                    TextField("music.example.com", text: $model.serverText)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .keyboardType(.URL)
@@ -16,7 +16,7 @@ struct ConnectionView: View {
                 } header: {
                     Text("服务器地址")
                 } footer: {
-                    Text("填写自托管实例的地址。HTTP 仅在你明确确认风险后使用。")
+                    Text("未填写协议时默认使用 HTTPS。HTTP 仅在你明确确认风险后使用。")
                 }
 
                 Section("账号") {
