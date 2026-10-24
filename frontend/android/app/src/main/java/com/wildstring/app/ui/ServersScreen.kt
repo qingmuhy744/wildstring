@@ -40,7 +40,7 @@ import kotlinx.coroutines.launch
                             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Text(server.label, style = MaterialTheme.typography.titleMedium)
                                 if (server.name.isNotBlank()) Text(server.url, style = MaterialTheme.typography.bodySmall)
-                                Text((if (active) "当前服务器 · " else "") + if (vm.repository.session.hasSession(server.id)) "已保存登录${vm.repository.session.accountFor(server.id)?.username?.let { " · $it" }.orEmpty()}" else "待登录", style = MaterialTheme.typography.bodySmall)
+                                Text((if (active) "当前服务器 · " else "") + (if (vm.repository.session.hasSession(server.id)) "已保存登录${vm.repository.session.accountFor(server.id)?.username?.let { " · $it" }.orEmpty()}" else "待登录") + (if (active && state.serverVersion != null) " · 服务端 v${state.serverVersion}" else ""), style = MaterialTheme.typography.bodySmall)
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                     Row { IconButton({ editing = server }, Modifier.testTag("server-edit-${server.id}")) { Icon(Icons.Default.Edit, "编辑${server.label}") }
                                         IconButton({ deleting = server }, Modifier.testTag("server-delete-${server.id}")) { Icon(Icons.Default.DeleteOutline, "删除${server.label}") } }
@@ -68,7 +68,7 @@ import kotlinx.coroutines.launch
     AlertDialog(onDismissRequest = { if (!busy) dismiss() }, title = { Text(if (server == null) "添加服务器" else "编辑服务器") }, text = {
         Column(Modifier.heightIn(max = 480.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             OutlinedTextField(name, { name = it.take(80) }, Modifier.fillMaxWidth().testTag("server-name"), label = { Text("名称（可选）") }, singleLine = true, enabled = !busy)
-            OutlinedTextField(url, { url = it }, Modifier.fillMaxWidth().testTag("server-url"), label = { Text("服务器地址") }, singleLine = true, enabled = !busy)
+            OutlinedTextField(url, { url = it }, Modifier.fillMaxWidth().testTag("server-url"), label = { Text("服务器地址") }, placeholder = { Text("music.your-domain.com") }, singleLine = true, enabled = !busy)
             Row { Checkbox(local, { local = it }, enabled = !busy, modifier = Modifier.testTag("server-local-http")); Text("允许此服务器使用未加密 HTTP") }
             if (server != null) Text("修改地址后需要重新登录，并清除此配置原有的本地缓存。", style = MaterialTheme.typography.bodySmall)
             error?.let { Text(it, color = MaterialTheme.colorScheme.error) }

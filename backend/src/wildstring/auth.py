@@ -10,6 +10,7 @@ from uuid import uuid4
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, ValidationError, field_validator
 
+from wildstring import get_app_version
 from wildstring.config import Settings
 from wildstring.database import Database
 from wildstring.permissions import require_owner, require_scope
@@ -238,7 +239,11 @@ class Auth:
         def status(request: Request, response: Response):
             response.headers["Cache-Control"] = "no-store"
             authenticated = self.authenticated(request)
-            result = {"configured": self.configured(), "authenticated": authenticated}
+            result = {
+                "configured": self.configured(),
+                "authenticated": authenticated,
+                "version": get_app_version(),
+            }
             if authenticated:
                 result["user"] = self.require_session(request)
             return result

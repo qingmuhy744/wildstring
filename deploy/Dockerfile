@@ -12,9 +12,11 @@ FROM ${PYTHON_IMAGE} AS builder
 ARG UV_VERSION=0.13.1
 ENV UV_PYTHON_DOWNLOADS=never UV_LINK_MODE=copy
 WORKDIR /app
-RUN python -m pip install --no-cache-dir "uv==${UV_VERSION}"
+COPY --from=ghcr.io/astral-sh/uv:0.13.1 /uv /uvx /usr/local/bin/
 COPY backend/pyproject.toml backend/uv.lock ./
+# 步骤 1：仅同步第三方外部依赖，依赖不变时完全缓存命中
 RUN uv sync --locked --no-dev --extra community-sources --no-install-project
+# 步骤 2：安装项目包元数据，供 entrypoints 与 importlib.metadata 使用
 COPY backend/src/ ./src/
 RUN uv sync --locked --no-dev --extra community-sources --no-editable
 
@@ -25,6 +27,7 @@ ENV PATH="/app/.venv/bin:$PATH" \
     WILDSTRING_ENVIRONMENT=production \
     WILDSTRING_DATA_DIR=/data \
     WILDSTRING_MUSIC_DIR=/music \
+    WILDSTRING_PODCASTS_DIR=/podcasts \
     WILDSTRING_WEB_DIR=/app/web
 WORKDIR /app
 RUN apt-get update --error-on=any \
@@ -32,8 +35,8 @@ RUN apt-get update --error-on=any \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid 10001 wildstring \
     && useradd --uid 10001 --gid wildstring --no-create-home wildstring \
-    && mkdir /data /music \
-    && chown wildstring:wildstring /data
+    && mkdir /data /music /podcasts \
+    && chown wildstring:wildstring /data /podcasts
 COPY --from=builder /app/.venv /app/.venv
 COPY --from=web /web/dist /app/web
 COPY --from=web /usr/local/bin/node /usr/local/bin/node

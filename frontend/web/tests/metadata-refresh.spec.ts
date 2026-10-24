@@ -153,20 +153,19 @@ test('歌曲、专辑、曲库手动更新先反馈再入队，保持当前音�
   expect(await audio(page)).toEqual(before);
 });
 
-test('歌曲编辑里的更新弹窗关闭后保留编辑器与焦点', async ({ page }) => {
+test('歌曲编辑里的在线匹配展开收起后保留编辑器', async ({ page }) => {
   await login(page);
   await page.getByRole('button', { name: '歌曲操作 晴天测试曲', exact: true }).click();
   await page.getByRole('button', { name: '编辑歌曲信息', exact: true }).click();
   const editor = page.getByRole('dialog', { name: '编辑歌曲信息', exact: true });
-  await editor.getByRole('button', { name: '联网建议', exact: true }).click();
-  const trigger = editor.getByRole('button', { name: '更新元数据', exact: true });
-  await trigger.click();
-  const refresh = page.getByRole('dialog', { name: '更新元数据', exact: true });
-  await expect(refresh).toBeVisible();
-  await page.keyboard.press('Escape');
-  await expect(refresh).toHaveCount(0);
+  const matcher = editor.locator('.online-metadata-matcher');
+  await matcher.getByRole('button', { name: '查找网络元数据 ↗', exact: true }).click();
+  await expect(matcher.getByRole('button', { name: '重新联网检索', exact: true })).toBeVisible();
+  await matcher.getByRole('button', { name: '收起在线匹配', exact: true }).click();
+  await expect(
+    matcher.getByRole('button', { name: '查找网络元数据 ↗', exact: true }),
+  ).toBeVisible();
   await expect(editor).toBeVisible();
-  await expect(trigger).toBeFocused();
   await page.keyboard.press('Escape');
   await expect(editor).toHaveCount(0);
 });

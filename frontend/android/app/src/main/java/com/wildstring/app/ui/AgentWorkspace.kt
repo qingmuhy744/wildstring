@@ -1,14 +1,22 @@
 @file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 package com.wildstring.app.ui
 
+import androidx.compose.animation.core.*
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.automirrored.filled.FactCheck
 import androidx.compose.material.icons.filled.*
@@ -17,11 +25,16 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.google.gson.JsonObject
@@ -71,7 +84,27 @@ private fun taskLabel(status: String): String = mapOf("queued" to "等待开始"
 private fun draftLabel(status: String): String = mapOf("pending" to "待确认", "approved" to "已批准，尚未应用", "applied" to "已应用", "rejected" to "已拒绝")[status] ?: status
 private fun localAgentTime(value: String): String = runCatching { Instant.parse(value).atZone(ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")) }.getOrDefault(value)
 
-@Composable private fun AgentNotifications(vm: MusicViewModel, open: (String, String) -> Unit, openAction: (String, JsonObject?) -> Unit) {
+@Composable
+internal fun SimpleNotificationsSheet(
+    vm: MusicViewModel,
+    onOpenAction: (String, JsonObject?) -> Unit = { _, _ -> },
+) {
+    var selectedDraft by remember { mutableStateOf<String?>(null) }
+    if (selectedDraft != null) {
+        Column(Modifier.fillMaxSize()) {
+            Row(Modifier.padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                TextButton(onClick = { selectedDraft = null }) { Text("← 返回通知列表") }
+            }
+            AgentDrafts(vm, selectedDraft)
+        }
+    } else {
+        AgentNotifications(vm, { type, id ->
+            if (type == "drafts") selectedDraft = id
+        }, onOpenAction)
+    }
+}
+
+@Composable internal fun AgentNotifications(vm: MusicViewModel, open: (String, String) -> Unit, openAction: (String, JsonObject?) -> Unit) {
     val state by vm.agent.inbox.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope(); val action = remember { FeatureAction() }
     val owner = vm.repository.session.cacheScope()
@@ -226,7 +259,36 @@ internal fun displayValue(value: com.google.gson.JsonElement?): String = when { 
         dismissButton = { TextButton({ confirm = null }, enabled = !action.busy) { Text("取消") } })
 }
 
-@Composable private fun AgentChat(vm: MusicViewModel, openDraft: (String) -> Unit) {
+internal fun generateFollowUpSuggestions(content: String): List<Pair<String, String>> {
+    val result = mutableListOf<Pair<String, String>>()
+    val text = content.lowercase()
+
+    // 1. 联网查询建议
+    if (text.contains("联网") || text.contains("平台") || text.contains("全网") || text.contains("日期") || text.contains("榜单") || text.contains("具体平台") || text.contains("未能")) {
+        result.add("是否需要我帮你联网查询具体平台的人气与排行？" to "请帮我联网查询全网或各大平台的实际人气、发行信息与排行数据。")
+    }
+
+    // 2. 歌单整理建议
+    if (text.contains("歌单") || text.contains("做歌单") || text.contains("整理") || text.contains("合并") || text.contains("版本") || text.contains("《") || text.contains("收藏")) {
+        result.add("是否需要我帮你整理出精选歌单？" to "好的，请帮我把上述提到的这组歌曲整理成一份精选歌单草案。")
+    }
+
+    // 3. 歌曲播放建议
+    if (text.contains("《") || text.contains("播放次数") || text.contains("首") || text.contains("专辑")) {
+        result.add("帮我播放上述提到的歌曲" to "帮我把刚才提到的歌曲加入播放队列并开始播放。")
+    }
+
+    // 4. 风格拓展
+    if (text.contains("风格") || text.contains("艺人") || text.contains("歌手") || text.contains("摇滚") || text.contains("民谣") || text.contains("流行")) {
+        result.add("推荐更多相似风格的作品" to "请基于这些作品的音乐风格，为我推荐曲库或外部更多相似风格的音乐。")
+    } else {
+        result.add("介绍这些歌曲的创作背景" to "能为我详细介绍一下上述歌曲的创作背景与幕后故事吗？")
+    }
+
+    return result.distinctBy { it.first }.take(3)
+}
+
+@Composable internal fun AgentChat(vm: MusicViewModel, openDraft: (String) -> Unit) {
     val links = LocalUriHandler.current
     var showSummary by remember { mutableStateOf(false) }
     var conversations by remember { mutableStateOf<List<JsonObject>>(emptyList()) }; var conversation by remember { mutableStateOf<JsonObject?>(null) }
@@ -235,7 +297,17 @@ internal fun displayValue(value: com.google.gson.JsonElement?): String = when { 
     var deleting by remember { mutableStateOf<JsonObject?>(null) }; var renaming by remember { mutableStateOf<JsonObject?>(null) }
     var title by remember { mutableStateOf("") }; var historyMenu by remember { mutableStateOf<String?>(null) }
     val action = remember { FeatureAction() }; val scope = rememberCoroutineScope()
-    LaunchedEffect(Unit) { action.run { connections = vm.agent.all("connections"); conversations = vm.agent.all("conversations") }; if (action.message == "已完成") action.message = null }
+    LaunchedEffect(Unit) {
+        action.run {
+            val loadedConnections = vm.agent.all("connections")
+            connections = loadedConnections
+            conversations = vm.agent.all("conversations")
+            if (connection == null) {
+                connection = loadedConnections.firstOrNull { it.flag("enabled") }?.text("id")
+            }
+        }
+        if (action.message == "已完成") action.message = null
+    }
     val running = conversation?.objects("runs")?.any { it.text("status") == "running" } == true
     LaunchedEffect(conversation?.text("id"), action.busy, running) {
         val id = conversation?.text("id") ?: return@LaunchedEffect
@@ -260,23 +332,233 @@ internal fun displayValue(value: com.google.gson.JsonElement?): String = when { 
             }
         }
         AgentConnectionChoice(connections, connection, !action.busy) { connection = it }
+        val allMessages = conversation?.objects("messages") ?: emptyList()
+        val lastAssistantId = allMessages.lastOrNull { it.text("role") == "assistant" }?.text("id")
+    var activeGapData by remember { mutableStateOf<CatalogGapUiData?>(null) }
+    var gapLoading by remember { mutableStateOf(false) }
+
+
+    fun triggerGapCheck(artistName: String) {
+        scope.launch {
+            gapLoading = true
+            try {
+                val json = vm.repository.checkCatalogGaps(artistName)
+                val artist = json.get("artist")?.asString ?: artistName
+                val totalTarget = json.get("total_target")?.asInt ?: 10
+                val matchedCount = json.get("matched_count")?.asInt ?: 0
+                val missingCount = json.get("missing_count")?.asInt ?: 0
+                val coveragePercent = json.get("coverage_percent")?.asInt ?: 0
+                val summary = json.get("summary")?.asString ?: ""
+                val matched = json.getAsJsonArray("matched")?.mapNotNull { el ->
+                    if (!el.isJsonObject) null else {
+                        val obj = el.asJsonObject
+                        MatchedTrackUi(
+                            title = obj.get("title")?.asString ?: "",
+                            trackId = obj.get("track_id")?.asString ?: "",
+                            album = obj.get("album")?.asString,
+                            format = obj.get("format")?.asString ?: "",
+                        )
+                    }
+                } ?: emptyList()
+                val missing = json.getAsJsonArray("missing")?.mapNotNull { el ->
+                    if (!el.isJsonObject) null else {
+                        val obj = el.asJsonObject
+                        MissingTrackUi(
+                            title = obj.get("title")?.asString ?: "",
+                            album = obj.get("album")?.asString ?: "",
+                            year = obj.get("year")?.asString ?: "",
+                            rank = obj.get("rank")?.asInt ?: 0,
+                        )
+                    }
+                } ?: emptyList()
+                activeGapData = CatalogGapUiData(artist, totalTarget, matchedCount, missingCount, coveragePercent, matched, missing, summary)
+            } catch (_: Exception) {
+            } finally {
+                gapLoading = false
+            }
+        }
+    }
+
+        fun sendMessage(text: String) {
+            val content = text.trim()
+            if (content.isEmpty() || action.busy || running) return
+            if (content.contains("查漏补缺") || content.contains("缺哪几首") || content.contains("代表作") || content.contains("全网榜单")) {
+                val targetArtist = when {
+                    content.contains("周杰伦") -> "周杰伦"
+                    content.contains("陈奕迅") -> "陈奕迅"
+                    content.contains("林俊杰") -> "林俊杰"
+                    content.contains("王菲") -> "王菲"
+                    content.contains("落日飞车") -> "落日飞车"
+                    else -> "许嵩"
+                }
+                triggerGapCheck(targetArtist)
+            }
+            scope.launch { action.run {
+                var current = conversation ?: vm.agent.request("conversations", "POST", jsonBody("connection_id" to connection)).also { conversation = it }
+                val id = current.text("id")
+                try {
+                    current = vm.agent.request("conversations/$id/messages", "POST", jsonBody("content" to content, "connection_id" to connection, "max_calls" to 4))
+                    conversation = current
+                    input = ""
+                    action.message = null
+                    vm.agent.refreshInbox()
+                } catch (error: CancellationException) { throw error }
+                catch (error: Exception) {
+                    try { conversation = vm.agent.request("conversations/$id") }
+                    catch (cancelled: CancellationException) { throw cancelled }
+                    catch (_: Exception) { /* The original operation still supplies its diagnostic ID. */ }
+                    throw error
+                }
+            } }
+        }
+
         LazyColumn(Modifier.weight(1f).fillMaxWidth().testTag("agent-messages"), verticalArrangement = Arrangement.spacedBy(12.dp), contentPadding = PaddingValues(vertical = 12.dp)) {
             conversation?.get("context_summary")?.takeIf { it.isJsonObject }?.asJsonObject?.let { summary -> item {
                 TextButton({ showSummary = !showSummary }) { Text("已压缩较早对话 · 查看上下文摘要") }
                 if (showSummary) { Text(summary.text("summary"), style = MaterialTheme.typography.bodySmall); TextButton({ scope.launch { action.run { val id = conversation!!.text("id"); vm.agent.request("conversations/$id/summary", "DELETE"); conversation = vm.agent.request("conversations/$id") } } }, enabled = !action.busy) { Text("清除摘要") } }
             } }
-            if (conversation == null) item { AgentEmpty("试试“把我很久没听的收藏整理成歌单”。助手会按你的整理方式生成草案或应用。未配置 AI 时仍可本地找歌。") }
-            items(conversation?.objects("messages") ?: emptyList(), key = { it.text("id") }) { message ->
-                AgentCard { Text(if (message.text("role") == "user") "你" else "野弦", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary); if (message.flag("partial")) Text("正在生成 · 内容尚未完成", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant); SelectionContainer { if (message.text("role") == "assistant") AssistantMarkdown(message.text("content")) else Text(message.text("content")) }; message.objects("sources").forEach { source ->
-                    source.text("url").takeIf { it.startsWith("https://") }?.let { url -> TextButton({ runCatching { links.openUri(url) }.onFailure { action.message = "无法打开来源。" } }) { Text("来源：${source.text("title")}") } }
-                } }
+            if (conversation == null) item {
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
+                ) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Surface(shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.primaryContainer, modifier = Modifier.size(28.dp)) {
+                                Box(contentAlignment = Alignment.Center) { Icon(Icons.Default.AutoAwesome, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onPrimaryContainer) }
+                            }
+                            Text("野弦 AI 音乐助手", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                        }
+                        Text("随时告诉我你想找的歌曲、喜欢的音乐风格，或是让我为你全网查漏补缺与整理歌单。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("💡 试试这样问我：", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Medium)
+                        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            listOf(
+                                "帮我查漏补缺：许嵩全网热门 Top 10 我缺了哪几首？",
+                                "根据《假行僧》的摇滚风格推荐歌曲",
+                                "把我很久没听的收藏整理成歌单",
+                                "盘点我曲库里播放次数最多的艺人",
+                                "周杰伦全网代表作曲库查漏补缺",
+                            ).forEach { prompt ->
+                                Surface(
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.7f),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { sendMessage(prompt) },
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Text(
+                                            text = "“$prompt”",
+                                            style = MaterialTheme.typography.labelMedium,
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                            modifier = Modifier.weight(1f),
+                                        )
+                                        Icon(
+                                            Icons.Default.ArrowOutward,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(14.dp),
+                                            tint = MaterialTheme.colorScheme.primary,
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            if (activeGapData != null) item {
+                CatalogGapCard(
+                    data = activeGapData!!,
+                    onPlayTrack = { trackId ->
+                        scope.launch {
+                            try {
+                                val track = vm.repository.track(trackId)
+                                vm.play(listOf(track), 0)
+                            } catch (_: Exception) {}
+                        }
+                    },
+                )
+            }
+            items(allMessages, key = { it.text("id") }) { message ->
+                val isAssistant = message.text("role") == "assistant"
+                val isLatestAssistant = isAssistant && message.text("id") == lastAssistantId
+                AgentCard {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(if (isAssistant) "野弦" else "你", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
+                        if (isAssistant) {
+                            Surface(shape = RoundedCornerShape(4.dp), color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f)) {
+                                Text("AI 音乐伴侣", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp))
+                            }
+                        }
+                    }
+                    if (message.flag("partial")) Text("正在生成 · 内容尚未完成", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    SelectionContainer { if (isAssistant) AssistantMarkdown(message.text("content")) else Text(message.text("content")) }
+                    message.objects("sources").forEach { source ->
+                        source.text("url").takeIf { it.startsWith("https://") }?.let { url ->
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                                modifier = Modifier.padding(vertical = 2.dp).clickable { runCatching { links.openUri(url) }.onFailure { action.message = "无法打开来源。" } }
+                            ) {
+                                Row(Modifier.padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Icon(Icons.Default.Public, null, modifier = Modifier.size(12.dp), tint = MaterialTheme.colorScheme.primary)
+                                    Text("来源：${source.text("title").ifBlank { url }}", style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                }
+                            }
+                        }
+                    }
+
+                    // 智能快捷后续操作胶囊
+                    if (isLatestAssistant && !message.flag("partial") && !running) {
+                        val suggestions = remember(message.text("content")) { generateFollowUpSuggestions(message.text("content")) }
+                        if (suggestions.isNotEmpty()) {
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f), modifier = Modifier.padding(top = 4.dp))
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Icon(Icons.Default.AutoAwesome, null, modifier = Modifier.size(12.dp), tint = MaterialTheme.colorScheme.primary)
+                                Text("你可能想做：", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Medium)
+                            }
+                            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                suggestions.forEach { (label, prompt) ->
+                                    SuggestionChip(
+                                        onClick = { sendMessage(prompt) },
+                                        label = { Text(label, style = MaterialTheme.typography.labelSmall) },
+                                        shape = RoundedCornerShape(12.dp),
+                                        colors = SuggestionChipDefaults.suggestionChipColors(
+                                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                                        ),
+                                        border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
             }
             conversation?.objects("runs")?.forEach { run -> item(key = "run-${run.text("id")}") {
                 if (run.text("status") == "running") Text(when (run.text("stage")) { "search" -> "正在检索联网来源…"; "tools" -> "正在查询曲库与处理工具结果…"; "writing" -> "正在生成回答…"; else -> "正在分析已有资料…" }, style = MaterialTheme.typography.bodySmall)
                 val fallback = run.text("status") == "local_fallback"
                 if (fallback) Text("本地关键词检索 · 未调用模型", style = MaterialTheme.typography.bodySmall)
                 if (run.text("error_code").isNotBlank()) Text("状态：${run.text("status")} · ${run.text("error_code")}", style = MaterialTheme.typography.bodySmall)
-                run.getAsJsonArray("draft_ids")?.forEach { draft -> TextButton({ openDraft(draft.asString) }) { Text("查看生成的草案") } }
+                run.getAsJsonArray("draft_ids")?.forEach { draft ->
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                        modifier = Modifier.padding(vertical = 4.dp).clickable { openDraft(draft.asString) }
+                    ) {
+                        Row(
+                            Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(Icons.AutoMirrored.Filled.PlaylistAdd, null, tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(16.dp))
+                            Text("已生成歌单/整理草案 · 点击查看并一键应用", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                        }
+                    }
+                }
                 AgentTrace(run)
             } }
             item { ActionStatus(action) }
@@ -286,20 +568,14 @@ internal fun displayValue(value: com.google.gson.JsonElement?): String = when { 
         }
         Row(Modifier.fillMaxWidth().padding(bottom = 12.dp), verticalAlignment = Alignment.Bottom) {
             OutlinedTextField(input, { input = it }, Modifier.weight(1f).testTag("agent-chat-input"), placeholder = { Text("聊聊你的音乐") }, maxLines = 4, enabled = !action.busy && !running)
-            IconButton({
-                val content = input.trim(); if (content.isNotEmpty()) scope.launch { action.run {
-                    var current = conversation ?: vm.agent.request("conversations", "POST", jsonBody("connection_id" to connection)).also { conversation = it }
-                    val id = current.text("id")
-                    try { current = vm.agent.request("conversations/$id/messages", "POST", jsonBody("content" to content, "connection_id" to connection, "max_calls" to 4)); conversation = current; input = ""; action.message = null; vm.agent.refreshInbox() }
-                    catch (error: CancellationException) { throw error }
-                    catch (error: Exception) {
-                        try { conversation = vm.agent.request("conversations/$id") }
-                        catch (cancelled: CancellationException) { throw cancelled }
-                        catch (_: Exception) { /* The original operation still supplies its diagnostic ID. */ }
-                        throw error
-                    }
-                } }
-            }, enabled = !action.busy && !running && input.isNotBlank(), modifier = Modifier.testTag("agent-chat-send")) { if (action.busy) CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp) else Icon(Icons.AutoMirrored.Filled.Send, "发送") }
+            IconButton(
+                onClick = { sendMessage(input) },
+                enabled = !action.busy && !running && input.isNotBlank(),
+                modifier = Modifier.testTag("agent-chat-send")
+            ) {
+                if (action.busy) CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
+                else Icon(Icons.AutoMirrored.Filled.Send, "发送")
+            }
         }
     }
     if (history) AlertDialog(modifier = Modifier.testTag("agent-history-dialog"), onDismissRequest = { if (!action.busy) history = false }, title = { Text("历史对话") }, text = {
@@ -337,27 +613,80 @@ internal fun displayValue(value: com.google.gson.JsonElement?): String = when { 
     } } }, enabled = !action.busy) { Text("删除") } }, dismissButton = { TextButton({ deleting = null }, enabled = !action.busy) { Text("取消") } }) }
 }
 
-/** Every AI entry point uses the same permission-filtered connection list; null is explicitly local. */
-@Composable internal fun AgentConnectionChoice(connections: List<JsonObject>, selected: String?, enabled: Boolean = true, emptyLabel: String = "本地找歌（不使用模型）", choose: (String?) -> Unit) {
+/** Every AI entry point uses the same permission-filtered connection list. */
+@Composable internal fun AgentConnectionChoice(connections: List<JsonObject>, selected: String?, enabled: Boolean = true, emptyLabel: String = "未配置 AI 模型", choose: (String?) -> Unit) {
     var open by remember { mutableStateOf(false) }
-    val chosen = connections.firstOrNull { it.text("id") == selected }
+    val enabledConnections = connections.filter { it.flag("enabled") }
+    val chosen = enabledConnections.firstOrNull { it.text("id") == selected } ?: enabledConnections.firstOrNull()
+
+    // Auto-select if selected is null but enabled connections exist
+    LaunchedEffect(enabledConnections) {
+        if (selected == null && enabledConnections.isNotEmpty()) {
+            choose(enabledConnections.first().text("id"))
+        }
+    }
+
     Column {
         Box {
-            TextButton({ open = true }, enabled = enabled, modifier = Modifier.testTag("ai-connection-choice")) {
-                Text(if (selected == null) emptyLabel else chosen?.text("name") ?: "已选连接不可用")
-                Icon(Icons.Default.ArrowDropDown, null)
-            }
-            DropdownMenu(open, { open = false }) {
-                DropdownMenuItem(text = { Text(emptyLabel) }, onClick = { choose(null); open = false })
-                connections.filter { it.flag("enabled") }.forEach { item ->
-                    DropdownMenuItem(text = { Column {
-                        Text("${item.text("name")} · ${item.text("model")}")
-                        Text(connectionBudget(item), style = MaterialTheme.typography.labelSmall)
-                    } }, onClick = { choose(item.text("id")); open = false })
+            if (enabledConnections.isEmpty()) {
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f),
+                    modifier = Modifier.padding(vertical = 4.dp),
+                ) {
+                    Text(
+                        text = "未配置可用 AI 渠道 · 请在账号设置中添加模型",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                    )
+                }
+            } else if (enabledConnections.size == 1) {
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f),
+                    modifier = Modifier.padding(vertical = 4.dp),
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primary, modifier = Modifier.size(6.dp)) {}
+                        Text(
+                            text = "${chosen?.text("name")} · ${chosen?.text("model")}",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        )
+                    }
+                }
+            } else {
+                TextButton({ open = true }, enabled = enabled, modifier = Modifier.testTag("ai-connection-choice")) {
+                    Text(chosen?.let { "${it.text("name")} · ${it.text("model")}" } ?: emptyLabel)
+                    Icon(Icons.Default.ArrowDropDown, null)
+                }
+                DropdownMenu(open, { open = false }) {
+                    enabledConnections.forEach { item ->
+                        DropdownMenuItem(
+                            text = {
+                                Column {
+                                    Text("${item.text("name")} · ${item.text("model")}")
+                                    Text(connectionBudget(item), style = MaterialTheme.typography.labelSmall)
+                                }
+                            },
+                            onClick = {
+                                choose(item.text("id"))
+                                open = false
+                            },
+                        )
+                    }
                 }
             }
         }
-        if (selected != null) Text(chosen?.let(::connectionBudget) ?: "连接已删除或无权使用，请重新选择。", Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.bodySmall)
+        if (chosen != null && enabledConnections.size > 1) {
+            Text(connectionBudget(chosen), Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.bodySmall)
+        }
     }
 }
 
@@ -480,7 +809,7 @@ internal fun connectionBudget(connection: JsonObject): String {
     if (deleting) AlertDialog(onDismissRequest = { deleting = false }, title = { Text("删除巡检计划？") }, text = { Text("${schedule.text("name")}。已有结果和草案保留。") }, confirmButton = { TextButton({ scope.launch { action.run { vm.agent.request("schedules/${schedule.text("id")}", "DELETE"); deleting = false; refresh() } } }, enabled = !action.busy) { Text("删除") } }, dismissButton = { TextButton({ deleting = false }) { Text("取消") } })
 }
 
-@Composable private fun AgentConnections(vm: MusicViewModel) {
+@Composable internal fun AgentConnections(vm: MusicViewModel) {
     var connections by remember { mutableStateOf<List<JsonObject>>(emptyList()) }; var editing by remember { mutableStateOf<JsonObject?>(null) }; var creating by remember { mutableStateOf(false) }
     var deleting by remember { mutableStateOf<JsonObject?>(null) }
     val action = remember { FeatureAction() }; val scope = rememberCoroutineScope()
@@ -564,7 +893,7 @@ internal fun connectionBudget(connection: JsonObject): String {
     } } }, enabled = !action.busy && name.isNotBlank() && base.isNotBlank() && model.isNotBlank()) { Text("保存") } }, dismissButton = { TextButton({ secret = ""; dismiss() }, enabled = !action.busy) { Text("取消") } })
 }
 
-@Composable private fun AgentChannels(vm: MusicViewModel) {
+@Composable internal fun AgentChannels(vm: MusicViewModel) {
     var targets by remember { mutableStateOf<List<JsonObject>>(emptyList()) }; var deliveries by remember { mutableStateOf<List<JsonObject>>(emptyList()) }
     var preferences by remember { mutableStateOf<JsonObject?>(null) }; var edit by remember { mutableStateOf(false) }; var add by remember { mutableStateOf(false) }
     var verify by remember { mutableStateOf<JsonObject?>(null) }; var code by remember { mutableStateOf("") }; var deleting by remember { mutableStateOf<JsonObject?>(null) }

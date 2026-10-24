@@ -23,10 +23,10 @@ def login(client, password=PASSWORD):
 
 def test_no_default_admin_or_unauthenticated_library_access(settings):
     with TestClient(create_app(settings)) as client:
-        assert client.get("/api/v1/auth/status").json() == {
-            "configured": False,
-            "authenticated": False,
-        }
+        status_data = client.get("/api/v1/auth/status").json()
+        assert status_data["configured"] is False
+        assert status_data["authenticated"] is False
+        assert "version" in status_data
         for path in ("tracks", "scans", "tracks/not-a-track/stream"):
             assert client.get(f"/api/v1/{path}").status_code == 401
         assert login(client).status_code == 503

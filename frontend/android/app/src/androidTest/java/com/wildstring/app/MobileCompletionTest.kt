@@ -205,6 +205,13 @@ class MobileCompletionTest {
         val address = fixture.server.url("/").newBuilder().host("127.0.0.1").build().toString()
         val connection = compose.runOnIdle { vm.repository.session.invalidate(); vm.settings.quality(0); vm.sharing.mode("off"); vm.connect(address, "mobile-admin", "test-password", true) }
         compose.waitUntil(20_000) { connection.isCompleted && vm.state.value.connected && vm.state.value.server == address && !vm.state.value.loading }
+        compose.waitUntil(10_000) { compose.runOnIdle { vm.controller != null } }
+        compose.runOnIdle { vm.controller?.pause(); vm.controller?.stop(); vm.controller?.clearMediaItems() }
+        compose.waitUntil(5_000) {
+            compose.runOnIdle {
+                vm.controller?.let { !it.isPlaying && !it.playWhenReady && it.mediaItemCount == 0 } == true
+            }
+        }
         return vm
     }
     private fun cleanup(vm: MusicViewModel) { compose.runOnIdle { vm.sleep.cancel(); vm.repository.session.invalidate(); vm.controller?.stop(); vm.controller?.clearMediaItems() } }
@@ -260,29 +267,20 @@ class MobileCompletionTest {
         }
     }
 
-    @Test fun downloadCompletionPolicyCanBeConfiguredFromManagement() {
+    @Test fun advancedLibraryGovernanceRemainsWebOnlyOnPhone() {
         Fixture().use { fixture -> val vm = connect(fixture)
             try {
                 compose.onNodeWithContentDescription("设置").performClick()
-                compose.onNodeWithText("曲库管理", substring = false).performScrollTo().performClick()
-                compose.waitUntil(10_000) { compose.onAllNodesWithText("下载完成与自动导入设置").fetchSemanticsNodes().isNotEmpty() }
-                compose.onNodeWithText("下载完成与自动导入设置").performScrollTo().performClick()
-                compose.onNodeWithText("检查间隔（15–86400 秒）").performTextReplacement("30")
-                compose.onNodeWithText("稳定期（5–86400 秒）").performTextReplacement("10")
-                compose.onNodeWithText("下载后缀，空格或逗号分隔").performTextReplacement(".part, .uploading")
-                compose.onNodeWithText("保存设置").performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnClick) { click -> assertTrue(click()) }
-                compose.waitUntil(10_000) { fixture.mutations.any { it.first.endsWith("/manage/intake/settings") } }
-                val value = JsonParser.parseString(fixture.mutations.last { it.first.endsWith("/manage/intake/settings") }.second).asJsonObject
-                assertEquals(30, value.get("interval_seconds").asInt)
-                assertEquals(10, value.get("stable_seconds").asInt)
-                assertEquals(".uploading", value.getAsJsonObject("download_policy").getAsJsonArray("partial_suffixes")[1].asString)
-                assertEquals(1, value.get("version").asInt)
-                capture("download-policy-phone.png")
+                compose.onNodeWithText("资料来源与插件", substring = false).performScrollTo().assertIsDisplayed()
+                compose.onNodeWithText("全库批量核对、目录整理等高级治理请在电脑网页端进行。", substring = true)
+                    .performScrollTo().assertIsDisplayed()
+                compose.onNodeWithText("曲库管理", substring = false).assertDoesNotExist()
+                compose.onNodeWithText("歌词补全与洗版", substring = false).assertDoesNotExist()
             } finally { cleanup(vm) }
         }
     }
 
-    @Test fun phoneRecommendationAiPlaylistAndManagementEntriesHaveWorkingControls() {
+    @Test fun phoneRecommendationAssistantAndPlaylistEntriesHaveWorkingControls() {
         Fixture().use { fixture -> val vm = connect(fixture)
             try {
                 compose.onNodeWithTag("nav-mine").performClick()
@@ -299,17 +297,9 @@ class MobileCompletionTest {
                 compose.waitUntil(10_000) { fixture.mutations.any { it.first.endsWith("/playlists/manual/tracks") } }
                 compose.onAllNodesWithContentDescription("返回").onLast().performClick()
                 compose.waitUntil(10_000) { compose.onAllNodesWithTag("feature-daily").fetchSemanticsNodes().isEmpty() }
-                compose.onNodeWithText("AI 找歌", substring = false).performClick()
-                // A new Dialog window can attach after the shortcut's click becomes idle.
-                compose.waitUntil(10_000) { compose.onAllNodes(hasText("想听什么？") and hasSetTextAction()).fetchSemanticsNodes().size == 1 }
-                compose.onNodeWithText("想听什么？").performTextInput("想听摇滚")
-                compose.onNodeWithText("生成候选").performClick()
-                compose.waitUntil(10_000) { compose.onAllNodesWithText("手机 AI 歌单").fetchSemanticsNodes().isNotEmpty() }
-                capture("mobile-ai-preview.png")
-                compose.onNodeWithText("确认保存歌单").performClick()
-                try { compose.waitUntil(10_000) { fixture.mutations.count { it.first.endsWith("/playlists") } >= 2 } }
-                catch (error: Throwable) { capture("mobile-ui-failure.png"); compose.onRoot(useUnmergedTree = true).printToLog("MobileCompletionUI"); throw AssertionError("AI save requests=${fixture.requests.toList()} mutations=${fixture.mutations.toList()}", error) }
-                compose.onAllNodesWithContentDescription("返回").onLast().performClick()
+                compose.onNodeWithTag("nav-assistant").performClick()
+                compose.waitUntil(10_000) { compose.onAllNodesWithTag("agent-chat-input").fetchSemanticsNodes().isNotEmpty() }
+                compose.onNodeWithTag("agent-chat-input").assertIsDisplayed()
                 compose.onNodeWithTag("nav-mine").performClick()
                 compose.onNodeWithContentDescription("新建歌单").performClick()
                 compose.onNodeWithText("歌单名称").performTextInput("手机规则歌单")
@@ -319,14 +309,6 @@ class MobileCompletionTest {
                 compose.onNodeWithText("只选我喜欢的音乐").assertIsDisplayed()
                 compose.onNodeWithText("保存歌单").performScrollTo().performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnClick) { click -> assertTrue(click()) }
                 compose.waitUntil(10_000) { fixture.mutations.any { it.first.endsWith("/playlists") && it.second.contains("\"kind\":\"smart\"") } }
-                compose.onNodeWithContentDescription("设置").performClick()
-                compose.onNodeWithText("曲库管理", substring = false).performScrollTo().performClick()
-                compose.waitUntil(10_000) { compose.onAllNodesWithText("曲库概览").fetchSemanticsNodes().isNotEmpty() }
-                compose.waitUntil(10_000) { compose.onAllNodes(hasText("导入音乐") and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
-                compose.onNodeWithText("导入音乐").performClick(); compose.onNodeWithText("开始", substring = false).performClick()
-                compose.waitUntil(10_000) { fixture.mutations.any { it.first.endsWith("/manage/jobs") } }
-                compose.onAllNodesWithContentDescription("返回").onLast().performClick()
-                compose.onNodeWithContentDescription("返回").performClick()
                 compose.runOnIdle { vm.openAlbum(Album("completion-album", "手机测试专辑", listOf("测试艺人"), 3, null)) }
                 compose.waitUntil(10_000) { compose.onAllNodesWithContentDescription("手机测试歌曲 0的操作").fetchSemanticsNodes().isNotEmpty() }
                 compose.onNodeWithContentDescription("手机测试歌曲 0的操作").performClick(); compose.onNodeWithText("编辑歌曲信息").performScrollTo().performClick()
@@ -347,7 +329,7 @@ class MobileCompletionTest {
             } finally { cleanup(vm) }
         }
     }
-    @Test fun lyricsConflictPreservesDraftAndSuggestionsRespectStatusAndVersion() {
+    @Test fun lyricsConflictPreservesDraftAndSyncVersion() {
         Fixture().use { fixture -> val vm = connect(fixture)
             try {
                 compose.runOnIdle { vm.openAlbum(Album("completion-album", "手机测试专辑", listOf("测试艺人"), 3, null)) }
@@ -379,62 +361,18 @@ class MobileCompletionTest {
                 assertEquals(2, fixture.lyrics.lines().size)
                 assertTrue(fixture.lyrics.lines().all { it.matches(Regex("\\[\\d{2}:\\d{2}\\.\\d{3}].*")) })
                 compose.runOnIdle { vm.controller!!.pause() }
-                compose.onAllNodesWithContentDescription("返回").onLast().performClick()
-                fixture.showSuggestions.set(true)
-                compose.onNodeWithContentDescription("手机测试歌曲 0的操作").performClick()
-                compose.onNodeWithText("更新元数据与建议").performScrollTo().performClick()
-                compose.waitUntil(10_000) { compose.onAllNodesWithText("已选 2 首 · 2 个字段", substring = false).fetchSemanticsNodes().isNotEmpty() }
-                compose.onNodeWithTag("review-scroll").performScrollToNode(hasTestTag("review-field-title"))
-                compose.onNodeWithTag("review-field-title").assertIsOn()
-                compose.onNodeWithTag("review-field-album").performScrollTo().assertIsOff()
-                compose.onAllNodesWithText("当前值").onFirst().assertExists()
-                compose.onAllNodesWithText("建议值").onFirst().assertExists()
-                compose.onNodeWithText("建议标题").performScrollTo().assertExists()
-                capture("metadata-review-native.png")
-                compose.onNodeWithText("接受选中项").performClick()
-                compose.waitUntil(10_000) { fixture.applied.get() }
-                val apply = JsonParser.parseString(fixture.mutations.last { it.first.endsWith("/metadata-review/accept") }.second).asJsonObject
-                assertEquals(2, apply.getAsJsonArray("items").size())
-                apply.getAsJsonArray("items").forEach { item -> assertEquals("title", item.asJsonObject.getAsJsonArray("fields").single().asString) }
             } finally { cleanup(vm) }
         }
     }
-    @Test fun metadataReviewRejectsOnlyCurrentCandidateAndPreservesOtherChoices() {
+    @Test fun metadataReviewStaysOutOfTheAndroidTrackMenu() {
         Fixture().use { fixture -> val vm = connect(fixture)
             try {
-                fixture.showSuggestions.set(true)
                 compose.runOnIdle { vm.openAlbum(Album("completion-album", "手机测试专辑", listOf("测试艺人"), 3, null)) }
                 compose.waitUntil(10_000) { compose.onAllNodesWithContentDescription("手机测试歌曲 0的操作").fetchSemanticsNodes().isNotEmpty() }
                 compose.onNodeWithContentDescription("手机测试歌曲 0的操作").performClick()
-                compose.onNodeWithText("更新元数据与建议").performScrollTo().performClick()
-                compose.waitUntil(10_000) { compose.onAllNodesWithTag("review-source").fetchSemanticsNodes().isNotEmpty() }
-                compose.onNodeWithTag("review-scroll").performScrollToNode(hasTestTag("review-source"))
-                compose.onNodeWithTag("review-source").performClick()
-                compose.waitUntil(10_000) { compose.onAllNodesWithText("MusicBrainz · 建议标题 · 建议专辑 · 匹配度 98%", substring = true).fetchSemanticsNodes().isNotEmpty() }
-                compose.onAllNodesWithText("MusicBrainz · 建议标题 · 建议专辑 · 匹配度 98%", substring = true).onLast().assertIsDisplayed()
-                capture("metadata-review-candidates-native.png")
-                compose.onNodeWithText("关闭", substring = false).performClick()
-                compose.onNodeWithText("清空", substring = false).performScrollTo().performClick()
-                compose.onNodeWithTag("review-reject-current").assertIsEnabled()
-                fixture.failRejection.set(true)
-                compose.onNodeWithTag("review-reject-current").performClick()
-                compose.waitUntil(10_000) { compose.onAllNodesWithText("请刷新并重新核对", substring = true).fetchSemanticsNodes().isNotEmpty() }
-                assertTrue(fixture.rejected.isEmpty())
-                compose.onNodeWithTag("review-reject-current").performClick()
-                compose.waitUntil(10_000) { compose.onAllNodesWithTag("review-rejection-notice").fetchSemanticsNodes().isNotEmpty() }
-                assertEquals(setOf("pending-0"), fixture.rejected.toSet())
-                compose.onNodeWithText("已选 0 首 · 0 个字段", substring = false).assertIsDisplayed()
-                compose.onNodeWithTag("review-accept-selected").assertIsNotEnabled()
-                assertFalse(fixture.applied.get())
-                val attempts = fixture.mutations.filter { it.first.endsWith("/metadata-review/reject") }
-                assertEquals(2, attempts.size); assertEquals(attempts[0].second, attempts[1].second)
-                val body = JsonParser.parseString(attempts[0].second).asJsonObject
-                assertEquals("completion-0", body.text("track_id")); assertEquals("pending-0", body.text("suggestion_id"))
-                assertEquals("a".repeat(64), body.text("candidate_digest")); assertEquals(1, body.number("metadata_version").toInt())
-                capture("metadata-review-rejected-native.png")
-                compose.onNodeWithText("本次跳过", substring = false).performClick()
-                compose.onNodeWithTag("review-rejection-notice").assertDoesNotExist()
-                compose.onNodeWithTag("review-reject-current").assertIsEnabled()
+                compose.onNodeWithText("编辑歌曲信息").assertIsDisplayed()
+                compose.onNodeWithText("编辑歌词与打点").assertIsDisplayed()
+                compose.onNodeWithText("更新元数据与建议").assertDoesNotExist()
             } finally { cleanup(vm) }
         }
     }
@@ -536,7 +474,8 @@ class MobileCompletionTest {
         }
     }
 
-    private fun remotePause(version: Int, state: String = "paused", at: String = "2026-10-19T10:00:00Z", eligible: Boolean = state == "paused", device: String = "other-device", ids: List<String> = listOf("completion-0"), index: Int = 0, position: Int = 2000): String =
+    private fun recentAt(minutesAgo: Long = 1) = java.time.Instant.now().minusSeconds(minutesAgo * 60).toString()
+    private fun remotePause(version: Int, state: String = "paused", at: String = recentAt(), eligible: Boolean = state == "paused", device: String = "other-device", ids: List<String> = listOf("completion-0"), index: Int = 0, position: Int = 2000): String =
         jsonBody("version" to version, "device_id" to device, "track_ids" to jsonStrings(ids), "index" to index, "position_ms" to position,
             "mode" to "repeat_all", "playback_state" to state, "paused_at" to if (state == "paused") at else null,
             "handoff_supported" to true, "handoff_eligible" to eligible, "updated_at" to at).toString()
@@ -545,24 +484,36 @@ class MobileCompletionTest {
         try {
             // The API/state update can finish before the first measured frame.
             // Wait for the actual notice and action to be visible, not just composed.
-            compose.waitUntil(10_000) {
+            // The handoff notice stays until the test explicitly accepts or dismisses it.
+            if (vm.state.value.handoff?.version != version) {
+                // Media3 can finish its asynchronous stop just after the initial
+                // check; retry once after the controller has settled.
+                runBlocking { withContext(Dispatchers.Main) { vm.checkSharedPlayback() } }
+            }
+            compose.waitUntil(5_000) {
                 vm.state.value.handoff?.version == version &&
                     compose.onNodeWithTag("playback-handoff-notice").isDisplayed() &&
-                    compose.onNodeWithText("其他设备有可接续的进度").isDisplayed() &&
-                    compose.onNodeWithText("载入进度").isDisplayed()
+                    compose.onNodeWithText("其他设备有接续进度").isDisplayed() &&
+                    compose.onNodeWithText("载入").isDisplayed()
             }
         } catch (error: Throwable) {
             val tree = runCatching { compose.onRoot(useUnmergedTree = true).printToString() }.getOrDefault("UI unavailable")
-            throw AssertionError("Expected visible handoff $version; actual=${vm.state.value.handoff?.version}, playing=${vm.state.value.playing}\n$tree", error)
+            throw AssertionError(
+                "Expected visible handoff $version; actual=${vm.state.value.handoff?.version}, " +
+                    "playing=${vm.state.value.playing}, connected=${vm.state.value.connected}, " +
+                    "mode=${vm.sharing.mode.value}, seen=${vm.sharing.lastSeen()}, " +
+                    "offered=${vm.sharing.lastOfferedPause()}, error=${vm.state.value.error}\n$tree",
+                error,
+            )
         }
         compose.onNodeWithTag("playback-handoff-notice").assertIsDisplayed()
-        compose.onNodeWithText("载入进度").assertIsEnabled()
+        compose.onNodeWithText("载入").assertIsEnabled()
     }
 
     @Test fun crossDevicePromptRestoresPausedAndPausePublishesWithoutManualClaim() {
         Fixture().use { fixture -> val vm = connect(fixture)
             try {
-                compose.runOnIdle { vm.sharing.mode("ask") }
+                compose.runOnIdle { vm.observeProgress(false); vm.sharing.mode("ask") }
                 for (ignored in listOf(remotePause(65, "playing"), remotePause(66, "unknown"), remotePause(67, eligible = false), remotePause(68, device = vm.deviceId()))) {
                     fixture.snapshot = ignored
                     runBlocking { withContext(Dispatchers.Main) { vm.checkSharedPlayback() } }
@@ -571,7 +522,7 @@ class MobileCompletionTest {
                 fixture.snapshot = remotePause(70, ids = listOf("completion-0", "completion-1"), index = 1, position = 3000)
                 runBlocking { withContext(Dispatchers.Main) { vm.checkSharedPlayback() } }
                 awaitHandoffNotice(vm, 70)
-                compose.onNodeWithText("载入进度").performClick()
+                compose.onNodeWithText("载入").performClick()
                 try { compose.waitUntil(10_000) { vm.state.value.handoff == null && vm.state.value.queue.size == 2 } }
                 catch (e: Throwable) {
                     val tree = runCatching { val roots = compose.onAllNodes(isRoot(), useUnmergedTree = true); (0 until roots.fetchSemanticsNodes().size).joinToString("\n") { roots[it].printToString() } }.getOrDefault("UI unavailable")
@@ -597,10 +548,11 @@ class MobileCompletionTest {
                 assertNotNull(paused.pausedAt)
                 fixture.snapshot = remotePause(90)
                 runBlocking { withContext(Dispatchers.Main) { vm.checkSharedPlayback() } }
+                runBlocking { withContext(Dispatchers.Main) { vm.dismissHandoff() } }
                 compose.runOnIdle { assertNull(vm.state.value.handoff); vm.syncMode("off") }
                 runBlocking { withContext(Dispatchers.Main) { vm.checkSharedPlayback() } }
                 compose.runOnIdle { assertNull(vm.state.value.handoff); vm.sharing.mode("auto") }
-                fixture.snapshot = remotePause(91, at = "2026-10-19T10:05:00Z")
+                fixture.snapshot = remotePause(91, at = recentAt(5))
                 runBlocking { withContext(Dispatchers.Main) { vm.checkSharedPlayback() } }
                 compose.waitUntil(10_000) { vm.state.value.queue.size == 1 }
                 compose.waitUntil(10_000) { compose.runOnIdle { vm.controller!!.currentPosition == 2000L } }
@@ -620,15 +572,16 @@ class MobileCompletionTest {
                 compose.onNodeWithTag("playback-handoff-notice").assertDoesNotExist()
                 fixture.snapshot = remotePause(122)
                 runBlocking { withContext(Dispatchers.Main) { vm.checkSharedPlayback() } }
+                runBlocking { withContext(Dispatchers.Main) { vm.dismissHandoff() } }
                 compose.runOnIdle { assertNull(vm.state.value.handoff) }
-                fixture.snapshot = remotePause(123, at = "2026-10-19T10:10:00Z")
+                fixture.snapshot = remotePause(123, at = recentAt(10))
                 runBlocking { withContext(Dispatchers.Main) { vm.checkSharedPlayback() } }
                 awaitHandoffNotice(vm, 123)
                 fixture.snapshot = remotePause(124, "playing")
                 val queueBefore = vm.state.value.queue
                 runBlocking { withContext(Dispatchers.Main) { vm.acceptHandoff() } }
                 compose.runOnIdle { assertNull(vm.state.value.handoff); assertEquals(queueBefore, vm.state.value.queue) }
-                fixture.snapshot = remotePause(125, at = "2026-10-19T10:20:00Z")
+                fixture.snapshot = remotePause(125, at = recentAt(20))
                 runBlocking { withContext(Dispatchers.Main) { vm.checkSharedPlayback() } }
                 fixture.resumeAfterSnapshot = remotePause(126, "playing")
                 try {

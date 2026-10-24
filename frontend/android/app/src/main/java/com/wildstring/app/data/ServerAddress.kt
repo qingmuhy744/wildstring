@@ -8,7 +8,17 @@ import okhttp3.Response
 
 object ServerAddress {
     fun normalize(raw: String, allowInsecureHttp: Boolean = false): HttpUrl {
-        val url = raw.trim().toHttpUrlOrNull() ?: throw IllegalArgumentException("请输入完整的 HTTP 或 HTTPS 服务器地址。")
+        val value = raw.trim()
+        val input = if (
+            value.startsWith("http://", ignoreCase = true) ||
+                value.startsWith("https://", ignoreCase = true)
+        ) {
+            value
+        } else {
+            "https://$value"
+        }
+        val url = input.toHttpUrlOrNull()
+            ?: throw IllegalArgumentException("请输入有效的服务器地址，例如 music.example.com。")
         require(url.username.isEmpty() && url.password.isEmpty() && url.query == null && url.fragment == null) {
             "服务器地址不能包含账号、密码、查询参数或片段。"
         }

@@ -344,6 +344,12 @@ def library_router(repository: LibraryRepository, auth: Auth, transcoding) -> AP
             raise HTTPException(status_code=404, detail="track_not_found")
         return result
 
+    @router.get("/tracks/{track_id}/file-info")
+    def track_file_info(track_id: str, current: Annotated[LibraryRepository, Depends(scoped)]):
+        from wildstring.library.file_reorganizer import get_track_file_info
+
+        return get_track_file_info(current, track_id)
+
     @router.get(
         "/scans",
         response_model=list[ScanReport],

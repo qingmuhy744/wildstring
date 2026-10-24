@@ -9,8 +9,14 @@ import { clearOfflineAccount, offlineUser, setOfflineAccount } from './offline';
 import './style.css';
 import './completion.css';
 import './browse.css';
+import './podcasts.css';
 
-type AuthStatus = { configured: boolean; authenticated: boolean; user?: User };
+type AuthStatus = {
+  configured: boolean;
+  authenticated: boolean;
+  user?: User;
+  version?: string;
+};
 
 function Login({
   configured,

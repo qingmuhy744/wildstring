@@ -28,8 +28,14 @@ import kotlinx.coroutines.launch
 
 @Composable
 internal fun MobileShortcuts(discovery: Boolean = false, open: (String) -> Unit) {
-    val entries = if (discovery) listOf(Triple("daily", "每日推荐", Icons.Default.AutoAwesome), Triple("ai", "AI 找歌", Icons.Default.Search), Triple("external", "发现新音乐", Icons.Default.Explore))
-        else listOf(Triple("offline", "离线保存", Icons.Default.Download), Triple("statistics", "收听统计", Icons.Default.BarChart))
+    val entries = if (discovery) listOf(
+        Triple("daily", "每日推荐", Icons.Default.AutoAwesome),
+        Triple("rankings", "收听排行", Icons.Default.BarChart),
+        Triple("external", "发现新音乐", Icons.Default.Explore)
+    ) else listOf(
+        Triple("offline", "离线保存", Icons.Default.Download),
+        Triple("statistics", "收听统计", Icons.Default.BarChart)
+    )
     Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp).testTag(if (discovery) "discovery-shortcuts" else "personal-shortcuts"), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         entries.forEach { (route, title, icon) ->
             FilledTonalButton({ open(route) }, Modifier.weight(1f), shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp), contentPadding = PaddingValues(vertical = 12.dp, horizontal = 4.dp)) {
@@ -46,7 +52,7 @@ internal fun MobileShortcuts(discovery: Boolean = false, open: (String) -> Unit)
 internal fun FeatureDialog(vm: MusicViewModel, route: String, track: Track? = null, playlist: Playlist? = null, albumId: String? = null, initialBatchId: String? = null, onOpenAction: (String, JsonObject?) -> Unit = { _, _ -> }, dismiss: () -> Unit) {
     val account by vm.state.collectAsStateWithLifecycle()
     val title = when (route) {
-        "assistant" -> "野弦助手"; "notifications" -> "通知与任务"
+        "assistant" -> "野弦助手"; "notifications" -> "通知"
         "connections" -> "模型连接"; "research" -> "联网与记忆"; "channels" -> "通知设置"
         "external" -> "发现新音乐"; "rankings" -> "收听排行"; "daily" -> "每日推荐"; "ai" -> "AI 找歌与歌单"; "offline" -> "离线保存"; "statistics" -> "收听统计"; "devices" -> "其他设备继续"
         "playlist" -> if (playlist == null) "新建歌单" else "编辑歌单"; "order" -> "歌单排序"; "multi" -> "多选加入歌单"
@@ -72,8 +78,11 @@ internal fun FeatureDialog(vm: MusicViewModel, route: String, track: Track? = nu
                 TopAppBar(title = { Text(title) }, navigationIcon = { IconButton(dismiss) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回") } })
                 Box(Modifier.weight(1f).fillMaxWidth()) {
                     when (route) {
-                        "assistant", "notifications" -> AgentWorkspace(vm, if (route == "notifications") "notifications" else "chat", onOpenAction)
-                        "connections", "research", "channels" -> AgentWorkspace(vm, route, onOpenAction)
+                        "assistant" -> AgentWorkspace(vm, "chat", onOpenAction)
+                        "notifications" -> SimpleNotificationsSheet(vm, onOpenAction)
+                        "connections" -> AgentConnections(vm)
+                        "research" -> AgentResearch(vm)
+                        "channels" -> AgentChannels(vm)
                         "daily" -> DailyPanel(vm)
                         "rankings" -> RankingsPanel(vm)
                         "external" -> ExternalMusicPanel(vm)

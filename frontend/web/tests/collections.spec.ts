@@ -85,6 +85,7 @@ test('默认我喜欢歌单、心形状态与刷新后持久化', async ({ page 
   await expect(page.getByRole('table')).toContainText('晴天测试曲');
   await expect(page.getByRole('button', { name: '删除歌单', exact: true })).toHaveCount(0);
   await page.reload();
+  await tab(page, '歌曲');
   await expect(page.getByRole('table')).toBeVisible();
   await tab(page, '歌单');
   await page.getByRole('button', { name: '打开歌单 ♥ 我喜欢', exact: true }).click();
@@ -121,6 +122,7 @@ test('普通歌单创建、单曲与整页加入、排序移除和持久化', as
     await page.getByRole('button', { name: '歌单中上移', exact: true }).click();
     await expect(page.getByRole('table').getByRole('row').nth(1)).toContainText('夜晚测试曲');
     await page.reload();
+    await tab(page, '歌曲');
     await expect(page.getByRole('table')).toBeVisible();
     await tab(page, '歌单');
     await page.getByRole('button', { name: `打开歌单 ${prefix}`, exact: true }).click();

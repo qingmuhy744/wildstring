@@ -23,7 +23,7 @@ data class ProfileUpdate(
     @SerializedName("display_name") val displayName: String = "",
     val email: String = ""
 )
-data class AuthStatus(val configured: Boolean, val authenticated: Boolean, val user: Account? = null)
+data class AuthStatus(val configured: Boolean, val authenticated: Boolean, val user: Account? = null, val version: String? = null)
 data class PasswordChange(@SerializedName("current_password") val currentPassword: String, @SerializedName("new_password") val newPassword: String)
 data class LoginRequest(val username: String, val password: String)
 data class Track(
@@ -148,3 +148,68 @@ fun networkGson(): com.google.gson.Gson = com.google.gson.GsonBuilder().serializ
 /** Server-owned order and offsets, shared by all clients (including Chinese pinyin). */
 data class BrowseGroup(val key: String, val offset: Int?, val count: Int)
 data class BrowseIndex(val kind: String, val total: Int, val groups: List<BrowseGroup>)
+
+data class PodcastSummary(
+    val id: String,
+    val title: String,
+    val author: String = "",
+    val description: String = "",
+    @SerializedName("feed_url") val feedUrl: String,
+    @SerializedName("cover_url") val coverUrl: String = "",
+    @SerializedName("auto_update") val autoUpdate: Boolean = true,
+    @SerializedName("update_interval_minutes") val updateIntervalMinutes: Int = 60,
+    @SerializedName("last_updated_at") val lastUpdatedAt: String? = null,
+    @SerializedName("slow_download") val slowDownload: Boolean = false,
+    @SerializedName("max_retries") val maxRetries: Int = 3,
+    @SerializedName("retry_backoff_base") val retryBackoffBase: Int = 5,
+    @SerializedName("created_at") val createdAt: String = "",
+    @SerializedName("total_episodes") val totalEpisodes: Int = 0,
+    @SerializedName("unplayed_episodes") val unplayedEpisodes: Int = 0,
+)
+
+data class PodcastEpisode(
+    val id: String,
+    @SerializedName("podcast_id") val podcastId: String,
+    val guid: String,
+    val title: String,
+    val description: String = "",
+    @SerializedName("audio_url") val audioUrl: String,
+    @SerializedName("duration_seconds") val durationSeconds: Int = 0,
+    @SerializedName("pub_date") val pubDate: String = "",
+    @SerializedName("episode_number") val episodeNumber: Int? = null,
+    @SerializedName("season_number") val seasonNumber: Int? = null,
+    @SerializedName("created_at") val createdAt: String = "",
+    @SerializedName("position_seconds") val positionSeconds: Int = 0,
+    val completed: Boolean = false,
+) {
+    fun toTrack(podcast: PodcastSummary): Track = Track(
+        id = "podcast_ep_$id",
+        title = title,
+        artists = listOf(podcast.author.ifBlank { podcast.title }),
+        album = podcast.title,
+        durationMs = durationSeconds.toLong() * 1000L,
+        hasCover = podcast.coverUrl.isNotBlank(),
+        format = "mp3",
+        status = "available",
+    )
+}
+
+data class PodcastDetail(
+    val podcast: PodcastSummary,
+    val episodes: List<PodcastEpisode> = emptyList(),
+)
+
+data class PodcastSubscribeRequest(
+    @SerializedName("feed_url") val feedUrl: String,
+    @SerializedName("auto_update") val autoUpdate: Boolean = true,
+    @SerializedName("update_interval_minutes") val updateIntervalMinutes: Int = 60,
+    @SerializedName("slow_download") val slowDownload: Boolean = false,
+    @SerializedName("max_retries") val maxRetries: Int = 3,
+    @SerializedName("retry_backoff_base") val retryBackoffBase: Int = 5,
+)
+
+data class PodcastProgressUpdate(
+    @SerializedName("position_seconds") val positionSeconds: Int,
+    @SerializedName("duration_seconds") val durationSeconds: Int,
+    val completed: Boolean,
+)

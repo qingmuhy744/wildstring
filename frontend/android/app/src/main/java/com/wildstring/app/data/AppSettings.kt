@@ -12,7 +12,8 @@ import kotlinx.coroutines.flow.asStateFlow
 data class Preferences(val redCloth: Boolean = false, val redIcon: Boolean = false,
     val metadataMb: Int = 32, val artworkMb: Int = 64, val audioMb: Int = 256, val haptics: Boolean = true, val appearance: String = "system", val aacBitrate: Int = 0,
     val playbackStyle: String = "cover", val songListSize: SongListSize = SongListSize.MEDIUM,
-    val lyricFollowSeconds: Int = 2, val lyricSize: LyricSize = LyricSize.MEDIUM)
+    val lyricFollowSeconds: Int = 2, val lyricSize: LyricSize = LyricSize.MEDIUM,
+    val orientation: String = "auto")
 
 @Singleton
 class AppSettings @Inject constructor(@param:ApplicationContext private val context: Context) {
@@ -22,7 +23,8 @@ class AppSettings @Inject constructor(@param:ApplicationContext private val cont
         prefs.getString("playback_style", "cover").takeIf { it in listOf("cover", "vinyl", "cassette") } ?: "cover",
         SongListSize.fromStored(runCatching { prefs.getString("song_list_size", null) }.getOrNull()),
         prefs.getInt("lyric_follow_seconds", 2).takeIf { it in listOf(1, 2, 3, 5, 10) } ?: 2,
-        LyricSize.fromStored(runCatching { prefs.getString("lyric_size", null) }.getOrNull())))
+        LyricSize.fromStored(runCatching { prefs.getString("lyric_size", null) }.getOrNull()),
+        prefs.getString("screen_orientation", "auto").takeIf { it in listOf("auto", "portrait", "sensor") } ?: "auto"))
     val state = mutable.asStateFlow()
     private val gainMutable = MutableStateFlow(0L)
     val gainRevision = gainMutable.asStateFlow()
@@ -65,6 +67,10 @@ class AppSettings @Inject constructor(@param:ApplicationContext private val cont
     fun appearance(mode: String) {
         require(mode in listOf("system", "light", "dark"))
         prefs.edit().putString("appearance", mode).apply(); mutable.value = mutable.value.copy(appearance = mode)
+    }
+    fun orientation(mode: String) {
+        require(mode in listOf("auto", "portrait", "sensor"))
+        prefs.edit().putString("screen_orientation", mode).apply(); mutable.value = mutable.value.copy(orientation = mode)
     }
     fun haptics(enabled: Boolean) { prefs.edit().putBoolean("haptics", enabled).apply(); mutable.value = mutable.value.copy(haptics = enabled) }
     fun theme(red: Boolean) { prefs.edit().putBoolean("red_cloth", red).apply(); mutable.value = mutable.value.copy(redCloth = red) }

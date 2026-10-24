@@ -5,7 +5,6 @@ import logging
 import os
 import sqlite3
 from contextlib import asynccontextmanager
-from importlib.metadata import version
 from tempfile import TemporaryFile
 
 from fastapi import FastAPI
@@ -13,8 +12,10 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.routing import Route
 
+from wildstring import get_app_version
 from wildstring.agent_platform import AgentPlatform
 from wildstring.auth import Auth
+from wildstring.catalog_gaps import catalog_gaps_router
 from wildstring.config import Settings
 from wildstring.database import Database
 from wildstring.diagnostics import Diagnostics, RequestTrace, diagnostics_router, install_logging
@@ -26,6 +27,7 @@ from wildstring.library.transcoding import Transcoding
 from wildstring.management import Management, management_router
 from wildstring.mcp_http import HTTPMCP
 from wildstring.mobile_experience import experience_router
+from wildstring.podcasts import PodcastManager, podcast_router
 from wildstring.providers import Providers
 from wildstring.request_privacy import CallbackPrivacy, install_callback_filter
 from wildstring.site_access import HostAllowlist, SiteAccess
@@ -55,12 +57,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     management.diagnostics = diagnostics
     providers.platform = platform
     management.platform = platform
+    podcasts = PodcastManager(
+        database,
+        providers=providers,
+        storage_dir=current.podcasts_dir,
+    )
     mcp = HTTPMCP(platform)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         current.data_dir.mkdir(parents=True, exist_ok=True)
         current.library_dir.mkdir(parents=True, exist_ok=True)
+        current.podcasts_dir.mkdir(parents=True, exist_ok=True)
         database.initialize()
         diagnostics.start()
         install_logging()
@@ -75,10 +83,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         transcoding.start()
         providers.start()
         platform.start()
+        podcasts.start()
         try:
             async with mcp.run():
                 yield
         finally:
+            await asyncio.to_thread(podcasts.stop)
             await asyncio.to_thread(platform.stop)
             await asyncio.to_thread(providers.stop)
             await asyncio.to_thread(management.stop)
@@ -88,7 +98,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     development = current.environment != "production"
     app = FastAPI(
         title="WildString API",
-        version=version("wildstring-backend"),
+        version=get_app_version(),
         lifespan=lifespan,
         docs_url="/docs" if development else None,
         redoc_url=None,
@@ -146,6 +156,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(playlist_router(playlists, auth))
     app.include_router(management_router(management, auth, providers))
     app.include_router(experience_router(repository, auth, providers, platform))
+    app.include_router(podcast_router(podcasts, auth))
+    app.include_router(catalog_gaps_router(database, auth))
 
     app.include_router(diagnostics_router(diagnostics, auth, database))
 

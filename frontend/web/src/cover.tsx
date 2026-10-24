@@ -1,8 +1,18 @@
 import { useEffect, useState } from 'react';
 import { offlineCover, usingOfflineAccess } from './offline';
+import { DefaultArtwork } from './default-artwork';
 
-export const coverUrl = (trackId: string, size = 320) =>
-  `/api/v1/tracks/${encodeURIComponent(trackId)}/cover?size=${size}`;
+const podcastCovers = new Map<string, string>();
+
+export const rememberPodcastCover = (trackId: string, url: string) => {
+  if (url) podcastCovers.set(trackId, url);
+};
+
+export const coverUrl = (trackId: string, size = 320) => {
+  const custom = podcastCovers.get(trackId);
+  if (custom) return custom;
+  return `/api/v1/tracks/${encodeURIComponent(trackId)}/cover?size=${size}`;
+};
 
 export function Cover({
   trackId,
@@ -42,18 +52,23 @@ export function Cover({
     };
   }, [trackId, failed]);
   const src = local || coverUrl(trackId, size) + (revision ? `&revision=${revision}` : '');
+  const hasFailed = failed === src;
   return (
     <span className={`cover ${className}`} aria-hidden="true">
-      <span>{Array.from(title)[0] || '≋'}</span>
-      {failed !== src && (
-        <img
-          src={src}
-          alt=""
-          loading={size >= 768 ? 'eager' : 'lazy'}
-          decoding="async"
-          onLoad={(event) => onImage?.(event.currentTarget)}
-          onError={() => setFailed(src)}
-        />
+      {hasFailed ? (
+        <DefaultArtwork title={title} />
+      ) : (
+        <>
+          <DefaultArtwork title={title} style={{ position: 'absolute', inset: 0 }} />
+          <img
+            src={src}
+            alt=""
+            loading={size >= 768 ? 'eager' : 'lazy'}
+            decoding="async"
+            onLoad={(event) => onImage?.(event.currentTarget)}
+            onError={() => setFailed(src)}
+          />
+        </>
       )}
     </span>
   );

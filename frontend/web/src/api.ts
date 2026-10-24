@@ -178,7 +178,7 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
     ...options,
     credentials: 'same-origin',
     headers: {
-      'Content-Type': 'application/json',
+      ...(options.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
       'X-Wildstring-Client': 'web',
       ...options.headers,
     },
@@ -198,13 +198,25 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
       typeof suppliedTrace === 'string' && /^[A-Za-z0-9_-]{8,80}$/.test(suppliedTrace)
         ? suppliedTrace
         : undefined;
-    throw new ApiError(response.status, messages[code] || '请求未完成，请重试。', code, traceId);
+    const rawMessage =
+      typeof body.detail === 'string'
+        ? body.detail
+        : typeof body.message === 'string'
+          ? body.message
+          : '';
+    const message = messages[code] || rawMessage || '请求未完成，请重试。';
+    throw new ApiError(response.status, message, code, traceId);
   }
   return response.status === 204 ? (undefined as T) : response.json();
 }
 
 export const artist = (track: Track) => track.artists.join(' / ') || '未知艺人';
-export const streamUrl = (track: Track) => `/api/v1/tracks/${encodeURIComponent(track.id)}/stream`;
+export const streamUrl = (track: Track) => {
+  if (track.id.startsWith('podcast_ep_')) {
+    return `/api/v1/podcasts/episodes/${encodeURIComponent(track.id.replace('podcast_ep_', ''))}/stream`;
+  }
+  return `/api/v1/tracks/${encodeURIComponent(track.id)}/stream`;
+};
 export const time = (seconds: number) => {
   if (!Number.isFinite(seconds) || seconds < 0) return '0:00';
   return `${Math.floor(seconds / 60)}:${Math.floor(seconds % 60)
@@ -219,6 +231,40 @@ export interface Album {
   track_count: number;
   duration_ms: number;
   cover_track_id: string;
+}
+
+export interface AlbumMetadataTrack {
+  track_id: string;
+  title: string;
+  album: string;
+  album_artists: string[];
+  artists: string[];
+  track_number: number | null;
+  disc_number: number | null;
+  metadata_version: number;
+  metadata: Record<string, unknown>;
+  has_cover: boolean;
+  custom_cover?: string | null;
+}
+
+export interface AlbumMetadataRecord {
+  album_id: string;
+  primary_title: string;
+  primary_artists: string[];
+  cover_track_id: string;
+  has_custom_cover: boolean;
+  release_date: string;
+  original_date: string;
+  label: string;
+  catalog_number: string;
+  disc_total: number;
+  discs: number[];
+  genres: string[];
+  description: string;
+  tracks: AlbumMetadataTrack[];
+  album_variants: string[];
+  album_artist_variants: string[];
+  warning: boolean;
 }
 export interface AlbumPage {
   items: Album[];

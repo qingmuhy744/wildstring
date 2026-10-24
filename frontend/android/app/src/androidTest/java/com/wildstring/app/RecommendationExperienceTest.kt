@@ -105,7 +105,7 @@ class RecommendationExperienceTest {
                 compose.onNodeWithTag("recommendation-settings").performClick()
                 compose.onNodeWithTag("recommendation-source-community").performScrollTo().assertIsOn().performClick().assertIsOff()
                 compose.onNodeWithTag("ai-connection-choice").performScrollTo().performClick()
-                compose.onNodeWithText("我的模型 · synthetic-one").performClick()
+                compose.onAllNodesWithText("我的模型 · synthetic-one", useUnmergedTree = true).onLast().performClick()
                 compose.onNodeWithText("保存偏好").performClick()
                 compose.waitUntil(10_000) { fixture.requests.any { it.first.startsWith("PUT ") } }
                 val saved = JsonParser.parseString(fixture.preferences).asJsonObject
@@ -124,21 +124,13 @@ class RecommendationExperienceTest {
             } finally { cleanup(vm) }
         }
     }
-    @Test fun aiDiscoveryExplicitlySelectsSameConnectionAndShowsActualFallback() {
+    @Test fun assistantEntryUsesCurrentMobileWorkspace() {
         Fixture().use { fixture -> val vm = connect(fixture)
             try {
-                open("AI 找歌")
-                compose.onNodeWithText("本地找歌（不使用模型）").assertExists()
-                compose.onNodeWithTag("ai-connection-choice").performClick()
-                compose.onNodeWithText("我的模型 · synthetic-one").performClick()
-                compose.onNodeWithText("个人连接 · 每日预算 20 次 · 已用 20 次").assertExists()
-                compose.onNodeWithText("想听什么？").performTextInput("想听摇滚")
-                compose.onNodeWithText("生成候选").performClick()
-                compose.waitUntil(10_000) { fixture.requests.any { it.first.contains("/ai/discover?") } }
-                val body = JsonParser.parseString(fixture.requests.first { it.first.contains("/ai/discover?") }.second).asJsonObject
-                assertEquals("personal-one", body.text("connection_id"))
-                compose.waitUntil(10_000) { compose.onAllNodesWithText("AI：AI 预算不足，保留本地结果").fetchSemanticsNodes().isNotEmpty() }
-                compose.onNodeWithText("当前使用本地检索").assertExists()
+                compose.onNodeWithTag("nav-assistant").performClick()
+                compose.waitUntil(10_000) { compose.onAllNodesWithText("野弦 AI 音乐助手").fetchSemanticsNodes().isNotEmpty() }
+                compose.onNodeWithText("野弦 AI 音乐助手").assertIsDisplayed()
+                compose.onNodeWithText("把我很久没听的收藏整理成歌单", substring = true).assertExists()
             } finally { cleanup(vm) }
         }
     }

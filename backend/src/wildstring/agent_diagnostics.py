@@ -2,9 +2,10 @@
 
 import json
 import re
-from importlib.metadata import version
 
 from fastapi import HTTPException
+
+from wildstring import get_app_version
 
 DEFINITIONS = {
     "get_system_status": ("读取服务版本、数据库及诊断状态", "diagnostics:read", True, {}),
@@ -146,7 +147,7 @@ def execute(service, actor, name, arguments):
         with service.database.connect() as connection:
             schema = connection.execute("PRAGMA user_version").fetchone()[0]
         return {
-            "version": version("wildstring-backend"),
+            "version": get_app_version(),
             "schema_version": schema,
             "logging": service.diagnostics.status(),
         }

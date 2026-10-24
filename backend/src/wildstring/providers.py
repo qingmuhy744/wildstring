@@ -42,9 +42,11 @@ from wildstring.provider_network import (
 )
 from wildstring.provider_tasks import (
     RETENTION_DAYS,
+    AttentionClear,
     HistoryClear,
     ReviewTasks,
     View,
+    clear_attention,
     clear_history,
     retry_task,
     review_tasks,
@@ -1379,6 +1381,14 @@ class Providers:
         @router.post("/manage/providers/tasks/history/clear", dependencies=mutation)
         def clear_tasks(body: HistoryClear, user: admin):
             return clear_history(self.repository, body.through)
+
+        @router.post("/manage/providers/tasks/attention/clear", dependencies=mutation)
+        def clear_attention_tasks(body: AttentionClear | None = None, user: admin = None):
+            return clear_attention(
+                self.repository,
+                body.through if body else None,
+                body.batch_id if body else None,
+            )
 
         @router.post("/manage/providers/tasks/clear-queued", dependencies=mutation)
         def clear_queued_tasks(user: admin):

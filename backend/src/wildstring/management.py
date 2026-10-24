@@ -1,25 +1,29 @@
 """Authenticated management and a durable, single-consumer library task queue."""
 
+import hashlib
 import json
 import logging
 import os
+import re
 import shutil
 import sqlite3
 import time
 from datetime import datetime
-from importlib.metadata import version
 from pathlib import Path, PurePosixPath
+from tempfile import NamedTemporaryFile
 from threading import Event, Thread
 from typing import Annotated, Literal
 from uuid import uuid4
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from filelock import FileLock, Timeout
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
+from wildstring import get_app_version
 from wildstring.ai_config import AIService, AIUpdate
 from wildstring.album_release_locks import ReleaseLockInput
 from wildstring.diagnostics import record_event, trace_context
+from wildstring.library.assets import MAX_COVER_BYTES, TrackAssets
 from wildstring.library.download_policy import partial
 from wildstring.library.edits import MetadataEditor, MetadataUpdate, Overrides
 from wildstring.library.importer import import_music
@@ -79,7 +83,7 @@ class FolderMetadataUpdate(BaseModel):
 class AlbumMetadataUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     album_id: str = Field(min_length=1, max_length=128)
-    tracks: list[FolderTrackUpdate] = Field(min_length=1, max_length=1000)
+    tracks: list[FolderTrackUpdate] | None = None
     overrides: Overrides
 
 
@@ -311,10 +315,12 @@ class Management:
         with self.database.connect() as connection:
             rows = connection.execute(
                 """SELECT t.id,t.path,t.title,t.album,t.album_artists,t.artists,t.track_number,
-                t.disc_number,m.version,m.observed,m.overrides
-                FROM tracks t JOIN track_metadata m ON m.track_id=t.id
+                t.disc_number,t.has_cover,m.version,m.observed,m.overrides,a.filename AS custom_cover
+                FROM tracks t
+                JOIN track_metadata m ON m.track_id=t.id
+                LEFT JOIN artwork_choices a ON a.track_id=t.id
                 WHERE t.library_id=? AND t.album_id=? AND t.status='available'
-                ORDER BY t.disc_number,t.track_number,t.path,t.id""",
+                ORDER BY coalesce(t.disc_number,1),coalesce(t.track_number,99999),t.path,t.id""",
                 (library_id, album_id),
             ).fetchall()
         if not rows:
@@ -322,8 +328,42 @@ class Management:
         tracks = []
         albums = set()
         album_artists = set()
+        discs = set()
+        genres = set()
+        cover_track_id = None
+        has_custom_cover = False
+        release_date = ""
+        original_date = ""
+        label = ""
+        catalog_number = ""
+        description = ""
+        disc_total = 1
+
         for row in rows:
             current = json.loads(row["observed"]) | json.loads(row["overrides"])
+            if row["has_cover"] and cover_track_id is None:
+                cover_track_id = row["id"]
+            if row["custom_cover"]:
+                has_custom_cover = True
+            if row["disc_number"]:
+                discs.add(row["disc_number"])
+                if row["disc_number"] > disc_total:
+                    disc_total = row["disc_number"]
+            if current.get("disc_total") and current["disc_total"] > disc_total:
+                disc_total = current["disc_total"]
+            if not release_date and current.get("release_date"):
+                release_date = current["release_date"]
+            if not original_date and current.get("original_date"):
+                original_date = current["original_date"]
+            if not label and current.get("label"):
+                label = current["label"]
+            if not catalog_number and current.get("catalog_number"):
+                catalog_number = current["catalog_number"]
+            if not description and current.get("description"):
+                description = current["description"]
+            if current.get("genres"):
+                genres.update(current["genres"])
+
             tracks.append(
                 {
                     "track_id": row["id"],
@@ -335,18 +375,131 @@ class Management:
                     "disc_number": row["disc_number"],
                     "metadata_version": row["version"],
                     "metadata": current,
+                    "has_cover": bool(row["has_cover"]),
+                    "custom_cover": row["custom_cover"],
                 }
             )
             if row["album"]:
                 albums.add(row["album"])
             album_artists.update(json.loads(row["album_artists"]))
+
+        if cover_track_id is None and tracks:
+            cover_track_id = tracks[0]["track_id"]
+
+        primary_title = (
+            next(iter(albums), "") if len(albums) == 1 else (tracks[0]["album"] if tracks else "")
+        )
+        primary_artists = (
+            list(album_artists)
+            if len(album_artists) > 0
+            else (tracks[0]["album_artists"] if tracks else [])
+        )
+
         return {
             "album_id": album_id,
+            "primary_title": primary_title,
+            "primary_artists": primary_artists,
+            "cover_track_id": cover_track_id,
+            "has_custom_cover": has_custom_cover,
+            "release_date": release_date,
+            "original_date": original_date,
+            "label": label,
+            "catalog_number": catalog_number,
+            "disc_total": disc_total,
+            "discs": sorted(discs) if discs else [1],
+            "genres": sorted(genres),
+            "description": description,
             "tracks": tracks,
             "album_variants": sorted(albums),
             "album_artist_variants": sorted(album_artists),
             "warning": len(albums) > 1 or len(album_artists) > 1,
         }
+
+    def update_album_cover(
+        self, album_id: str, file_bytes: bytes, filename: str, save_sidecar: bool = True
+    ):
+        if len(file_bytes) > MAX_COVER_BYTES:
+            raise HTTPException(413, "cover_too_large")
+        assets = TrackAssets(self.repository)
+        if assets.thumbnail(file_bytes, 320) is None:
+            raise HTTPException(422, "invalid_cover_image")
+
+        artwork_folder = self.database.path.parent / "artwork"
+        artwork_folder.mkdir(parents=True, exist_ok=True)
+        key = hashlib.sha256(file_bytes).hexdigest()
+        with NamedTemporaryFile(dir=artwork_folder, delete=False) as stream:
+            temp_path = Path(stream.name)
+            try:
+                stream.write(file_bytes)
+                stream.flush()
+                os.fsync(stream.fileno())
+                temp_path.replace(artwork_folder / key)
+            finally:
+                temp_path.unlink(missing_ok=True)
+
+        with self.database.connect(write=True) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            tracks = connection.execute(
+                "SELECT id, path FROM tracks WHERE album_id=? AND library_id=? AND status='available'",
+                (album_id, self.repository.library_id()),
+            ).fetchall()
+            if not tracks:
+                raise HTTPException(404, "album_not_found")
+
+            for track in tracks:
+                connection.execute(
+                    "INSERT INTO artwork_choices(track_id,filename,source_url,mode) VALUES (?,?,'upload','chosen') "
+                    "ON CONFLICT(track_id) DO UPDATE SET filename=excluded.filename,source_url=excluded.source_url,"
+                    "mode='chosen',version=artwork_choices.version+1",
+                    (track["id"], key),
+                )
+                connection.execute("UPDATE tracks SET has_cover=1 WHERE id=?", (track["id"],))
+                connection.execute(
+                    "UPDATE track_metadata SET version=version+1 WHERE track_id=?", (track["id"],)
+                )
+
+        if save_sidecar:
+            self._save_album_sidecar_cover(tracks, file_bytes)
+
+        return {"album_id": album_id, "image_sha256": key, "tracks_updated": len(tracks)}
+
+    def remove_album_cover(self, album_id: str):
+        with self.database.connect(write=True) as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            tracks = connection.execute(
+                "SELECT id FROM tracks WHERE album_id=? AND library_id=? AND status='available'",
+                (album_id, self.repository.library_id()),
+            ).fetchall()
+            if not tracks:
+                raise HTTPException(404, "album_not_found")
+            for track in tracks:
+                connection.execute("DELETE FROM artwork_choices WHERE track_id=?", (track["id"],))
+                # 重新判断是否有内嵌封面或者同目录本地封面，若无则设为 0
+                connection.execute("UPDATE tracks SET has_cover=0 WHERE id=?", (track["id"],))
+                connection.execute(
+                    "UPDATE track_metadata SET version=version+1 WHERE track_id=?", (track["id"],)
+                )
+        return {"album_id": album_id, "cleared": True}
+
+    def _save_album_sidecar_cover(self, tracks, file_bytes: bytes):
+        library_root = self.repository.root.resolve()
+        dirs = set()
+        for track in tracks:
+            track_rel = Path(track["path"])
+            parent = track_rel.parent
+            if re.fullmatch(r"(?i)(cd|disc|disk)[\s_-]*\d+", parent.name):
+                dirs.add(parent.parent)
+            else:
+                dirs.add(parent)
+        for rel_dir in dirs:
+            target_dir = (library_root / rel_dir).resolve()
+            if target_dir.is_relative_to(library_root) and target_dir.is_dir():
+                try:
+                    cover_file = target_dir / "cover.jpg"
+                    cover_file.write_bytes(file_bytes)
+                except OSError:
+                    # Ignore write failures when writing album covers to non-writable directories
+                    pass
 
     def source_roots(self):
         return [{"id": "import", "name": "导入目录", "read_only": True}]
@@ -514,10 +667,13 @@ class Management:
         group = self.metadata_album(body.album_id)
         if group is None:
             raise HTTPException(404, "album_not_found")
-        requested = {item.track_id: item.version for item in body.tracks}
-        available = {item["track_id"]: item for item in group["tracks"]}
-        if set(requested) - set(available):
-            raise HTTPException(409, "album_membership_changed")
+        if body.tracks is None:
+            requested = {item["track_id"]: item["metadata_version"] for item in group["tracks"]}
+        else:
+            requested = {item.track_id: item.version for item in body.tracks}
+            available = {item["track_id"]: item for item in group["tracks"]}
+            if set(requested) - set(available):
+                raise HTTPException(409, "album_membership_changed")
         editor = MetadataEditor(self.repository)
         with self.database.connect(write=True) as connection:
             connection.execute("BEGIN IMMEDIATE")
@@ -730,7 +886,7 @@ class Management:
             ).fetchone()
         return {
             "active_job": active["id"] if active else None,
-            "version": version("wildstring-backend"),
+            "version": get_app_version(),
             "schema_version": schema,
             "preferences": self.preferences(),
             "counts": dict(counts),
@@ -921,6 +1077,44 @@ def management_router(service, auth, providers=None):
             "path": body.path,
         }
 
+    @router.post(
+        "/library/upload",
+        dependencies=[
+            Depends(auth.require_client),
+            Depends(auth.require_permission("library:import")),
+        ],
+    )
+    def library_upload(
+        file: Annotated[UploadFile, File()],
+        relative_path: Annotated[str, Form()] = "",
+        auto_scan: Annotated[bool, Form()] = False,
+        override_artist: Annotated[str, Form()] = "",
+        override_album: Annotated[str, Form()] = "",
+    ):
+        from wildstring.library.upload import handle_upload
+
+        return handle_upload(
+            service.settings,
+            service.database,
+            file,
+            relative_path_raw=relative_path,
+            override_artist=override_artist or None,
+            override_album=override_album or None,
+            auto_scan=auto_scan,
+        )
+
+    @router.post(
+        "/library/scan",
+        dependencies=[
+            Depends(auth.require_client),
+            Depends(auth.require_permission("library:import")),
+        ],
+    )
+    def library_scan():
+        from wildstring.library.scanner import scan_library
+
+        return scan_library(service.settings)
+
     @router.get("/library/trash")
     def library_trash():
         with service.database.connect() as connection:
@@ -1004,6 +1198,33 @@ def management_router(service, auth, providers=None):
     ):
         return service.update_metadata_album(body, user_id=user["id"])
 
+    @router.post(
+        "/albums/{album_id}/cover",
+        dependencies=[
+            Depends(auth.require_client),
+            Depends(auth.require_permission("metadata:write")),
+        ],
+    )
+    async def upload_album_cover(
+        album_id: str,
+        file: Annotated[UploadFile, File()],
+        save_sidecar: Annotated[bool, Form()] = True,
+    ):
+        content = await file.read()
+        return service.update_album_cover(
+            album_id, content, filename=file.filename or "cover.jpg", save_sidecar=save_sidecar
+        )
+
+    @router.delete(
+        "/albums/{album_id}/cover",
+        dependencies=[
+            Depends(auth.require_client),
+            Depends(auth.require_permission("metadata:write")),
+        ],
+    )
+    def remove_album_cover(album_id: str):
+        return service.remove_album_cover(album_id)
+
     @router.get("/tracks/{track_id}/metadata")
     def metadata(track_id: str):
         return editor.read(track_id)
@@ -1021,6 +1242,24 @@ def management_router(service, auth, providers=None):
         user: Annotated[dict, Depends(auth.require_permission("metadata:write"))],
     ):
         return editor.save(track_id, body, user_id=user["id"])
+
+    @router.get("/tracks/{track_id}/file-info")
+    def track_file_info(track_id: str):
+        from wildstring.library.file_reorganizer import get_track_file_info
+
+        return get_track_file_info(service.repository, track_id)
+
+    @router.post(
+        "/tracks/{track_id}/reorganize-file",
+        dependencies=[
+            Depends(auth.require_client),
+            Depends(auth.require_permission("metadata:write")),
+        ],
+    )
+    def reorganize_file(track_id: str):
+        from wildstring.library.file_reorganizer import reorganize_track_file
+
+        return reorganize_track_file(service.repository, track_id)
 
     @router.get("/albums/{album_id}/release-lock")
     def album_release_lock(album_id: str):

@@ -173,17 +173,30 @@ test('系统明暗实时切换、手动优先和记忆', async ({ page }, info) 
   await page.emulateMedia({ colorScheme: 'dark' });
   await expect(root).toHaveAttribute('data-theme', 'dark');
   await page.screenshot({ path: `../../artifacts/theme-dark-${info.project.name}.png` });
-  if (info.project.name === 'mobile') await page.getByLabel('浏览方式').selectOption('account');
-  const theme = page.getByLabel('外观模式', { exact: true }).last();
-  await theme.selectOption('light');
-  await expect(root).toHaveAttribute('data-theme', 'light');
-  await page.emulateMedia({ colorScheme: 'dark' });
-  await expect(root).toHaveAttribute('data-theme', 'light');
-  await page.reload();
-  await expect(root).toHaveAttribute('data-theme', 'light');
-  await page.screenshot({ path: `../../artifacts/theme-light-${info.project.name}.png` });
-  if (info.project.name === 'mobile') await page.getByLabel('浏览方式').selectOption('account');
-  await page.getByLabel('外观模式', { exact: true }).last().selectOption('system');
+  if (info.project.name === 'mobile') {
+    await page.getByLabel('浏览方式').selectOption('account');
+    const theme = page.getByLabel('外观模式', { exact: true }).last();
+    await theme.selectOption('light');
+    await expect(root).toHaveAttribute('data-theme', 'light');
+    await page.emulateMedia({ colorScheme: 'dark' });
+    await expect(root).toHaveAttribute('data-theme', 'light');
+    await page.reload();
+    await expect(root).toHaveAttribute('data-theme', 'light');
+    await page.getByLabel('浏览方式').selectOption('account');
+    await page.getByLabel('外观模式', { exact: true }).last().selectOption('system');
+  } else {
+    const theme = page.getByRole('button', { name: '外观：跟随系统', exact: true });
+    await theme.click();
+    await expect(root).toHaveAttribute('data-theme', 'dark');
+    await page.emulateMedia({ colorScheme: 'light' });
+    await expect(root).toHaveAttribute('data-theme', 'dark');
+    await page.reload();
+    await expect(root).toHaveAttribute('data-theme', 'dark');
+    await page.getByRole('button', { name: '外观：深色', exact: true }).click();
+    await expect(root).toHaveAttribute('data-theme', 'light');
+    await page.emulateMedia({ colorScheme: 'dark' });
+    await page.getByRole('button', { name: '外观：浅色', exact: true }).click();
+  }
   await expect(root).toHaveAttribute('data-theme', 'dark');
 });
 

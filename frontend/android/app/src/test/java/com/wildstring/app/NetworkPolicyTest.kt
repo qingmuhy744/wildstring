@@ -12,6 +12,10 @@ import org.junit.Test
 
 class NetworkPolicyTest {
     private class Vault : CookieVault { var value: String? = null; override fun read() = value; override fun write(value: String?) { this.value = value } }
+    @Test fun addressWithoutSchemeDefaultsToHttps() {
+        val base = ServerAddress.normalize(" music.example.com/music ")
+        assertEquals("https://music.example.com/music/", base.toString())
+    }
     @Test fun addressValidationAndPrefixIsolation() {
         val base = ServerAddress.normalize(" https://music.example.com/music ")
         assertEquals("https://music.example.com/music/", base.toString())

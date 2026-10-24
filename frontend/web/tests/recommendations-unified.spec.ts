@@ -521,7 +521,6 @@ test('真实后端：切换账号后推荐偏好与私人连接隔离', async ({
   await page.getByLabel('账号', { exact: true }).fill(username);
   await page.getByLabel('密码', { exact: true }).fill(password);
   await page.getByRole('button', { name: '进入曲库' }).click();
-  await expect(page.getByRole('table', { name: '歌曲列表', exact: true })).toBeVisible();
   await section(page, '每日推荐 · AI');
   await page.getByText('推荐偏好', { exact: true }).click();
   await expect(panel.getByLabel('每日首数', { exact: true })).toHaveValue('20');

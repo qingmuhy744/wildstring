@@ -603,8 +603,8 @@ export function PlayerBar({
           {current ? (
             <Cover trackId={current.id} title={current.album || current.title} />
           ) : (
-            <span className="record" aria-hidden="true">
-              ≋
+            <span className="playing-art-placeholder" aria-hidden="true">
+              <Icon name="album" />
             </span>
           )}
           {current && (

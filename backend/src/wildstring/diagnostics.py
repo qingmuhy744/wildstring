@@ -15,7 +15,6 @@ import threading
 import time
 from contextlib import contextmanager
 from datetime import UTC, datetime
-from importlib.metadata import version
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Annotated
@@ -23,6 +22,8 @@ from uuid import uuid4
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
+
+from wildstring import get_app_version
 
 TRACE_HEADER = "X-Wildstring-Trace-Id"
 RETENTION_DAYS = 7
@@ -85,7 +86,7 @@ def _project(event, level, fields):
         "id": uuid4().hex,
         "time": datetime.now(UTC).isoformat(),
         "schema_version": 1,
-        "version": version("wildstring-backend"),
+        "version": get_app_version(),
         "level": level if level in {"DEBUG", "INFO", "WARNING", "ERROR"} else "INFO",
         "event": event
         if isinstance(event, str) and _name.fullmatch(event)
@@ -402,7 +403,7 @@ class Diagnostics:
 
     def bundle(self, trace_id=None):
         return {
-            "version": version("wildstring-backend"),
+            "version": get_app_version(),
             "logging": self.status(),
             "events": self.events(limit=100, trace_id=trace_id)["items"],
             "truncated_at": 100,
@@ -470,7 +471,7 @@ def diagnostics_router(service, auth, database):
         with database.connect() as connection:
             schema = connection.execute("PRAGMA user_version").fetchone()[0]
         return {
-            "version": version("wildstring-backend"),
+            "version": get_app_version(),
             "schema_version": schema,
             "logging": service.status(),
             "external_services": ["musicbrainz", "lastfm", "caa", "acoustid"],

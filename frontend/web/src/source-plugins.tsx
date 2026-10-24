@@ -1,8 +1,9 @@
 import { hints } from './help-content';
 import { HelpLabel } from './desktop-help';
-import { useEffect, useRef, useState } from 'react';
-import { api } from './api';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { api, time, type Track } from './api';
 import { Icon } from './icons';
+import type { Player } from './player';
 import { PluginZipUpload } from './plugin-zip-upload';
 import './source-plugins.css';
 
@@ -388,11 +389,6 @@ export function SourcePlugins() {
           </article>
         ))}
       </div>
-      {!plugins.length && (
-        <p className="plugin-empty">
-          还没有插件。可以从 WildString Release 下载 QQ、酷狗或网易云插件 ZIP，使用上方入口导入。
-        </p>
-      )}
     </section>
   );
 }
@@ -482,7 +478,213 @@ function inferCandidateQuality(candidate: LyricCandidate) {
   };
 }
 
-export function OnlineLyrics({ trackId, applied }: { trackId: string; applied: () => void }) {
+function formatCandidateMs(ms: number | null): string {
+  if (ms === null || ms === undefined) return '--:--';
+  const totalSeconds = ms / 1000;
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = (totalSeconds % 60).toFixed(2);
+  return `${String(minutes).padStart(2, '0')}:${seconds.padStart(5, '0')}`;
+}
+
+function InteractiveCandidateAudition({
+  candidate,
+  hasWords,
+  showWordSplits,
+  offset,
+  onOffsetChange,
+  trackId,
+  track,
+  player,
+}: {
+  candidate: LyricCandidate;
+  hasWords: boolean;
+  showWordSplits: boolean;
+  offset: number;
+  onOffsetChange: (offset: number) => void;
+  trackId: string;
+  track?: Track;
+  player?: Player;
+}) {
+  const isPlayingThisTrack = player && player.current?.id === trackId;
+  const currentPosMs = isPlayingThisTrack ? player.position * 1000 - offset : null;
+
+  const activeIndex = useMemo(() => {
+    if (currentPosMs === null) return -1;
+    let found = -1;
+    for (let i = 0; i < candidate.normalized.lines.length; i++) {
+      const line = candidate.normalized.lines[i];
+      if (line.time_ms !== null && line.time_ms <= currentPosMs) {
+        found = i;
+      } else if (line.time_ms !== null && line.time_ms > currentPosMs) {
+        break;
+      }
+    }
+    return found;
+  }, [currentPosMs, candidate.normalized.lines]);
+
+  const activeRowRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (activeIndex >= 0 && activeRowRef.current) {
+      activeRowRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }, [activeIndex]);
+
+  function handleSeek(lineTimeMs: number | null) {
+    if (lineTimeMs === null || !player) return;
+    const targetSeconds = Math.max(0, (lineTimeMs + offset) / 1000);
+    if (player.current?.id !== trackId) {
+      if (track) {
+        player.start([track], 0);
+        setTimeout(() => player.seek(targetSeconds), 250);
+      } else {
+        api<Track>(`/tracks/${trackId}`)
+          .then((t) => {
+            player.start([t], 0);
+            setTimeout(() => player.seek(targetSeconds), 250);
+          })
+          .catch(() => {});
+      }
+      return;
+    }
+    player.seek(targetSeconds);
+    if (!player.playing) {
+      player.toggle();
+    }
+  }
+
+  function handleStartTrack() {
+    if (!player) return;
+    if (track) {
+      player.start([track], 0);
+    } else {
+      api<Track>(`/tracks/${trackId}`)
+        .then((t) => player.start([t], 0))
+        .catch(() => {});
+    }
+  }
+
+  return (
+    <div className="candidate-audition-container">
+      <div className="candidate-audition-bar">
+        <div className="audition-player-status">
+          {isPlayingThisTrack ? (
+            <div className="status-playing-pill">
+              <span className={`audition-dot ${player.playing ? 'playing' : 'paused'}`} />
+              <span>{player.playing ? '正在播放试听' : '试听已暂停'}</span>
+              <span className="audition-time">({time(player.position)})</span>
+              <button
+                type="button"
+                className="text-button audition-ctrl-btn"
+                onClick={player.toggle}
+              >
+                {player.playing ? '暂停' : '播放'}
+              </button>
+            </div>
+          ) : player ? (
+            <button
+              type="button"
+              className="text-button audition-start-btn"
+              onClick={handleStartTrack}
+            >
+              ▶ 播放此歌曲以交互试听
+            </button>
+          ) : null}
+        </div>
+
+        <div className="audition-offset-controls">
+          <span className="offset-label">微调：</span>
+          <div className="nudge-btn-group">
+            <button type="button" onClick={() => onOffsetChange(offset - 500)} title="提早 500ms">
+              -500ms
+            </button>
+            <button type="button" onClick={() => onOffsetChange(offset - 200)} title="提早 200ms">
+              -200ms
+            </button>
+            <button
+              type="button"
+              className={offset === 0 ? 'nudge-zero-active' : ''}
+              onClick={() => onOffsetChange(0)}
+              title="复位到 0 偏移"
+            >
+              0
+            </button>
+            <button type="button" onClick={() => onOffsetChange(offset + 200)} title="延后 200ms">
+              +200ms
+            </button>
+            <button type="button" onClick={() => onOffsetChange(offset + 500)} title="延后 500ms">
+              +500ms
+            </button>
+          </div>
+          <label className="manual-offset-input">
+            <input
+              type="number"
+              min="-60000"
+              max="60000"
+              step="50"
+              value={offset}
+              onChange={(e) => onOffsetChange(Number(e.target.value))}
+            />
+            <span>ms</span>
+          </label>
+        </div>
+      </div>
+
+      <p className="audition-hint">💡 点击任意歌词行立即跳播试听；随播放高亮并平滑居中滚动。</p>
+
+      <pre className="candidate-lyric-list" role="list">
+        {candidate.normalized.lines.slice(0, 300).map((line, idx) => {
+          const isActive = idx === activeIndex;
+          return (
+            <div
+              key={idx}
+              ref={isActive ? activeRowRef : null}
+              className={`candidate-lyric-row ${isActive ? 'active' : ''}`}
+              onClick={() => handleSeek(line.time_ms)}
+              title={line.time_ms !== null ? '点击跳播试听此句' : undefined}
+            >
+              <span className="candidate-lyric-time">{formatCandidateMs(line.time_ms)}</span>
+              <div className="candidate-lyric-body">
+                <div className="candidate-lyric-text">
+                  {hasWords && showWordSplits && line.words && line.words.length > 0
+                    ? line.words.map((w, wIdx) => (
+                        <span key={wIdx} className="word-chunk">
+                          {w.text}
+                          {w.start_ms !== undefined && w.start_ms !== null && (
+                            <span className="word-split-chip">
+                              ⟨{(w.start_ms / 1000).toFixed(2)}s⟩
+                            </span>
+                          )}
+                        </span>
+                      ))
+                    : line.text || '（间奏）'}
+                </div>
+                {line.translation && (
+                  <div className="candidate-lyric-trans">{line.translation}</div>
+                )}
+                {line.romanization && (
+                  <div className="candidate-lyric-roman">{line.romanization}</div>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </pre>
+    </div>
+  );
+}
+
+export function OnlineLyrics({
+  trackId,
+  track,
+  player,
+  applied,
+}: {
+  trackId: string;
+  track?: Track;
+  player?: Player;
+  applied: () => void;
+}) {
   const [result, setResult] = useState<{
     items: LyricCandidate[];
     jobs: { status: string; warnings: string[] }[];
@@ -714,63 +916,45 @@ export function OnlineLyrics({ trackId, applied }: { trackId: string; applied: (
                   显示逐字时间切分标记
                 </label>
               )}
-              <pre style={{ maxHeight: 240, overflow: 'auto', whiteSpace: 'pre-wrap' }}>
-                {selected.normalized.lines
-                  .slice(0, 100)
-                  .map((line) => {
-                    const body =
-                      hasWords && showWordSplits && line.words && line.words.length > 0
-                        ? line.words
-                            .map((w) =>
-                              w.start_ms !== undefined && w.start_ms !== null
-                                ? `${w.text}⟨${(w.start_ms / 1000).toFixed(2)}s⟩`
-                                : w.text,
-                            )
-                            .join(' ')
-                        : line.text;
-                    return (
-                      `${line.time_ms === null ? '' : (line.time_ms / 1000).toFixed(2)} ${body}` +
-                      (line.translation ? `\n${line.translation}` : '') +
-                      (line.romanization ? `\n${line.romanization}` : '')
-                    );
-                  })
-                  .join('\n')}
-              </pre>
-              <label>
-                播放偏移（毫秒，正值延后）
-                <input
-                  type="number"
-                  min="-60000"
-                  max="60000"
-                  step="100"
-                  value={offset}
-                  onChange={(e) => setOffset(Number(e.target.value))}
-                />
-              </label>
-              <button
-                disabled={busy}
-                onClick={() =>
-                  void run(async () => {
-                    await api(`/manage/lyric-candidates/${selected.id}/apply`, {
-                      method: 'POST',
-                      body: JSON.stringify({
-                        version: selected.lyrics_version,
-                        file_version: selected.file_version,
-                        offset_ms: offset,
-                      }),
-                    });
-                    setSelected(null);
-                    applied();
-                    window.dispatchEvent(
-                      new CustomEvent('wildstring:lyrics-updated', { detail: trackId }),
-                    );
-                    setMessage('已保存选中的歌词，音乐文件未修改。');
-                  })
-                }
-              >
-                确认使用此歌词
-              </button>
-              <button onClick={() => setSelected(null)}>取消选择</button>
+              <InteractiveCandidateAudition
+                candidate={selected}
+                hasWords={hasWords}
+                showWordSplits={showWordSplits}
+                offset={offset}
+                onOffsetChange={setOffset}
+                trackId={trackId}
+                track={track}
+                player={player}
+              />
+              <div className="button-row" style={{ marginTop: 12 }}>
+                <button
+                  className="primary"
+                  disabled={busy}
+                  onClick={() =>
+                    void run(async () => {
+                      await api(`/manage/lyric-candidates/${selected.id}/apply`, {
+                        method: 'POST',
+                        body: JSON.stringify({
+                          version: selected.lyrics_version,
+                          file_version: selected.file_version,
+                          offset_ms: offset,
+                        }),
+                      });
+                      setSelected(null);
+                      applied();
+                      window.dispatchEvent(
+                        new CustomEvent('wildstring:lyrics-updated', { detail: trackId }),
+                      );
+                      setMessage('已保存选中的歌词，音乐文件未修改。');
+                    })
+                  }
+                >
+                  确认使用此歌词
+                </button>
+                <button type="button" onClick={() => setSelected(null)}>
+                  取消选择
+                </button>
+              </div>
             </div>
           );
         })()}

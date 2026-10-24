@@ -12,7 +12,7 @@ PR 工作流只有仓库读取权限，不读取发布私钥。
 
 ## 版本和签名
 
-显示名称「野弦 / WildString」。正式 Android applicationId 为 `com.wildstring.app`，debug 为 `com.wildstring.app.debug`。0.1.0 的 Android versionCode 为 2；0.2.0 为 3，0.2.1 为 4，0.2.2 为 5，未发布 0.2.3 为 6、0.3.0 为 7、0.3.1 为 8、0.3.2 为 9、0.3.3 为 10、0.3.4 为 11、0.4.0 为 12，0.5.14 为 28，0.5.15 为 29，0.6.0 为 30，0.6.1 为 31，0.6.2 为 32，0.6.3 为 33，后续发布必须递增。旧的 `dev.wildstring.app.debug` 属于独立应用，安装新版后重新连接即可，服务端数据保留。
+显示名称「野弦 / WildString」。正式 Android applicationId 为 `com.wildstring.app`，debug 为 `com.wildstring.app.debug`。0.1.0 的 Android versionCode 为 2；0.2.0 为 3，0.2.1 为 4，0.2.2 为 5，未发布 0.2.3 为 6、0.3.0 为 7、0.3.1 为 8、0.3.2 为 9、0.3.3 为 10、0.3.4 为 11、0.4.0 为 12，0.5.14 为 28，0.5.15 为 29，0.6.0 为 30，0.6.1 为 31，0.6.2 为 32，0.6.3 为 33，0.7.0 为 34，0.7.1 为 35，后续发布必须递增。旧的 `dev.wildstring.app.debug` 属于独立应用，安装新版后重新连接即可，服务端数据保留。
 
 同时更新 Python、Web、Android 版本及对应锁文件：
 

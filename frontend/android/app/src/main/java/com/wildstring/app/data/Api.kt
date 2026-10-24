@@ -61,4 +61,12 @@ interface Api {
     @POST suspend fun addTracks(@Url url: String, @Body body: AddTracks): Playlist
     @DELETE suspend fun removeTrack(@Url url: String, @Query("version") version: Int): ResponseBody
     @POST("api/v1/listening") suspend fun listening(@Body body: ListeningRequest, @Tag owner: RequestOwner? = null): ResponseBody
+    @GET("api/v1/podcasts") suspend fun podcasts(): List<PodcastSummary>
+    @POST("api/v1/podcasts") suspend fun subscribePodcast(@Body body: PodcastSubscribeRequest): PodcastDetail
+    @GET("api/v1/podcasts/{id}") suspend fun podcastDetail(@Path("id") id: String): PodcastDetail
+    @POST("api/v1/podcasts/{id}/refresh") suspend fun refreshPodcast(@Path("id") id: String): PodcastDetail
+    @POST("api/v1/podcasts/refresh-all") suspend fun refreshAllPodcasts(): JsonObject
+    @DELETE("api/v1/podcasts/{id}") suspend fun deletePodcast(@Path("id") id: String): retrofit2.Response<Unit>
+    @PUT("api/v1/podcasts/episodes/{id}/progress") suspend fun updatePodcastProgress(@Path("id") id: String, @Body body: PodcastProgressUpdate): JsonObject
+    @POST("api/v1/ai/catalog-gaps") suspend fun catalogGaps(@Body body: JsonObject): JsonObject
 }

@@ -83,7 +83,12 @@ class Repository @Inject constructor(val session: SessionStore, val client: OkHt
         segments.forEach { builder.addPathSegment(it) }
         return builder.build().toString()
     }
-    fun cover(id: String): String = url("api", "v1", "tracks", id, "cover") + "?size=768"
+    private val podcastCovers = java.util.concurrent.ConcurrentHashMap<String, String>()
+    fun rememberPodcastCover(trackId: String, coverUrl: String) {
+        if (coverUrl.isNotBlank()) podcastCovers[trackId] = coverUrl
+    }
+    fun cover(id: String): String =
+        podcastCovers[id]?.takeIf { it.isNotBlank() } ?: (url("api", "v1", "tracks", id, "cover") + "?size=768")
     suspend fun coverImage(id: String): ByteArray = withContext(Dispatchers.IO) {
         val owner = session.cacheScope(); requireProfile(owner)
         val bytes = api().coverImage(cover(id), RequestOwner(owner!!)).use { body ->
@@ -103,8 +108,32 @@ class Repository @Inject constructor(val session: SessionStore, val client: OkHt
         if (bytes.size < 3 || bytes[0] != 0xff.toByte() || bytes[1] != 0xd8.toByte()) throw IOException("封面图片不可用。")
         bytes
     }
-    fun originalStream(id: String): String = url("api", "v1", "tracks", id, "stream")
+    fun originalStream(id: String): String =
+        if (id.startsWith("podcast_ep_")) {
+            url("api", "v1", "podcasts", "episodes", id.removePrefix("podcast_ep_"), "stream")
+        } else {
+            url("api", "v1", "tracks", id, "stream")
+        }
     fun stream(id: String): String = PlaybackRequest.url(originalStream(id), if (downloads.file(id) != null) 0 else settings.state.value.aacBitrate)
+
+    suspend fun podcasts(): List<PodcastSummary> = api().podcasts()
+    suspend fun subscribePodcast(feedUrl: String): PodcastDetail = api().subscribePodcast(PodcastSubscribeRequest(feedUrl = feedUrl))
+    suspend fun podcastDetail(id: String): PodcastDetail = api().podcastDetail(id)
+    suspend fun refreshPodcast(id: String): PodcastDetail = api().refreshPodcast(id)
+    suspend fun refreshAllPodcasts(): Boolean = try { api().refreshAllPodcasts(); true } catch (_: Exception) { false }
+    suspend fun deletePodcast(id: String): Boolean = api().deletePodcast(id).isSuccessful
+    suspend fun updatePodcastProgress(episodeId: String, positionSec: Int, durationSec: Int, completed: Boolean) {
+        try {
+            api().updatePodcastProgress(episodeId, PodcastProgressUpdate(positionSec, durationSec, completed))
+        } catch (_: Exception) {}
+    }
+    suspend fun checkCatalogGaps(artist: String, limit: Int = 10): com.google.gson.JsonObject {
+        val payload = com.google.gson.JsonObject().apply {
+            addProperty("artist", artist)
+            addProperty("limit", limit)
+        }
+        return api().catalogGaps(payload)
+    }
     suspend fun status(): AuthStatus {
         val owner = session.cacheScope()
         val endpoint = session.endpoint

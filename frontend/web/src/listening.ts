@@ -93,7 +93,7 @@ export class ListeningTracker {
           if (response.ok) {
             if (this.pending.get(payload.session_id) === payload)
               this.pending.delete(payload.session_id);
-            if (payload.listened_ms > 0)
+            if (payload.listened_ms > 0 && payload.state === 'paused')
               window.dispatchEvent(new Event('wildstring:listening-updated'));
           }
         } catch {

@@ -9,7 +9,55 @@ from pathlib import Path
 from wildstring.library.albums import album_key
 from wildstring.provider_schema import SCHEMA as PROVIDER_SCHEMA
 
-SCHEMA_VERSION = 31
+SCHEMA_VERSION = 32
+PODCAST_SCHEMA = """
+BEGIN IMMEDIATE;
+CREATE TABLE IF NOT EXISTS podcasts (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    author TEXT NOT NULL DEFAULT '',
+    description TEXT NOT NULL DEFAULT '',
+    feed_url TEXT NOT NULL UNIQUE,
+    cover_url TEXT NOT NULL DEFAULT '',
+    auto_update INTEGER NOT NULL DEFAULT 1,
+    update_interval_minutes INTEGER NOT NULL DEFAULT 60,
+    download_policy TEXT NOT NULL DEFAULT 'latest_3',
+    retention_policy TEXT NOT NULL DEFAULT 'keep',
+    slow_download INTEGER NOT NULL DEFAULT 0,
+    max_retries INTEGER NOT NULL DEFAULT 3,
+    retry_backoff_base INTEGER NOT NULL DEFAULT 5,
+    last_updated_at TEXT,
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS podcast_episodes (
+    id TEXT PRIMARY KEY,
+    podcast_id TEXT NOT NULL REFERENCES podcasts(id) ON DELETE CASCADE,
+    guid TEXT NOT NULL,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    audio_url TEXT NOT NULL,
+    duration_seconds INTEGER NOT NULL DEFAULT 0,
+    pub_date TEXT NOT NULL DEFAULT '',
+    episode_number INTEGER,
+    season_number INTEGER,
+    created_at TEXT NOT NULL,
+    local_path TEXT,
+    download_status TEXT NOT NULL DEFAULT 'none',
+    UNIQUE(podcast_id, guid)
+);
+CREATE INDEX IF NOT EXISTS episodes_by_podcast ON podcast_episodes(podcast_id, pub_date DESC);
+CREATE TABLE IF NOT EXISTS podcast_progress (
+    user_id TEXT NOT NULL,
+    episode_id TEXT NOT NULL REFERENCES podcast_episodes(id) ON DELETE CASCADE,
+    position_seconds INTEGER NOT NULL DEFAULT 0,
+    duration_seconds INTEGER NOT NULL DEFAULT 0,
+    completed INTEGER NOT NULL DEFAULT 0,
+    last_listened_at TEXT NOT NULL,
+    PRIMARY KEY(user_id, episode_id)
+);
+PRAGMA user_version = 32;
+COMMIT;
+"""
 TRANSCODING_SCHEMA = """
 BEGIN IMMEDIATE;
 CREATE TABLE transcoding_settings (
@@ -534,6 +582,8 @@ class Database:
                     )
                 connection.execute("PRAGMA user_version = 31")
                 connection.commit()
+            if current < 32:
+                connection.executescript(PODCAST_SCHEMA)
             connection.execute("PRAGMA journal_mode = WAL")
 
     def check_ready(self) -> bool:

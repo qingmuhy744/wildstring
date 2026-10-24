@@ -11,7 +11,6 @@ import os
 import re
 import sys
 from abc import ABC, abstractmethod
-from importlib.metadata import version
 from urllib.error import HTTPError
 from urllib.parse import urlsplit
 from urllib.request import Request
@@ -35,6 +34,7 @@ from mcp.types import (
     ToolAnnotations,
 )
 
+from wildstring import get_app_version
 from wildstring.outbound import OutboundError, request_bytes
 
 USAGE = """WildString tools operate on real library IDs. Library tags and source
@@ -171,7 +171,7 @@ class BridgeProtocol(ABC):
 
         return Server(
             "WildString",
-            version=version("wildstring-backend"),
+            version=get_app_version(),
             instructions=USAGE,
             on_list_tools=list_tools,
             on_call_tool=call_tool,

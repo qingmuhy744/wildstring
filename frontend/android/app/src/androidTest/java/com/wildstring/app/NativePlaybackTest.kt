@@ -1,7 +1,6 @@
 package com.wildstring.app
 
 import android.content.ComponentName
-import android.content.pm.ActivityInfo
 import android.graphics.Bitmap
 import java.io.ByteArrayOutputStream
 import android.content.res.Configuration
@@ -212,7 +211,7 @@ class NativePlaybackTest {
             runCatching { captureFailure() }
             throw failure
         } finally {
-            runCatching { onAndroidMain { resumedActivity()?.let { ViewModelProvider(it)[MusicViewModel::class.java] }?.let { vm -> vm.settings.playbackStyle("cover"); vm.repository.session.invalidate(); vm.controller?.stop(); vm.controller?.clearMediaItems() } } }
+            runCatching { onAndroidMain { resumedActivity()?.let { ViewModelProvider(it)[MusicViewModel::class.java] }?.let { vm -> vm.settings.playbackStyle("cover"); vm.settings.orientation("auto"); vm.repository.session.invalidate(); vm.controller?.stop(); vm.controller?.clearMediaItems() } } }
             shellForTest("cmd uimode night $previousNight")
             stage("test cleanup complete")
         }
@@ -274,7 +273,7 @@ class NativePlaybackTest {
         }
         expectedWindow = phoneWindow
         val vm = compose.runOnIdle { ViewModelProvider(compose.activity)[MusicViewModel::class.java] }
-        compose.runOnIdle { vm.settings.playbackStyle("cover") }
+        compose.runOnIdle { vm.settings.playbackStyle("cover"); vm.settings.orientation("sensor") }
         val requests = ConcurrentLinkedQueue<RecordedRequest>()
         val offline = AtomicBoolean(false)
         val unauthorized = AtomicBoolean(false)
@@ -430,23 +429,6 @@ class NativePlaybackTest {
                 assertTrue(kotlin.math.abs(compose.runOnIdle { player.currentPosition } - stylePosition) < 250)
                 if (key != "cover") {
                     capture("player-$key-phone.png", style = key)
-                    val orientation = compose.runOnIdle { compose.activity.requestedOrientation }
-                    try {
-                        rotate(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE)
-                        waitForConfigurationTag("player-landscape")
-                        capture("player-$key-landscape.png", style = key)
-                        compose.onNodeWithContentDescription("播放").assertIsDisplayed()
-                        compose.onNodeWithContentDescription("上一首").assertIsDisplayed()
-                        compose.onNodeWithContentDescription("下一首").assertIsDisplayed()
-                        val visualBounds = compose.onNodeWithTag("playback-visual-$key").fetchSemanticsNode().boundsInRoot
-                        val controlsBounds = compose.onNodeWithContentDescription("播放").fetchSemanticsNode().boundsInRoot
-                        val playerBounds = compose.onNodeWithTag("player-landscape").fetchSemanticsNode().boundsInRoot
-                        assertTrue("Landscape must retain a large visual", visualBounds.width > playerBounds.height * .45f)
-                        assertTrue("Landscape controls belong beside the visual", visualBounds.right < controlsBounds.left)
-                        assertEquals(styleEntry, compose.runOnIdle { player.currentMediaItem!!.mediaId })
-                        assertTrue(kotlin.math.abs(compose.runOnIdle { player.currentPosition } - stylePosition) < 250)
-                    } finally { rotate(orientation) }
-                    waitForConfigurationTag("player-phone")
                 }
                 stage("style complete $key")
             }

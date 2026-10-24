@@ -264,11 +264,31 @@ export function MetadataJobs({
           </p>
           {view === 'attention' && !!value?.counts.attention && (
             <p className="muted metadata-task-guidance" role="note">
-              这些结果产生后歌曲信息发生过变化，旧候选不能直接应用。请点“重新查询”生成新的候选；“查看旧结果”只用于核对历史依据。
+              包含查询失败、网络异常或需人工核对的任务。可单曲重试，也可一键忽略归档至历史记录。
             </p>
           )}
         </div>
         <div className="metadata-task-toolbar">
+          {view === 'attention' && !!value?.counts.attention ? (
+            <button
+              disabled={busy}
+              onClick={() => {
+                if (
+                  confirm(
+                    `忽略全部 ${value.counts.attention} 个需处理问题？相关异常记录将归档到历史记录中。`,
+                  )
+                ) {
+                  void mutate(
+                    '/manage/providers/tasks/attention/clear',
+                    { through: value.snapshot_at, batch_id: batchId },
+                    `已忽略 ${value.counts.attention} 个问题。`,
+                  );
+                }
+              }}
+            >
+              忽略全部问题（{value.counts.attention}）
+            </button>
+          ) : null}
           {value?.queued ? (
             <button
               disabled={busy}

@@ -529,6 +529,8 @@ export function LyricsEditor({
       )}
       <OnlineLyrics
         trackId={track.id}
+        track={track}
+        player={player}
         applied={() => {
           void load();
         }}

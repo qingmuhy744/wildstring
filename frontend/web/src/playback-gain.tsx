@@ -149,8 +149,24 @@ export function GainControls({ trackId }: { trackId?: string }) {
           className="playlist-editor gain-dialog"
           style={{ maxHeight: '90dvh', overflow: 'auto' }}
         >
-          <h2>响度均衡与手动调整</h2>
-          <p>按账号保存，不修改音频。专辑整体调整与单曲额外微调叠加；自动均衡可独立关闭。</p>
+          <div className="editor-heading">
+            <div>
+              <span className="eyebrow">PLAYBACK GAIN</span>
+              <h2>响度均衡与手动调整</h2>
+              <p className="muted">
+                按账号保存，不修改音频。专辑整体调整与单曲额外微调叠加；自动均衡可独立关闭。
+              </p>
+            </div>
+            <button
+              type="button"
+              className="icon-button"
+              aria-label="关闭"
+              tabIndex={-1}
+              onClick={() => setOpen(false)}
+            >
+              ×
+            </button>
+          </div>
           <p role="status">{message}</p>
           {record && (
             <fieldset disabled={busy}>
@@ -294,7 +310,11 @@ export function GainControls({ trackId }: { trackId?: string }) {
               {record.analysis.error && <p>分析未完成：{record.analysis.error}</p>}
             </fieldset>
           )}
-          <button onClick={() => setOpen(false)}>关闭响度设置</button>
+          <div className="editor-footer">
+            <button type="button" onClick={() => setOpen(false)}>
+              关闭响度设置
+            </button>
+          </div>
         </dialog>
       )}
     </>
