@@ -50,7 +50,14 @@ def test_parse_duration():
     assert parse_duration("invalid") == 0
 
 
-def test_podcast_full_lifecycle(settings: Settings, authenticated_client):
+def test_podcast_full_lifecycle(settings: Settings, authenticated_client, monkeypatch):
+    # Subscription and settings updates may auto-queue downloads. The fixture
+    # URLs are deliberately synthetic, so keep this lifecycle test focused on
+    # the API contract instead of leaving retrying network workers behind.
+    monkeypatch.setattr(
+        "wildstring.podcasts.PodcastManager.queue_download_episode",
+        lambda *_args, **_kwargs: True,
+    )
     mock_response = MagicMock()
     mock_response.read.return_value = SAMPLE_RSS
     mock_response.__enter__.return_value = mock_response
@@ -199,7 +206,11 @@ def test_podcast_full_lifecycle(settings: Settings, authenticated_client):
             assert check_res.status_code == 404
 
 
-def test_server_side_auto_update_scheduler(settings: Settings, authenticated_client):
+def test_server_side_auto_update_scheduler(settings: Settings, authenticated_client, monkeypatch):
+    monkeypatch.setattr(
+        "wildstring.podcasts.PodcastManager.queue_download_episode",
+        lambda *_args, **_kwargs: True,
+    )
     mock_response = MagicMock()
     mock_response.read.return_value = SAMPLE_RSS
     mock_response.__enter__.return_value = mock_response
