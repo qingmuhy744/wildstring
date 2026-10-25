@@ -143,7 +143,7 @@ def test_v1_database_migrates_without_losing_library(settings):
     database = Database(settings.data_dir)
     with sqlite3.connect(database.path) as connection:
         connection.executescript(SCHEMA)
-        connection.execute("INSERT INTO libraries VALUES ('existing', '/old-library')")
+        connection.execute("INSERT INTO libraries(id,root) VALUES ('existing', '/old-library')")
     database.initialize()
     database.initialize()
     with database.connect() as connection:

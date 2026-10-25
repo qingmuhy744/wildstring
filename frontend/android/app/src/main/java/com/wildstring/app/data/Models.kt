@@ -36,7 +36,14 @@ data class Track(
     @SerializedName("album_id") val albumId: String? = null,
     @SerializedName("track_number") val trackNumber: Int? = null,
     @SerializedName("disc_number") val discNumber: Int? = null,
-) { val artist: String get() = artists.joinToString(" / ").ifBlank { "未知艺人" } }
+    val podcast: PodcastTrackInfo? = null,
+    @SerializedName("library_id") val libraryId: String? = null,
+) {
+    val artist: String get() = artists.joinToString(" / ").ifBlank { "未知艺人" }
+    val podcastEpisodeId: String? get() = podcastEpisodeId(id)
+    val isPodcast: Boolean get() = podcastEpisodeId != null
+}
+data class PodcastTrackInfo(val podcastId: String, val coverUrl: String = "")
 data class Album(val id: String, val title: String, val artists: List<String>,
     @SerializedName("track_count") val trackCount: Int,
     @SerializedName("cover_track_id") val coverTrackId: String?)
@@ -165,7 +172,29 @@ data class PodcastSummary(
     @SerializedName("created_at") val createdAt: String = "",
     @SerializedName("total_episodes") val totalEpisodes: Int = 0,
     @SerializedName("unplayed_episodes") val unplayedEpisodes: Int = 0,
+    val publisher: PodcastPublisher? = null,
+    @SerializedName("publisher_version") val publisherVersion: Int = 1,
+    val followed: Boolean = false,
 )
+
+data class MusicLibrarySource(val id: String, val root: String)
+data class MusicLibrary(val id: String, val name: String, val enabled: Boolean = true,
+    @SerializedName("is_default") val isDefault: Boolean = false, val version: Int = 1,
+    val sources: List<MusicLibrarySource>? = null, @SerializedName("managed_root") val managedRoot: String? = null)
+data class MusicLibraryCreate(val name: String, @SerializedName("source_roots") val sourceRoots: List<String>)
+data class MusicLibraryInput(val name: String, @SerializedName("source_roots") val sourceRoots: List<String>,
+    val version: Int, val enabled: Boolean = true)
+data class LibraryAccess(val version: Int, @SerializedName("library_ids") val libraryIds: List<String>)
+data class AccountList(val items: List<Account>)
+data class MusicLibraryJob(val kind: String, val full: Boolean = false,
+    @SerializedName("source_id") val sourceId: String = "all", val path: String = ".")
+data class PodcastFollow(val followed: Boolean)
+
+data class PodcastPublisher(val id: String, val name: String,
+    @SerializedName("podcast_count") val podcastCount: Int = 0)
+data class PodcastPublisherDetail(val publisher: PodcastPublisher, val podcasts: List<PodcastSummary>)
+data class PodcastPublisherAssignment(val version: Int,
+    @SerializedName("publisher_id") val publisherId: String? = null, val name: String? = null)
 
 data class PodcastEpisode(
     val id: String,
@@ -181,6 +210,8 @@ data class PodcastEpisode(
     @SerializedName("created_at") val createdAt: String = "",
     @SerializedName("position_seconds") val positionSeconds: Int = 0,
     val completed: Boolean = false,
+    @SerializedName("resource_saved") val resourceSaved: Boolean = false,
+    @SerializedName("download_status") val downloadStatus: String = "none",
 ) {
     fun toTrack(podcast: PodcastSummary): Track = Track(
         id = "podcast_ep_$id",
@@ -188,9 +219,10 @@ data class PodcastEpisode(
         artists = listOf(podcast.author.ifBlank { podcast.title }),
         album = podcast.title,
         durationMs = durationSeconds.toLong() * 1000L,
-        hasCover = podcast.coverUrl.isNotBlank(),
+        hasCover = podcastArtworkUrl(podcast.coverUrl) != null,
         format = "mp3",
         status = "available",
+        podcast = PodcastTrackInfo(podcast.id, podcastArtworkUrl(podcast.coverUrl).orEmpty()),
     )
 }
 
@@ -208,8 +240,40 @@ data class PodcastSubscribeRequest(
     @SerializedName("retry_backoff_base") val retryBackoffBase: Int = 5,
 )
 
-data class PodcastProgressUpdate(
-    @SerializedName("position_seconds") val positionSeconds: Int,
-    @SerializedName("duration_seconds") val durationSeconds: Int,
-    val completed: Boolean,
+data class EpisodeProgress(
+    @SerializedName("episode_id") val episodeId: String,
+    val version: Long = 0,
+    @SerializedName("session_id") val sessionId: String = "",
+    @SerializedName("device_id") val deviceId: String = "",
+    val sequence: Long = 0,
+    @SerializedName("position_seconds") val positionSeconds: Long = 0,
+    @SerializedName("duration_seconds") val durationSeconds: Long = 0,
+    val completed: Boolean = false,
 )
+data class PodcastProgressUpdate(
+    @SerializedName("session_id") val sessionId: String,
+    @SerializedName("device_id") val deviceId: String,
+    @SerializedName("base_version") val baseVersion: Long,
+    val sequence: Long,
+    @SerializedName("position_seconds") val positionSeconds: Long,
+    @SerializedName("duration_seconds") val durationSeconds: Long,
+    val event: String,
+)
+
+data class PodcastPlaybackSettings(
+    @SerializedName("user_id") val userId: String,
+    @SerializedName("auto_cache_current") val autoCacheCurrent: Boolean = true,
+    @SerializedName("prefetch_next") val prefetchNext: Boolean = false,
+    @SerializedName("network_policy") val networkPolicy: String = "wifi",
+    val version: Int = 1,
+)
+
+data class PodcastPlaybackSettingsUpdate(
+    val version: Int,
+    @SerializedName("auto_cache_current") val autoCacheCurrent: Boolean,
+    @SerializedName("prefetch_next") val prefetchNext: Boolean,
+    @SerializedName("network_policy") val networkPolicy: String,
+)
+
+
+data class PodcastSaveResult(val id: String, val saved: Boolean, val reused: Boolean = false, val status: String = "")

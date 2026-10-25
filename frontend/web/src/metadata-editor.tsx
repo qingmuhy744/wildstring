@@ -5,6 +5,7 @@ import { TrackFileInfoDialog } from './track-file-info-dialog';
 import { LyricsEditor } from './lyrics-editor';
 import { splitMultiValue } from './metadata-parser';
 import type { Player } from './player';
+import { DialogCloseButton } from './dialog-close';
 
 export type MetadataFields = Pick<
   Track,
@@ -225,9 +226,7 @@ export function MetadataEditor({
           <h2>编辑歌曲信息</h2>
           <p className="muted">{track.title}</p>
         </div>
-        <button className="icon-button" disabled={busy} aria-label="关闭歌曲编辑" onClick={onClose}>
-          ×
-        </button>
+        <DialogCloseButton disabled={busy} aria-label="关闭歌曲编辑" onClick={onClose} />
       </div>
       <nav className="management-tabs" aria-label="歌曲编辑分类">
         <button aria-pressed={tab === 'metadata'} onClick={() => setTab('metadata')}>

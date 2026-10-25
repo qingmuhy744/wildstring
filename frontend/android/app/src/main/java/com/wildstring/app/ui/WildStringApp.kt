@@ -73,6 +73,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.media3.common.Player
 import com.google.gson.JsonObject
 import coil.compose.AsyncImage
@@ -211,6 +212,7 @@ fun WildStringApp(model: MusicViewModel) {
                     if (!connected) ConnectionScreen(state, model::connect) { servers = true } else LibraryApp(model, state)
                 } }
                 com.wildstring.app.update.UpdatePrompt()
+                PodcastProgressDialog(model)
                 LaunchedEffect(state.playing, state.handoff?.version) {
                     if (state.playing && state.current != null && state.handoff != null) model.dismissHandoff()
                 }
@@ -363,6 +365,13 @@ fun ConnectionScreen(state: MusicState, connect: (String, String, String, Boolea
 
 @Composable
 private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
+    val libraryLifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
+    LaunchedEffect(libraryLifecycle, state.serverSelection) {
+        libraryLifecycle.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
+            vm.refreshLibraries()
+            while (true) { kotlinx.coroutines.delay(30_000); vm.refreshLibraries() }
+        }
+    }
     val inbox by vm.agent.inbox.collectAsStateWithLifecycle()
     val feedback = LocalTactileFeedback.current
     val unread = inbox.unread.takeIf { inbox.owner == vm.repository.session.cacheScope() } ?: 0
@@ -399,7 +408,12 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
         vm.cancelAlbumNavigation()
         expanded = false
         queue = false
-        if (playerFromSettings) settings = true
+        if (state.current?.isPodcast == true) {
+            lyrics = false
+            settings = false
+            playerFromSettings = false
+            vm.openPlayingPodcast()
+        } else if (playerFromSettings) settings = true
     }
     fun openTrackAlbum(track: Track) {
         actions = null
@@ -484,7 +498,7 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
         var wasWide by remember { mutableStateOf(wide) }
         LaunchedEffect(wide) { if (wasWide && !wide && expanded && !queue) lyrics = true; wasWide = wide }
         BackHandler(enabled = !settings && (expanded || queue || state.canGoBack || state.tab != "search")) {
-            when { queue && !wide -> queue = false; lyrics && !wide -> lyrics = false; expanded -> collapsePlayer(); state.canGoBack -> vm.back(); else -> vm.navigate("search") }
+            when { queue && (!wide || state.current?.isPodcast == true) -> queue = false; lyrics && !wide && state.current?.isPodcast != true -> lyrics = false; expanded -> collapsePlayer(); state.tab == "podcast" && state.podcastId != null -> vm.back(); state.canGoBack -> vm.back(); else -> vm.navigate("search") }
         }
         @Composable fun BaseDestination(target: String) {
             Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))) {
@@ -500,7 +514,7 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
                     val showGlobalMore = state.tab == "search" && state.collection == null && state.kind != "recent"
                     Scaffold(
                         contentWindowInsets = WindowInsets(0, 0, 0, 0),
-                        topBar = { CatalogTopBar(state, vm::back, { settings = true }, compact = true, unread = unread,
+                        topBar = { if (state.tab != "podcast" || state.podcastId == null) CatalogTopBar(state, vm::back, { settings = true }, compact = true, unread = unread,
                             notifications = { feature = "notifications" },
                             queue = if (showGlobalMore) ({ queue = true }) else null,
                             recent = if (showGlobalMore) vm::recent else null,
@@ -538,11 +552,12 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
                     ) { padding ->
                         Box(Modifier.fillMaxSize().padding(padding)) {
                             if (state.tab == "podcast") {
-                                PodcastChannelPage(vm)
+                                savedPages.SaveableStateProvider("podcast") { PodcastChannelPage(vm) }
                             } else if (state.tab == "assistant") {
                                 MobileAssistantPage(vm)
                             } else {
                             Column(Modifier.fillMaxSize()) {
+                                MusicLibraryChoice(vm)
                                 if (state.tab == "library" && state.collection == null) LibraryTabs(state.kind, vm::kind)
                                 // Keep the editor outside query-keyed pages and discover/result branches.
                                 if (state.tab == "search" && state.collection == null && state.kind != "recent") CatalogSearch(state.query, vm::search)
@@ -582,8 +597,8 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
                                         edit = { featurePlaylist = state.activePlaylist; feature = "playlist" },
                                         order = { featurePlaylist = state.activePlaylist; feature = "order" },
                                         delete = { deletingPlaylist = state.activePlaylist },
-                                        albumLyrics = if (state.account?.isOwner == true && (state.collection == "albums" || state.albumFilter != null)) ({ lyricScanAlbum = state.albumFilter ?: state.collectionId }) else null,
-                                        albumRefresh = if (state.account?.isOwner == true && (state.collection == "albums" || state.albumFilter != null)) ({ refreshAlbum = state.albumFilter ?: state.collectionId }) else null)
+                                        albumLyrics = null,
+                                        albumRefresh = null)
                                 }
                             }
                             var manualRefresh by remember { mutableStateOf(false) }
@@ -659,7 +674,7 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
                 BaseDestination(currentDestination)
             }
         }
-        val usePhoneQueueSheet = (!wide && !landscape) || !expanded
+        val usePhoneQueueSheet = state.current?.isPodcast == true || (!wide && !landscape) || !expanded
         val density = LocalDensity.current
         val defaultMaxQueueSheetPx = with(density) { 560.dp.toPx() }
         var measuredQueueSheetPx by remember { mutableFloatStateOf(0f) }
@@ -820,7 +835,7 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
         }
         SongAction("离线保存", Icons.Default.Download) { vm.download(listOf(track)); actions = null }
         state.activePlaylist?.takeIf { it.kind == "manual" }?.let { playlist -> SongAction("从当前歌单移除", Icons.Default.RemoveCircleOutline, destructive = true) { actions = null; scope.launch { try { vm.removePlaylistTrack(track, playlist) } catch (e: Exception) { localError = friendlyError(e) } } } }
-        if (state.account?.isOwner == true) {
+        if (state.account?.profile in listOf("owner", "librarian", "editor")) {
             HorizontalDivider(Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
             listOf(
                 Triple("metadata", "编辑歌曲信息", Icons.Default.Edit),
@@ -875,6 +890,7 @@ private fun AlbumActionsSheet(
     onReview: () -> Unit = {},
     onRefresh: () -> Unit,
 ) {
+    val accountState by vm.state.collectAsStateWithLifecycle()
     val action = remember { FeatureAction() }
     val scope = rememberCoroutineScope()
     suspend fun tracks(): List<Track> = vm.repository.collectionTracks(CatalogQuery(
@@ -919,8 +935,9 @@ private fun AlbumActionsSheet(
                 scope.launch { action.run { onAddPlaylist(tracks()) } }
             })
             HorizontalDivider(Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
-            SongAction("编辑专辑信息", Icons.Default.Edit, navigate = true, onClick = onEdit)
-            SongAction("更新专辑元数据", Icons.Default.Refresh, onClick = onRefresh)
+            if (accountState.account?.profile in listOf("owner", "librarian", "editor")) {
+                SongAction("编辑专辑信息", Icons.Default.Edit, navigate = true, onClick = onEdit)
+            }
             Spacer(Modifier.height(24.dp))
         }
     }
@@ -1006,7 +1023,7 @@ private fun RowScope.BottomItems(state: MusicState, vm: MusicViewModel) {
 internal fun Cover(vm: MusicViewModel, id: String?, title: String, modifier: Modifier, contentScale: ContentScale = ContentScale.Crop) {
     val profile by vm.repository.session.profiles.collectAsStateWithLifecycle()
     val fallback = painterResource(if (LocalRedCloth.current) R.drawable.ic_red_cloth else R.drawable.ic_wildstring)
-    AsyncImage(model = id?.let { ImageRequest.Builder(LocalContext.current).data(vm.repository.cover(it)).memoryCacheKey("${profile}:${it}").crossfade(180).build() }, imageLoader = vm.imageLoader, contentDescription = title,
+    AsyncImage(model = id?.let { ImageRequest.Builder(LocalContext.current).data(vm.repository.cover(it)).memoryCacheKey("${profile}:${vm.repository.cover(it)}").crossfade(180).build() }, imageLoader = vm.coverLoader(id), contentDescription = title,
         placeholder = fallback, error = fallback, fallback = fallback,
         contentScale = contentScale, modifier = modifier.clip(RoundedCornerShape(10.dp)))
 }
@@ -1108,21 +1125,25 @@ private fun PlayerScreen(vm: MusicViewModel, state: MusicState, wide: Boolean, l
     val sleep by vm.sleep.state.collectAsStateWithLifecycle()
     val feedback = LocalTactileFeedback.current
     val track = state.current ?: return
+    // Draw the drag offset without moving pointer hit targets during the gesture.
+    val playerModifier = Modifier.fillMaxSize().drawWithContent {
+        withTransform({ translate(top = dragOffset.value.coerceAtLeast(0f)) }) {
+            this@drawWithContent.drawContent()
+        }
+    }
+    if (track.isPodcast) {
+        Box(playerModifier) {
+            PodcastPlayerScreen(vm, state, landscape || wide, !queue,
+                onBack, onDismiss, onUpdateDrag, onQueue, onSleep)
+        }
+        return
+    }
     var artworkPreview by rememberSaveable { mutableStateOf(false) }
     val showArtwork = remember { { artworkPreview = true } }
     val dismissArtwork = remember { { artworkPreview = false } }
     val spinning = state.playing && !state.buffering && state.playbackError == null && !artworkPreview
     val thresholdTick = { feedback(TactileKind.Tap) }
-    // Translate only in the canvas draw phase on downward drag so pointerInput hit-test coordinates never shift mid-drag.
-    Box(
-        Modifier.fillMaxSize()
-            .drawWithContent {
-                val ty = dragOffset.value.coerceAtLeast(0f)
-                withTransform({ translate(top = ty) }) {
-                    this@drawWithContent.drawContent()
-                }
-            }
-    ) {
+    Box(playerModifier) {
     ArtworkBackdrop(vm, track, LocalRedCloth.current)
     Column(Modifier.testTag(if (wide) "player-tablet" else if (landscape) "player-landscape" else "player-phone")
         .fillMaxSize()
@@ -1334,7 +1355,7 @@ private fun PlaybackControls(vm: MusicViewModel, state: MusicState, onQueue: () 
 }
 
 @Composable
-private fun PlaybackSeekSection(vm: MusicViewModel, duration: Long) {
+internal fun PlaybackSeekSection(vm: MusicViewModel, duration: Long) {
     val position by vm.position.collectAsStateWithLifecycle()
     var scrub by remember { mutableStateOf<Float?>(null) }
     val feedback = LocalTactileFeedback.current

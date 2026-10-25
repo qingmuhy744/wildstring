@@ -52,9 +52,15 @@ def problems(metadata):
 
 class Intake:
     def __init__(self, settings, repository):
-        self.settings, self.repository = settings, repository
+        self._settings, self.repository = settings, repository
         self.database = repository.database
         self.root = settings.data_dir / "intake"
+
+    @property
+    def settings(self):
+        from wildstring.library.catalog import scoped_settings
+
+        return scoped_settings(self._settings, self.database)
 
     def preferences(self):
         with self.database.connect() as connection:

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { api, ApiError, type Playlist, type SmartDefinition } from './api';
+import { DialogCloseButton } from './dialog-close';
 
 type Row = { field: string; operator: string; value: string; end: string };
 const fields: Record<string, { label: string; type: 'text' | 'number' | 'boolean' | 'date' }> = {
@@ -167,15 +168,7 @@ export function PlaylistEditor({
             <span className="eyebrow">YOUR OWN MIX</span>
             <h2>{initial ? '编辑歌单' : '留住喜欢的声音。'}</h2>
           </div>
-          <button
-            type="button"
-            className="icon-button"
-            onClick={onClose}
-            disabled={saving}
-            aria-label="关闭歌单编辑"
-          >
-            ×
-          </button>
+          <DialogCloseButton onClick={onClose} disabled={saving} aria-label="关闭歌单编辑" />
         </div>
         <label>
           歌单名称

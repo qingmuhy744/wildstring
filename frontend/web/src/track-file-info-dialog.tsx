@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { api, artist, type Track } from './api';
+import { DialogCloseButton } from './dialog-close';
 
 interface TrackFileInfo {
   track_id: string;
@@ -121,14 +122,7 @@ export function TrackFileInfoDialog({
               {track.title} · {artist(track)}
             </p>
           </div>
-          <button
-            type="button"
-            className="icon-button close-button"
-            aria-label="关闭"
-            onClick={onClose}
-          >
-            ✕
-          </button>
+          <DialogCloseButton aria-label="关闭" onClick={onClose} />
         </header>
 
         {loading ? (

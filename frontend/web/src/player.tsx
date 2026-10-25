@@ -6,14 +6,40 @@ import { Icon } from './icons';
 import { FavoriteButton, type Favorites } from './favorites';
 import { ListeningTracker } from './listening';
 import {
+  PodcastProgressStore,
+  episodeId,
+  episodeResumeMode,
+  type PodcastProgressEvent,
+} from './podcast-progress';
+import type { PodcastProgressPrompt } from './podcast-progress-dialog';
+import {
   modeNames,
   readPlayback,
   savePlayback,
   QUEUE_LIMIT,
+  PLAYBACK_RATES,
+  normalizePlaybackRate,
+  type PlaybackRate,
   type PlaybackMode,
 } from './playback-state';
-import { offlineAudio, usingOfflineAccess } from './offline';
+import {
+  offlineAudio,
+  usingOfflineAccess,
+  offlineTracks,
+  removeDownload,
+  activeOfflineUserId,
+} from './offline';
+import { libraryUser } from './library-context';
+import type { MusicLibrary } from './music-libraries';
 import { GainControls, usePlaybackGain } from './playback-gain';
+import type { PodcastDetail } from './podcasts';
+import {
+  continuePodcastQueue,
+  readPodcastPreference,
+  savePodcastPreference,
+  defaultPodcastPreference,
+  type PodcastPreference,
+} from './podcast-continuation';
 
 export function usePlayer(userId: string) {
   const saved = useRef(readPlayback(userId));
@@ -29,11 +55,122 @@ export function usePlayer(userId: string) {
   const tracker = useRef(new ListeningTracker());
   const [queue, setQueue] = useState<Track[]>(saved.current?.tracks || []);
   const [index, setIndex] = useState(saved.current?.index ?? -1);
+  const accessQueue = useRef({ queue, index });
+  accessQueue.current = { queue, index };
+  const accessValidated = useRef(false);
   const [playing, setPlaying] = useState(false);
   const [position, setPosition] = useState(saved.current?.position || 0);
   const [duration, setDuration] = useState(0);
   const [volume, setVolume] = useState(saved.current?.volume ?? 0.8);
+  const [podcastPlaybackRate, setPlaybackRateState] = useState<PlaybackRate>(
+    normalizePlaybackRate(saved.current?.playbackRate),
+  );
+  const playbackRateRef = useRef<PlaybackRate>(podcastPlaybackRate);
   const [error, setError] = useState('');
+  useEffect(() => {
+    const recheck = () => {
+      void api<MusicLibrary[]>('/libraries')
+        .then(async (libraries) => {
+          if (libraryUser() !== userId) return;
+          const { queue, index } = accessQueue.current;
+          const allowed = new Set(libraries.map((library) => library.id));
+          const legacyAllowed = libraries.some((library) => library.is_default);
+          const permitted = (track: Track) =>
+            !!track.podcast_id ||
+            (track.library_id ? allowed.has(track.library_id) : legacyAllowed);
+          const filtered = queue.filter(permitted);
+          const active = queue[index];
+          if (filtered.length !== queue.length) {
+            if (active && !permitted(active)) {
+              audio.current?.pause();
+              setPlaying(false);
+            }
+            setQueue(filtered);
+            setIndex(active && permitted(active) ? filtered.indexOf(active) : -1);
+          }
+          if (activeOfflineUserId() !== userId) return;
+          const records = await offlineTracks();
+          for (const item of records) {
+            if (activeOfflineUserId() !== userId || libraryUser() !== userId) return;
+            if (!permitted(item.track)) await removeDownload(item.track.id);
+          }
+        })
+        .catch(() => {});
+    };
+    if (!accessValidated.current) {
+      accessValidated.current = true;
+      recheck();
+    }
+    window.addEventListener('wildstring:library-access-changed', recheck);
+    return () => window.removeEventListener('wildstring:library-access-changed', recheck);
+  }, [queue, index]);
+  const podcastProgress = useRef<PodcastProgressStore | null>(null);
+  const podcastTrack = useRef<Track | null>(null);
+  const podcastIntent = useRef(0);
+  const [podcastProgressPrompt, setPodcastProgressPrompt] = useState<PodcastProgressPrompt | null>(
+    null,
+  );
+  const [podcastProgressMessage, setPodcastProgressMessage] = useState('');
+  const answerProgress = useRef<(answer: 'remote' | 'local' | null) => void>(() => {});
+  function askPodcastProgress(prompt: PodcastProgressPrompt) {
+    answerProgress.current(null);
+    setPodcastProgressPrompt(prompt);
+    return new Promise<'remote' | 'local' | null>((resolve) => {
+      answerProgress.current = (value) => {
+        setPodcastProgressPrompt(null);
+        resolve(value);
+        answerProgress.current = () => {};
+      };
+    });
+  }
+  function checkpointPodcast(event: PodcastProgressEvent, force = false) {
+    const element = audio.current;
+    const id = episodeId(podcastTrack.current?.id);
+    if (
+      !id ||
+      !element ||
+      loading.current ||
+      pendingSeek.current !== null ||
+      element.readyState < 1
+    )
+      return;
+    if (!element.currentSrc.includes(`/episodes/${encodeURIComponent(id)}/stream`)) return;
+    podcastProgress.current?.checkpoint(id, element.currentTime, element.duration, event, force);
+  }
+  useEffect(() => {
+    const store = new PodcastProgressStore(userId, (id, problem) => {
+      if (episodeId(podcastTrack.current?.id) === id) setPodcastProgressMessage(problem || '');
+    });
+    podcastProgress.current = store;
+    const background = () => checkpointPodcast(audio.current?.ended ? 'ended' : 'pause', true);
+    const visibility = () => {
+      if (document.visibilityState === 'hidden') background();
+      else void store.flushAll();
+    };
+    const online = () => void store.flushAll();
+    let lastCheckpoint = Date.now();
+    const timer = setInterval(() => {
+      if (audio.current && !audio.current.paused && Date.now() - lastCheckpoint >= 5000) {
+        checkpointPodcast('progress');
+        lastCheckpoint = Date.now();
+      }
+      void store.flushAll(true);
+    }, 1000);
+    window.addEventListener('pagehide', background);
+    window.addEventListener('online', online);
+    document.addEventListener('visibilitychange', visibility);
+    void store.flushAll();
+    return () => {
+      background();
+      store.dispose();
+      podcastIntent.current++;
+      answerProgress.current(null);
+      clearInterval(timer);
+      window.removeEventListener('pagehide', background);
+      window.removeEventListener('online', online);
+      document.removeEventListener('visibilitychange', visibility);
+    };
+  }, [userId]);
   const [buffering, setBuffering] = useState(false);
   const generation = useRef(0);
   const [quality, setQuality] = useState(saved.current?.quality || 'original');
@@ -46,6 +183,45 @@ export function usePlayer(userId: string) {
   const sourceRequest = useRef<AbortController | null>(null);
   const pendingSeek = useRef<number | null>(null);
   const current = queue[index];
+  const playbackRate = current?.podcast_id ? podcastPlaybackRate : 1;
+  const [podcastDetail, setPodcastDetail] = useState<PodcastDetail | null>(null);
+  const [podcastPreference, setPodcastPreference] =
+    useState<PodcastPreference>(defaultPodcastPreference);
+  const [podcastQueueStatus, setPodcastQueueStatus] = useState<'loading' | 'ready' | 'error'>(
+    'loading',
+  );
+  const dismissedEpisodes = useRef(new Set<string>());
+  playbackRateRef.current = podcastPlaybackRate;
+  useEffect(() => {
+    const show = current?.podcast_id;
+    setPodcastDetail(null);
+    if (!show) return;
+    setPodcastPreference(readPodcastPreference(userId, show));
+    setPodcastQueueStatus('loading');
+    const controller = new AbortController();
+    void api<PodcastDetail>(`/podcasts/${encodeURIComponent(show)}`, { signal: controller.signal })
+      .then((detail) => {
+        if (controller.signal.aborted) return;
+        setPodcastDetail(detail);
+        setPodcastQueueStatus('ready');
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setPodcastQueueStatus('error');
+      });
+    return () => controller.abort();
+  }, [current?.id, current?.podcast_id, userId]);
+  useEffect(() => {
+    if (!podcastDetail || podcastQueueStatus !== 'ready') return;
+    setQueue((items) =>
+      continuePodcastQueue(
+        items,
+        index,
+        podcastDetail,
+        podcastPreference,
+        dismissedEpisodes.current,
+      ),
+    );
+  }, [podcastDetail, podcastPreference, podcastQueueStatus, index, queue]);
   const playbackGain = usePlaybackGain(audio, current?.id, userId, volume);
 
   const saveRef = useRef(() => {});
@@ -57,12 +233,13 @@ export function usePlayer(userId: string) {
         position: offset.current + (audio.current?.currentTime || position),
         quality,
         volume,
+        playbackRate: podcastPlaybackRate,
         mode,
       });
   };
   useEffect(() => {
     saveRef.current();
-  }, [queue, index, quality, volume, mode, playing]);
+  }, [queue, index, quality, volume, podcastPlaybackRate, mode, playing]);
   useEffect(() => {
     const save = () => saveRef.current();
     window.addEventListener('pagehide', save);
@@ -82,9 +259,10 @@ export function usePlayer(userId: string) {
     const restore = async () => {
       const track = state.tracks[state.index];
       // A saved queue restores paused, with a fresh authorization check while online.
-      if (navigator.onLine && !usingOfflineAccess())
+      if (navigator.onLine && !usingOfflineAccess() && !track.id.startsWith('podcast_ep_'))
         await api<Track>(`/tracks/${encodeURIComponent(track.id)}`, { signal: controller.signal });
       if (!controller.signal.aborted) {
+        podcastTrack.current = track;
         tracker.current.start(track, audio.current!);
         await loadSource(track, state.position, false);
       }
@@ -117,6 +295,13 @@ export function usePlayer(userId: string) {
       document.removeEventListener('visibilitychange', check);
     };
   }, [sleep]);
+  useEffect(() => {
+    if (audio.current) {
+      audio.current.defaultPlaybackRate = playbackRate;
+      audio.current.playbackRate = playbackRate;
+      audio.current.preservesPitch = true;
+    }
+  }, [playbackRate]);
   useEffect(() => {
     shuffleHistory.current = [];
     shuffleBag.current = [];
@@ -204,7 +389,7 @@ export function usePlayer(userId: string) {
       const offline = await offlineAudio(track.id, controller.signal);
       if (!navigator.onLine && !offline) throw new Error('这首歌尚未完整离线保存。');
       let next: PlaybackPlan | null = null;
-      if (!offline && qualityRef.current !== 'original') {
+      if (!offline && !track.podcast_id && qualityRef.current !== 'original') {
         const query = new URLSearchParams({
           format: 'aac',
           bitrate_kbps: qualityRef.current,
@@ -232,8 +417,12 @@ export function usePlayer(userId: string) {
         return;
       }
       pendingSeek.current = next?.mode !== 'transcode' && seconds > 0 ? seconds : null;
+      const rate = track.podcast_id ? playbackRateRef.current : 1;
+      element.defaultPlaybackRate = rate;
       element.src = url;
       element.load();
+      element.playbackRate = rate;
+      element.preservesPitch = true;
       loading.current = false;
       if (desiredPlay.current) play();
       else setBuffering(false);
@@ -248,7 +437,13 @@ export function usePlayer(userId: string) {
     }
   }
 
-  function start(tracks: Track[], target: number, seconds = 0, autoplay = true) {
+  function start(
+    tracks: Track[],
+    target: number,
+    seconds?: number,
+    autoplay = true,
+    automatic = false,
+  ) {
     const element = audio.current;
     const track = tracks[target];
     if (!element || !track) return;
@@ -256,14 +451,77 @@ export function usePlayer(userId: string) {
       setError(`播放队列最多 ${QUEUE_LIMIT} 首。`);
       return;
     }
-    tracker.current.start(track, element);
-    setQueue(tracks);
-    setIndex(target);
-    void loadSource(track, seconds, autoplay);
+    const intent = ++podcastIntent.current;
+    answerProgress.current(null);
+    const begin = (position: number) => {
+      podcastTrack.current = track;
+      tracker.current.start(track, element);
+      if (tracks !== queue) dismissedEpisodes.current.clear();
+      setQueue(tracks);
+      setIndex(target);
+      void loadSource(track, position, autoplay);
+    };
+    const id = episodeId(track.id);
+    if (!id || (!autoplay && seconds === undefined)) {
+      checkpointPodcast(audio.current?.ended ? 'ended' : 'stop', true);
+      podcastProgress.current?.leave();
+      begin(seconds ?? 0);
+      return;
+    }
+    void (async () => {
+      const store = podcastProgress.current;
+      if (!store || !id) return;
+      checkpointPodcast(audio.current?.ended ? 'ended' : 'pause', true);
+      element.pause();
+      const { remote, local, conflict } = await store.inspect(id);
+      if (intent !== podcastIntent.current) return;
+      let position =
+        seconds ??
+        (local?.dirty && !conflict
+          ? local.position_seconds
+          : remote.completed
+            ? 0
+            : remote.position_seconds);
+      const mode = episodeResumeMode(userId);
+      const localPosition = seconds ?? local?.position_seconds ?? 0;
+      if (
+        conflict ||
+        (seconds === undefined && position > 0 && mode === 'ask' && !automatic && !store.owns(id))
+      ) {
+        const choice = await askPodcastProgress({
+          title: track.title,
+          remote: remote.completed ? 0 : remote.position_seconds,
+          local: conflict ? localPosition : 0,
+          conflict,
+        });
+        if (choice === null || intent !== podcastIntent.current) return;
+        position =
+          choice === 'remote'
+            ? remote.completed
+              ? 0
+              : remote.position_seconds
+            : conflict
+              ? localPosition
+              : 0;
+      } else if (seconds === undefined && mode === 'restart') position = 0;
+      setPodcastProgressMessage('');
+      // Freeze the revision that was inspected; never refresh and silently force a conflict away.
+      if (!(await store.begin(id, remote, position, track.duration_ms / 1000))) {
+        setPodcastProgressMessage('另一台设备刚更新了本集，请重新选择接续位置。');
+        return;
+      }
+      if (intent !== podcastIntent.current) {
+        store.leave();
+        return;
+      }
+      begin(position);
+    })().catch(() => {
+      if (intent === podcastIntent.current) setError('暂时无法读取单集进度，请重试。');
+    });
   }
 
   function feedback(action: 'skip' | 'complete') {
-    if (current && navigator.onLine)
+    if (current && !current.podcast_id && navigator.onLine)
       void api('/recommendations/feedback', {
         method: 'POST',
         body: JSON.stringify({ event_id: eventId(), track_id: current.id, action }),
@@ -278,8 +536,8 @@ export function usePlayer(userId: string) {
       audio.current?.pause();
       return;
     }
-    if (automatic && mode === 'repeat_one') target = index;
-    else if (mode === 'shuffle') {
+    if (automatic && mode === 'repeat_one' && !current?.podcast_id) target = index;
+    else if (mode === 'shuffle' && !current?.podcast_id) {
       if (direction < 0) target = shuffleHistory.current.pop() ?? index;
       else {
         if (!shuffleBag.current.length)
@@ -293,16 +551,23 @@ export function usePlayer(userId: string) {
           shuffleHistory.current.push(index);
         }
       }
-    } else if (mode === 'repeat_all') target = (target + queue.length) % queue.length;
+    } else if (mode === 'repeat_all' && !current?.podcast_id)
+      target = (target + queue.length) % queue.length;
     if (target >= 0 && target < queue.length) {
       if (!automatic && direction > 0) feedback('skip');
-      start(queue, target);
+      start(queue, target, undefined, true, automatic);
     }
   }
 
   function seek(value: number) {
     if (!audio.current || !current || !duration) return;
     const target = Math.max(0, Math.min(value, duration - 0.05));
+    const id = episodeId(current.id);
+    if (id && !podcastProgress.current?.owns(id)) {
+      // A deliberate seek is an intent to listen, even when the restored player is paused.
+      start(queue, index, target, !audio.current.paused);
+      return;
+    }
     if (
       planRef.current?.mode === 'transcode' ||
       (loading.current && qualityRef.current !== 'original')
@@ -332,7 +597,8 @@ export function usePlayer(userId: string) {
       setBuffering(false);
     } else {
       setError('');
-      if (audio.current.error || !audio.current.getAttribute('src')) start(queue, index);
+      if (current.podcast_id || audio.current.error || !audio.current.getAttribute('src'))
+        start(queue, index);
       else play();
     }
   }
@@ -351,6 +617,15 @@ export function usePlayer(userId: string) {
         loading.current ? desiredPlay.current : !audio.current.paused,
       );
     }
+  }
+
+  function setPlaybackRate(value: number) {
+    if (!current?.podcast_id) return;
+    if (audio.current) tracker.current.sample(audio.current);
+    const next = normalizePlaybackRate(value);
+    playbackRateRef.current = next;
+    setPlaybackRateState(next);
+    if (audio.current) audio.current.playbackRate = next;
   }
 
   async function mediaError() {
@@ -393,7 +668,7 @@ export function usePlayer(userId: string) {
       album: current.album || '',
     });
     const actions: [MediaSessionAction, MediaSessionActionHandler][] = [
-      ['play', play],
+      ['play', () => (current.podcast_id ? start(queue, index) : play())],
       [
         'pause',
         () => {
@@ -437,6 +712,10 @@ export function usePlayer(userId: string) {
   return {
     audio,
     visualPhase,
+    podcastProgressPrompt,
+    podcastProgressMessage,
+    answerPodcastProgress: (choice: 'remote' | 'local' | null) => answerProgress.current(choice),
+    reviewPodcastProgress: () => start(queue, index),
     queue,
     index,
     current,
@@ -447,14 +726,25 @@ export function usePlayer(userId: string) {
     error,
     buffering,
     quality,
+    playbackRate,
+    podcastPreference,
+    podcastQueueStatus,
+    setPodcastPreference: (value: PodcastPreference) => {
+      if (!current?.podcast_id) return;
+      savePodcastPreference(userId, current.podcast_id, value);
+      setPodcastPreference(value);
+    },
     changeQuality,
+    setPlaybackRate,
     plan,
     mode,
     setMode,
     sleep,
     sleepLabel:
       sleep === 'track'
-        ? '本曲结束停止'
+        ? current?.podcast_id
+          ? '本集结束停止'
+          : '本曲结束停止'
         : typeof sleep === 'number'
           ? `约 ${Math.max(1, Math.ceil((sleep - clock) / 60000))} 分钟后停止`
           : '睡眠定时',
@@ -496,6 +786,9 @@ export function usePlayer(userId: string) {
       if (from < 0 || to < 0 || from >= queue.length || to >= queue.length || from === to) return;
       const next = [...queue];
       next.splice(to, 0, next.splice(from, 1)[0]);
+      // Explicit reordering takes ownership of the moved automatic entry.
+      if (next[to].podcast_queue_origin === 'auto')
+        next[to] = { ...next[to], podcast_queue_origin: undefined };
       setQueue(next);
       if (from === index) setIndex(to);
       else if (from < index && to >= index) setIndex(index - 1);
@@ -506,16 +799,31 @@ export function usePlayer(userId: string) {
         setError(`播放队列最多 ${QUEUE_LIMIT} 首。`);
         return false;
       }
-      setQueue((items) => (items.length < QUEUE_LIMIT ? [...items, track] : items));
+      setQueue((items) => {
+        if (items.length >= QUEUE_LIMIT) return items;
+        const autoAt = items.findIndex(
+          (item, i) => i > index && item.podcast_queue_origin === 'auto',
+        );
+        const at = autoAt < 0 ? items.length : autoAt;
+        return [
+          ...items.slice(0, at),
+          { ...track, podcast_queue_origin: undefined },
+          ...items.slice(at),
+        ];
+      });
       return true;
     },
     remove: (target: number) => {
       if (target === index) return;
+      if (queue[target]?.podcast_queue_origin === 'auto')
+        dismissedEpisodes.current.add(queue[target].id);
       setQueue((items) => items.filter((_, i) => i !== target));
       if (target < index) setIndex(index - 1);
     },
     audioEvents: {
       onLoadedMetadata: () => {
+        if (audio.current)
+          audio.current.playbackRate = current?.podcast_id ? playbackRateRef.current : 1;
         if (audio.current && pendingSeek.current !== null) {
           audio.current.currentTime = pendingSeek.current;
           pendingSeek.current = null;
@@ -523,6 +831,7 @@ export function usePlayer(userId: string) {
       },
       onPlay: () => setPlaying(true),
       onPause: () => {
+        checkpointPodcast(audio.current?.ended ? 'ended' : 'pause', true);
         if (audio.current) tracker.current.playing(audio.current, false);
         setPlaying(false);
         if (!loading.current || !desiredPlay.current) setBuffering(false);
@@ -531,6 +840,7 @@ export function usePlayer(userId: string) {
         if (audio.current) tracker.current.beforeSeek(audio.current);
       },
       onSeeked: () => {
+        checkpointPodcast('seek', true);
         if (audio.current) tracker.current.afterSeek(audio.current);
       },
       onPlaying: () => {
@@ -559,6 +869,7 @@ export function usePlayer(userId: string) {
       },
       onEnded: () => {
         if (loading.current) return;
+        checkpointPodcast('ended', true);
         if (audio.current) tracker.current.finish(audio.current);
         setPlaying(false);
         setBuffering(false);
@@ -601,7 +912,11 @@ export function PlayerBar({
           aria-expanded={lyricsOpen}
         >
           {current ? (
-            <Cover trackId={current.id} title={current.album || current.title} />
+            <Cover
+              trackId={current.id}
+              title={current.album || current.title}
+              source={current.cover_url}
+            />
           ) : (
             <span className="playing-art-placeholder" aria-hidden="true">
               <Icon name="album" />
@@ -622,18 +937,19 @@ export function PlayerBar({
       <PlaybackControls player={player} />
       <div className="player-options">
         <SleepControl player={player} />
-        <QualityControl player={player} />
-        <GainControls trackId={current?.id} />
-        {current && <FavoriteButton track={current} favorites={favorites} />}
+        {current?.podcast_id && <PlaybackRateControl player={player} />}
+        {!current?.podcast_id && <QualityControl player={player} />}
+        {!current?.podcast_id && <GainControls trackId={current?.id} />}
+        {current && !current.podcast_id && <FavoriteButton track={current} favorites={favorites} />}
         <button
           className={`lyrics-toggle icon-button ${lyricsOpen ? 'active' : ''}`}
           onClick={onLyrics}
           aria-expanded={lyricsOpen}
           disabled={!current}
-          aria-label="显示歌词"
-          data-help="查看同步歌词"
+          aria-label={current?.podcast_id ? '显示播客详情' : '显示歌词'}
+          data-help={current?.podcast_id ? '查看播客详情与续播' : '查看同步歌词'}
         >
-          词
+          {current?.podcast_id ? '报' : '词'}
         </button>
         <VolumeControl player={player} />
         <button
@@ -650,40 +966,87 @@ export function PlayerBar({
   );
 }
 
+export function PodcastSkipButton({
+  player,
+  seconds,
+  direction,
+  variant = 'default',
+}: {
+  player: Player;
+  seconds: 15 | 30;
+  direction: 'backward' | 'forward';
+  variant?: 'default' | 'retro';
+}) {
+  const amount = direction === 'backward' ? -seconds : seconds;
+  return (
+    <button
+      className={`icon-button podcast-skip podcast-skip-${direction} ${
+        variant === 'retro' ? 'retro-skip' : ''
+      }`}
+      aria-label={`${variant === 'retro' ? '收音机' : ''}${direction === 'backward' ? '后退' : '前进'}${seconds}秒`}
+      onClick={() => player.seek(player.playbackTime() + amount)}
+      disabled={!player.duration}
+    >
+      <span className="podcast-skip-glyph" aria-hidden="true">
+        <svg viewBox="0 0 32 32">
+          <path
+            d={
+              direction === 'backward'
+                ? 'M8.93 8.93A10 10 0 1 1 6 16M8.93 3.93v5h5'
+                : 'M23.07 8.93A10 10 0 1 0 26 16M23.07 3.93v5h-5'
+            }
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+        <b>{seconds}</b>
+      </span>
+    </button>
+  );
+}
+
 export function PlaybackControls({ player }: { player: Player }) {
   const { current, playing, index, queue, duration, position } = player;
+  const podcast = !!current?.podcast_id;
   return (
     <div className="transport">
-      <div className="transport-buttons">
+      <div className={`transport-buttons ${podcast ? 'podcast-transport' : ''}`}>
+        {podcast ? (
+          <PodcastSkipButton player={player} seconds={15} direction="backward" />
+        ) : (
+          <button
+            className="icon-button playback-mode"
+            aria-label={`播放模式：${modeNames[player.mode]}`}
+            data-help={`播放模式：${modeNames[player.mode]}`}
+            onClick={() => {
+              const modes = Object.keys(modeNames) as PlaybackMode[];
+              player.setMode(modes[(modes.indexOf(player.mode) + 1) % modes.length]);
+            }}
+          >
+            <Icon
+              name={
+                player.mode === 'shuffle'
+                  ? 'shuffle'
+                  : player.mode === 'repeat_one'
+                    ? 'repeatOne'
+                    : player.mode === 'repeat_all'
+                      ? 'repeat'
+                      : 'sequential'
+              }
+            />
+          </button>
+        )}
         <button
-          className="icon-button playback-mode"
-          aria-label={`播放模式：${modeNames[player.mode]}`}
-          data-help={`播放模式：${modeNames[player.mode]}`}
-          onClick={() => {
-            const modes = Object.keys(modeNames) as PlaybackMode[];
-            player.setMode(modes[(modes.indexOf(player.mode) + 1) % modes.length]);
-          }}
-        >
-          <Icon
-            name={
-              player.mode === 'shuffle'
-                ? 'shuffle'
-                : player.mode === 'repeat_one'
-                  ? 'repeatOne'
-                  : player.mode === 'repeat_all'
-                    ? 'repeat'
-                    : 'sequential'
-            }
-          />
-        </button>
-        <button
-          className="icon-button"
+          className="icon-button transport-track-button"
           onClick={() => player.step(-1)}
-          disabled={!current || (index <= 0 && player.mode === 'sequential')}
-          aria-label="上一首"
+          disabled={!current || (index <= 0 && (podcast || player.mode === 'sequential'))}
+          aria-label={podcast ? '上一集' : '上一首'}
         >
           <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M5 5h2v14H5zm14 0v14L8 12z" />
+            <path d={podcast ? 'M6 5v14M18 5l-8 7 8 7' : 'M5 5h2v14H5zm14 0v14L8 12z'} />
           </svg>
         </button>
         <button
@@ -697,15 +1060,18 @@ export function PlaybackControls({ player }: { player: Player }) {
           </svg>
         </button>
         <button
-          className="icon-button"
+          className="icon-button transport-track-button"
           onClick={() => player.step(1)}
-          disabled={!current || (index >= queue.length - 1 && player.mode === 'sequential')}
-          aria-label="下一首"
+          disabled={
+            !current || (index >= queue.length - 1 && (podcast || player.mode === 'sequential'))
+          }
+          aria-label={podcast ? '下一集' : '下一首'}
         >
           <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M17 5h2v14h-2zM5 5l11 7-11 7z" />
+            <path d={podcast ? 'M18 5v14M6 5l8 7-8 7' : 'M17 5h2v14h-2zM5 5l11 7-11 7z'} />
           </svg>
         </button>
+        {podcast && <PodcastSkipButton player={player} seconds={30} direction="forward" />}
         {player.buffering && (
           <span className="sr-only" role="status">
             缓冲中…
@@ -784,6 +1150,25 @@ export function QualityControl({ player }: { player: Player }) {
   );
 }
 
+export function PlaybackRateControl({ player }: { player: Player }) {
+  return (
+    <label className="playback-rate-control">
+      <span>倍速</span>
+      <select
+        aria-label="播放倍速"
+        value={player.playbackRate}
+        onChange={(event) => player.setPlaybackRate(Number(event.target.value))}
+      >
+        {PLAYBACK_RATES.map((rate) => (
+          <option key={rate} value={rate}>
+            {rate}×
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
 export function SleepControl({ player }: { player: Player }) {
   const id = useId();
   const panel = useRef<HTMLDivElement>(null);
@@ -829,7 +1214,9 @@ export function SleepControl({ player }: { player: Player }) {
             <option value="15">15 分钟</option>
             <option value="30">30 分钟</option>
             <option value="60">60 分钟</option>
-            <option value="track">播完本曲停止</option>
+            <option value="track">
+              {player.current?.podcast_id ? '播完本集停止' : '播完本曲停止'}
+            </option>
           </select>
         </label>
       </div>

@@ -43,4 +43,10 @@ class CatalogWindowTest {
         assertFalse(query.copy(collection = "artists", collectionId = "artist", albumFilter = "album").indexed)
         assertFalse(query.copy(collection = "playlists", collectionId = "favorites").indexed)
     }
+    @Test fun librarySelectionHasAnIndependentCatalogCacheIdentity() {
+        val all = CatalogQuery(tab = "library", kind = "tracks")
+        assertNotEquals(all.key, all.copy(libraryId = "classical").key)
+        assertNotEquals(all.copy(libraryId = "pop").key, all.copy(libraryId = "classical").key)
+    }
+
 }

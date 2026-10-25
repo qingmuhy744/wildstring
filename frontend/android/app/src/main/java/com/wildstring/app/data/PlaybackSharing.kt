@@ -35,6 +35,7 @@ class PlaybackSharing @Inject constructor(@ApplicationContext context: Context, 
     fun pauseOffered(snapshot: SharedPlayback) { repository.session.cacheScope()?.let { owner -> snapshot.pauseEvent()?.let { prefs.edit().putString("offered-pause:$owner", it).apply() } } }
     suspend fun acceptRemote(version: Int) = lock.withLock { automaticOwner = null; enabled = false; revision = version; seen(version) }
     suspend fun publish(snapshot: SharedPlayback, claim: Boolean = false, claimVersion: Int? = null, force: Boolean = false): SharedPlayback? = lock.withLock {
+        if (snapshot.trackIds.any { podcastEpisodeId(it) != null }) return@withLock null
         val profile = repository.session.cacheScope() ?: return@withLock null
         if (profile != owner) { owner = profile; revision = null; supportsPausedHandoff = false; enabled = false; lastAt = 0; lastSnapshot = null; claimedGeneration = -1 }
         if (!claim && (mutableMode.value == "off" || automaticOwner != profile)) return@withLock null

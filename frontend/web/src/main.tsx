@@ -10,6 +10,7 @@ import './style.css';
 import './completion.css';
 import './browse.css';
 import './podcasts.css';
+import './podcast-player.css';
 
 type AuthStatus = {
   configured: boolean;

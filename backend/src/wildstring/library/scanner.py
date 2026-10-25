@@ -80,6 +80,9 @@ def scan_library(
     try:
         database = Database(settings.data_dir)
         database.initialize()
+        from wildstring.library.catalog import scoped_settings
+
+        settings = scoped_settings(settings, database)
         repository = LibraryRepository(database, settings.library_dir)
         run_id = repository.begin_scan()
         if on_start is not None:
@@ -117,6 +120,9 @@ def scan_library(
                 counts["skipped"] += len(folders) - len(normal_folders)
                 folders[:] = sorted(normal_folders)
                 for name in sorted(files):
+                    from wildstring.library.catalog import require_current_library
+
+                    require_current_library(database, "library:manage")
                     path = Path(directory) / name
                     if path.suffix.lower() not in SUPPORTED_SUFFIXES or path.is_symlink():
                         counts["skipped"] += 1

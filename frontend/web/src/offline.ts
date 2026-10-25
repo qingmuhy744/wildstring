@@ -228,10 +228,16 @@ export async function offlineCover(id: string): Promise<Blob | null> {
 }
 export async function removeDownload(id: string) {
   if (!account) return;
-  removed.add(key(account.id, id));
+  const user = account;
+  const epoch = generation;
+  removed.add(key(user.id, id));
   active.get(id)?.abort();
   active.delete(id);
-  await storage('readwrite', (s) => s.delete(key(account!.id, id)));
+  await storage('readwrite', (s) =>
+    epoch === generation && account?.id === user.id
+      ? s.delete(key(user.id, id))
+      : s.get(key(user.id, id)),
+  );
   changed();
 }
 export function pauseDownload(id: string) {

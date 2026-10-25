@@ -128,6 +128,9 @@ class TrackAssets:
     def cover(
         self, track_id: str, size: int = 320, *, inherit: bool = True
     ) -> tuple[bytes, str] | None:
+        current = self.repository.for_track(track_id)
+        if current.root != self.repository.root:
+            return TrackAssets(current).cover(track_id, size, inherit=inherit)
         with self.repository.database.connect() as connection:
             choice = connection.execute(
                 "SELECT filename FROM artwork_choices WHERE track_id=?", (track_id,)
@@ -176,6 +179,9 @@ class TrackAssets:
         return None
 
     def lyrics(self, track_id: str, *, include_override: bool = True) -> dict:
+        current = self.repository.for_track(track_id)
+        if current.root != self.repository.root:
+            return TrackAssets(current).lyrics(track_id, include_override=include_override)
         relative, audio = self.source(track_id)
         if include_override:
             with self.repository.database.connect() as connection:

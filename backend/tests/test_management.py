@@ -150,12 +150,21 @@ def test_metadata_validation_permissions_and_library_isolation(settings, authent
         )
     other = settings.model_copy(update={"library_dir": settings.data_dir / "another-library"})
     with authenticated_client(other) as client:
-        assert client.get(endpoint).status_code == 404
+        # Owner access follows stable library identities, regardless of the process default root.
+        assert client.get(endpoint).status_code == 200
         assert (
             client.put(endpoint, headers=HEADERS, json={"version": 2, "overrides": {}}).status_code
-            == 404
+            == 200
         )
-        assert client.get("/api/v1/manage/overview").json()["counts"]["tracks"] == 0
+        selected = next(
+            library["id"]
+            for library in client.get("/api/v1/libraries").json()
+            if library["managed_root"] == str(other.library_dir)
+        )
+        assert (
+            client.get(f"/api/v1/manage/overview?library_id={selected}").json()["counts"]["tracks"]
+            == 0
+        )
 
 
 def test_folder_metadata_batch_updates_all_members_and_keeps_versions(
@@ -349,7 +358,7 @@ def test_concurrent_submit_and_job_isolation(settings, authenticated_client):
     assert conflict.value.status_code == 409
     other = settings.model_copy(update={"library_dir": settings.data_dir / "different"})
     with authenticated_client(other) as client:
-        assert client.get("/api/v1/manage/jobs/" + ids[0]).status_code == 404
+        assert client.get("/api/v1/manage/jobs/" + ids[0]).status_code == 200
         assert client.get("/api/v1/manage/jobs").json()["total"] == 0
         assert client.post("/api/v1/manage/jobs", json={"kind": "scan"}).status_code == 403
         assert (

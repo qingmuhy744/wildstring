@@ -16,6 +16,10 @@ export class ListeningTracker {
 
   start(track: Track, audio: HTMLAudioElement) {
     this.finish(audio);
+    if (track.id.startsWith('podcast_ep_')) {
+      this.session = null;
+      return;
+    }
     this.session = {
       session_id: eventId(),
       track_id: track.id,
@@ -35,15 +39,16 @@ export class ListeningTracker {
     const clock = performance.now(),
       elapsed = Math.max(0, clock - session.clock);
     const advance = (audio.currentTime - session.position) * 1000;
+    const rate = audio.playbackRate > 0 ? audio.playbackRate : 1;
     // Seeking, buffering and paused wall time never become listening time.
     if (
       session.playing &&
       !audio.seeking &&
       audio.readyState >= 2 &&
       advance >= 0 &&
-      advance <= elapsed * 1.75 + 250
+      advance <= elapsed * rate * 1.75 + 250
     )
-      session.listened_ms += Math.min(elapsed, advance);
+      session.listened_ms += Math.min(elapsed, advance / rate);
     session.clock = clock;
     session.position = audio.currentTime;
     if (session.listened_ms - session.lastSent >= 5000) this.report();

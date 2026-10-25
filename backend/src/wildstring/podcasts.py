@@ -1,5 +1,6 @@
 """Podcast RSS subscription, server-side auto-updater, and playback API."""
 
+import hashlib
 import ipaddress
 import json
 import logging
@@ -14,19 +15,30 @@ import xml.etree.ElementTree as ET
 from collections import deque
 from datetime import UTC, datetime
 from pathlib import Path
-from threading import Event, Thread
+from threading import Event, RLock, Thread
 from typing import Annotated, Any, Literal
 from urllib.parse import urlsplit
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import RedirectResponse, StreamingResponse
+from filelock import FileLock, Timeout
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from wildstring.auth import Auth
 from wildstring.database import Database
 from wildstring.library.repository import now
 from wildstring.outbound import outbound_proxies
+from wildstring.podcast_follows import FollowUpdate, follow, followed_ids
+from wildstring.podcast_progress import ProgressState, ProgressWrite, get_progress, save_progress
+from wildstring.podcast_publishers import (
+    PodcastPublishers,
+    PublisherAssignment,
+    PublisherRef,
+    PublisherSummary,
+    publisher_fields,
+)
+from wildstring.podcast_resources import PodcastResources
 
 logger = logging.getLogger(__name__)
 
@@ -181,11 +193,20 @@ class PodcastStorageResponse(BaseModel):
     disk_usage_human: str
 
 
-class PodcastProgressRequest(BaseModel):
+class PodcastPlaybackSettingsUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    position_seconds: int = Field(default=0, ge=0)
-    duration_seconds: int = Field(default=0, ge=0)
-    completed: bool = False
+    version: int = Field(ge=1, strict=True)
+    auto_cache_current: bool
+    prefetch_next: bool
+    network_policy: Literal["off", "wifi", "any"]
+
+
+class PodcastPlaybackSettingsResponse(BaseModel):
+    user_id: str
+    auto_cache_current: bool
+    prefetch_next: bool
+    network_policy: Literal["off", "wifi", "any"]
+    version: int
 
 
 class PodcastEpisodeResponse(BaseModel):
@@ -204,6 +225,7 @@ class PodcastEpisodeResponse(BaseModel):
     completed: bool = False
     local_path: str | None = None
     download_status: str = "none"
+    resource_saved: bool = False
 
 
 class PodcastSummaryResponse(BaseModel):
@@ -226,11 +248,19 @@ class PodcastSummaryResponse(BaseModel):
     unplayed_episodes: int
     downloaded_episodes: int = 0
     storage_path: str = ""
+    publisher: PublisherRef | None = None
+    publisher_version: int = 1
+    followed: bool = False
 
 
 class PodcastDetailResponse(BaseModel):
     podcast: PodcastSummaryResponse
     episodes: list[PodcastEpisodeResponse]
+
+
+class PublisherDetailResponse(BaseModel):
+    publisher: PublisherSummary
+    podcasts: list[PodcastSummaryResponse]
 
 
 def parse_duration(raw: str | None) -> int:
@@ -475,6 +505,8 @@ class PodcastManager:
         self._failed_downloads: dict[str, dict[str, Any]] = {}
         self._download_workers: list[Thread] = []
         self._cancelled_downloads: set[str] = set()
+        self.resources = PodcastResources(self)
+        self._queue_lock = RLock()
 
     def _podcast_dir(self, podcast_id: str) -> Path:
         return self.storage_dir / podcast_folder_name(podcast_id)
@@ -571,6 +603,15 @@ class PodcastManager:
         if self.thread is not None and self.thread.is_alive():
             return
         self.stopping.clear()
+        with self.database.connect() as db:
+            pending = [
+                r[0]
+                for r in db.execute(
+                    "SELECT id FROM podcast_episodes WHERE download_status IN ('queued','downloading')"
+                )
+            ]
+        for identity in pending:
+            self.queue_download_episode(identity)
         self.thread = Thread(
             target=self._scheduler_loop,
             name="wildstring-podcast-scheduler",
@@ -729,6 +770,7 @@ class PodcastManager:
         self.stopping.wait(timeout=5)
         while not self.stopping.is_set():
             try:
+                self.resources.cleanup(dry_run=False, automatic=True)
                 self.run_scheduled_updates()
             except Exception as e:
                 logger.error("Error during scheduled podcast updates: %s", e)
@@ -797,12 +839,14 @@ class PodcastManager:
             with self.database.connect() as conn:
                 query = """
                     SELECT e.id FROM podcast_episodes e
-                    LEFT JOIN podcast_progress pr ON pr.episode_id = e.id AND pr.user_id = 'admin'
                     WHERE e.podcast_id = ? AND (e.local_path IS NULL OR e.download_status != 'downloaded')
                 """
                 params: list[Any] = [podcast_id]
                 if unplayed_only:
-                    query += " AND COALESCE(pr.completed, 0) = 0"
+                    query += """ AND EXISTS(SELECT 1 FROM podcast_follows f
+                        JOIN users u ON u.id=f.user_id AND u.enabled=1
+                        LEFT JOIN podcast_progress pr ON pr.user_id=f.user_id AND pr.episode_id=e.id
+                        WHERE f.podcast_id=e.podcast_id AND COALESCE(pr.completed,0)=0)"""
                 query += " ORDER BY e.created_at DESC"
                 if limit:
                     query += f" LIMIT {limit}"
@@ -1081,6 +1125,28 @@ class PodcastManager:
                 temporary.unlink(missing_ok=True)
 
     def download_episode(self, episode_id: str, slow_download: bool | None = None) -> bool:
+        self.storage_dir.mkdir(parents=True, exist_ok=True)
+        key = hashlib.sha256(episode_id.encode()).hexdigest()
+        try:
+            with FileLock(self.storage_dir / f".download-{key}.lock", timeout=0):
+                with self.database.connect(write=True) as db:
+                    if (
+                        db.execute(
+                            "SELECT 1 FROM podcast_episodes WHERE id=?", (episode_id,)
+                        ).fetchone()
+                        is None
+                    ):
+                        return False
+                    lease = self.resources.acquire(db, episode_id)
+                try:
+                    return self._download_episode(episode_id, slow_download)
+                finally:
+                    self.resources.release_lease(lease)
+        except Timeout:
+            # Another worker already owns this shared resource.
+            return True
+
+    def _download_episode(self, episode_id: str, slow_download: bool | None = None) -> bool:
         with self.database.connect() as conn:
             row = conn.execute(
                 """
@@ -1099,7 +1165,8 @@ class PodcastManager:
             episode_title = row["title"]
             audio_url = row["audio_url"]
             existing_path = row["local_path"]
-            if existing_path and os.path.isfile(existing_path):
+            existing = self.resources.cached_path(existing_path)
+            if existing:
                 return True
             is_slow = bool(row["slow_download"]) if slow_download is None else bool(slow_download)
 
@@ -1224,6 +1291,7 @@ class PodcastManager:
                     "UPDATE podcast_episodes SET local_path = ?, download_status = 'downloaded' WHERE id = ?",
                     (str(dest_path), episode_id),
                 )
+                self.resources.downloaded(conn, episode_id)
             self._failed_downloads.pop(episode_id, None)
             logger.info("Successfully downloaded episode %s to %s", episode_id, dest_path)
             return True
@@ -1363,48 +1431,8 @@ class PodcastManager:
         }
 
     def clean_downloaded_files(self, podcast_id: str) -> dict[str, Any]:
-        with self.database.connect() as conn:
-            p = conn.execute(
-                "SELECT id, title FROM podcasts WHERE id = ?", (podcast_id,)
-            ).fetchone()
-            if not p:
-                raise HTTPException(status_code=404, detail="播客未找到")
-
-        with self.database.connect() as conn:
-            paths = [
-                row["local_path"]
-                for row in conn.execute(
-                    "SELECT local_path FROM podcast_episodes WHERE podcast_id = ?",
-                    (podcast_id,),
-                ).fetchall()
-            ]
-            protected = [
-                row["local_path"]
-                for row in conn.execute(
-                    "SELECT local_path FROM podcast_episodes WHERE podcast_id <> ?",
-                    (podcast_id,),
-                ).fetchall()
-            ]
-        freed_bytes = 0
-        for path in (self._safe_local_path(raw) for raw in paths):
-            try:
-                if path is not None and path.is_file():
-                    freed_bytes += path.stat().st_size
-            except OSError:
-                continue
-        deleted_count = self._delete_local_paths(paths, protected=protected)
-
-        with self.database.connect(write=True) as conn:
-            conn.execute(
-                "UPDATE podcast_episodes SET local_path = NULL, download_status = 'none' WHERE podcast_id = ?",
-                (podcast_id,),
-            )
-
-        return {
-            "status": "ok",
-            "freed_bytes": freed_bytes,
-            "deleted_count": deleted_count,
-        }
+        self.get_podcast_detail(podcast_id, "admin")
+        return {"status": "ok", **self.resources.cleanup(dry_run=False, podcast_id=podcast_id)}
 
     def _get_episode_display_info(self, episode_id: str) -> dict[str, Any] | None:
         try:
@@ -1442,6 +1470,10 @@ class PodcastManager:
             return None
 
     def queue_download_episode(self, episode_id: str) -> bool:
+        with self._queue_lock:
+            return self._queue_download_episode(episode_id)
+
+    def _queue_download_episode(self, episode_id: str) -> bool:
         self._cancelled_downloads.discard(episode_id)
         if episode_id in self._active_downloads or episode_id in self._queued_episodes:
             return False
@@ -1456,8 +1488,103 @@ class PodcastManager:
             "status": "queued",
             "enqueued_at": datetime.now(UTC).isoformat(),
         }
+        with self.database.connect(write=True) as db:
+            db.execute(
+                "UPDATE podcast_episodes SET download_status='queued' WHERE id=?", (episode_id,)
+            )
         self._download_queue.put(episode_id)
         return True
+
+    def playback_settings(self, user_id: str) -> dict[str, Any]:
+        """Read per-user playback caching preferences, creating defaults lazily."""
+        with self.database.connect(write=True) as conn:
+            conn.execute(
+                "INSERT OR IGNORE INTO podcast_playback_settings(user_id) VALUES (?)", (user_id,)
+            )
+            row = conn.execute(
+                "SELECT user_id, auto_cache_current, prefetch_next, network_policy, version "
+                "FROM podcast_playback_settings WHERE user_id = ?",
+                (user_id,),
+            ).fetchone()
+        if row is None:
+            raise HTTPException(status_code=404, detail="播客播放设置不存在")
+        return {
+            "user_id": row["user_id"],
+            "auto_cache_current": bool(row["auto_cache_current"]),
+            "prefetch_next": bool(row["prefetch_next"]),
+            "network_policy": row["network_policy"],
+            "version": int(row["version"]),
+        }
+
+    def update_playback_settings(
+        self,
+        user_id: str,
+        *,
+        version: int,
+        auto_cache_current: bool,
+        prefetch_next: bool,
+        network_policy: str,
+    ) -> dict[str, Any]:
+        if network_policy not in {"off", "wifi", "any"}:
+            raise HTTPException(status_code=422, detail="invalid_podcast_network_policy")
+        with self.database.connect(write=True) as conn:
+            conn.execute(
+                "INSERT OR IGNORE INTO podcast_playback_settings(user_id) VALUES (?)", (user_id,)
+            )
+            result = conn.execute(
+                """
+                UPDATE podcast_playback_settings
+                SET auto_cache_current = ?, prefetch_next = ?, network_policy = ?, version = version + 1
+                WHERE user_id = ? AND version = ?
+                """,
+                (
+                    1 if auto_cache_current else 0,
+                    1 if prefetch_next else 0,
+                    network_policy,
+                    user_id,
+                    version,
+                ),
+            )
+            if result.rowcount == 0:
+                raise HTTPException(status_code=409, detail="podcast_playback_settings_conflict")
+        return self.playback_settings(user_id)
+
+    @staticmethod
+    def _network_allowed(policy: str, network: str) -> bool:
+        if policy == "off":
+            return False
+        if policy == "wifi":
+            return network == "wifi"
+        return network in {"wifi", "cellular", "unknown"}
+
+    def queue_playback_cache(self, episode_id: str, user_id: str, network: str) -> int:
+        """Queue the current episode and optionally its next sibling after playback starts."""
+        if network not in {"wifi", "cellular", "unknown"}:
+            network = "unknown"
+        settings = self.playback_settings(user_id)
+        if not settings["auto_cache_current"] or not self._network_allowed(
+            settings["network_policy"], network
+        ):
+            return 0
+        with self.database.connect() as conn:
+            current = conn.execute(
+                "SELECT podcast_id FROM podcast_episodes WHERE id = ?", (episode_id,)
+            ).fetchone()
+            if current is None:
+                return 0
+            episode_ids = [
+                row["id"]
+                for row in conn.execute(
+                    "SELECT id FROM podcast_episodes WHERE podcast_id = ? ORDER BY created_at DESC",
+                    (current["podcast_id"],),
+                ).fetchall()
+            ]
+        candidates = [episode_id]
+        if settings["prefetch_next"] and episode_id in episode_ids:
+            index = episode_ids.index(episode_id)
+            if index + 1 < len(episode_ids):
+                candidates.append(episode_ids[index + 1])
+        return sum(1 for candidate in candidates if self.queue_download_episode(candidate))
 
     def get_download_queue_info(self) -> dict[str, Any]:
         return {
@@ -1531,10 +1658,12 @@ class PodcastManager:
         return StreamingResponse(iterfile(), status_code=status_code, headers=response_headers)
 
     def list_podcasts(self, user_id: str) -> list[dict[str, Any]]:
+        following = followed_ids(self.database, user_id)
         with self.database.connect() as conn:
             query = """
                 SELECT
                     p.id, p.title, p.author, p.description, p.feed_url, p.cover_url,
+                    p.publisher_id, p.publisher_version, pub.name AS publisher_name,
                     p.auto_update, p.update_interval_minutes,
                     COALESCE(p.download_policy, 'latest_3') as download_policy,
                     COALESCE(p.retention_policy, 'keep') as retention_policy,
@@ -1543,9 +1672,10 @@ class PodcastManager:
                     COALESCE(p.retry_backoff_base, 5) as retry_backoff_base,
                     p.last_updated_at, p.created_at,
                     COUNT(e.id) AS total_episodes,
-                    SUM(CASE WHEN COALESCE(pr.completed, 0) = 0 THEN 1 ELSE 0 END) AS unplayed_episodes,
+                    SUM(CASE WHEN e.id IS NOT NULL AND COALESCE(pr.completed, 0) = 0 THEN 1 ELSE 0 END) AS unplayed_episodes,
                     SUM(CASE WHEN e.download_status = 'downloaded' THEN 1 ELSE 0 END) AS downloaded_episodes
                 FROM podcasts p
+                LEFT JOIN podcast_publishers pub ON pub.id=p.publisher_id
                 LEFT JOIN podcast_episodes e ON e.podcast_id = p.id
                 LEFT JOIN podcast_progress pr ON pr.episode_id = e.id AND pr.user_id = ?
                 GROUP BY p.id
@@ -1573,16 +1703,20 @@ class PodcastManager:
                     "unplayed_episodes": r["unplayed_episodes"] or 0,
                     "downloaded_episodes": r["downloaded_episodes"] or 0,
                     "storage_path": podcast_folder_name(r["id"]),
+                    **publisher_fields(r),
+                    "followed": r["id"] in following,
                 }
                 for r in rows
             ]
 
     def get_podcast_detail(self, podcast_id: str, user_id: str) -> dict[str, Any]:
+        saved = self.resources.saved_ids(user_id)
         with self.database.connect() as conn:
             p = conn.execute(
                 """
                 SELECT
                     p.id, p.title, p.author, p.description, p.feed_url, p.cover_url,
+                    p.publisher_id, p.publisher_version, pub.name AS publisher_name,
                     p.auto_update, p.update_interval_minutes,
                     COALESCE(p.download_policy, 'latest_3') as download_policy,
                     COALESCE(p.retention_policy, 'keep') as retention_policy,
@@ -1591,9 +1725,10 @@ class PodcastManager:
                     COALESCE(p.retry_backoff_base, 5) as retry_backoff_base,
                     p.last_updated_at, p.created_at,
                     COUNT(e.id) AS total_episodes,
-                    SUM(CASE WHEN COALESCE(pr.completed, 0) = 0 THEN 1 ELSE 0 END) AS unplayed_episodes,
+                    SUM(CASE WHEN e.id IS NOT NULL AND COALESCE(pr.completed, 0) = 0 THEN 1 ELSE 0 END) AS unplayed_episodes,
                     SUM(CASE WHEN e.download_status = 'downloaded' THEN 1 ELSE 0 END) AS downloaded_episodes
                 FROM podcasts p
+                LEFT JOIN podcast_publishers pub ON pub.id=p.publisher_id
                 LEFT JOIN podcast_episodes e ON e.podcast_id = p.id
                 LEFT JOIN podcast_progress pr ON pr.episode_id = e.id AND pr.user_id = ?
                 WHERE p.id = ?
@@ -1669,6 +1804,8 @@ class PodcastManager:
                     "unplayed_episodes": p["unplayed_episodes"] or 0,
                     "downloaded_episodes": p["downloaded_episodes"] or 0,
                     "storage_path": podcast_folder_name(p["id"]),
+                    **publisher_fields(p),
+                    "followed": podcast_id in followed_ids(self.database, user_id),
                 },
                 "episodes": [
                     {
@@ -1688,6 +1825,7 @@ class PodcastManager:
                         # Absolute host paths are internal state; stream endpoints resolve them server-side.
                         "local_path": None,
                         "download_status": ep["download_status"] or "none",
+                        "resource_saved": ep["id"] in saved,
                     }
                     for ep in sorted_ep_rows
                 ],
@@ -1760,76 +1898,55 @@ class PodcastManager:
                 "completed": bool(row["completed"]),
                 "local_path": row["local_path"] if include_local_path else None,
                 "download_status": row["download_status"] or "none",
+                "resource_saved": episode_id in self.resources.saved_ids(user_id),
             }
-
-    def update_progress(
-        self,
-        user_id: str,
-        episode_id: str,
-        position_seconds: int,
-        duration_seconds: int,
-        completed: bool,
-    ) -> None:
-        local_path: str | None = None
-        protected_paths: list[str | None] = []
-        remove_after_play = False
-        with self.database.connect(write=True) as conn:
-            episode = conn.execute(
-                """
-                SELECT e.local_path, COALESCE(p.retention_policy, 'keep') AS retention_policy
-                FROM podcast_episodes e
-                JOIN podcasts p ON p.id = e.podcast_id
-                WHERE e.id = ?
-                """,
-                (episode_id,),
-            ).fetchone()
-            if not episode:
-                raise HTTPException(status_code=404, detail="单集未找到")
-            local_path = episode["local_path"]
-            remove_after_play = completed and episode["retention_policy"] == "delete_after_played"
-            if remove_after_play:
-                protected_paths = [
-                    row["local_path"]
-                    for row in conn.execute(
-                        "SELECT local_path FROM podcast_episodes WHERE id <> ?",
-                        (episode_id,),
-                    ).fetchall()
-                ]
-            conn.execute(
-                """
-                INSERT INTO podcast_progress (
-                    user_id, episode_id, position_seconds, duration_seconds, completed, last_listened_at
-                ) VALUES (?, ?, ?, ?, ?, ?)
-                ON CONFLICT(user_id, episode_id) DO UPDATE SET
-                    position_seconds = excluded.position_seconds,
-                    duration_seconds = excluded.duration_seconds,
-                    completed = excluded.completed,
-                    last_listened_at = excluded.last_listened_at
-                """,
-                (
-                    user_id,
-                    episode_id,
-                    position_seconds,
-                    duration_seconds,
-                    1 if completed else 0,
-                    now(),
-                ),
-            )
-            if remove_after_play:
-                conn.execute(
-                    "UPDATE podcast_episodes SET local_path = NULL, download_status = 'none' WHERE id = ?",
-                    (episode_id,),
-                )
-        if remove_after_play:
-            self._delete_local_paths([local_path], protected=protected_paths)
 
 
 def podcast_router(manager: PodcastManager, auth: Auth) -> APIRouter:
     router = APIRouter(prefix="/api/v1/podcasts", tags=["podcasts"])
+    publishers = PodcastPublishers(manager.database)
+
+    @router.get("/publishers", response_model=list[PublisherSummary])
+    def list_publishers(user: Annotated[dict, Depends(auth.require_session)]):
+        return publishers.list()
+
+    @router.get("/publishers/{publisher_id}", response_model=PublisherDetailResponse)
+    def get_publisher(publisher_id: str, user: Annotated[dict, Depends(auth.require_session)]):
+        publisher = publishers.get(publisher_id)
+        shows = [
+            show
+            for show in manager.list_podcasts(user["id"])
+            if show["publisher"] is not None and show["publisher"]["id"] == publisher_id
+        ]
+        publisher["podcast_count"] = len(shows)
+        return {"publisher": publisher, "podcasts": shows}
+
+    @router.put(
+        "/{podcast_id}/publisher",
+        response_model=PodcastDetailResponse,
+        dependencies=[
+            Depends(auth.require_client),
+            Depends(auth.require_permission("metadata:write")),
+        ],
+    )
+    def assign_publisher(
+        podcast_id: str,
+        payload: PublisherAssignment,
+        user: Annotated[dict, Depends(auth.require_session)],
+    ):
+        publishers.assign(podcast_id, payload)
+        return manager.get_podcast_detail(podcast_id, user["id"])
 
     @router.get("", response_model=list[PodcastSummaryResponse])
-    def list_podcasts(user: Annotated[dict, Depends(auth.require_session)]):
-        return manager.list_podcasts(user["id"])
+    def list_podcasts(user: Annotated[dict, Depends(auth.require_session)], followed: bool = False):
+        items = manager.list_podcasts(user["id"])
+        return [item for item in items if item["followed"]] if followed else items
+
+    @router.put("/{podcast_id}/follow", dependencies=[Depends(auth.require_client)])
+    def set_follow(
+        podcast_id: str, body: FollowUpdate, user: Annotated[dict, Depends(auth.require_session)]
+    ):
+        return follow(manager.database, user["id"], podcast_id, body.followed)
 
     @router.post(
         "",
@@ -1843,7 +1960,7 @@ def podcast_router(manager: PodcastManager, auth: Auth) -> APIRouter:
         payload: PodcastCreateRequest,
         user: Annotated[dict, Depends(auth.require_session)],
     ):
-        return manager.subscribe(
+        result = manager.subscribe(
             feed_url=payload.feed_url,
             auto_update=payload.auto_update,
             update_interval_minutes=payload.update_interval_minutes,
@@ -1853,6 +1970,7 @@ def podcast_router(manager: PodcastManager, auth: Auth) -> APIRouter:
             max_retries=payload.max_retries,
             retry_backoff_base=payload.retry_backoff_base,
         )
+        return manager.get_podcast_detail(result["podcast"]["id"], user["id"])
 
     @router.put(
         "/{podcast_id}/settings",
@@ -1898,7 +2016,7 @@ def podcast_router(manager: PodcastManager, auth: Auth) -> APIRouter:
         "/{podcast_id}/clean-downloads",
         dependencies=[
             Depends(auth.require_client),
-            Depends(auth.require_permission("library:manage")),
+            Depends(auth.require_owner),
         ],
     )
     def clean_podcast_downloads(
@@ -1949,6 +2067,27 @@ def podcast_router(manager: PodcastManager, auth: Auth) -> APIRouter:
     )
     def get_download_queue():
         return manager.get_download_queue_info()
+
+    @router.get("/playback-settings", response_model=PodcastPlaybackSettingsResponse)
+    def get_playback_settings(user: Annotated[dict, Depends(auth.require_session)]):
+        return manager.playback_settings(user["id"])
+
+    @router.put(
+        "/playback-settings",
+        response_model=PodcastPlaybackSettingsResponse,
+        dependencies=[Depends(auth.require_client)],
+    )
+    def update_playback_settings(
+        payload: PodcastPlaybackSettingsUpdate,
+        user: Annotated[dict, Depends(auth.require_session)],
+    ):
+        return manager.update_playback_settings(
+            user["id"],
+            version=payload.version,
+            auto_cache_current=payload.auto_cache_current,
+            prefetch_next=payload.prefetch_next,
+            network_policy=payload.network_policy,
+        )
 
     @router.post(
         "/downloads/retry-failed",
@@ -2028,9 +2167,15 @@ def podcast_router(manager: PodcastManager, auth: Auth) -> APIRouter:
         ep = manager.get_episode(episode_id, user["id"], include_local_path=True)
         if not ep or not ep.get("audio_url"):
             raise HTTPException(status_code=404, detail="音频不可用")
-        local_path = manager._safe_local_path(ep.get("local_path"))
-        if local_path and local_path.is_file():
-            return FileResponse(local_path, media_type="audio/mpeg")
+        local_response = manager.resources.local_response(episode_id)
+        if local_response is not None:
+            return local_response
+        if request.query_params.get("cache") == "1":
+            manager.queue_playback_cache(
+                episode_id,
+                user["id"],
+                request.query_params.get("network", "unknown"),
+            )
         if request.query_params.get("proxy") == "1":
             return manager.stream_remote_audio(ep["audio_url"], request.headers.get("range"))
         return RedirectResponse(url=ep["audio_url"], status_code=status.HTTP_307_TEMPORARY_REDIRECT)
@@ -2039,32 +2184,35 @@ def podcast_router(manager: PodcastManager, auth: Auth) -> APIRouter:
         "/episodes/{episode_id}/download",
         dependencies=[
             Depends(auth.require_client),
-            Depends(auth.require_permission("library:manage")),
         ],
     )
     def download_episode(
         episode_id: str,
         user: Annotated[dict, Depends(auth.require_session)],
     ):
-        ep = manager.get_episode(episode_id, user["id"])
-        if not ep:
-            raise HTTPException(status_code=404, detail="单集未找到")
-        manager.queue_download_episode(episode_id)
-        return {"status": "downloading", "id": episode_id}
+        return manager.resources.save(episode_id, user["id"])
 
-    @router.put("/episodes/{episode_id}/progress", dependencies=[Depends(auth.require_client)])
-    def update_progress(
+    @router.delete("/episodes/{episode_id}/download", dependencies=[Depends(auth.require_client)])
+    def release_episode(episode_id: str, user: Annotated[dict, Depends(auth.require_session)]):
+        return manager.resources.release(episode_id, user["id"])
+
+    @router.get("/episodes/{episode_id}/progress", response_model=ProgressState)
+    def read_progress(
         episode_id: str,
-        payload: PodcastProgressRequest,
         user: Annotated[dict, Depends(auth.require_session)],
     ):
-        manager.update_progress(
-            user_id=user["id"],
-            episode_id=episode_id,
-            position_seconds=payload.position_seconds,
-            duration_seconds=payload.duration_seconds,
-            completed=payload.completed,
-        )
-        return {"status": "ok"}
+        return get_progress(manager.database, user["id"], episode_id)
+
+    @router.put(
+        "/episodes/{episode_id}/progress",
+        response_model=ProgressState,
+        dependencies=[Depends(auth.require_client)],
+    )
+    def update_progress(
+        episode_id: str,
+        payload: ProgressWrite,
+        user: Annotated[dict, Depends(auth.require_session)],
+    ):
+        return save_progress(manager, user["id"], episode_id, payload)
 
     return router

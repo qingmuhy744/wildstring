@@ -340,88 +340,91 @@ class MusicSources:
             )
         warnings = []
         try:
-            with self.database.connect(write=True) as db:
-                db.execute(
-                    "DELETE FROM lyric_candidates WHERE track_id=? AND job_id NOT IN (SELECT id FROM lyric_lookup_jobs WHERE track_id=? ORDER BY created_at DESC LIMIT 5) AND id NOT IN (SELECT json_extract(selected_candidate,'$.id') FROM track_lyrics WHERE selected_candidate IS NOT NULL) AND id NOT IN (SELECT candidate_id FROM lyric_scan_items WHERE candidate_id IS NOT NULL) AND id NOT IN (SELECT json_extract(previous,'$.selected_candidate.id') FROM lyric_scan_items WHERE json_extract(previous,'$.selected_candidate.id') IS NOT NULL)",
-                    (job["track_id"], job["track_id"]),
-                )
-                db.execute(
-                    "DELETE FROM lyric_lookup_jobs WHERE track_id=? AND id NOT IN (SELECT id FROM lyric_lookup_jobs WHERE track_id=? ORDER BY created_at DESC LIMIT 5) AND id NOT IN (SELECT job_id FROM lyric_candidates)",
-                    (job["track_id"], job["track_id"]),
-                )
-            track = self.providers.repository.track(job["track_id"])
-            record = LyricsEditor(self.providers.repository).read(job["track_id"])
-            for config in self.catalog():
-                if not config["enabled"] or not config["lyrics_enabled"]:
-                    continue
-                try:
-                    candidates, context = self.candidates(track, config["id"])
-                    for candidate in candidates[:2]:
-                        raw = self.plugins[config["id"]].lyrics(context, candidate)
-                        if (
-                            len(
-                                json.dumps(
-                                    {
-                                        key: value
-                                        for key, value in raw.items()
-                                        if key != "normalized"
-                                    }
-                                ).encode()
-                            )
-                            > 512 * 1024
-                        ):
-                            raise PluginError("source_plugin_response_too_large")
-                        normalized = normalize_bundle(raw, config["id"])
-                        if normalized["kind"] == "none":
-                            continue
-                        self.current(config["id"], config["version"])
-                        with self.database.connect(write=True) as db:
-                            db.execute(
-                                "INSERT INTO lyric_candidates VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-                                (
-                                    uuid4().hex,
-                                    job["id"],
-                                    track["id"],
-                                    config["id"],
-                                    str(candidate["id"]),
-                                    candidate["source_url"],
-                                    json.dumps(candidate["match"]),
+            from wildstring.library.catalog import library_job_scope
+
+            with library_job_scope(self.database, "lyric_lookup_jobs", job["id"], job["track_id"]):
+                with self.database.connect(write=True) as db:
+                    db.execute(
+                        "DELETE FROM lyric_candidates WHERE track_id=? AND job_id NOT IN (SELECT id FROM lyric_lookup_jobs WHERE track_id=? ORDER BY created_at DESC LIMIT 5) AND id NOT IN (SELECT json_extract(selected_candidate,'$.id') FROM track_lyrics WHERE selected_candidate IS NOT NULL) AND id NOT IN (SELECT candidate_id FROM lyric_scan_items WHERE candidate_id IS NOT NULL) AND id NOT IN (SELECT json_extract(previous,'$.selected_candidate.id') FROM lyric_scan_items WHERE json_extract(previous,'$.selected_candidate.id') IS NOT NULL)",
+                        (job["track_id"], job["track_id"]),
+                    )
+                    db.execute(
+                        "DELETE FROM lyric_lookup_jobs WHERE track_id=? AND id NOT IN (SELECT id FROM lyric_lookup_jobs WHERE track_id=? ORDER BY created_at DESC LIMIT 5) AND id NOT IN (SELECT job_id FROM lyric_candidates)",
+                        (job["track_id"], job["track_id"]),
+                    )
+                track = self.providers.repository.track(job["track_id"])
+                record = LyricsEditor(self.providers.repository).read(job["track_id"])
+                for config in self.catalog():
+                    if not config["enabled"] or not config["lyrics_enabled"]:
+                        continue
+                    try:
+                        candidates, context = self.candidates(track, config["id"])
+                        for candidate in candidates[:2]:
+                            raw = self.plugins[config["id"]].lyrics(context, candidate)
+                            if (
+                                len(
                                     json.dumps(
                                         {
                                             key: value
                                             for key, value in raw.items()
                                             if key != "normalized"
                                         }
+                                    ).encode()
+                                )
+                                > 512 * 1024
+                            ):
+                                raise PluginError("source_plugin_response_too_large")
+                            normalized = normalize_bundle(raw, config["id"])
+                            if normalized["kind"] == "none":
+                                continue
+                            self.current(config["id"], config["version"])
+                            with self.database.connect(write=True) as db:
+                                db.execute(
+                                    "INSERT INTO lyric_candidates VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                                    (
+                                        uuid4().hex,
+                                        job["id"],
+                                        track["id"],
+                                        config["id"],
+                                        str(candidate["id"]),
+                                        candidate["source_url"],
+                                        json.dumps(candidate["match"]),
+                                        json.dumps(
+                                            {
+                                                key: value
+                                                for key, value in raw.items()
+                                                if key != "normalized"
+                                            }
+                                        ),
+                                        json.dumps(normalized),
+                                        record["version"],
+                                        record["file_version"],
+                                        time.time(),
                                     ),
-                                    json.dumps(normalized),
-                                    record["version"],
-                                    record["file_version"],
-                                    time.time(),
-                                ),
+                                )
+                    except Exception as error:
+                        warnings.append(
+                            config["id"]
+                            + ":"
+                            + (
+                                error.code
+                                if isinstance(error, PluginError)
+                                else "source_plugin_invalid_response"
                             )
-                except Exception as error:
-                    warnings.append(
-                        config["id"]
-                        + ":"
-                        + (
-                            error.code
-                            if isinstance(error, PluginError)
-                            else "source_plugin_invalid_response"
                         )
+                with self.database.connect(write=True) as db:
+                    count = db.execute(
+                        "SELECT count(*) FROM lyric_candidates WHERE job_id=?", (job["id"],)
+                    ).fetchone()[0]
+                    db.execute(
+                        "UPDATE lyric_lookup_jobs SET status=?,warnings=?,updated_at=? WHERE id=?",
+                        (
+                            "completed" if count else "no_match",
+                            json.dumps(warnings),
+                            time.time(),
+                            job["id"],
+                        ),
                     )
-            with self.database.connect(write=True) as db:
-                count = db.execute(
-                    "SELECT count(*) FROM lyric_candidates WHERE job_id=?", (job["id"],)
-                ).fetchone()[0]
-                db.execute(
-                    "UPDATE lyric_lookup_jobs SET status=?,warnings=?,updated_at=? WHERE id=?",
-                    (
-                        "completed" if count else "no_match",
-                        json.dumps(warnings),
-                        time.time(),
-                        job["id"],
-                    ),
-                )
         except Exception:
             with self.database.connect(write=True) as db:
                 db.execute(

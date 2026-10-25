@@ -14,6 +14,7 @@ import { MetadataJobs } from './metadata-tasks';
 import { MetadataReviewDialog } from './metadata-review';
 import { FolderMetadataEditor } from './folder-metadata';
 import { LibrarySources } from './library-sources';
+import { MusicLibraryManager, LibrarySwitcher } from './music-libraries';
 
 type Directory = {
   path: string;
@@ -133,6 +134,9 @@ function RunDetail({ title, run }: { title: string; run: Run | null }) {
   );
 }
 
+export type ManagementTab =
+  'overview' | 'tracks' | 'jobs' | 'intake' | 'settings' | 'users' | 'diagnostics';
+
 export function Management({
   revision,
   onBack,
@@ -142,6 +146,8 @@ export function Management({
   onOpenConnections,
   profile,
   initialAction,
+  initialTab = 'overview',
+  onTabChanged,
 }: {
   revision: number;
   onBack: () => void;
@@ -151,12 +157,16 @@ export function Management({
   onOpenConnections: () => void;
   profile: User['profile'];
   initialAction?: { type: 'metadata-center'; batchId?: string } | null;
+  initialTab?: ManagementTab;
+  onTabChanged?: (tab: ManagementTab) => void;
 }) {
   const canOwner = profile === 'owner';
   const canImport = profile === 'owner' || profile === 'librarian';
-  const [tab, setTab] = useState<
-    'overview' | 'tracks' | 'jobs' | 'intake' | 'settings' | 'users' | 'diagnostics'
-  >('overview');
+  const [tab, updateTab] = useState<ManagementTab>(initialTab);
+  function setTab(value: ManagementTab) {
+    updateTab(value);
+    onTabChanged?.(value);
+  }
   const [reviewOpen, setReviewOpen] = useState(false);
   const [metadataBatchId, setMetadataBatchId] = useState<string | undefined>(
     initialAction?.batchId,
@@ -286,6 +296,7 @@ export function Management({
           ← 返回音乐
         </button>
       </header>
+      <LibrarySwitcher onChanged={onChanged} management />
       <nav className="management-tabs" aria-label="管理分类">
         {(
           [
@@ -333,7 +344,12 @@ export function Management({
                 <IntakePanel />
               </>
             )}
-            {tab === 'users' && <UsersPanel />}
+            {tab === 'users' && (
+              <>
+                <MusicLibraryManager />
+                <UsersPanel />
+              </>
+            )}
             {tab === 'overview' && (
               <>
                 <section className="management-metrics" aria-label="曲库概览">

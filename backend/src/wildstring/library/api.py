@@ -16,6 +16,7 @@ from wildstring.library.streaming import AudioResponse
 
 class Track(BaseModel):
     id: str
+    library_id: str = ""
     album_id: str
     path: str
     title: str
@@ -70,6 +71,7 @@ class TrackPage(BaseModel):
 
 class Album(BaseModel):
     id: str
+    library_id: str = ""
     title: str
     artists: list[str]
     track_count: int

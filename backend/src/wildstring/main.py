@@ -19,7 +19,9 @@ from wildstring.catalog_gaps import catalog_gaps_router
 from wildstring.config import Settings
 from wildstring.database import Database
 from wildstring.diagnostics import Diagnostics, RequestTrace, diagnostics_router, install_logging
+from wildstring.library.access import LibraryAccess
 from wildstring.library.api import library_router
+from wildstring.library.catalog import LibraryCatalog
 from wildstring.library.listening import listening_router
 from wildstring.library.playlists import PlaylistStore, playlist_router
 from wildstring.library.repository import LibraryRepository
@@ -41,6 +43,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     database = Database(current.data_dir)
     auth = Auth(database, current)
     repository = LibraryRepository(database, current.library_dir)
+    catalog = LibraryCatalog(database, current)
     playlists = PlaylistStore(repository)
     management = Management(current, repository)
     access = SiteAccess(database)
@@ -67,9 +70,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         current.data_dir.mkdir(parents=True, exist_ok=True)
-        current.library_dir.mkdir(parents=True, exist_ok=True)
         current.podcasts_dir.mkdir(parents=True, exist_ok=True)
         database.initialize()
+        catalog.initialize()
+        repository.root.mkdir(parents=True, exist_ok=True)
         diagnostics.start()
         install_logging()
         playlists.ensure_default()
@@ -121,10 +125,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             logger.warning("Data directory is not writable")
             checks["data_directory"] = "unavailable"
         try:
-            with os.scandir(current.library_dir) as entries:
+            with os.scandir(repository.root) as entries:
                 next(entries, None)
             checks["music_directory"] = "ok"
-        except OSError:
+        except (OSError, sqlite3.Error):
             logger.warning("Music directory is not readable")
             checks["music_directory"] = "unavailable"
         try:
@@ -141,6 +145,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(auth.users_router())
     app.include_router(access.router(auth))
     app.state.transcoding = transcoding
+    app.state.library_catalog = catalog
+    app.state.podcasts = podcasts
+    app.state.management = management
+    app.include_router(catalog.router(auth))
     app.state.providers = providers
     app.state.diagnostics = diagnostics
     app.state.agent_platform = platform
@@ -156,6 +164,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(playlist_router(playlists, auth))
     app.include_router(management_router(management, auth, providers))
     app.include_router(experience_router(repository, auth, providers, platform))
+    app.include_router(podcasts.resources.router(auth))
     app.include_router(podcast_router(podcasts, auth))
     app.include_router(catalog_gaps_router(database, auth))
 
@@ -164,6 +173,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     if current.web_dir is not None:
         app.mount("/", StaticFiles(directory=current.web_dir, html=True), name="web")
 
+    app.add_middleware(LibraryAccess, auth=auth, catalog=catalog, router=app.router)
     app.add_middleware(HostAllowlist, access=access)
     app.add_middleware(CallbackPrivacy)
     app.add_middleware(RequestTrace, diagnostics=diagnostics)

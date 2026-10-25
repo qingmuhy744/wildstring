@@ -36,6 +36,10 @@ def main() -> None:
     subprocess.run(["/usr/bin/ffmpeg", "-version"], check=True, capture_output=True)
     subprocess.run(["/usr/bin/fpcalc", "-version"], check=True, capture_output=True)
     settings = Settings()
+    from wildstring.database import Database
+    from wildstring.library.catalog import scoped_settings
+
+    settings = scoped_settings(settings, Database(settings.data_dir))
     with TemporaryFile(dir=settings.library_dir) as probe:
         probe.write(b"managed-library-write-check")
     try:

@@ -1,0 +1,1043 @@
+{
+  "info": {
+    "name": "WildString isolated storage resource regression",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Only run against an isolated disposable container seeded with Storage Resource Fixture; never against an existing user instance."
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://127.0.0.1:18801"
+    }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "if(!/^http:\\/\\/(127\\.0\\.0\\.1|localhost):\\d+$/.test(pm.variables.get('base_url'))) throw new Error('Local isolated fixture required');",
+          "if(!pm.collectionVariables.get('run_id'))pm.collectionVariables.set('run_id',String(Date.now()));"
+        ]
+      }
+    }
+  ],
+  "item": [
+    {
+      "name": "01 Owner login",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/auth/login",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"username\": \"admin\", \"password\": \"disposable-storage-check-password\"}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": ["pm.test('HTTP 200', () => pm.response.to.have.status(200));"]
+          }
+        }
+      ]
+    },
+    {
+      "name": "02 Require isolated fixture before mutations",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/podcasts/storage-resource-fixture"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+              "const b=pm.response.json(); const safe=pm.response.code===200 && b.podcast?.title==='Storage Resource Fixture'; pm.test('isolated fixture marker',()=>pm.expect(safe).to.eql(true)); if(!safe)pm.execution.setNextRequest(null);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "03 Read cleanup policy",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/podcasts/resources/settings"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+              "pm.collectionVariables.set('policy_version',pm.response.json().version); pm.test('automatic cleanup initially off',()=>pm.expect(pm.response.json().enabled).to.eql(false));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "04 Save policy with version",
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/podcasts/resources/settings",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"version\": {{policy_version}}, \"enabled\": false, \"retention_days\": 7}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+              "pm.test('policy version advances',()=>pm.expect(pm.response.json().version).to.eql(Number(pm.collectionVariables.get('policy_version'))+1));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "05 Stale policy rejected",
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/podcasts/resources/settings",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"version\": {{policy_version}}, \"enabled\": true, \"retention_days\": 0}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": ["pm.test('HTTP 409', () => pm.response.to.have.status(409));"]
+          }
+        }
+      ]
+    },
+    {
+      "name": "06 Create listener without music grants",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/manage/users",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"username\": \"storage-saver-{{run_id}}\", \"password\": \"disposable-saver-password\", \"profile\": \"listener\", \"library_ids\": []}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+              "pm.collectionVariables.set('saver_username',pm.response.json().username);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "07 Owner save reuses bytes",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/podcasts/episodes/storage-resource-shared/download"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+              "const b=pm.response.json(); pm.test('reused existing shared audio',()=>{pm.expect(b.saved).to.eql(true);pm.expect(b.reused).to.eql(true);pm.expect(b.status).to.eql('reused');});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "08 Duplicate save is idempotent",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/podcasts/episodes/storage-resource-shared/download"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+              "pm.test('same personal save',()=>pm.expect(pm.response.json().saved).to.eql(true));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "09 Count personal references",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/podcasts/resources"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+              "const b=pm.response.json().items.find(x=>x.id==='storage-resource-shared');pm.test('duplicate save counts once',()=>pm.expect(b.reference_count).to.eql(1));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "10 Owner logout",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/auth/logout"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": ["pm.test('HTTP 204', () => pm.response.to.have.status(204));"]
+          }
+        }
+      ]
+    },
+    {
+      "name": "11 Listener login",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/auth/login",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"username\": \"{{saver_username}}\", \"password\": \"disposable-saver-password\"}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": ["pm.test('HTTP 200', () => pm.response.to.have.status(200));"]
+          }
+        }
+      ]
+    },
+    {
+      "name": "12 Listener can save same bytes",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/podcasts/episodes/storage-resource-shared/download"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+              "pm.test('listener reuses shared audio',()=>pm.expect(pm.response.json().reused).to.eql(true));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "13 Source management denied to listener",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/podcasts/resources"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": ["pm.test('HTTP 403', () => pm.response.to.have.status(403));"]
+          }
+        }
+      ]
+    },
+    {
+      "name": "14 Cleanup denied to listener",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/podcasts/resources/cleanup",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"dry_run\": false}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": ["pm.test('HTTP 403', () => pm.response.to.have.status(403));"]
+          }
+        }
+      ]
+    },
+    {
+      "name": "15 Unfollow preserves save",
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/podcasts/storage-resource-fixture/follow",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"followed\": false}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": ["pm.test('HTTP 200', () => pm.response.to.have.status(200));"]
+          }
+        }
+      ]
+    },
+    {
+      "name": "16 Personal save flag remains",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/podcasts/episodes/storage-resource-shared"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+              "pm.test('save independent from follow',()=>pm.expect(pm.response.json().resource_saved).to.eql(true));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "17 Finish listening without releasing save",
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/podcasts/episodes/storage-resource-shared/progress",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"session_id\": \"postman-storage-check\", \"device_id\": \"postman\", \"base_version\": 0, \"sequence\": 1, \"position_seconds\": 12, \"duration_seconds\": 12, \"event\": \"ended\"}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+              "pm.test('completed bookmark',()=>pm.expect(pm.response.json().completed).to.eql(true));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "18 Finished audio remains saved",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/podcasts/episodes/storage-resource-shared"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+              "pm.test('completion preserves saved cache',()=>{pm.expect(pm.response.json().resource_saved).to.eql(true);pm.expect(pm.response.json().download_status).to.eql('downloaded');});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "19 Listener logout",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/auth/logout"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": ["pm.test('HTTP 204', () => pm.response.to.have.status(204));"]
+          }
+        }
+      ]
+    },
+    {
+      "name": "20 Owner login",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/auth/login",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"username\": \"admin\", \"password\": \"disposable-storage-check-password\"}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": ["pm.test('HTTP 200', () => pm.response.to.have.status(200));"]
+          }
+        }
+      ]
+    },
+    {
+      "name": "21 Count two personal saves",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/podcasts/resources"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+              "pm.test('two users share one resource',()=>pm.expect(pm.response.json().items.find(x=>x.id==='storage-resource-shared').reference_count).to.eql(2));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "22 Release only owner save",
+      "request": {
+        "method": "DELETE",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/podcasts/episodes/storage-resource-shared/download"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+              "pm.test('owner release',()=>pm.expect(pm.response.json().saved).to.eql(false));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "23 Remaining listener prevents cleanup",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/podcasts/resources/cleanup",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"dry_run\": false}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+              "pm.test('active reference survives cleanup',()=>pm.expect(pm.response.json().deleted_count).to.eql(0));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "24 Owner logout",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/auth/logout"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": ["pm.test('HTTP 204', () => pm.response.to.have.status(204));"]
+          }
+        }
+      ]
+    },
+    {
+      "name": "25 Listener login",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/auth/login",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"username\": \"{{saver_username}}\", \"password\": \"disposable-saver-password\"}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": ["pm.test('HTTP 200', () => pm.response.to.have.status(200));"]
+          }
+        }
+      ]
+    },
+    {
+      "name": "26 Release listener save",
+      "request": {
+        "method": "DELETE",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/podcasts/episodes/storage-resource-shared/download"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": ["pm.test('HTTP 200', () => pm.response.to.have.status(200));"]
+          }
+        }
+      ]
+    },
+    {
+      "name": "27 Duplicate release is idempotent",
+      "request": {
+        "method": "DELETE",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/podcasts/episodes/storage-resource-shared/download"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": ["pm.test('HTTP 200', () => pm.response.to.have.status(200));"]
+          }
+        }
+      ]
+    },
+    {
+      "name": "28 Listener logout",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/auth/logout"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": ["pm.test('HTTP 204', () => pm.response.to.have.status(204));"]
+          }
+        }
+      ]
+    },
+    {
+      "name": "29 Owner login",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/auth/login",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"username\": \"admin\", \"password\": \"disposable-storage-check-password\"}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": ["pm.test('HTTP 200', () => pm.response.to.have.status(200));"]
+          }
+        }
+      ]
+    },
+    {
+      "name": "30 Cleanup defaults to preview",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/podcasts/resources/cleanup",
+        "body": {
+          "mode": "raw",
+          "raw": "{}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+              "pm.test('one eligible cache with safe preview default',()=>{pm.expect(pm.response.json().dry_run).to.eql(true);pm.expect(pm.response.json().candidate_count).to.eql(1);});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "31 Preview keeps audio registration",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/podcasts/episodes/storage-resource-shared"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+              "pm.test('preview does not delete',()=>pm.expect(pm.response.json().download_status).to.eql('downloaded'));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "32 Execute zero-reference cleanup",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/podcasts/resources/cleanup",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"dry_run\": false}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+              "pm.test('exactly one zero-reference resource removed',()=>{pm.expect(pm.response.json().deleted_count).to.eql(1);pm.expect(pm.response.json().freed_bytes).to.be.above(0);});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "33 Cleared resource registration",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/podcasts/episodes/storage-resource-shared"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+              "pm.test('shared cache cleared',()=>pm.expect(pm.response.json().download_status).to.eql('none'));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "34 Legacy protected cache retained",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/podcasts/episodes/storage-resource-legacy"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+              "pm.test('legacy cache preserved',()=>pm.expect(pm.response.json().download_status).to.eql('downloaded'));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "35 Existing protected audio supports ranges",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          },
+          {
+            "key": "Range",
+            "value": "bytes=0-255"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/podcasts/episodes/storage-resource-legacy/stream"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 206', () => pm.response.to.have.status(206));",
+              "pm.test('bounded media range',()=>pm.expect(pm.response.headers.get('Content-Length')).to.eql('256'));"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

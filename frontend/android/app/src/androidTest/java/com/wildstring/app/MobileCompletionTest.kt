@@ -271,10 +271,13 @@ class MobileCompletionTest {
         Fixture().use { fixture -> val vm = connect(fixture)
             try {
                 compose.onNodeWithContentDescription("设置").performClick()
-                compose.onNodeWithText("资料来源与插件", substring = false).performScrollTo().assertIsDisplayed()
-                compose.onNodeWithText("全库批量核对、目录整理等高级治理请在电脑网页端进行。", substring = true)
+                compose.onNodeWithText("服务端管理", substring = false).performScrollTo().assertIsDisplayed()
+                compose.onNodeWithText("音乐库、文件夹、权限、共享音频清理及插件配置请在网页端管理。", substring = true)
                     .performScrollTo().assertIsDisplayed()
                 compose.onNodeWithText("曲库管理", substring = false).assertDoesNotExist()
+                compose.onNodeWithText("音乐库与权限", substring = false).assertDoesNotExist()
+                compose.onNodeWithText("数据源插件", substring = false).assertDoesNotExist()
+                compose.onNodeWithText("模型连接", substring = false).assertDoesNotExist()
                 compose.onNodeWithText("歌词补全与洗版", substring = false).assertDoesNotExist()
             } finally { cleanup(vm) }
         }

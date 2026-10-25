@@ -82,7 +82,7 @@ import kotlinx.coroutines.withContext
                     .transformable(transformState)
                     .pointerInput(Unit) { detectTapGestures(onTap = {}) }, ContentScale.Fit)
             Row(Modifier.align(Alignment.TopEnd).padding(8.dp)) {
-                if (track.hasCover) IconButton({ scope.launch {
+                if (track.hasCover && !track.isPodcast) IconButton({ scope.launch {
                     busy = true; message = "正在准备封面…"
                     try {
                         val owner = checkNotNull(vm.repository.session.cacheScope())

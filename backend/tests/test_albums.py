@@ -96,7 +96,7 @@ def test_v2_migration_keeps_track_ids_and_auth_data(settings):
     with sqlite3.connect(database.path) as connection:
         connection.executescript(SCHEMA)
         connection.executescript(AUTH_SCHEMA)
-        connection.execute("INSERT INTO libraries VALUES ('library', '/music')")
+        connection.execute("INSERT INTO libraries(id,root) VALUES ('library', '/music')")
         connection.execute(
             "INSERT INTO scan_runs VALUES ('run', 'library', 'completed', 'now', 'now', '{}')"
         )

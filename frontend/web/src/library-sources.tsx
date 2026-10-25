@@ -41,6 +41,8 @@ export function LibrarySources({
   onChanged: () => void;
 }) {
   const [path, setPath] = useState('.');
+  const [sources, setSources] = useState<{ id: string; name: string }[]>([]);
+  const [source, setSource] = useState('import');
   const [listing, setListing] = useState<SourceListing | null>(null);
   const [preview, setPreview] = useState<Preview | null>(null);
   const [trash, setTrash] = useState<TrashEntry[]>([]);
@@ -48,10 +50,10 @@ export function LibrarySources({
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
 
-  async function load(folder = path) {
+  async function load(folder = path, sourceId = source) {
     const [current, removed] = await Promise.all([
       api<SourceListing>(
-        `/manage/library/folders?source_id=import&path=${encodeURIComponent(folder)}`,
+        `/manage/library/folders?source_id=${encodeURIComponent(sourceId)}&path=${encodeURIComponent(folder)}`,
       ),
       api<{ items: TrashEntry[] }>('/manage/library/trash'),
     ]);
@@ -59,6 +61,12 @@ export function LibrarySources({
     setTrash(removed.items);
   }
   useEffect(() => {
+    void api<{ items: { id: string; name: string }[] }>('/manage/library/sources')
+      .then((value) => {
+        setSources(value.items);
+        if (value.items[0]) setSource(value.items[0].id);
+      })
+      .catch(() => {});
     void load('.').catch((reason) =>
       setError(reason instanceof Error ? reason.message : '来源目录暂时无法读取。'),
     );
@@ -92,7 +100,7 @@ export function LibrarySources({
       setPreview(
         await api<Preview>('/manage/library/import/preview', {
           method: 'POST',
-          body: JSON.stringify({ source_id: 'import', path }),
+          body: JSON.stringify({ source_id: source, path }),
         }),
       );
     } catch (reason) {
@@ -110,7 +118,7 @@ export function LibrarySources({
     try {
       await api('/manage/library/import', {
         method: 'POST',
-        body: JSON.stringify({ source_id: 'import', path }),
+        body: JSON.stringify({ source_id: source, path }),
       });
       setNotice('已提交导入任务，可在任务记录查看进度。');
       onChanged();
@@ -158,6 +166,27 @@ export function LibrarySources({
       <section className="management-card" aria-label="导入来源工作台">
         <span className="eyebrow">SOURCE WORKSPACE</span>
         <h2>来源浏览与导入</h2>
+        <label className="source-root-select">
+          源文件夹
+          <select
+            aria-label="选择源文件夹"
+            value={source}
+            disabled={busy}
+            onChange={(event) => {
+              const next = event.target.value;
+              setSource(next);
+              setPath('.');
+              setPreview(null);
+              void load('.', next).catch((reason: Error) => setError(reason.message));
+            }}
+          >
+            {sources.map((item) => (
+              <option key={item.id} value={item.id}>
+                {item.name}
+              </option>
+            ))}
+          </select>
+        </label>
         <p className="muted">
           导入源始终只读。先浏览和预览，再提交导入；带有 .part 等标记的文件会等待下载完成。
         </p>

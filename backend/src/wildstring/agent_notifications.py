@@ -139,7 +139,18 @@ class Notifications:
                         raise ValueError
                 except (ValueError, TypeError):
                     raise HTTPException(410, "notification_cursor_expired") from None
-            query = "SELECT n.*,e.kind AS event_type,e.title,e.summary,e.severity,e.task_id,e.draft_id,e.trace_id,e.counts,e.actions FROM agent_notifications n JOIN agent_events e ON e.id=n.event_id WHERE n.user_id=?"
+            visible = """n.user_id=?
+                AND COALESCE((SELECT library_visible(d.library_id) FROM agent_drafts d WHERE d.id=e.draft_id),1)
+                AND COALESCE((SELECT library_visible(t.library_id) FROM agent_tasks t WHERE t.id=e.task_id),
+                    (SELECT library_visible(j.library_id) FROM admin_jobs j WHERE j.id=e.task_id),1)"""
+            base = (
+                " FROM agent_notifications n JOIN agent_events e ON e.id=n.event_id WHERE "
+                + visible
+            )
+            query = (
+                "SELECT n.*,e.kind AS event_type,e.title,e.summary,e.severity,e.task_id,e.draft_id,e.trace_id,e.counts,e.actions"
+                + base
+            )
             if cursor is not None:
                 query += " AND n.changed_seq>? ORDER BY n.changed_seq,n.id LIMIT ?"
                 rows = connection.execute(query, (actor.user_id, seq, limit)).fetchall()
@@ -150,11 +161,9 @@ class Notifications:
                     (actor.user_id, limit, offset),
                 ).fetchall()
                 end = watermark
-            total = connection.execute(
-                "SELECT count(*) FROM agent_notifications WHERE user_id=?", (actor.user_id,)
-            ).fetchone()[0]
+            total = connection.execute("SELECT count(*)" + base, (actor.user_id,)).fetchone()[0]
             unread = connection.execute(
-                "SELECT count(*) FROM agent_notifications WHERE user_id=? AND read_at IS NULL",
+                "SELECT count(*)" + base + " AND n.read_at IS NULL",
                 (actor.user_id,),
             ).fetchone()[0]
         items = []

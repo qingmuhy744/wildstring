@@ -1,4 +1,6 @@
 import { CatalogSortControl, useCatalogSorting } from './catalog-sort';
+import { bindLibraryUser, selectedLibrary } from './library-context';
+import { LibrarySwitcher } from './music-libraries';
 import {
   Suspense,
   lazy,
@@ -37,6 +39,7 @@ import { PlaylistMenu } from './playlist-menu';
 import { AlbumEditor } from './album-editor';
 import { AlbumMenu } from './album-menu';
 import { PlaybackSync } from './playback-sync';
+import { PodcastProgressDialog } from './podcast-progress-dialog';
 import { QueuePanel } from './queue-panel';
 import { Management } from './management';
 import { MetadataEditor } from './metadata-editor';
@@ -177,6 +180,7 @@ type CatalogLocation = {
 };
 
 export function Library({ onLogout, user }: { onLogout: () => Promise<void>; user: User }) {
+  bindLibraryUser(user.id);
   const [currentUser, setCurrentUser] = useState(user);
   const profile = currentUser.profile;
   const canManage = profile !== 'listener';
@@ -246,12 +250,42 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
     [],
   );
   const [manageOpen, setManageOpen] = useState(false);
+  const [managementTab, setManagementTab] =
+    useState<import('./management').ManagementTab>('overview');
   const [editingTrack, setEditingTrack] = useState<Track | null>(null);
   const [metadataRefresh, setMetadataRefresh] = useState<RefreshTarget | null>(null);
   useEffect(() => {
     if (manageOpen) window.scrollTo({ top: 0 });
   }, [manageOpen]);
   const refreshLibrary = useCallback(() => setRevision((value) => value + 1), []);
+  useEffect(() => {
+    const changed = () => {
+      if (!manageOpen) switchView(view);
+      refreshLibrary();
+    };
+    const accessChanged = () => {
+      albumRequest.current?.abort();
+      collectionRequest.current?.abort();
+      setEditingTrack(null);
+      setEditingAlbum(null);
+      setViewingFileTrack(null);
+      setMetadataRefresh(null);
+      setEditor(null);
+      setAlbumMenu(null);
+      setPlaylistMenu(null);
+      setLyricScanAlbum(null);
+      setLyricScanBatch(null);
+      setSelectedAgentItem(null);
+      if (profile !== 'owner') switchView('tracks');
+      refreshLibrary();
+    };
+    window.addEventListener('wildstring:library-access-changed', accessChanged);
+    window.addEventListener('wildstring:library-changed', changed);
+    return () => {
+      window.removeEventListener('wildstring:library-access-changed', accessChanged);
+      window.removeEventListener('wildstring:library-changed', changed);
+    };
+  }, [refreshLibrary, view, manageOpen, profile]);
   const [album, setAlbum] = useState<Album | null>(null);
   const [albumLoading, setAlbumLoading] = useState(false);
   const [lyricScanAlbum, setLyricScanAlbum] = useState<string | null>(null);
@@ -1067,6 +1101,9 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
         </aside>
         {manageOpen && (
           <Management
+            key={selectedLibrary()}
+            initialTab={managementTab}
+            onTabChanged={setManagementTab}
             revision={revision}
             onBack={() => {
               setManageOpen(false);
@@ -1081,6 +1118,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
           />
         )}
         <main className={`library ${album ? 'is-album' : ''}`} hidden={manageOpen}>
+          <LibrarySwitcher onChanged={refreshLibrary} />
           <header className="topbar">
             <div>
               <span className="eyebrow">YOUR OWN COLLECTION</span>
@@ -1175,6 +1213,15 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
           >
             {view === 'podcasts' && (
               <PodcastsPage
+                userId={currentUser.id}
+                canEditPublishers={canManage}
+                canManageSources={canImport}
+                canManageResources={currentUser.profile === 'owner'}
+                onQueueTrack={(track, next) => {
+                  if (next) player.playNext(track);
+                  else if (!player.current) player.start([track], 0, undefined, false);
+                  else player.enqueue(track);
+                }}
                 onPlayTrack={(track) => {
                   player.start([track], 0);
                   setNotice(`正在播放播客《${track.title}》`);
@@ -1795,6 +1842,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
         <MetadataRefreshDialog target={metadataRefresh} onClose={() => setMetadataRefresh(null)} />
       )}
       <PlaybackSync player={player} userId={currentUser.id} />
+      <PodcastProgressDialog player={player} />
       {playlistMenu && (
         <PlaylistMenu
           playlist={playlistMenu.item}

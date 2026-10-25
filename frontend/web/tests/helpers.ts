@@ -34,6 +34,7 @@ export async function audio(page: Page) {
     time: element.currentTime,
     duration: element.duration,
     volume: element.volume,
+    playbackRate: element.playbackRate,
     source: element.currentSrc,
     ended: element.ended,
   }));

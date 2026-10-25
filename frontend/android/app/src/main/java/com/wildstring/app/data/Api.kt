@@ -5,6 +5,14 @@ import com.google.gson.JsonObject
 import retrofit2.http.*
 
 interface Api {
+    @GET("api/v1/libraries") suspend fun libraries(@Query("include_disabled") includeDisabled: Boolean = false): List<MusicLibrary>
+    @POST("api/v1/libraries") suspend fun createLibrary(@Body body: MusicLibraryCreate): MusicLibrary
+    @PUT("api/v1/libraries/{id}") suspend fun updateLibrary(@Path("id") id: String, @Body body: MusicLibraryInput): MusicLibrary
+    @GET("api/v1/libraries/access/{id}") suspend fun libraryAccess(@Path("id") userId: String): LibraryAccess
+    @PUT("api/v1/libraries/access/{id}") suspend fun updateLibraryAccess(@Path("id") userId: String, @Body body: LibraryAccess): LibraryAccess
+    @GET("api/v1/manage/users") suspend fun users(): AccountList
+    @POST("api/v1/manage/jobs") suspend fun musicLibraryJob(@Query("library_id") id: String, @Body body: MusicLibraryJob): JsonObject
+    @PUT("api/v1/podcasts/{id}/follow") suspend fun followPodcast(@Path("id") id: String, @Body body: PodcastFollow, @Tag owner: RequestOwner): PodcastFollow
     @POST suspend fun uploadAvatar(@Url url: String, @Body body: okhttp3.RequestBody, @Tag owner: RequestOwner): retrofit2.Response<JsonObject>
     @GET suspend fun agentGet(@Url url: String, @Tag owner: RequestOwner? = null): retrofit2.Response<JsonObject>
     @POST suspend fun agentPost(@Url url: String, @Body body: JsonObject, @Tag policy: AgentRequestPolicy? = null, @Tag owner: RequestOwner? = null): retrofit2.Response<JsonObject>
@@ -62,11 +70,21 @@ interface Api {
     @DELETE suspend fun removeTrack(@Url url: String, @Query("version") version: Int): ResponseBody
     @POST("api/v1/listening") suspend fun listening(@Body body: ListeningRequest, @Tag owner: RequestOwner? = null): ResponseBody
     @GET("api/v1/podcasts") suspend fun podcasts(): List<PodcastSummary>
+    @GET("api/v1/podcasts/publishers") suspend fun podcastPublishers(@Tag owner: RequestOwner): List<PodcastPublisher>
+    @GET("api/v1/podcasts/publishers/{id}") suspend fun podcastPublisher(@Path("id") id: String, @Tag owner: RequestOwner): PodcastPublisherDetail
+    @PUT("api/v1/podcasts/{id}/publisher") suspend fun assignPodcastPublisher(@Path("id") id: String,
+        @Body body: PodcastPublisherAssignment, @Tag owner: RequestOwner): PodcastDetail
+    @POST("api/v1/podcasts/episodes/{id}/download") suspend fun savePodcastEpisode(@Path("id") id: String, @Tag owner: RequestOwner): PodcastSaveResult
+    @DELETE("api/v1/podcasts/episodes/{id}/download") suspend fun releasePodcastEpisode(@Path("id") id: String, @Tag owner: RequestOwner): PodcastSaveResult
     @POST("api/v1/podcasts") suspend fun subscribePodcast(@Body body: PodcastSubscribeRequest): PodcastDetail
     @GET("api/v1/podcasts/{id}") suspend fun podcastDetail(@Path("id") id: String): PodcastDetail
+    @GET("api/v1/podcasts/episodes/{id}") suspend fun podcastEpisode(@Path("id") id: String): PodcastEpisode
     @POST("api/v1/podcasts/{id}/refresh") suspend fun refreshPodcast(@Path("id") id: String): PodcastDetail
     @POST("api/v1/podcasts/refresh-all") suspend fun refreshAllPodcasts(): JsonObject
     @DELETE("api/v1/podcasts/{id}") suspend fun deletePodcast(@Path("id") id: String): retrofit2.Response<Unit>
-    @PUT("api/v1/podcasts/episodes/{id}/progress") suspend fun updatePodcastProgress(@Path("id") id: String, @Body body: PodcastProgressUpdate): JsonObject
+    @GET("api/v1/podcasts/episodes/{id}/progress") suspend fun podcastProgress(@Path("id") id: String, @Tag owner: RequestOwner): EpisodeProgress
+    @PUT("api/v1/podcasts/episodes/{id}/progress") suspend fun updatePodcastProgress(@Path("id") id: String, @Body body: PodcastProgressUpdate, @Tag owner: RequestOwner): EpisodeProgress
+    @GET("api/v1/podcasts/playback-settings") suspend fun podcastPlaybackSettings(): PodcastPlaybackSettings
+    @PUT("api/v1/podcasts/playback-settings") suspend fun updatePodcastPlaybackSettings(@Body body: PodcastPlaybackSettingsUpdate): PodcastPlaybackSettings
     @POST("api/v1/ai/catalog-gaps") suspend fun catalogGaps(@Body body: JsonObject): JsonObject
 }

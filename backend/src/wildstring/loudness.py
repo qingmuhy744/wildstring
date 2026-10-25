@@ -185,10 +185,16 @@ class Loudness:
         if not shutil.which("ffmpeg"):
             raise HTTPException(409, "loudness_tool_missing")
         with self.database.connect(write=True) as db:
-            db.execute(
+            queued = db.execute(
                 "INSERT INTO loudness_analysis VALUES (?,?,NULL,NULL,'queued',NULL,?) ON CONFLICT(track_id) DO UPDATE SET file_version=excluded.file_version,status='queued',error=NULL,updated_at=excluded.updated_at WHERE loudness_analysis.status NOT IN ('queued','running')",
                 (track_id, source_version(record), time.time()),
             )
+            if queued.rowcount:
+                db.execute(
+                    "INSERT OR REPLACE INTO library_job_owners(kind,id,user_id,library_id) "
+                    "SELECT 'loudness_analysis',id,active_user(),library_id FROM tracks WHERE id=?",
+                    (track_id,),
+                )
         return {"status": "queued"}
 
     def step(self):
@@ -204,7 +210,16 @@ class Loudness:
                 (time.time(), job["track_id"]),
             )
         try:
-            result = self.analyze(job["track_id"], job["file_version"])
+            from wildstring.library.catalog import library_job_scope
+
+            with library_job_scope(
+                self.database,
+                "loudness_analysis",
+                job["track_id"],
+                job["track_id"],
+                "tasks:control",
+            ):
+                result = self.analyze(job["track_id"], job["file_version"])
             with self.database.connect(write=True) as db:
                 db.execute(
                     "UPDATE loudness_analysis SET status='completed',track_gain=?,track_peak=?,error=NULL,updated_at=? WHERE track_id=? AND file_version=?",

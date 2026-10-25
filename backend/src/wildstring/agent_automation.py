@@ -107,7 +107,8 @@ class Automation:
     def task(self, actor, identity):
         with self.database.connect() as connection:
             row = connection.execute(
-                "SELECT * FROM agent_tasks WHERE id=? AND user_id=?", (identity, actor.user_id)
+                "SELECT * FROM agent_tasks WHERE id=? AND user_id=? AND library_visible(library_id)",
+                (identity, actor.user_id),
             ).fetchone()
         if row is None:
             raise HTTPException(404, "agent_task_not_found")
@@ -125,11 +126,12 @@ class Automation:
     def tasks(self, actor, limit=50, offset=0):
         with self.database.connect() as connection:
             rows = connection.execute(
-                "SELECT id FROM agent_tasks WHERE user_id=? ORDER BY created_at DESC,id LIMIT ? OFFSET ?",
+                "SELECT id FROM agent_tasks WHERE user_id=? AND library_visible(library_id) ORDER BY created_at DESC,id LIMIT ? OFFSET ?",
                 (actor.user_id, limit, offset),
             ).fetchall()
             total = connection.execute(
-                "SELECT count(*) FROM agent_tasks WHERE user_id=?", (actor.user_id,)
+                "SELECT count(*) FROM agent_tasks WHERE user_id=? AND library_visible(library_id)",
+                (actor.user_id,),
             ).fetchone()[0]
         return {
             "items": [self.task(actor, row["id"]) for row in rows],
@@ -200,6 +202,11 @@ class Automation:
 
     def validate_task_actor(self, job):
         actor = self.current_actor(job["user_id"], credential_id=job["credential_id"])
+        from wildstring.library.catalog import allowed_ids
+
+        with self.database.connect() as db:
+            if job["library_id"] not in allowed_ids(db, actor.user_id):
+                raise HTTPException(403, "library_access_required")
         if actor.version != job["auth_version"]:
             raise HTTPException(403, "agent_authorization_changed")
         if actor.credential_id:
@@ -301,9 +308,13 @@ class Automation:
 
     def execute_task(self, job):
         from wildstring.diagnostics import trace_context
+        from wildstring.library.catalog import library_context
 
-        with trace_context(
-            job["trace_id"], user_id=job["user_id"], task_id=job["id"], sink=self.diagnostics
+        with (
+            library_context(job["user_id"], job["library_id"]),
+            trace_context(
+                job["trace_id"], user_id=job["user_id"], task_id=job["id"], sink=self.diagnostics
+            ),
         ):
             return self._execute_task(job)
 
@@ -320,6 +331,9 @@ class Automation:
         )
         try:
             actor = self.validate_task_actor(job)
+            from wildstring.library.catalog import require_current_library
+
+            require_current_library(self.database)
             identities = parameters["track_ids"]
             from wildstring.library.inspection import InspectionIndex
 
@@ -461,7 +475,7 @@ class Automation:
     def schedules(self, actor):
         with self.database.connect() as connection:
             rows = connection.execute(
-                "SELECT * FROM agent_schedules WHERE user_id=? ORDER BY created_at DESC",
+                "SELECT * FROM agent_schedules WHERE user_id=? AND library_visible(library_id) ORDER BY created_at DESC",
                 (actor.user_id,),
             ).fetchall()
         return [

@@ -2,6 +2,7 @@ import { hints } from './help-content';
 import { useEffect, useRef, useState } from 'react';
 import { api } from './api';
 import { JobDiagnostics, jobStatus, type ProviderJob } from './provider-diagnostics';
+import { DialogCloseButton } from './dialog-close';
 
 export type RefreshTarget = { scope: 'track' | 'album' | 'library'; id?: string; label: string };
 interface RefreshBatch {
@@ -135,9 +136,7 @@ export function MetadataRefreshDialog({
     >
       <header>
         <h2>更新元数据</h2>
-        <button aria-label="关闭元数据更新" disabled={busy} onClick={onClose}>
-          ×
-        </button>
+        <DialogCloseButton aria-label="关闭元数据更新" disabled={busy} onClick={onClose} />
       </header>
       <p>{target.label}</p>
       {!done ? (

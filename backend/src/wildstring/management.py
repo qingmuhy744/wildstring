@@ -42,6 +42,7 @@ class JobRequest(BaseModel):
     kind: Literal["import", "scan"]
     full: bool = Field(default=False, strict=True)
     path: str = "."
+    source_id: str = Field(default="all", min_length=1, max_length=64)
 
     @field_validator("path")
     @classmethod
@@ -89,7 +90,7 @@ class AlbumMetadataUpdate(BaseModel):
 
 class SourcePathRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    source_id: Literal["import"] = "import"
+    source_id: str = Field(default="import", min_length=1, max_length=64)
     path: str = "."
 
     @field_validator("path")
@@ -100,7 +101,7 @@ class SourcePathRequest(BaseModel):
 
 class Management:
     def __init__(self, settings, repository):
-        self.settings, self.repository = settings, repository
+        self._settings, self.repository = settings, repository
         self.database = repository.database
         self.stopping = Event()
         self.thread = None
@@ -109,11 +110,25 @@ class Management:
         )
         self.storage_identity = None
         self.intake = Intake(settings, repository)
+        from wildstring.library.catalog import LibraryCatalog
+        from wildstring.library.storage import LibraryStorage
+
+        self.storage = LibraryStorage(LibraryCatalog(self.database, settings))
         self.next_discovery = 0
         self.next_recommendation = 0
-        self.recommendation_inflight: set[str] = set()
+        self.discovery_due = {}
+        self.recommendation_inflight: set[tuple[str, str]] = set()
+
+    @property
+    def settings(self):
+        from wildstring.library.catalog import scoped_settings
+
+        return scoped_settings(self._settings, self.database)
 
     def start(self):
+        from wildstring.library.catalog import LibraryCatalog
+
+        LibraryCatalog(self.database, self._settings).initialize()
         self.repository.library_id(create=True)
         info = self.settings.data_dir.stat()
         self.storage_identity = (info.st_dev, info.st_ino)
@@ -133,7 +148,8 @@ class Management:
     def preferences(self):
         with self.database.connect() as connection:
             row = connection.execute(
-                "SELECT name, version FROM library_preferences WHERE library_id=?",
+                "SELECT COALESCE(p.name,l.name) AS name,COALESCE(p.version,1) AS version "
+                "FROM libraries l LEFT JOIN library_preferences p ON p.library_id=l.id WHERE l.id=?",
                 (self.repository.library_id(),),
             ).fetchone()
         return dict(row) if row else {"name": "我的曲库", "version": 1}
@@ -152,28 +168,53 @@ class Management:
             )
             if result.rowcount != 1:
                 raise HTTPException(409, "settings_version_conflict")
+            connection.execute(
+                "UPDATE libraries SET name=?,version=version+1 WHERE id=?",
+                (body.name, library_id),
+            )
         return self.preferences()
 
-    def submit(self, body, *, automatic=False):
+    def submit(self, body, *, automatic=False, followup=False):
+        from wildstring.library.catalog import current_library
+        from wildstring.library.storage import busy
+
+        context = current_library.get()
+        if (followup or body.source_id == "import") and context and context.source_id != "import":
+            body = body.model_copy(update={"source_id": context.source_id})
         library_id = self.repository.library_id(create=True)
         with self.database.connect(write=True) as connection:
             connection.execute("BEGIN IMMEDIATE")
-            active = connection.execute(
+            if busy(connection, library_id):
+                raise HTTPException(409, "library_migration_busy")
+            pending = connection.execute(
                 "SELECT * FROM admin_jobs WHERE library_id=? AND status IN ('queued','running')",
                 (library_id,),
-            ).fetchone()
-            if active:
+            ).fetchall()
+            for active in pending:
                 if (
                     active["kind"] == body.kind
                     and bool(active["full"]) == body.full
                     and active["scope_path"] == body.path
+                    and active["source_id"] == body.source_id
+                    and (not followup or active["status"] == "queued")
                 ):
                     return self.job(active["id"])
+            if pending and not followup:
                 raise HTTPException(409, "library_task_busy")
             job_id = uuid4().hex
             connection.execute(
-                "INSERT INTO admin_jobs(id,library_id,kind,full,status,created_at,automatic,scope_path) VALUES (?,?,?,?,'queued',?,?,?)",
-                (job_id, library_id, body.kind, body.full, now(), automatic, body.path),
+                "INSERT INTO admin_jobs(id,library_id,kind,full,status,created_at,automatic,scope_path,created_by,source_id) VALUES (?,?,?,?,'queued',?,?,?,?,?)",
+                (
+                    job_id,
+                    library_id,
+                    body.kind,
+                    body.full,
+                    now(),
+                    automatic,
+                    body.path,
+                    self.request_user(),
+                    body.source_id,
+                ),
             )
         return self.job(job_id)
 
@@ -502,11 +543,17 @@ class Management:
                     pass
 
     def source_roots(self):
-        return [{"id": "import", "name": "导入目录", "read_only": True}]
+        with self.database.connect() as db:
+            sources = db.execute(
+                "SELECT id,root FROM library_sources WHERE library_id=? ORDER BY id",
+                (self.repository.library_id(),),
+            ).fetchall()
+        return [
+            {"id": s["id"], "name": Path(s["root"]).name or "导入目录", "read_only": True}
+            for s in sources
+        ] or [{"id": "import", "name": "导入目录", "read_only": True}]
 
     def source_folders(self, source_id="import", path="."):
-        if source_id != "import":
-            raise HTTPException(404, "source_not_found")
         relative = Path(".") if path == "." else Path(validate_folder(path))
         root = self.settings.music_dir.resolve()
         directory = (root / relative).resolve()
@@ -536,8 +583,6 @@ class Management:
         return {"source_id": source_id, "path": path, "items": entries}
 
     def import_preview(self, body):
-        if body.source_id != "import":
-            raise HTTPException(404, "source_not_found")
         folder = Path(".") if body.path == "." else Path(validate_folder(body.path))
         root = self.settings.music_dir.resolve()
         directory = (root / folder).resolve()
@@ -698,8 +743,7 @@ class Management:
         with self.database.connect(write=True) as connection:
             connection.execute("BEGIN IMMEDIATE")
             row = connection.execute(
-                "SELECT * FROM admin_jobs WHERE library_id=? AND status='queued' ORDER BY created_at, id LIMIT 1",
-                (self.repository.library_id(),),
+                "SELECT * FROM admin_jobs WHERE status='queued' ORDER BY created_at, id LIMIT 1",
             ).fetchone()
             if row:
                 connection.execute(
@@ -710,22 +754,73 @@ class Management:
 
     def execute(self, job):
         try:
+            from wildstring.library.catalog import allowed_ids, library_context
+            from wildstring.permissions import require_scope
+
+            with self.database.connect() as db:
+                user = db.execute("SELECT * FROM users WHERE id=?", (job["created_by"],)).fetchone()
+                if user is None or job["library_id"] not in allowed_ids(db, job["created_by"]):
+                    raise HTTPException(403, "library_access_required")
+                require_scope(
+                    dict(user), "library:import" if job["kind"] == "import" else "library:manage"
+                )
+            with library_context(job["created_by"], job["library_id"], job["source_id"]):
+                return self.execute_scoped(job)
+        except Exception:
+            logger.exception("Library management task no longer authorized")
+            with self.database.connect(write=True) as db:
+                db.execute(
+                    "UPDATE admin_jobs SET status='failed',finished_at=?,error='library_access_required' WHERE id=?",
+                    (now(), job["id"]),
+                )
+
+    @staticmethod
+    def request_user():
+        from wildstring.library.catalog import current_library
+
+        context = current_library.get()
+        return context.user_id if context else "admin"
+
+    def execute_scoped(self, job):
+        try:
 
             def on_scan(run_id):
                 self.link(job["id"], scan_id=run_id)
 
-            result = (
-                import_music(
-                    self.settings,
-                    full=bool(job["full"]),
-                    relative_root=job.get("scope_path", "."),
-                    on_import=lambda run_id: self.link(job["id"], import_id=run_id),
-                    on_scan=on_scan,
-                    automatic=bool(job["automatic"]),
+            if job["kind"] == "import":
+                from wildstring.library.catalog import library_context
+
+                sources = (
+                    self.source_roots() if job["source_id"] == "all" else [{"id": job["source_id"]}]
                 )
-                if job["kind"] == "import"
-                else scan_library(self.settings, full=bool(job["full"]), on_start=on_scan)
-            )
+                results = []
+                for source in sources:
+                    with library_context(job["created_by"], job["library_id"], source["id"]):
+                        from wildstring.library.catalog import require_current_library
+
+                        require_current_library(self.database, "library:import")
+                        results.append(
+                            import_music(
+                                self.settings,
+                                full=bool(job["full"]),
+                                relative_root=job.get("scope_path", "."),
+                                on_import=lambda run_id: self.link(job["id"], import_id=run_id),
+                                on_scan=on_scan,
+                                automatic=bool(job["automatic"]),
+                            )
+                        )
+                result = (
+                    results[0]
+                    if len(results) == 1
+                    else {
+                        "status": "completed"
+                        if all(r["status"] == "completed" for r in results)
+                        else "completed_with_errors",
+                        "sources": results,
+                    }
+                )
+            else:
+                result = scan_library(self.settings, full=bool(job["full"]), on_start=on_scan)
             with self.database.connect(write=True) as connection:
                 connection.execute(
                     "UPDATE admin_jobs SET status=?, finished_at=?, result=? WHERE id=?",
@@ -755,6 +850,20 @@ class Management:
                     self.worker_lock.acquire()
                 try:
                     # This process owns the worker lock: previous running jobs lost their owner.
+                    self.storage.recover()
+                    with self.database.connect(write=True) as db:
+                        for table, field in (
+                            ("scan_runs", "scan_id"),
+                            ("import_runs", "import_id"),
+                        ):
+                            db.execute(
+                                f"UPDATE {table} SET status='interrupted',finished_at=? WHERE status='running' AND id IN (SELECT {field} FROM admin_jobs WHERE status='running')",  # nosec B608
+                                (now(),),
+                            )
+                        db.execute(
+                            "UPDATE admin_jobs SET status='interrupted',finished_at=?,error='worker_interrupted' WHERE status='running'",
+                            (now(),),
+                        )
                     with self.database.connect(write=True) as connection:
                         connection.execute("BEGIN IMMEDIATE")
                         connection.execute(
@@ -775,6 +884,9 @@ class Management:
                         )
                     while not self.stopping.is_set():
                         self.check_storage()
+                        if self.storage.step():
+                            self.stopping.wait(0.5)
+                            continue
                         job = self.claim()
                         if job:
                             with trace_context(
@@ -784,16 +896,11 @@ class Management:
                             ):
                                 record_event("library.task.started", operation=job["kind"])
                                 self.execute(job)
-                                record_event(
-                                    "library.task.finished", stage=self.job(job["id"])["status"]
-                                )
+                                record_event("library.task.finished", task_id=job["id"])
                         if time.monotonic() >= self.next_discovery:
-                            self.next_discovery = (
-                                time.monotonic() + self.intake.preferences()["interval_seconds"]
-                            )
+                            self.next_discovery = time.monotonic() + 15
                             try:
-                                if self.intake.has_work():
-                                    self.submit(JobRequest(kind="import"), automatic=True)
+                                self.discover_sources()
                             except HTTPException as error:
                                 if error.status_code != 409:
                                     raise
@@ -813,6 +920,43 @@ class Management:
                 self.stopping.wait(1)
         self.worker_lock.release(force=True)
 
+    def discover_sources(self):
+        from wildstring.library.catalog import library_context
+
+        with self.database.connect() as db:
+            owner = db.execute(
+                "SELECT id FROM users WHERE profile='owner' AND enabled=1 ORDER BY id LIMIT 1"
+            ).fetchone()
+            sources = db.execute(
+                "SELECT s.library_id,s.id FROM library_sources s JOIN libraries l ON l.id=s.library_id WHERE l.enabled=1 AND s.watch_enabled=1 AND NOT EXISTS(SELECT 1 FROM library_migrations m WHERE m.library_id=l.id AND m.status IN ('queued','running'))"
+            ).fetchall()
+        if owner is None:
+            return
+        for source in sources:
+            key = (source["library_id"], source["id"])
+            if time.monotonic() < self.discovery_due.get(key, 0):
+                continue
+            try:
+                with library_context(owner[0], *key):
+                    self.discovery_due[key] = (
+                        time.monotonic() + self.intake.preferences()["interval_seconds"]
+                    )
+                    if self.intake.has_work():
+                        try:
+                            self.submit(
+                                JobRequest(kind="import", source_id=source["id"]), automatic=True
+                            )
+                        except HTTPException as error:
+                            if error.status_code != 409:
+                                raise
+                            self.discovery_due[key] = time.monotonic() + 1
+                            raise
+            except HTTPException as error:
+                if error.status_code not in {403, 404}:
+                    raise
+                # A source may be removed or its library disabled after taking the snapshot.
+                self.discovery_due.pop(key, None)
+
     def generate_scheduled_recommendations(self):
         """Generate each account's opted-in daily list after its local clock time."""
         platform = getattr(self, "platform", None)
@@ -826,24 +970,27 @@ class Management:
             rows = connection.execute(
                 """SELECT p.user_id,p.library_id,p.daily_time FROM recommendation_preferences p
                 JOIN users u ON u.id=p.user_id
-                WHERE p.library_id=? AND p.daily_enabled=1 AND u.enabled=1""",
-                (self.repository.library_id(),),
+                WHERE p.daily_enabled=1 AND u.enabled=1""",
             ).fetchall()
         for row in rows:
-            identity = row["user_id"]
+            identity = (row["user_id"], row["library_id"])
             if identity in self.recommendation_inflight or clock < row["daily_time"]:
                 continue
             with self.database.connect() as connection:
                 cached = connection.execute(
                     "SELECT day FROM recommendation_daily WHERE user_id=? AND library_id=?",
-                    (identity, row["library_id"]),
+                    (row["user_id"], row["library_id"]),
                 ).fetchone()
             if cached and cached["day"] == day:
                 continue
             self.recommendation_inflight.add(identity)
             try:
-                repository = self.repository.for_user(identity)
-                Recommendations(repository, providers, platform).daily(repository, refresh=True)
+                from wildstring.library.catalog import library_context, require_current_library
+
+                with library_context(row["user_id"], row["library_id"]):
+                    require_current_library(self.database)
+                    repository = self.repository.for_user(row["user_id"])
+                    Recommendations(repository, providers, platform).daily(repository, refresh=True)
             except Exception:
                 logger.exception("Scheduled daily recommendation failed for account %s", identity)
             finally:
@@ -929,6 +1076,7 @@ def management_router(service, auth, providers=None):
     def configure_intake(body: IntakeSettings):
         result = service.intake.configure(body)
         service.next_discovery = 0
+        service.discovery_due.clear()
         return result
 
     @router.get("/intake/items")
@@ -947,8 +1095,9 @@ def management_router(service, auth, providers=None):
     def approve_intake(item_id: str, body: IntakeApproval):
         result = service.intake.approve(item_id, body)
         service.next_discovery = 0
+        service.discovery_due.clear()
         try:
-            service.submit(JobRequest(kind="import"), automatic=True)
+            service.submit(JobRequest(kind="import"), automatic=True, followup=True)
         except HTTPException as error:
             if error.status_code != 409:
                 raise
@@ -984,8 +1133,9 @@ def management_router(service, auth, providers=None):
             if not result.rowcount:
                 raise HTTPException(409, "metadata_version_conflict")
         service.next_discovery = 0
+        service.discovery_due.clear()
         try:
-            service.submit(JobRequest(kind="import"), automatic=True)
+            service.submit(JobRequest(kind="import"), automatic=True, followup=True)
         except HTTPException as error:
             if error.status_code != 409:
                 raise
@@ -1050,7 +1200,7 @@ def management_router(service, auth, providers=None):
         return {"items": service.source_roots()}
 
     @router.get("/library/folders")
-    def library_folders(source_id: Literal["import"] = "import", path: str = "."):
+    def library_folders(source_id: str = "import", path: str = "."):
         return service.source_folders(source_id, validate_folder(path) if path != "." else ".")
 
     @router.post(
@@ -1072,7 +1222,9 @@ def management_router(service, auth, providers=None):
         ],
     )
     def library_import(body: SourcePathRequest):
-        return service.submit(JobRequest(kind="import", path=body.path)) | {
+        return service.submit(
+            JobRequest(kind="import", path=body.path, source_id=body.source_id)
+        ) | {
             "source_id": body.source_id,
             "path": body.path,
         }

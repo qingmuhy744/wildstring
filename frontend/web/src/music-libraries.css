@@ -1,0 +1,106 @@
+.music-library-switcher {
+  display: grid;
+  gap: 0.4rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+  min-width: 0;
+}
+.music-library-switcher select {
+  width: 100%;
+  min-width: 0;
+  padding: 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: 0.6rem;
+  color: var(--text);
+  background: var(--surface-input);
+}
+.music-library-manager form,
+.music-library-grants {
+  display: grid;
+  gap: 0.7rem;
+  margin-top: 1.5rem;
+}
+.music-library-manager input:not([type='checkbox']),
+.music-library-manager select,
+.music-library-manager textarea {
+  width: 100%;
+  min-width: 0;
+  padding: 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  color: var(--text);
+  background: var(--surface-input);
+}
+.music-library-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 0.7rem;
+  margin-top: 1rem;
+}
+.music-library-list button {
+  display: grid;
+  gap: 0.35rem;
+  padding: 1rem;
+  text-align: left;
+}
+.music-library-list span,
+.music-library-manager .muted {
+  font-size: 0.8rem;
+  overflow-wrap: anywhere;
+}
+.music-library-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.7rem;
+}
+.music-library-grant-option {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem;
+}
+.music-library-grants fieldset {
+  border: 1px solid var(--border);
+  border-radius: 0.6rem;
+}
+
+.source-root-select {
+  display: grid;
+  min-width: 0;
+  gap: 0.5rem;
+}
+.source-root-select select {
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+}
+
+.library-storage {
+  margin-block: 1.5rem;
+  padding-block: 1rem;
+  border-block: 1px solid var(--border);
+  min-width: 0;
+}
+.library-storage fieldset {
+  display: grid;
+  gap: 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 0.6rem;
+  padding: 1rem;
+  min-width: 0;
+}
+.storage-path {
+  overflow-wrap: anywhere;
+  font-size: 0.8rem;
+  min-width: 0;
+}
+.library-migration-status {
+  margin-top: 1rem;
+  padding: 1rem;
+  background: var(--surface-input);
+  border-radius: 0.6rem;
+}
+.library-migration-status progress {
+  width: 100%;
+  accent-color: var(--accent);
+}

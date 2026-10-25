@@ -138,7 +138,7 @@ def listening_router(repository, auth, providers=None):
                 COALESCE(sum(listened_ms), 0) AS listened_ms,
                 sum(CASE WHEN last_played_at IS NOT NULL THEN 1 ELSE 0 END) AS tracks_played,
                 sum(CASE WHEN loved AND status = 'available' THEN 1 ELSE 0 END) AS favorites,
-                max(last_played_at) AS last_played_at FROM personal_tracks WHERE library_id = ?""",
+                max(last_played_at) AS last_played_at FROM personal_tracks WHERE library_selected(library_id, ?)""",
                 (current.library_id(),),
             ).fetchone()
         return {
@@ -150,8 +150,7 @@ def listening_router(repository, auth, providers=None):
     def favorite_ids(current: Annotated[LibraryRepository, Depends(scoped)]):
         with current.database.connect() as connection:
             rows = connection.execute(
-                "SELECT id FROM personal_tracks WHERE library_id = ? AND loved = 1",
-                (current.library_id(),),
+                "SELECT id FROM personal_tracks WHERE library_visible(library_id) AND loved = 1",
             ).fetchall()
         return {"ids": [row["id"] for row in rows]}
 

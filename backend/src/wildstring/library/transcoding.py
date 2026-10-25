@@ -177,7 +177,7 @@ class Transcoding:
         if record["status"] != "available":
             raise HTTPException(409, "track_unavailable")
         try:
-            with open_source(self.repository.root, Path(record["path"])) as source:
+            with open_source(Path(record["library_root"]), Path(record["path"])) as source:
                 stat = os.fstat(source.fileno())
                 if (stat.st_size, stat.st_mtime_ns) != (record["size_bytes"], record["mtime_ns"]):
                     raise HTTPException(409, "file_changed_rescan_required")
@@ -477,7 +477,7 @@ class Transcoding:
         try:
             plan = entry.plan
             with (
-                open_source(self.repository.root, Path(plan.record["path"])) as source,
+                open_source(Path(plan.record["library_root"]), Path(plan.record["path"])) as source,
                 TemporaryFile() as errors,
             ):
                 before = os.fstat(source.fileno())
@@ -560,7 +560,7 @@ class Transcoding:
     def response(self, plan, request):
         if not plan.bitrate:
             return AudioResponse(
-                self.repository.root,
+                Path(plan.record["library_root"]),
                 plan.record,
                 request,
                 headers={

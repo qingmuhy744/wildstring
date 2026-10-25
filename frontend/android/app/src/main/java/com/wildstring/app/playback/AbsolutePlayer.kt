@@ -122,7 +122,7 @@ internal class AbsolutePlayer(private val engine: ExoPlayer, private val resolve
             val original = item.mediaMetadata.extras?.getString("original_stream") ?: uri(item)
             item.buildUpon().setUri(PlaybackRequest.url(original, bitrate, if (i == index) position else 0)).build()
         }
-        engine.setMediaItems(items, index, if (bitrate == 0) position else 0)
+        engine.setMediaItems(items, index, if (requested(items[index])) 0 else position)
         engine.prepare(); engine.playWhenReady = autoplay
     }
 }

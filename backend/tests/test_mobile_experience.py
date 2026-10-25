@@ -602,7 +602,7 @@ def test_simultaneous_snapshot_writers_have_one_cas_winner(settings, authenticat
     assert sorted(value[0] for value in results) == [1, 409]
 
 
-def test_cross_library_ids_never_enter_snapshots_feedback_or_daily(
+def test_unauthorized_library_ids_never_enter_snapshots_feedback_or_daily(
     settings, authenticated_client, tmp_path
 ):
     from fastapi import HTTPException
@@ -615,10 +615,21 @@ def test_cross_library_ids_never_enter_snapshots_feedback_or_daily(
     seed(settings, 1)
     with authenticated_client(settings) as client:
         identity = tracks(client)[0]["id"]
-    other = tmp_path / "separate-library"
-    other.mkdir()
-    repository = LibraryRepository(Database(settings.data_dir), other)
-    repository.library_id(create=True)
+        other = tmp_path / "separate-library"
+        other.mkdir()
+        repository = LibraryRepository(Database(settings.data_dir), other)
+        library_id = repository.library_id(create=True)
+        user = client.post(
+            "/api/v1/manage/users",
+            headers=HEADERS,
+            json={
+                "username": "isolated-snapshots",
+                "password": "isolated-user-password",
+                "library_ids": [library_id],
+            },
+        )
+        assert user.status_code == 201
+        repository = repository.for_user(user.json()["id"])
     service = recommendations.Recommendations(repository, Providers(repository))
     with pytest.raises(HTTPException) as conflict:
         put_state(repository, PlaybackState.model_validate(snapshot([{"id": identity}])))

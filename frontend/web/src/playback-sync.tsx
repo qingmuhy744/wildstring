@@ -1,3 +1,4 @@
+import { episodeId, episodeResumeMode } from './podcast-progress';
 import { HelpLabel } from './desktop-help';
 import { Icon } from './icons';
 import { useEffect, useRef, useState } from 'react';
@@ -38,24 +39,44 @@ export function playbackSyncMode(id: string): SyncMode {
 }
 export function SyncModeControl({ userId }: { userId: string }) {
   const [mode, setMode] = useState(() => playbackSyncMode(userId));
+  const [podcastMode, setPodcastMode] = useState(() => episodeResumeMode(userId));
   return (
-    <label>
-      <HelpLabel hint="handoff">跨设备接续</HelpLabel>
-      <select
-        aria-label="跨设备接续方式"
-        value={mode}
-        onChange={(event) => {
-          const value = event.target.value as SyncMode;
-          setMode(value);
-          localStorage.setItem(modeKey(userId), value);
-          window.dispatchEvent(new Event(optionsEvent));
-        }}
-      >
-        <option value="off">关闭</option>
-        <option value="ask">轻提示（默认）</option>
-        <option value="auto">自动恢复</option>
-      </select>
-    </label>
+    <>
+      <label>
+        <HelpLabel hint="handoff">音乐跨设备接续</HelpLabel>
+        <select
+          aria-label="跨设备接续方式"
+          value={mode}
+          onChange={(event) => {
+            const value = event.target.value as SyncMode;
+            setMode(value);
+            localStorage.setItem(modeKey(userId), value);
+            window.dispatchEvent(new Event(optionsEvent));
+          }}
+        >
+          <option value="off">关闭</option>
+          <option value="ask">轻提示（默认）</option>
+          <option value="auto">自动恢复</option>
+        </select>
+      </label>
+      <label>
+        播客单集接续
+        <select
+          aria-label="播客单集接续"
+          value={podcastMode}
+          onChange={(event) => {
+            const value = event.target.value as typeof podcastMode;
+            setPodcastMode(value);
+            localStorage.setItem(`wildstring:podcast-resume:${userId}`, value);
+          }}
+        >
+          <option value="ask">询问（默认）</option>
+          <option value="auto">自动继续</option>
+          <option value="restart">从头播放</option>
+        </select>
+      </label>
+      <p className="muted">播客按单集保存进度；以上选择只影响开始收听的位置，进度始终自动保存。</p>
+    </>
   );
 }
 
@@ -258,7 +279,12 @@ export function PlaybackSync({ player, userId }: { player: Player; userId: strin
           }
           if (controller.signal.aborted) return;
           const current = latest.current;
-          if (!current.current || !current.queue.length) return;
+          if (
+            !current.current ||
+            !current.queue.length ||
+            current.queue.some((track) => episodeId(track.id))
+          )
+            return;
           const result = await api<SharedPlayback>('/playback/state', {
             method: 'PUT',
             signal: controller.signal,
@@ -303,7 +329,8 @@ export function PlaybackSync({ player, userId }: { player: Player; userId: strin
         applying ||
         playbackSyncMode(userId) === 'off' ||
         document.visibilityState !== 'visible' ||
-        latest.current.playing
+        latest.current.playing ||
+        episodeId(latest.current.current?.id)
       )
         return;
       reading = true;
@@ -351,8 +378,8 @@ export function PlaybackSync({ player, userId }: { player: Player; userId: strin
       offered = 0;
       offeredPause = null;
       setOffer(null);
-      armed = true;
-      publish(true);
+      armed = !latest.current.queue.some((track) => episodeId(track.id));
+      if (armed) publish(true);
     };
     const pause = () => {
       epoch++;

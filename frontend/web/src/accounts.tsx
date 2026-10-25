@@ -5,6 +5,8 @@ import { ThemeControl } from './theme';
 import { PlaybackStyleControl } from './playback-style';
 import { TrackListSizeControl } from './track-list-size';
 import { AvatarEditor } from './avatar';
+import { DialogCloseButton } from './dialog-close';
+import type { MusicLibrary } from './music-libraries';
 
 type Profile = User['profile'];
 const profileLabels: Record<Profile, string> = {
@@ -117,9 +119,7 @@ export function AccountDialog({
             {user.username} · {profileLabels[userProfile(user)]}
           </p>
         </div>
-        <button className="icon-button" aria-label="关闭账号设置" disabled={busy} onClick={onClose}>
-          ×
-        </button>
+        <DialogCloseButton aria-label="关闭账号设置" disabled={busy} onClick={onClose} />
       </div>
       <AvatarEditor user={user} disabled={busy} onBusy={setBusy} />
       <form className="account-form" onSubmit={saveProfile} aria-label="个人资料">
@@ -243,6 +243,8 @@ export function AccountDialog({
 }
 
 export function UsersPanel() {
+  const [libraries, setLibraries] = useState<MusicLibrary[]>([]);
+  const [libraryIds, setLibraryIds] = useState<string[]>([]);
   const [users, setUsers] = useState<User[]>([]),
     [self, setSelf] = useState<User | null>(null);
   const [username, setUsername] = useState(''),
@@ -263,13 +265,22 @@ export function UsersPanel() {
     if (signal?.aborted) return;
     setUsers(list.items);
     setSelf(auth.user);
+    const available = await api<MusicLibrary[]>('/libraries', { signal }).catch(() => []);
+    if (!signal?.aborted) setLibraries(available);
   }
   useEffect(() => {
     const controller = new AbortController();
-    void load(controller.signal).catch((reason) => {
-      if (!controller.signal.aborted) setError(reason.message);
-    });
-    return () => controller.abort();
+    const refresh = () => {
+      void load(controller.signal).catch((reason) => {
+        if (!controller.signal.aborted) setError(reason.message);
+      });
+    };
+    refresh();
+    window.addEventListener('wildstring:libraries-updated', refresh);
+    return () => {
+      controller.abort();
+      window.removeEventListener('wildstring:libraries-updated', refresh);
+    };
   }, []);
   async function act(work: () => Promise<unknown>, message: string) {
     setBusy(true);
@@ -278,6 +289,7 @@ export function UsersPanel() {
     try {
       await work();
       await load();
+      window.dispatchEvent(new Event('wildstring:users-updated'));
       setNotice(message);
       return true;
     } catch (reason) {
@@ -302,6 +314,7 @@ export function UsersPanel() {
               username,
               password,
               profile,
+              library_ids: libraryIds,
             }),
           }),
         '账号已创建。',
@@ -487,6 +500,28 @@ export function UsersPanel() {
             <option value="owner">所有者</option>
           </select>
         </label>
+        {profile !== 'owner' && (
+          <fieldset>
+            <legend>可访问音乐库</legend>
+            {libraries.map((library) => (
+              <label key={library.id} className="music-library-grant-option">
+                <input
+                  type="checkbox"
+                  checked={libraryIds.includes(library.id)}
+                  onChange={(event) =>
+                    setLibraryIds((values) =>
+                      event.target.checked
+                        ? [...values, library.id]
+                        : values.filter((key) => key !== library.id),
+                    )
+                  }
+                />
+                {library.name}
+              </label>
+            ))}
+            <small>未勾选时只可使用个人播客关注等功能。</small>
+          </fieldset>
+        )}
         <label>
           初始密码
           <input

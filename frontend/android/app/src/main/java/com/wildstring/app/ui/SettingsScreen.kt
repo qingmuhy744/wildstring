@@ -56,8 +56,12 @@ private val LocalSettingsFeedback = staticCompositionLocalOf<() -> Unit> { {} }
     var assistant by remember { mutableStateOf(false) }
     var diagnostics by remember { mutableStateOf(false) }
     var feature by remember { mutableStateOf<String?>(null) }
+    var podcastPlayback by remember { mutableStateOf<com.wildstring.app.data.PodcastPlaybackSettings?>(null) }
     val inbox by vm.agent.inbox.collectAsStateWithLifecycle()
     LaunchedEffect(preferences, clearing, assistant, feature, servers, state.current?.id) { usage = vm.cacheUsage() }
+    LaunchedEffect(state.serverSelection, state.account?.id) {
+        podcastPlayback = runCatching { vm.repository.podcastPlaybackSettings() }.getOrNull()
+    }
     fun mb(bytes: Long) = "%.1f MB".format(bytes / 1048576.0)
     CompositionLocalProvider(LocalSettingsFeedback provides tactile {}) {
         SettingsPage(back, bottomBar) {
@@ -77,16 +81,14 @@ private val LocalSettingsFeedback = staticCompositionLocalOf<() -> Unit> { {} }
             SettingsGroup("Last.fm") { LastfmSettings(vm) }
             SettingsGroup("助手与通知") {
                 SettingsAction("野弦助手 / 通知与草案", Icons.Default.AutoAwesome) { assistant = true }
-                Text(if (inbox.owner == vm.repository.session.cacheScope() && inbox.unread > 0) "${inbox.unread} 条未读通知" else "对话找歌、确认草案、曲库巡检与 AI 连接",
+                Text(if (inbox.owner == vm.repository.session.cacheScope() && inbox.unread > 0) "${inbox.unread} 条未读通知" else "对话找歌、通知与轻量资料修正",
                     Modifier.padding(start = 16.dp, end = 16.dp, bottom = 16.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                SettingsAction("模型连接", Icons.Default.Hub) { feature = "connections" }
                 SettingsAction("联网与记忆", Icons.Default.TravelExplore) { feature = "research" }
                 SettingsAction("通知设置", Icons.Default.Notifications) { feature = "channels" }
             }
-            if (state.account?.isOwner == true) SettingsGroup("资料来源与插件") {
-                SettingsAction("数据源插件", Icons.Default.Extension) { feature = "source-plugins" }
+            if (state.account?.isOwner == true) SettingsGroup("服务端管理") {
                 Text(
-                    "全库批量核对、目录整理等高级治理请在电脑网页端进行。",
+                    "音乐库、文件夹、权限、共享音频清理及插件配置请在网页端管理。",
                     Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -96,9 +98,13 @@ private val LocalSettingsFeedback = staticCompositionLocalOf<() -> Unit> { {} }
                 SettingsAction("播放诊断", Icons.Default.Troubleshoot) { diagnostics = true }
                 SettingsAction("其他设备继续", Icons.Default.Devices) { feature = "devices" }
                 val syncMode by vm.sharing.mode.collectAsStateWithLifecycle()
-                SettingsChoice("跨设备接续", when(syncMode) { "off" -> "关闭"; "auto" -> "自动恢复"; else -> "轻提示" }, Icons.Default.Devices,
+                SettingsChoice("音乐跨设备接续", when(syncMode) { "off" -> "关闭"; "auto" -> "自动恢复"; else -> "轻提示" }, Icons.Default.Devices,
                     listOf("off" to "关闭", "ask" to "轻提示（默认）", "auto" to "自动恢复"), syncMode,
                     "暂停时自动保存进度。仅提示其他设备最近 30 分钟内的暂停，每次暂停只提示一次；载入后保持暂停。", vm::syncMode)
+                val podcastMode by vm.podcastProgress.mode.collectAsStateWithLifecycle()
+                SettingsChoice("播客单集接续", when(podcastMode) { "auto" -> "自动接续"; "restart" -> "从头播放"; else -> "播放前询问" }, Icons.Default.Podcasts,
+                    listOf("ask" to "播放前询问（默认）", "auto" to "自动接续", "restart" to "从头播放"), podcastMode,
+                    "每集进度独立保存。播放时定时同步，离线时先保存在本机；不同设备进度冲突时会让你选择。", vm.podcastProgress::mode)
                 SettingsChoice("播放音质", if (preferences.aacBitrate == 0) "原音" else "AAC · ${preferences.aacBitrate} kbps", Icons.Default.GraphicEq,
                     com.wildstring.app.data.PlaybackRequest.bitrates.map { it to if (it == 0) "原音" else "AAC · $it kbps" }, preferences.aacBitrate,
                     "默认原音。选择 AAC 后，无损音源转码，有损音源直放。切换保留播放位置和暂停状态。", vm.settings::quality)
@@ -108,6 +114,37 @@ private val LocalSettingsFeedback = staticCompositionLocalOf<() -> Unit> { {} }
                 SettingsChoice("歌词大小", preferences.lyricSize.label, Icons.Default.FormatSize,
                     com.wildstring.app.data.LyricSize.entries.map { it to it.label }, preferences.lyricSize,
                     "调整全屏歌词和逐字高亮的字号，只影响本机播放页。", vm.settings::lyricSize)
+                podcastPlayback?.let { playback ->
+                    val savePodcastPlayback: (com.wildstring.app.data.PodcastPlaybackSettings) -> Unit = { next ->
+                        podcastPlayback = next
+                        scope.launch {
+                            runCatching { vm.repository.updatePodcastPlaybackSettings(next) }
+                                .onSuccess { podcastPlayback = it; message = "播客播放缓存设置已保存。" }
+                                .onFailure { message = "播客播放缓存设置保存失败，请刷新后重试。" }
+                        }
+                    }
+                    ListItem(
+                        headlineContent = { Text("播放时缓存播客单集") },
+                        supportingContent = { Text("未下载单集开始播放时，服务端自动缓存当前单集") },
+                        leadingContent = { Icon(Icons.Default.Podcasts, null) },
+                        trailingContent = { Switch(playback.autoCacheCurrent, { enabled -> savePodcastPlayback(playback.copy(autoCacheCurrent = enabled)) }) },
+                    )
+                    ListItem(
+                        headlineContent = { Text("预缓存下一集") },
+                        supportingContent = { Text("当前单集开始缓存后，再加入下一集") },
+                        leadingContent = { Icon(Icons.Default.SkipNext, null) },
+                        trailingContent = { Switch(playback.prefetchNext, { enabled -> savePodcastPlayback(playback.copy(prefetchNext = enabled)) }) },
+                    )
+                    SettingsChoice(
+                        "播客缓存网络",
+                        when (playback.networkPolicy) { "off" -> "关闭自动缓存"; "any" -> "Wi‑Fi 和移动网络"; else -> "仅 Wi‑Fi" },
+                        Icons.Default.NetworkCheck,
+                        listOf("off" to "关闭自动缓存", "wifi" to "仅 Wi‑Fi（推荐）", "any" to "Wi‑Fi 和移动网络"),
+                        playback.networkPolicy,
+                        "播放仍会立即开始；网络策略只限制后台缓存任务。",
+                        change = { policy -> savePodcastPlayback(playback.copy(networkPolicy = policy)) },
+                    )
+                }
             }
             SettingsGroup("外观与触感") {
                 SettingsChoice("歌曲列表大小", preferences.songListSize.label, Icons.Default.FormatSize,

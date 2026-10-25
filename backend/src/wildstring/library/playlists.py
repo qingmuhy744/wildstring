@@ -48,8 +48,13 @@ class PlaylistStore:
         self.user_id = library.database.user_id
 
     def ensure_default(self):
-        library_id = self.library.library_id(create=True)
+        library_id = self.library.default_library_id()
         with self.database.connect(write=True) as connection:
+            if connection.execute(
+                "SELECT id FROM playlists WHERE user_id=? AND kind='favorites' LIMIT 1",
+                (self.user_id,),
+            ).fetchone():
+                return
             connection.execute(
                 """INSERT OR IGNORE INTO playlists
                 (id, library_id, name, kind, created_at, updated_at, user_id) VALUES (?, ?, '♥ 我喜欢', 'favorites', ?, ?, ?)""",
@@ -66,8 +71,8 @@ class PlaylistStore:
 
     def _record(self, connection, playlist_id, version=None, editable=False):
         row = connection.execute(
-            "SELECT * FROM playlists WHERE id = ? AND library_id = ? AND user_id = ?",
-            (playlist_id, self.library.library_id(), self.user_id),
+            "SELECT * FROM playlists WHERE id = ? AND user_id = ?",
+            (playlist_id, self.user_id),
         ).fetchone()
         if row is None:
             raise HTTPException(404, "playlist_not_found")
@@ -79,7 +84,7 @@ class PlaylistStore:
         return result
 
     def _selection(self, record, q=""):
-        where = "t.library_id = :library_id AND t.status = 'available'"
+        where = "library_visible(t.library_id) AND t.status = 'available'"
         parameters = {"library_id": self.library.library_id(), "playlist_id": record["id"]}
         cap = 2_147_483_647
         if record["kind"] == "manual":
@@ -136,15 +141,15 @@ class PlaylistStore:
 
     def listing(self, q="", limit=50, offset=0):
         query = normalize(q).replace("\\", "\\\\").replace("%", r"\%").replace("_", r"\_")
-        parameters = (self.library.library_id(), self.user_id, query, f"%{query}%")
+        parameters = (self.user_id, query, f"%{query}%")
         with self.database.connect() as connection:
             configure_artist_queries(connection)
             total = connection.execute(
-                "SELECT count(*) FROM playlists WHERE library_id = ? AND user_id = ? AND (? = '' OR normalized(name) LIKE ? ESCAPE '\\')",
+                "SELECT count(*) FROM playlists WHERE user_id = ? AND (? = '' OR normalized(name) LIKE ? ESCAPE '\\')",
                 parameters,
             ).fetchone()[0]
             rows = connection.execute(
-                "SELECT * FROM playlists WHERE library_id = ? AND user_id = ? AND (? = '' OR normalized(name) LIKE ? ESCAPE '\\') ORDER BY kind = 'favorites' DESC, updated_at DESC, id LIMIT ? OFFSET ?",
+                "SELECT * FROM playlists WHERE user_id = ? AND (? = '' OR normalized(name) LIKE ? ESCAPE '\\') ORDER BY kind = 'favorites' DESC, updated_at DESC, id LIMIT ? OFFSET ?",
                 (*parameters, limit, offset),
             ).fetchall()
             items = [self._public(connection, dict(row)) for row in rows]
@@ -184,7 +189,7 @@ class PlaylistStore:
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     playlist_id,
-                    self.library.library_id(),
+                    self.library.default_library_id(),
                     body.name,
                     body.kind,
                     body.definition.model_dump_json(exclude_none=True) if body.definition else None,
@@ -239,8 +244,8 @@ class PlaylistStore:
                         not isinstance(track_id, str)
                         or len(track_id) > 128
                         or connection.execute(
-                            "SELECT id FROM tracks WHERE id = ? AND library_id = ? AND status = 'available'",
-                            (track_id, self.library.library_id()),
+                            "SELECT id FROM tracks WHERE id = ? AND library_visible(library_id) AND status = 'available'",
+                            (track_id,),
                         ).fetchone()
                         is None
                     ):
@@ -262,9 +267,9 @@ class PlaylistStore:
                     available = {
                         row["id"]
                         for row in connection.execute(
-                            "SELECT id FROM tracks WHERE library_id=? AND status='available' "
+                            "SELECT id FROM tracks WHERE library_visible(library_id) AND status='available' "
                             "AND id IN (SELECT value FROM json_each(?))",
-                            (self.library.library_id(), json.dumps(ids)),
+                            (json.dumps(ids),),
                         )
                     }
                     if requested != available:

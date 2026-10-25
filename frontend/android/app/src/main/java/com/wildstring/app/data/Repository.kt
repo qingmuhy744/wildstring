@@ -1,11 +1,15 @@
 package com.wildstring.app.data
 
+import android.content.Context
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import java.io.IOException
 import com.google.gson.Gson
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import javax.inject.Singleton
+import dagger.hilt.android.qualifiers.ApplicationContext
 import okhttp3.OkHttpClient
 import okhttp3.CookieJar
 import okhttp3.Request
@@ -15,23 +19,42 @@ import okhttp3.MediaType.Companion.toMediaType
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.asSharedFlow
 import retrofit2.HttpException
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 
 data class CatalogQuery(val tab: String = "search", val kind: String = "discover", val title: String = "发现",
     val query: String = "", val offset: Int = 0, val collection: String? = null, val collectionId: String? = null,
-    val playlist: Playlist? = null, val role: String = "album_artist", val sort: String = "title", val albumFilter: String? = null, val order: String = "asc") {
+    val playlist: Playlist? = null, val role: String = "album_artist", val sort: String = "title", val albumFilter: String? = null, val order: String = "asc",
+    val libraryId: String = "all") {
     val indexed: Boolean get() = kind in listOf("tracks", "albums", "artists") && sort in listOf("title", "name") && order == "asc" &&
         collection != "playlists" && collection != "albums" && albumFilter == null
-    val key: String get() = Gson().toJson(listOf(tab, kind, query, offset, collection, collectionId, role, sort, albumFilter, order))
+    val key: String get() = Gson().toJson(listOf(tab, kind, query, offset, collection, collectionId, role, sort, albumFilter, order, libraryId))
 }
 data class CatalogPage(val tracks: List<Track> = emptyList(), val albums: List<Album> = emptyList(),
     val artists: List<Artist> = emptyList(), val playlists: List<Playlist> = emptyList(), val total: Int = 0, val discs: List<DiscSummary>? = null)
 
 @Singleton
-class Repository @Inject constructor(val session: SessionStore, val client: OkHttpClient, val database: QueueDatabase, val cache: ClientCache, val settings: AppSettings, val downloads: OfflineDownloads) {
+class Repository @Inject constructor(@param:ApplicationContext private val context: Context, val session: SessionStore, val client: OkHttpClient, val database: QueueDatabase, val cache: ClientCache, val settings: AppSettings, val downloads: OfflineDownloads) {
     private val gson = Gson()
+    private val libraryPrefs = context.getSharedPreferences("music-libraries", Context.MODE_PRIVATE)
+    val selectedLibraryId: String get() = libraryPrefs.getString("selected:${session.storageScope()}", "all") ?: "all"
+    fun selectLibrary(id: String) { session.storageScope()?.let { libraryPrefs.edit().putString("selected:$it", id).apply() } }
+    private val accessChanges = kotlinx.coroutines.flow.MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    val libraryAccessChanges = accessChanges.asSharedFlow()
+    @Volatile private var libraryAccessFingerprint = ""
+    @Volatile private var fingerprintOwner: String? = null
+    private fun libraryInterceptor(owner: String, selection: String) = okhttp3.Interceptor { chain ->
+        val response = chain.proceed(chain.request().newBuilder().header("X-Wildstring-Library", selection).build())
+        if (owner == session.cacheScope()) response.header("X-Wildstring-Library-Access")?.let { fingerprint ->
+            synchronized(this) {
+                if (fingerprintOwner == owner && libraryAccessFingerprint.isNotEmpty() && libraryAccessFingerprint != fingerprint) accessChanges.tryEmit(Unit)
+                libraryAccessFingerprint = fingerprint; fingerprintOwner = owner
+            }
+        }
+        response
+    }
     private var cachedUrl: String? = null
     private var cachedApi: Api? = null
     private var cachedAgentKey: String? = null
@@ -56,9 +79,13 @@ class Repository @Inject constructor(val session: SessionStore, val client: OkHt
         val request = session.requestState() ?: throw IOException("请先连接服务器。")
         val base = request.endpoint
         val selection = request.selection
-        val key = "$base|$selection"
+        val library = selectedLibraryId
+        val key = "$base|$selection|$library"
         if (cachedUrl != key) {
-            val scoped = client.newBuilder().apply { interceptors().add(0, SelectionRequestInterceptor(selection) { session.requestState()?.selection }) }.build()
+            val scoped = client.newBuilder().apply {
+                interceptors().add(0, SelectionRequestInterceptor(selection) { session.requestState()?.selection })
+                addInterceptor(libraryInterceptor(session.cacheScope().orEmpty(), library))
+            }.build()
             cachedApi = Retrofit.Builder().baseUrl(base).client(scoped).addConverterFactory(GsonConverterFactory.create(networkGson())).build().create(Api::class.java)
             cachedUrl = key
         }
@@ -67,10 +94,12 @@ class Repository @Inject constructor(val session: SessionStore, val client: OkHt
     /** A lost assistant response can already have consumed model budget; do not resend POSTs. */
     @Synchronized fun agentApi(): Api {
         val request = session.requestState() ?: throw IOException("请先连接服务器。")
-        val key = "${request.endpoint}|${request.selection}"
+        val library = selectedLibraryId
+        val key = "${request.endpoint}|${request.selection}|$library"
         if (cachedAgentKey != key) {
             val scoped = client.newBuilder().retryOnConnectionFailure(false).apply {
                 interceptors().add(0, SelectionRequestInterceptor(request.selection) { session.requestState()?.selection })
+                addInterceptor(libraryInterceptor(session.cacheScope().orEmpty(), library))
             }.build()
             cachedAgentApi = Retrofit.Builder().baseUrl(request.endpoint).client(scoped)
                 .addConverterFactory(GsonConverterFactory.create(networkGson())).build().create(Api::class.java)
@@ -83,12 +112,14 @@ class Repository @Inject constructor(val session: SessionStore, val client: OkHt
         segments.forEach { builder.addPathSegment(it) }
         return builder.build().toString()
     }
-    private val podcastCovers = java.util.concurrent.ConcurrentHashMap<String, String>()
-    fun rememberPodcastCover(trackId: String, coverUrl: String) {
-        if (coverUrl.isNotBlank()) podcastCovers[trackId] = coverUrl
-    }
+    val podcastImageClient: OkHttpClient = podcastArtworkClient().newBuilder()
+        .addInterceptor(CoverCacheInterceptor(cache, session) { true }).build()
     fun cover(id: String): String =
-        podcastCovers[id]?.takeIf { it.isNotBlank() } ?: (url("api", "v1", "tracks", id, "cover") + "?size=768")
+        knownTracks[id]?.podcast?.coverUrl?.let(::podcastArtworkUrl)
+            ?: (url("api", "v1", "tracks", id, "cover") + "?size=768")
+    fun imageClient(uri: String): OkHttpClient = if (knownTracks.values.any {
+        it.podcast?.coverUrl?.let(::podcastArtworkUrl) == uri
+    }) podcastImageClient else client
     suspend fun coverImage(id: String): ByteArray = withContext(Dispatchers.IO) {
         val owner = session.cacheScope(); requireProfile(owner)
         val bytes = api().coverImage(cover(id), RequestOwner(owner!!)).use { body ->
@@ -108,25 +139,86 @@ class Repository @Inject constructor(val session: SessionStore, val client: OkHt
         if (bytes.size < 3 || bytes[0] != 0xff.toByte() || bytes[1] != 0xd8.toByte()) throw IOException("封面图片不可用。")
         bytes
     }
+    private fun podcastNetwork(): String {
+        val manager = context.getSystemService(ConnectivityManager::class.java)
+        val caps = manager.getNetworkCapabilities(manager.activeNetwork)
+        return when {
+            caps?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true || caps?.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) == true -> "wifi"
+            caps?.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) == true -> "cellular"
+            else -> "unknown"
+        }
+    }
     fun originalStream(id: String): String =
         if (id.startsWith("podcast_ep_")) {
-            url("api", "v1", "podcasts", "episodes", id.removePrefix("podcast_ep_"), "stream") + "?proxy=1"
+            url("api", "v1", "podcasts", "episodes", id.removePrefix("podcast_ep_"), "stream") + "?proxy=1&cache=1&network=${podcastNetwork()}"
         } else {
             url("api", "v1", "tracks", id, "stream")
         }
-    fun stream(id: String): String = PlaybackRequest.url(originalStream(id), if (downloads.file(id) != null) 0 else settings.state.value.aacBitrate)
+    fun stream(id: String): String = PlaybackRequest.url(originalStream(id), if (podcastEpisodeId(id) != null || downloads.file(id) != null) 0 else settings.state.value.aacBitrate)
 
     suspend fun podcasts(): List<PodcastSummary> = api().podcasts()
-    suspend fun subscribePodcast(feedUrl: String): PodcastDetail = api().subscribePodcast(PodcastSubscribeRequest(feedUrl = feedUrl))
-    suspend fun podcastDetail(id: String): PodcastDetail = api().podcastDetail(id)
-    suspend fun refreshPodcast(id: String): PodcastDetail = api().refreshPodcast(id)
-    suspend fun refreshAllPodcasts(): Boolean = try { api().refreshAllPodcasts(); true } catch (_: Exception) { false }
-    suspend fun deletePodcast(id: String): Boolean = api().deletePodcast(id).isSuccessful
-    suspend fun updatePodcastProgress(episodeId: String, positionSec: Int, durationSec: Int, completed: Boolean) {
-        try {
-            api().updatePodcastProgress(episodeId, PodcastProgressUpdate(positionSec, durationSec, completed))
-        } catch (_: Exception) {}
+    suspend fun libraries(includeDisabled: Boolean = false): List<MusicLibrary> {
+        val owner = session.cacheScope(); requireProfile(owner)
+        return api().libraries(includeDisabled).also { requireProfile(owner) }
     }
+    suspend fun followPodcast(id: String, followed: Boolean): Boolean {
+        val owner = session.cacheScope(); requireProfile(owner)
+        return api().followPodcast(id, PodcastFollow(followed), RequestOwner(owner)).also { requireProfile(owner) }.followed
+    }
+    suspend fun podcastPublishers(): List<PodcastPublisher> {
+        val owner = session.cacheScope(); requireProfile(owner)
+        return api().podcastPublishers(RequestOwner(owner)).also { requireProfile(owner) }
+    }
+    suspend fun podcastPublisher(id: String): PodcastPublisherDetail {
+        val owner = session.cacheScope(); requireProfile(owner)
+        return api().podcastPublisher(id, RequestOwner(owner)).also { requireProfile(owner) }
+    }
+    suspend fun assignPodcastPublisher(id: String, body: PodcastPublisherAssignment): PodcastDetail {
+        val owner = session.cacheScope(); requireProfile(owner)
+        return api().assignPodcastPublisher(id, body, RequestOwner(owner)).also {
+            requireProfile(owner); save("podcast:$id", it, owner)
+        }
+    }
+    suspend fun savePodcastEpisode(id: String, saved: Boolean): PodcastSaveResult {
+        val owner = session.cacheScope()
+        return (if (saved) api().savePodcastEpisode(id, RequestOwner(owner)) else api().releasePodcastEpisode(id, RequestOwner(owner))).also { requireProfile(owner) }
+    }
+    suspend fun subscribePodcast(feedUrl: String): PodcastDetail = api().subscribePodcast(PodcastSubscribeRequest(feedUrl = feedUrl))
+    suspend fun podcastDetail(id: String): PodcastDetail {
+        val owner = session.cacheScope(); requireProfile(owner)
+        return api().podcastDetail(id).also { detail ->
+            requireProfile(owner); save("podcast:$id", detail, owner)
+        }
+    }
+    suspend fun cachedPodcastDetail(id: String): PodcastDetail? = saved("podcast:$id", PodcastDetail::class.java)
+    suspend fun cachedPodcastEpisode(id: String): PodcastEpisode? = saved("podcast-episode:$id", PodcastEpisode::class.java)
+    suspend fun podcastEpisode(id: String): PodcastEpisode {
+        val owner = session.cacheScope(); requireProfile(owner)
+        return api().podcastEpisode(id).also { episode ->
+            requireProfile(owner); save("podcast-episode:$id", episode, owner)
+        }
+    }
+    suspend fun rememberPodcastEpisode(episode: PodcastEpisode, podcast: PodcastSummary): Track {
+        val owner = session.cacheScope(); requireProfile(owner)
+        val track = episode.toTrack(podcast)
+        save("track:${track.id}", track, owner)
+        save("podcast-episode:${episode.id}", episode, owner)
+        requireProfile(owner)
+        return rememberTrack(track)
+    }
+    suspend fun refreshPodcast(id: String): PodcastDetail {
+        val owner = session.cacheScope(); requireProfile(owner)
+        return api().refreshPodcast(id).also { detail ->
+            requireProfile(owner); save("podcast:$id", detail, owner)
+        }
+    }
+    suspend fun refreshAllPodcasts(): Boolean = try { api().refreshAllPodcasts(); true }
+        catch (e: CancellationException) { throw e }
+        catch (_: Exception) { false }
+    suspend fun deletePodcast(id: String): Boolean = api().deletePodcast(id).isSuccessful
+    suspend fun podcastPlaybackSettings(): PodcastPlaybackSettings = api().podcastPlaybackSettings()
+    suspend fun updatePodcastPlaybackSettings(settings: PodcastPlaybackSettings): PodcastPlaybackSettings =
+        api().updatePodcastPlaybackSettings(PodcastPlaybackSettingsUpdate(settings.version, settings.autoCacheCurrent, settings.prefetchNext, settings.networkPolicy))
     suspend fun checkCatalogGaps(artist: String, limit: Int = 10): com.google.gson.JsonObject {
         val payload = com.google.gson.JsonObject().apply {
             addProperty("artist", artist)
@@ -227,6 +319,7 @@ class Repository @Inject constructor(val session: SessionStore, val client: OkHt
         return this
     }
     suspend fun catalog(query: CatalogQuery): CatalogPage {
+        if (query.libraryId != selectedLibraryId) throw CancellationException("音乐库已切换。")
         val profile = session.cacheScope()
         val revision = cache.catalogRevision
         val page = when (query.kind) {
@@ -242,6 +335,7 @@ class Repository @Inject constructor(val session: SessionStore, val client: OkHt
             else -> tracks(query.query, query.offset, query.collection, query.collectionId, query.kind == "recent", query.role, query.sort, albumFilter = query.albumFilter, order = query.order).checked(query).let { CatalogPage(tracks = it.items, total = it.total, discs = it.discs) }
         }
         requireProfile(profile)
+        if (query.libraryId != selectedLibraryId) throw CancellationException("音乐库已切换。")
         if (revision != cache.catalogRevision) throw CancellationException("曲库已更新。")
         save("catalog:${query.key}", page, profile, revision)
         page.tracks.forEach { save("track:${it.id}", it, profile, revision) }
@@ -249,11 +343,13 @@ class Repository @Inject constructor(val session: SessionStore, val client: OkHt
         return page
     }
     suspend fun browseIndex(query: CatalogQuery): BrowseIndex? {
+        if (query.libraryId != selectedLibraryId) throw CancellationException("音乐库已切换。")
         if (!query.indexed) return null
         val owner = session.cacheScope()
         val result = api().browseIndex(query.kind, query.query,
             query.collectionId.takeIf { query.collection == "artists" }, query.role.takeIf { query.collection == "artists" || query.kind == "artists" }, query.albumFilter)
         requireProfile(owner)
+        if (query.libraryId != selectedLibraryId) throw CancellationException("音乐库已切换。")
         // An older server or incomplete response must not create fabricated positions.
         require(result.kind == query.kind && result.total >= 0 && result.groups.size == 28)
         require(result.groups.map { it.key } == listOf("0–9") + ('A'..'Z').map { it.toString() } + "#")
@@ -263,12 +359,15 @@ class Repository @Inject constructor(val session: SessionStore, val client: OkHt
     /** Build the complete snapshot before touching playback. Any failed page preserves the old queue. */
     suspend fun collectionTracks(query: CatalogQuery): List<Track> {
         val owner = session.cacheScope() ?: throw IOException("登录已失效。")
+        val library = selectedLibraryId
+        val revision = cache.catalogRevision
         val result = linkedMapOf<String, Track>()
         var offset = 0
         var expected = -1
         while (true) {
             val page = tracks(query.query, offset, query.collection, query.collectionId, query.kind == "recent", query.role, query.sort, 200, query.albumFilter, query.order)
             requireProfile(owner)
+            if (library != selectedLibraryId || revision != cache.catalogRevision) throw CancellationException("音乐库或权限已变化，请重新读取。")
             if (expected == -1) { expected = page.total; require(expected <= 5000) { "集合超过 5000 首，请筛选后播放。" } }
             require(expected == page.total) { "集合已变化，请重试。" }
             if (page.items.isEmpty()) { require(offset >= expected) { "集合读取不完整，请重试。" }; break }
@@ -283,6 +382,17 @@ class Repository @Inject constructor(val session: SessionStore, val client: OkHt
     suspend fun track(id: String): Track {
         val profile = session.cacheScope()
         val snapshot = favoriteClock.get()
+        podcastEpisodeId(id)?.let { episodeId ->
+            return try {
+                val episode = podcastEpisode(episodeId)
+                val podcast = podcasts().firstOrNull { it.id == episode.podcastId } ?: throw IOException("节目已移除。")
+                requireProfile(profile)
+                rememberPodcastEpisode(episode, podcast)
+            } catch (error: IOException) {
+                if (error is javax.net.ssl.SSLException || profile != session.cacheScope()) throw error
+                cachedTrack(id) ?: throw error
+            }
+        }
         return try { api().track(url("api", "v1", "tracks", id)).let { requireProfile(profile); val merged = rememberTrack(it, snapshot); downloads.refreshTrack(merged); save("track:$id", merged, profile); requireProfile(profile); rememberTrack(merged, snapshot) } }
         catch (error: HttpException) { if (profile == session.cacheScope() && error.code() in listOf(401, 403, 404)) downloads.remove(id); throw error }
         catch (error: IOException) {

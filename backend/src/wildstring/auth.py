@@ -66,6 +66,7 @@ class UserCreate(BaseModel):
     username: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,31}$")
     password: SecretStr = Field(min_length=12, max_length=128)
     profile: Literal["owner", "librarian", "editor", "listener"] = "listener"
+    library_ids: list[str] | None = Field(default=None, max_length=1000)
 
 
 class UserUpdate(BaseModel):
@@ -374,6 +375,24 @@ class Auth:
                 connection.execute(
                     "INSERT INTO users(id,username,password_hash,profile) VALUES (?,?,?,?)",
                     (user_id, value.username, hashed, value.profile),
+                )
+                ids = (
+                    set(value.library_ids)
+                    if value.library_ids is not None
+                    else {
+                        row[0]
+                        for row in connection.execute(
+                            "SELECT id FROM libraries WHERE is_default=1 AND enabled=1"
+                        )
+                    }
+                )
+                available = {
+                    row[0] for row in connection.execute("SELECT id FROM libraries WHERE enabled=1")
+                }
+                if not ids <= available:
+                    raise HTTPException(404, "library_not_found")
+                connection.executemany(
+                    "INSERT INTO user_library_access VALUES (?,?)", [(user_id, i) for i in ids]
                 )
                 return public_user(
                     connection.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()

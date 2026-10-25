@@ -57,17 +57,57 @@ class PlaybackService : MediaSessionService() {
     @Inject lateinit var health: PlaybackHealth
     @Inject lateinit var resolver: PlaybackResolver
     @Inject lateinit var sharing: PlaybackSharing
+    @Inject lateinit var podcastProgress: PodcastProgress
     @Inject lateinit var sleep: SleepTimer
     @Inject lateinit var settings: AppSettings
     private lateinit var player: AbsolutePlayer
     private lateinit var engine: ExoPlayer
     private val gainProcessor = GainAudioProcessor()
     private var gainRequest: Job? = null
+    private var podcastStart: Job? = null
+    private var preparingPodcast = false
+    private var applyingPodcast = false
+    private var progressEntry: String? = null
+    private var podcastGeneration = 0L
+    private val consumedPodcastIntents = mutableSetOf<String>()
+    private fun checkpointPodcast(event: String, force: Boolean = false) {
+        if (restoring || preparingPodcast || applyingPodcast) return
+        val item = player.currentMediaItem ?: return
+        if (item.mediaId != progressEntry || item.mediaMetadata.extras?.getString("profile") != repository.session.cacheScope()) return
+        val id = podcastEpisodeId(item.mediaMetadata.extras?.getString("track_id")) ?: return
+        podcastProgress.checkpoint(id, player.currentPosition, player.duration, event, force)
+    }
+    private fun preparePodcast(automatic: Boolean = false, requestedMs: Long? = null, autoplay: Boolean = true) {
+        if (restoring || preparingPodcast || applyingPodcast) return
+        val item = player.currentMediaItem ?: return
+        val extras = item.mediaMetadata.extras ?: return
+        val id = podcastEpisodeId(extras.getString("track_id")) ?: return
+        val owner = extras.getString("profile") ?: return
+        if (owner != repository.session.cacheScope()) return
+        checkpointPodcast(if (player.playbackState == Player.STATE_ENDED) "ended" else "pause", true)
+        val generation = ++podcastGeneration
+        preparingPodcast = true
+        player.pause()
+        val explicit = requestedMs ?: if (consumedPodcastIntents.add(item.mediaId) && extras.containsKey("podcast_requested_position")) extras.getLong("podcast_requested_position") else null
+        podcastStart = scope.launch {
+            try {
+                val position = podcastProgress.prepare(id, item.mediaMetadata.title?.toString().orEmpty(), extras.getLong("duration_ms"), explicit, automatic) ?: return@launch
+                if (owner != repository.session.cacheScope() || player.currentMediaItem?.mediaId != item.mediaId) return@launch
+                applyingPodcast = true
+                player.seekTo(position)
+                progressEntry = item.mediaId
+                if (autoplay) player.play()
+            } catch (error: CancellationException) { throw error }
+            catch (_: Exception) { podcastProgress.playbackProblem() }
+            finally { if (generation == podcastGeneration) { applyingPodcast = false; preparingPodcast = false } }
+        }
+    }
 
     private fun refreshGain() {
         gainRequest?.cancel()
         val item = engine.currentMediaItem ?: return
         val track = item.mediaMetadata.extras?.getString("track_id") ?: return
+        if (podcastEpisodeId(track) != null) { gainProcessor.factor = 1f; return }
         val owner = repository.session.cacheScope() ?: return
         if (item.mediaMetadata.extras?.getString("profile") != owner) { gainProcessor.factor = 1f; return }
         gainRequest = scope.launch {
@@ -114,7 +154,7 @@ class PlaybackService : MediaSessionService() {
         })
         val activity = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         session = MediaSession.Builder(this, player).setSessionActivity(activity)
-            .setBitmapLoader(AuthenticatedBitmapLoader(repository.client, executor))
+            .setBitmapLoader(AuthenticatedBitmapLoader(repository, executor))
             .setCallback(object : MediaSession.Callback {
                 override fun onAddMediaItems(session: MediaSession, controller: MediaSession.ControllerInfo, mediaItems: List<MediaItem>): ListenableFuture<List<MediaItem>> {
                     val owner = repository.session.cacheScope()
@@ -166,6 +206,8 @@ class PlaybackService : MediaSessionService() {
                     reason !in listOf(Player.MEDIA_ITEM_TRANSITION_REASON_AUTO, Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT)) {
                     sleep.cancel()
                 }
+                podcastGeneration++; podcastStart?.cancel(); preparingPodcast = false; applyingPodcast = false; progressEntry = null
+                if (podcastEpisodeId(mediaItem?.mediaMetadata?.extras?.getString("track_id")) == null) podcastProgress.leave()
                 listeningEntry = mediaItem?.mediaId
                 report()
                 clock = ListeningClock(); sentMs = 0; listeningId = UUID.randomUUID().toString(); listeningStarted = System.currentTimeMillis() / 1000.0
@@ -173,21 +215,40 @@ class PlaybackService : MediaSessionService() {
                 listeningTrack = mediaItem?.mediaMetadata?.extras?.getString("track_id")
                 clock.reset(SystemClock.elapsedRealtime(), player.currentPosition, player.isPlaying)
                 persist()
+                if (player.playWhenReady) preparePodcast(automatic = reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO)
             }
             override fun onPlaybackStateChanged(playbackState: Int) {
                 if (playbackState == Player.STATE_ENDED) {
                     clock.sample(SystemClock.elapsedRealtime(), player.currentPosition, false)
+                    checkpointPodcast("ended", true)
                     completeFeedback(); report()
                 }
             }
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 clock.sample(SystemClock.elapsedRealtime(), player.currentPosition, isPlaying)
+                checkpointPodcast(if (player.playbackState == Player.STATE_ENDED) "ended" else if (isPlaying) "progress" else "pause", !isPlaying)
                 report(); persist(force = !isPlaying)
             }
             override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
-                if (playWhenReady) sharing.localPlaybackStarted() else persist(force = true)
+                if (playWhenReady && preparingPodcast && !applyingPodcast) { player.pause(); return }
+                val podcast = podcastEpisodeId(player.currentMediaItem?.mediaMetadata?.extras?.getString("track_id")) != null
+                if (playWhenReady && podcast && reason == Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST) preparePodcast()
+                else if (playWhenReady && !podcast) sharing.localPlaybackStarted()
+                else if (!playWhenReady) { checkpointPodcast(if (player.playbackState == Player.STATE_ENDED) "ended" else "pause", true); persist(force = true) }
             }
             override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
+                val oldItem = oldPosition.mediaItem
+                if (!restoring && !preparingPodcast && !applyingPodcast && oldItem?.mediaId == progressEntry) {
+                    val oldExtras = oldItem?.mediaMetadata?.extras
+                    if (oldExtras?.getString("profile") == repository.session.cacheScope()) podcastEpisodeId(oldExtras?.getString("track_id"))?.let { id ->
+                        if (oldItem?.mediaId != newPosition.mediaItem?.mediaId) podcastProgress.checkpoint(id, oldPosition.positionMs,
+                            oldExtras?.getLong("duration_ms") ?: 0, if (reason == Player.DISCONTINUITY_REASON_AUTO_TRANSITION) "ended" else "stop", true)
+                    }
+                }
+                if (reason == Player.DISCONTINUITY_REASON_SEEK && oldPosition.mediaItem?.mediaId == newPosition.mediaItem?.mediaId && !preparingPodcast && !applyingPodcast && !restoring) {
+                    if (player.currentMediaItem?.mediaId == progressEntry && podcastEpisodeId(player.currentMediaItem?.mediaMetadata?.extras?.getString("track_id"))?.let(podcastProgress::owns) == true) checkpointPodcast("seek", true)
+                    else preparePodcast(requestedMs = newPosition.positionMs, autoplay = player.playWhenReady)
+                }
                 if (oldPosition.mediaItem?.mediaMetadata?.extras?.getString("track_id") == listeningTrack && oldPosition.mediaItem?.mediaMetadata?.extras?.getString("profile") == listeningOwner) {
                     clock.sample(SystemClock.elapsedRealtime(), oldPosition.positionMs, false)
                     report()
@@ -236,6 +297,8 @@ class PlaybackService : MediaSessionService() {
             while (isActive) {
                 delay(5_000)
                 clock.sample(SystemClock.elapsedRealtime(), player.currentPosition, player.isPlaying)
+                checkpointPodcast("progress")
+                podcastProgress.retry()
                 report(); persist()
             }
         }
@@ -243,12 +306,14 @@ class PlaybackService : MediaSessionService() {
     }
 
     private fun discardPlaybackOwner() {
+        podcastGeneration++; podcastStart?.cancel(); podcastProgress.leave(); progressEntry = null
         gainRequest?.cancel(); gainProcessor.factor = 1f
         listeningOwner = null; queueOwner = null; listeningTrack = null; listeningEntry = null
         queueEntries = emptyList(); clock = ListeningClock(); sentMs = 0
     }
     private fun completeFeedback() {
         val id = listeningTrack ?: return
+        if (podcastEpisodeId(id) != null) return
         val profile = listeningOwner ?: return
         if (profile != repository.session.cacheScope()) return
         if (clock.totalMs < 5_000) return
@@ -260,6 +325,7 @@ class PlaybackService : MediaSessionService() {
     }
     private fun report() {
         val id = listeningTrack ?: return
+        if (podcastEpisodeId(id) != null) return
         val profile = listeningOwner ?: return
         if (profile != repository.session.cacheScope()) return
         val value = clock.totalMs
@@ -331,6 +397,7 @@ class PlaybackService : MediaSessionService() {
         if (controllerInfo.uid == Process.myUid() || controllerInfo.isTrusted) session else null
 
     override fun onDestroy() {
+        checkpointPodcast(if (player.playbackState == Player.STATE_ENDED) "ended" else "stop", true)
         scope.cancel()
         health.diagnostics = null
         session?.release(); session = null
@@ -340,13 +407,13 @@ class PlaybackService : MediaSessionService() {
 }
 
 @OptIn(UnstableApi::class)
-private class AuthenticatedBitmapLoader(private val client: OkHttpClient, private val executor: ListeningExecutorService) : BitmapLoader {
+private class AuthenticatedBitmapLoader(private val repository: Repository, private val executor: ListeningExecutorService) : BitmapLoader {
     override fun supportsMimeType(mimeType: String): Boolean = mimeType.startsWith("image/")
     override fun decodeBitmap(data: ByteArray): ListenableFuture<Bitmap> = executor.submit<Bitmap> {
         BitmapFactory.decodeByteArray(data, 0, data.size) ?: throw IOException("Invalid cover")
     }
     override fun loadBitmap(uri: Uri): ListenableFuture<Bitmap> = executor.submit<Bitmap> {
-        client.newCall(Request.Builder().url(uri.toString()).build()).execute().use { response ->
+        repository.imageClient(uri.toString()).newCall(Request.Builder().url(uri.toString()).build()).execute().use { response ->
             if (!response.isSuccessful) throw IOException("Cover unavailable")
             val body = response.body
             if (body.contentLength() > 2 * 1024 * 1024) throw IOException("Cover too large")

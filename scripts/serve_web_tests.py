@@ -15,6 +15,7 @@ from PIL import Image
 from pydantic import SecretStr
 
 from wildstring.config import Settings
+from wildstring.database import Database
 from wildstring.library.scanner import scan_library
 from wildstring.main import create_app
 
@@ -147,26 +148,104 @@ def main() -> None:
             shutil.copyfile(ROOT / "tests/fixtures/audio/playback.mp3", pending)
             audio = MP3(pending)
             audio.delete()
+        web = root / "web"
+        if os.environ.get("WILDSTRING_TEST_API_ONLY") != "1":
+            # Keep this server's assets stable while another independent check rebuilds dist.
+            shutil.copytree(ROOT / "frontend/web/dist", web)
         settings = Settings(
             _env_file=None,
             environment="test",
             music_dir=root / "source",
             library_dir=music,
             data_dir=root / "runtime",
-            web_dir=(
-                None
-                if os.environ.get("WILDSTRING_TEST_API_ONLY") == "1"
-                else ROOT / "frontend/web/dist"
-            ),
+            web_dir=(None if os.environ.get("WILDSTRING_TEST_API_ONLY") == "1" else web),
             admin_password=SecretStr("disposable-browser-test-password"),
             cookie_secure=False,
         )
         scan_library(settings)
+        if os.environ.get("WILDSTRING_TEST_LIBRARIES") == "1":
+            from wildstring.library.catalog import LibraryCatalog, LibraryInput
+
+            extra_source = root / "classical-source"
+            extra_source.mkdir()
+            catalog = LibraryCatalog(Database(settings.data_dir), settings)
+            catalog.initialize()
+            second = catalog.save(LibraryInput(name="古典测试库", source_roots=[str(extra_source)]))
+            second_root = Path(second["managed_root"])
+            path = second_root / "classical.mp3"
+            shutil.copyfile(ROOT / "tests/fixtures/audio/playback.mp3", path)
+            tags = MP3(path)
+            tags["TIT2"] = TIT2(encoding=3, text=["跨库测试曲"])
+            tags["TALB"] = TALB(encoding=3, text=["跨库测试专辑"])
+            tags.save()
+            scan_library(settings.model_copy(update={"library_dir": second_root}))
+        if os.environ.get("WILDSTRING_TEST_PODCAST") == "1":
+            seed_podcast(settings, picture.getvalue())
+        if os.environ.get("WILDSTRING_TEST_PUBLISHERS") == "1":
+            with Database(settings.data_dir).connect(write=True) as connection:
+                for identifier, title, author in (
+                    ("publisher-second", "同出品方节目测试", "另一种作者署名"),
+                    ("publisher-unconfirmed", "未确认归属节目测试", "野弦测试"),
+                ):
+                    connection.execute(
+                        "INSERT INTO podcasts(id,title,author,feed_url,auto_update,download_policy,created_at) "
+                        "VALUES (?,?,?,?,0,'none','2026-10-25')",
+                        (identifier, title, author, f"https://example.invalid/{identifier}.xml"),
+                    )
         uvicorn.run(
             create_app(settings),
             host=os.environ.get("WILDSTRING_WEB_TEST_BIND", "127.0.0.1"),
             port=int(os.environ.get("WILDSTRING_WEB_TEST_PORT", "18782")),
             access_log=False,
+        )
+
+
+def seed_podcast(settings: Settings, picture: bytes) -> None:
+    """Local audio and inline art keep the podcast UI regression fully offline."""
+    import base64
+
+    settings.podcasts_dir.mkdir(parents=True, exist_ok=True)
+    database = Database(settings.data_dir)
+    with database.connect(write=True) as connection:
+        connection.execute(
+            "INSERT INTO podcasts (id,title,author,feed_url,cover_url,auto_update,"
+            "download_policy,created_at) VALUES (?,?,?,?,?,0,'none',?)",
+            (
+                "radio-test",
+                "午后广播测试",
+                "野弦测试",
+                "https://example.invalid/radio-test.xml",
+                "data:image/png;base64," + base64.b64encode(picture).decode(),
+                "2026-01-01T00:00:00Z",
+            ),
+        )
+        for number in range(1, 7):
+            audio = settings.podcasts_dir / f"radio-{number}.mp3"
+            shutil.copyfile(ROOT / "tests/fixtures/audio/playback.mp3", audio)
+            connection.execute(
+                "INSERT INTO podcast_episodes (id,podcast_id,guid,title,description,"
+                "audio_url,duration_seconds,pub_date,episode_number,created_at,"
+                "local_path,download_status) VALUES (?,'radio-test',?,?,?, ?,25,?,?,?,?,'downloaded')",
+                (
+                    f"radio-{number}",
+                    f"radio-{number}",
+                    f"第 {number} 集：给午后的一封声音来信",
+                    "<p>在旧收音机的刻度之间，留一点时间听故事。</p>"
+                    "<h3>本期话题</h3><p>[00:05] 从声音到记忆</p>" * 12,
+                    "https://example.invalid/audio.mp3",
+                    f"2026-01-{number:02d}T00:00:00Z",
+                    number,
+                    "2026-01-01T00:00:00Z",
+                    str(audio),
+                ),
+            )
+        connection.execute(
+            "INSERT INTO podcast_episodes (id,podcast_id,guid,title,description,"
+            "audio_url,duration_seconds,pub_date,created_at,download_status) "
+            "VALUES ('radio-online','radio-test','radio-online',"
+            "'在线单集：还没有下载','可在全部单集中找到',"
+            "'https://example.invalid/not-downloaded.mp3',25,"
+            "'2025-12-31T00:00:00Z','2025-12-31T00:00:00Z','none')"
         )
 
 
