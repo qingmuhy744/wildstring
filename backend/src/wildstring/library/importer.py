@@ -90,7 +90,7 @@ class MusicImporter:
             )
 
     def import_track(self, relative: Path, *, metadata=None):
-        from wildstring.library.catalog import require_current_library
+        from wildstring.library.scope import require_current_library
 
         require_current_library(self.database, "library:import")
         with open_source(self.settings.music_dir, relative) as source:
@@ -367,7 +367,7 @@ def import_music(
         with FileLock(settings.data_dir / "library-scan.lock", timeout=0):
             database = Database(settings.data_dir)
             database.initialize()
-            from wildstring.library.catalog import scoped_settings
+            from wildstring.library.scope import scoped_settings
 
             settings = scoped_settings(settings, database)
             settings.library_dir.mkdir(parents=True, exist_ok=True)

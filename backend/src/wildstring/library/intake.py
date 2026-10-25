@@ -58,7 +58,7 @@ class Intake:
 
     @property
     def settings(self):
-        from wildstring.library.catalog import scoped_settings
+        from wildstring.library.scope import scoped_settings
 
         return scoped_settings(self._settings, self.database)
 

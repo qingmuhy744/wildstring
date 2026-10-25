@@ -46,7 +46,6 @@ import com.wildstring.app.data.LyricSize
 import com.wildstring.app.data.Lyrics
 import com.wildstring.app.data.formatTime
 import kotlinx.coroutines.isActive
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlin.math.abs
@@ -56,7 +55,6 @@ import kotlin.math.roundToInt
 @Composable internal fun LyricViewport(lyrics: Lyrics, position: Long, onSeek: (Long) -> Unit,
     onBlank: () -> Unit, modifier: Modifier = Modifier, onArtwork: () -> Unit = {}, followDelayMs: Long = 2_000,
     playing: Boolean = false, lyricSize: LyricSize = LyricSize.MEDIUM) {
-    val scope = rememberCoroutineScope()
     val feedback = LocalTactileFeedback.current
     var follow by remember(lyrics) { mutableStateOf(true) }
     var dragging by remember(lyrics) { mutableStateOf(false) }

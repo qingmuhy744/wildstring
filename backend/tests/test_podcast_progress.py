@@ -72,11 +72,10 @@ def read(client, episode):
 def test_takeover_fences_delayed_offline_writes_and_allows_rewind(episode_client):
     client, episode, podcast = episode_client
     assert read(client, episode)["version"] == 0
-    assert write(client, episode).json()["version"] == 1
-    assert (
-        write(client, episode, sequence=2, position_seconds=1200, event="progress").status_code
-        == 200
-    )
+    response = write(client, episode)
+    assert response.json()["version"] == 1
+    response = write(client, episode, sequence=2, position_seconds=1200, event="progress")
+    assert response.status_code == 200
     takeover = write(
         client,
         episode,
@@ -124,7 +123,8 @@ def test_unsent_first_checkpoint_cannot_reclaim_after_another_device(episode_cli
     client, episode, _ = episode_client
     write(client, episode, session_id="session-device-b-1", device_id="B", position_seconds=200)
     # Offline A captured revision zero. Even its first upload must not become a fresh claim.
-    assert write(client, episode, sequence=30, position_seconds=1000).status_code == 409
+    response = write(client, episode, sequence=30, position_seconds=1000)
+    assert response.status_code == 409
     latest = read(client, episode)
     # Explicitly choosing A's local bookmark uses a new session and the inspected revision.
     accepted = write(
@@ -136,19 +136,18 @@ def test_unsent_first_checkpoint_cannot_reclaim_after_another_device(episode_cli
     )
     assert accepted.status_code == 200
     assert accepted.json()["position_seconds"] == 1000
-    assert write(client, episode, sequence=31, position_seconds=1100).status_code == 409
+    response = write(client, episode, sequence=31, position_seconds=1100)
+    assert response.status_code == 409
 
 
 def test_only_current_ended_event_can_complete_without_collecting_shared_audio(
     episode_client, settings
 ):
     client, episode, podcast = episode_client
-    assert (
-        client.put(
-            f"/api/v1/podcasts/{podcast}/follow", headers=HEADERS, json={"followed": True}
-        ).status_code
-        == 200
+    mutation = client.put(
+        f"/api/v1/podcasts/{podcast}/follow", headers=HEADERS, json={"followed": True}
     )
+    assert mutation.status_code == 200
     local = settings.podcasts_dir / "safe-audio.mp3"
     local.parent.mkdir(parents=True, exist_ok=True)
     local.write_bytes(b"test audio")
@@ -162,9 +161,8 @@ def test_only_current_ended_event_can_complete_without_collecting_shared_audio(
         )
     write(client, episode)
     write(client, episode, session_id="session-device-b-1", device_id="B", base_version=1)
-    assert (
-        write(client, episode, sequence=2, position_seconds=3600, event="ended").status_code == 409
-    )
+    response = write(client, episode, sequence=2, position_seconds=3600, event="ended")
+    assert response.status_code == 409
     assert local.exists()
     near_end = write(
         client,
@@ -213,19 +211,15 @@ def test_progress_is_account_scoped_and_rejects_unversioned_clients(episode_clie
     )
     assert created.status_code == 201
     client.post("/api/v1/auth/logout", headers=HEADERS)
-    assert (
-        client.post(
-            "/api/v1/auth/login",
-            headers=HEADERS,
-            json={
-                "username": "second-listener",
-                "password": "test-listener-password-123",
-            },
-        ).status_code
-        == 200
+    mutation = client.post(
+        "/api/v1/auth/login",
+        headers=HEADERS,
+        json={"username": "second-listener", "password": "test-listener-password-123"},
     )
+    assert mutation.status_code == 200
     assert read(client, episode)["version"] == 0
-    assert write(client, episode, position_seconds=50).status_code == 200
+    response = write(client, episode, position_seconds=50)
+    assert response.status_code == 200
     assert read(client, episode)["position_seconds"] == 50
     legacy = client.put(
         f"/api/v1/podcasts/episodes/{episode}/progress",
@@ -284,4 +278,5 @@ def test_schema_33_bookmarks_survive_migration(episode_client, settings):
     saved = read(client, episode)
     assert saved["position_seconds"] == 600
     assert saved["version"] == 0 and saved["session_id"] == ""
-    assert write(client, episode, position_seconds=300, event="seek").status_code == 200
+    response = write(client, episode, position_seconds=300, event="seek")
+    assert response.status_code == 200

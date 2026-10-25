@@ -121,7 +121,7 @@ class Management:
 
     @property
     def settings(self):
-        from wildstring.library.catalog import scoped_settings
+        from wildstring.library.scope import scoped_settings
 
         return scoped_settings(self._settings, self.database)
 
@@ -175,7 +175,7 @@ class Management:
         return self.preferences()
 
     def submit(self, body, *, automatic=False, followup=False):
-        from wildstring.library.catalog import current_library
+        from wildstring.library.scope import current_library
         from wildstring.library.storage import busy
 
         context = current_library.get()
@@ -752,9 +752,9 @@ class Management:
                 )
         return dict(row) if row else None
 
-    def execute(self, job):
+    def execute(self, job) -> None:
         try:
-            from wildstring.library.catalog import allowed_ids, library_context
+            from wildstring.library.scope import allowed_ids, library_context
             from wildstring.permissions import require_scope
 
             with self.database.connect() as db:
@@ -765,7 +765,7 @@ class Management:
                     dict(user), "library:import" if job["kind"] == "import" else "library:manage"
                 )
             with library_context(job["created_by"], job["library_id"], job["source_id"]):
-                return self.execute_scoped(job)
+                self.execute_scoped(job)
         except Exception:
             logger.exception("Library management task no longer authorized")
             with self.database.connect(write=True) as db:
@@ -776,7 +776,7 @@ class Management:
 
     @staticmethod
     def request_user():
-        from wildstring.library.catalog import current_library
+        from wildstring.library.scope import current_library
 
         context = current_library.get()
         return context.user_id if context else "admin"
@@ -788,7 +788,7 @@ class Management:
                 self.link(job["id"], scan_id=run_id)
 
             if job["kind"] == "import":
-                from wildstring.library.catalog import library_context
+                from wildstring.library.scope import library_context
 
                 sources = (
                     self.source_roots() if job["source_id"] == "all" else [{"id": job["source_id"]}]
@@ -796,7 +796,7 @@ class Management:
                 results = []
                 for source in sources:
                     with library_context(job["created_by"], job["library_id"], source["id"]):
-                        from wildstring.library.catalog import require_current_library
+                        from wildstring.library.scope import require_current_library
 
                         require_current_library(self.database, "library:import")
                         results.append(
@@ -921,7 +921,7 @@ class Management:
         self.worker_lock.release(force=True)
 
     def discover_sources(self):
-        from wildstring.library.catalog import library_context
+        from wildstring.library.scope import library_context
 
         with self.database.connect() as db:
             owner = db.execute(
@@ -985,7 +985,7 @@ class Management:
                 continue
             self.recommendation_inflight.add(identity)
             try:
-                from wildstring.library.catalog import library_context, require_current_library
+                from wildstring.library.scope import library_context, require_current_library
 
                 with library_context(row["user_id"], row["library_id"]):
                     require_current_library(self.database)

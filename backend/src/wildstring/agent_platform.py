@@ -690,7 +690,7 @@ class Core:
 
     def execute_tool(self, actor, name, arguments):
         actor = self.refresh_actor(actor)
-        from wildstring.library.catalog import actor_library_scope
+        from wildstring.library.scope import actor_library_scope
 
         with actor_library_scope(self.database, actor, arguments):
             return self.execute_scoped_tool(actor, name, arguments)

@@ -818,7 +818,7 @@ class Providers:
         return [value["id"] for value in self.sources.catalog()] + self.settings()["priority"]
 
     def process_job(self, job):
-        from wildstring.library.catalog import library_job_scope
+        from wildstring.library.scope import library_job_scope
 
         try:
             with library_job_scope(
@@ -833,7 +833,7 @@ class Providers:
         if track is None:
             raise ProviderError("track_not_found", False)
         suggestions, warnings = self.suggestions(track, force=bool(job["force"]))
-        from wildstring.library.catalog import require_current_library
+        from wildstring.library.scope import require_current_library
 
         require_current_library(self.database, "metadata:write")
         input_snapshot = lookup_snapshot(track)

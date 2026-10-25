@@ -41,14 +41,12 @@ def resources(settings, authenticated_client):
             json={"username": "saver", "password": "test-saver-password", "library_ids": []},
         ).json()
         other = TestClient(client.app)
-        assert (
-            other.post(
-                "/api/v1/auth/login",
-                headers=HEADERS,
-                json={"username": "saver", "password": "test-saver-password"},
-            ).status_code
-            == 200
+        mutation = other.post(
+            "/api/v1/auth/login",
+            headers=HEADERS,
+            json={"username": "saver", "password": "test-saver-password"},
         )
+        assert mutation.status_code == 200
         try:
             yield client, other, manager.resources, path, db, created["id"]
         finally:
@@ -65,39 +63,46 @@ def test_personal_saves_reuse_and_release_independently(resources):
     with db.connect() as conn:
         assert conn.execute("SELECT count(*) FROM podcast_resource_refs").fetchone()[0] == 2
     assert listener.get("/api/v1/podcasts/east").json()["episodes"][0]["resource_saved"] is True
-    assert listener.delete(endpoint, headers=HEADERS).json()["saved"] is False
+    response = listener.delete(endpoint, headers=HEADERS)
+    assert response.json()["saved"] is False
     assert owner.get("/api/v1/podcasts/episodes/ep-east").json()["resource_saved"] is True
-    assert store.cleanup(dry_run=False)["deleted_count"] == 0
+    collection = store.cleanup(dry_run=False)
+    assert collection["deleted_count"] == 0
     assert path.is_file()
-    assert owner.delete(endpoint, headers=HEADERS).status_code == 200
+    response = owner.delete(endpoint, headers=HEADERS)
+    assert response.status_code == 200
     preview = store.cleanup()
     assert preview["candidate_count"] == 1 and path.is_file()
-    assert store.cleanup(dry_run=False)["freed_bytes"] == len(b"shared audio")
+    collection = store.cleanup(dry_run=False)
+    assert collection["freed_bytes"] == len(b"shared audio")
     assert not path.exists()
-    assert store.save("ep-east", user_id)["status"] == "downloading"
+    mutation = store.save("ep-east", user_id)
+    assert mutation["status"] == "downloading"
     assert listener.get("/api/v1/podcasts/resources").status_code == 403
-    assert (
-        listener.post(
-            "/api/v1/podcasts/resources/cleanup", headers=HEADERS, json={"dry_run": False}
-        ).status_code
-        == 403
+    mutation = listener.post(
+        "/api/v1/podcasts/resources/cleanup", headers=HEADERS, json={"dry_run": False}
     )
+    assert mutation.status_code == 403
 
 
 def test_collector_protects_legacy_pins_streams_aliases_and_grace(resources):
     owner, _, store, path, db, _ = resources
-    assert store.cleanup(automatic=True, dry_run=False)["deleted_count"] == 0
+    collection = store.cleanup(automatic=True, dry_run=False)
+    assert collection["deleted_count"] == 0
     current = store.settings()
     store.configure(ResourceSettings(**{**current, "enabled": True, "retention_days": 7}))
-    assert store.cleanup(automatic=True, dry_run=False)["deleted_count"] == 0
+    collection = store.cleanup(automatic=True, dry_run=False)
+    assert collection["deleted_count"] == 0
     with db.connect(write=True) as conn:
         conn.execute("UPDATE podcast_resource_state SET zero_since=?", (time.time() - 8 * 86400,))
         lease = store.acquire(conn, "ep-east")
-    assert store.cleanup(dry_run=False)["deleted_count"] == 0
+    collection = store.cleanup(dry_run=False)
+    assert collection["deleted_count"] == 0
     store.release_lease(lease)
     item = store.listing()["items"][0]
     protected = store.protect("ep-east", ProtectionUpdate(version=item["version"], protected=True))
-    assert store.cleanup(dry_run=False)["deleted_count"] == 0
+    collection = store.cleanup(dry_run=False)
+    assert collection["deleted_count"] == 0
     with pytest.raises(HTTPException):
         store.protect("ep-east", ProtectionUpdate(version=item["version"], protected=False))
     store.protect("ep-east", ProtectionUpdate(version=protected["version"], protected=False))
@@ -108,9 +113,11 @@ def test_collector_protects_legacy_pins_streams_aliases_and_grace(resources):
         )
         store.downloaded(conn, "ep-coffee")
     store.save("ep-coffee", "admin")
-    assert store.cleanup(dry_run=False)["deleted_count"] == 0
+    collection = store.cleanup(dry_run=False)
+    assert collection["deleted_count"] == 0
     store.release("ep-coffee", "admin")
-    assert store.cleanup(dry_run=False)["deleted_count"] == 1
+    collection = store.cleanup(dry_run=False)
+    assert collection["deleted_count"] == 1
     assert not path.exists()
 
 
@@ -120,7 +127,8 @@ def test_stream_acquires_and_releases_lease_and_delete_failure_keeps_registratio
     owner, _, store, path, db, _ = resources
     response = store.local_response("ep-east")
     assert response is not None
-    assert store.cleanup(dry_run=False)["deleted_count"] == 0
+    collection = store.cleanup(dry_run=False)
+    assert collection["deleted_count"] == 0
     with db.connect(write=True) as conn:
         conn.execute("DELETE FROM podcast_resource_leases")
     original = Path.unlink
@@ -131,7 +139,8 @@ def test_stream_acquires_and_releases_lease_and_delete_failure_keeps_registratio
         return original(self, *args, **kwargs)
 
     monkeypatch.setattr(Path, "unlink", fail)
-    assert store.cleanup(dry_run=False)["failed_count"] == 1
+    collection = store.cleanup(dry_run=False)
+    assert collection["failed_count"] == 1
     with db.connect() as conn:
         assert conn.execute(
             "SELECT local_path FROM podcast_episodes WHERE id='ep-east'"
@@ -290,7 +299,8 @@ def test_failed_migration_preserves_original_and_recovery_reuses_verified_files(
         from wildstring.library.importer import import_music
 
         settings.music_dir.mkdir(parents=True, exist_ok=True)
-        assert import_music(settings)["status"] == "completed"
+        mutation = import_music(settings)
+        assert mutation["status"] == "completed"
 
 
 def test_storage_rejects_overlap_nonempty_paths_and_direct_root_changes(
@@ -350,18 +360,143 @@ def test_storage_rejects_overlap_nonempty_paths_and_direct_root_changes(
         )
 
 
+@pytest.mark.parametrize("profile", [None, "listener", "editor", "librarian", "owner"])
+def test_storage_routes_authorize_before_probing_owner_selected_paths(
+    settings, authenticated_client, tmp_path, monkeypatch, profile
+):
+    source = tmp_path / "watch"
+    source.mkdir()
+    target = tmp_path / "owner-selected-mount"
+    with authenticated_client(settings) as owner:
+        library = owner.get("/api/v1/libraries").json()[0]
+        other = TestClient(owner.app)
+        try:
+            if profile not in (None, "owner"):
+                created = owner.post(
+                    "/api/v1/manage/users",
+                    headers=HEADERS,
+                    json={
+                        "username": "storage-review-user",
+                        "password": "storage-review-test-password",
+                        "profile": profile,
+                        "library_ids": [library["id"]],
+                    },
+                )
+                assert created.status_code == 201
+                signed_in = other.post(
+                    "/api/v1/auth/login",
+                    headers=HEADERS,
+                    json={
+                        "username": "storage-review-user",
+                        "password": "storage-review-test-password",
+                    },
+                )
+                assert signed_in.status_code == 200
+
+            def forbidden_probe(*_args, **_kwargs):
+                pytest.fail("A denied request must not probe its requested server path")
+
+            monkeypatch.setattr(LibraryStorage, "destination", forbidden_probe)
+            client = owner if profile == "owner" else other
+            headers = {} if profile == "owner" else HEADERS
+            expected = 401 if profile is None else 403
+            create = client.post(
+                "/api/v1/libraries",
+                headers=headers,
+                json={
+                    "name": "Owner path",
+                    "source_roots": [str(source)],
+                    "managed_root": str(target),
+                },
+            )
+            migration = client.post(
+                f"/api/v1/libraries/{library['id']}/migrations",
+                headers=headers,
+                json={"version": library["version"], "managed_root": str(target)},
+            )
+            retry = client.post(
+                f"/api/v1/libraries/{library['id']}/migrations/not-a-job/retry", headers=headers
+            )
+            assert create.status_code == expected, create.text
+            assert migration.status_code == expected, migration.text
+            assert retry.status_code == expected, retry.text
+            assert not target.exists()
+            with Database(settings.data_dir).connect() as db:
+                assert db.execute("SELECT count(*) FROM library_migrations").fetchone()[0] == 0
+        finally:
+            other.close()
+
+
+def test_storage_resolves_aliases_before_rejecting_reserved_roots(
+    settings, authenticated_client, tmp_path
+):
+    settings = settings.model_copy(
+        update={"podcasts_dir": tmp_path / "podcasts", "web_dir": tmp_path / "web"}
+    )
+    settings.music_dir.mkdir()
+    settings.web_dir.mkdir()
+    with authenticated_client(settings) as client:
+        library = client.get("/api/v1/libraries").json()[0]
+        for index, root in enumerate(
+            (
+                settings.data_dir,
+                settings.podcasts_dir,
+                settings.web_dir,
+                settings.library_dir,
+                settings.music_dir,
+            )
+        ):
+            alias = tmp_path / f"directory-alias-{index}"
+            alias.symlink_to(root, target_is_directory=True)
+            response = client.post(
+                f"/api/v1/libraries/{library['id']}/migrations",
+                headers=HEADERS,
+                json={
+                    "version": library["version"],
+                    "managed_root": str(alias / "unexpected-copy"),
+                },
+            )
+            assert response.status_code == 422, response.text
+            assert not (root / "unexpected-copy").exists()
+
+
+@pytest.mark.parametrize("profile,enabled", [("librarian", 1), ("owner", 0)])
+def test_migration_rechecks_owner_before_touching_files(
+    settings, authenticated_client, tmp_path, profile, enabled
+):
+    source = tmp_path / "old-files"
+    source.mkdir()
+    original = source / "original.mp3"
+    original.write_bytes(b"keep source")
+    target = tmp_path / "new-mount"
+    with authenticated_client(settings) as client:
+        catalog = client.app.state.library_catalog
+        with catalog.database.connect(write=True) as db:
+            db.execute("UPDATE users SET profile=?,enabled=? WHERE id='admin'", (profile, enabled))
+        with pytest.raises(HTTPException) as denied:
+            LibraryStorage(catalog).copy(
+                {"created_by": "admin", "source_root": str(source), "target_root": str(target)}
+            )
+        assert denied.value.status_code == 403
+        assert original.read_bytes() == b"keep source"
+        assert not target.exists()
+
+
 def test_automatic_collection_respects_last_release_time(resources):
     _, _, store, path, db, user_id = resources
     store.configure(ResourceSettings(**{**store.settings(), "enabled": True, "retention_days": 7}))
     store.save("ep-east", user_id)
     with db.connect(write=True) as conn:
         conn.execute("UPDATE podcast_resource_state SET zero_since=?", (time.time() - 30 * 86400,))
-    assert store.cleanup(automatic=True, dry_run=False)["deleted_count"] == 0
+    collection = store.cleanup(automatic=True, dry_run=False)
+    assert collection["deleted_count"] == 0
     store.release("ep-east", user_id)
-    assert store.cleanup(automatic=True, dry_run=False)["deleted_count"] == 0
+    collection = store.cleanup(automatic=True, dry_run=False)
+    assert collection["deleted_count"] == 0
     with db.connect(write=True) as conn:
         conn.execute("UPDATE podcast_resource_state SET zero_since=?", (time.time() - 8 * 86400,))
-    assert store.cleanup(automatic=True, dry_run=False)["deleted_count"] == 1
+    collection = store.cleanup(automatic=True, dry_run=False)
+    assert collection["deleted_count"] == 1
     assert not path.exists()
     # A newly downloaded physical copy starts a fresh cache grace period.
     path.write_bytes(b"new shared audio")
@@ -371,14 +506,15 @@ def test_automatic_collection_respects_last_release_time(resources):
             (str(path),),
         )
         store.downloaded(conn, "ep-east")
-    assert store.cleanup(automatic=True, dry_run=False)["deleted_count"] == 0
+    collection = store.cleanup(automatic=True, dry_run=False)
+    assert collection["deleted_count"] == 0
     assert path.is_file()
 
 
 def test_approved_paused_source_keeps_its_identity_and_queues_after_running_import(
     settings, authenticated_client, tmp_path
 ):
-    from wildstring.library.catalog import library_context
+    from wildstring.library.scope import library_context
     from wildstring.management import JobRequest
 
     first, second = tmp_path / "watch-a", tmp_path / "watch-b"

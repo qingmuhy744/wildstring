@@ -23,7 +23,7 @@ import com.wildstring.app.data.podcastArtworkUrl
 import com.wildstring.app.data.podcastTimestamps
 
 /** RSS is untrusted content. Render text formatting only; never execute a page or load its images. */
-internal fun podcastArticleText(raw: String, durationMs: Long, onSeek: ((Long) -> Unit)?): CharSequence {
+internal fun buildPodcastArticleText(raw: String, durationMs: Long, onSeek: ((Long) -> Unit)?): CharSequence {
     val source = raw.replace(Regex("<(script|style)\\b[^>]*>[\\s\\S]*?</\\1\\s*>", RegexOption.IGNORE_CASE), "")
     val rich = Regex("</?[a-z][^>]*>", RegexOption.IGNORE_CASE).containsMatchIn(source)
     val text = SpannableStringBuilder(if (rich) HtmlCompat.fromHtml(source, HtmlCompat.FROM_HTML_MODE_COMPACT) else source)
@@ -55,7 +55,7 @@ internal fun podcastArticleText(raw: String, durationMs: Long, onSeek: ((Long) -
 internal fun PodcastArticleText(raw: String, modifier: Modifier = Modifier, durationMs: Long = 0, onSeek: ((Long) -> Unit)? = null) {
     val latestSeek = rememberUpdatedState(onSeek)
     val text = remember(raw, durationMs, onSeek != null) {
-        podcastArticleText(raw, durationMs, if (onSeek == null) null else { time -> latestSeek.value?.invoke(time) })
+        buildPodcastArticleText(raw, durationMs, if (onSeek == null) null else { time -> latestSeek.value?.invoke(time) })
     }
     val foreground = MaterialTheme.colorScheme.onSurface.toArgb()
     val link = MaterialTheme.colorScheme.primary.toArgb()

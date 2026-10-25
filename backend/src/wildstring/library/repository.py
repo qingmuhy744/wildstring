@@ -10,9 +10,9 @@ from wildstring.database import Database
 from wildstring.library.albums import album_key
 from wildstring.library.artists import ARTIST_CREDITS, ARTIST_SUMMARY, configure_artist_queries
 from wildstring.library.browsing import BROWSE_KEYS, BrowseKind, configure_browse_queries
-from wildstring.library.catalog import current_library
 from wildstring.library.edits import observe
 from wildstring.library.metadata import Metadata, normalize
+from wildstring.library.scope import current_library
 from wildstring.library.sorting import album_order, track_order
 
 COUNTERS = ("visited", "added", "updated", "unchanged", "errors", "missing", "skipped")
@@ -99,11 +99,11 @@ class LibraryRepository:
         if not self.fixed and context:
             from fastapi import HTTPException
 
-            from wildstring.library.catalog import allowed_ids
+            from wildstring.library.scope import allowed_ids
 
             with self.database.connect() as db:
                 visible = allowed_ids(db, context.user_id)
-                from wildstring.library.catalog import library_for_root
+                from wildstring.library.scope import library_for_root
 
                 original = library_for_root(db, self._root)
             identity = context.library_id or (
@@ -121,7 +121,7 @@ class LibraryRepository:
         if self._library_id is not None:
             return self._library_id
         with self.database.connect(write=create) as connection:
-            from wildstring.library.catalog import library_for_root
+            from wildstring.library.scope import library_for_root
 
             row = (
                 library_for_root(connection, self._root)

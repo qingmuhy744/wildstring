@@ -431,7 +431,7 @@ def test_intake_approval_resolves_the_items_actual_source_folder(catalog, settin
 
 
 def test_discovery_survives_a_source_replaced_after_its_snapshot(catalog, monkeypatch):
-    from wildstring.library.catalog import current_library
+    from wildstring.library.scope import current_library
 
     client, _, second, _, _ = catalog
     manager = client.app.state.management

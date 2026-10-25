@@ -80,7 +80,7 @@ def scan_library(
     try:
         database = Database(settings.data_dir)
         database.initialize()
-        from wildstring.library.catalog import scoped_settings
+        from wildstring.library.scope import scoped_settings
 
         settings = scoped_settings(settings, database)
         repository = LibraryRepository(database, settings.library_dir)
@@ -120,7 +120,7 @@ def scan_library(
                 counts["skipped"] += len(folders) - len(normal_folders)
                 folders[:] = sorted(normal_folders)
                 for name in sorted(files):
-                    from wildstring.library.catalog import require_current_library
+                    from wildstring.library.scope import require_current_library
 
                     require_current_library(database, "library:manage")
                     path = Path(directory) / name

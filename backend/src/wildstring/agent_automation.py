@@ -202,7 +202,7 @@ class Automation:
 
     def validate_task_actor(self, job):
         actor = self.current_actor(job["user_id"], credential_id=job["credential_id"])
-        from wildstring.library.catalog import allowed_ids
+        from wildstring.library.scope import allowed_ids
 
         with self.database.connect() as db:
             if job["library_id"] not in allowed_ids(db, actor.user_id):
@@ -308,7 +308,7 @@ class Automation:
 
     def execute_task(self, job):
         from wildstring.diagnostics import trace_context
-        from wildstring.library.catalog import library_context
+        from wildstring.library.scope import library_context
 
         with (
             library_context(job["user_id"], job["library_id"]),
@@ -331,7 +331,7 @@ class Automation:
         )
         try:
             actor = self.validate_task_actor(job)
-            from wildstring.library.catalog import require_current_library
+            from wildstring.library.scope import require_current_library
 
             require_current_library(self.database)
             identities = parameters["track_ids"]

@@ -369,7 +369,7 @@ class Database:
         )
         try:
             connection.execute("PRAGMA foreign_keys = ON")
-            from wildstring.library.catalog import configure_scope
+            from wildstring.library.scope import configure_scope
 
             if connection.execute("PRAGMA user_version").fetchone()[0] >= 36:
                 configure_scope(connection, self.user_id)
@@ -606,7 +606,7 @@ class Database:
 
                 migrate_publishers(connection)
             if current < 36:
-                from wildstring.library.catalog import migrate as migrate_libraries
+                from wildstring.library.catalog_schema import migrate as migrate_libraries
 
                 migrate_libraries(connection)
             if current < 37:

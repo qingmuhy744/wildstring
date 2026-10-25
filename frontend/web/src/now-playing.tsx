@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type CSSProperties, type PointerEvent } from 'react';
-import { api, artist, time, type Lyrics } from './api';
+import { api, time, type Lyrics } from './api';
 import { Cover, coverUrl } from './cover';
 import { PlaybackVisual, usePlaybackStyle } from './playback-style';
 import { FavoriteButton, type Favorites } from './favorites';

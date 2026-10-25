@@ -210,7 +210,7 @@ class Loudness:
                 (time.time(), job["track_id"]),
             )
         try:
-            from wildstring.library.catalog import library_job_scope
+            from wildstring.library.scope import library_job_scope
 
             with library_job_scope(
                 self.database,

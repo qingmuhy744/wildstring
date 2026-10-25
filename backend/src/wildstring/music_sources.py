@@ -340,7 +340,7 @@ class MusicSources:
             )
         warnings = []
         try:
-            from wildstring.library.catalog import library_job_scope
+            from wildstring.library.scope import library_job_scope
 
             with library_job_scope(self.database, "lyric_lookup_jobs", job["id"], job["track_id"]):
                 with self.database.connect(write=True) as db:

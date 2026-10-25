@@ -37,7 +37,7 @@ def main() -> None:
     subprocess.run(["/usr/bin/fpcalc", "-version"], check=True, capture_output=True)
     settings = Settings()
     from wildstring.database import Database
-    from wildstring.library.catalog import scoped_settings
+    from wildstring.library.scope import scoped_settings
 
     settings = scoped_settings(settings, Database(settings.data_dir))
     with TemporaryFile(dir=settings.library_dir) as probe:

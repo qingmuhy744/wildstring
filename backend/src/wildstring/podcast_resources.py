@@ -68,7 +68,9 @@ class PodcastResources:
                     if stream.read(1):
                         return path
         except OSError:
-            pass
+            # A registered cache file can disappear or become unreadable between probes.
+            # Treat it as a cache miss so a personal save can request a fresh download.
+            return None
         return None
 
     def save(self, identity, user_id):

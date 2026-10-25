@@ -8,7 +8,7 @@ from fastapi import HTTPException, Request
 from starlette.responses import JSONResponse
 from starlette.routing import Match
 
-from wildstring.library.catalog import (
+from wildstring.library.scope import (
     LibraryContext,
     allowed_ids,
     current_library,

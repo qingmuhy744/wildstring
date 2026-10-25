@@ -65,6 +65,13 @@ class LibraryStorage:
             raise HTTPException(422, "library_target_invalid")
 
     def destination(self, value, sources=()):
+        """Validate an owner-selected server directory, not a relative media filename.
+
+        The create/migrate routes require an authenticated instance owner and the
+        client header before reaching any filesystem probe. Arbitrary absolute
+        mount points are intentional; canonicalization and the checks below keep
+        them disjoint from reserved data, media sources and other libraries.
+        """
         try:
             if not Path(value).is_absolute():
                 raise ValueError

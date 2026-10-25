@@ -50,7 +50,7 @@ export class PodcastProgressStore {
   private prefix: string;
   private device: string;
   private active: { id: string; session: string } | null = null;
-  private sending = new Map<string, Promise<void>>();
+  private sending = new Map<string, { promise: Promise<void> }>();
   private controller = new AbortController();
   private lastSent = new Map<string, number>();
   private volatile = new Map<string, EpisodeCheckpoint>();
@@ -194,15 +194,15 @@ export class PodcastProgressStore {
     if (this.controller.signal.aborted) return;
     const previous = this.sending.get(id);
     if (previous) {
-      await previous;
+      await previous.promise;
       return this.flush(id);
     }
-    const task = this.send(id);
-    this.sending.set(id, task);
+    const entry = { promise: this.send(id) };
+    this.sending.set(id, entry);
     try {
-      await task;
+      await entry.promise;
     } finally {
-      if (this.sending.get(id) === task) this.sending.delete(id);
+      if (this.sending.get(id) === entry) this.sending.delete(id);
     }
   }
   private async send(id: string) {

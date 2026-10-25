@@ -317,7 +317,7 @@ class LyricScans:
         return {"locked": bool(locked), "version": version}
 
     def checkpoint(self, db, batch_id):
-        from wildstring.library.catalog import require_current_library
+        from wildstring.library.scope import require_current_library
 
         require_current_library(self.database, "metadata:write")
         row = db.execute("SELECT status FROM lyric_scan_batches WHERE id=?", (batch_id,)).fetchone()
@@ -452,7 +452,7 @@ class LyricScans:
                 )
 
     def process(self, item, options):
-        from wildstring.library.catalog import library_job_scope
+        from wildstring.library.scope import library_job_scope
 
         with library_job_scope(
             self.database,
