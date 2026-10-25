@@ -10,7 +10,7 @@ lifecycle = "2.9.4"
 media3 = "1.11.1"
 room = "2.8.5"
 retrofit = "3.0.0"
-okhttp = "5.5.0"
+okhttp = "5.5.1"
 coil = "2.7.0"
 coroutines = "1.11.0"
 junit = "4.13.2"
@@ -19,8 +19,8 @@ test-runner = "1.7.0"
 
 [libraries]
 core = { module = "androidx.core:core-ktx", version.ref = "core" }
-commonmark = { module = "org.commonmark:commonmark", version = "0.30.1" }
-commonmark-tables = { module = "org.commonmark:commonmark-ext-gfm-tables", version = "0.30.1" }
+commonmark = { module = "org.commonmark:commonmark", version = "0.31.0" }
+commonmark-tables = { module = "org.commonmark:commonmark-ext-gfm-tables", version = "0.31.0" }
 compose-bom = { module = "androidx.compose:compose-bom", version.ref = "compose" }
 compose-ui = { module = "androidx.compose.ui:ui" }
 compose-tooling = { module = "androidx.compose.ui:ui-tooling" }
