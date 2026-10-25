@@ -149,8 +149,23 @@ test('同一浏览器另一个标签页接手后，原页面主动回听仍能�
     .getByRole('button', { name: '继续 0:06', exact: true })
     .click();
   await expect.poll(async () => (await audio(next)).paused).toBe(false);
+  // Metadata restoration can emit a late seek checkpoint. Finish it before pausing,
+  // then wait for the pause itself, rather than the already-synced play checkpoint.
+  await expect
+    .poll(() =>
+      next.locator('audio').evaluate((element: HTMLAudioElement) => ({
+        seeking: element.seeking,
+        restored: element.currentTime >= 6,
+      })),
+    )
+    .toEqual({ seeking: false, restored: true });
   await next.getByRole('button', { name: '暂停', exact: true }).click();
-  await expect.poll(async () => (await local(next))?.dirty).toBe(false);
+  await expect
+    .poll(async () => {
+      const checkpoint = await local(next);
+      return checkpoint?.event === 'pause' && !checkpoint.dirty;
+    })
+    .toBe(true);
   const second = await state(next);
   expect(second.session_id).not.toBe(first.session_id);
   await page.getByRole('slider', { name: '播放进度', exact: true }).fill('2');

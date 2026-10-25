@@ -12,5 +12,6 @@ services:
     network_mode: none
     read_only: true
     tmpfs:
-      - /tmp:size=512m,mode=1777
+      # The full suite retains isolated databases and audio until pytest exits.
+      - /tmp:size=1g,mode=1777
       - /podcasts:size=512m,mode=1777
