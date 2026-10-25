@@ -1,6 +1,6 @@
 package com.wildstring.app
 
-import android.database.sqlite.SQLiteDatabase
+import android.content.Context
 import androidx.room.Room
 import androidx.test.platform.app.InstrumentationRegistry
 import com.wildstring.app.data.*
@@ -10,11 +10,10 @@ import org.junit.Test
 
 class PodcastCheckpointStorageTest {
     @Test fun migrationKeepsQueueAndReopenKeepsAccountScopedOutbox() = runBlocking {
-        val context = InstrumentationRegistry.getInstrumentation().context
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
         val name = "podcast-migration-test.db"
         context.deleteDatabase(name)
-        val file = context.getDatabasePath(name).also { it.parentFile?.mkdirs() }
-        SQLiteDatabase.openOrCreateDatabase(file, null).use { old ->
+        context.openOrCreateDatabase(name, Context.MODE_PRIVATE, null).use { old ->
             old.execSQL("CREATE TABLE queue_entries (entryId TEXT NOT NULL PRIMARY KEY, trackId TEXT NOT NULL, orderIndex INTEGER NOT NULL)")
             old.execSQL("CREATE TABLE playback_position (id INTEGER NOT NULL PRIMARY KEY, endpoint TEXT NOT NULL, entryId TEXT, positionMs INTEGER NOT NULL)")
             old.execSQL("INSERT INTO queue_entries VALUES ('entry','podcast_ep_one',0)")
