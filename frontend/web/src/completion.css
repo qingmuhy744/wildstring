@@ -406,8 +406,8 @@
   padding: 8px;
   border: 1px solid var(--border);
   border-radius: 14px;
-  background: #22231f;
-  color: #eeeae2;
+  background: var(--surface);
+  color: var(--text);
   box-shadow: 0 12px 40px #0005;
 }
 .playlist-context > strong {
@@ -427,7 +427,7 @@
 }
 .playlist-context > button:hover,
 .playlist-context > button:focus-visible {
-  background: #ffffff12;
+  background: var(--bg-hover);
 }
 .offline-options > summary {
   cursor: pointer;
@@ -481,7 +481,7 @@
   margin: -4px -4px 0 0;
 }
 .device-resume-close:hover {
-  background: #ffffff14;
+  background: var(--bg-hover);
   color: var(--workspace-text);
 }
 .device-resume-close .ui-icon {

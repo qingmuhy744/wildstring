@@ -1,3 +1,4 @@
+import { readPreference, writePreference } from './user-preferences';
 import { useEffect, useRef, useState, type CSSProperties, type PointerEvent } from 'react';
 import { api, time, type Lyrics } from './api';
 import { Cover, coverUrl } from './cover';
@@ -510,7 +511,7 @@ function LyricsPanel({ player, onTogglePanel }: { player: Player; onTogglePanel:
   const [showRomanization, setShowRomanization] = useState(false);
   const [lyricSize, setLyricSize] = useState<LyricSize>(() => {
     try {
-      const value = localStorage.getItem('wildstring-lyric-size');
+      const value = readPreference('wildstring-lyric-size');
       return value === 'small' || value === 'large' ? value : 'medium';
     } catch {
       return 'medium';
@@ -522,13 +523,6 @@ function LyricsPanel({ player, onTogglePanel }: { player: Player; onTogglePanel:
     null,
   );
   const [displayPosition, setDisplayPosition] = useState(player.position);
-  useEffect(() => {
-    try {
-      localStorage.setItem('wildstring-lyric-size', lyricSize);
-    } catch {
-      /* Private browsing may deny local storage; the in-session value still works. */
-    }
-  }, [lyricSize]);
   useEffect(() => {
     if (!player.playing) {
       setDisplayPosition(player.position);
@@ -708,7 +702,10 @@ function LyricsPanel({ player, onTogglePanel }: { player: Player; onTogglePanel:
               className="text-button"
               aria-label={`歌词大小：${size === 'small' ? '小' : size === 'medium' ? '中' : '大'}`}
               aria-pressed={lyricSize === size}
-              onClick={() => setLyricSize(size)}
+              onClick={() => {
+                setLyricSize(size);
+                writePreference('wildstring-lyric-size', size);
+              }}
             >
               {size === 'small' ? '小' : size === 'medium' ? '中' : '大'}
             </button>

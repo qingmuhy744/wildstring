@@ -15,6 +15,7 @@ import { MetadataReviewDialog } from './metadata-review';
 import { FolderMetadataEditor } from './folder-metadata';
 import { LibrarySources } from './library-sources';
 import { MusicLibraryManager, LibrarySwitcher } from './music-libraries';
+import { PodcastCatalogSettings } from './podcast-catalog-settings';
 
 type Directory = {
   path: string;
@@ -296,7 +297,6 @@ export function Management({
           ← 返回音乐
         </button>
       </header>
-      <LibrarySwitcher onChanged={onChanged} management />
       <nav className="management-tabs" aria-label="管理分类">
         {(
           [
@@ -319,6 +319,9 @@ export function Management({
             </button>
           ))}
       </nav>
+      {tab !== 'users' && tab !== 'settings' && tab !== 'diagnostics' && (
+        <LibrarySwitcher onChanged={onChanged} management />
+      )}
       {error && (
         <p role="alert" className="error">
           {error}
@@ -333,6 +336,12 @@ export function Management({
         overview && (
           <>
             {tab === 'diagnostics' && <SystemDiagnostics />}
+            {tab === 'settings' && (
+              <>
+                <MusicLibraryManager />
+                <PodcastCatalogSettings />
+              </>
+            )}
             {tab === 'intake' && (
               <>
                 <LibrarySources
@@ -344,12 +353,7 @@ export function Management({
                 <IntakePanel />
               </>
             )}
-            {tab === 'users' && (
-              <>
-                <MusicLibraryManager />
-                <UsersPanel />
-              </>
-            )}
+            {tab === 'users' && <UsersPanel />}
             {tab === 'overview' && (
               <>
                 <section className="management-metrics" aria-label="曲库概览">
@@ -569,7 +573,6 @@ export function Management({
             )}
             {tab === 'settings' && (
               <>
-                <LyricScanEntry />
                 <ProviderSettings />
                 <section className="management-card">
                   <h2>AI 模型连接</h2>
@@ -580,31 +583,35 @@ export function Management({
                 </section>
                 <TranscodingSettings />
                 <HostSettings />
-                <section className="management-card">
-                  <h2>曲库设置</h2>
-                  <form
-                    className="library-settings-form"
-                    onSubmit={(e) => {
-                      e.preventDefault();
-                      void saveName();
-                    }}
-                  >
-                    <label>
-                      曲库名称
-                      <input
-                        required
-                        maxLength={100}
-                        value={name}
-                        onChange={(e) => setName(e.target.value)}
-                      />
-                    </label>
-                    <button
-                      className="primary"
-                      disabled={busy || name.trim() === overview.preferences.name}
+                <section className="management-library-settings" aria-label="当前音乐库设置">
+                  <LibrarySwitcher onChanged={onChanged} management />
+                  <LyricScanEntry />
+                  <section className="management-card">
+                    <h2>曲库设置</h2>
+                    <form
+                      className="library-settings-form"
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        void saveName();
+                      }}
                     >
-                      {busy ? '保存中…' : '保存设置'}
-                    </button>
-                  </form>
+                      <label>
+                        曲库名称
+                        <input
+                          required
+                          maxLength={100}
+                          value={name}
+                          onChange={(e) => setName(e.target.value)}
+                        />
+                      </label>
+                      <button
+                        className="primary"
+                        disabled={busy || name.trim() === overview.preferences.name}
+                      >
+                        {busy ? '保存中…' : '保存设置'}
+                      </button>
+                    </form>
+                  </section>
                 </section>
                 <section className="management-card">
                   <h2>服务状态</h2>

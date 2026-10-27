@@ -1,7 +1,8 @@
 import { useEffect, useId, useState } from 'react';
-import { api, type User } from './api';
+import { api } from './api';
 import { selectLibrary, selectedLibrary } from './library-context';
 import { LibraryStorage } from './library-storage';
+import { FolderPicker } from './folder-picker';
 import './music-libraries.css';
 
 export interface MusicLibrary {
@@ -10,17 +11,19 @@ export interface MusicLibrary {
   enabled: boolean;
   is_default: boolean;
   version: number;
+  default_access?: boolean;
   sources?: { id: string; root: string; watch_enabled?: number }[];
   managed_root?: string;
 }
-type Access = { version: number; library_ids: string[] };
 
 export function LibrarySwitcher({
   onChanged,
   management = false,
+  visible = true,
 }: {
   onChanged: () => void;
   management?: boolean;
+  visible?: boolean;
 }) {
   const [libraries, setLibraries] = useState<MusicLibrary[]>([]);
   const [selected, setSelected] = useState(selectedLibrary());
@@ -33,7 +36,7 @@ export function LibrarySwitcher({
         if (!active) return;
         setSupported(true);
         setLibraries(items);
-        if (management && selectedLibrary() === 'all' && items[0])
+        if (management && visible && selectedLibrary() === 'all' && items[0])
           selectLibrary(items.find((item) => item.is_default)?.id || items[0].id);
         if (selectedLibrary() !== 'all' && !items.some((item) => item.id === selectedLibrary()))
           selectLibrary('all');
@@ -60,17 +63,30 @@ export function LibrarySwitcher({
       window.removeEventListener('wildstring:library-access-changed', load);
       window.removeEventListener('wildstring:libraries-updated', load);
     };
-  }, [onChanged, management]);
-  if (!supported) return null;
+  }, [onChanged, management, visible]);
+  if (!supported || !visible || (!management && libraries.length === 1)) return null;
+  if (!management && libraries.length === 0)
+    return (
+      <small className="music-access-empty">暂无可播放的音乐，可联系管理员分配访问权限。</small>
+    );
+  if (management && libraries.length === 1)
+    return (
+      <div className="music-library-switcher music-library-switcher-management">
+        <span>当前音乐库</span>
+        <strong>{libraries[0].name}</strong>
+      </div>
+    );
   return (
-    <label className="music-library-switcher">
-      音乐库
+    <label
+      className={`music-library-switcher ${management ? 'music-library-switcher-management' : 'music-library-switcher-browse'}`}
+    >
+      {management ? '当前音乐库' : '浏览范围'}
       <select
         aria-label="选择音乐库"
         value={selected}
         onChange={(event) => selectLibrary(event.target.value)}
       >
-        {!management && <option value="all">全部可访问库</option>}
+        {!management && <option value="all">全部音乐</option>}
         {libraries.map((item) => (
           <option key={item.id} value={item.id}>
             {item.name}
@@ -85,52 +101,28 @@ export function LibrarySwitcher({
 export function MusicLibraryManager() {
   const id = useId();
   const [libraries, setLibraries] = useState<MusicLibrary[]>([]);
-  const [users, setUsers] = useState<User[]>([]);
   const [editing, setEditing] = useState<MusicLibrary | null>(null);
   const [name, setName] = useState('');
   const [folders, setFolders] = useState('');
   const [paused, setPaused] = useState<string[]>([]);
   const [managedRoot, setManagedRoot] = useState('');
-  const [userId, setUserId] = useState('');
-  const [access, setAccess] = useState<Access | null>(null);
+  const [defaultAccess, setDefaultAccess] = useState(false);
+  const [picker, setPicker] = useState<'source' | 'managed' | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   async function load() {
-    const [items, accounts] = await Promise.all([
-      api<MusicLibrary[]>('/libraries?include_disabled=true'),
-      api<{ items: User[] }>('/manage/users'),
-    ]);
+    const items = await api<MusicLibrary[]>('/libraries?include_disabled=true');
     setLibraries(items);
-    setUsers(accounts.items);
     return items;
   }
   useEffect(() => {
-    const refresh = () => {
-      void load().catch((reason: Error) => setError(reason.message));
-    };
-    refresh();
-    window.addEventListener('wildstring:users-updated', refresh);
-    return () => window.removeEventListener('wildstring:users-updated', refresh);
+    void load().catch((reason: Error) => setError(reason.message));
   }, []);
-  useEffect(() => {
-    setAccess(null);
-    if (!userId) return;
-    let active = true;
-    void api<Access>(`/libraries/access/${encodeURIComponent(userId)}`)
-      .then((value) => {
-        if (active) setAccess(value);
-      })
-      .catch((reason: Error) => {
-        if (active) setError(reason.message);
-      });
-    return () => {
-      active = false;
-    };
-  }, [userId]);
   function edit(item: MusicLibrary | null) {
     setEditing(item);
     setName(item?.name || '');
+    setDefaultAccess(item?.default_access ?? item?.is_default ?? false);
     setFolders(item?.sources?.map((s) => s.root).join('\n') || '');
     setPaused(item?.sources?.filter((s) => s.watch_enabled === 0).map((s) => s.root) || []);
     setManagedRoot('');
@@ -146,6 +138,7 @@ export function MusicLibraryManager() {
         method: editing ? 'PUT' : 'POST',
         body: JSON.stringify({
           name,
+          default_access: defaultAccess,
           source_roots: folders
             .split('\n')
             .map((s) => s.trim())
@@ -170,29 +163,6 @@ export function MusicLibraryManager() {
       setBusy(false);
     }
   }
-  async function grant() {
-    if (!access) return;
-    setBusy(true);
-    setError('');
-    try {
-      const result = await api<Access>(`/libraries/access/${encodeURIComponent(userId)}`, {
-        method: 'PUT',
-        body: JSON.stringify(access),
-      });
-      setAccess(result);
-      setNotice('库权限已保存，对方的新请求会使用新的授权范围。');
-      window.dispatchEvent(new Event('wildstring:libraries-updated'));
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '权限保存失败。');
-      setAccess(null);
-      const fresh = await api<Access>(`/libraries/access/${encodeURIComponent(userId)}`).catch(
-        () => null,
-      );
-      setAccess(fresh);
-    } finally {
-      setBusy(false);
-    }
-  }
   async function reread() {
     const identity = editing?.id;
     if (!identity) return;
@@ -207,8 +177,8 @@ export function MusicLibraryManager() {
     }
   }
   return (
-    <section className="management-card music-library-manager" aria-label="音乐库与权限">
-      <h2>音乐库与权限</h2>
+    <section className="management-card music-library-manager" aria-label="音乐库配置">
+      <h2>音乐库配置</h2>
       <p className="muted">
         每个库可接入多个只读文件夹。导入后使用托管副本，移除来源或停用库会保留已有音乐。
       </p>
@@ -248,7 +218,22 @@ export function MusicLibraryManager() {
           maxLength={100}
           disabled={busy}
         />
-        <label htmlFor={`${id}-folders`}>源文件夹，每行一个</label>
+        <label className="music-library-grant-option">
+          <input
+            type="checkbox"
+            checked={defaultAccess}
+            disabled={busy}
+            onChange={(event) => setDefaultAccess(event.target.checked)}
+          />
+          <span>新用户默认可访问此库</span>
+        </label>
+        <p className="muted">仅用于创建新账号时的默认授权，已有用户的权限保持不变。</p>
+        <div className="library-folder-heading">
+          <label htmlFor={`${id}-folders`}>源文件夹，每行一个</label>
+          <button type="button" disabled={busy} onClick={() => setPicker('source')}>
+            浏览添加来源
+          </button>
+        </div>
         <textarea
           id={`${id}-folders`}
           value={folders}
@@ -291,6 +276,9 @@ export function MusicLibraryManager() {
               placeholder="留空使用默认目录"
               disabled={busy}
             />
+            <button type="button" disabled={busy} onClick={() => setPicker('managed')}>
+              浏览托管目录
+            </button>
             <p className="muted">填写服务端可写的独立空目录。Docker 使用容器内已挂载的路径。</p>
           </>
         )}
@@ -310,55 +298,29 @@ export function MusicLibraryManager() {
           )}
         </div>
       </form>
+      {picker && (
+        <FolderPicker
+          title={picker === 'source' ? '选择音乐来源文件夹' : '选择托管目录'}
+          onClose={() => setPicker(null)}
+          onSelect={(path) => {
+            if (picker === 'source')
+              setFolders((value) =>
+                [
+                  ...new Set([
+                    ...value
+                      .split('\n')
+                      .map((item) => item.trim())
+                      .filter(Boolean),
+                    path,
+                  ]),
+                ].join('\n'),
+              );
+            else setManagedRoot(path);
+            setPicker(null);
+          }}
+        />
+      )}
       {editing && <LibraryStorage library={editing} onChanged={reread} />}
-      <div className="music-library-grants">
-        <h3>用户可访问的库</h3>
-        <label htmlFor={`${id}-user`}>选择用户</label>
-        <select
-          id={`${id}-user`}
-          value={userId}
-          onChange={(event) => setUserId(event.target.value)}
-          disabled={busy}
-        >
-          <option value="">选择需要授权的用户</option>
-          {users
-            .filter((user) => user.profile !== 'owner')
-            .map((user) => (
-              <option key={user.id} value={user.id}>
-                {user.display_name || user.username}
-              </option>
-            ))}
-        </select>
-        <fieldset disabled={!access || busy}>
-          <legend>允许访问</legend>
-          {libraries
-            .filter((item) => item.enabled)
-            .map((item) => (
-              <label key={item.id} className="music-library-grant-option">
-                <input
-                  type="checkbox"
-                  checked={access?.library_ids.includes(item.id) || false}
-                  onChange={(event) =>
-                    setAccess(
-                      (value) =>
-                        value && {
-                          ...value,
-                          library_ids: event.target.checked
-                            ? [...value.library_ids, item.id]
-                            : value.library_ids.filter((key) => key !== item.id),
-                        },
-                    )
-                  }
-                />
-                {item.name}
-              </label>
-            ))}
-        </fieldset>
-        <p className="muted">编辑和管理能力由账号角色决定。所有者始终可以访问全部库。</p>
-        <button type="button" onClick={() => void grant()} disabled={busy || !access}>
-          保存库权限
-        </button>
-      </div>
     </section>
   );
 }

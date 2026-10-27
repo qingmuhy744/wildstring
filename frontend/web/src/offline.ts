@@ -1,3 +1,4 @@
+import { bindPreferences, readPreference, writePreference } from './user-preferences';
 import { streamUrl, type Track, type User } from './api';
 
 export type DownloadState = 'queued' | 'downloading' | 'paused' | 'failed' | 'complete';
@@ -34,19 +35,19 @@ export function activeOfflineUserId() {
   return account?.id || null;
 }
 export function downloadBitrate() {
-  const value = Number(localStorage.getItem('wildstring:download-bitrate')) || 0;
+  const value = Number(readPreference('wildstring:download-bitrate')) || 0;
   return [0, 128, 192, 256, 320].includes(value) ? value : 0;
 }
 export function setDownloadBitrate(value: number) {
   if (![0, 128, 192, 256, 320].includes(value)) return;
-  localStorage.setItem('wildstring:download-bitrate', String(value));
+  writePreference('wildstring:download-bitrate', String(value));
   changed();
 }
 export function automaticDownloadNetworkAllowed() {
   const connection = (navigator as Navigator & { connection?: { type?: string } }).connection;
   return (
     navigator.onLine &&
-    (localStorage.getItem('wildstring:download-any-network') === 'true' ||
+    (readPreference('wildstring:download-any-network') === 'true' ||
       ['wifi', 'ethernet'].includes(connection?.type || ''))
   );
 }
@@ -80,13 +81,13 @@ async function storage<T>(
 const key = (userId: string, id: string) => `${userId}:${id}`;
 export function offlineLimit() {
   return (
-    Math.max(100, Math.min(2048, Number(localStorage.getItem('wildstring:offline-limit')) || 512)) *
+    Math.max(100, Math.min(2048, Number(readPreference('wildstring:offline-limit')) || 512)) *
     1024 *
     1024
   );
 }
 export function setOfflineLimit(mb: number) {
-  localStorage.setItem('wildstring:offline-limit', String(Math.max(100, Math.min(2048, mb))));
+  writePreference('wildstring:offline-limit', String(Math.max(100, Math.min(2048, mb))));
   changed();
 }
 export function offlineUser(): User | null {
@@ -104,6 +105,7 @@ export function setOfflineAccount(user: User, remember = true) {
     active.clear();
   }
   account = user;
+  bindPreferences(user.id);
   offlineAccess = !remember;
   rememberedCleared = false;
   try {
@@ -116,6 +118,7 @@ export async function clearOfflineAccount() {
   const user = account || (!rememberedCleared ? offlineUser() : null);
   rememberedCleared = true;
   account = null;
+  bindPreferences(null);
   generation++;
   active.forEach((c) => c.abort());
   active.clear();
@@ -182,7 +185,7 @@ export async function offlineAudio(id: string, signal?: AbortSignal): Promise<Bl
         method: 'HEAD',
         signal: controller.signal,
         credentials: 'same-origin',
-        headers: { 'X-Wildstring-Client': 'web' },
+        headers: { 'X-Wildstring-Client': 'web', 'X-Wildstring-Account': user.id },
       });
     } catch (error) {
       if (
@@ -347,6 +350,7 @@ async function download(record: OfflineTrack, used: number, currentGeneration: n
     if (record.bitrate) {
       const source = await fetch(target, {
         method: 'HEAD',
+        headers: { 'X-Wildstring-Client': 'web', 'X-Wildstring-Account': record.userId },
         credentials: 'same-origin',
         signal: controller.signal,
       });
@@ -367,9 +371,11 @@ async function download(record: OfflineTrack, used: number, currentGeneration: n
               Range: `bytes=${record.bytes}-`,
               ...(record.etag ? { 'If-Range': record.etag } : {}),
               'X-Wildstring-Client': 'web',
+              'X-Wildstring-Account': record.userId,
             }
-          : { 'X-Wildstring-Client': 'web' },
+          : { 'X-Wildstring-Client': 'web', 'X-Wildstring-Account': record.userId },
     });
+    guard();
     if (response.status === 401 || response.status === 403) {
       await clearOfflineAccount();
       window.dispatchEvent(new Event('wildstring:unauthorized'));
@@ -430,6 +436,7 @@ async function download(record: OfflineTrack, used: number, currentGeneration: n
     try {
       const cover = await fetch(`/api/v1/tracks/${record.track.id}/cover?size=320`, {
         signal: controller.signal,
+        headers: { 'X-Wildstring-Account': record.userId },
       });
       const coverSize = Number(cover.headers.get('content-length'));
       if (cover.ok && coverSize > 0 && coverSize < 5 * 1024 * 1024) next.cover = await cover.blob();

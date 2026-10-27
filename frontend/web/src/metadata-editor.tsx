@@ -354,7 +354,7 @@ export function MetadataEditor({
                           className="text-button"
                           type="button"
                           style={{
-                            color: 'var(--accent, #e57373)',
+                            color: 'var(--accent-text)',
                             fontSize: '12px',
                             padding: '2px 6px',
                             textAlign: 'left',
@@ -374,7 +374,7 @@ export function MetadataEditor({
                           className="text-button"
                           type="button"
                           style={{
-                            color: 'var(--accent, #e57373)',
+                            color: 'var(--accent-text)',
                             fontSize: '12px',
                             padding: '2px 6px',
                             textAlign: 'left',

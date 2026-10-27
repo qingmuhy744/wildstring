@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { login, section } from './helpers';
+import { login, section, podcastCatalog } from './helpers';
 
 test.skip(process.env.WILDSTRING_TEST_PUBLISHERS !== '1', 'Run make test-publisher-web.');
 const headers = { 'X-Wildstring-Client': 'web' };
@@ -17,7 +17,7 @@ async function reset(page: Page) {
       ).status(),
     ).toBe(200);
   }
-  await section(page, '电台 · 播客');
+  await podcastCatalog(page);
 }
 
 async function open(page: Page, title: string) {
@@ -122,6 +122,11 @@ test('听众可以查看聚合但没有修改入口', async ({ page }, info) => 
       })
     ).status(),
   ).toBe(200);
+  const catalogPolicy = await (await page.request.get('/api/v1/podcasts/catalog-settings')).json();
+  await page.request.put('/api/v1/podcasts/catalog-settings', {
+    headers,
+    data: { version: catalogPolicy.version, allow_user_subscriptions: true },
+  });
   const username = `pub-listener-${info.project.name}`;
   expect(
     (
@@ -140,6 +145,10 @@ test('听众可以查看聚合但没有修改入口', async ({ page }, info) => 
       })
     ).status(),
   ).toBe(200);
+  await page.request.post('/api/v1/podcasts', {
+    headers,
+    data: { feed_url: current.podcast.feed_url },
+  });
   await page.reload();
   await section(page, '电台 · 播客');
   await open(page, '午后广播测试');

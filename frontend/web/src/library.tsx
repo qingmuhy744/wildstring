@@ -1,3 +1,4 @@
+import { readPreference, writePreference } from './user-preferences';
 import { CatalogSortControl, useCatalogSorting } from './catalog-sort';
 import { bindLibraryUser, selectedLibrary } from './library-context';
 import { LibrarySwitcher } from './music-libraries';
@@ -193,7 +194,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
   }
   const [view, setView] = useState<View>(() => {
     try {
-      const saved = localStorage.getItem('wildstring:active_view');
+      const saved = readPreference('wildstring:active_view');
       if (saved && Object.hasOwn(labels, saved)) {
         return saved as View;
       }
@@ -653,7 +654,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
   function switchView(target: View, resetHistory = true) {
     if (!Object.hasOwn(labels, target)) return;
     try {
-      localStorage.setItem('wildstring:active_view', target);
+      writePreference('wildstring:active_view', target);
     } catch {
       // 忽略
     }
@@ -1101,7 +1102,11 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
         </aside>
         {manageOpen && (
           <Management
-            key={selectedLibrary()}
+            key={
+              ['settings', 'users', 'diagnostics'].includes(managementTab)
+                ? 'instance-management'
+                : selectedLibrary()
+            }
             initialTab={managementTab}
             onTabChanged={setManagementTab}
             revision={revision}
@@ -1118,10 +1123,9 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
           />
         )}
         <main className={`library ${album ? 'is-album' : ''}`} hidden={manageOpen}>
-          <LibrarySwitcher onChanged={refreshLibrary} />
-          <header className="topbar">
+          <header className={`topbar ${specialView ? 'topbar-context' : ''}`}>
             <div>
-              <span className="eyebrow">YOUR OWN COLLECTION</span>
+              {!specialView && <span className="eyebrow">YOUR OWN COLLECTION</span>}
               <span className="mobile-brand">野弦 / WILDSTRING</span>
               <button className="mobile-logout text-button" onClick={logout}>
                 退出登录
@@ -1148,34 +1152,37 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
               <option value="account">账号设置</option>
             </select>
             <div className="topbar-actions">
-              <form className="search" onSubmit={search} role="search" autoComplete="off">
-                <label className="sr-only" htmlFor="search">
-                  搜索曲库
-                </label>
-                <span aria-hidden="true">⌕</span>
-                <input
-                  id="search"
-                  type="search"
-                  name="wildstring-library-query"
-                  autoComplete="off"
-                  spellCheck={false}
-                  placeholder={
-                    artistGrid
-                      ? '搜索艺人、乐队'
-                      : playlistGrid
-                        ? '搜索歌单'
-                        : selectedArtist
-                          ? `搜索 ${selectedArtist.name} 的歌曲、专辑`
-                          : '搜索歌曲、艺人、专辑'
-                  }
-                  maxLength={256}
-                  value={draft}
-                  onChange={(event) => setDraft(event.target.value)}
-                />
-                <button type="submit" aria-label="搜索">
-                  ↵
-                </button>
-              </form>
+              <LibrarySwitcher onChanged={refreshLibrary} visible={!specialView} />
+              {!specialView && (
+                <form className="search" onSubmit={search} role="search" autoComplete="off">
+                  <label className="sr-only" htmlFor="search">
+                    搜索曲库
+                  </label>
+                  <span aria-hidden="true">⌕</span>
+                  <input
+                    id="search"
+                    type="search"
+                    name="wildstring-library-query"
+                    autoComplete="off"
+                    spellCheck={false}
+                    placeholder={
+                      artistGrid
+                        ? '搜索艺人、乐队'
+                        : playlistGrid
+                          ? '搜索歌单'
+                          : selectedArtist
+                            ? `搜索 ${selectedArtist.name} 的歌曲、专辑`
+                            : '搜索歌曲、艺人、专辑'
+                    }
+                    maxLength={256}
+                    value={draft}
+                    onChange={(event) => setDraft(event.target.value)}
+                  />
+                  <button type="submit" aria-label="搜索">
+                    ↵
+                  </button>
+                </form>
+              )}
               <button
                 className={`notification-entry icon-button ${view === 'notifications' ? 'selected' : ''}`}
                 aria-label="通知中心"

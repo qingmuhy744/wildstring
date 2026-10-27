@@ -1,3 +1,9 @@
+import {
+  preferencesChanged,
+  preferenceKey,
+  readPreference,
+  writePreference,
+} from './user-preferences';
 import { useSyncExternalStore } from 'react';
 
 export type TrackListSize = 'small' | 'medium' | 'large';
@@ -9,7 +15,7 @@ function normalized(value: unknown): TrackListSize {
 }
 function saved(): TrackListSize {
   try {
-    return normalized(localStorage.getItem(KEY));
+    return normalized(readPreference(KEY));
   } catch {
     return 'medium';
   }
@@ -28,12 +34,13 @@ export function beforeTrackListSizeChange(capture: () => void) {
   };
 }
 function storage(event: StorageEvent) {
-  if (event.key === KEY) publish(normalized(event.newValue));
+  if (event.key === preferenceKey(KEY)) publish(normalized(event.newValue));
   else if (event.key === null) publish(saved());
 }
 // Album/artist grids do not mount a song table. Keep the shared preference
 // current there too, so returning to songs sees changes from another tab.
 window.addEventListener('storage', storage);
+window.addEventListener(preferencesChanged, () => publish(saved()));
 function subscribe(changed: () => void) {
   listeners.add(changed);
   return () => {
@@ -51,7 +58,7 @@ function choose(value: string) {
   const size = normalized(value);
   // Persist when available; the external store also works in private/blocked storage.
   try {
-    localStorage.setItem(KEY, size);
+    writePreference(KEY, size);
   } catch {
     /* Keep the current tab preference. */
   }

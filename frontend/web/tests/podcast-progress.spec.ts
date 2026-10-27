@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { audio, login, section } from './helpers';
+import { audio, login, section, podcastCatalog } from './helpers';
 
 test.skip(process.env.WILDSTRING_TEST_PODCAST !== '1', 'Use make test-podcast-web.');
 const path = '/api/v1/podcasts/episodes/radio-6/progress';
@@ -24,7 +24,7 @@ async function otherDevice(page: Page, position: number) {
   return response.json();
 }
 async function episodes(page: Page) {
-  await section(page, '电台 · 播客');
+  await podcastCatalog(page);
   await page.locator('.podcast-card').filter({ hasText: '午后广播测试' }).click();
 }
 async function start(page: Page) {

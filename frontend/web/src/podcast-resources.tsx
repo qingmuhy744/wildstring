@@ -83,8 +83,7 @@ export function PodcastResourceManager({ onClose }: { onClose: () => void }) {
             关闭
           </button>
         </div>
-        <p>每个人保存单集会建立一份引用。清理仅处理零引用音频；播放、下载和已保护的资源会保留。</p>
-        <p className="muted">升级前的音频已加历史保护，取消保护后才能清理。自动清理默认关闭。</p>
+        <p>保存单集会建立个人引用。清理仅处理零引用音频；正在播放、下载和手动保护的资源会保留。</p>
         {message && <p role="status">{message}</p>}
         {settings && (
           <form

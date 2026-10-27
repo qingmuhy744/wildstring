@@ -10,6 +10,7 @@ type Report = {
 type Session = Report & { clock: number; position: number; playing: boolean; lastSent: number };
 
 export class ListeningTracker {
+  constructor(private userId: string) {}
   private session: Session | null = null;
   private pending = new Map<string, Report>();
   private sending = new Set<string>();
@@ -92,7 +93,11 @@ export class ListeningTracker {
             method: 'POST',
             credentials: 'same-origin',
             keepalive: true,
-            headers: { 'Content-Type': 'application/json', 'X-Wildstring-Client': 'web' },
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Wildstring-Client': 'web',
+              'X-Wildstring-Account': this.userId,
+            },
             body: JSON.stringify(payload),
           });
           if (response.ok) {

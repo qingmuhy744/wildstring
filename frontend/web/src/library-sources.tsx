@@ -41,7 +41,7 @@ export function LibrarySources({
   onChanged: () => void;
 }) {
   const [path, setPath] = useState('.');
-  const [sources, setSources] = useState<{ id: string; name: string }[]>([]);
+  const [sources, setSources] = useState<{ id: string; name: string; path?: string }[]>([]);
   const [source, setSource] = useState('import');
   const [listing, setListing] = useState<SourceListing | null>(null);
   const [preview, setPreview] = useState<Preview | null>(null);
@@ -61,7 +61,7 @@ export function LibrarySources({
     setTrash(removed.items);
   }
   useEffect(() => {
-    void api<{ items: { id: string; name: string }[] }>('/manage/library/sources')
+    void api<{ items: { id: string; name: string; path?: string }[] }>('/manage/library/sources')
       .then((value) => {
         setSources(value.items);
         if (value.items[0]) setSource(value.items[0].id);
@@ -183,10 +183,16 @@ export function LibrarySources({
             {sources.map((item) => (
               <option key={item.id} value={item.id}>
                 {item.name}
+                {item.path ? ` · ${item.path}` : ''}
               </option>
             ))}
           </select>
         </label>
+        {sources.find((item) => item.id === source)?.path && (
+          <p className="storage-path source-absolute-path">
+            服务器来源：{sources.find((item) => item.id === source)?.path}
+          </p>
+        )}
         <p className="muted">
           导入源始终只读。先浏览和预览，再提交导入；带有 .part 等标记的文件会等待下载完成。
         </p>

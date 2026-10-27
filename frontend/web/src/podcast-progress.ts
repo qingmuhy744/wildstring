@@ -55,7 +55,7 @@ export class PodcastProgressStore {
   private lastSent = new Map<string, number>();
   private volatile = new Map<string, EpisodeCheckpoint>();
   constructor(
-    user: string,
+    private user: string,
     private changed: (id: string, problem?: string) => void = () => {},
   ) {
     this.prefix = `wildstring:podcast-progress:${user}:`;
@@ -103,7 +103,11 @@ export class PodcastProgressStore {
       credentials: 'same-origin',
       keepalive: !!body,
       signal: AbortSignal.any([this.controller.signal, AbortSignal.timeout(6000)]),
-      headers: { 'Content-Type': 'application/json', 'X-Wildstring-Client': 'web' },
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Wildstring-Client': 'web',
+        'X-Wildstring-Account': this.user,
+      },
       ...(body ? { body: JSON.stringify(body) } : {}),
     });
     return response;

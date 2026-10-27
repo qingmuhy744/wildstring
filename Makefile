@@ -161,13 +161,13 @@ test-storage: ## Verify safe managed-directory migrations and personal podcast r
 	$(RUN) pytest -c backend/pyproject.toml backend/tests/test_storage_resources.py
 
 test-multiple-libraries: ## Verify grants, cross-library playlists, personal follows and shared cache retention
-	$(RUN) pytest -c backend/pyproject.toml backend/tests/test_multiple_libraries.py backend/tests/test_storage_resources.py backend/tests/test_podcast_follows.py backend/tests/test_podcast_progress.py
+	$(RUN) pytest -c backend/pyproject.toml backend/tests/test_multiple_libraries.py backend/tests/test_storage_resources.py backend/tests/test_podcast_follows.py backend/tests/test_podcast_progress.py backend/tests/test_podcast_user_settings.py
 
 test-libraries-web: build-web ## Verify library selection, owner configuration, grants and personal podcast follows
 	WILDSTRING_TEST_LIBRARIES=1 WILDSTRING_TEST_PODCAST=1 npm --prefix frontend/web run test -- music-libraries.spec.ts
 
 test-podcast-web: build-web ## Verify the day/night radio, podcast continuation and saved progress locally
-	WILDSTRING_TEST_PODCAST=1 npm --prefix frontend/web run test -- podcast-continuation.spec.ts podcast-player.spec.ts podcast-progress.spec.ts
+	WILDSTRING_TEST_PODCAST=1 npm --prefix frontend/web run test -- podcast-continuation.spec.ts podcast-player.spec.ts podcast-progress.spec.ts personal-settings.spec.ts
 
 test-large-web: build-web ## Verify real API pagination and continuous playback with 257 album tracks
 	WILDSTRING_TEST_LARGE_LIBRARY=1 npm --prefix frontend/web run test -- multipage-real.spec.ts

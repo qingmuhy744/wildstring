@@ -52,7 +52,7 @@ export function usePlayer(userId: string) {
   const shuffleBag = useRef<number[]>([]);
   const audio = useRef<HTMLAudioElement>(null);
   const visualPhase = useRef(0);
-  const tracker = useRef(new ListeningTracker());
+  const tracker = useRef(new ListeningTracker(userId));
   const [queue, setQueue] = useState<Track[]>(saved.current?.tracks || []);
   const [index, setIndex] = useState(saved.current?.index ?? -1);
   const accessQueue = useRef({ queue, index });
@@ -636,7 +636,9 @@ export function usePlayer(userId: string) {
     if (!current || loading.current || !audio.current?.getAttribute('src')) return;
     try {
       // HEAD diagnoses expired sessions, missing files and changed sources without downloading audio.
-      const response = await fetch(audio.current.currentSrc, { method: 'HEAD' });
+      const response = await fetch(audio.current.currentSrc, {
+        method: 'HEAD',
+      });
       if (attempt !== generation.current) return;
       if (response.status === 401) {
         window.dispatchEvent(new Event('wildstring:unauthorized'));

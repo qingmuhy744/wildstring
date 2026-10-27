@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { audio, login, section } from './helpers';
+import { audio, login, section, podcastCatalog } from './helpers';
 
 test.skip(
   process.env.WILDSTRING_TEST_PODCAST !== '1',
@@ -26,7 +26,7 @@ async function openRadio(page: Page) {
     });
     expect(reset.status()).toBe(200);
   }
-  await section(page, '电台 · 播客');
+  await podcastCatalog(page);
   await page.locator('.podcast-card').filter({ hasText: '午后广播测试' }).click();
   await page.locator('.episode-play-btn').first().click();
   await page.getByRole('button', { name: '全屏播放', exact: true }).click();
@@ -36,7 +36,7 @@ async function openRadio(page: Page) {
 
 test('播放缓存设置可保存并在重新打开后保留', async ({ page }) => {
   await login(page);
-  await section(page, '电台 · 播客');
+  await podcastCatalog(page);
   await page.getByRole('button', { name: '⚡ 播放缓存', exact: true }).click();
   await page.getByRole('radio', { name: '允许所有网络', exact: true }).check();
   const saved = page.waitForResponse(
@@ -53,9 +53,48 @@ test('播放缓存设置可保存并在重新打开后保留', async ({ page }) 
   await page.getByRole('button', { name: '取消', exact: true }).click();
 });
 
-test('下载与存储可保存策略和重试选项，重新打开后保留', async ({ page }, info) => {
+test('服务器下载设置可保存重试选项，个人策略另设入口', async ({ page }, info) => {
   await login(page);
-  await section(page, '电台 · 播客');
+  await podcastCatalog(page);
+  for (const theme of ['light', 'dark']) {
+    await page.evaluate((value) => {
+      localStorage.setItem('wildstring-theme', value);
+      window.dispatchEvent(new CustomEvent('wildstring:theme-changed', { detail: value }));
+    }, theme);
+    await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
+    await page.locator('.podcast-card-menu-btn').first().click();
+    const item = page.locator('.podcast-context-item').filter({ hasText: '服务器下载与存储设置' });
+    await item.hover();
+    await expect(item).toHaveCSS(
+      'color',
+      theme === 'light' ? 'rgb(42, 43, 37)' : 'rgb(238, 234, 226)',
+    );
+    await expect(item).toHaveCSS(
+      'background-color',
+      theme === 'light' ? 'rgb(230, 231, 220)' : 'rgb(48, 49, 43)',
+    );
+    const contrast = await item.evaluate((element) => {
+      const style = getComputedStyle(element);
+      const luminance = (value: string) => {
+        const rgb = value
+          .match(/[\d.]+/g)!
+          .slice(0, 3)
+          .map(Number)
+          .map((n) => n / 255)
+          .map((n) => (n <= 0.04045 ? n / 12.92 : ((n + 0.055) / 1.055) ** 2.4));
+        return rgb[0] * 0.2126 + rgb[1] * 0.7152 + rgb[2] * 0.0722;
+      };
+      const a = luminance(style.color),
+        b = luminance(style.backgroundColor);
+      return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+    });
+    expect(contrast).toBeGreaterThanOrEqual(4.5);
+    await page.screenshot({
+      path: `../../artifacts/podcast-menu-${theme}-${info.project.name}.png`,
+      animations: 'disabled',
+    });
+    await page.getByRole('heading', { name: '电台 · 播客', exact: true }).click();
+  }
   await page.locator('.podcast-card').filter({ hasText: '午后广播测试' }).click();
   await page.getByRole('button', { name: '存储与下载设置…', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: '下载与存储', exact: true });
@@ -70,8 +109,8 @@ test('下载与存储可保存策略和重试选项，重新打开后保留', as
       path: `../../artifacts/podcast-storage-${theme}-${info.project.name}.png`,
     });
   }
-  await dialog.getByRole('radio', { name: '关闭自动下载', exact: true }).check();
-  await expect(dialog).toContainText('共享音频按个人保存引用保留');
+  await expect(dialog.getByRole('radio')).toHaveCount(0);
+  await expect(dialog).toContainText('个人自动下载请使用节目的「自动下载」');
   await dialog.getByText('下载速度与重试', { exact: true }).click();
   await dialog.getByRole('checkbox', { name: /平缓下载/ }).check();
   await dialog.getByLabel('失败后重试').selectOption('5');
@@ -91,7 +130,7 @@ test('下载与存储可保存策略和重试选项，重新打开后保留', as
   });
   await expect(dialog).toHaveCount(0);
   await page.getByRole('button', { name: '存储与下载设置…', exact: true }).click();
-  await expect(dialog.getByRole('radio', { name: '关闭自动下载', exact: true })).toBeChecked();
+  await expect(dialog.getByRole('radio')).toHaveCount(0);
   await dialog.getByText('下载速度与重试', { exact: true }).click();
   await expect(dialog.getByRole('checkbox', { name: /平缓下载/ })).toBeChecked();
   await expect(dialog.getByLabel('失败后重试')).toHaveValue('5');
@@ -99,12 +138,12 @@ test('下载与存储可保存策略和重试选项，重新打开后保留', as
   await dialog.getByRole('button', { name: '关闭下载与存储', exact: true }).click();
 });
 
-test('单集首次只显示已下载，切换全部后跨页面和刷新保留选择', async ({ page }) => {
+test('单集首次显示服务器已有，切换全部后跨页面和刷新保留选择', async ({ page }) => {
   await login(page);
-  await section(page, '电台 · 播客');
+  await podcastCatalog(page);
   await page.locator('.podcast-card').filter({ hasText: '午后广播测试' }).click();
   const scope = page.getByRole('group', { name: '单集范围' });
-  await expect(scope.getByRole('button', { name: '已下载 6' })).toHaveAttribute(
+  await expect(scope.getByRole('button', { name: '服务器已有 6' })).toHaveAttribute(
     'aria-pressed',
     'true',
   );
@@ -115,17 +154,17 @@ test('单集首次只显示已下载，切换全部后跨页面和刷新保留�
   await scope.getByRole('button', { name: '全部单集 7' }).click();
   await expect(page.locator('.podcast-episode-row')).toHaveCount(7);
   await section(page, '全部歌曲');
-  await section(page, '电台 · 播客');
+  await podcastCatalog(page);
   await page.locator('.podcast-card').filter({ hasText: '午后广播测试' }).click();
   await expect(scope.getByRole('button', { name: '全部单集 7' })).toHaveAttribute(
     'aria-pressed',
     'true',
   );
   await page.reload();
-  await section(page, '电台 · 播客');
+  await podcastCatalog(page);
   await page.locator('.podcast-card').filter({ hasText: '午后广播测试' }).click();
   await expect(page.locator('.podcast-episode-row')).toHaveCount(7);
-  await scope.getByRole('button', { name: '已下载 6' }).click();
+  await scope.getByRole('button', { name: '服务器已有 6' }).click();
   await expect(page.locator('.podcast-episode-row')).toHaveCount(6);
 });
 
@@ -169,7 +208,7 @@ test('单集右键和更多菜单可以立即播放、插入下一集、追加�
 
 test('下载管理可切换状态，昼夜配色可读且窄屏不溢出', async ({ page }, info) => {
   await login(page);
-  await section(page, '电台 · 播客');
+  await podcastCatalog(page);
   for (const theme of ['light', 'dark']) {
     await page.evaluate((value) => {
       localStorage.setItem('wildstring-theme', value);
@@ -322,7 +361,7 @@ test('倍速即时生效、切集刷新保留，音乐正常速度且播客偏�
   await page.getByRole('button', { name: '播放 晴天测试曲', exact: true }).click();
   await expect.poll(async () => (await audio(page)).playbackRate).toBe(1);
   await page.getByRole('button', { name: '暂停', exact: true }).click();
-  await section(page, '电台 · 播客');
+  await podcastCatalog(page);
   await page.locator('.podcast-card').filter({ hasText: '午后广播测试' }).click();
   await page.locator('.episode-play-btn').first().click();
   await expect.poll(async () => (await audio(page)).playbackRate).toBe(1.5);

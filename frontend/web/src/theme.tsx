@@ -1,10 +1,16 @@
+import {
+  preferencesChanged,
+  preferenceKey,
+  readPreference,
+  writePreference,
+} from './user-preferences';
 import { useEffect, useState } from 'react';
 
 type Theme = 'system' | 'light' | 'dark';
 const KEY = 'wildstring-theme';
 function savedTheme(): Theme {
   try {
-    const value = localStorage.getItem(KEY);
+    const value = readPreference(KEY);
     return value === 'light' || value === 'dark' ? value : 'system';
   } catch {
     return 'system';
@@ -21,12 +27,14 @@ function apply(theme: Theme) {
 // Apply before React mounts; the small bootstrap in index.html also prevents a first-paint flash.
 apply(savedTheme());
 if (typeof window !== 'undefined') {
+  window.addEventListener(preferencesChanged, () => apply(savedTheme()));
   const systemMedia = window.matchMedia('(prefers-color-scheme: dark)');
   systemMedia.addEventListener('change', () => {
     if (savedTheme() === 'system') apply('system');
   });
   window.addEventListener('wildstring:theme-changed', (event: Event) => {
     if (event instanceof CustomEvent && ['system', 'light', 'dark'].includes(event.detail)) {
+      writePreference(KEY, event.detail);
       apply(event.detail);
     }
   });
@@ -37,17 +45,20 @@ export function ThemeControl() {
     const system = matchMedia('(prefers-color-scheme: dark)');
     const update = () => apply(theme);
     const sync = (event: StorageEvent) => {
-      if (event.key === KEY || event.key === null) setTheme(savedTheme());
+      if (event.key === preferenceKey(KEY) || event.key === null) setTheme(savedTheme());
     };
     const changed = (event: Event) => {
       if (event instanceof CustomEvent && ['system', 'light', 'dark'].includes(event.detail))
         setTheme(event.detail);
     };
+    const accountChanged = () => setTheme(savedTheme());
+    window.addEventListener(preferencesChanged, accountChanged);
     update();
     window.addEventListener('wildstring:theme-changed', changed);
     system.addEventListener('change', update);
     window.addEventListener('storage', sync);
     return () => {
+      window.removeEventListener(preferencesChanged, accountChanged);
       system.removeEventListener('change', update);
       window.removeEventListener('storage', sync);
       window.removeEventListener('wildstring:theme-changed', changed);
@@ -64,7 +75,7 @@ export function ThemeControl() {
           setTheme(value);
           apply(value);
           try {
-            localStorage.setItem(KEY, value);
+            writePreference(KEY, value);
           } catch {
             /* Device storage may be disabled. */
           }
@@ -83,9 +94,11 @@ export function ThemeToggleCompact() {
   const [theme, setTheme] = useState<Theme>(savedTheme);
   useEffect(() => {
     const sync = () => setTheme(savedTheme());
+    window.addEventListener(preferencesChanged, sync);
     window.addEventListener('wildstring:theme-changed', sync);
     window.addEventListener('storage', sync);
     return () => {
+      window.removeEventListener(preferencesChanged, sync);
       window.removeEventListener('wildstring:theme-changed', sync);
       window.removeEventListener('storage', sync);
     };
@@ -97,7 +110,7 @@ export function ThemeToggleCompact() {
     setTheme(target);
     apply(target);
     try {
-      localStorage.setItem(KEY, target);
+      writePreference(KEY, target);
     } catch {
       /* Device storage may be disabled. */
     }

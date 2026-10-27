@@ -1,3 +1,9 @@
+import {
+  preferencesChanged,
+  preferenceKey,
+  readPreference,
+  writePreference,
+} from './user-preferences';
 import { useEffect, useRef, useState, type CSSProperties, type MutableRefObject } from 'react';
 import { artist, time, type Track } from './api';
 import { Cover } from './cover';
@@ -15,7 +21,7 @@ function valid(value: unknown): value is PlaybackStyle {
 }
 function savedStyle(): PlaybackStyle {
   try {
-    const value = localStorage.getItem(KEY);
+    const value = readPreference(KEY);
     if (valid(value)) return value;
   } catch {
     /* Storage is optional for playback. */
@@ -23,13 +29,17 @@ function savedStyle(): PlaybackStyle {
   return 'cover';
 }
 let selected = savedStyle();
+window.addEventListener(preferencesChanged, () => {
+  selected = savedStyle();
+  window.dispatchEvent(new Event('wildstring:playback-style'));
+});
 
 export function usePlaybackStyle() {
   const [style, setStyle] = useState<PlaybackStyle>(() => selected);
   useEffect(() => {
     const changed = () => setStyle(selected);
     const storage = (event: StorageEvent) => {
-      if (event.key === KEY || event.key === null) {
+      if (event.key === preferenceKey(KEY) || event.key === null) {
         selected = savedStyle();
         changed();
       }
@@ -57,7 +67,7 @@ export function PlaybackStyleControl() {
           if (!valid(value)) return;
           selected = value;
           try {
-            localStorage.setItem(KEY, value);
+            writePreference(KEY, value);
           } catch {
             /* Keep the in-memory preference. */
           }

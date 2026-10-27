@@ -1,5 +1,6 @@
 import { useEffect, useId, useState } from 'react';
 import { api } from './api';
+import { FolderPicker } from './folder-picker';
 import type { MusicLibrary } from './music-libraries';
 
 type IntakePolicy = {
@@ -37,6 +38,7 @@ export function LibraryStorage({
   const [policy, setPolicy] = useState<IntakePolicy | null>(null);
   const [job, setJob] = useState<Migration | null>(null);
   const [target, setTarget] = useState('');
+  const [picking, setPicking] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const endpoint = `/libraries/${encodeURIComponent(library.id)}/migrations`;
@@ -221,10 +223,23 @@ export function LibraryStorage({
           disabled={busy || moving}
           placeholder="填写一个独立的空目录"
         />
+        <button type="button" disabled={busy || moving} onClick={() => setPicking(true)}>
+          浏览迁移目标目录
+        </button>
         <button type="submit" disabled={busy || moving || !target.trim()}>
           复制、校验并迁移
         </button>
       </form>
+      {picking && (
+        <FolderPicker
+          title="选择迁移目标目录"
+          onClose={() => setPicking(false)}
+          onSelect={(path) => {
+            setTarget(path);
+            setPicking(false);
+          }}
+        />
+      )}
       {job && (
         <div role="status" className="library-migration-status">
           <strong>{statusText[job.status] || job.status}</strong>
