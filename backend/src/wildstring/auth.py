@@ -132,20 +132,24 @@ class Auth:
                 connection.execute("UPDATE login_guard SET failures=0,blocked_until=0")
 
     def require_session(self, request: Request) -> dict:
-        if getattr(request.state, "user", None) is not None:
-            return request.state.user
-        token = request.cookies.get(COOKIE, "")
-        if not token or len(token) > 128:
-            raise HTTPException(401, "authentication_required")
-        with self.database.connect() as connection:
-            row = connection.execute(
-                "SELECT u.* FROM sessions s JOIN users u ON u.id=s.user_id "
-                "WHERE s.token_hash=? AND s.expires_at>? AND u.enabled=1 AND u.password_hash IS NOT NULL",
-                (token_hash(token), int(time.time())),
-            ).fetchone()
-        if row is None:
-            raise HTTPException(401, "authentication_required")
-        request.state.user = public_user(row)
+        if getattr(request.state, "user", None) is None:
+            token = request.cookies.get(COOKIE, "")
+            if not token or len(token) > 128:
+                raise HTTPException(401, "authentication_required")
+            with self.database.connect() as connection:
+                row = connection.execute(
+                    "SELECT u.* FROM sessions s JOIN users u ON u.id=s.user_id "
+                    "WHERE s.token_hash=? AND s.expires_at>? AND u.enabled=1 AND u.password_hash IS NOT NULL",
+                    (token_hash(token), int(time.time())),
+                ).fetchone()
+            if row is None:
+                raise HTTPException(401, "authentication_required")
+            request.state.user = public_user(row)
+        # This optional binding never grants access. It prevents an old Web tab
+        # from writing to the new account when same-origin cookies have changed.
+        expected = request.headers.get("X-Wildstring-Account")
+        if expected is not None and expected != request.state.user["id"]:
+            raise HTTPException(401, "account_session_changed")
         return request.state.user
 
     def authenticated(self, request: Request) -> bool:
@@ -382,7 +386,7 @@ class Auth:
                     else {
                         row[0]
                         for row in connection.execute(
-                            "SELECT id FROM libraries WHERE is_default=1 AND enabled=1"
+                            "SELECT id FROM libraries WHERE default_access=1 AND enabled=1"
                         )
                     }
                 )

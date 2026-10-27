@@ -13,3 +13,14 @@ CREATE TABLE IF NOT EXISTS podcast_playback_settings (
 PRAGMA user_version = 33;
 COMMIT;
 """
+
+CACHE_SCHEMA = """
+BEGIN IMMEDIATE;
+CREATE TABLE IF NOT EXISTS podcast_playback_cache (
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    episode_id TEXT NOT NULL REFERENCES podcast_episodes(id) ON DELETE CASCADE,
+    PRIMARY KEY(user_id, episode_id)
+);
+PRAGMA user_version = 41;
+COMMIT;
+"""

@@ -1,0 +1,11 @@
+version: 1
+name: WildString RSS fixture
+slug: wildstring-rss-fixture
+protocol: http
+port: 4500
+interceptRequests: true
+origin: rss.wildstring.test
+scenarios:
+  - name: default
+    path: ./default.js
+    default: true

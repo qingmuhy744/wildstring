@@ -3,6 +3,8 @@
 from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
+from wildstring.podcast_access import admit, require_programme
+
 
 class FollowUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -19,12 +21,15 @@ def followed_ids(database, user_id):
         }
 
 
-def follow(database, user_id, podcast_id, followed):
+def follow(database, user_id, podcast_id, followed, *, admitted=False):
     with database.connect(write=True) as db:
         db.execute("BEGIN IMMEDIATE")
         if db.execute("SELECT id FROM podcasts WHERE id=?", (podcast_id,)).fetchone() is None:
             raise HTTPException(404, "播客未找到")
+        if not admitted:
+            require_programme(db, user_id, podcast_id)
         if followed:
+            admit(db, user_id, podcast_id)
             db.execute(
                 "INSERT OR IGNORE INTO podcast_follows(user_id,podcast_id) VALUES (?,?)",
                 (user_id, podcast_id),
@@ -35,20 +40,3 @@ def follow(database, user_id, podcast_id, followed):
                 (user_id, podcast_id),
             )
     return {"podcast_id": podcast_id, "followed": followed}
-
-
-def cache_no_longer_needed(connection, episode_id):
-    return bool(
-        connection.execute(
-            """SELECT
-        EXISTS(SELECT 1 FROM podcast_follows f JOIN users u ON u.id=f.user_id AND u.enabled=1
-          WHERE f.podcast_id=e.podcast_id)
-        AND NOT EXISTS(SELECT 1 FROM podcast_follows f JOIN users u ON u.id=f.user_id AND u.enabled=1
-          LEFT JOIN podcast_progress pr ON pr.user_id=f.user_id AND pr.episode_id=e.id
-          WHERE f.podcast_id=e.podcast_id AND COALESCE(pr.completed,0)=0)
-        AND NOT EXISTS(SELECT 1 FROM podcast_progress pr JOIN users u ON u.id=pr.user_id AND u.enabled=1
-          WHERE pr.episode_id=e.id AND pr.completed=0)
-        FROM podcast_episodes e WHERE e.id=?""",
-            (episode_id,),
-        ).fetchone()[0]
-    )

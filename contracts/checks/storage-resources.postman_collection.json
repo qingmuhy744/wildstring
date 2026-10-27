@@ -2,7 +2,7 @@
   "info": {
     "name": "WildString isolated storage resource regression",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
-    "description": "Only run against an isolated disposable container seeded with Storage Resource Fixture; never against an existing user instance."
+    "description": "Only run against an isolated disposable test service seeded with Storage Resource Fixture; never against an existing user instance."
   },
   "variable": [
     {
@@ -53,7 +53,9 @@
           "listen": "test",
           "script": {
             "type": "text/javascript",
-            "exec": ["pm.test('HTTP 200', () => pm.response.to.have.status(200));"]
+            "exec": [
+              "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+            ]
           }
         }
       ]
@@ -176,7 +178,9 @@
           "listen": "test",
           "script": {
             "type": "text/javascript",
-            "exec": ["pm.test('HTTP 409', () => pm.response.to.have.status(409));"]
+            "exec": [
+              "pm.test('HTTP 409', () => pm.response.to.have.status(409));"
+            ]
           }
         }
       ]
@@ -295,6 +299,135 @@
       ]
     },
     {
+      "name": "09a Owner playback cache preferences",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/podcasts/playback-settings"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200',()=>pm.response.to.have.status(200));",
+              "pm.collectionVariables.set('playback_version',pm.response.json().version);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "09b Disable only owner playback cache",
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/podcasts/playback-settings",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"version\":{{playback_version}},\"auto_cache_current\":false,\"prefetch_next\":false,\"network_policy\":\"off\"}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200',()=>pm.response.to.have.status(200));",
+              "pm.test('Owner cache preference saved',()=>pm.expect(pm.response.json().network_policy).to.eql('off'));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "09c Read personal addition policy",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/podcasts/catalog-settings"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200',()=>pm.response.to.have.status(200));",
+              "pm.collectionVariables.set('catalog_version',pm.response.json().version);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "09d Allow listener personal additions",
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/podcasts/catalog-settings",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"version\": {{catalog_version}}, \"allow_user_subscriptions\": true}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200',()=>pm.response.to.have.status(200));"
+            ]
+          }
+        }
+      ]
+    },
+    {
       "name": "10 Owner logout",
       "request": {
         "method": "POST",
@@ -311,7 +444,9 @@
           "listen": "test",
           "script": {
             "type": "text/javascript",
-            "exec": ["pm.test('HTTP 204', () => pm.response.to.have.status(204));"]
+            "exec": [
+              "pm.test('HTTP 204', () => pm.response.to.have.status(204));"
+            ]
           }
         }
       ]
@@ -346,7 +481,124 @@
           "listen": "test",
           "script": {
             "type": "text/javascript",
-            "exec": ["pm.test('HTTP 200', () => pm.response.to.have.status(200));"]
+            "exec": [
+              "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "11a Listener cannot read unassociated episode",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/podcasts/episodes/storage-resource-shared"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 404',()=>pm.response.to.have.status(404));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "11b Listener adds existing feed to personal catalogue",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/podcasts",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"feed_url\": \"https://fixture.example/rss\"}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200',()=>pm.response.to.have.status(200));",
+              "pm.test('existing programme is followed',()=>pm.expect(pm.response.json().podcast.followed).to.eql(true));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "11c Playback reuses shared bytes for the listener",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          },
+          {
+            "key": "Range",
+            "value": "bytes=0-1"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/podcasts/episodes/storage-resource-shared/stream?cache=1&network=wifi"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('existing audio supports playback cache',()=>pm.response.to.have.status(206));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "11d Playback cache enters personal downloads without manual retention",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/podcasts/episodes/storage-resource-shared"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200',()=>pm.response.to.have.status(200));",
+              "pm.test('listener owns playback cache without manual or automatic retention',()=>{const b=pm.response.json();pm.expect(b.resource_playback_cached).to.eql(true);pm.expect(b.resource_saved).to.eql(false);pm.expect(b.resource_automatic).to.eql(false);});"
+            ]
           }
         }
       ]
@@ -377,6 +629,35 @@
       ]
     },
     {
+      "name": "12a Listener playback cache preferences are independent",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/podcasts/playback-settings"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200',()=>pm.response.to.have.status(200));",
+              "pm.test('Listener retains personal defaults',()=>{pm.expect(pm.response.json().auto_cache_current).to.eql(true);pm.expect(pm.response.json().network_policy).to.eql('wifi');});"
+            ]
+          }
+        }
+      ]
+    },
+    {
       "name": "13 Source management denied to listener",
       "request": {
         "method": "GET",
@@ -393,7 +674,9 @@
           "listen": "test",
           "script": {
             "type": "text/javascript",
-            "exec": ["pm.test('HTTP 403', () => pm.response.to.have.status(403));"]
+            "exec": [
+              "pm.test('HTTP 403', () => pm.response.to.have.status(403));"
+            ]
           }
         }
       ]
@@ -428,7 +711,9 @@
           "listen": "test",
           "script": {
             "type": "text/javascript",
-            "exec": ["pm.test('HTTP 403', () => pm.response.to.have.status(403));"]
+            "exec": [
+              "pm.test('HTTP 403', () => pm.response.to.have.status(403));"
+            ]
           }
         }
       ]
@@ -463,7 +748,9 @@
           "listen": "test",
           "script": {
             "type": "text/javascript",
-            "exec": ["pm.test('HTTP 200', () => pm.response.to.have.status(200));"]
+            "exec": [
+              "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+            ]
           }
         }
       ]
@@ -573,7 +860,9 @@
           "listen": "test",
           "script": {
             "type": "text/javascript",
-            "exec": ["pm.test('HTTP 204', () => pm.response.to.have.status(204));"]
+            "exec": [
+              "pm.test('HTTP 204', () => pm.response.to.have.status(204));"
+            ]
           }
         }
       ]
@@ -608,7 +897,34 @@
           "listen": "test",
           "script": {
             "type": "text/javascript",
-            "exec": ["pm.test('HTTP 200', () => pm.response.to.have.status(200));"]
+            "exec": [
+              "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "20a Listener playback cache does not enter owner downloads",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/podcasts/episodes/storage-resource-shared"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200',()=>pm.response.to.have.status(200));",
+              "pm.test('owner has no playback cache attribution',()=>pm.expect(pm.response.json().resource_playback_cached).to.eql(false));"
+            ]
           }
         }
       ]
@@ -718,7 +1034,9 @@
           "listen": "test",
           "script": {
             "type": "text/javascript",
-            "exec": ["pm.test('HTTP 204', () => pm.response.to.have.status(204));"]
+            "exec": [
+              "pm.test('HTTP 204', () => pm.response.to.have.status(204));"
+            ]
           }
         }
       ]
@@ -753,7 +1071,9 @@
           "listen": "test",
           "script": {
             "type": "text/javascript",
-            "exec": ["pm.test('HTTP 200', () => pm.response.to.have.status(200));"]
+            "exec": [
+              "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+            ]
           }
         }
       ]
@@ -775,7 +1095,9 @@
           "listen": "test",
           "script": {
             "type": "text/javascript",
-            "exec": ["pm.test('HTTP 200', () => pm.response.to.have.status(200));"]
+            "exec": [
+              "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+            ]
           }
         }
       ]
@@ -797,7 +1119,9 @@
           "listen": "test",
           "script": {
             "type": "text/javascript",
-            "exec": ["pm.test('HTTP 200', () => pm.response.to.have.status(200));"]
+            "exec": [
+              "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+            ]
           }
         }
       ]
@@ -819,7 +1143,9 @@
           "listen": "test",
           "script": {
             "type": "text/javascript",
-            "exec": ["pm.test('HTTP 204', () => pm.response.to.have.status(204));"]
+            "exec": [
+              "pm.test('HTTP 204', () => pm.response.to.have.status(204));"
+            ]
           }
         }
       ]
@@ -854,7 +1180,9 @@
           "listen": "test",
           "script": {
             "type": "text/javascript",
-            "exec": ["pm.test('HTTP 200', () => pm.response.to.have.status(200));"]
+            "exec": [
+              "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+            ]
           }
         }
       ]
@@ -986,7 +1314,7 @@
       ]
     },
     {
-      "name": "34 Legacy protected cache retained",
+      "name": "34 Manually protected cache retained",
       "request": {
         "method": "GET",
         "header": [
@@ -1004,7 +1332,7 @@
             "type": "text/javascript",
             "exec": [
               "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
-              "pm.test('legacy cache preserved',()=>pm.expect(pm.response.json().download_status).to.eql('downloaded'));"
+              "pm.test('manual protection preserved',()=>pm.expect(pm.response.json().download_status).to.eql('downloaded'));"
             ]
           }
         }
@@ -1034,6 +1362,35 @@
             "exec": [
               "pm.test('HTTP 206', () => pm.response.to.have.status(206));",
               "pm.test('bounded media range',()=>pm.expect(pm.response.headers.get('Content-Length')).to.eql('256'));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "36 Owner playback cache setting remains personal",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/podcasts/playback-settings"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200',()=>pm.response.to.have.status(200));",
+              "pm.test('Owner retains disabled cache',()=>{pm.expect(pm.response.json().auto_cache_current).to.eql(false);pm.expect(pm.response.json().network_policy).to.eql('off');});"
             ]
           }
         }

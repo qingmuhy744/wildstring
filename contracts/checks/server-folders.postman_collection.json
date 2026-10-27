@@ -1,0 +1,540 @@
+{
+  "info": {
+    "name": "WildString server folder creation isolated checks",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Run only against scripts/serve_web_tests.py with WILDSTRING_TEST_LIBRARIES=1 and WILDSTRING_TEST_PODCAST=1. The disposable fixture owns every created folder and account. No existing user server."
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://127.0.0.1:18828"
+    }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "if(!/^http:\\/\\/127\\.0\\.0\\.1:\\d+$/.test(pm.variables.get('base_url'))) throw new Error('Disposable local fixture required'); if(!pm.collectionVariables.get('run_id')) pm.collectionVariables.set('run_id',String(Date.now()));"
+        ]
+      }
+    }
+  ],
+  "item": [
+    {
+      "name": "01 Owner login",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/auth/login",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"username\": \"admin\", \"password\": \"disposable-browser-test-password\"}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": ["pm.test('HTTP 200',()=>pm.response.to.have.status(200));"]
+          }
+        }
+      ]
+    },
+    {
+      "name": "02 Require disposable fixture",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/podcasts/radio-test"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200',()=>pm.response.to.have.status(200));",
+              "const safe=pm.response.code===200&&pm.response.json().podcast?.title==='午后广播测试'; pm.test('Disposable fixture required',()=>pm.expect(safe).to.eql(true)); if(!safe)pm.execution.setNextRequest(null);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "03 Find storage and read-only source",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/libraries"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200',()=>pm.response.to.have.status(200));",
+              "const lib=pm.response.json().find(x=>x.is_default); pm.expect(lib).to.exist; const parent=lib.managed_root.slice(0,lib.managed_root.lastIndexOf('/')); const name='postman-folder-'+pm.collectionVariables.get('run_id'); pm.collectionVariables.set('parent',parent); pm.collectionVariables.set('browse_parent',encodeURIComponent(parent)); pm.collectionVariables.set('browse_source',encodeURIComponent(lib.sources[0].root)); pm.collectionVariables.set('create_body',JSON.stringify({parent_path:parent,name})); pm.collectionVariables.set('source_body',JSON.stringify({parent_path:lib.sources[0].root,name})); pm.collectionVariables.set('expected_path',parent+'/'+name);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "04 Writable parent supports creation",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/libraries/folders?path={{browse_parent}}"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200',()=>pm.response.to.have.status(200));",
+              "pm.test('Parent permits creation',()=>pm.expect(pm.response.json().can_create).to.eql(true));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "05 Create empty child folder",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/libraries/folders",
+        "body": {
+          "mode": "raw",
+          "raw": "{{create_body}}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 201',()=>pm.response.to.have.status(201));",
+              "const value=pm.response.json(); pm.test('New directory selected',()=>pm.expect(value.path).to.eql(pm.collectionVariables.get('expected_path'))); pm.test('Empty child returned',()=>pm.expect(value.items).to.eql([]));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "06 Duplicate never overwritten",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/libraries/folders",
+        "body": {
+          "mode": "raw",
+          "raw": "{{create_body}}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 409',()=>pm.response.to.have.status(409));",
+              "pm.test('Explicit conflict',()=>pm.expect(pm.response.json().detail).to.eql('folder_already_exists'));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "07 Reject traversal name",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/libraries/folders",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"parent_path\":\"{{parent}}\",\"name\":\"../escape\"}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": ["pm.test('HTTP 422',()=>pm.response.to.have.status(422));"]
+          }
+        }
+      ]
+    },
+    {
+      "name": "08 Sources advertise read-only policy",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/libraries/folders?path={{browse_source}}"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200',()=>pm.response.to.have.status(200));",
+              "pm.test('Source remains read-only',()=>pm.expect(pm.response.json().can_create).to.eql(false));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "09 Do not change source directories",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/libraries/folders",
+        "body": {
+          "mode": "raw",
+          "raw": "{{source_body}}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 403',()=>pm.response.to.have.status(403));",
+              "pm.test('Read-only source error',()=>pm.expect(pm.response.json().detail).to.eql('folder_source_read_only'));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "10 Mutation requires client header",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/libraries/folders",
+        "body": {
+          "mode": "raw",
+          "raw": "{{create_body}}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": ["pm.test('HTTP 403',()=>pm.response.to.have.status(403));"]
+          }
+        }
+      ]
+    },
+    {
+      "name": "11 Create ordinary account",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/manage/users",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"username\": \"folder-user-{{run_id}}\", \"password\": \"folder-test-password\", \"profile\": \"listener\", \"library_ids\": []}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": ["pm.test('HTTP 201',()=>pm.response.to.have.status(201));"]
+          }
+        }
+      ]
+    },
+    {
+      "name": "12 Owner logout",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/auth/logout"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": ["pm.test('HTTP 204',()=>pm.response.to.have.status(204));"]
+          }
+        }
+      ]
+    },
+    {
+      "name": "13 Ordinary account login",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/auth/login",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"username\": \"folder-user-{{run_id}}\", \"password\": \"folder-test-password\"}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": ["pm.test('HTTP 200',()=>pm.response.to.have.status(200));"]
+          }
+        }
+      ]
+    },
+    {
+      "name": "14 Ordinary account cannot create directories",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/libraries/folders",
+        "body": {
+          "mode": "raw",
+          "raw": "{{create_body}}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": ["pm.test('HTTP 403',()=>pm.response.to.have.status(403));"]
+          }
+        }
+      ]
+    },
+    {
+      "name": "15 Ordinary account cannot browse directories",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/libraries/folders?path={{browse_parent}}"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": ["pm.test('HTTP 403',()=>pm.response.to.have.status(403));"]
+          }
+        }
+      ]
+    },
+    {
+      "name": "16 Logout",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/auth/logout"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": ["pm.test('HTTP 204',()=>pm.response.to.have.status(204));"]
+          }
+        }
+      ]
+    }
+  ]
+}

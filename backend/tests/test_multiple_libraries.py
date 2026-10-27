@@ -456,3 +456,248 @@ def test_discovery_survives_a_source_replaced_after_its_snapshot(catalog, monkey
     manager.discover_sources()
     assert second["id"] in visited
     assert len(visited) == 2
+
+
+def test_new_account_defaults_are_configurable_without_changing_existing_grants(catalog):
+    client, first, second, _, _ = catalog
+    other, user_id = listener(client, [])
+    before = client.get(f"/api/v1/libraries/access/{user_id}").json()
+    assert first["default_access"] is True
+    assert second["default_access"] is False
+    for library, enabled in ((first, False), (second, True)):
+        for source in library["sources"]:
+            Path(source["root"]).mkdir(parents=True, exist_ok=True)
+        result = client.put(
+            f"/api/v1/libraries/{library['id']}",
+            headers=HEADERS,
+            json={
+                "name": library["name"],
+                "source_roots": [s["root"] for s in library["sources"]],
+                "version": library["version"],
+                "default_access": enabled,
+            },
+        )
+        assert result.status_code == 200, result.text
+    assert (
+        client.get(f"/api/v1/libraries/access/{user_id}").json()["library_ids"]
+        == before["library_ids"]
+    )
+    for username, explicit, expected in [
+        ("defaults", None, [second["id"]]),
+        ("empty", [], []),
+        ("override", [first["id"]], [first["id"]]),
+    ]:
+        body = {"username": username, "password": "default-access-test-password"}
+        if explicit is not None:
+            body["library_ids"] = explicit
+        created = client.post("/api/v1/manage/users", headers=HEADERS, json=body)
+        assert created.status_code == 201, created.text
+        assert (
+            client.get(f"/api/v1/libraries/access/{created.json()['id']}").json()["library_ids"]
+            == expected
+        )
+    other.close()
+
+
+def test_folder_picker_is_owner_only_and_never_returns_files_or_aliases(catalog, tmp_path):
+    client, _, _, _, source = catalog
+    (source / "专辑").mkdir()
+    (source / ".hidden").mkdir()
+    (source / "secret.txt").write_text("never returned")
+    (source / "alias").symlink_to(tmp_path, target_is_directory=True)
+    result = client.get("/api/v1/libraries/folders", params={"path": str(source)})
+    assert result.status_code == 200, result.text
+    assert result.json()["items"] == [{"name": "专辑", "path": str(source / "专辑")}]
+    assert result.json()["parent"] == str(source.parent)
+    assert (
+        client.get("/api/v1/libraries/folders", params={"path": str(source / "alias")}).status_code
+        == 422
+    )
+    assert (
+        client.get("/api/v1/libraries/folders", params={"path": str(source / "..")}).status_code
+        == 422
+    )
+    assert (
+        client.get(
+            "/api/v1/libraries/folders", params={"path": str(source / "secret.txt")}
+        ).status_code
+        == 404
+    )
+    assert (
+        client.get(
+            "/api/v1/libraries/folders", params={"path": str(source / "missing")}
+        ).status_code
+        == 404
+    )
+    assert client.get("/api/v1/libraries/folders", params={"path": "relative"}).status_code == 422
+    other, _ = listener(client, [], profile="librarian")
+    assert other.get("/api/v1/libraries/folders", params={"path": str(source)}).status_code == 403
+    other.close()
+
+
+def test_owner_creates_empty_child_folder_and_reuses_listing(catalog, tmp_path):
+    client, _, _, _, _ = catalog
+    parent = tmp_path / "new-storage"
+    parent.mkdir()
+    listing = client.get("/api/v1/libraries/folders", params={"path": str(parent)}).json()
+    assert listing["can_create"] is True
+    body = {"parent_path": str(parent), "name": "新的音乐库"}
+    assert client.post("/api/v1/libraries/folders", json=body).status_code == 403
+    assert list(parent.iterdir()) == []
+    created = client.post("/api/v1/libraries/folders", headers=HEADERS, json=body)
+    assert created.status_code == 201, created.text
+    assert created.json()["path"] == str(parent / body["name"])
+    assert created.json()["parent"] == str(parent)
+    assert created.json()["items"] == []
+    assert created.json()["can_create"] is True
+    assert list((parent / body["name"]).iterdir()) == []
+    assert client.post("/api/v1/libraries/folders", headers=HEADERS, json=body).status_code == 409
+    (parent / "existing-file").write_text("keep existing content")
+    response = client.post(
+        "/api/v1/libraries/folders",
+        headers=HEADERS,
+        json={"parent_path": str(parent), "name": "existing-file"},
+    )
+    assert response.status_code == 409
+    assert (parent / "existing-file").read_text() == "keep existing content"
+
+
+@pytest.mark.parametrize("profile", ["listener", "editor", "librarian"])
+def test_folder_creation_remains_owner_only(catalog, tmp_path, profile):
+    client, _, _, _, _ = catalog
+    other, _ = listener(client, [], profile=profile)
+    try:
+        response = other.post(
+            "/api/v1/libraries/folders",
+            headers=HEADERS,
+            json={"parent_path": str(tmp_path), "name": "forbidden"},
+        )
+        assert response.status_code == 403
+        assert not (tmp_path / "forbidden").exists()
+    finally:
+        other.close()
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "",
+        " ",
+        ".",
+        "..",
+        ".hidden",
+        "../escape",
+        "a/b",
+        "a\\b",
+        "bad\nname",
+        "bad\x00name",
+        "音" * 86,
+    ],
+)
+def test_folder_creation_rejects_path_components_and_invalid_names(catalog, tmp_path, name):
+    client, _, _, _, _ = catalog
+    parent = tmp_path / "empty-parent"
+    parent.mkdir()
+    response = client.post(
+        "/api/v1/libraries/folders",
+        headers=HEADERS,
+        json={"parent_path": str(parent), "name": name},
+    )
+    assert response.status_code == 422, response.text
+    assert list(parent.iterdir()) == []
+
+
+def test_folder_creation_keeps_all_configured_sources_read_only(catalog, settings):
+    client, _, _, _, second_source = catalog
+    settings.music_dir.mkdir(exist_ok=True)
+    nested = second_source / "nested"
+    nested.mkdir()
+    for source in (settings.music_dir, second_source, nested):
+        before = set(source.iterdir())
+        listing = client.get("/api/v1/libraries/folders", params={"path": str(source)}).json()
+        assert listing["can_create"] is False
+        assert listing["creation_blocked_reason"] == "read_only_source"
+        response = client.post(
+            "/api/v1/libraries/folders",
+            headers=HEADERS,
+            json={"parent_path": str(source), "name": "must-not-create"},
+        )
+        assert response.status_code == 403, response.text
+        assert response.json()["detail"] == "folder_source_read_only"
+        assert set(source.iterdir()) == before
+
+
+def test_folder_creation_rejects_missing_paths_files_and_symlink_ancestors(catalog, tmp_path):
+    client, _, _, _, source = catalog
+    (tmp_path / "plain-file").write_text("keep")
+    (tmp_path / "link").symlink_to(source, target_is_directory=True)
+    (source / "nested").mkdir()
+    for path, code in (
+        ("relative", 422),
+        (str(tmp_path / "missing"), 404),
+        (str(tmp_path / "plain-file"), 404),
+        (str(source / ".."), 422),
+        (str(tmp_path / "link"), 422),
+        (str(tmp_path / "link" / "nested"), 422),
+    ):
+        response = client.post(
+            "/api/v1/libraries/folders",
+            headers=HEADERS,
+            json={"parent_path": path, "name": "forbidden"},
+        )
+        assert response.status_code == code, response.text
+    assert not (source / "forbidden").exists()
+    assert not (source / "nested" / "forbidden").exists()
+
+
+def test_folder_creation_reports_filesystem_permission_failure(catalog, tmp_path, monkeypatch):
+    from wildstring.library import folders
+
+    client, _, _, _, _ = catalog
+
+    def denied(*args, **kwargs):
+        raise PermissionError
+
+    with monkeypatch.context() as patch:
+        patch.setattr(folders.os, "mkdir", denied)
+        response = client.post(
+            "/api/v1/libraries/folders",
+            headers=HEADERS,
+            json={"parent_path": str(tmp_path), "name": "forbidden"},
+        )
+    assert response.status_code == 403
+    assert response.json()["detail"] == "folder_not_writable"
+    assert not (tmp_path / "forbidden").exists()
+
+
+def test_schema37_policy_migration_preserves_existing_library_grants(catalog, settings):
+    from migration_support import pre38
+
+    from wildstring.database import SCHEMA_VERSION
+
+    client, first, second, _, _ = catalog
+    other, user_id = listener(client, [second["id"]])
+    database = Database(settings.data_dir)
+    with database.connect(write=True) as db:
+        pre38(db)
+        db.execute("PRAGMA user_version=37")
+    database.initialize()
+    with database.connect() as db:
+        assert db.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
+        assert [
+            r[0]
+            for r in db.execute(
+                "SELECT library_id FROM user_library_access WHERE user_id=?", (user_id,)
+            )
+        ] == [second["id"]]
+        assert dict(db.execute("SELECT id,default_access FROM libraries")) == {
+            first["id"]: 1,
+            second["id"]: 0,
+        }
+        assert (
+            db.execute("SELECT allow_user_subscriptions FROM podcast_catalog_settings").fetchone()[
+                0
+            ]
+            == 0
+        )
+    other.close()

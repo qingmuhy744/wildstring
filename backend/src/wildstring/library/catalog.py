@@ -4,9 +4,10 @@ from pathlib import Path
 from typing import Annotated
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 
+from wildstring.library.folders import FolderCreate, browse_folders, create_folder
 from wildstring.library.scope import allowed_ids, library_for_root
 from wildstring.library.storage import LibraryStorage, MigrationInput, busy
 
@@ -19,6 +20,7 @@ class LibraryInput(BaseModel):
     )
     paused_source_roots: list[str] | None = Field(default=None, max_length=32)
     managed_root: str | None = Field(default=None, min_length=1, max_length=4096)
+    default_access: bool | None = Field(default=None, strict=True)
 
 
 class LibraryUpdate(LibraryInput):
@@ -48,7 +50,9 @@ class LibraryCatalog:
                     (identity, str(self.settings.library_dir), initial),
                 )
             if initial:
-                db.execute("UPDATE libraries SET is_default=1 WHERE id=?", (identity,))
+                db.execute(
+                    "UPDATE libraries SET is_default=1,default_access=1 WHERE id=?", (identity,)
+                )
                 db.execute(
                     "INSERT OR IGNORE INTO user_library_access SELECT id,? FROM users", (identity,)
                 )
@@ -106,6 +110,7 @@ class LibraryCatalog:
         result["enabled"] = bool(result["enabled"])
         result["is_default"] = bool(result["is_default"])
         if owner:
+            result["default_access"] = bool(record["default_access"])
             result["sources"] = record["sources"]
             result["managed_root"] = record["root"]
         return result
@@ -179,12 +184,13 @@ class LibraryCatalog:
             if creating:
                 LibraryStorage(self).available(db, root)
                 db.execute(
-                    "INSERT INTO libraries(id,root,name) VALUES (?,?,?)",
-                    (identity, str(root), body.name),
+                    "INSERT INTO libraries(id,root,name,default_access) VALUES (?,?,?,?)",
+                    (identity, str(root), body.name, bool(body.default_access)),
                 )
             elif not db.execute(
-                "UPDATE libraries SET name=?,enabled=?,version=version+1 WHERE id=? AND version=?",
-                (body.name, body.enabled, identity, body.version),
+                "UPDATE libraries SET name=?,enabled=?,default_access=COALESCE(?,default_access),"
+                "version=version+1 WHERE id=? AND version=?",
+                (body.name, body.enabled, body.default_access, identity, body.version),
             ).rowcount:
                 raise HTTPException(409, "library_version_conflict")
             db.execute(
@@ -263,6 +269,18 @@ class LibraryCatalog:
     def router(self, auth):
         router = APIRouter(prefix="/api/v1/libraries", tags=["libraries"])
         storage = LibraryStorage(self)
+
+        @router.get("/folders", dependencies=[Depends(auth.require_owner)])
+        def folders(path: Annotated[str | None, Query(max_length=4096)] = None):
+            return browse_folders(self.settings, self.database, path)
+
+        @router.post(
+            "/folders",
+            dependencies=[Depends(auth.require_owner), Depends(auth.require_client)],
+            status_code=201,
+        )
+        def new_folder(body: FolderCreate):
+            return create_folder(self.settings, self.database, body)
 
         @router.get("")
         def listing(

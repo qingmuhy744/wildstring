@@ -42,6 +42,6 @@ def migrate(connection):
     for statement in statements:
         connection.execute(statement)
     connection.execute("""INSERT OR IGNORE INTO podcast_resource_state(episode_id,protected,zero_since)
-        SELECT id,1,strftime('%s','now') FROM podcast_episodes WHERE local_path IS NOT NULL AND local_path<>''""")
+        SELECT id,0,strftime('%s','now') FROM podcast_episodes WHERE local_path IS NOT NULL AND local_path<>''""")
     connection.execute("PRAGMA user_version=37")
     connection.commit()

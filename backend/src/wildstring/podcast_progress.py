@@ -10,6 +10,7 @@ from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
 from wildstring.library.repository import now
+from wildstring.podcast_access import admit, require_episode
 
 SCHEMA = """
 BEGIN IMMEDIATE;
@@ -46,6 +47,7 @@ class ProgressState(BaseModel):
 
 
 def state(connection, user_id, episode_id):
+    require_episode(connection, user_id, episode_id)
     if not connection.execute(
         "SELECT 1 FROM podcast_episodes WHERE id=?", (episode_id,)
     ).fetchone():
@@ -67,6 +69,8 @@ def save_progress(manager, user_id, episode_id, body: ProgressWrite):
     with manager.database.connect(write=True) as connection:
         connection.execute("BEGIN IMMEDIATE")
         current = state(connection, user_id, episode_id)
+        podcast_id = require_episode(connection, user_id, episode_id)
+        admit(connection, user_id, podcast_id)
         same_session = current.session_id == body.session_id and current.device_id == body.device_id
         if not same_session and body.base_version != current.version:
             raise HTTPException(
@@ -102,4 +106,7 @@ def save_progress(manager, user_id, episode_id, body: ProgressWrite):
                 body.sequence,
             ),
         )
-        return state(connection, user_id, episode_id)
+        result = state(connection, user_id, episode_id)
+    if current.completed != result.completed:
+        manager.auto_downloads.reconcile(user_id, podcast_id)
+    return result

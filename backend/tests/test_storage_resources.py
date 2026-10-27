@@ -9,7 +9,7 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from test_podcast_publishers import seed
 
-from wildstring.database import Database
+from wildstring.database import SCHEMA_VERSION, Database
 from wildstring.library.catalog import LibraryInput, LibraryUpdate
 from wildstring.library.repository import LibraryRepository
 from wildstring.library.scanner import scan_library
@@ -40,6 +40,8 @@ def resources(settings, authenticated_client):
             headers=HEADERS,
             json={"username": "saver", "password": "test-saver-password", "library_ids": []},
         ).json()
+        with db.connect(write=True) as conn:
+            conn.execute("INSERT INTO podcast_user_catalog VALUES (?,?)", (created["id"], "east"))
         other = TestClient(client.app)
         mutation = other.post(
             "/api/v1/auth/login",
@@ -85,7 +87,7 @@ def test_personal_saves_reuse_and_release_independently(resources):
     assert mutation.status_code == 403
 
 
-def test_collector_protects_legacy_pins_streams_aliases_and_grace(resources):
+def test_collector_respects_manual_pins_streams_aliases_and_grace(resources):
     owner, _, store, path, db, _ = resources
     collection = store.cleanup(automatic=True, dry_run=False)
     assert collection["deleted_count"] == 0
@@ -150,7 +152,7 @@ def test_stream_acquires_and_releases_lease_and_delete_failure_keeps_registratio
         assert conn.execute("SELECT count(*) FROM podcast_resource_leases").fetchone()[0] == 0
 
 
-def test_schema36_upgrade_protects_cached_audio_without_making_personal_refs(resources):
+def test_schema36_upgrade_registers_cached_audio_under_standard_rules(resources):
     _, _, _, path, db, _ = resources
     from migration_support import pre37
 
@@ -159,8 +161,8 @@ def test_schema36_upgrade_protects_cached_audio_without_making_personal_refs(res
         conn.execute("PRAGMA user_version=36")
     db.initialize()
     with db.connect() as conn:
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 37
-        assert conn.execute("SELECT protected FROM podcast_resource_state").fetchone()[0] == 1
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
+        assert conn.execute("SELECT protected FROM podcast_resource_state").fetchone()[0] == 0
         assert conn.execute("SELECT count(*) FROM podcast_resource_refs").fetchone()[0] == 0
     assert path.read_bytes() == b"shared audio"
 
@@ -552,3 +554,73 @@ def test_approved_paused_source_keeps_its_identity_and_queues_after_running_impo
                 ).fetchone()[0]
                 == "queued"
             )
+
+
+def test_schema38_removes_only_automatic_protection_and_preserves_files_refs_and_policy(resources):
+    _, _, store, path, database, user_id = resources
+    manual_path = path.with_name("manual.mp3")
+    manual_path.write_bytes(b"explicitly protected")
+    with database.connect(write=True) as db:
+        db.execute(
+            "UPDATE podcast_resource_state SET protected=1,version=1 WHERE episode_id='ep-east'"
+        )
+        db.execute(
+            "UPDATE podcast_episodes SET local_path=?,download_status='downloaded' WHERE id='ep-coffee'",
+            (str(manual_path),),
+        )
+        store.downloaded(db, "ep-coffee")
+    item = next(row for row in store.listing()["items"] if row["id"] == "ep-coffee")
+    store.protect("ep-coffee", ProtectionUpdate(version=item["version"], protected=True))
+    store.save("ep-east", user_id)
+    policy = store.configure(
+        ResourceSettings(**{**store.settings(), "enabled": True, "retention_days": 30})
+    )
+    with database.connect(write=True) as db:
+        lease = store.acquire(db, "ep-east")
+        db.execute("PRAGMA user_version=38")
+    database.initialize()
+    with database.connect() as db:
+        state = {
+            row["episode_id"]: dict(row)
+            for row in db.execute("SELECT * FROM podcast_resource_state")
+        }
+        assert state["ep-east"]["protected"] == 0
+        assert state["ep-coffee"]["protected"] == 1
+        assert db.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
+    assert store.saved_ids(user_id) == {"ep-east"}
+    assert store.settings() == policy
+    assert path.read_bytes() == b"shared audio"
+    assert manual_path.read_bytes() == b"explicitly protected"
+    assert store.cleanup()["candidate_count"] == 0
+    store.release_lease(lease)
+    store.release("ep-east", user_id)
+    # A released save still receives the configured retention period.
+    assert store.cleanup(automatic=True)["candidate_count"] == 0
+    assert store.cleanup()["candidate_count"] == 1
+    assert path.exists()  # Preview never removes audio.
+    database.initialize()
+    assert (
+        next(row for row in store.listing()["items"] if row["id"] == "ep-coffee")["protected"]
+        is True
+    )
+
+
+def test_discovered_existing_audio_uses_standard_zero_reference_retention(resources):
+    _, _, store, path, database, _ = resources
+    with database.connect(write=True) as db:
+        db.execute("DELETE FROM podcast_resource_state WHERE episode_id='ep-east'")
+    item = store.listing()["items"][0]
+    assert item["protected"] is False
+    assert item["reference_count"] == 0
+    assert store.cleanup()["candidate_count"] == 1
+    assert path.exists()
+    store.configure(ResourceSettings(**{**store.settings(), "enabled": True, "retention_days": 7}))
+    assert store.cleanup(automatic=True)["candidate_count"] == 0
+    with database.connect(write=True) as db:
+        db.execute(
+            "UPDATE podcast_resource_state SET zero_since=? WHERE episode_id='ep-east'",
+            (time.time() - 8 * 86400,),
+        )
+    result = store.cleanup(automatic=True, dry_run=False)
+    assert result["deleted_count"] == 1
+    assert not path.exists()

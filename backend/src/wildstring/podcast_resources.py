@@ -10,6 +10,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from starlette.background import BackgroundTask
 from starlette.responses import FileResponse
 
+from wildstring.podcast_access import admit, require_episode
+
 
 class ResourceSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -77,9 +79,11 @@ class PodcastResources:
         with self.database.connect(write=True) as db:
             db.execute("BEGIN IMMEDIATE")
             row = self._episode(db, identity)
+            podcast_id = require_episode(db, user_id, identity)
+            admit(db, user_id, podcast_id)
             reused = self.cached_path(row["local_path"]) is not None
             db.execute(
-                "INSERT OR IGNORE INTO podcast_resource_refs VALUES (?,?,?)",
+                "INSERT INTO podcast_resource_refs(user_id,episode_id,created_at,manual,automatic) VALUES (?,?,?,1,0) ON CONFLICT(user_id,episode_id) DO UPDATE SET manual=1",
                 (user_id, identity, time.time()),
             )
             db.execute(
@@ -110,9 +114,12 @@ class PodcastResources:
     def release(self, identity, user_id):
         with self.database.connect(write=True) as db:
             db.execute("BEGIN IMMEDIATE")
-            self._episode(db, identity)
             db.execute(
-                "DELETE FROM podcast_resource_refs WHERE user_id=? AND episode_id=?",
+                "UPDATE podcast_resource_refs SET manual=0 WHERE user_id=? AND episode_id=?",
+                (user_id, identity),
+            )
+            db.execute(
+                "DELETE FROM podcast_resource_refs WHERE user_id=? AND episode_id=? AND manual=0 AND automatic=0",
                 (user_id, identity),
             )
             db.execute(
@@ -126,7 +133,27 @@ class PodcastResources:
             return {
                 r[0]
                 for r in db.execute(
-                    "SELECT episode_id FROM podcast_resource_refs WHERE user_id=?", (user_id,)
+                    "SELECT episode_id FROM podcast_resource_refs WHERE user_id=? AND manual=1",
+                    (user_id,),
+                )
+            }
+
+    def automatic_ids(self, user_id):
+        with self.database.connect() as db:
+            return {
+                r[0]
+                for r in db.execute(
+                    "SELECT episode_id FROM podcast_resource_refs WHERE user_id=? AND automatic=1",
+                    (user_id,),
+                )
+            }
+
+    def playback_ids(self, user_id):
+        with self.database.connect() as db:
+            return {
+                r[0]
+                for r in db.execute(
+                    "SELECT episode_id FROM podcast_playback_cache WHERE user_id=?", (user_id,)
                 )
             }
 
@@ -167,9 +194,9 @@ class PodcastResources:
     def synchronize(self, db):
         stamp = time.time()
         db.execute("DELETE FROM podcast_resource_leases WHERE expires_at<?", (stamp,))
-        # Unknown pre-existing audio is conservative by default, including files imported by older workers.
+        # Register existing files under the same rules as newly downloaded audio.
         db.execute(
-            "INSERT OR IGNORE INTO podcast_resource_state(episode_id,protected,zero_since) SELECT id,1,? FROM podcast_episodes WHERE local_path IS NOT NULL AND local_path<>''",
+            "INSERT OR IGNORE INTO podcast_resource_state(episode_id,protected,zero_since) SELECT id,0,? FROM podcast_episodes WHERE local_path IS NOT NULL AND local_path<>''",
             (stamp,),
         )
         db.execute(
@@ -186,7 +213,7 @@ class PodcastResources:
             dict(r)
             for r in db.execute(
                 """SELECT e.id,e.podcast_id,e.title,e.local_path,e.download_status,p.title AS podcast_title,
-            COALESCE(s.protected,1) AS protected,s.zero_since,COALESCE(s.version,1) AS version,
+            COALESCE(s.protected,0) AS protected,s.zero_since,COALESCE(s.version,1) AS version,
             (SELECT count(*) FROM podcast_resource_refs r WHERE r.episode_id=e.id) AS reference_count,
             EXISTS(SELECT 1 FROM podcast_resource_leases x WHERE x.episode_id=e.id AND x.expires_at>?) AS leased
             FROM podcast_episodes e JOIN podcasts p ON p.id=e.podcast_id LEFT JOIN podcast_resource_state s ON s.episode_id=e.id
@@ -291,6 +318,10 @@ class PodcastResources:
                         for alias in aliases:
                             db.execute(
                                 "UPDATE podcast_episodes SET local_path=NULL,download_status='none' WHERE id=?",
+                                (alias["id"],),
+                            )
+                            db.execute(
+                                "DELETE FROM podcast_playback_cache WHERE episode_id=?",
                                 (alias["id"],),
                             )
                         deleted_count += 1

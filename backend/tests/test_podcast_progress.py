@@ -197,8 +197,8 @@ def test_only_current_ended_event_can_complete_without_collecting_shared_audio(
     assert replay.status_code == 200 and not replay.json()["completed"]
 
 
-def test_progress_is_account_scoped_and_rejects_unversioned_clients(episode_client):
-    client, episode, _ = episode_client
+def test_progress_is_account_scoped_and_rejects_unversioned_clients(episode_client, settings):
+    client, episode, podcast_id = episode_client
     write(client, episode, position_seconds=900)
     created = client.post(
         "/api/v1/manage/users",
@@ -210,6 +210,12 @@ def test_progress_is_account_scoped_and_rejects_unversioned_clients(episode_clie
         },
     )
     assert created.status_code == 201
+    from wildstring.database import Database
+
+    with Database(settings.data_dir).connect(write=True) as db:
+        db.execute(
+            "INSERT INTO podcast_user_catalog VALUES (?,?)", (created.json()["id"], podcast_id)
+        )
     client.post("/api/v1/auth/logout", headers=HEADERS)
     mutation = client.post(
         "/api/v1/auth/login",

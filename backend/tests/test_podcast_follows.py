@@ -24,6 +24,8 @@ def followers(settings, authenticated_client):
             },
         )
         assert user.status_code == 201
+        with database.connect(write=True) as db:
+            db.execute("INSERT INTO podcast_user_catalog VALUES (?,?)", (user.json()["id"], "east"))
         other = TestClient(client.app)
         assert (
             other.post(
@@ -66,7 +68,7 @@ def test_follow_is_idempotent_personal_and_does_not_copy_programmes(followers):
     assert following(other).status_code == 200
     assert [p["id"] for p in other.get("/api/v1/podcasts?followed=true").json()] == ["east"]
     assert client.get("/api/v1/podcasts?followed=true").json() == []
-    assert len(other.get("/api/v1/podcasts").json()) == 3
+    assert len(other.get("/api/v1/podcasts").json()) == 1
     assert len(other.get("/api/v1/podcasts/east").json()["episodes"]) == 1
     with database.connect() as db:
         assert db.execute("SELECT count(*) FROM podcasts").fetchone()[0] == 3
@@ -131,5 +133,64 @@ def test_unplayed_prefetch_uses_followers_instead_of_admin(followers, monkeypatc
     )
     with database.connect() as db:
         assert db.execute("SELECT count(*) FROM podcast_follows").fetchone()[0] == 1
-    # Queueing is deduplicated by episode; a different user's completion cannot suppress it.
-    assert manager._auto_download_by_policy("east", "unplayed") == 1
+    response = other.put(
+        "/api/v1/podcasts/east/download-settings",
+        headers=HEADERS,
+        json={"version": 1, "download_policy": "unplayed"},
+    )
+    assert response.status_code == 200, response.text
+    # The listener's personal policy ignores another user's completed progress.
+    assert queued == ["ep-east"]
+
+
+def test_subscription_switch_reuses_catalog_and_only_follows_the_requesting_user(
+    followers, monkeypatch
+):
+    client, other, database = followers
+    endpoint = "/api/v1/podcasts/catalog-settings"
+    with database.connect() as db:
+        feed = db.execute("SELECT feed_url FROM podcasts WHERE id='east'").fetchone()[0]
+    monkeypatch.setattr(
+        "wildstring.podcasts.fetch_and_parse_feed",
+        lambda *args, **kwargs: pytest.fail("Existing feeds must not fetch again"),
+    )
+    assert other.get(endpoint).json()["can_add"] is False
+    response_1 = other.post("/api/v1/podcasts", headers=HEADERS, json={"feed_url": feed})
+    assert response_1.status_code == 403
+    value = client.get(endpoint).json()
+    body = {"version": value["version"], "allow_user_subscriptions": True}
+    response_2 = other.put(endpoint, headers=HEADERS, json=body)
+    assert response_2.status_code == 403
+    response_3 = client.put(endpoint, json=body)
+    assert response_3.status_code == 403
+    response_4 = client.put(endpoint, headers=HEADERS, json=body)
+    assert response_4.status_code == 200
+    response_5 = client.put(endpoint, headers=HEADERS, json=body)
+    assert response_5.status_code == 409
+    assert other.get(endpoint).json()["can_add"] is True
+    response_6 = other.post(
+        "/api/v1/podcasts", headers=HEADERS, json={"feed_url": feed, "download_policy": "all"}
+    )
+    assert response_6.status_code == 403
+    for _ in range(2):
+        added = other.post("/api/v1/podcasts", headers=HEADERS, json={"feed_url": feed})
+        assert added.status_code == 200, added.text
+        assert added.json()["podcast"]["id"] == "east"
+        assert added.json()["podcast"]["followed"] is True
+    assert client.get("/api/v1/podcasts?followed=true").json() == []
+    response_7 = other.delete("/api/v1/podcasts/east", headers=HEADERS)
+    assert response_7.status_code == 403
+    response_8 = other.put(
+        "/api/v1/podcasts/east/settings", headers=HEADERS, json={"auto_update": False}
+    )
+    assert response_8.status_code == 403
+    latest = client.get(endpoint).json()
+    response_9 = client.put(
+        endpoint,
+        headers=HEADERS,
+        json={"version": latest["version"], "allow_user_subscriptions": False},
+    )
+    assert response_9.status_code == 200
+    response_10 = other.post("/api/v1/podcasts", headers=HEADERS, json={"feed_url": feed})
+    assert response_10.status_code == 403
+    assert [p["id"] for p in other.get("/api/v1/podcasts?followed=true").json()] == ["east"]

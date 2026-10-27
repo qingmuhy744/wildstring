@@ -57,6 +57,8 @@ def account(client, profile="listener"):
         },
     )
     assert response.status_code == 201
+    with client.app.state.podcasts.database.connect(write=True) as db:
+        db.execute("INSERT INTO podcast_user_catalog VALUES (?,?)", (response.json()["id"], "east"))
     other = TestClient(client.app)
     assert (
         other.post(

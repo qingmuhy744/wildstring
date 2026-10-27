@@ -1,0 +1,7 @@
+simulation: wildstring-rss
+routing: path
+mocks:
+  - name: RSS 2.0 feed
+    routeKey: rss
+    origin: rss.wildstring.test
+    path: contracts/checks/rss-feed-mock

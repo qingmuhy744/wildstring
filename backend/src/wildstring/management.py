@@ -549,9 +549,21 @@ class Management:
                 (self.repository.library_id(),),
             ).fetchall()
         return [
-            {"id": s["id"], "name": Path(s["root"]).name or "导入目录", "read_only": True}
+            {
+                "id": s["id"],
+                "name": Path(s["root"]).name or "导入目录",
+                "path": s["root"],
+                "read_only": True,
+            }
             for s in sources
-        ] or [{"id": "import", "name": "导入目录", "read_only": True}]
+        ] or [
+            {
+                "id": "import",
+                "name": "导入目录",
+                "path": str(self.settings.music_dir),
+                "read_only": True,
+            }
+        ]
 
     def source_folders(self, source_id="import", path="."):
         relative = Path(".") if path == "." else Path(validate_folder(path))

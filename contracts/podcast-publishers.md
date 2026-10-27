@@ -18,12 +18,12 @@
   每项为 `{id,name,podcast_count}`，按名称排序。
 - `GET /api/v1/podcasts/publishers/{id}` 返回
   `{publisher:{id,name,podcast_count},podcasts:[PodcastSummary]}`。
-  只含本服节目；各节目的未听数量仍按请求账号计算。未知 ID 返回 404。
+  只含本账号有权读取的本服节目；数量及未听统计按该范围计算。未知或没有可读节目的出品方 ID 返回 404；管理员可读取全服。
 
 ## 手动确认、修改和解除
 
 `PUT /api/v1/podcasts/{podcast_id}/publisher` 要求客户端标头和
-`metadata:write` 权限（所有者、曲库管理员、资料编辑员）。听众写入返回 403。
+`metadata:write` 权限（所有者、曲库管理员、资料编辑员），并检查节目访问权限。听众写入返回 403；资料编辑员不能修改未关联节目的资料。
 
 请求均携带读取到的 `version`，并采用以下一种选择：
 

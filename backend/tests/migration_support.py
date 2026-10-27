@@ -145,6 +145,7 @@ def pre36(connection):
 
 
 def pre37(connection):
+    pre38(connection)
     connection.execute("DROP INDEX IF EXISTS one_active_library_job")
     if connection.execute(
         "SELECT 1 FROM sqlite_master WHERE name='admin_jobs' AND type='table'"
@@ -163,3 +164,21 @@ def pre37(connection):
     columns = {r[1] for r in connection.execute("PRAGMA table_info(library_sources)")}
     if "watch_enabled" in columns:
         connection.execute("ALTER TABLE library_sources DROP COLUMN watch_enabled")
+
+
+def pre38(connection):
+    pre40(connection)
+    connection.execute("DROP TABLE IF EXISTS podcast_catalog_settings")
+    columns = {row[1] for row in connection.execute("PRAGMA table_info(libraries)")}
+    if "default_access" in columns:
+        connection.execute("ALTER TABLE libraries DROP COLUMN default_access")
+
+
+def pre40(connection):
+    connection.execute("DROP TABLE IF EXISTS podcast_playback_cache")
+    for table in ("podcast_user_catalog", "podcast_user_settings"):
+        connection.execute(f"DROP TABLE IF EXISTS {table}")
+    columns = {row[1] for row in connection.execute("PRAGMA table_info(podcast_resource_refs)")}
+    for name in ("manual", "automatic"):
+        if name in columns:
+            connection.execute(f"ALTER TABLE podcast_resource_refs DROP COLUMN {name}")
