@@ -2,6 +2,8 @@ package com.wildstring.app.data
 
 import android.content.ComponentName
 import android.content.Context
+import android.content.SharedPreferences
+import java.security.MessageDigest
 import android.content.pm.PackageManager
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
@@ -17,29 +19,71 @@ data class Preferences(val redCloth: Boolean = false, val redIcon: Boolean = fal
 
 @Singleton
 class AppSettings @Inject constructor(@param:ApplicationContext private val context: Context) {
-    private val prefs = context.getSharedPreferences("appearance_cache", Context.MODE_PRIVATE)
-    private val mutable = MutableStateFlow(Preferences(prefs.getBoolean("red_cloth", false), prefs.getBoolean("red_icon", false),
+    private val devicePrefs = context.getSharedPreferences("appearance_cache", Context.MODE_PRIVATE)
+    private var prefs = devicePrefs
+    private var boundAccount: String? = null
+    private var initializedBinding = false
+    private fun preferences() = Preferences(prefs.getBoolean("red_cloth", false), devicePrefs.getBoolean("red_icon", false),
         prefs.getInt("metadata_mb", 32), prefs.getInt("artwork_mb", 64), prefs.getInt("audio_mb", 256), prefs.getBoolean("haptics", true), prefs.getString("appearance", "system") ?: "system", prefs.getInt("aac_bitrate", 0).takeIf { it in listOf(0, 128, 192, 256, 320) } ?: 0,
         prefs.getString("playback_style", "cover").takeIf { it in listOf("cover", "vinyl", "cassette") } ?: "cover",
         SongListSize.fromStored(runCatching { prefs.getString("song_list_size", null) }.getOrNull()),
         prefs.getInt("lyric_follow_seconds", 2).takeIf { it in listOf(1, 2, 3, 5, 10) } ?: 2,
         LyricSize.fromStored(runCatching { prefs.getString("lyric_size", null) }.getOrNull()),
-        prefs.getString("screen_orientation", "auto").takeIf { it in listOf("auto", "portrait", "sensor") } ?: "auto"))
+        prefs.getString("screen_orientation", "auto").takeIf { it in listOf("auto", "portrait", "sensor") } ?: "auto")
+    private val mutable = MutableStateFlow(preferences())
+
+    /** Stable server and account IDs survive token refreshes and reconnects. */
+    @Synchronized fun bindAccount(serverId: String?, userId: String?) {
+        val identity = if (serverId != null && userId != null) "$serverId:$userId" else null
+        if (initializedBinding && identity == boundAccount) return
+        val name = identity?.let { value ->
+            MessageDigest.getInstance("SHA-256").digest(value.toByteArray()).joinToString("") { "%02x".format(it) }
+        } ?: "signed-out"
+        val target = context.getSharedPreferences("account_preferences_$name", Context.MODE_PRIVATE)
+        // Claim the old device-wide values only once, for the first existing account.
+        if (identity != null && !devicePrefs.contains("preferences_legacy_owner")) {
+            val edit = target.edit()
+            devicePrefs.all.forEach { (key, value) ->
+                if (key != "red_icon" && !target.contains(key)) copyPreference(edit, key, value)
+            }
+            edit.apply()
+            devicePrefs.edit().putString("preferences_legacy_owner", identity).apply()
+        }
+        prefs = target
+        boundAccount = identity
+        initializedBinding = true
+        mutable.value = preferences()
+    }
+
+    private fun copyPreference(edit: SharedPreferences.Editor, key: String, value: Any?) {
+        when (value) {
+            is String -> edit.putString(key, value)
+            is Boolean -> edit.putBoolean(key, value)
+            is Int -> edit.putInt(key, value)
+            is Long -> edit.putLong(key, value)
+            is Float -> edit.putFloat(key, value)
+        }
+    }
     val state = mutable.asStateFlow()
     private val gainMutable = MutableStateFlow(0L)
     val gainRevision = gainMutable.asStateFlow()
     private val avatarMutable = MutableStateFlow(0L)
     val avatarRevision = avatarMutable.asStateFlow()
+    private fun sortKey(owner: String?, context: String) = if (boundAccount != null) "catalog-sort:$context" else "catalog-sort:$owner:$context"
+    private fun sortValue(owner: String?, context: String, suffix: String, fallback: String): String {
+        val legacy = "catalog-sort:$owner:$context$suffix"
+        return prefs.getString(sortKey(owner, context) + suffix, null)
+            ?: prefs.getString(legacy, null) ?: devicePrefs.getString(legacy, fallback) ?: fallback
+    }
     fun catalogSort(owner: String?, context: String): CatalogSort {
         val fallback = defaultCatalogSort(context)
-        val key = "catalog-sort:$owner:$context"
-        val sort = prefs.getString(key, fallback.sort).takeIf { candidate -> catalogSortChoices(context).any { it.first == candidate } } ?: fallback.sort
-        val order = prefs.getString("$key:order", fallback.order).takeIf { it in listOf("asc", "desc") } ?: fallback.order
+        val sort = sortValue(owner, context, "", fallback.sort).takeIf { candidate -> catalogSortChoices(context).any { it.first == candidate } } ?: fallback.sort
+        val order = sortValue(owner, context, ":order", fallback.order).takeIf { it in listOf("asc", "desc") } ?: fallback.order
         return CatalogSort(sort, order)
     }
     fun catalogSort(owner: String?, context: String, selection: CatalogSort) {
         require(catalogSortChoices(context).any { it.first == selection.sort } && selection.order in listOf("asc", "desc"))
-        val key = "catalog-sort:$owner:$context"
+        val key = sortKey(owner, context)
         prefs.edit().putString(key, selection.sort).putString("$key:order", selection.order).apply()
     }
     fun avatarChanged() { avatarMutable.value += 1 }
@@ -85,6 +129,6 @@ class AppSettings @Inject constructor(@param:ApplicationContext private val cont
         // Enable the destination first so an interrupted switch always leaves a launcher entry.
         manager.setComponentEnabledSetting(component(red), PackageManager.COMPONENT_ENABLED_STATE_ENABLED, PackageManager.DONT_KILL_APP)
         manager.setComponentEnabledSetting(component(!red), PackageManager.COMPONENT_ENABLED_STATE_DISABLED, PackageManager.DONT_KILL_APP)
-        prefs.edit().putBoolean("red_icon", red).apply(); mutable.value = mutable.value.copy(redIcon = red)
+        devicePrefs.edit().putBoolean("red_icon", red).apply(); mutable.value = mutable.value.copy(redIcon = red)
     }
 }

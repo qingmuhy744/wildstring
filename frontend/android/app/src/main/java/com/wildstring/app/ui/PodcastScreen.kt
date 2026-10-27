@@ -90,10 +90,21 @@ fun PodcastChannelPage(
     }
     val detailLoading = browser.owner != owner || (selectedId != null &&
         (selectedId !in browser.loadedDetails || selectedId in browser.loadingDetails))
-    var showSubscribeDialog by remember { mutableStateOf(false) }
+    var showSubscribeDialog by remember(owner) { mutableStateOf(false) }
+    var autoDownloadPodcast by remember(owner) { mutableStateOf<PodcastSummary?>(null) }
     var statusMessage by remember { mutableStateOf<String?>(null) }
-    var followingOnly by rememberSaveable { mutableStateOf(false) }
+    var followingOnly by rememberSaveable { mutableStateOf(true) }
+    val canBrowseCatalog = state.account?.profile in listOf("owner", "librarian")
+    val personalOnly = !canBrowseCatalog || followingOnly
+    var canAddPodcast by remember(owner) { mutableStateOf(false) }
     val canEditPublisher = state.account?.profile in listOf("owner", "librarian", "editor")
+    LaunchedEffect(owner, browser.listLoading) {
+        try {
+            val policy = vm.repository.podcastCatalogPolicy()
+            if (owner == vm.repository.session.cacheScope()) canAddPodcast = policy.canAdd
+        } catch (e: CancellationException) { throw e }
+        catch (_: Exception) { canAddPodcast = state.account?.profile in listOf("owner", "librarian") }
+    }
     BackHandler(enabled = selectedId == null && selectedPublisher != null) { selectedPublisherId = null }
 
     LaunchedEffect(owner, browser.listLoaded) { vm.podcastBrowser.ensureList() }
@@ -119,6 +130,8 @@ fun PodcastChannelPage(
                         vm.addPodcastEpisodeToQueue(ep, selectedPodcast, next)
                     },
                     onFollow = { vm.togglePodcastFollow(selectedPodcast) },
+                    onAutoDownload = { autoDownloadPodcast = selectedPodcast },
+                    onReadDownloads = { vm.podcastBrowser.refresh(selectedPodcast.id, synchronize = false) },
                     onSaveEpisode = { episode -> scope.launch {
                         try {
                             val result = vm.repository.savePodcastEpisode(episode.id, !episode.resourceSaved)
@@ -142,14 +155,16 @@ fun PodcastChannelPage(
                 )
             }
         } else if (selectedPublisher != null) {
-            PodcastPublisherPage(vm, selectedPublisher, { selectedPublisherId = null }, { vm.openPodcast(it.id) })
+            PodcastPublisherPage(vm, selectedPublisher, { selectedPublisherId = null }, { vm.openPodcast(it.id) }, personalOnly)
         } else {
             pageStates.SaveableStateProvider("list") {
                 PodcastListView(
-                    podcasts = if (followingOnly) podcasts.filter { it.followed } else podcasts,
-                    followingOnly = followingOnly,
-                    onScope = { followingOnly = it },
+                    podcasts = if (personalOnly) podcasts.filter { it.followed } else podcasts,
+                    followingOnly = personalOnly,
+                    canBrowseCatalog = canBrowseCatalog,
+                    onScope = { followingOnly = it; if (!it) vm.podcastBrowser.reloadList(synchronize = false) },
                     canManage = false,
+                    canAdd = canAddPodcast,
                     onFollow = vm::togglePodcastFollow,
                     loading = loading,
                     onSelect = { vm.openPodcast(it.id) },
@@ -171,6 +186,12 @@ fun PodcastChannelPage(
             }
         }
 
+        autoDownloadPodcast?.let { podcast ->
+            PodcastDownloadSettingsDialog(vm, podcast, onDismiss = { autoDownloadPodcast = null }, onSaved = {
+                vm.podcastBrowser.refresh(podcast.id, synchronize = false)
+                statusMessage = "已保存你的自动下载设置"
+            })
+        }
         if (showSubscribeDialog) {
             SubscribePodcastDialog(
                 onDismiss = { showSubscribeDialog = false },
@@ -182,7 +203,7 @@ fun PodcastChannelPage(
                             if (owner != vm.repository.session.cacheScope()) return@launch
                             vm.podcastBrowser.remember(detail)
                             vm.openPodcast(detail.podcast.id)
-                            statusMessage = "成功订阅: ${detail.podcast.title}"
+                            statusMessage = "已添加并关注: ${detail.podcast.title}"
                         } catch (e: CancellationException) { throw e }
                         catch (e: Exception) {
                             statusMessage = "订阅失败: ${e.message}"
@@ -227,8 +248,10 @@ private fun PodcastRefreshBox(loading: Boolean, onRefresh: () -> Unit, tag: Stri
 private fun PodcastListView(
     podcasts: List<PodcastSummary>,
     followingOnly: Boolean,
+    canBrowseCatalog: Boolean,
     onScope: (Boolean) -> Unit,
     canManage: Boolean,
+    canAdd: Boolean,
     onFollow: (PodcastSummary) -> Unit,
     loading: Boolean,
     onSelect: (PodcastSummary) -> Unit,
@@ -254,7 +277,7 @@ private fun PodcastListView(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                if (canManage) FilledTonalButton(
+                if (canAdd) FilledTonalButton(
                     onClick = onAddClick,
                     contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
                     shape = RoundedCornerShape(20.dp),
@@ -267,8 +290,8 @@ private fun PodcastListView(
         }
 
         Row(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FilterChip(!followingOnly, { onScope(false) }, label = { Text("本服节目") })
             FilterChip(followingOnly, { onScope(true) }, label = { Text("我的关注") })
+            if (canBrowseCatalog) FilterChip(!followingOnly, { onScope(false) }, label = { Text("本服节目") })
         }
         PodcastRefreshBox(loading, onRefreshAll, "podcast-list-refresh", "刷新播客订阅") {
             LazyColumn(
@@ -280,8 +303,9 @@ private fun PodcastListView(
                     Box(Modifier.fillParentMaxSize()) {
                         if (followingOnly) Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
                             Text("还没有关注的节目")
-                            TextButton({ onScope(false) }) { Text("浏览本服节目") }
-                        } else EmptyPodcastState(canAdd = canManage, onPresetSelect = onAddClick)
+                            if (canAdd) TextButton(onAddClick) { Text("添加 RSS 并关注") }
+                            if (canBrowseCatalog) TextButton({ onScope(false) }) { Text("浏览本服节目") }
+                        } else EmptyPodcastState(canAdd = canAdd, onPresetSelect = onAddClick)
                     }
                 }
                 items(podcasts, key = { it.id }) { podcast ->
@@ -497,14 +521,22 @@ private fun PodcastDetailView(
     onQueueEpisode: (PodcastEpisode, Boolean) -> Unit,
     onSaveEpisode: (PodcastEpisode) -> Unit,
     onFollow: () -> Unit,
+    onAutoDownload: () -> Unit,
+    onReadDownloads: () -> Unit,
     publisher: @Composable () -> Unit,
 ) {
-    var savedOnly by rememberSaveable(podcast.id) { mutableStateOf(false) }
+    var episodeScope by rememberSaveable(podcast.id) { mutableStateOf("all") }
     var sortDescending by rememberSaveable(podcast.id) { mutableStateOf(true) }
     var showDescription by remember(podcast.id) { mutableStateOf(false) }
 
-    val sortedEpisodes = remember(detail?.episodes, sortDescending, savedOnly) {
-        val list = detail?.episodes.orEmpty().filter { !savedOnly || it.resourceSaved }
+    val sortedEpisodes = remember(detail?.episodes, sortDescending, episodeScope) {
+        val list = detail?.episodes.orEmpty().filter {
+            when (episodeScope) {
+                "saved" -> it.resourceSaved || it.resourceAutomatic || it.resourcePlaybackCached
+                "downloaded" -> it.downloadStatus == "downloaded"
+                else -> true
+            }
+        }
         val parseNum = { ep: PodcastEpisode ->
             if (ep.episodeNumber != null) ep.episodeNumber
             else {
@@ -593,6 +625,7 @@ private fun PodcastDetailView(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                             TextButton(onFollow, contentPadding = PaddingValues(0.dp)) { Text(if (podcast.followed) "取消关注" else "关注节目") }
+                            if (podcast.followed) TextButton(onAutoDownload, contentPadding = PaddingValues(0.dp)) { Text("自动下载") }
                             publisher()
                             Spacer(Modifier.height(8.dp))
                             Text(
@@ -607,9 +640,13 @@ private fun PodcastDetailView(
                         }
                     }
                     Row(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        FilterChip(!savedOnly, { savedOnly = false }, label = { Text("全部单集") })
-                        FilterChip(savedOnly, { savedOnly = true }, label = { Text("我保存的") })
+                        FilterChip(episodeScope == "saved", { episodeScope = "saved"; onReadDownloads() }, label = { Text("我的下载") })
+                        FilterChip(episodeScope == "downloaded", { episodeScope = "downloaded" }, label = { Text("服务器已有") })
+                        FilterChip(episodeScope == "all", { episodeScope = "all" }, label = { Text("全部单集") })
                     }
+                    if (episodeScope == "saved") Text("包含你的手动下载、自动下载和播放缓存。播放缓存可按服务器清理规则回收。",
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
                     Spacer(Modifier.height(8.dp))
 
@@ -643,7 +680,11 @@ private fun PodcastDetailView(
                 if (sortedEpisodes.isEmpty() && !loading) {
                     item {
                         Box(Modifier.fillMaxWidth().padding(48.dp), contentAlignment = Alignment.Center) {
-                            Text(if (savedOnly) "尚未保存单集，可在单集菜单中保存到服务器" else "暂无单集", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(when (episodeScope) {
+                                "saved" -> "还没有你的下载，播放时缓存或选择保存后会显示在这里"
+                                "downloaded" -> "服务器还没有已下载单集"
+                                else -> "暂无单集"
+                            }, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
                 } else {
@@ -741,7 +782,8 @@ private fun EpisodeRowItem(
                             color = MaterialTheme.colorScheme.primary,
                         )
                     }
-                    if (episode.resourceSaved) { Spacer(Modifier.width(8.dp)); Text("已保存", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary) }
+                    if (episode.resourceSaved || episode.resourceAutomatic) { Spacer(Modifier.width(8.dp)); Text(if (episode.resourceSaved) "已保存" else "自动保存", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary) }
+                    else if (episode.resourcePlaybackCached) { Spacer(Modifier.width(8.dp)); Text("播放缓存", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                     if (episode.completed) {
                         Spacer(Modifier.width(8.dp))
                         Text(
@@ -828,10 +870,10 @@ private fun SubscribePodcastDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("添加本服节目") },
+        title = { Text("添加 RSS 并关注") },
         text = {
             Column {
-                Text("添加的 RSS 节目可供本服所有用户浏览，个人关注单独保存。", style = MaterialTheme.typography.bodySmall)
+                Text("输入节目 RSS 地址即可关注。已有节目会直接复用，你的关注和收听进度单独保存。", style = MaterialTheme.typography.bodySmall)
                 OutlinedTextField(
                     value = url,
                     onValueChange = { url = it },

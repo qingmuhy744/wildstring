@@ -44,23 +44,29 @@ private val LocalSettingsFeedback = staticCompositionLocalOf<() -> Unit> { {} }
 @Composable internal fun SettingsScreen(vm: MusicViewModel, bottomBar: @Composable () -> Unit = {}, back: () -> Unit) {
     val preferences by vm.settings.state.collectAsStateWithLifecycle()
     val state by vm.state.collectAsStateWithLifecycle()
+    val settingsOwner = vm.repository.session.cacheScope()
     val scope = rememberCoroutineScope()
     val feedback = LocalTactileFeedback.current
-    var usage by remember { mutableStateOf(Triple(0L, 0L, 0L)) }
-    var message by remember { mutableStateOf<String?>(null) }
-    var clearing by remember { mutableStateOf(false) }
-    var profile by remember { mutableStateOf(false) }
-    var password by remember { mutableStateOf(false) }
-    var servers by remember { mutableStateOf(false) }
-    var logout by remember { mutableStateOf(false) }
-    var assistant by remember { mutableStateOf(false) }
-    var diagnostics by remember { mutableStateOf(false) }
-    var feature by remember { mutableStateOf<String?>(null) }
-    var podcastPlayback by remember { mutableStateOf<com.wildstring.app.data.PodcastPlaybackSettings?>(null) }
+    var usage by remember(settingsOwner) { mutableStateOf(Triple(0L, 0L, 0L)) }
+    var message by remember(settingsOwner) { mutableStateOf<String?>(null) }
+    var clearing by remember(settingsOwner) { mutableStateOf(false) }
+    var profile by remember(settingsOwner) { mutableStateOf(false) }
+    var password by remember(settingsOwner) { mutableStateOf(false) }
+    var servers by remember(settingsOwner) { mutableStateOf(false) }
+    var logout by remember(settingsOwner) { mutableStateOf(false) }
+    var assistant by remember(settingsOwner) { mutableStateOf(false) }
+    var diagnostics by remember(settingsOwner) { mutableStateOf(false) }
+    var feature by remember(settingsOwner) { mutableStateOf<String?>(null) }
+    var podcastPlayback by remember(settingsOwner) { mutableStateOf<com.wildstring.app.data.PodcastPlaybackSettings?>(null) }
+    var savingPodcastPlayback by remember(settingsOwner) { mutableStateOf(false) }
     val inbox by vm.agent.inbox.collectAsStateWithLifecycle()
     LaunchedEffect(preferences, clearing, assistant, feature, servers, state.current?.id) { usage = vm.cacheUsage() }
-    LaunchedEffect(state.serverSelection, state.account?.id) {
-        podcastPlayback = runCatching { vm.repository.podcastPlaybackSettings() }.getOrNull()
+    LaunchedEffect(settingsOwner) {
+        try {
+            val loaded = vm.repository.podcastPlaybackSettings()
+            if (settingsOwner == vm.repository.session.cacheScope()) podcastPlayback = loaded
+        } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+        catch (_: Exception) { if (settingsOwner == vm.repository.session.cacheScope()) podcastPlayback = null }
     }
     fun mb(bytes: Long) = "%.1f MB".format(bytes / 1048576.0)
     CompositionLocalProvider(LocalSettingsFeedback provides tactile {}) {
@@ -115,25 +121,34 @@ private val LocalSettingsFeedback = staticCompositionLocalOf<() -> Unit> { {} }
                     com.wildstring.app.data.LyricSize.entries.map { it to it.label }, preferences.lyricSize,
                     "调整全屏歌词和逐字高亮的字号，只影响本机播放页。", vm.settings::lyricSize)
                 podcastPlayback?.let { playback ->
-                    val savePodcastPlayback: (com.wildstring.app.data.PodcastPlaybackSettings) -> Unit = { next ->
-                        podcastPlayback = next
+                    val savePodcastPlayback: (com.wildstring.app.data.PodcastPlaybackSettings) -> Unit = save@{ next ->
+                        if (savingPodcastPlayback || settingsOwner != vm.repository.session.cacheScope()) return@save
+                        podcastPlayback = next; savingPodcastPlayback = true
                         scope.launch {
-                            runCatching { vm.repository.updatePodcastPlaybackSettings(next) }
-                                .onSuccess { podcastPlayback = it; message = "播客播放缓存设置已保存。" }
-                                .onFailure { message = "播客播放缓存设置保存失败，请刷新后重试。" }
+                            try {
+                                val saved = vm.repository.updatePodcastPlaybackSettings(next, settingsOwner)
+                                if (settingsOwner == vm.repository.session.cacheScope()) {
+                                    podcastPlayback = saved; message = "播客播放缓存设置已保存。"
+                                }
+                            } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+                            catch (_: Exception) {
+                                if (settingsOwner == vm.repository.session.cacheScope()) {
+                                    podcastPlayback = playback; message = "播客播放缓存设置保存失败，请重新打开设置后重试。"
+                                }
+                            } finally { if (settingsOwner == vm.repository.session.cacheScope()) savingPodcastPlayback = false }
                         }
                     }
                     ListItem(
                         headlineContent = { Text("播放时缓存播客单集") },
-                        supportingContent = { Text("未下载单集开始播放时，服务端自动缓存当前单集") },
+                        supportingContent = { Text("服务端缓存当前单集，已有音频直接复用，并记入「我的下载」") },
                         leadingContent = { Icon(Icons.Default.Podcasts, null) },
-                        trailingContent = { Switch(playback.autoCacheCurrent, { enabled -> savePodcastPlayback(playback.copy(autoCacheCurrent = enabled)) }) },
+                        trailingContent = { Switch(playback.autoCacheCurrent, { enabled -> savePodcastPlayback(playback.copy(autoCacheCurrent = enabled)) }, enabled = !savingPodcastPlayback) },
                     )
                     ListItem(
                         headlineContent = { Text("预缓存下一集") },
                         supportingContent = { Text("当前单集开始缓存后，再加入下一集") },
                         leadingContent = { Icon(Icons.Default.SkipNext, null) },
-                        trailingContent = { Switch(playback.prefetchNext, { enabled -> savePodcastPlayback(playback.copy(prefetchNext = enabled)) }) },
+                        trailingContent = { Switch(playback.prefetchNext, { enabled -> savePodcastPlayback(playback.copy(prefetchNext = enabled)) }, enabled = !savingPodcastPlayback) },
                     )
                     SettingsChoice(
                         "播客缓存网络",
@@ -147,6 +162,8 @@ private val LocalSettingsFeedback = staticCompositionLocalOf<() -> Unit> { {} }
                 }
             }
             SettingsGroup("外观与触感") {
+                Text("这些偏好按服务器和账号保存在本机。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+
                 SettingsChoice("歌曲列表大小", preferences.songListSize.label, Icons.Default.FormatSize,
                     com.wildstring.app.data.SongListSize.entries.map { it to it.label }, preferences.songListSize,
                     "按习惯选择歌曲列表的显示大小。", vm.settings::songListSize)

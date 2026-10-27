@@ -4,6 +4,10 @@ import android.content.Context
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -12,7 +16,7 @@ import retrofit2.HttpException
 import java.util.UUID
 
 @Singleton
-class PlaybackSharing @Inject constructor(@ApplicationContext context: Context, private val repository: Repository) {
+class PlaybackSharing @Inject constructor(@ApplicationContext private val context: Context, private val repository: Repository) {
     private val prefs = context.getSharedPreferences("playback-device", Context.MODE_PRIVATE)
     val deviceId: String = prefs.getString("id", null) ?: UUID.randomUUID().toString().also { prefs.edit().putString("id", it).apply() }
     private val lock = Mutex()
@@ -23,11 +27,15 @@ class PlaybackSharing @Inject constructor(@ApplicationContext context: Context, 
     private var lastAt = 0L
     private var lastSnapshot: SharedPlayback? = null
     private var claimedGeneration = -1L
-    private val mutableMode = MutableStateFlow(prefs.getString("sync_mode", "ask").takeIf { it in listOf("off", "ask", "auto") } ?: "ask")
+    private val personalPrefs get() = AccountPreferences.forAccount(context, "playback-device", repository.session.activeServerId, repository.session.account?.id, setOf("sync_mode"))
+    private fun savedMode() = personalPrefs.getString("sync_mode", "ask").takeIf { it in listOf("off", "ask", "auto") } ?: "ask"
+    private val mutableMode = MutableStateFlow(savedMode())
+    private val preferenceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    init { preferenceScope.launch { repository.session.profiles.collect { mutableMode.value = savedMode(); automaticOwner = null } } }
     val mode = mutableMode.asStateFlow()
     @Volatile private var automaticOwner: String? = null
     @Volatile private var automaticGeneration = 0L
-    fun mode(value: String) { require(value in listOf("off", "ask", "auto")); prefs.edit().putString("sync_mode", value).apply(); mutableMode.value = value; if (value == "off") automaticOwner = null }
+    fun mode(value: String) { require(value in listOf("off", "ask", "auto")); personalPrefs.edit().putString("sync_mode", value).apply(); mutableMode.value = value; if (value == "off") automaticOwner = null }
     fun localPlaybackStarted() { automaticOwner = repository.session.cacheScope(); automaticGeneration++ }
     fun seen(version: Int) { repository.session.cacheScope()?.let { prefs.edit().putInt("seen:$it", maxOf(prefs.getInt("seen:$it", 0), version)).apply() } }
     fun lastSeen(): Int = repository.session.cacheScope()?.let { prefs.getInt("seen:$it", 0) } ?: 0

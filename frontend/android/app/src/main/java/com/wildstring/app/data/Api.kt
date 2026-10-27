@@ -69,14 +69,15 @@ interface Api {
     @POST suspend fun addTracks(@Url url: String, @Body body: AddTracks): Playlist
     @DELETE suspend fun removeTrack(@Url url: String, @Query("version") version: Int): ResponseBody
     @POST("api/v1/listening") suspend fun listening(@Body body: ListeningRequest, @Tag owner: RequestOwner? = null): ResponseBody
-    @GET("api/v1/podcasts") suspend fun podcasts(): List<PodcastSummary>
+    @GET("api/v1/podcasts") suspend fun podcasts(@Query("followed") followed: Boolean? = null): List<PodcastSummary>
     @GET("api/v1/podcasts/publishers") suspend fun podcastPublishers(@Tag owner: RequestOwner): List<PodcastPublisher>
     @GET("api/v1/podcasts/publishers/{id}") suspend fun podcastPublisher(@Path("id") id: String, @Tag owner: RequestOwner): PodcastPublisherDetail
     @PUT("api/v1/podcasts/{id}/publisher") suspend fun assignPodcastPublisher(@Path("id") id: String,
         @Body body: PodcastPublisherAssignment, @Tag owner: RequestOwner): PodcastDetail
     @POST("api/v1/podcasts/episodes/{id}/download") suspend fun savePodcastEpisode(@Path("id") id: String, @Tag owner: RequestOwner): PodcastSaveResult
     @DELETE("api/v1/podcasts/episodes/{id}/download") suspend fun releasePodcastEpisode(@Path("id") id: String, @Tag owner: RequestOwner): PodcastSaveResult
-    @POST("api/v1/podcasts") suspend fun subscribePodcast(@Body body: PodcastSubscribeRequest): PodcastDetail
+    @GET("api/v1/podcasts/catalog-settings") suspend fun podcastCatalogPolicy(@Tag owner: RequestOwner): PodcastCatalogPolicy
+    @POST("api/v1/podcasts") suspend fun subscribePodcast(@Body body: PodcastSubscribeRequest, @Tag owner: RequestOwner): PodcastDetail
     @GET("api/v1/podcasts/{id}") suspend fun podcastDetail(@Path("id") id: String): PodcastDetail
     @GET("api/v1/podcasts/episodes/{id}") suspend fun podcastEpisode(@Path("id") id: String): PodcastEpisode
     @POST("api/v1/podcasts/{id}/refresh") suspend fun refreshPodcast(@Path("id") id: String): PodcastDetail
@@ -84,7 +85,9 @@ interface Api {
     @DELETE("api/v1/podcasts/{id}") suspend fun deletePodcast(@Path("id") id: String): retrofit2.Response<Unit>
     @GET("api/v1/podcasts/episodes/{id}/progress") suspend fun podcastProgress(@Path("id") id: String, @Tag owner: RequestOwner): EpisodeProgress
     @PUT("api/v1/podcasts/episodes/{id}/progress") suspend fun updatePodcastProgress(@Path("id") id: String, @Body body: PodcastProgressUpdate, @Tag owner: RequestOwner): EpisodeProgress
-    @GET("api/v1/podcasts/playback-settings") suspend fun podcastPlaybackSettings(): PodcastPlaybackSettings
-    @PUT("api/v1/podcasts/playback-settings") suspend fun updatePodcastPlaybackSettings(@Body body: PodcastPlaybackSettingsUpdate): PodcastPlaybackSettings
+    @GET("api/v1/podcasts/{id}/download-settings") suspend fun podcastDownloadSettings(@Path("id") id: String, @Tag owner: RequestOwner): PodcastDownloadSettings
+    @PUT("api/v1/podcasts/{id}/download-settings") suspend fun updatePodcastDownloadSettings(@Path("id") id: String, @Body body: PodcastDownloadSettingsUpdate, @Tag owner: RequestOwner): PodcastDownloadSettings
+    @GET("api/v1/podcasts/playback-settings") suspend fun podcastPlaybackSettings(@Tag owner: RequestOwner): PodcastPlaybackSettings
+    @PUT("api/v1/podcasts/playback-settings") suspend fun updatePodcastPlaybackSettings(@Body body: PodcastPlaybackSettingsUpdate, @Tag owner: RequestOwner): PodcastPlaybackSettings
     @POST("api/v1/ai/catalog-gaps") suspend fun catalogGaps(@Body body: JsonObject): JsonObject
 }

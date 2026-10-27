@@ -1,8 +1,6 @@
 package com.wildstring.app.ui
 
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -12,14 +10,21 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 @Composable internal fun MusicLibraryChoice(vm: MusicViewModel) {
     val state by vm.state.collectAsStateWithLifecycle()
-    if (!state.librariesSupported) return
+    if (!state.librariesSupported || state.libraries.size == 1) return
+    var expanded by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp).testTag("music-library-choice")) {
-        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FilterChip(state.selectedLibraryId == "all", { vm.selectLibrary("all") }, label = { Text("全部可访问库") })
-            state.libraries.forEach { library ->
-                FilterChip(state.selectedLibraryId == library.id, { vm.selectLibrary(library.id) }, label = { Text(library.name) })
+        if (state.libraries.isEmpty()) {
+            Text("暂无可播放的音乐，可联系管理员分配访问权限。", style = MaterialTheme.typography.bodySmall)
+        } else Box {
+            TextButton(onClick = { expanded = true }) {
+                Text((state.libraries.find { it.id == state.selectedLibraryId }?.name ?: "全部音乐") + " ▾")
+            }
+            DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                DropdownMenuItem(text = { Text("全部音乐") }, onClick = { expanded = false; vm.selectLibrary("all") })
+                state.libraries.forEach { library ->
+                    DropdownMenuItem(text = { Text(library.name) }, onClick = { expanded = false; vm.selectLibrary(library.id) })
+                }
             }
         }
-        if (state.libraries.isEmpty()) Text("尚未分配音乐库，可联系所有者授权。", style = MaterialTheme.typography.bodySmall)
     }
 }

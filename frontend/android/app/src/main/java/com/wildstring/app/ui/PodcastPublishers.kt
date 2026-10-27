@@ -44,7 +44,7 @@ internal fun PublisherAffiliation(vm: MusicViewModel, podcast: PodcastSummary, c
 
 @Composable
 internal fun PodcastPublisherPage(vm: MusicViewModel, publisher: PodcastPublisher,
-    onBack: () -> Unit, onSelect: (PodcastSummary) -> Unit) {
+    onBack: () -> Unit, onSelect: (PodcastSummary) -> Unit, personalOnly: Boolean = true) {
     var detail by remember(publisher.id) { mutableStateOf<PodcastPublisherDetail?>(null) }
     var error by remember(publisher.id) { mutableStateOf<String?>(null) }
     var loading by remember(publisher.id) { mutableStateOf(true) }
@@ -56,22 +56,23 @@ internal fun PodcastPublisherPage(vm: MusicViewModel, publisher: PodcastPublishe
         catch (e: Exception) { error = friendlyError(e) }
         finally { loading = false }
     }
+    val shows = detail?.podcasts.orEmpty().filter { !personalOnly || it.followed }
     Column(Modifier.fillMaxSize().testTag("podcast-publisher-page")) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回节目列表") }
             Text(detail?.publisher?.name ?: publisher.name, style = MaterialTheme.typography.titleLarge,
                 maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
         }
-        Text("本服已有 ${detail?.podcasts?.size ?: 0} 档已确认节目", Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+        Text("${if (personalOnly) "我关注的" else "本服已有"} ${shows.size} 档已确认节目", Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
         error?.let { message ->
             Text(message, Modifier.padding(20.dp), color = MaterialTheme.colorScheme.error)
             TextButton({ reload++ }) { Text("重试") }
         }
-        if (!loading && error == null && detail?.podcasts.isNullOrEmpty()) Text("该出品方暂无已关联节目", Modifier.padding(20.dp))
+        if (!loading && error == null && shows.isEmpty()) Text("该出品方暂无已关联节目", Modifier.padding(20.dp))
         LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(16.dp, 8.dp, 16.dp, 96.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            items(detail?.podcasts.orEmpty(), key = { it.id }) { podcast ->
+            items(shows, key = { it.id }) { podcast ->
                 Surface(Modifier.fillMaxWidth().clickable { onSelect(podcast) }, shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceContainerLow) {
                     ListItem(headlineContent = { Text(podcast.title, maxLines = 2, overflow = TextOverflow.Ellipsis) },
                         supportingContent = { Text("${podcast.totalEpisodes} 集 · ${podcast.unplayedEpisodes} 未听") },

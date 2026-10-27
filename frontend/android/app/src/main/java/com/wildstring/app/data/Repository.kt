@@ -6,6 +6,7 @@ import android.net.NetworkCapabilities
 import java.io.IOException
 import com.google.gson.Gson
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -37,6 +38,13 @@ data class CatalogPage(val tracks: List<Track> = emptyList(), val albums: List<A
 
 @Singleton
 class Repository @Inject constructor(@param:ApplicationContext private val context: Context, val session: SessionStore, val client: OkHttpClient, val database: QueueDatabase, val cache: ClientCache, val settings: AppSettings, val downloads: OfflineDownloads) {
+    private val preferenceScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.Main.immediate)
+    init {
+        settings.bindAccount(session.activeServerId, session.account?.id)
+        preferenceScope.launch {
+            session.profiles.collect { settings.bindAccount(session.activeServerId, session.account?.id) }
+        }
+    }
     private val gson = Gson()
     private val libraryPrefs = context.getSharedPreferences("music-libraries", Context.MODE_PRIVATE)
     val selectedLibraryId: String get() = libraryPrefs.getString("selected:${session.storageScope()}", "all") ?: "all"
@@ -156,7 +164,7 @@ class Repository @Inject constructor(@param:ApplicationContext private val conte
         }
     fun stream(id: String): String = PlaybackRequest.url(originalStream(id), if (podcastEpisodeId(id) != null || downloads.file(id) != null) 0 else settings.state.value.aacBitrate)
 
-    suspend fun podcasts(): List<PodcastSummary> = api().podcasts()
+    suspend fun podcasts(): List<PodcastSummary> = api().podcasts(if (session.account?.profile in listOf("owner", "librarian")) null else true)
     suspend fun libraries(includeDisabled: Boolean = false): List<MusicLibrary> {
         val owner = session.cacheScope(); requireProfile(owner)
         return api().libraries(includeDisabled).also { requireProfile(owner) }
@@ -183,7 +191,14 @@ class Repository @Inject constructor(@param:ApplicationContext private val conte
         val owner = session.cacheScope()
         return (if (saved) api().savePodcastEpisode(id, RequestOwner(owner)) else api().releasePodcastEpisode(id, RequestOwner(owner))).also { requireProfile(owner) }
     }
-    suspend fun subscribePodcast(feedUrl: String): PodcastDetail = api().subscribePodcast(PodcastSubscribeRequest(feedUrl = feedUrl))
+    suspend fun podcastCatalogPolicy(): PodcastCatalogPolicy {
+        val owner = session.cacheScope(); requireProfile(owner)
+        return api().podcastCatalogPolicy(RequestOwner(owner)).also { requireProfile(owner) }
+    }
+    suspend fun subscribePodcast(feedUrl: String): PodcastDetail {
+        val owner = session.cacheScope(); requireProfile(owner)
+        return api().subscribePodcast(PodcastSubscribeRequest(feedUrl), RequestOwner(owner)).also { requireProfile(owner) }
+    }
     suspend fun podcastDetail(id: String): PodcastDetail {
         val owner = session.cacheScope(); requireProfile(owner)
         return api().podcastDetail(id).also { detail ->
@@ -216,9 +231,23 @@ class Repository @Inject constructor(@param:ApplicationContext private val conte
         catch (e: CancellationException) { throw e }
         catch (_: Exception) { false }
     suspend fun deletePodcast(id: String): Boolean = api().deletePodcast(id).isSuccessful
-    suspend fun podcastPlaybackSettings(): PodcastPlaybackSettings = api().podcastPlaybackSettings()
-    suspend fun updatePodcastPlaybackSettings(settings: PodcastPlaybackSettings): PodcastPlaybackSettings =
-        api().updatePodcastPlaybackSettings(PodcastPlaybackSettingsUpdate(settings.version, settings.autoCacheCurrent, settings.prefetchNext, settings.networkPolicy))
+    suspend fun podcastDownloadSettings(id: String): PodcastDownloadSettings {
+        val owner = session.cacheScope(); requireProfile(owner)
+        return api().podcastDownloadSettings(id, RequestOwner(owner)).also { requireProfile(owner) }
+    }
+    suspend fun updatePodcastDownloadSettings(id: String, settings: PodcastDownloadSettings, expectedOwner: String? = session.cacheScope()): PodcastDownloadSettings {
+        val owner = expectedOwner; requireProfile(owner)
+        return api().updatePodcastDownloadSettings(id, PodcastDownloadSettingsUpdate(settings.version, settings.downloadPolicy, settings.retentionPolicy), RequestOwner(owner)).also { requireProfile(owner) }
+    }
+    suspend fun podcastPlaybackSettings(): PodcastPlaybackSettings {
+        val owner = session.cacheScope(); requireProfile(owner)
+        return api().podcastPlaybackSettings(RequestOwner(owner)).also { requireProfile(owner) }
+    }
+    suspend fun updatePodcastPlaybackSettings(settings: PodcastPlaybackSettings, expectedOwner: String? = session.cacheScope()): PodcastPlaybackSettings {
+        val owner = expectedOwner; requireProfile(owner)
+        if (settings.userId != session.account?.id) throw CancellationException("会话已变化。")
+        return api().updatePodcastPlaybackSettings(PodcastPlaybackSettingsUpdate(settings.version, settings.autoCacheCurrent, settings.prefetchNext, settings.networkPolicy), RequestOwner(owner)).also { requireProfile(owner) }
+    }
     suspend fun checkCatalogGaps(artist: String, limit: Int = 10): com.google.gson.JsonObject {
         val payload = com.google.gson.JsonObject().apply {
             addProperty("artist", artist)

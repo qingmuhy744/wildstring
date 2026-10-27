@@ -189,6 +189,12 @@ data class AccountList(val items: List<Account>)
 data class MusicLibraryJob(val kind: String, val full: Boolean = false,
     @SerializedName("source_id") val sourceId: String = "all", val path: String = ".")
 data class PodcastFollow(val followed: Boolean)
+data class PodcastDownloadSettings(val version: Int = 1,
+    @SerializedName("download_policy") val downloadPolicy: String = "none",
+    @SerializedName("retention_policy") val retentionPolicy: String = "keep", val active: Boolean = false)
+data class PodcastDownloadSettingsUpdate(val version: Int,
+    @SerializedName("download_policy") val downloadPolicy: String,
+    @SerializedName("retention_policy") val retentionPolicy: String)
 
 data class PodcastPublisher(val id: String, val name: String,
     @SerializedName("podcast_count") val podcastCount: Int = 0)
@@ -211,6 +217,8 @@ data class PodcastEpisode(
     @SerializedName("position_seconds") val positionSeconds: Int = 0,
     val completed: Boolean = false,
     @SerializedName("resource_saved") val resourceSaved: Boolean = false,
+    @SerializedName("resource_automatic") val resourceAutomatic: Boolean = false,
+    @SerializedName("resource_playback_cached") val resourcePlaybackCached: Boolean = false,
     @SerializedName("download_status") val downloadStatus: String = "none",
 ) {
     fun toTrack(podcast: PodcastSummary): Track = Track(
@@ -231,14 +239,13 @@ data class PodcastDetail(
     val episodes: List<PodcastEpisode> = emptyList(),
 )
 
-data class PodcastSubscribeRequest(
-    @SerializedName("feed_url") val feedUrl: String,
-    @SerializedName("auto_update") val autoUpdate: Boolean = true,
-    @SerializedName("update_interval_minutes") val updateIntervalMinutes: Int = 60,
-    @SerializedName("slow_download") val slowDownload: Boolean = false,
-    @SerializedName("max_retries") val maxRetries: Int = 3,
-    @SerializedName("retry_backoff_base") val retryBackoffBase: Int = 5,
+data class PodcastCatalogPolicy(
+    @SerializedName("allow_user_subscriptions") val allowUserSubscriptions: Boolean = false,
+    @SerializedName("can_add") val canAdd: Boolean = false,
+    val version: Int = 1,
 )
+
+data class PodcastSubscribeRequest(@SerializedName("feed_url") val feedUrl: String)
 
 data class EpisodeProgress(
     @SerializedName("episode_id") val episodeId: String,

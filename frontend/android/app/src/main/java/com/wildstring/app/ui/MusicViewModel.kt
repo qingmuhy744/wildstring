@@ -130,9 +130,13 @@ class MusicViewModel @Inject constructor(
     }
 
     init {
+        settings.bindAccount(repository.session.activeServerId, repository.session.account?.id)
         viewModelScope.launch { state.map { it.connected to it.account?.id }.distinctUntilChanged().collect { (connected, _) -> if (connected) refreshLibraries() } }
         viewModelScope.launch { repository.libraryAccessChanges.collect { refreshLibraries(recheck = true) } }
-        viewModelScope.launch { repository.session.profiles.collect { agent.reset(); podcastBrowser.reset() } }
+        viewModelScope.launch { repository.session.profiles.collect {
+            settings.bindAccount(repository.session.activeServerId, repository.session.account?.id)
+            agent.reset(); podcastBrowser.reset()
+        } }
         controllerFuture.addListener({
             runCatching { controllerFuture.get() }.onSuccess { c -> controller = c; c.addListener(playerListener); rebuildQueue(); refreshPlayer() }
                 .onFailure { mutable.update { it.copy(error = "播放器连接失败，请重新打开应用。") } }
