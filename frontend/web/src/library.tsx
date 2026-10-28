@@ -1125,7 +1125,6 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
         <main className={`library ${album ? 'is-album' : ''}`} hidden={manageOpen}>
           <header className={`topbar ${specialView ? 'topbar-context' : ''}`}>
             <div>
-              {!specialView && <span className="eyebrow">YOUR OWN COLLECTION</span>}
               <span className="mobile-brand">野弦 / WILDSTRING</span>
               <button className="mobile-logout text-button" onClick={logout}>
                 退出登录
@@ -1284,20 +1283,30 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
                           : '返回歌单'}
                   </button>
                 )}
-                <p className="eyebrow">
-                  LIBRARY /{' '}
-                  {album
-                    ? 'ALBUM'
-                    : selectedArtist
-                      ? 'ARTIST'
-                      : activePlaylist
-                        ? activePlaylist.kind === 'smart'
-                          ? 'SMART PLAYLIST'
-                          : 'PLAYLIST'
-                        : query
-                          ? 'SEARCH'
-                          : view.toUpperCase()}
-                </p>
+                {!specialView && (
+                  <p className="eyebrow collection-eyebrow">
+                    <span className="eyebrow-tagline">YOUR OWN COLLECTION</span>
+                    <span className="eyebrow-sep" aria-hidden="true">
+                      ·
+                    </span>
+                    <span className="eyebrow-crumb">
+                      曲库 /{' '}
+                      {album
+                        ? '专辑'
+                        : selectedArtist
+                          ? '艺人'
+                          : activePlaylist
+                            ? activePlaylist.kind === 'smart'
+                              ? '智能歌单'
+                              : '歌单'
+                            : query
+                              ? '搜索'
+                              : view === 'tracks'
+                                ? '歌曲'
+                                : labels[view]}
+                    </span>
+                  </p>
+                )}
                 <h1>{title}</h1>
                 <p className="muted">{subtitle}</p>
               </div>
