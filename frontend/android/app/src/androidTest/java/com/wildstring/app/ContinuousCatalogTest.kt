@@ -338,9 +338,12 @@ class ContinuousCatalogTest {
                     if (size == SongListSize.SMALL) capture("song-list-size-settings.png")
                     compose.onNodeWithText(size.label).performClick()
                     compose.onNodeWithTag("mini-player").assertIsDisplayed()
-                    val reopened = AppSettings(InstrumentationRegistry.getInstrumentation().targetContext)
-                    reopened.bindAccount(vm.repository.session.activeServerId, vm.repository.session.account?.id)
-                    assertEquals(size, reopened.state.value.songListSize)
+                    assertEquals(size, vm.settings.state.value.songListSize)
+                    compose.waitUntil(5_000) {
+                        val reopened = AppSettings(InstrumentationRegistry.getInstrumentation().targetContext)
+                        reopened.bindAccount(vm.repository.session.activeServerId, vm.repository.session.account?.id)
+                        reopened.state.value.songListSize == size
+                    }
                     compose.onNodeWithTag("settings-back").performClick()
                     compose.onNodeWithTag("catalog-item-60").assertIsDisplayed()
                     assertSongRowSize(60, size)
