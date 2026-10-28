@@ -95,6 +95,48 @@ test('切换音乐库保留获授权的播放，跨库歌单统一显示', async
   await expect(page.getByRole('table', { name: '歌曲列表' }).getByRole('row')).toHaveCount(4);
 });
 
+test('资料编辑员只看到可执行的管理动作', async ({ page }, info) => {
+  const libraries = await owner(page);
+  const primary = libraries.find((library) => library.is_default)!;
+  const username = `editor-actions-${info.project.name}`;
+  expect(
+    (
+      await page.request.post('/api/v1/manage/users', {
+        headers,
+        data: {
+          username,
+          password: 'editor-actions-password',
+          profile: 'editor',
+          library_ids: [primary.id],
+        },
+      })
+    ).status(),
+  ).toBe(201);
+  await page.request.post('/api/v1/auth/logout', { headers });
+  expect(
+    (
+      await page.request.post('/api/v1/auth/login', {
+        headers,
+        data: { username, password: 'editor-actions-password' },
+      })
+    ).status(),
+  ).toBe(200);
+  await page.reload();
+  await section(page, '管理');
+  await expect(page.getByRole('heading', { name: '曲库管理', exact: true })).toBeVisible();
+  for (const name of ['导入音乐', '扫描曲库', '更新曲库元数据', '批量核对资料']) {
+    await expect(page.getByRole('button', { name, exact: true })).toHaveCount(0);
+  }
+  for (const name of ['导入与整理', '设置', '用户', '诊断']) {
+    await expect(page.getByRole('button', { name, exact: true })).toHaveCount(0);
+  }
+  await page.getByRole('button', { name: '任务记录', exact: true }).click();
+  await expect(page.getByText('元数据候选中心', { exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: '歌曲信息', exact: true }).click();
+  await expect(page.getByRole('button', { name: '查询本页资料', exact: true })).toHaveCount(0);
+  await expect(page.getByText('编辑信息', { exact: true }).first()).toBeVisible();
+});
+
 test('所有者创建多来源库、分配权限、停用时保留配置', async ({ page }, info) => {
   const libraries = await owner(page);
   const username = `library-ui-${info.project.name}`;
