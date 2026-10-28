@@ -195,6 +195,45 @@ def test_new_account_can_have_no_music_grants_and_cannot_escalate(catalog):
         other.close()
 
 
+def test_import_history_is_scoped_and_legacy_unlinked_runs_are_owner_only(catalog, settings):
+    client, first, second, _, _ = catalog
+    other, _ = listener(client, [first["id"]], profile="librarian")
+    try:
+        with Database(settings.data_dir).connect(write=True) as db:
+            for identity, library_id, path in (
+                ("import-first", first["id"], "first/visible.flac"),
+                ("import-second", second["id"], "second/hidden.flac"),
+                ("import-legacy", None, "legacy/unlinked.flac"),
+            ):
+                db.execute(
+                    "INSERT INTO import_runs VALUES (?,?,?,?,?,?)",
+                    (
+                        identity,
+                        "completed",
+                        identity,
+                        identity,
+                        '{"copied":1}',
+                        f'[{{"path":"{path}","code":"fixture"}}]',
+                    ),
+                )
+                if library_id:
+                    db.execute(
+                        """INSERT INTO admin_jobs(
+                            id,library_id,kind,full,status,created_at,finished_at,import_id
+                        ) VALUES (?,?,'import',0,'completed',?,?,?)""",
+                        (f"job-{identity}", library_id, identity, identity, identity),
+                    )
+
+        assert {item["id"] for item in other.get("/api/v1/imports").json()} == {"import-first"}
+        assert {item["id"] for item in client.get("/api/v1/imports").json()} == {
+            "import-first",
+            "import-second",
+            "import-legacy",
+        }
+    finally:
+        other.close()
+
+
 def test_schema35_upgrade_preserves_ids_accounts_playlists_progress_and_audio(
     settings, authenticated_client
 ):

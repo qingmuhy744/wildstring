@@ -117,12 +117,37 @@ def test_mobile_session_keeps_normal_authentication_and_client_validation(settin
 def test_wrong_password_throttling(settings):
     settings.admin_password = SecretStr(PASSWORD)
     with TestClient(create_app(settings)) as client:
+        assert login(client).status_code == 200
+        assert (
+            client.post(
+                "/api/v1/manage/users",
+                headers=CLIENT,
+                json={
+                    "username": "other-user",
+                    "password": "other-user-password",
+                    "profile": "listener",
+                },
+            ).status_code
+            == 201
+        )
+        assert client.post("/api/v1/auth/logout", headers=CLIENT).status_code == 204
         for _ in range(5):
             assert login(client, "incorrect-password").status_code == 401
         assert login(client).status_code == 429
+        assert (
+            client.post(
+                "/api/v1/auth/login",
+                headers=CLIENT,
+                json={"username": "other-user", "password": "other-user-password"},
+            ).status_code
+            == 200
+        )
+        assert client.post("/api/v1/auth/logout", headers=CLIENT).status_code == 204
         database = Database(settings.data_dir)
         with database.connect(write=True) as connection:
-            connection.execute("UPDATE login_guard SET blocked_until = ?", (int(time.time()) - 1,))
+            connection.execute(
+                "UPDATE login_attempts SET blocked_until = ?", (int(time.time()) - 1,)
+            )
         assert login(client).status_code == 200
 
 

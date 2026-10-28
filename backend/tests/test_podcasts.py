@@ -1,5 +1,6 @@
 """Tests for server-side podcast subscription, auto-updater, and REST API."""
 
+import socket
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -67,6 +68,20 @@ def test_podcast_urls_reject_local_schemes_and_private_hosts():
 
     with pytest.raises(HTTPException) as private:
         fetch_and_parse_feed("http://127.0.0.1:18780/feed.xml")
+    assert private.value.status_code == 422
+
+
+def test_podcast_direct_fetch_rejects_hostname_resolving_to_private_address(monkeypatch):
+    real_getaddrinfo = socket.getaddrinfo
+
+    def resolve(host, port, *args, **kwargs):
+        if host == "localtest.me":
+            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", port))]
+        return real_getaddrinfo(host, port, *args, **kwargs)
+
+    monkeypatch.setattr(socket, "getaddrinfo", resolve)
+    with pytest.raises(HTTPException) as private:
+        fetch_and_parse_feed("http://localtest.me/feed.xml", proxy_mode="direct")
     assert private.value.status_code == 422
 
 

@@ -154,6 +154,7 @@ def audit_catalog_gaps(
             SELECT id, title, artists, album, duration_ms, format
             FROM tracks
             WHERE status = 'available'
+            AND library_selected(library_id, active_library())
             """
         ).fetchall()
 
@@ -248,7 +249,11 @@ def audit_catalog_gaps(
 def catalog_gaps_router(database: Database, auth: Auth) -> APIRouter:
     router = APIRouter(prefix="/api/v1/ai/catalog-gaps", tags=["ai"])
 
-    @router.post("", response_model=CatalogGapResponse)
+    @router.post(
+        "",
+        response_model=CatalogGapResponse,
+        dependencies=[Depends(auth.require_permission("library:read"))],
+    )
     def check_gaps(
         payload: CatalogGapRequest,
         user: Annotated[dict, Depends(auth.require_session)],

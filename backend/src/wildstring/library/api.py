@@ -242,9 +242,12 @@ def library_router(repository: LibraryRepository, auth: Auth, transcoding) -> AP
             q, limit, offset, artist_id=artist_id, role=role, sort=sort, order=order
         )
 
-    @router.get("/imports", dependencies=[Depends(auth.require_permission("library:inspect"))])
-    def imports(limit: Annotated[int, Query(ge=1, le=100)] = 20):
-        return repository.imports(limit)
+    @router.get("/imports")
+    def imports(
+        user: Annotated[dict, Depends(auth.require_permission("library:inspect"))],
+        limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    ):
+        return repository.imports(limit, global_history=user["profile"] == "owner")
 
     @router.get("/tracks/{track_id}/cover")
     def cover(track_id: str, size: Annotated[int, Query(ge=64, le=768)] = 320):

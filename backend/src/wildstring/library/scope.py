@@ -169,18 +169,21 @@ def references(arguments):
 
 
 @contextmanager
-def actor_library_scope(database, actor, arguments, *, library_id=None):
+def actor_library_scope(database, actor, arguments, *, library_id=None, require_selection=False):
     identities, objects = references(arguments)
     previous = current_library.get()
-    selection = library_id or (
+    requested = library_id or (
         previous.library_id if previous and previous.user_id == actor.user_id else None
     )
+    selection = requested
     with database.connect() as db:
         visible = allowed_ids(db, actor.user_id)
         for identity in objects:
             target = object_library(db, identity)
             if target:
                 if target not in visible:
+                    raise HTTPException(404, "library_not_found")
+                if library_id and target != library_id:
                     raise HTTPException(404, "library_not_found")
                 selection = target
         source = previous.source_id if previous and previous.user_id == actor.user_id else "import"
@@ -197,11 +200,15 @@ def actor_library_scope(database, actor, arguments, *, library_id=None):
             if row:
                 if row[0] not in visible:
                     raise HTTPException(404, "track_not_found")
+                if library_id and row[0] != library_id:
+                    raise HTTPException(404, "track_not_found")
                 libraries.add(row[0])
-        if len(libraries) == 1:
+        if len(libraries) == 1 and not library_id:
             selection = next(iter(libraries))
         if selection and selection not in visible:
             raise HTTPException(404, "library_not_found")
+        if require_selection and selection is None and len(visible) > 1:
+            raise HTTPException(422, "library_selection_required")
     with library_context(actor.user_id, selection, source):
         yield
 

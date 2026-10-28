@@ -9,7 +9,7 @@ from pathlib import Path
 from wildstring.library.albums import album_key
 from wildstring.provider_schema import SCHEMA as PROVIDER_SCHEMA
 
-SCHEMA_VERSION = 41
+SCHEMA_VERSION = 42
 PODCAST_SCHEMA = """
 BEGIN IMMEDIATE;
 CREATE TABLE IF NOT EXISTS podcasts (
@@ -631,6 +631,10 @@ class Database:
                 from wildstring.podcast_playback_schema import CACHE_SCHEMA
 
                 connection.executescript(CACHE_SCHEMA)
+            if current < 42:
+                from wildstring.login_guard_schema import migrate as migrate_login_guards
+
+                migrate_login_guards(connection)
             connection.execute("PRAGMA journal_mode = WAL")
 
     def check_ready(self) -> bool:

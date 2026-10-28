@@ -11,6 +11,7 @@ from wildstring.agent_ai import Assistant
 from wildstring.agent_application import Application
 from wildstring.agent_automation import Automation
 from wildstring.agent_common import (
+    LIBRARY_TARGET_REQUIRED,
     TOOLS,
     Actor,
     digest,
@@ -692,8 +693,22 @@ class Core:
         actor = self.refresh_actor(actor)
         from wildstring.library.scope import actor_library_scope
 
-        with actor_library_scope(self.database, actor, arguments):
-            return self.execute_scoped_tool(actor, name, arguments)
+        if not isinstance(arguments, dict) or len(encoded(arguments).encode()) > 100000:
+            raise HTTPException(422, "agent_invalid_input")
+        scoped_arguments = dict(arguments)
+        library_id = scoped_arguments.pop("library_id", None)
+        if library_id is not None and (
+            not isinstance(library_id, str) or not 1 <= len(library_id) <= 128
+        ):
+            raise HTTPException(422, "agent_invalid_input")
+        with actor_library_scope(
+            self.database,
+            actor,
+            scoped_arguments,
+            library_id=library_id,
+            require_selection=name in LIBRARY_TARGET_REQUIRED,
+        ):
+            return self.execute_scoped_tool(actor, name, scoped_arguments)
 
     def execute_scoped_tool(self, actor, name, arguments):
         if name in MUSIC_TOOLS:

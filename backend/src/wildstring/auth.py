@@ -34,6 +34,11 @@ def token_hash(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
 
+def login_guard_key(scope: str, client_host: str | None) -> str:
+    value = f"{scope.casefold()}\0{client_host or ''}"
+    return hashlib.sha256(value.encode()).hexdigest()
+
+
 class Login(BaseModel):
     model_config = ConfigDict(extra="forbid")
     username: str = Field(min_length=1, max_length=128)
@@ -129,7 +134,7 @@ class Auth:
             )
             if result.rowcount:
                 connection.execute("DELETE FROM sessions WHERE user_id='admin'")
-                connection.execute("UPDATE login_guard SET failures=0,blocked_until=0")
+                connection.execute("DELETE FROM login_attempts")
 
     def require_session(self, request: Request) -> dict:
         if getattr(request.state, "user", None) is None:
@@ -184,10 +189,13 @@ class Auth:
             raise HTTPException(403, "owner_required")
 
     @staticmethod
-    def verify_password(connection, hashed, password):
+    def verify_password(connection, hashed, password, guard_key):
         current = int(time.time())
-        guard = connection.execute("SELECT * FROM login_guard").fetchone()
-        if guard["blocked_until"] > current:
+        connection.execute("DELETE FROM login_attempts WHERE last_attempt<?", (current - 86400,))
+        guard = connection.execute(
+            "SELECT * FROM login_attempts WHERE guard_key=?", (guard_key,)
+        ).fetchone()
+        if guard and guard["blocked_until"] > current:
             raise HTTPException(429, "login_throttled", headers={"Retry-After": "60"})
         expected = hashed or DUMMY_HASH
         try:
@@ -198,16 +206,26 @@ class Auth:
         except (ValueError, UnicodeError):
             valid = False
         if not valid:
-            failures = guard["failures"] + 1 if guard["blocked_until"] == 0 else 1
+            failures = (
+                1
+                if guard and guard["blocked_until"] and guard["blocked_until"] <= current
+                else (guard["failures"] if guard else 0) + 1
+            )
             connection.execute(
-                "UPDATE login_guard SET failures=?,blocked_until=?",
-                (failures, current + 60 if failures >= 5 else 0),
+                """INSERT INTO login_attempts(guard_key,failures,blocked_until,last_attempt)
+                VALUES (?,?,?,?)
+                ON CONFLICT(guard_key) DO UPDATE SET
+                failures=excluded.failures,blocked_until=excluded.blocked_until,
+                last_attempt=excluded.last_attempt""",
+                (guard_key, failures, current + 60 if failures >= 5 else 0, current),
             )
             connection.commit()
             raise HTTPException(401, "invalid_credentials")
-        connection.execute("UPDATE login_guard SET failures=0,blocked_until=0")
+        connection.execute("DELETE FROM login_attempts WHERE guard_key=?", (guard_key,))
 
-    def login(self, username: str, password: str) -> tuple[str, dict]:
+    def login(
+        self, username: str, password: str, *, client_host: str | None = None
+    ) -> tuple[str, dict]:
         with self.database.connect(write=True) as connection:
             connection.execute("BEGIN IMMEDIATE")
             if (
@@ -222,7 +240,12 @@ class Auth:
             row = connection.execute(
                 "SELECT * FROM users WHERE username=? COLLATE NOCASE AND enabled=1", (username,)
             ).fetchone()
-            self.verify_password(connection, row["password_hash"] if row else None, password)
+            self.verify_password(
+                connection,
+                row["password_hash"] if row else None,
+                password,
+                login_guard_key(username, client_host),
+            )
             token = secrets.token_urlsafe(32)
             connection.execute(
                 "INSERT INTO sessions(token_hash,expires_at,user_id) VALUES (?,?,?)",
@@ -257,7 +280,11 @@ class Auth:
         def login(request: Request, response: Response, body: object = Body(...)):
             self.require_client(request)
             value = validated(Login, body)
-            token, user = self.login(value.username, value.password.get_secret_value())
+            token, user = self.login(
+                value.username,
+                value.password.get_secret_value(),
+                client_host=request.client.host if request.client else None,
+            )
             response.set_cookie(
                 COOKIE,
                 token,
@@ -283,7 +310,13 @@ class Auth:
                 ).fetchone()
                 try:
                     self.verify_password(
-                        connection, row[0], value.current_password.get_secret_value()
+                        connection,
+                        row[0],
+                        value.current_password.get_secret_value(),
+                        login_guard_key(
+                            f"self:{user['id']}",
+                            request.client.host if request.client else None,
+                        ),
                     )
                 except HTTPException as error:
                     if error.status_code == 401:

@@ -1,6 +1,7 @@
 """Podcast RSS subscription, server-side auto-updater, and playback API."""
 
 import hashlib
+import http.client
 import ipaddress
 import json
 import logging
@@ -8,6 +9,7 @@ import os
 import queue
 import re
 import shutil
+import socket
 import time
 import urllib.error
 import urllib.request
@@ -68,6 +70,122 @@ class PodcastURLRejected(ValueError):
     """Raised when a podcast URL could access a non-public local resource."""
 
 
+def public_socket_addresses(host, port):
+    """Resolve one endpoint once and reject mixed or non-public DNS answers."""
+    try:
+        values = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+    except (OSError, UnicodeError) as error:
+        raise PodcastURLRejected("remote_url_unresolvable") from error
+    addresses = []
+    seen = set()
+    for family, socktype, protocol, _, sockaddr in values:
+        raw = str(sockaddr[0]).split("%", 1)[0]
+        try:
+            address = ipaddress.ip_address(raw)
+        except ValueError:
+            continue
+        if not address.is_global:
+            raise PodcastURLRejected("remote_url_private_host")
+        key = (family, sockaddr)
+        if key not in seen:
+            seen.add(key)
+            addresses.append((family, socktype, protocol, sockaddr))
+    if not addresses:
+        raise PodcastURLRejected("remote_url_unresolvable")
+    return addresses
+
+
+def connect_public_socket(host, port, timeout, source_address):
+    """Connect only to the public addresses validated for this connection."""
+    last_error = None
+    for family, socktype, protocol, sockaddr in public_socket_addresses(host, port):
+        stream = socket.socket(family, socktype, protocol)
+        try:
+            stream.settimeout(timeout)
+            if source_address:
+                stream.bind(source_address)
+            stream.connect(sockaddr)
+            return stream
+        except OSError as error:
+            last_error = error
+            stream.close()
+    raise last_error or OSError("public address unavailable")
+
+
+def proxy_endpoints(proxies):
+    endpoints = set()
+    for value in proxies.values():
+        try:
+            parsed = urlsplit(value if "://" in value else "http://" + value)
+            host = parsed.hostname
+            port = parsed.port or 80
+        except ValueError:
+            continue
+        if host:
+            endpoints.add((host.rstrip(".").lower(), port))
+    return frozenset(endpoints)
+
+
+class SafeHTTPConnection(http.client.HTTPConnection):
+    def __init__(self, host, *, trusted_proxy_endpoints=(), **kwargs):
+        self.trusted_proxy_endpoints = trusted_proxy_endpoints
+        super().__init__(host, **kwargs)
+
+    def connect(self):
+        if (self.host.rstrip(".").lower(), self.port) in self.trusted_proxy_endpoints:
+            return super().connect()
+        self.sock = connect_public_socket(self.host, self.port, self.timeout, self.source_address)
+        try:
+            self.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        except OSError:
+            pass
+
+
+class SafeHTTPSConnection(http.client.HTTPSConnection):
+    def __init__(self, host, *, trusted_proxy_endpoints=(), **kwargs):
+        self.trusted_proxy_endpoints = trusted_proxy_endpoints
+        super().__init__(host, **kwargs)
+
+    def connect(self):
+        if (self.host.rstrip(".").lower(), self.port) in self.trusted_proxy_endpoints:
+            return super().connect()
+        self.sock = connect_public_socket(self.host, self.port, self.timeout, self.source_address)
+        try:
+            self.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        except OSError:
+            pass
+        self.sock = self._context.wrap_socket(self.sock, server_hostname=self.host)
+
+
+class SafeHTTPHandler(urllib.request.HTTPHandler):
+    def __init__(self, trusted_proxy_endpoints):
+        super().__init__()
+        self.trusted_proxy_endpoints = trusted_proxy_endpoints
+
+    def http_open(self, req):
+        return self.do_open(
+            lambda host, **kwargs: SafeHTTPConnection(
+                host, trusted_proxy_endpoints=self.trusted_proxy_endpoints, **kwargs
+            ),
+            req,
+        )
+
+
+class SafeHTTPSHandler(urllib.request.HTTPSHandler):
+    def __init__(self, trusted_proxy_endpoints):
+        super().__init__()
+        self.trusted_proxy_endpoints = trusted_proxy_endpoints
+
+    def https_open(self, req):
+        return self.do_open(
+            lambda host, **kwargs: SafeHTTPSConnection(
+                host, trusted_proxy_endpoints=self.trusted_proxy_endpoints, **kwargs
+            ),
+            req,
+            context=self._context,
+        )
+
+
 class PodcastPayloadTooLarge(ValueError):
     """Raised when a remote podcast response exceeds its bounded size."""
 
@@ -121,8 +239,12 @@ def podcast_opener(proxy_mode: str, proxy_url: str | None):
     except Exception as exc:
         logger.warning("Could not configure podcast proxy: %s", exc)
         proxies = {}
+    trusted = proxy_endpoints(proxies)
     return urllib.request.build_opener(
-        urllib.request.ProxyHandler(proxies), PodcastRedirectHandler()
+        urllib.request.ProxyHandler(proxies),
+        SafeHTTPHandler(trusted),
+        SafeHTTPSHandler(trusted),
+        PodcastRedirectHandler(),
     )
 
 
@@ -317,6 +439,8 @@ def fetch_and_parse_feed(
     try:
         with podcast_opener(proxy_mode, proxy_url).open(req, timeout=timeout) as resp:  # nosec B310
             data = read_bounded(resp, MAX_FEED_BYTES)
+    except PodcastURLRejected as exc:
+        raise HTTPException(status_code=422, detail="invalid_podcast_feed_url") from exc
     except PodcastPayloadTooLarge as exc:
         raise HTTPException(status_code=413, detail="podcast_feed_too_large") from exc
     except Exception as e:
@@ -1299,6 +1423,9 @@ class PodcastManager:
         except PodcastPayloadTooLarge:
             self._record_failed(episode_id, row, "播客音频超过大小限制", temp_path)
             return False
+        except PodcastURLRejected:
+            self._record_failed(episode_id, row, "播客音频地址指向非公网资源", temp_path)
+            return False
         except urllib.error.HTTPError as e:
             if e.code == 429:
                 err_msg = "源站频繁请求限流 (HTTP 429 Too Many Requests)，已启动防限流冷却"
@@ -1626,6 +1753,8 @@ class PodcastManager:
 
         try:
             resp = opener.open(req, timeout=15)  # nosec B310
+        except PodcastURLRejected as exc:
+            raise HTTPException(status_code=422, detail="invalid_podcast_audio_url") from exc
         except Exception as e:
             logger.warning(
                 "Remote audio stream proxy failed (%s): %s; redirecting client", audio_url, e

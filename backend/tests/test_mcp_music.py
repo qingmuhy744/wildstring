@@ -35,7 +35,7 @@ def result(api, headers, name, args=None):
 
 
 def test_new_permissions_settings_validation_and_read_only_source(
-    settings, authenticated_client, monkeypatch
+    settings, authenticated_client, monkeypatch, tmp_path
 ):
     monkeypatch.setattr(Providers, "start", lambda self: None)
     monkeypatch.setattr(Management, "start", lambda self: None)
@@ -48,6 +48,12 @@ def test_new_permissions_settings_validation_and_read_only_source(
         token = create_token(
             api, ["library:read", "library:manage", "personal:read", "personal:write"]
         )
+        capabilities = api.get(BASE + "/capabilities", headers=token).json()
+        library_job = next(
+            item for item in capabilities["tools"] if item["name"] == "submit_library_task"
+        )
+        assert "library_id" in library_job["input_schema"]["properties"]
+        default_id = api.get("/api/v1/libraries").json()[0]["id"]
         assert tool(api, old, "submit_library_task", {"kind": "import"}).status_code == 403
         assert (
             tool(api, old, "set_gain_settings", {"version": 0, "mode": "album"}).status_code == 403
@@ -82,15 +88,55 @@ def test_new_permissions_settings_validation_and_read_only_source(
         assert adjustment["track"]["gain_db"] == -1.0
         assert path.read_bytes() == before
         assert result(api, token, "list_library_tasks")["total"] == 0
-        job = result(api, token, "submit_library_task", {"kind": "import"})
-        assert result(api, token, "submit_library_task", {"kind": "import"})["id"] == job["id"]
+        other_source = tmp_path / "mcp-other-source"
+        other_source.mkdir()
+        other_library = api.post(
+            "/api/v1/libraries",
+            headers=HEADERS,
+            json={"name": "MCP 目标库", "source_roots": [str(other_source)]},
+        )
+        assert other_library.status_code == 201, other_library.text
+        other_id = other_library.json()["id"]
+        assert tool(api, token, "submit_library_task", {"kind": "import"}).status_code == 422
+        job = result(
+            api, token, "submit_library_task", {"kind": "import", "library_id": default_id}
+        )
+        assert (
+            result(
+                api,
+                token,
+                "submit_library_task",
+                {"kind": "import", "library_id": default_id},
+            )["id"]
+            == job["id"]
+        )
         management = api.app.state.agent_platform.management
         claimed = management.claim()
         assert claimed["automatic"] == 1
         management.execute(claimed)
         completed = result(api, token, "get_library_task", {"task_id": job["id"]})
         assert completed["counts"]["waiting"] == 1 and completed["counts"]["copied"] == 0
-        assert result(api, token, "list_library_tasks")["total"] == 1
+        assert result(api, token, "list_library_tasks", {"library_id": default_id})["total"] == 1
+        explicit = result(
+            api, token, "submit_library_task", {"kind": "import", "library_id": other_id}
+        )
+        with api.app.state.management.database.connect() as db:
+            assert (
+                db.execute(
+                    "SELECT library_id FROM admin_jobs WHERE id=?", (explicit["id"],)
+                ).fetchone()[0]
+                == other_id
+            )
+        assert result(api, token, "list_library_tasks", {"library_id": other_id})["total"] == 1
+        assert (
+            tool(
+                api,
+                token,
+                "submit_library_task",
+                {"kind": "import", "library_id": "missing-library"},
+            ).status_code
+            == 404
+        )
         assert path.read_bytes() == before
 
 

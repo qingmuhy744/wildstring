@@ -548,11 +548,22 @@ class LibraryRepository:
             ).fetchall()
         return [self.scan(row[0]) for row in ids]
 
-    def imports(self, limit: int = 20) -> list[dict]:
+    def imports(self, limit: int = 20, *, global_history: bool = False) -> list[dict]:
         with self.database.connect() as connection:
-            rows = connection.execute(
-                "SELECT * FROM import_runs ORDER BY started_at DESC LIMIT ?", (limit,)
-            ).fetchall()
+            if global_history:
+                rows = connection.execute(
+                    "SELECT * FROM import_runs ORDER BY started_at DESC LIMIT ?", (limit,)
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    """SELECT r.* FROM import_runs r
+                    WHERE EXISTS(
+                        SELECT 1 FROM admin_jobs j
+                        WHERE j.import_id=r.id AND j.library_id=?
+                    )
+                    ORDER BY r.started_at DESC LIMIT ?""",
+                    (self.library_id(), limit),
+                ).fetchall()
         result = []
         for row in rows:
             item = dict(row)
