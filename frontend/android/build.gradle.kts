@@ -14,6 +14,7 @@ buildscript {
                 "org.bitbucket.b_c" -> security.getProperty("jose4j")
                 "org.jdom" -> security.getProperty("jdom2")
                 "io.opentelemetry" -> if (requested.name in listOf("opentelemetry-api", "opentelemetry-context")) security.getProperty("opentelemetry") else null
+                "com.google.guava" -> if (requested.name == "guava") security.getProperty("guava-jre") else null
                 else -> null
             }
             if (target != null) { useVersion(target); because("Patched build-tool dependency; see docs/architecture/github-security.md") }
@@ -45,6 +46,10 @@ allprojects {
                 "org.bitbucket.b_c" -> security.getProperty("jose4j")
                 "org.jdom" -> security.getProperty("jdom2")
                 "io.opentelemetry" -> if (requested.name in listOf("opentelemetry-api", "opentelemetry-context")) security.getProperty("opentelemetry") else null
+                "com.google.guava" -> if (requested.name == "guava") {
+                    if (requested.version?.endsWith("-android") == true) security.getProperty("guava-android")
+                    else security.getProperty("guava-jre")
+                } else null
                 else -> null
             }
             if (target != null) { useVersion(target); because("Patched build-tool dependency; see docs/architecture/github-security.md") }
