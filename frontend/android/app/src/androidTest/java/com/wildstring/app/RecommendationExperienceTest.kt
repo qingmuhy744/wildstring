@@ -105,9 +105,8 @@ class RecommendationExperienceTest {
                 compose.onNodeWithTag("recommendation-settings").performClick()
                 compose.onNodeWithTag("recommendation-source-community").performScrollTo().assertIsOn().performClick().assertIsOff()
                 compose.onNodeWithTag("ai-connection-choice").performScrollTo().performClick()
-                val personalChoice = hasText("我的模型 · synthetic-one", substring = false) and hasClickAction()
-                compose.waitUntil(10_000) { compose.onAllNodes(personalChoice, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
-                compose.onNode(personalChoice, useUnmergedTree = true).performClick()
+                compose.waitUntil(10_000) { compose.onAllNodesWithTag("ai-connection-personal-one").fetchSemanticsNodes().isNotEmpty() }
+                compose.onNodeWithTag("ai-connection-personal-one").performClick()
                 compose.onNodeWithTag("ai-connection-choice").assertTextContains("我的模型 · synthetic-one")
                 compose.onNodeWithText("保存偏好").performClick()
                 compose.waitUntil(10_000) { fixture.requests.any { it.first.startsWith("PUT ") } }
