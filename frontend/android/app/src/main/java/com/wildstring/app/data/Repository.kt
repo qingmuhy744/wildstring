@@ -264,6 +264,7 @@ class Repository @Inject constructor(@param:ApplicationContext private val conte
     }
     suspend fun acceptAccount(account: Account?): Boolean {
         val changed = session.bindAccount(account)
+        settings.bindAccount(session.activeServerId, session.account?.id)
         if (changed) {
             knownTracks.clear()
             val owner = session.cacheScope()
@@ -455,6 +456,7 @@ class Repository @Inject constructor(@param:ApplicationContext private val conte
         val cookie = session.read()?.substringBefore(';')
         client.dispatcher.cancelAll()
         cache.clear(); session.invalidate(); knownTracks.clear(); database.queue().clear()
+        settings.bindAccount(session.activeServerId, session.account?.id)
         withContext(Dispatchers.IO) {
             if (cookie != null) client.newBuilder().apply { interceptors().clear(); networkInterceptors().clear() }.cookieJar(CookieJar.NO_COOKIES).build().newCall(
                 Request.Builder().url(target).header("Cookie", cookie).post("".toRequestBody()).build()
