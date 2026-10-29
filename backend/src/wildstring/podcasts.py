@@ -133,12 +133,15 @@ class SafeHTTPConnection(http.client.HTTPConnection):
 
     def connect(self):
         if (self.host.rstrip(".").lower(), self.port) in self.trusted_proxy_endpoints:
-            return super().connect()
-        self.sock = connect_public_socket(self.host, self.port, self.timeout, self.source_address)
-        try:
-            self.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-        except OSError:
-            pass
+            super().connect()
+        else:
+            self.sock = connect_public_socket(
+                self.host, self.port, self.timeout, self.source_address
+            )
+            try:
+                self.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            except OSError as error:
+                logger.debug("could not set TCP_NODELAY on podcast proxy socket: %s", error)
 
 
 class SafeHTTPSConnection(http.client.HTTPSConnection):
@@ -148,13 +151,16 @@ class SafeHTTPSConnection(http.client.HTTPSConnection):
 
     def connect(self):
         if (self.host.rstrip(".").lower(), self.port) in self.trusted_proxy_endpoints:
-            return super().connect()
-        self.sock = connect_public_socket(self.host, self.port, self.timeout, self.source_address)
-        try:
-            self.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-        except OSError:
-            pass
-        self.sock = self._context.wrap_socket(self.sock, server_hostname=self.host)
+            super().connect()
+        else:
+            self.sock = connect_public_socket(
+                self.host, self.port, self.timeout, self.source_address
+            )
+            try:
+                self.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            except OSError as error:
+                logger.debug("could not set TCP_NODELAY on podcast proxy socket: %s", error)
+            self.sock = self._context.wrap_socket(self.sock, server_hostname=self.host)
 
 
 class SafeHTTPHandler(urllib.request.HTTPHandler):

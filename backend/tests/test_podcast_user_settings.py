@@ -245,7 +245,8 @@ def test_private_unplayed_retention_manual_refs_and_unfollow(personal):
     assert references(db, user) == {"e6": (1, 0), "e5": (0, 1), "e4": (0, 1)}
     assert references(db, "admin")["e6"] == (0, 1)
     assert listener.get(f"{ROOT}/episodes/e5").json()["resource_automatic"]
-    assert listener.delete(f"{ROOT}/episodes/e5/download", headers=HEADERS).status_code == 200
+    deleted = listener.delete(f"{ROOT}/episodes/e5/download", headers=HEADERS)
+    assert deleted.status_code == 200
     assert references(db, user)["e5"] == (0, 1)
     assert (
         listener.put(f"{ROOT}/east/follow", headers=HEADERS, json={"followed": False}).status_code

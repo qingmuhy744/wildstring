@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { audio, login, section, podcastCatalog } from './helpers';
+import { audio, login, podcastCatalog } from './helpers';
 
 test.skip(process.env.WILDSTRING_TEST_PODCAST !== '1', 'Use make test-podcast-web.');
 const path = '/api/v1/podcasts/episodes/radio-6/progress';
