@@ -92,3 +92,42 @@
 改动后执行项目检查、库授权/进度/迁移专项、完整后端与网页回归、Android 单元/编译/构建/Lint；远程继续核对 CI、Android 模拟器与四语言 CodeQL。误报及生成代码原因同步写入相应 GitHub 告警的单条处置评论。默认分支的修复状态不能从本开发分支推断；本轮不合并、不部署。
 
 核对依据包括[循环依赖规则说明](https://codeql.github.com/codeql-query-help/python/py-cyclic-import/)、[路径访问规则说明](https://codeql.github.com/codeql-query-help/python/py-path-injection/)和[单条告警处置接口](https://docs.github.com/en/rest/code-scanning/code-scanning#update-a-code-scanning-alert)。路径误报结论来自本项目的调用链、权限测试和产品契约，属于本轮代码审查判断。
+
+## PR #74 复扫新增告警（186–199，2026-10-29）
+
+基础：`feat/podcast-player-0.8.0` 的 PR 分析（基础提交 `a7cf559`）报告 14 条新告警：6 条 high、1 条 error、2 条 warning、5 条 note。修复提交为 `a2b6d27`；逐条处置评论引用该提交，最终状态以复扫后的 PR "CodeQL" 检查与本页表的复核为准。
+
+### 代码调整（6 条）
+
+| 告警 | 规则 | 原始位置 | 调整与核对 |
+| --- | --- | --- | --- |
+| [#190](https://github.com/qingmuhy744/wildstring/security/code-scanning/190) | `py/side-effect-in-assert` | `backend/tests/test_podcast_user_settings.py:248` | 先执行 HTTP 删除并保存响应，再断言状态码；语义与处理方式沿用前轮 #175–#183 的既定模式。 |
+| [#193](https://github.com/qingmuhy744/wildstring/security/code-scanning/193) | `js/unused-local-variable` | `frontend/web/tests/podcast-progress.spec.ts:2` | 移除未使用的 `section` 导入；`tsc --noEmit` 通过，套件实际入口由 `make test-podcast-web` 验证。 |
+| [#196](https://github.com/qingmuhy744/wildstring/security/code-scanning/196) | `py/empty-except` | `backend/src/wildstring/podcasts.py:140` | `TCP_NODELAY` 失败转为 `logger.debug` 记录并继续；行为仍为容忍选项失败，连接错误继续向调用方传播。 |
+| [#197](https://github.com/qingmuhy744/wildstring/security/code-scanning/197) | `py/empty-except` | `backend/src/wildstring/podcasts.py:155` | 同 #196，HTTPS 连接同样记录 debug 后继续包装 TLS。 |
+| [#198](https://github.com/qingmuhy744/wildstring/security/code-scanning/198) | `py/mixed-returns` | `backend/src/wildstring/podcasts.py:134` | `connect()` 改为 if/else 结构，不再混合显式与隐式返回；受信任转发端点仍走父类连接，其余路径仍由 `connect_public_socket` 保护。 |
+| [#199](https://github.com/qingmuhy744/wildstring/security/code-scanning/199) | `py/mixed-returns` | `backend/src/wildstring/podcasts.py:149` | 同 #198；TLS 包装仍仅在非受信任端点分支执行，行为保持不变。 |
+
+### 误报处置（8 条）
+
+**`folders.py` 文件未显式关闭（#191、#192）**：与已登记的 [#94–#97](https://github.com/qingmuhy744/wildstring/security/code-scanning/94) 同一结构。`library/scanner.py` 的 `open_directory` 用 `try/finally` 关闭 `os.open` 描述符；`create_folder` 通过 `ExitStack.enter_context` 逐级注册，栈退出时按逆序关闭。按 `false positive` 登记，保持规则启用。
+
+**目录浏览/创建路径提示（#186–#189）**：与既有"受控托管目录"6 条同类。判定依据：
+
+- `wildstring/library/catalog.py` 注册的 `/libraries/folders` 路由要求 `Depends(auth.require_owner)`；听众、编辑员与曲库管理员均被拒绝。
+- `directory_path` 校验输入必须是绝对路径、拒绝 `..`、要求路径整链（含各级父目录）都不是符号链接，然后 `resolve(strict=True)` 且必须为目录；浏览时过滤符号链接条目并限 500 项。
+- `create_folder` 在写事务中先复核 `create_policy`：注册来源（只读）与不可写目录直接拒绝；`os.mkdir` 通过目录描述符逐级定位、`O_NOFOLLOW` 打开的 fd 创建，从未把用户输入拼接成新路径模板。
+- 输入来自所有者的服务端目录选择窗口，是与[存储与共享资源契约](../../contracts/storage-and-podcast-resources.md)一致的既有管理能力；若改为向非所有者开放、把任意来源内容拼入路径或放宽符号链接约束，必须重新审查。
+
+**Android 偏好明文存储（#194、#195）**：`AccountPreferences.forAccount` 与 `AppSettings.bindAccount` 是外观/行为偏好按账号拆分的迁移逻辑，不是凭据存储：
+
+- 调用点传入的键集只有 `PlaybackSharing` 的 `sync_mode`、`OfflineDownloads` 的 `capacity_gb`/`wifi_only`/`download_bitrate` 与外观缓存键；全部为界面与离线策略值。
+- 偏好文件名后缀使用 `serverId:userId` 的 SHA-256 摘要，不包含明文账号或令牌。
+- 凭据与服务器身份存放在 `SessionStore`（`connection` 偏好的 `servers_v1` 仅含 id/url/name，会话按既有加密机制保存），不经过这两个被标记的文件。
+- 两处 `SharedPreferences` 均为 `MODE_PRIVATE` 应用私有目录；若未来把令牌写入这些文件或把键集扩到凭据语义，必须重新审查。
+
+### 验证与远程处置
+
+- 本地：`test_podcast_user_settings.py` 13 项通过；`ruff check` 与 hook 的 Ruff lint/format、Web format/typecheck 通过；`tsc --noEmit` 通过。
+- 远程：推送后 PR #74 复跑矩阵 CodeQL 与完整检查；8 条误报按单条口径写入处置评论；"告警已处置"不等于原始 SARIF 无结果，规则与扫描范围保持不变。
+- 默认分支的该批告警不存在（`folders.py`、偏好迁移均为 0.8.0 新增代码），处置只针对分支 ref；合并后需在 main 复核处置随历史保留。
