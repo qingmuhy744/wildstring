@@ -1768,7 +1768,12 @@ class PodcastManager:
             return RedirectResponse(url=audio_url, status_code=status.HTTP_307_TEMPORARY_REDIRECT)
 
         status_code = resp.status if hasattr(resp, "status") else 200
-        content_type = resp.headers.get("Content-Type") or "audio/mpeg"
+        raw_content_type = resp.headers.get("Content-Type") or "audio/mpeg"
+        mime_main = raw_content_type.split(";")[0].strip().lower()
+        if not mime_main.startswith("audio/"):
+            content_type = "application/octet-stream"
+        else:
+            content_type = raw_content_type
         content_length = resp.headers.get("Content-Length")
         if content_length and content_length.isdigit() and int(content_length) > MAX_AUDIO_BYTES:
             resp.close()
@@ -1776,6 +1781,8 @@ class PodcastManager:
         response_headers = {
             "Accept-Ranges": "bytes",
             "Content-Type": content_type,
+            "X-Content-Type-Options": "nosniff",
+            "Content-Security-Policy": "sandbox; default-src 'none'",
         }
         for h in ("Content-Length", "Content-Range"):
             val = resp.headers.get(h)
