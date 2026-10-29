@@ -669,6 +669,7 @@ internal fun generateFollowUpSuggestions(content: String): List<Pair<String, Str
                 DropdownMenu(open, { open = false }) {
                     enabledConnections.forEach { item ->
                         DropdownMenuItem(
+                            modifier = Modifier.testTag("ai-connection-${item.text("id")}"),
                             text = {
                                 Column {
                                     Text("${item.text("name")} · ${item.text("model")}")
