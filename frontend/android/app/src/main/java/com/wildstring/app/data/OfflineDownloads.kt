@@ -37,15 +37,16 @@ class OfflineDownloads @Inject constructor(@ApplicationContext private val conte
     private var activeId: String? = null
     private var generation = 0L
     private val prefs = context.getSharedPreferences("offline-options", Context.MODE_PRIVATE)
+    private val personalPrefs get() = AccountPreferences.forAccount(context, "offline-options", session.activeServerId, session.account?.id, setOf("capacity_gb", "wifi_only", "download_bitrate"))
     var capacityGb: Int
-        get() = prefs.getInt("capacity_gb", 4).coerceIn(1, 64)
-        set(value) { require(value in 1..64); prefs.edit().putInt("capacity_gb", value).apply() }
+        get() = personalPrefs.getInt("capacity_gb", 4).coerceIn(1, 64)
+        set(value) { require(value in 1..64); personalPrefs.edit().putInt("capacity_gb", value).apply() }
     var wifiOnly: Boolean
-        get() = prefs.getBoolean("wifi_only", true)
-        set(value) { prefs.edit().putBoolean("wifi_only", value).apply() }
+        get() = personalPrefs.getBoolean("wifi_only", true)
+        set(value) { personalPrefs.edit().putBoolean("wifi_only", value).apply() }
     var bitrate: Int
-        get() = prefs.getInt("download_bitrate", 0).takeIf { it in PlaybackRequest.bitrates } ?: 0
-        set(value) { require(value in PlaybackRequest.bitrates); prefs.edit().putInt("download_bitrate", value).apply() }
+        get() = personalPrefs.getInt("download_bitrate", 0).takeIf { it in PlaybackRequest.bitrates } ?: 0
+        set(value) { require(value in PlaybackRequest.bitrates); personalPrefs.edit().putInt("download_bitrate", value).apply() }
     @Synchronized fun followedPlaylists(): Set<String> = ensureOwner()?.let {
         prefs.getStringSet("playlists:$it", emptySet())?.toSet()
     }.orEmpty()

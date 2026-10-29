@@ -453,7 +453,7 @@
   text-align: right;
   border-radius: 6px;
   border: 1px solid var(--border, rgba(255, 255, 255, 0.15));
-  background: rgba(0, 0, 0, 0.2);
+  background: var(--surface-input);
   color: inherit;
 }
 .audition-hint {
@@ -517,7 +517,7 @@
 }
 .candidate-lyric-row.active .candidate-lyric-text {
   font-weight: 600;
-  color: #fff;
+  color: var(--text);
 }
 .candidate-lyric-trans {
   font-size: 0.8rem;

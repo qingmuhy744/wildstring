@@ -66,7 +66,7 @@ export function usePlaybackGain(
     factor.current = 1;
     apply();
     const load = () => {
-      if (!trackId) return;
+      if (!trackId || trackId.startsWith('podcast_ep_')) return;
       void api<GainRecord>(`/tracks/${trackId}/playback-gain`, { signal: controller.signal })
         .then((value) => {
           if (!controller.signal.aborted) {

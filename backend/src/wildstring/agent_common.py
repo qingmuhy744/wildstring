@@ -139,6 +139,25 @@ TOOLS.update(
     }
 )
 
+LIBRARY_TARGET_REQUIRED = frozenset(
+    {
+        "search_tracks",
+        "search_albums",
+        "search_artists",
+        "get_personal_library",
+        "inspect_library",
+        "submit_inspection",
+        "get_import_settings",
+        "set_import_settings",
+        "discover_imports",
+        "list_intake_items",
+        "submit_library_task",
+        "list_library_tasks",
+        "submit_lyric_scan",
+        "list_lyric_scans",
+    }
+)
+
 
 def tool_definitions():
     from wildstring.agent_tool_schemas import describe
@@ -158,7 +177,7 @@ def tool_definitions():
     }
     from wildstring.agent_music_models import DEFINITIONS as MUSIC_TOOLS
 
-    return [
+    definitions = [
         {
             "name": name,
             "description": desc,
@@ -197,3 +216,11 @@ def tool_definitions():
         }
         for name, (desc, scope, readonly, model) in MUSIC_TOOLS.items()
     ]
+    for definition in definitions:
+        definition["input_schema"]["properties"]["library_id"] = {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "description": "可选的音乐库 ID；只影响按音乐库执行的工具。",
+        }
+    return definitions

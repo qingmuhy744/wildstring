@@ -169,4 +169,38 @@ def test_cover_preview_scope_missing_and_invalid_image(settings, authenticated_c
             connection.execute(
                 "UPDATE tracks SET library_id=? WHERE id=?", (library_id, track["id"])
             )
-        assert client.get(endpoint).status_code == 404
+        # The owner may access any enabled library; this fixture still returns invalid pixels.
+        assert client.get(endpoint).status_code == 502
+        default = next(
+            item["id"] for item in client.get("/api/v1/libraries").json() if item["is_default"]
+        )
+        headers = {"X-Wildstring-Client": "web"}
+        assert (
+            client.post(
+                "/api/v1/manage/users",
+                headers=headers,
+                json={
+                    "username": "scoped-preview",
+                    "password": "scoped-preview-password",
+                    "profile": "editor",
+                    "library_ids": [default],
+                },
+            ).status_code
+            == 201
+        )
+        restricted = TestClient(client.app)
+        try:
+            assert (
+                restricted.post(
+                    "/api/v1/auth/login",
+                    headers=headers,
+                    json={
+                        "username": "scoped-preview",
+                        "password": "scoped-preview-password",
+                    },
+                ).status_code
+                == 200
+            )
+            assert restricted.get(endpoint).status_code == 404
+        finally:
+            restricted.close()

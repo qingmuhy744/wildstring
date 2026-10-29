@@ -109,26 +109,16 @@ class AgentWorkspaceTest {
         val login = compose.runOnIdle { vm.connect(address, "alice", "synthetic-password", true) }
         compose.waitUntil(20_000) { login.isCompleted && vm.state.value.connected && !vm.state.value.connecting }
     }
-    @Test fun applicationPolicyCanBeSelectedAndReadBack() {
+    @Test fun heavyApplicationPolicyAndConnectionsAreNotExposedOnPhone() {
         val vm = vm()
         Fixture().use { fixture -> try {
             connect(vm, fixture)
             compose.onNodeWithContentDescription("设置").performClick()
+            compose.onNodeWithText("模型连接", substring = false).assertDoesNotExist()
             compose.onNodeWithText("野弦助手 / 通知与草案").performScrollTo().performClick()
-            compose.onNodeWithTag("agent-tab-connections").performScrollTo().performClick()
-            compose.onNodeWithText("整理方式").performScrollTo().performClick()
-            compose.waitUntil(15_000) { compose.onAllNodesWithTag("application-mode-automatic").fetchSemanticsNodes().isNotEmpty() }
-            compose.onNodeWithTag("application-mode-automatic").performScrollTo().performClick()
-            compose.onNodeWithTag("application-kind-cover").performScrollTo().performClick()
-            compose.onNodeWithText("保存整理方式").performScrollTo().performClick()
-            compose.waitUntil(15_000) { fixture.applicationVersion == 2 }
-            assertEquals("automatic", fixture.applicationMode); assertEquals(setOf("playlist"), fixture.applicationKinds)
-            compose.onNodeWithText("收起整理方式").performScrollTo().performClick()
-            compose.onNodeWithText("整理方式").performScrollTo().performClick()
-            compose.waitUntil(15_000) { compose.onAllNodesWithTag("application-mode-automatic").fetchSemanticsNodes().any { it.config.getOrNull(androidx.compose.ui.semantics.SemanticsProperties.Selected) == true } }
-            compose.onNodeWithTag("application-mode-automatic").performScrollTo().assertIsSelected()
-            compose.onNodeWithTag("application-kind-cover").performScrollTo().assertIsOff()
-            capture("agent-application-policy-phone.png")
+            compose.onNodeWithTag("agent-tab-connections").assertDoesNotExist()
+            compose.onNodeWithText("整理方式", substring = false).assertDoesNotExist()
+            assertFalse(fixture.requests.any { it.first.contains("/application-settings") })
         } finally { compose.runOnIdle { vm.repository.session.invalidate() } } }
     }
     @Test fun researchSettingsAndExplicitMemoryCanBeSavedEditedAndDeleted() {
@@ -227,77 +217,17 @@ class AgentWorkspaceTest {
             assertEquals(3, fixture.requests.count { it.first.startsWith("DELETE /api/v1/agent/conversations/") })
         } finally { compose.runOnIdle { vm.repository.session.invalidate() } } }
     }
-    @Test fun manualInspectionUsesLegacyConnectionButScheduleRequiresAutomaticAuthorization() {
+    @Test fun inspectionAndScheduleManagementAreNotLoadedOnPhone() {
         val vm = vm()
         Fixture().use { fixture -> try {
-            val legacy = """{"id":"legacy","name":"实例 AI（已有配置）","model":"synthetic","enabled":true,"read_only":true,"background_allowed":false,"daily_call_budget":100}"""
-            fixture.connections = "[$legacy]"
-            connect(vm, fixture)
-            compose.runOnIdle { vm.settings.appearance("dark") }
-            compose.onNodeWithContentDescription("设置").performClick()
-            compose.onNodeWithText("野弦助手 / 通知与草案").performScrollTo().performClick()
-            compose.onNodeWithTag("agent-tab-tasks").performClick()
-            compose.onNodeWithText("开始巡检", substring = false).performClick()
-            compose.waitUntil(15_000) { compose.onAllNodesWithTag("inspection-use-ai").fetchSemanticsNodes().isNotEmpty() }
-            compose.onNodeWithTag("inspection-use-ai").performClick()
-            // A single enabled connection is selected automatically; only the
-            // multi-connection dropdown requires an explicit choice.
-            compose.waitUntil(15_000) { runCatching { compose.onNodeWithText("开始", substring = false).assertIsEnabled(); true }.getOrDefault(false) }
-            compose.onNodeWithText("本地找歌（不使用模型）", substring = false).assertDoesNotExist()
-            capture("manual-ai-inspection-dark.png", dark = true)
-            compose.onNodeWithText("开始", substring = false).performClick()
-            compose.waitUntil(15_000) { fixture.requests.any { it.first == "POST /api/v1/agent/tasks" } }
-            val submitted = fixture.requests.single { it.first == "POST /api/v1/agent/tasks" }.second
-            assertTrue(submitted.flag("use_ai")); assertEquals("legacy", submitted.text("connection_id")); assertEquals(4, submitted.number("max_calls").toInt())
-            assertFalse(submitted.has("_manual_ai_authorized"))
-            compose.waitUntil(15_000) { compose.onAllNodesWithText("开始曲库巡检", substring = false).fetchSemanticsNodes().isEmpty() }
-            compose.waitUntil(15_000) { compose.onAllNodesWithText("新建计划", substring = false).fetchSemanticsNodes().isNotEmpty() }
-            compose.onNodeWithText("新建计划", substring = false).performScrollTo().performClick()
-            compose.waitUntil(15_000) { compose.onAllNodesWithTag("inspection-use-ai").fetchSemanticsNodes().isNotEmpty() }
-            compose.onNodeWithTag("inspection-use-ai").performScrollTo().performClick()
-            compose.waitUntil(15_000) { compose.onAllNodesWithText("没有可用于定时巡检的连接。", substring = true).fetchSemanticsNodes().isNotEmpty() }
-            compose.onNodeWithText("保存计划", substring = false).assertIsNotEnabled()
-            compose.onNodeWithText("实例 AI（已有配置） · synthetic", substring = false).assertDoesNotExist()
-            compose.onNodeWithText("取消", substring = false).performClick()
-            compose.waitUntil(15_000) { compose.onAllNodesWithTag("inspection-use-ai").fetchSemanticsNodes().isEmpty() }
-            fixture.connections = "[$legacy,{\"id\":\"automatic\",\"name\":\"自动巡检模型\",\"model\":\"synthetic\",\"enabled\":true,\"background_allowed\":true,\"daily_call_budget\":100}]"
-            compose.onNodeWithText("新建计划", substring = false).performScrollTo().performClick()
-            compose.waitUntil(15_000) { compose.onAllNodesWithTag("inspection-use-ai").fetchSemanticsNodes().isNotEmpty() }
-            compose.onNodeWithTag("inspection-use-ai").performScrollTo().performClick()
-            compose.waitUntil(15_000) { runCatching { compose.onNodeWithText("保存计划", substring = false).assertIsEnabled(); true }.getOrDefault(false) }
-            compose.onNodeWithText("取消", substring = false).performClick()
-        } finally { compose.runOnIdle { vm.settings.appearance("system"); vm.repository.session.invalidate() } } }
-    }
-    @Test fun inspectionFailureAndSkippedAnalysisAreReadableWithoutAutomaticRetry() {
-        val vm = vm()
-        val schedulesGate = CountDownLatch(1)
-        Fixture().use { fixture -> try {
-            fixture.schedulesGate = schedulesGate
-            fixture.tasks = """[{"id":"limited-task","status":"failed","stage":"completed","counts":{"processed":134,"issues":0,"failed":0,"calls":1},"error_code":"ai_output_limit","results":[],"created_at":"2026-10-18T00:00:00Z"}]"""
             connect(vm, fixture)
             compose.onNodeWithContentDescription("设置").performClick()
             compose.onNodeWithText("野弦助手 / 通知与草案").performScrollTo().performClick()
-            compose.onNodeWithTag("agent-tab-tasks").performClick()
-            compose.waitUntil(15_000) { compose.onAllNodesWithText("详情与恢复").fetchSemanticsNodes().isNotEmpty() }
-            compose.onNodeWithText("详情与恢复").assertIsNotEnabled()
-            schedulesGate.countDown()
-            compose.waitUntil(15_000) { compose.onAllNodes(hasText("详情与恢复") and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
-            compose.onNodeWithText("详情与恢复").performScrollTo().performClick()
-            compose.waitUntil(15_000) { compose.onAllNodesWithText("阶段：处理结束，未全部完成").fetchSemanticsNodes().isNotEmpty() }
-            compose.onNodeWithText("阶段：处理结束，未全部完成").assertExists()
-            compose.onNodeWithText("模型达到输出 Token 上限", substring = true).assertExists()
-            compose.onNode(hasText("模型调用 1", substring = true) and hasAnyAncestor(hasTestTag("inspection-task-detail"))).assertExists()
-            compose.onNode(hasText("已完成", substring = false) and hasAnyAncestor(hasTestTag("inspection-task-detail"))).assertDoesNotExist()
-            compose.onNodeWithText("恢复巡检").assertIsDisplayed()
-            assertEquals(0, fixture.writes.get())
-            capture("inspection-output-limit-phone.png")
-            fixture.tasks = """[{"id":"limited-task","status":"succeeded","stage":"completed","counts":{"processed":134,"calls":1},"results":[{"analysis":"规则检查未发现待解释问题，本次未继续调用 AI。","ai_skipped":true,"draft_ids":[]}]}]"""
-            compose.onAllNodesWithText("刷新", substring = false).onLast().performClick()
-            compose.waitUntil(15_000) { compose.onAllNodesWithText("规则检查说明").fetchSemanticsNodes().isNotEmpty() }
-            compose.onNodeWithText("规则检查未发现待解释问题，本次未继续调用 AI。").assertExists()
-            compose.onNodeWithText("恢复巡检").assertDoesNotExist()
-            assertEquals(0, fixture.writes.get())
-        } finally { schedulesGate.countDown(); compose.runOnIdle { vm.settings.appearance("system"); vm.repository.session.invalidate() } } }
+            compose.onNodeWithTag("agent-tab-tasks").assertDoesNotExist()
+            compose.onNodeWithText("开始巡检", substring = false).assertDoesNotExist()
+            compose.onNodeWithText("新建计划", substring = false).assertDoesNotExist()
+            assertFalse(fixture.requests.any { it.first.endsWith("/agent/tasks") || it.first.endsWith("/agent/schedules") })
+        } finally { compose.runOnIdle { vm.repository.session.invalidate() } } }
     }
     @Test fun mobileAssistantNotificationAndConcreteApprovalRoundTrip() {
         val vm = vm()

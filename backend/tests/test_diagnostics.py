@@ -224,7 +224,7 @@ def test_refresh_notification_trace_expands_jobs_and_legacy_task_diagnostics(
         # A batch belonging to another configured library must not expand into this one.
         with service.database.connect(write=True) as connection:
             connection.execute(
-                "INSERT INTO libraries VALUES (?,?)", ("other-library", "/not-this-root")
+                "INSERT INTO libraries(id,root) VALUES (?,?)", ("other-library", "/not-this-root")
             )
             connection.execute(
                 "INSERT INTO provider_refresh_batches VALUES (?,?,0,1)", ("c" * 32, "other-library")

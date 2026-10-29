@@ -1,5 +1,11 @@
+import {
+  preferencesChanged,
+  preferenceKey,
+  readPreference,
+  writePreference,
+} from './user-preferences';
 import { useEffect, useRef, useState, type CSSProperties, type MutableRefObject } from 'react';
-import { artist, type Track } from './api';
+import { artist, time, type Track } from './api';
 import { Cover } from './cover';
 import './playback-style.css';
 
@@ -15,7 +21,7 @@ function valid(value: unknown): value is PlaybackStyle {
 }
 function savedStyle(): PlaybackStyle {
   try {
-    const value = localStorage.getItem(KEY);
+    const value = readPreference(KEY);
     if (valid(value)) return value;
   } catch {
     /* Storage is optional for playback. */
@@ -23,13 +29,17 @@ function savedStyle(): PlaybackStyle {
   return 'cover';
 }
 let selected = savedStyle();
+window.addEventListener(preferencesChanged, () => {
+  selected = savedStyle();
+  window.dispatchEvent(new Event('wildstring:playback-style'));
+});
 
 export function usePlaybackStyle() {
   const [style, setStyle] = useState<PlaybackStyle>(() => selected);
   useEffect(() => {
     const changed = () => setStyle(selected);
     const storage = (event: StorageEvent) => {
-      if (event.key === KEY || event.key === null) {
+      if (event.key === preferenceKey(KEY) || event.key === null) {
         selected = savedStyle();
         changed();
       }
@@ -57,7 +67,7 @@ export function PlaybackStyleControl() {
           if (!valid(value)) return;
           selected = value;
           try {
-            localStorage.setItem(KEY, value);
+            writePreference(KEY, value);
           } catch {
             /* Keep the in-memory preference. */
           }
@@ -77,6 +87,7 @@ export function PlaybackStyleControl() {
 export function PlaybackVisual({
   track,
   style,
+  podcast = false,
   playing,
   position,
   duration,
@@ -86,6 +97,7 @@ export function PlaybackVisual({
 }: {
   track: Track;
   style: PlaybackStyle;
+  podcast?: boolean;
   playing: boolean;
   position: number;
   duration: number;
@@ -115,7 +127,8 @@ export function PlaybackVisual({
     const update = () => {
       cancelAnimationFrame(frame);
       last = 0;
-      const active = playing && style !== 'cover' && !document.hidden && !reduced.matches;
+      const active =
+        playing && (podcast || style !== 'cover') && !document.hidden && !reduced.matches;
       setMotion(active);
       draw();
       if (active) frame = requestAnimationFrame(tick);
@@ -128,25 +141,37 @@ export function PlaybackVisual({
       document.removeEventListener('visibilitychange', update);
       reduced.removeEventListener('change', update);
     };
-  }, [playing, style, phase]);
+  }, [playing, podcast, style, phase]);
   const progress = duration > 0 ? Math.max(0, Math.min(position / duration, 1)) : 0;
   return (
     <div
       ref={root}
-      className={`playback-visual visual-${style}`}
-      data-style={style}
+      className={`playback-visual visual-${podcast ? 'radio' : style}`}
+      data-style={podcast ? 'radio' : style}
       data-moving={motion}
       data-engaged={playing && settled}
-      role="img"
+      role={podcast ? 'button' : 'img'}
       tabIndex={0}
-      aria-label="歌曲封面，长按或按回车查看大图"
-      data-help="右键或长按查看大封面"
+      aria-label={podcast ? '播客封面，点击查看大图' : '歌曲封面，长按或按回车查看大图'}
+      data-help={podcast ? '点击或右键查看大封面' : '右键或长按查看大封面'}
       style={
         {
           '--left-pack': `${38 - progress * 13}%`,
           '--right-pack': `${25 + progress * 13}%`,
+          '--radio-progress': progress,
         } as CSSProperties
       }
+      onClick={(event) => {
+        if (!podcast) return;
+        event.stopPropagation();
+        onPreview();
+      }}
+      onContextMenu={(event) => {
+        if (!podcast) return;
+        event.preventDefault();
+        event.stopPropagation();
+        onPreview();
+      }}
       onKeyDown={(event) => {
         if (event.key === 'Enter' || event.key === ' ') {
           event.preventDefault();
@@ -155,39 +180,78 @@ export function PlaybackVisual({
         }
       }}
     >
-      <span className="cassette-case" aria-hidden="true">
-        <span className="cassette-paper">
-          <span className="cassette-brand">野弦 / WILDSTRING</span>
-          <strong>{track.title}</strong>
-          <span className="cassette-artist">{artist(track)}</span>
+      {podcast ? (
+        <span className="radio-shell" data-live={playing ? 'true' : 'false'} aria-hidden="true">
+          <span className="radio-antenna" />
+          <span className="radio-top-label">WILDSTRING FM</span>
+          <span className="radio-display">
+            <Cover
+              trackId={track.id}
+              title={track.album || track.title}
+              size={320}
+              className="radio-cover"
+              source={track.cover_url}
+              onImage={onImage}
+            />
+            <span className="radio-display-copy">
+              <strong>{playing ? '播出中' : '待命'}</strong>
+              <span>{track.album || '播客节目'}</span>
+              <small className="radio-display-duration">
+                {duration > 0 ? `${time(position)} / ${time(duration)}` : '--:--'}
+              </small>
+            </span>
+          </span>
+          <span className="radio-speaker">
+            <span className="radio-meter" />
+            <span className="radio-meter" />
+            <span className="radio-meter" />
+            <span className="radio-meter" />
+            <span className="radio-meter" />
+          </span>
+          <span className="radio-tuning">
+            <span className="radio-dial" />
+            <span className="radio-frequency">88 · 94 · 101 · 108</span>
+          </span>
+          <span className="radio-status-light" />
         </span>
-        <span className="tape-window">
-          <span className="tape-pack tape-left" />
-          <span className="tape-pack tape-right" />
-          <span className="tape-guide" />
-          <span className="tape-hub tape-left" />
-          <span className="tape-hub tape-right" />
-        </span>
-        <span className="cassette-apron" />
-        {[0, 1, 2, 3].map((index) => (
-          <span key={index} className={`cassette-screw screw-${index}`} />
-        ))}
-      </span>
-      <span className="visual-platter">
-        <Cover
-          trackId={track.id}
-          title={track.album || track.title}
-          size={768}
-          className="fullscreen-cover"
-          onImage={onImage}
-        />
-        <span className="record-spindle" aria-hidden="true" />
-      </span>
-      <span className="record-sheen" aria-hidden="true" />
-      <span className="tonearm" aria-hidden="true">
-        <span className="tonearm-pivot" />
-        <span className="tonearm-head" />
-      </span>
+      ) : (
+        <>
+          <span className="cassette-case" aria-hidden="true">
+            <span className="cassette-paper">
+              <span className="cassette-brand">野弦 / WILDSTRING</span>
+              <strong>{track.title}</strong>
+              <span className="cassette-artist">{artist(track)}</span>
+            </span>
+            <span className="tape-window">
+              <span className="tape-pack tape-left" />
+              <span className="tape-pack tape-right" />
+              <span className="tape-guide" />
+              <span className="tape-hub tape-left" />
+              <span className="tape-hub tape-right" />
+            </span>
+            <span className="cassette-apron" />
+            {[0, 1, 2, 3].map((index) => (
+              <span key={index} className={`cassette-screw screw-${index}`} />
+            ))}
+          </span>
+          <span className="visual-platter">
+            <Cover
+              trackId={track.id}
+              title={track.album || track.title}
+              size={768}
+              className="fullscreen-cover"
+              source={track.cover_url}
+              onImage={onImage}
+            />
+            <span className="record-spindle" aria-hidden="true" />
+          </span>
+          <span className="record-sheen" aria-hidden="true" />
+          <span className="tonearm" aria-hidden="true">
+            <span className="tonearm-pivot" />
+            <span className="tonearm-head" />
+          </span>
+        </>
+      )}
     </div>
   );
 }

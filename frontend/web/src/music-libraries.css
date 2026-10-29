@@ -1,0 +1,413 @@
+.music-library-switcher {
+  display: grid;
+  gap: 0.4rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+  min-width: 0;
+}
+.music-library-switcher select {
+  width: 100%;
+  min-width: 0;
+  padding: 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: 0.6rem;
+  color: var(--text);
+  background: var(--surface-input);
+}
+.music-library-switcher-management {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 24px;
+  font-size: 13px;
+}
+.music-library-switcher-management select {
+  width: auto;
+  min-width: 0;
+  max-width: min(320px, 100%);
+}
+.music-library-switcher-management strong {
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.management-library-settings {
+  margin-top: 28px;
+}
+.music-library-manager form {
+  display: grid;
+  gap: 0.7rem;
+  margin-top: 1.5rem;
+}
+.music-library-manager input:not([type='checkbox']),
+.music-library-manager select,
+.music-library-manager textarea {
+  width: 100%;
+  min-width: 0;
+  padding: 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  color: var(--text);
+  background: var(--surface-input);
+}
+.music-library-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 0.7rem;
+  margin-top: 1rem;
+}
+.music-library-list button {
+  display: grid;
+  gap: 0.35rem;
+  padding: 1rem;
+  text-align: left;
+}
+.music-library-list span,
+.music-library-manager .muted {
+  font-size: 0.8rem;
+  overflow-wrap: anywhere;
+}
+.music-library-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.7rem;
+}
+.music-library-grant-option {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem;
+}
+.account-form .music-library-grant-option,
+.music-library-grant-option {
+  display: flex;
+  justify-content: flex-start;
+  min-width: 0;
+  text-align: left;
+}
+.account-form .music-library-grant-option input[type='checkbox'],
+.music-library-grant-option input[type='checkbox'] {
+  width: 18px;
+  height: 18px;
+  min-width: 18px;
+  flex: 0 0 18px;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--accent);
+}
+.music-library-grant-option span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.account-form .music-library-options,
+.music-library-options {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.music-library-options small {
+  display: block;
+  color: var(--muted);
+  margin: 8px;
+  line-height: 1.6;
+}
+.library-folder-heading,
+.server-folder-picker header {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 12px;
+}
+.source-absolute-path {
+  padding: 10px 12px;
+  border-left: 2px solid var(--accent);
+  color: var(--muted);
+}
+.server-folder-picker {
+  width: min(720px, calc(100vw - 32px));
+  max-height: calc(100dvh - 48px);
+  overflow: hidden;
+  padding: 24px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--surface);
+  color: var(--text);
+}
+.server-folder-picker[open] {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 20px;
+}
+.folder-picker-body {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.server-folder-picker::backdrop {
+  background: #0009;
+  backdrop-filter: blur(4px);
+}
+.server-folder-picker h2 {
+  margin: 6px 0;
+  font-size: 23px;
+}
+.server-folder-picker header {
+  flex-wrap: nowrap;
+}
+.server-folder-picker header > div {
+  min-width: 0;
+}
+.folder-picker-body > .muted {
+  margin: 0;
+  line-height: 1.6;
+}
+.server-folder-picker input {
+  width: 100%;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-input);
+  color: inherit;
+}
+.folder-path-entry {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  margin: 20px 0 12px;
+}
+.folder-path-entry input,
+.folder-path-entry button,
+.folder-create-actions button,
+.folder-picker-actions button {
+  height: 44px;
+  min-height: 44px;
+}
+.folder-path-entry input {
+  padding: 10px 12px;
+}
+.folder-path-entry button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap;
+  min-width: 0;
+  padding-inline: 12px;
+  gap: 6px;
+}
+.folder-path-entry svg,
+.folder-picker-list > button > svg {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+}
+.server-folder-picker .folder-create-form {
+  display: grid;
+  gap: 12px;
+  margin-block: 12px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-input);
+}
+.folder-create-form label {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+.folder-create-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+}
+.folder-create-form .error {
+  margin: 0;
+}
+.folder-picker-notice {
+  color: var(--success);
+  font-size: 13px;
+}
+.folder-picker-hint {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 0 0 14px;
+}
+.server-folder-picker nav {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.server-folder-picker nav button {
+  flex-shrink: 0;
+  white-space: nowrap;
+  padding: 6px 10px;
+  font-size: 12px;
+}
+.folder-picker-list {
+  min-height: 140px;
+  max-height: 38dvh;
+  overflow: auto;
+  border-top: 1px solid var(--border);
+  padding-block: 6px;
+}
+.folder-picker-list > button {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 14px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+.folder-picker-list > button:hover {
+  background: var(--surface-input);
+}
+.folder-picker-list .folder-entry-label {
+  flex: 1;
+  min-width: 0;
+}
+.folder-picker-list > p {
+  margin: 0;
+  padding: 16px 10px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.folder-picker-list strong,
+.folder-picker-list small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.folder-picker-list small {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.server-folder-picker footer {
+  display: grid;
+  gap: 16px;
+  border-top: 1px solid var(--border);
+  padding-top: 16px;
+}
+.folder-picker-current {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  line-height: 1.6;
+}
+.folder-picker-current > span:first-child {
+  color: var(--muted);
+  font-size: 12px;
+}
+.folder-picker-current .storage-path {
+  font-size: 12px;
+}
+.folder-picker-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+}
+@media (max-width: 600px) {
+  .folder-path-entry {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .folder-path-entry > input {
+    grid-column: 1 / -1;
+  }
+  .folder-picker-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+.music-library-switcher-browse {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+.music-library-switcher-browse select {
+  width: auto;
+  max-width: 180px;
+  padding: 8px 10px;
+}
+.music-access-empty {
+  color: var(--muted);
+  max-width: 240px;
+  line-height: 1.5;
+}
+@media (max-width: 760px) {
+  .topbar-actions {
+    flex-wrap: wrap;
+    width: 100%;
+    min-width: 0;
+  }
+  .topbar-actions > .search {
+    flex: 1;
+    min-width: 0;
+  }
+  .music-library-switcher-browse,
+  .music-access-empty {
+    order: 2;
+    flex-basis: 100%;
+    max-width: none;
+  }
+  .library .topbar-context {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 42px;
+    gap: 10px;
+  }
+  .topbar-context > div:first-child {
+    grid-column: 1 / -1;
+  }
+  .topbar-context .topbar-actions {
+    width: auto;
+  }
+}
+.source-root-select {
+  display: grid;
+  min-width: 0;
+  gap: 0.5rem;
+}
+.source-root-select select {
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+}
+
+.library-storage {
+  margin-block: 1.5rem;
+  padding-block: 1rem;
+  border-block: 1px solid var(--border);
+  min-width: 0;
+}
+.library-storage fieldset {
+  display: grid;
+  gap: 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 0.6rem;
+  padding: 1rem;
+  min-width: 0;
+}
+.storage-path {
+  overflow-wrap: anywhere;
+  font-size: 0.8rem;
+  min-width: 0;
+}
+.library-migration-status {
+  margin-top: 1rem;
+  padding: 1rem;
+  background: var(--surface-input);
+  border-radius: 0.6rem;
+}
+.library-migration-status progress {
+  width: 100%;
+  accent-color: var(--accent);
+}

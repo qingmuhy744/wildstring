@@ -819,7 +819,7 @@ export function OnlineLyrics({
                       : q.level >= 2
                         ? 'rgba(128, 128, 128, 0.2)'
                         : 'rgba(128, 128, 128, 0.12)',
-                    color: q.word_timed ? '#fff' : 'inherit',
+                    color: q.word_timed ? 'var(--on-accent)' : 'inherit',
                   }}
                 >
                   {q.word_timed

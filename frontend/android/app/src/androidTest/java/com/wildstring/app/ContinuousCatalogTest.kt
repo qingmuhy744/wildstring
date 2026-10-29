@@ -278,8 +278,8 @@ class ContinuousCatalogTest {
                 capture("compact-album-light.png")
                 compose.onNodeWithTag("catalog-global-more").assertDoesNotExist()
                 compose.onNodeWithTag("catalog-more").performClick()
-                compose.onNodeWithText("更新专辑元数据").assertIsDisplayed()
-                compose.onNodeWithText("歌词补全与洗版").assertIsDisplayed()
+                compose.onNodeWithText("更新专辑元数据").assertDoesNotExist()
+                compose.onNodeWithText("歌词补全与洗版").assertDoesNotExist()
                 compose.onNodeWithText("刷新曲库").assertDoesNotExist()
                 InstrumentationRegistry.getInstrumentation().sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
                 compose.onNodeWithText("更新专辑元数据").assertDoesNotExist()
@@ -338,7 +338,12 @@ class ContinuousCatalogTest {
                     if (size == SongListSize.SMALL) capture("song-list-size-settings.png")
                     compose.onNodeWithText(size.label).performClick()
                     compose.onNodeWithTag("mini-player").assertIsDisplayed()
-                    assertEquals(size, AppSettings(InstrumentationRegistry.getInstrumentation().targetContext).state.value.songListSize)
+                    assertEquals(size, vm.settings.state.value.songListSize)
+                    compose.waitUntil(5_000) {
+                        val reopened = AppSettings(InstrumentationRegistry.getInstrumentation().targetContext)
+                        reopened.bindAccount(vm.repository.session.activeServerId, vm.repository.session.account?.id)
+                        reopened.state.value.songListSize == size
+                    }
                     compose.onNodeWithTag("settings-back").performClick()
                     compose.onNodeWithTag("catalog-item-60").assertIsDisplayed()
                     assertSongRowSize(60, size)

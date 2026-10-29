@@ -316,12 +316,13 @@ def test_rule_validation_and_playlist_library_authorization(
         root.mkdir()
         separate = settings.model_copy(update={"library_dir": root})
         with authenticated_client(separate) as other:
-            assert other.get("/api/v1/playlists/" + playlist["id"]).status_code == 404
+            # The same owner's playlists now span their permitted libraries.
+            assert other.get("/api/v1/playlists/" + playlist["id"]).status_code == 200
             assert (
                 other.put(
                     f"/api/v1/tracks/{track_id}/favorite", headers=HEADERS, json={"loved": True}
                 ).status_code
-                == 404
+                == 200
             )
             assert (
                 other.post(
@@ -329,7 +330,7 @@ def test_rule_validation_and_playlist_library_authorization(
                     headers=HEADERS,
                     json={"session_id": str(uuid4()), "track_id": track_id, "listened_ms": 0},
                 ).status_code
-                == 404
+                == 200
             )
     with TestClient(create_app(settings)) as anonymous:
         for path in (
@@ -417,7 +418,7 @@ def test_v4_upgrade_preserves_track_identity_and_seeds_one_default(settings, aut
         connection.commit()
         connection.executescript(IMPORT_SCHEMA)
         connection.execute(
-            "INSERT INTO libraries VALUES (?,?)", ("library", str(settings.library_dir))
+            "INSERT INTO libraries(id,root) VALUES (?,?)", ("library", str(settings.library_dir))
         )
         connection.execute(
             "INSERT INTO scan_runs VALUES ('scan','library','completed','2026-10-01T00:00:00+00:00',NULL,'{}')"

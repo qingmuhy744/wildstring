@@ -19,5 +19,25 @@ abstract class QueueDao {
     }
     @Transaction open suspend fun clear() { clearEntries(); clearPosition() }
 }
-@Database(entities = [QueueEntry::class, SavedPosition::class], version = 1, exportSchema = true)
-abstract class QueueDatabase : RoomDatabase() { abstract fun queue(): QueueDao }
+@Entity(tableName = "podcast_checkpoints", primaryKeys = ["owner", "episodeId"])
+data class PodcastCheckpointRow(val owner: String, val episodeId: String, val payload: String)
+@Dao
+interface PodcastCheckpointDao {
+    @Query("SELECT * FROM podcast_checkpoints WHERE owner = :owner AND episodeId = :episodeId")
+    suspend fun get(owner: String, episodeId: String): PodcastCheckpointRow?
+    @Query("SELECT * FROM podcast_checkpoints WHERE owner = :owner")
+    suspend fun all(owner: String): List<PodcastCheckpointRow>
+    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun save(row: PodcastCheckpointRow)
+}
+@Database(entities = [QueueEntry::class, SavedPosition::class, PodcastCheckpointRow::class], version = 2, exportSchema = true)
+abstract class QueueDatabase : RoomDatabase() {
+    abstract fun queue(): QueueDao
+    abstract fun podcasts(): PodcastCheckpointDao
+    companion object {
+        val MIGRATION_1_2 = object : androidx.room.migration.Migration(1, 2) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL("CREATE TABLE IF NOT EXISTS podcast_checkpoints (owner TEXT NOT NULL, episodeId TEXT NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(owner, episodeId))")
+            }
+        }
+    }
+}

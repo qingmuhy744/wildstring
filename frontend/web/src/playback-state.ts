@@ -7,6 +7,12 @@ export const modeNames: Record<PlaybackMode, string> = {
   repeat_one: '单曲循环',
   shuffle: '随机播放',
 };
+export const PLAYBACK_RATES = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2] as const;
+export type PlaybackRate = (typeof PLAYBACK_RATES)[number];
+export function normalizePlaybackRate(value: unknown): PlaybackRate {
+  const rate = Number(value);
+  return PLAYBACK_RATES.includes(rate as PlaybackRate) ? (rate as PlaybackRate) : 1;
+}
 export const QUEUE_LIMIT = 5000;
 export interface SavedPlayback {
   tracks: Track[];
@@ -14,6 +20,7 @@ export interface SavedPlayback {
   position: number;
   quality: string;
   volume: number;
+  playbackRate: PlaybackRate;
   mode: PlaybackMode;
 }
 export function playbackKey(userId: string) {
@@ -72,6 +79,7 @@ export function readPlayback(userId: string): SavedPlayback | null {
         ? value.quality
         : 'original',
       volume: Math.max(0, Math.min(1, Number(value.volume) || 0)),
+      playbackRate: normalizePlaybackRate(value.playbackRate),
       mode: Object.hasOwn(modeNames, value.mode) ? value.mode : 'sequential',
     };
   } catch {
@@ -84,18 +92,29 @@ export function savePlayback(userId: string, state: SavedPlayback) {
       playbackKey(userId),
       JSON.stringify({
         ...state,
-        tracks: state.tracks.map(
-          ({ id, album_id, title, artists, album, duration_ms, format, status }) => ({
-            id,
-            album_id,
-            title,
-            artists,
-            album,
-            duration_ms,
-            format,
-            status,
-          }),
-        ),
+        tracks: state.tracks.map((track) => ({
+          id: track.id,
+          album_id: track.album_id,
+          title: track.title,
+          artists: track.artists,
+          album: track.album,
+          duration_ms: track.duration_ms,
+          format: track.format,
+          status: track.status,
+          ...(track.id.startsWith('podcast_ep_')
+            ? {
+                podcast_id: track.podcast_id,
+                podcast_queue_origin: track.podcast_queue_origin,
+                podcast_list_order: track.podcast_list_order,
+                podcast_position_seconds: track.podcast_position_seconds,
+                podcast_completed: track.podcast_completed,
+                cover_url: track.cover_url,
+                description: track.description,
+                release_date: track.release_date,
+                track_number: track.track_number,
+              }
+            : {}),
+        })),
       }),
     );
   } catch {

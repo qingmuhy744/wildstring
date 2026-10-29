@@ -4,7 +4,7 @@
 
 ## 权限及工具
 
-`GET /capabilities` 返回 `{version:1,scopes:[…],tools:[{name,description,scope,input_schema,read_only}]}`。scope：`library:read, personal:read, drafts:write, drafts:apply, tasks:write, diagnostics:read, notifications:read`。
+`GET /capabilities` 返回 `{version:1,scopes:[…],tools:[{name,description,scope,input_schema,read_only}]}`。scope：`library:read, personal:read, drafts:write, drafts:apply, tasks:write, diagnostics:read, notifications:read`。所有工具 Schema 接受可选 `library_id` 作为库级目标；需要库上下文的工具据此选择并复核授权。账号有多个可访问库且工具无法从对象推断目标时，库级工具必须显式传入该字段，否则返回 422 `library_selection_required`；个人数据仍按当前账号隔离。
 
 `GET /credentials`；`POST /credentials {name,scopes,expires_in_days:30}` 返回 `{id,name,scopes,created_at,expires_at,revoked_at,token}`，token 只在创建响应出现。`DELETE /credentials/{id}` 立即撤销。
 

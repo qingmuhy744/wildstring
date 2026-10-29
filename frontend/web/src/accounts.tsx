@@ -5,6 +5,9 @@ import { ThemeControl } from './theme';
 import { PlaybackStyleControl } from './playback-style';
 import { TrackListSizeControl } from './track-list-size';
 import { AvatarEditor } from './avatar';
+import { DialogCloseButton } from './dialog-close';
+import type { MusicLibrary } from './music-libraries';
+import { UserLibraryAccessDialog } from './user-library-access';
 
 type Profile = User['profile'];
 const profileLabels: Record<Profile, string> = {
@@ -117,9 +120,7 @@ export function AccountDialog({
             {user.username} · {profileLabels[userProfile(user)]}
           </p>
         </div>
-        <button className="icon-button" aria-label="关闭账号设置" disabled={busy} onClick={onClose}>
-          ×
-        </button>
+        <DialogCloseButton aria-label="关闭账号设置" disabled={busy} onClick={onClose} />
       </div>
       <AvatarEditor user={user} disabled={busy} onBusy={setBusy} />
       <form className="account-form" onSubmit={saveProfile} aria-label="个人资料">
@@ -175,6 +176,7 @@ export function AccountDialog({
       </form>
       <section className="account-preferences-section" aria-label="界面与偏好">
         <h3>界面与偏好</h3>
+        <p className="muted">这些偏好按账号保存在当前浏览器。</p>
         <div className="account-preferences-list">
           <ThemeControl />
           <PlaybackStyleControl />
@@ -243,6 +245,11 @@ export function AccountDialog({
 }
 
 export function UsersPanel() {
+  const [libraries, setLibraries] = useState<MusicLibrary[]>([]);
+  const [libraryIds, setLibraryIds] = useState<string[] | null>(null);
+  const defaultLibraryIds = libraries
+    .filter((library) => library.default_access ?? library.is_default)
+    .map((library) => library.id);
   const [users, setUsers] = useState<User[]>([]),
     [self, setSelf] = useState<User | null>(null);
   const [username, setUsername] = useState(''),
@@ -252,6 +259,7 @@ export function UsersPanel() {
   const [resetting, setResetting] = useState<User | null>(null),
     [resetPassword, setResetPassword] = useState(''),
     [resetConfirm, setResetConfirm] = useState('');
+  const [granting, setGranting] = useState<User | null>(null);
   const [busy, setBusy] = useState(false),
     [error, setError] = useState(''),
     [notice, setNotice] = useState('');
@@ -263,13 +271,22 @@ export function UsersPanel() {
     if (signal?.aborted) return;
     setUsers(list.items);
     setSelf(auth.user);
+    const available = await api<MusicLibrary[]>('/libraries', { signal }).catch(() => []);
+    if (!signal?.aborted) setLibraries(available);
   }
   useEffect(() => {
     const controller = new AbortController();
-    void load(controller.signal).catch((reason) => {
-      if (!controller.signal.aborted) setError(reason.message);
-    });
-    return () => controller.abort();
+    const refresh = () => {
+      void load(controller.signal).catch((reason) => {
+        if (!controller.signal.aborted) setError(reason.message);
+      });
+    };
+    refresh();
+    window.addEventListener('wildstring:libraries-updated', refresh);
+    return () => {
+      controller.abort();
+      window.removeEventListener('wildstring:libraries-updated', refresh);
+    };
   }, []);
   async function act(work: () => Promise<unknown>, message: string) {
     setBusy(true);
@@ -278,6 +295,7 @@ export function UsersPanel() {
     try {
       await work();
       await load();
+      window.dispatchEvent(new Event('wildstring:users-updated'));
       setNotice(message);
       return true;
     } catch (reason) {
@@ -302,6 +320,7 @@ export function UsersPanel() {
               username,
               password,
               profile,
+              library_ids: libraryIds ?? defaultLibraryIds,
             }),
           }),
         '账号已创建。',
@@ -310,6 +329,7 @@ export function UsersPanel() {
       setUsername('');
       setPassword('');
       setConfirmation('');
+      setLibraryIds(null);
     }
   }
   function update(user: User, values: { profile?: Profile; enabled?: boolean }) {
@@ -352,7 +372,9 @@ export function UsersPanel() {
     <section aria-label="用户管理" className="management-users">
       <div className="management-card">
         <h2>用户管理</h2>
-        <p className="muted">共享曲库，各自收藏。管理员负责曲库、歌词和实例设置。</p>
+        <p className="muted">
+          按账号分配音乐库，角色决定可执行的操作。收藏、关注和播放进度各自保存。
+        </p>
         {error && (
           <p className="error" role="alert">
             {error}{' '}
@@ -372,17 +394,24 @@ export function UsersPanel() {
             {notice}
           </p>
         )}
-        <ul className="account-list">
+        <div className="account-list-heading" aria-hidden="true">
+          <span>账号</span>
+          <span>角色</span>
+          <span>音乐库</span>
+          <span>账号操作</span>
+        </div>
+        <ul className="account-list" aria-label="账号列表">
           {users.map((user) => (
             <li key={user.id}>
-              <div>
+              <div className="account-row-identity">
                 <strong>{user.username}</strong>
                 <small>
-                  {profileLabels[userProfile(user)]} · {user.enabled ? '已启用' : '已停用'}
+                  {user.enabled ? '已启用' : '已停用'}
                   {self?.id === user.id ? ' · 当前账号' : ''}
                 </small>
               </div>
               <select
+                className="account-row-role"
                 aria-label={`${user.username} 的角色`}
                 disabled={busy || !self || self.id === user.id}
                 value={userProfile(user)}
@@ -394,25 +423,48 @@ export function UsersPanel() {
                 <option value="owner">所有者</option>
               </select>
               <button
-                disabled={busy || !self || self.id === user.id}
-                onClick={() => update(user, { enabled: !user.enabled })}
+                className="account-row-access"
+                aria-label={`${user.username} 的库权限`}
+                title={user.profile === 'owner' ? '所有者始终可以访问全部音乐库' : undefined}
+                disabled={busy || !self || user.profile === 'owner'}
+                onClick={() => setGranting(user)}
               >
-                {user.enabled ? '停用' : '启用'} {user.username}
+                {user.profile === 'owner' ? '全部音乐库' : '库权限'}
               </button>
-              <button
-                disabled={busy || !self || self.id === user.id}
-                onClick={() => {
-                  setResetting(user);
-                  setResetPassword('');
-                  setResetConfirm('');
-                  setError('');
-                }}
-              >
-                重置密码 · {user.username}
-              </button>
+              <div className="account-row-actions">
+                <button
+                  aria-label={`${user.enabled ? '停用' : '启用'} ${user.username}`}
+                  disabled={busy || !self || self.id === user.id}
+                  onClick={() => update(user, { enabled: !user.enabled })}
+                >
+                  {user.enabled ? '停用' : '启用'}
+                </button>
+                <button
+                  aria-label={`重置密码 · ${user.username}`}
+                  disabled={busy || !self || self.id === user.id}
+                  onClick={() => {
+                    setResetting(user);
+                    setResetPassword('');
+                    setResetConfirm('');
+                    setError('');
+                  }}
+                >
+                  重置密码
+                </button>
+              </div>
             </li>
           ))}
         </ul>
+        {granting && (
+          <UserLibraryAccessDialog
+            user={granting}
+            onClose={() => setGranting(null)}
+            onSaved={() => {
+              setNotice(`${granting.username} 的库权限已保存。`);
+              setGranting(null);
+            }}
+          />
+        )}
         {resetting && (
           <form
             className="account-form reset-password-form"
@@ -487,6 +539,28 @@ export function UsersPanel() {
             <option value="owner">所有者</option>
           </select>
         </label>
+        {profile !== 'owner' && (
+          <fieldset className="music-library-options">
+            <legend>可访问音乐库</legend>
+            {libraries.map((library) => (
+              <label key={library.id} className="music-library-grant-option">
+                <input
+                  type="checkbox"
+                  checked={(libraryIds ?? defaultLibraryIds).includes(library.id)}
+                  onChange={(event) =>
+                    setLibraryIds((values) =>
+                      event.target.checked
+                        ? [...(values ?? defaultLibraryIds), library.id]
+                        : (values ?? defaultLibraryIds).filter((key) => key !== library.id),
+                    )
+                  }
+                />
+                <span>{library.name}</span>
+              </label>
+            ))}
+            <small>未勾选时只可使用个人播客关注等功能。</small>
+          </fieldset>
+        )}
         <label>
           初始密码
           <input

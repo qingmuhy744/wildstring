@@ -28,7 +28,7 @@ object ApplicationModule {
         .connectTimeout(15, TimeUnit.SECONDS).readTimeout(30, TimeUnit.SECONDS)
         .followRedirects(false).followSslRedirects(false).cache(null).build()
     @Provides @Singleton fun database(@ApplicationContext context: Context): QueueDatabase =
-        Room.databaseBuilder(context, QueueDatabase::class.java, "playback.db").build()
+        Room.databaseBuilder(context, QueueDatabase::class.java, "playback.db").addMigrations(QueueDatabase.MIGRATION_1_2).build()
     @Provides @Singleton fun images(@ApplicationContext context: Context, client: OkHttpClient): ImageLoader =
         ImageLoader.Builder(context).okHttpClient(client).diskCache(null).build()
 }

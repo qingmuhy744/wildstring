@@ -1,0 +1,1187 @@
+{
+  "info": {
+    "name": "WildString catalog access isolated checks",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Only use a disposable scripts/serve_web_tests.py fixture and the RSS simulation; never an existing user server."
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://127.0.0.1:18813"
+    }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "if(!/^http:\\/\\/127\\.0\\.0\\.1:\\d+$/.test(pm.variables.get('base_url'))) throw new Error('Disposable local server required'); if(!pm.collectionVariables.get('run_id'))pm.collectionVariables.set('run_id',String(Date.now()));"
+        ]
+      }
+    }
+  ],
+  "item": [
+    {
+      "name": "01 Owner login",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/auth/login",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"username\": \"admin\", \"password\": \"disposable-browser-test-password\"}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "02 Require disposable fixture",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/podcasts/radio-test"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+              "const safe=pm.response.code===200 && pm.response.json().podcast?.title==='午后广播测试'; pm.test('Disposable fixture required',()=>pm.expect(safe).to.eql(true)); if(!safe)pm.execution.setNextRequest(null);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "03 Owner sees newcomer defaults",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/libraries"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+              "const libs=pm.response.json(); const lib=libs.find(x=>!x.is_default); pm.expect(lib).to.exist; pm.collectionVariables.set('library',JSON.stringify(lib)); pm.test('Default library preserves newcomer access',()=>pm.expect(libs.find(x=>x.is_default).default_access).to.eql(true));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "04 Configure newcomer access",
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/libraries/{{library_id}}",
+        "body": {
+          "mode": "raw",
+          "raw": "{{library_update}}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const lib=JSON.parse(pm.collectionVariables.get('library')); pm.variables.set('library_id',lib.id); pm.variables.set('library_update',JSON.stringify({name:lib.name,source_roots:lib.sources.map(x=>x.root),version:lib.version,default_access:true}));"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+              "pm.test('Newcomer default enabled',()=>pm.expect(pm.response.json().default_access).to.eql(true));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "05 New account inherits configured defaults",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/manage/users",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"username\": \"default-check-{{run_id}}\", \"password\": \"disposable-default-check-password\"}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+              "pm.collectionVariables.set('default_user',pm.response.json().id);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "06 Verify default grants",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/libraries/access/{{default_user}}"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+              "const lib=JSON.parse(pm.collectionVariables.get('library')); pm.test('New user has opted-in library',()=>pm.expect(pm.response.json().library_ids).to.include(lib.id));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "07 Create podcast-only account",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/manage/users",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"username\": \"rss-check-{{run_id}}\", \"password\": \"disposable-rss-check-password\", \"library_ids\": []}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+              "pm.collectionVariables.set('listener_id',pm.response.json().id);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "08 Explicit empty grants override defaults",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/libraries/access/{{listener_id}}"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+              "pm.test('No music grants',()=>pm.expect(pm.response.json().library_ids).to.eql([]));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "09 Owner browses server folders",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/libraries/folders"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+              "pm.test('Only paths, no file contents',()=>pm.expect(pm.response.json().items.every(x=>x.path&&x.name)).to.eql(true));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "10 Read catalog policy",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/podcasts/catalog-settings"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+              "pm.collectionVariables.set('policy_version',pm.response.json().version);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "11 Enable ordinary additions",
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/podcasts/catalog-settings",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"version\": {{policy_version}}, \"allow_user_subscriptions\": true}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+              "pm.collectionVariables.set('policy_version',pm.response.json().version);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "12 Owner logout",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/auth/logout"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 204', () => pm.response.to.have.status(204));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "13 Listener login",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/auth/login",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"username\": \"rss-check-{{run_id}}\", \"password\": \"disposable-rss-check-password\"}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "14 Podcast account needs no music grant",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/libraries"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+              "pm.test('No music libraries exposed',()=>pm.expect(pm.response.json()).to.eql([]));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "15 Listener cannot browse server filesystem",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/libraries/folders"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 403', () => pm.response.to.have.status(403));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "16 Listener can add when enabled",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/podcasts/catalog-settings"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+              "pm.test('Personal addition is enabled',()=>pm.expect(pm.response.json().can_add).to.eql(true));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "17 Listener cannot administer switch",
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/podcasts/catalog-settings",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"version\": 1, \"allow_user_subscriptions\": false}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 403', () => pm.response.to.have.status(403));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "18 Add actual simulated RSS and follow",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/podcasts",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"feed_url\": \"http://rss.wildstring.test/feed.xml\"}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "if(pm.response.code!==200) console.log(pm.response.text());",
+              "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+              "const b=pm.response.json(); pm.collectionVariables.set('podcast_id',b.podcast.id); pm.test('Only personal follow and safe defaults',()=>{pm.expect(b.podcast.followed).to.eql(true);pm.expect(b.podcast.download_policy).to.eql('none');pm.expect(b.episodes).to.have.lengthOf(1);});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "19 Reuse RSS without another fetch",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/podcasts",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"feed_url\": \"http://rss.wildstring.test/feed.xml\"}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+              "pm.test('Same shared programme',()=>pm.expect(pm.response.json().podcast.id).to.eql(pm.collectionVariables.get('podcast_id')));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "20 Shared settings remain protected",
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/podcasts/{{podcast_id}}/settings",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"auto_update\": false}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 403', () => pm.response.to.have.status(403));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "21 Shared deletion remains protected",
+      "request": {
+        "method": "DELETE",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/podcasts/{{podcast_id}}"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 403', () => pm.response.to.have.status(403));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "22 Shared refresh remains protected",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/podcasts/refresh-all"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 403', () => pm.response.to.have.status(403));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "23 Cannot inject shared download policy",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/podcasts",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"feed_url\": \"http://rss.wildstring.test/feed.xml\", \"download_policy\": \"all\"}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 403', () => pm.response.to.have.status(403));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "24 Malformed upstream feed is rejected",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/podcasts",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"feed_url\": \"http://rss.wildstring.test/broken.xml\"}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 422', () => pm.response.to.have.status(422));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "25 Private URL remains rejected",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/podcasts",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"feed_url\": \"http://127.0.0.1/private.xml\"}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 422', () => pm.response.to.have.status(422));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "26 One shared copy, no malformed feed record",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/podcasts"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+              "pm.test('Exactly one simulated programme',()=>{const shows=pm.response.json().filter(x=>x.feed_url.startsWith('http://rss.wildstring.test/'));pm.expect(shows).to.have.lengthOf(1);});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "27 Listener logout",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/auth/logout"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 204', () => pm.response.to.have.status(204));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "28 Owner login again",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/auth/login",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"username\": \"admin\", \"password\": \"disposable-browser-test-password\"}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "29 Other users not automatically followed",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/podcasts?followed=true"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+              "pm.test('Owner follow list unchanged',()=>pm.expect(pm.response.json().map(x=>x.id)).not.to.include(pm.collectionVariables.get('podcast_id')));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "30 Read latest policy",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/podcasts/catalog-settings"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+              "pm.collectionVariables.set('policy_version',pm.response.json().version);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "31 Disable ordinary additions",
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/podcasts/catalog-settings",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"version\": {{policy_version}}, \"allow_user_subscriptions\": false}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "32 Owner logout again",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/auth/logout"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 204', () => pm.response.to.have.status(204));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "33 Listener login after switch",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/auth/login",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"username\": \"rss-check-{{run_id}}\", \"password\": \"disposable-rss-check-password\"}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', () => pm.response.to.have.status(200));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "34 Disabled addition enforced by server",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/podcasts",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"feed_url\": \"http://rss.wildstring.test/feed.xml\"}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 403', () => pm.response.to.have.status(403));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "35 Existing personal follow retained",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/podcasts?followed=true"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+              "pm.test('Disabling additions preserves personal follow',()=>pm.expect(pm.response.json().map(x=>x.id)).to.include(pm.collectionVariables.get('podcast_id')));"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

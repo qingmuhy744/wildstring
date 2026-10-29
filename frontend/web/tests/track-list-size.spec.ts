@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { audio, login } from './helpers';
 
-const KEY = 'wildstring:track-list-size';
+const KEY = 'wildstring:user-preferences:admin:wildstring:track-list-size';
 async function settings(page: Page) {
   const navigation = page.getByLabel('浏览方式', { exact: true });
   if (await navigation.isVisible()) await navigation.selectOption('account');

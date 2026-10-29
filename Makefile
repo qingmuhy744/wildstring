@@ -17,6 +17,7 @@ export PRE_COMMIT_HOME ?= $(CURDIR)/.cache/pre-commit
 RUN = $(UV) run --frozen --project backend --extra community-sources
 ANDROID = ./frontend/android/gradlew -p frontend/android --console=plain
 ANDROID_TEST_ARGS ?=
+DEV_WEB_HOST ?= 127.0.0.1
 DOCKER = $(COMPOSE) --project-directory "$(CURDIR)" --env-file .env -p "$(PROJECT)" -f deploy/compose.yaml
 
 .PHONY: help env setup sync dev dev-web android-design scan import-music admin check hooks-check lint format format-check security test build-web icons browser-install test-web test-large-web test-browse-web test-transcoding-web web-test-server ci health docker-config docker-build docker-up docker-pull docker-down docker-status docker-logs docker-smoke docker-scan docker-import docker-admin docker-test fingerprint-check
@@ -48,7 +49,7 @@ dev: env ## Run the Python API at 127.0.0.1:18780 with reload
 	$(RUN) python -m wildstring
 
 dev-web: ## Run React at 127.0.0.1:18781 with an API proxy
-	npm --prefix frontend/web run dev
+	npm --prefix frontend/web run dev -- --host "$(DEV_WEB_HOST)"
 
 android-design: ## Preview the Android design at http://127.0.0.1:18782/android-v1.html
 	$(RUN) python -m http.server 18782 --bind 127.0.0.1 --directory docs/design
@@ -147,6 +148,27 @@ browser-install: ## Install Chromium for the Web integration tests
 test-web: build-web ## Test login, search, playback and mobile UI with an isolated fixture library
 	npm --prefix frontend/web run test
 
+.PHONY: test-podcast-web
+.PHONY: test-podcast-publishers test-publisher-web
+test-podcast-publishers: ## Verify shared podcast publisher assignments and account isolation
+	$(RUN) pytest -c backend/pyproject.toml backend/tests/test_podcast_publishers.py backend/tests/test_podcasts.py backend/tests/test_podcast_progress.py
+
+test-publisher-web: build-web ## Verify publisher confirmation, correction and browsing on desktop/mobile
+	WILDSTRING_TEST_PODCAST=1 WILDSTRING_TEST_PUBLISHERS=1 npm --prefix frontend/web run test -- podcast-publishers.spec.ts
+
+.PHONY: test-storage test-multiple-libraries test-libraries-web
+test-storage: ## Verify safe managed-directory migrations and personal podcast resource collection
+	$(RUN) pytest -c backend/pyproject.toml backend/tests/test_storage_resources.py
+
+test-multiple-libraries: ## Verify grants, cross-library playlists, personal follows and shared cache retention
+	$(RUN) pytest -c backend/pyproject.toml backend/tests/test_multiple_libraries.py backend/tests/test_storage_resources.py backend/tests/test_podcast_follows.py backend/tests/test_podcast_progress.py backend/tests/test_podcast_user_settings.py
+
+test-libraries-web: build-web ## Verify library selection, owner configuration, grants and personal podcast follows
+	WILDSTRING_TEST_LIBRARIES=1 WILDSTRING_TEST_PODCAST=1 npm --prefix frontend/web run test -- music-libraries.spec.ts
+
+test-podcast-web: build-web ## Verify the day/night radio, podcast continuation and saved progress locally
+	WILDSTRING_TEST_PODCAST=1 npm --prefix frontend/web run test -- podcast-continuation.spec.ts podcast-player.spec.ts podcast-progress.spec.ts personal-settings.spec.ts
+
 test-large-web: build-web ## Verify real API pagination and continuous playback with 257 album tracks
 	WILDSTRING_TEST_LARGE_LIBRARY=1 npm --prefix frontend/web run test -- multipage-real.spec.ts
 
@@ -167,7 +189,7 @@ dependency-audit: ## Audit complete Web and provider npm lockfiles, including bu
 	npm --prefix frontend/web audit --audit-level=low
 	npm --prefix plugins/node-runtime audit --audit-level=low
 
-ci: check source-plugins dependency-audit test test-web test-large-web test-browse-web test-catalog-web test-transcoding-web ## Run checks, backend tests, Web build and browser tests (install Chromium first)
+ci: check source-plugins dependency-audit test test-web test-podcast-web test-publisher-web test-libraries-web test-large-web test-browse-web test-catalog-web test-transcoding-web ## Run checks, backend tests, Web build and browser tests (install Chromium first)
 	$(UV) lock --check --project backend
 
 health: ## Check the locally configured API readiness

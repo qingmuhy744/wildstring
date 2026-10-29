@@ -504,7 +504,6 @@ class Providers:
                 scope is None and len(rows) != len(ids)
             ):
                 raise HTTPException(404, "track_not_found")
-            before = connection.total_changes
             clock = time.time()
             existing_active = connection.execute(
                 "SELECT id,track_id,metadata_version,status,refresh_mode,force FROM provider_jobs "
@@ -512,14 +511,14 @@ class Providers:
                 "(SELECT value FROM json_each(?))",
                 (json.dumps([row["id"] for row in rows]),),
             ).fetchall()
-            connection.executemany(
+            inserted = connection.executemany(
                 "INSERT OR IGNORE INTO provider_jobs(id,track_id,metadata_version,status,created_at,updated_at,refresh_mode,force) VALUES (?,?,?,'queued',?,?,?,?)",
                 [
                     (uuid4().hex, row["id"], row["version"], clock, clock, mode, force)
                     for row in rows
                 ],
             )
-            added = connection.total_changes - before
+            added = inserted.rowcount
             upgraded = 0
             intents = 0
             # A force refresh must also affect a job that is already queued.  A
@@ -819,10 +818,24 @@ class Providers:
         return [value["id"] for value in self.sources.catalog()] + self.settings()["priority"]
 
     def process_job(self, job):
+        from wildstring.library.scope import library_job_scope
+
+        try:
+            with library_job_scope(
+                self.database, "provider_jobs", job["id"], job["track_id"], "metadata:write"
+            ):
+                return self.process_scoped_job(job)
+        except HTTPException as error:
+            raise ProviderError(str(error.detail), False) from error
+
+    def process_scoped_job(self, job):
         track = self.repository.track(job["track_id"])
         if track is None:
             raise ProviderError("track_not_found", False)
         suggestions, warnings = self.suggestions(track, force=bool(job["force"]))
+        from wildstring.library.scope import require_current_library
+
+        require_current_library(self.database, "metadata:write")
         input_snapshot = lookup_snapshot(track)
         input_fingerprint = lookup_fingerprint(snapshot=input_snapshot)
         manual = MetadataEditor(self.repository).read(job["track_id"])["overrides"]

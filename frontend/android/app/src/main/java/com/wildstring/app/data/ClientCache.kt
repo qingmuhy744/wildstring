@@ -88,11 +88,12 @@ class ClientCache @Inject constructor(@ApplicationContext context: Context, priv
 
 }
 
-/** Covers use the same authenticated client; no cookie, login or error response is persisted. */
-class CoverCacheInterceptor(private val cache: ClientCache, private val session: SessionStore) : Interceptor {
+/** Bounded per-account artwork cache; public podcast images use a separate cookie-free client. */
+class CoverCacheInterceptor(private val cache: ClientCache, private val session: SessionStore,
+    private val accepts: (okhttp3.Request) -> Boolean = { it.url.encodedPath.endsWith("/cover") }) : Interceptor {
     override fun intercept(chain: Interceptor.Chain): Response {
         val request = chain.request()
-        if (request.method != "GET" || !request.url.encodedPath.endsWith("/cover")) return chain.proceed(request)
+        if (request.method != "GET" || !accepts(request)) return chain.proceed(request)
         val profile = session.cacheScope()
         val saved = cache.read(request.url.toString(), cover = true)
         fun cached(): Response = Response.Builder().request(request).protocol(okhttp3.Protocol.HTTP_1_1).code(200).message("Private cover cache")

@@ -27,12 +27,12 @@ internal data class Atmosphere(val image: ImageBitmap, val tint: Color)
 @Composable internal fun artworkAtmosphere(vm: MusicViewModel, track: Track): Atmosphere? {
     val context = LocalContext.current
     val profile by vm.repository.session.profiles.collectAsStateWithLifecycle()
-    val atmosphere by produceState<Atmosphere?>(null, track.id, track.hasCover, profile) {
+    val atmosphere by produceState<Atmosphere?>(null, track.id, track.hasCover, track.podcast?.coverUrl, profile) {
         value = null
         if (!track.hasCover || profile == null) return@produceState
         try {
-            val result = vm.imageLoader.execute(ImageRequest.Builder(context).data(vm.repository.cover(track.id))
-                .memoryCacheKey("$profile:atmosphere:${track.id}").size(96).allowHardware(false).build())
+            val result = vm.coverLoader(track.id).execute(ImageRequest.Builder(context).data(vm.repository.cover(track.id))
+                .memoryCacheKey("$profile:atmosphere:${vm.repository.cover(track.id)}").size(96).allowHardware(false).build())
             if (result is SuccessResult) value = withContext(Dispatchers.Default) {
                 val original = (result.drawable as? BitmapDrawable)?.bitmap ?: result.drawable.toBitmap(96, 96)
                 val small = Bitmap.createScaledBitmap(original, 64, 64, true)

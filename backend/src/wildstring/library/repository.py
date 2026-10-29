@@ -12,6 +12,7 @@ from wildstring.library.artists import ARTIST_CREDITS, ARTIST_SUMMARY, configure
 from wildstring.library.browsing import BROWSE_KEYS, BrowseKind, configure_browse_queries
 from wildstring.library.edits import observe
 from wildstring.library.metadata import Metadata, normalize
+from wildstring.library.scope import current_library
 from wildstring.library.sorting import album_order, track_order
 
 COUNTERS = ("visited", "added", "updated", "unchanged", "errors", "missing", "skipped")
@@ -19,7 +20,7 @@ COUNTERS = ("visited", "added", "updated", "unchanged", "errors", "missing", "sk
 # Reuse each selection for both the paginated rows and the global letter index.
 # This keeps literal search, contributor roles, availability and library scope equal.
 TRACK_SELECTION = """SELECT * FROM personal_tracks
-    WHERE library_id = :library_id AND status = 'available'
+    WHERE library_selected(library_id, :library_id) AND status = 'available'
     AND (:query = '' OR search_text LIKE :pattern ESCAPE '\\')
     AND (:album_id IS NULL OR album_id = :album_id)
     AND (:played_only = 0 OR last_played_at IS NOT NULL)
@@ -34,7 +35,7 @@ ALBUM_SELECTION = """SELECT album_id AS id,
         THEN browse_sort(json_extract(album_artists, '$[0]')) END),
         min(browse_sort(COALESCE(json_extract(artists, '$[0]'), '')))) AS sort_artist
     FROM tracks
-    WHERE library_id = :library_id AND status = 'available'
+    WHERE library_selected(library_id, :library_id) AND status = 'available'
     AND (:artist_id IS NULL OR id IN
         (SELECT track_id FROM artist_credits WHERE artist_id = :artist_id))
     GROUP BY album_id
@@ -51,26 +52,92 @@ def now() -> str:
 
 
 class LibraryRepository:
-    def __init__(self, database: Database, root: Path):
+    def __init__(self, database: Database, root: Path, *, fixed=False):
         self.database = database
-        self.root = root
+        self._root = root
+        self.fixed = fixed
         self._library_id: str | None = None
 
+    @property
+    def root(self):
+        if not self.fixed and self.database.path.is_file():
+            identity = self.library_id()
+            with self.database.connect() as db:
+                row = db.execute("SELECT root FROM libraries WHERE id=?", (identity,)).fetchone()
+                if row:
+                    return Path(row[0])
+        return self._root
+
     def for_user(self, user_id: str):
-        return LibraryRepository(Database(self.database.path.parent, user_id), self.root)
+        return LibraryRepository(
+            Database(self.database.path.parent, user_id), self._root, fixed=self.fixed
+        )
+
+    def for_track(self, track_id):
+        from fastapi import HTTPException
+
+        with self.database.connect() as db:
+            row = db.execute(
+                "SELECT l.root FROM tracks t JOIN libraries l ON l.id=t.library_id "
+                "WHERE t.id=? AND library_visible(l.id)",
+                (track_id,),
+            ).fetchone()
+            if row is None:
+                raise HTTPException(404, "track_not_found")
+        return LibraryRepository(self.database, Path(row[0]), fixed=True)
+
+    def default_library_id(self):
+        with self.database.connect() as db:
+            row = db.execute(
+                "SELECT id FROM libraries ORDER BY is_default DESC,(root=?) DESC,id LIMIT 1",
+                (str(self._root),),
+            ).fetchone()
+        return row[0] if row else self.library_id(create=True)
 
     def library_id(self, *, create: bool = False) -> str | None:
+        context = current_library.get()
+        if not self.fixed and context:
+            from fastapi import HTTPException
+
+            from wildstring.library.scope import allowed_ids
+
+            with self.database.connect() as db:
+                visible = allowed_ids(db, context.user_id)
+                from wildstring.library.scope import library_for_root
+
+                original = library_for_root(db, self._root)
+            identity = context.library_id or (
+                original[0]
+                if original and original[0] in visible
+                else min(visible)
+                if visible
+                else None
+            )
+            if identity not in visible:
+                if create:
+                    raise HTTPException(403, "library_access_required")
+                return None
+            return identity
         if self._library_id is not None:
             return self._library_id
         with self.database.connect(write=create) as connection:
-            if create:
+            from wildstring.library.scope import library_for_root
+
+            row = (
+                library_for_root(connection, self._root)
+                if not self.fixed
+                else connection.execute(
+                    "SELECT id FROM libraries WHERE root=?", (str(self._root),)
+                ).fetchone()
+            )
+            if create and row is None:
                 connection.execute(
                     "INSERT OR IGNORE INTO libraries(id, root) VALUES (?, ?)",
-                    (uuid4().hex, str(self.root)),
+                    (uuid4().hex, str(self._root)),
                 )
-            row = connection.execute(
-                "SELECT id FROM libraries WHERE root = ?", (str(self.root),)
-            ).fetchone()
+                row = connection.execute(
+                    "SELECT id FROM libraries WHERE root=?", (str(self._root),)
+                ).fetchone()
             self._library_id = row[0] if row else None
             return self._library_id
 
@@ -80,8 +147,8 @@ class LibraryRepository:
         with self.database.connect(write=True) as connection:
             # Caller owns the process lock, so leftover running rows cannot have a live scanner.
             connection.execute(
-                "UPDATE scan_runs SET status = 'interrupted', finished_at = ? WHERE status = 'running'",
-                (now(),),
+                "UPDATE scan_runs SET status = 'interrupted', finished_at = ? WHERE status = 'running' AND library_id=?",
+                (now(), library_id),
             )
             connection.execute(
                 "INSERT INTO scan_runs VALUES (?, ?, 'running', ?, NULL, ?)",
@@ -186,7 +253,7 @@ class LibraryRepository:
         from wildstring.library.tag_fields import DETAIL_DEFAULTS
 
         result.update(DETAIL_DEFAULTS | json.loads(result.pop("extra", "{}")))
-        for key in ("library_id", "seen_run", "search_text", "mtime_ns"):
+        for key in ("seen_run", "search_text", "mtime_ns"):
             result.pop(key)
         for key in ("artists", "album_artists"):
             result[key] = json.loads(result[key])
@@ -267,16 +334,17 @@ class LibraryRepository:
     def track(self, track_id: str) -> dict | None:
         with self.database.connect() as connection:
             row = connection.execute(
-                "SELECT * FROM personal_tracks WHERE library_id = ? AND id = ?",
-                (self.library_id(), track_id),
+                "SELECT * FROM personal_tracks WHERE library_visible(library_id) AND id = ?",
+                (track_id,),
             ).fetchone()
         return self.public_track(dict(row)) if row else None
 
     def source(self, track_id: str) -> dict | None:
         with self.database.connect() as connection:
             row = connection.execute(
-                "SELECT path, format, size_bytes, mtime_ns, status FROM tracks WHERE library_id = ? AND id = ?",
-                (self.library_id(), track_id),
+                "SELECT t.path,t.format,t.size_bytes,t.mtime_ns,t.status,t.library_id,l.root AS library_root "
+                "FROM tracks t JOIN libraries l ON l.id=t.library_id WHERE library_visible(t.library_id) AND t.id=?",
+                (track_id,),
             ).fetchone()
         return dict(row) if row else None
 
@@ -284,10 +352,10 @@ class LibraryRepository:
         result = dict(row)
         result.pop("sort_artist", None)
         members = connection.execute(
-            """SELECT id, artists, album_artists FROM tracks
-            WHERE library_id = ? AND album_id = ? AND status = 'available'
+            """SELECT id, artists, album_artists,library_id FROM tracks
+            WHERE library_visible(library_id) AND album_id = ? AND status = 'available'
             ORDER BY has_cover DESC, COALESCE(disc_number, 1), COALESCE(track_number, 2147483647), title, id""",
-            (self.library_id(), result["id"]),
+            (result["id"],),
         ).fetchall()
         explicit = next(
             (
@@ -301,6 +369,7 @@ class LibraryRepository:
             dict.fromkeys(artist for member in members for artist in json.loads(member["artists"]))
         )
         result["cover_track_id"] = members[0]["id"]
+        result["library_id"] = members[0]["library_id"]
         return result
 
     def albums(
@@ -449,8 +518,8 @@ class LibraryRepository:
             row = connection.execute(
                 """SELECT album_id AS id, min(COALESCE(NULLIF(album, ''), '未命名专辑')) AS title,
                 count(*) AS track_count, sum(duration_ms) AS duration_ms FROM tracks
-                WHERE library_id = ? AND album_id = ? AND status = 'available' GROUP BY album_id""",
-                (self.library_id(), album_id),
+                WHERE library_visible(library_id) AND album_id = ? AND status = 'available' GROUP BY album_id""",
+                (album_id,),
             ).fetchone()
             return self._album(connection, row) if row else None
 
@@ -479,11 +548,22 @@ class LibraryRepository:
             ).fetchall()
         return [self.scan(row[0]) for row in ids]
 
-    def imports(self, limit: int = 20) -> list[dict]:
+    def imports(self, limit: int = 20, *, global_history: bool = False) -> list[dict]:
         with self.database.connect() as connection:
-            rows = connection.execute(
-                "SELECT * FROM import_runs ORDER BY started_at DESC LIMIT ?", (limit,)
-            ).fetchall()
+            if global_history:
+                rows = connection.execute(
+                    "SELECT * FROM import_runs ORDER BY started_at DESC LIMIT ?", (limit,)
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    """SELECT r.* FROM import_runs r
+                    WHERE EXISTS(
+                        SELECT 1 FROM admin_jobs j
+                        WHERE j.import_id=r.id AND j.library_id=?
+                    )
+                    ORDER BY r.started_at DESC LIMIT ?""",
+                    (self.library_id(), limit),
+                ).fetchall()
         result = []
         for row in rows:
             item = dict(row)

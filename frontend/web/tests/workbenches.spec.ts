@@ -99,6 +99,7 @@ test('管理员建号和重置、普通用户权限与自行改密', async ({ pa
   const username = `listener-${info.project.name}`;
   const create = page.getByRole('form', { name: '创建账号', exact: true });
   await create.getByLabel('用户名', { exact: true }).fill(username);
+  await create.getByRole('checkbox').first().check();
   await create.getByLabel('初始密码', { exact: true }).fill('first-test-password');
   await create.getByLabel('确认初始密码', { exact: true }).fill('first-test-password');
   await create.getByRole('button', { name: '创建账号', exact: true }).click();

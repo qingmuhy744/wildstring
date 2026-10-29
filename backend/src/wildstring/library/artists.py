@@ -9,7 +9,7 @@ from wildstring.library.metadata import normalize
 ARTIST_CREDITS = """WITH artist_credits AS (
     SELECT DISTINCT t.id AS track_id, p.id AS artist_id, p.name
     FROM track_credits c JOIN tracks t ON t.id=c.track_id JOIN people p ON p.id=c.person_id
-    WHERE t.library_id = :library_id AND t.status = 'available'
+    WHERE library_selected(t.library_id, :library_id) AND t.status = 'available'
     AND (credit_role() IS NULL OR c.role=credit_role())
 )
 """

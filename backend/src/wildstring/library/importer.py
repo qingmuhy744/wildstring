@@ -90,6 +90,9 @@ class MusicImporter:
             )
 
     def import_track(self, relative: Path, *, metadata=None):
+        from wildstring.library.scope import require_current_library
+
+        require_current_library(self.database, "library:import")
         with open_source(self.settings.music_dir, relative) as source:
             before = os.fstat(source.fileno())
             previous = self.manifest(relative)
@@ -160,7 +163,9 @@ class MusicImporter:
 
     def import_sidecars(self, relative: Path, target: Path):
         # Reuse the same exact-name rules as playback. No fuzzy lyric matching.
-        source_assets = TrackAssets(LibraryRepository(self.database, self.settings.music_dir))
+        source_assets = TrackAssets(
+            LibraryRepository(self.database, self.settings.music_dir, fixed=True)
+        )
         candidates = list(
             source_assets.candidates(relative, [relative.stem], (".lrc", ".lryc", ".txt"))
         )
@@ -195,16 +200,29 @@ class MusicImporter:
         # Preserve IDs from the earlier direct-source catalog while moving each imported path.
         with self.database.connect(write=True) as connection:
             old = connection.execute(
-                "SELECT id FROM libraries WHERE root=?", (str(self.settings.music_dir),)
+                "SELECT id,enabled FROM libraries WHERE root=?", (str(self.settings.music_dir),)
             ).fetchone()
             if old is None:
                 return
             connection.execute(
-                "INSERT OR IGNORE INTO libraries VALUES (?,?)", (uuid4().hex, str(self.root))
+                "INSERT OR IGNORE INTO libraries(id,root) VALUES (?,?)",
+                (uuid4().hex, str(self.root)),
             )
             new = connection.execute(
                 "SELECT id FROM libraries WHERE root=?", (str(self.root),)
             ).fetchone()[0]
+            if old[0] != new and old["enabled"]:
+                connection.execute(
+                    "INSERT OR IGNORE INTO user_library_access SELECT user_id,? FROM user_library_access WHERE library_id=?",
+                    (new, old[0]),
+                )
+                connection.execute("DELETE FROM user_library_access WHERE library_id=?", (old[0],))
+                connection.execute("UPDATE libraries SET enabled=0 WHERE id=?", (old[0],))
+                connection.execute(
+                    "UPDATE libraries SET is_default=1 WHERE id=? AND EXISTS(SELECT 1 FROM libraries WHERE id=? AND is_default=1)",
+                    (new, old[0]),
+                )
+                connection.execute("UPDATE libraries SET is_default=0 WHERE id=?", (old[0],))
             rows = connection.execute(
                 """SELECT t.id, t.album, t.album_artists, i.target_path FROM tracks t
                 JOIN imported_files i ON i.source_path=t.path
@@ -345,11 +363,14 @@ def import_music(
     relative_root=None,
 ):
     settings.data_dir.mkdir(parents=True, exist_ok=True)
-    settings.library_dir.mkdir(parents=True, exist_ok=True)
     try:
         with FileLock(settings.data_dir / "library-scan.lock", timeout=0):
             database = Database(settings.data_dir)
             database.initialize()
+            from wildstring.library.scope import scoped_settings
+
+            settings = scoped_settings(settings, database)
+            settings.library_dir.mkdir(parents=True, exist_ok=True)
             return MusicImporter(settings, database).run(
                 full=full,
                 on_import=on_import,

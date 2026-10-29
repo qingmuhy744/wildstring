@@ -1,3 +1,4 @@
+import { readPreference, writePreference } from './user-preferences';
 import { useEffect } from 'react';
 import { api, ApiError, type Playlist, type TrackPage } from './api';
 import { activeOfflineUserId, automaticDownloadNetworkAllowed, saveDownloads } from './offline';
@@ -22,10 +23,10 @@ export function followPlaylist(userId: string, id: string, enabled: boolean) {
   window.dispatchEvent(new Event(event));
 }
 export function allowMeteredDownloads() {
-  return localStorage.getItem('wildstring:download-any-network') === 'true';
+  return readPreference('wildstring:download-any-network') === 'true';
 }
 export function setAllowMeteredDownloads(enabled: boolean) {
-  localStorage.setItem('wildstring:download-any-network', String(enabled));
+  writePreference('wildstring:download-any-network', String(enabled));
   window.dispatchEvent(new Event(event));
 }
 export async function allDownloadPlaylists(): Promise<Playlist[]> {

@@ -1,4 +1,7 @@
+import { readPreference, writePreference } from './user-preferences';
 import { CatalogSortControl, useCatalogSorting } from './catalog-sort';
+import { bindLibraryUser, selectedLibrary } from './library-context';
+import { LibrarySwitcher } from './music-libraries';
 import {
   Suspense,
   lazy,
@@ -37,6 +40,7 @@ import { PlaylistMenu } from './playlist-menu';
 import { AlbumEditor } from './album-editor';
 import { AlbumMenu } from './album-menu';
 import { PlaybackSync } from './playback-sync';
+import { PodcastProgressDialog } from './podcast-progress-dialog';
 import { QueuePanel } from './queue-panel';
 import { Management } from './management';
 import { MetadataEditor } from './metadata-editor';
@@ -177,6 +181,7 @@ type CatalogLocation = {
 };
 
 export function Library({ onLogout, user }: { onLogout: () => Promise<void>; user: User }) {
+  bindLibraryUser(user.id);
   const [currentUser, setCurrentUser] = useState(user);
   const profile = currentUser.profile;
   const canManage = profile !== 'listener';
@@ -189,7 +194,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
   }
   const [view, setView] = useState<View>(() => {
     try {
-      const saved = localStorage.getItem('wildstring:active_view');
+      const saved = readPreference('wildstring:active_view');
       if (saved && Object.hasOwn(labels, saved)) {
         return saved as View;
       }
@@ -246,12 +251,42 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
     [],
   );
   const [manageOpen, setManageOpen] = useState(false);
+  const [managementTab, setManagementTab] =
+    useState<import('./management').ManagementTab>('overview');
   const [editingTrack, setEditingTrack] = useState<Track | null>(null);
   const [metadataRefresh, setMetadataRefresh] = useState<RefreshTarget | null>(null);
   useEffect(() => {
     if (manageOpen) window.scrollTo({ top: 0 });
   }, [manageOpen]);
   const refreshLibrary = useCallback(() => setRevision((value) => value + 1), []);
+  useEffect(() => {
+    const changed = () => {
+      if (!manageOpen) switchView(view);
+      refreshLibrary();
+    };
+    const accessChanged = () => {
+      albumRequest.current?.abort();
+      collectionRequest.current?.abort();
+      setEditingTrack(null);
+      setEditingAlbum(null);
+      setViewingFileTrack(null);
+      setMetadataRefresh(null);
+      setEditor(null);
+      setAlbumMenu(null);
+      setPlaylistMenu(null);
+      setLyricScanAlbum(null);
+      setLyricScanBatch(null);
+      setSelectedAgentItem(null);
+      if (profile !== 'owner') switchView('tracks');
+      refreshLibrary();
+    };
+    window.addEventListener('wildstring:library-access-changed', accessChanged);
+    window.addEventListener('wildstring:library-changed', changed);
+    return () => {
+      window.removeEventListener('wildstring:library-access-changed', accessChanged);
+      window.removeEventListener('wildstring:library-changed', changed);
+    };
+  }, [refreshLibrary, view, manageOpen, profile]);
   const [album, setAlbum] = useState<Album | null>(null);
   const [albumLoading, setAlbumLoading] = useState(false);
   const [lyricScanAlbum, setLyricScanAlbum] = useState<string | null>(null);
@@ -619,7 +654,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
   function switchView(target: View, resetHistory = true) {
     if (!Object.hasOwn(labels, target)) return;
     try {
-      localStorage.setItem('wildstring:active_view', target);
+      writePreference('wildstring:active_view', target);
     } catch {
       // 忽略
     }
@@ -1067,6 +1102,13 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
         </aside>
         {manageOpen && (
           <Management
+            key={
+              ['settings', 'users', 'diagnostics'].includes(managementTab)
+                ? 'instance-management'
+                : selectedLibrary()
+            }
+            initialTab={managementTab}
+            onTabChanged={setManagementTab}
             revision={revision}
             onBack={() => {
               setManageOpen(false);
@@ -1081,9 +1123,8 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
           />
         )}
         <main className={`library ${album ? 'is-album' : ''}`} hidden={manageOpen}>
-          <header className="topbar">
+          <header className={`topbar ${specialView ? 'topbar-context' : ''}`}>
             <div>
-              <span className="eyebrow">YOUR OWN COLLECTION</span>
               <span className="mobile-brand">野弦 / WILDSTRING</span>
               <button className="mobile-logout text-button" onClick={logout}>
                 退出登录
@@ -1110,34 +1151,37 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
               <option value="account">账号设置</option>
             </select>
             <div className="topbar-actions">
-              <form className="search" onSubmit={search} role="search" autoComplete="off">
-                <label className="sr-only" htmlFor="search">
-                  搜索曲库
-                </label>
-                <span aria-hidden="true">⌕</span>
-                <input
-                  id="search"
-                  type="search"
-                  name="wildstring-library-query"
-                  autoComplete="off"
-                  spellCheck={false}
-                  placeholder={
-                    artistGrid
-                      ? '搜索艺人、乐队'
-                      : playlistGrid
-                        ? '搜索歌单'
-                        : selectedArtist
-                          ? `搜索 ${selectedArtist.name} 的歌曲、专辑`
-                          : '搜索歌曲、艺人、专辑'
-                  }
-                  maxLength={256}
-                  value={draft}
-                  onChange={(event) => setDraft(event.target.value)}
-                />
-                <button type="submit" aria-label="搜索">
-                  ↵
-                </button>
-              </form>
+              <LibrarySwitcher onChanged={refreshLibrary} visible={!specialView} />
+              {!specialView && (
+                <form className="search" onSubmit={search} role="search" autoComplete="off">
+                  <label className="sr-only" htmlFor="search">
+                    搜索曲库
+                  </label>
+                  <span aria-hidden="true">⌕</span>
+                  <input
+                    id="search"
+                    type="search"
+                    name="wildstring-library-query"
+                    autoComplete="off"
+                    spellCheck={false}
+                    placeholder={
+                      artistGrid
+                        ? '搜索艺人、乐队'
+                        : playlistGrid
+                          ? '搜索歌单'
+                          : selectedArtist
+                            ? `搜索 ${selectedArtist.name} 的歌曲、专辑`
+                            : '搜索歌曲、艺人、专辑'
+                    }
+                    maxLength={256}
+                    value={draft}
+                    onChange={(event) => setDraft(event.target.value)}
+                  />
+                  <button type="submit" aria-label="搜索">
+                    ↵
+                  </button>
+                </form>
+              )}
               <button
                 className={`notification-entry icon-button ${view === 'notifications' ? 'selected' : ''}`}
                 aria-label="通知中心"
@@ -1175,6 +1219,15 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
           >
             {view === 'podcasts' && (
               <PodcastsPage
+                userId={currentUser.id}
+                canEditPublishers={canManage}
+                canManageSources={canImport}
+                canManageResources={currentUser.profile === 'owner'}
+                onQueueTrack={(track, next) => {
+                  if (next) player.playNext(track);
+                  else if (!player.current) player.start([track], 0, undefined, false);
+                  else player.enqueue(track);
+                }}
                 onPlayTrack={(track) => {
                   player.start([track], 0);
                   setNotice(`正在播放播客《${track.title}》`);
@@ -1230,20 +1283,30 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
                           : '返回歌单'}
                   </button>
                 )}
-                <p className="eyebrow">
-                  LIBRARY /{' '}
-                  {album
-                    ? 'ALBUM'
-                    : selectedArtist
-                      ? 'ARTIST'
-                      : activePlaylist
-                        ? activePlaylist.kind === 'smart'
-                          ? 'SMART PLAYLIST'
-                          : 'PLAYLIST'
-                        : query
-                          ? 'SEARCH'
-                          : view.toUpperCase()}
-                </p>
+                {!specialView && (
+                  <p className="eyebrow collection-eyebrow">
+                    <span className="eyebrow-tagline">YOUR OWN COLLECTION</span>
+                    <span className="eyebrow-sep" aria-hidden="true">
+                      ·
+                    </span>
+                    <span className="eyebrow-crumb">
+                      曲库 /{' '}
+                      {album
+                        ? '专辑'
+                        : selectedArtist
+                          ? '艺人'
+                          : activePlaylist
+                            ? activePlaylist.kind === 'smart'
+                              ? '智能歌单'
+                              : '歌单'
+                            : query
+                              ? '搜索'
+                              : view === 'tracks'
+                                ? '歌曲'
+                                : labels[view]}
+                    </span>
+                  </p>
+                )}
                 <h1>{title}</h1>
                 <p className="muted">{subtitle}</p>
               </div>
@@ -1795,6 +1858,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
         <MetadataRefreshDialog target={metadataRefresh} onClose={() => setMetadataRefresh(null)} />
       )}
       <PlaybackSync player={player} userId={currentUser.id} />
+      <PodcastProgressDialog player={player} />
       {playlistMenu && (
         <PlaylistMenu
           playlist={playlistMenu.item}

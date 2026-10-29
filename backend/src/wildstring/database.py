@@ -9,7 +9,7 @@ from pathlib import Path
 from wildstring.library.albums import album_key
 from wildstring.provider_schema import SCHEMA as PROVIDER_SCHEMA
 
-SCHEMA_VERSION = 32
+SCHEMA_VERSION = 42
 PODCAST_SCHEMA = """
 BEGIN IMMEDIATE;
 CREATE TABLE IF NOT EXISTS podcasts (
@@ -362,8 +362,17 @@ class Database:
         )
         connection.row_factory = sqlite3.Row
         connection.create_function("active_user", 0, lambda: self.user_id)
+        connection.create_function("active_library", 0, lambda: None)
+        connection.create_function("library_visible", 1, lambda identity: 1)
+        connection.create_function(
+            "library_selected", 2, lambda identity, fallback: int(identity == fallback)
+        )
         try:
             connection.execute("PRAGMA foreign_keys = ON")
+            from wildstring.library.scope import configure_scope
+
+            if connection.execute("PRAGMA user_version").fetchone()[0] >= 36:
+                configure_scope(connection, self.user_id)
             if not write:
                 connection.execute("BEGIN")
             yield connection
@@ -584,6 +593,48 @@ class Database:
                 connection.commit()
             if current < 32:
                 connection.executescript(PODCAST_SCHEMA)
+            if current < 33:
+                from wildstring.podcast_playback_schema import SCHEMA as PODCAST_PLAYBACK_SCHEMA
+
+                connection.executescript(PODCAST_PLAYBACK_SCHEMA)
+            if current < 34:
+                from wildstring.podcast_progress import SCHEMA as PODCAST_PROGRESS_SCHEMA
+
+                connection.executescript(PODCAST_PROGRESS_SCHEMA)
+            if current < 35:
+                from wildstring.podcast_publishers import migrate as migrate_publishers
+
+                migrate_publishers(connection)
+            if current < 36:
+                from wildstring.library.catalog_schema import migrate as migrate_libraries
+
+                migrate_libraries(connection)
+            if current < 37:
+                from wildstring.storage_schema import migrate as migrate_storage
+
+                migrate_storage(connection)
+            if current < 38:
+                from wildstring.catalog_policy_schema import migrate as migrate_catalog_policy
+
+                migrate_catalog_policy(connection)
+            if current < 39:
+                from wildstring.standard_audio_cleanup_schema import (
+                    migrate as migrate_audio_cleanup,
+                )
+
+                migrate_audio_cleanup(connection)
+            if current < 40:
+                from wildstring.podcast_user_schema import migrate as migrate_podcast_users
+
+                migrate_podcast_users(connection)
+            if current < 41:
+                from wildstring.podcast_playback_schema import CACHE_SCHEMA
+
+                connection.executescript(CACHE_SCHEMA)
+            if current < 42:
+                from wildstring.login_guard_schema import migrate as migrate_login_guards
+
+                migrate_login_guards(connection)
             connection.execute("PRAGMA journal_mode = WAL")
 
     def check_ready(self) -> bool:

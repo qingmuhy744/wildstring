@@ -80,7 +80,7 @@ internal fun FeatureDialog(vm: MusicViewModel, route: String, track: Track? = nu
                     when (route) {
                         "assistant" -> AgentWorkspace(vm, "chat", onOpenAction)
                         "notifications" -> SimpleNotificationsSheet(vm, onOpenAction)
-                        "connections" -> AgentConnections(vm)
+                        "connections", "management", "source-plugins", "lyric-scans" -> Text("此项服务端管理请在网页端进行。", Modifier.padding(24.dp))
                         "research" -> AgentResearch(vm)
                         "channels" -> AgentChannels(vm)
                         "daily" -> DailyPanel(vm)
@@ -94,15 +94,13 @@ internal fun FeatureDialog(vm: MusicViewModel, route: String, track: Track? = nu
                         "order" -> playlist?.let { PlaylistOrder(vm, it, dismiss) }
                         "multi" -> MultiSelectPanel(vm, dismiss)
                         "gain" -> track?.let { PlaybackGainPanel(vm, it) }
-                        else -> if (account.account?.isOwner == true) when (route) {
+                        else -> if (account.account?.profile in listOf("owner", "librarian", "editor")) when (route) {
                             "metadata" -> track?.let { MetadataPanel(vm, it) }
                             "lyrics" -> track?.let { LyricsEditorPanel(vm, it) }
                             "suggestions" -> track?.let { SuggestionsPanel(vm, it) }
-                            "source-plugins" -> SourcePluginsPanel(vm)
-                            "lyric-scans" -> LyricScansPanel(vm, albumId, initialBatchId)
                             "album-edit" -> albumId?.let { AlbumMetadataPanel(vm, it, dismiss) }
-                            else -> ManagementPanel(vm, initialBatchId, albumId)
-                        } else Text("需要管理员权限。", Modifier.padding(24.dp))
+                            else -> Text("此项服务端管理请在网页端进行。", Modifier.padding(24.dp))
+                        } else Text("需要资料编辑权限。", Modifier.padding(24.dp))
                     }
                 }
             }

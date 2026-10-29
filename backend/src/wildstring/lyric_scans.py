@@ -317,6 +317,9 @@ class LyricScans:
         return {"locked": bool(locked), "version": version}
 
     def checkpoint(self, db, batch_id):
+        from wildstring.library.scope import require_current_library
+
+        require_current_library(self.database, "metadata:write")
         row = db.execute("SELECT status FROM lyric_scan_batches WHERE id=?", (batch_id,)).fetchone()
         if not row or row[0] != "running" or self.exit.is_set():
             raise PluginError("lyric_scan_paused")
@@ -449,6 +452,18 @@ class LyricScans:
                 )
 
     def process(self, item, options):
+        from wildstring.library.scope import library_job_scope
+
+        with library_job_scope(
+            self.database,
+            "lyric_scan_batches",
+            item["batch_id"],
+            item["track_id"],
+            "metadata:write",
+        ):
+            return self.process_scoped(item, options)
+
+    def process_scoped(self, item, options):
         track = self.sources.providers.repository.track(item["track_id"])
         editor = LyricsEditor(self.sources.providers.repository)
         record = editor.read(item["track_id"])

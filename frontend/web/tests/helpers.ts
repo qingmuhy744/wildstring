@@ -34,7 +34,13 @@ export async function audio(page: Page) {
     time: element.currentTime,
     duration: element.duration,
     volume: element.volume,
+    playbackRate: element.playbackRate,
     source: element.currentSrc,
     ended: element.ended,
   }));
+}
+
+export async function podcastCatalog(page: Page) {
+  await section(page, '电台 · 播客');
+  await page.getByRole('button', { name: '本服节目', exact: true }).click();
 }

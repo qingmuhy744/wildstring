@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { api, type AlbumMetadataRecord } from './api';
 import { DefaultArtwork } from './default-artwork';
 import { Icon } from './icons';
+import { DialogCloseButton } from './dialog-close';
 import { splitMultiValue } from './metadata-parser';
 
 export function AlbumEditor({
@@ -203,9 +204,7 @@ export function AlbumEditor({
           <h2>编辑专辑</h2>
           <p className="muted">{initialTitle || record?.primary_title || albumId}</p>
         </div>
-        <button className="icon-button" disabled={saving} aria-label="关闭" onClick={onClose}>
-          <Icon name="close" />
-        </button>
+        <DialogCloseButton disabled={saving} aria-label="关闭" onClick={onClose} />
       </div>
 
       {loading ? (

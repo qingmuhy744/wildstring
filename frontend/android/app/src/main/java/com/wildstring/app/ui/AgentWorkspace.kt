@@ -52,7 +52,7 @@ import java.time.format.DateTimeFormatter
     key(owner) {
         var tab by remember { mutableStateOf(initialTab) }
         var selected by remember { mutableStateOf<String?>(null) }
-        val tabs = listOf("chat" to "助手", "notifications" to "通知", "drafts" to "草案", "tasks" to "巡检", "connections" to "AI 连接", "research" to "联网与记忆", "channels" to "通知设置")
+        val tabs = listOf("chat" to "助手", "notifications" to "通知", "drafts" to "草案", "research" to "联网与记忆", "channels" to "通知设置")
         Column(Modifier.fillMaxSize().testTag("agent-workspace")) {
             PrimaryScrollableTabRow(tabs.indexOfFirst { it.first == tab }.coerceAtLeast(0), edgePadding = 8.dp) {
                 tabs.forEach { (id, title) -> Tab(tab == id, { tab = id; selected = null }, text = { Text(title) }, modifier = Modifier.testTag("agent-tab-$id")) }
@@ -62,8 +62,7 @@ import java.time.format.DateTimeFormatter
                     "chat" -> AgentChat(vm) { draft -> selected = draft; tab = "drafts" }
                     "notifications" -> AgentNotifications(vm, { type, id -> selected = id; tab = type }, onOpenAction)
                     "drafts" -> AgentDrafts(vm, selected)
-                    "tasks" -> AgentTasks(vm, selected)
-                    "connections" -> AgentConnections(vm)
+                    "tasks", "connections" -> Text("巡检、任务计划和模型连接请在网页端管理。", Modifier.padding(24.dp))
                     "research" -> AgentResearch(vm)
                     else -> AgentChannels(vm)
                 }
@@ -142,7 +141,7 @@ internal fun SimpleNotificationsSheet(
                 AgentTrace(notice)
                 Row {
                     notice.text("draft_id").takeIf { it.isNotBlank() }?.let { TextButton({ open("drafts", it) }) { Text("查看草案") } }
-                    notice.text("task_id").takeIf { it.isNotBlank() }?.let { TextButton({ open("tasks", it) }) { Text("查看巡检") } }
+                    notice.text("task_id").takeIf { it.isNotBlank() }?.let { TextButton({ open("tasks", it) }) { Text("巡检结果（网页处理）") } }
                     notice.objects("actions").forEach { actionItem ->
                         val target = actionItem.text("target")
                         if (target.isNotBlank()) TextButton({ openAction(target, actionItem.objectOrNull("params")) }) {
@@ -241,10 +240,11 @@ internal fun displayValue(value: com.google.gson.JsonElement?): String = when { 
             draft.objects("evidence").forEach { evidence -> Text("${evidence.text("source")} · ${evidence.text("summary")}", style = MaterialTheme.typography.bodySmall); evidence.text("url").takeIf { it.isNotBlank() }?.let { SelectionContainer { Text(it, style = MaterialTheme.typography.labelSmall) } } }
             Text("版本 ${draft.number("version")} · 导入仅复制；资料与歌词更新保存在应用内，不写回音乐文件。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             draft.objectOrNull("result")?.text("automatic_error")?.takeIf { it.isNotBlank() }?.let { Text("自动应用未完成：${agentError(409, it, null)}。草案已保留。", color = MaterialTheme.colorScheme.error) }
+            if (draft.text("kind") in listOf("metadata_batch", "intake")) Text("批量整理和导入草案请在网页端处理。", style = MaterialTheme.typography.bodySmall)
             AgentTrace(draft); ActionStatus(action)
         }
     }, confirmButton = {
-        if (draft.text("status") in listOf("pending", "approved")) TextButton({ scope.launch { action.run {
+        if (draft.text("status") in listOf("pending", "approved") && draft.text("kind") !in listOf("metadata_batch", "intake")) TextButton({ scope.launch { action.run {
             val body = jsonBody("version" to draft.number("version"), "idempotency_key" to "android-${draft.text("id")}-${draft.number("version")}")
             if (draft.text("preview_digest").isNotBlank()) body.addProperty("preview_digest", draft.text("preview_digest"))
             draft = vm.agent.request("drafts/${draft.text("id")}/accept", "POST", body); updated(draft); vm.agent.refreshInbox()

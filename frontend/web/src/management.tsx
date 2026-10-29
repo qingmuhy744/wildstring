@@ -14,6 +14,8 @@ import { MetadataJobs } from './metadata-tasks';
 import { MetadataReviewDialog } from './metadata-review';
 import { FolderMetadataEditor } from './folder-metadata';
 import { LibrarySources } from './library-sources';
+import { MusicLibraryManager, LibrarySwitcher } from './music-libraries';
+import { PodcastCatalogSettings } from './podcast-catalog-settings';
 
 type Directory = {
   path: string;
@@ -133,6 +135,9 @@ function RunDetail({ title, run }: { title: string; run: Run | null }) {
   );
 }
 
+export type ManagementTab =
+  'overview' | 'tracks' | 'jobs' | 'intake' | 'settings' | 'users' | 'diagnostics';
+
 export function Management({
   revision,
   onBack,
@@ -142,6 +147,8 @@ export function Management({
   onOpenConnections,
   profile,
   initialAction,
+  initialTab = 'overview',
+  onTabChanged,
 }: {
   revision: number;
   onBack: () => void;
@@ -151,12 +158,16 @@ export function Management({
   onOpenConnections: () => void;
   profile: User['profile'];
   initialAction?: { type: 'metadata-center'; batchId?: string } | null;
+  initialTab?: ManagementTab;
+  onTabChanged?: (tab: ManagementTab) => void;
 }) {
   const canOwner = profile === 'owner';
   const canImport = profile === 'owner' || profile === 'librarian';
-  const [tab, setTab] = useState<
-    'overview' | 'tracks' | 'jobs' | 'intake' | 'settings' | 'users' | 'diagnostics'
-  >('overview');
+  const [tab, updateTab] = useState<ManagementTab>(initialTab);
+  function setTab(value: ManagementTab) {
+    updateTab(value);
+    onTabChanged?.(value);
+  }
   const [reviewOpen, setReviewOpen] = useState(false);
   const [metadataBatchId, setMetadataBatchId] = useState<string | undefined>(
     initialAction?.batchId,
@@ -308,6 +319,9 @@ export function Management({
             </button>
           ))}
       </nav>
+      {tab !== 'users' && tab !== 'settings' && tab !== 'diagnostics' && (
+        <LibrarySwitcher onChanged={onChanged} management />
+      )}
       {error && (
         <p role="alert" className="error">
           {error}
@@ -322,6 +336,12 @@ export function Management({
         overview && (
           <>
             {tab === 'diagnostics' && <SystemDiagnostics />}
+            {tab === 'settings' && (
+              <>
+                <MusicLibraryManager />
+                <PodcastCatalogSettings />
+              </>
+            )}
             {tab === 'intake' && (
               <>
                 <LibrarySources
@@ -352,8 +372,12 @@ export function Management({
                 <section className="management-card">
                   <span className="eyebrow">YOUR LIBRARY</span>
                   <h2>{overview.preferences.name}</h2>
-                  <button onClick={onRefresh}>更新曲库元数据</button>
-                  <button onClick={() => setReviewOpen(true)}>批量核对资料</button>
+                  {canOwner && (
+                    <>
+                      <button onClick={onRefresh}>更新曲库元数据</button>
+                      <button onClick={() => setReviewOpen(true)}>批量核对资料</button>
+                    </>
+                  )}
                   <div className="library-locations">
                     {(
                       [
@@ -373,37 +397,39 @@ export function Management({
                       </div>
                     ))}
                   </div>
-                  <div className="management-task-actions">
-                    <div>
-                      <h3>导入新音乐</h3>
-                      <p className="muted">从导入源复制新歌曲到曲库，已有副本保留。</p>
-                      <button
-                        className="primary"
-                        disabled={busy || active || !overview.source.available}
-                        onClick={() => void start('import')}
-                      >
-                        导入音乐
-                      </button>
+                  {canImport && (
+                    <div className="management-task-actions">
+                      <div>
+                        <h3>导入新音乐</h3>
+                        <p className="muted">从导入源复制新歌曲到曲库，已有副本保留。</p>
+                        <button
+                          className="primary"
+                          disabled={busy || active || !overview.source.available}
+                          onClick={() => void start('import')}
+                        >
+                          导入音乐
+                        </button>
+                      </div>
+                      <div>
+                        <h3>更新曲库信息</h3>
+                        <p className="muted">检查库内文件变化，保留人工编辑的信息。</p>
+                        <label className="management-checkbox">
+                          <input
+                            type="checkbox"
+                            checked={full}
+                            onChange={(e) => setFull(e.target.checked)}
+                          />
+                          重新读取全部标签
+                        </label>
+                        <button
+                          disabled={busy || active || !overview.library.available}
+                          onClick={() => void start('scan')}
+                        >
+                          扫描曲库
+                        </button>
+                      </div>
                     </div>
-                    <div>
-                      <h3>更新曲库信息</h3>
-                      <p className="muted">检查库内文件变化，保留人工编辑的信息。</p>
-                      <label className="management-checkbox">
-                        <input
-                          type="checkbox"
-                          checked={full}
-                          onChange={(e) => setFull(e.target.checked)}
-                        />
-                        重新读取全部标签
-                      </label>
-                      <button
-                        disabled={busy || active || !overview.library.available}
-                        onClick={() => void start('scan')}
-                      >
-                        扫描曲库
-                      </button>
-                    </div>
-                  </div>
+                  )}
                   {active && (
                     <p role="status" className="muted">
                       曲库任务正在排队或执行，可在任务记录中查看进展。
@@ -453,24 +479,26 @@ export function Management({
                 </div>
                 {tracks ? (
                   <>
-                    <button
-                      disabled={busy || !tracks.items.length}
-                      onClick={() => {
-                        setBusy(true);
-                        setError('正在提交查询…');
-                        void api('/manage/providers/query', {
-                          method: 'POST',
-                          body: JSON.stringify({ track_ids: tracks.items.map((t) => t.id) }),
-                        })
-                          .then(() =>
-                            setError('已提交本页资料查询，可在歌曲编辑的联网建议中查看。'),
-                          )
-                          .catch(() => setError('查询未提交，请先启用联网资料或稍后重试。'))
-                          .finally(() => setBusy(false));
-                      }}
-                    >
-                      查询本页资料
-                    </button>
+                    {canOwner && (
+                      <button
+                        disabled={busy || !tracks.items.length}
+                        onClick={() => {
+                          setBusy(true);
+                          setError('正在提交查询…');
+                          void api('/manage/providers/query', {
+                            method: 'POST',
+                            body: JSON.stringify({ track_ids: tracks.items.map((t) => t.id) }),
+                          })
+                            .then(() =>
+                              setError('已提交本页资料查询，可在歌曲编辑的联网建议中查看。'),
+                            )
+                            .catch(() => setError('查询未提交，请先启用联网资料或稍后重试。'))
+                            .finally(() => setBusy(false));
+                        }}
+                      >
+                        查询本页资料
+                      </button>
+                    )}
                     <ul className="manage-track-list">
                       {tracks.items.map((track) => (
                         <li key={track.id}>
@@ -497,21 +525,27 @@ export function Management({
             )}
             {tab === 'jobs' && (
               <section className="management-card">
-                <MetadataJobs
-                  batchId={metadataBatchId}
-                  onInspect={(id) => {
-                    void api<Track>(`/tracks/${id}`)
-                      .then(onEdit)
-                      .catch(() => setError('无法读取歌曲，请刷新后重试。'));
-                  }}
-                />
+                {canOwner && (
+                  <MetadataJobs
+                    batchId={metadataBatchId}
+                    onInspect={(id) => {
+                      void api<Track>(`/tracks/${id}`)
+                        .then(onEdit)
+                        .catch(() => setError('无法读取歌曲，请刷新后重试。'));
+                    }}
+                  />
+                )}
                 <div className="management-section-heading">
                   <h2>任务记录</h2>
                   <button onClick={() => setTick((v) => v + 1)}>刷新任务</button>
                 </div>
                 <p className="muted">任务在服务端继续执行，关闭页面不影响处理。</p>
                 {!jobs?.total && (
-                  <p className="management-empty">还没有网页任务。从概览开始导入或扫描。</p>
+                  <p className="management-empty">
+                    {canImport
+                      ? '还没有网页任务。从概览开始导入或扫描。'
+                      : '还没有可查看的曲库任务。'}
+                  </p>
                 )}
                 {jobs?.items.map((job) => (
                   <details className="management-job" key={job.id}>
@@ -553,7 +587,6 @@ export function Management({
             )}
             {tab === 'settings' && (
               <>
-                <LyricScanEntry />
                 <ProviderSettings />
                 <section className="management-card">
                   <h2>AI 模型连接</h2>
@@ -564,31 +597,35 @@ export function Management({
                 </section>
                 <TranscodingSettings />
                 <HostSettings />
-                <section className="management-card">
-                  <h2>曲库设置</h2>
-                  <form
-                    className="library-settings-form"
-                    onSubmit={(e) => {
-                      e.preventDefault();
-                      void saveName();
-                    }}
-                  >
-                    <label>
-                      曲库名称
-                      <input
-                        required
-                        maxLength={100}
-                        value={name}
-                        onChange={(e) => setName(e.target.value)}
-                      />
-                    </label>
-                    <button
-                      className="primary"
-                      disabled={busy || name.trim() === overview.preferences.name}
+                <section className="management-library-settings" aria-label="当前音乐库设置">
+                  <LibrarySwitcher onChanged={onChanged} management />
+                  <LyricScanEntry />
+                  <section className="management-card">
+                    <h2>曲库设置</h2>
+                    <form
+                      className="library-settings-form"
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        void saveName();
+                      }}
                     >
-                      {busy ? '保存中…' : '保存设置'}
-                    </button>
-                  </form>
+                      <label>
+                        曲库名称
+                        <input
+                          required
+                          maxLength={100}
+                          value={name}
+                          onChange={(e) => setName(e.target.value)}
+                        />
+                      </label>
+                      <button
+                        className="primary"
+                        disabled={busy || name.trim() === overview.preferences.name}
+                      >
+                        {busy ? '保存中…' : '保存设置'}
+                      </button>
+                    </form>
+                  </section>
                 </section>
                 <section className="management-card">
                   <h2>服务状态</h2>

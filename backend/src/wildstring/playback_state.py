@@ -61,9 +61,9 @@ def available_tracks(repository, connection, identities):
     for offset in range(0, len(unique), 400):
         batch = unique[offset : offset + 400]
         rows = connection.execute(
-            "SELECT id,duration_ms FROM tracks WHERE library_id=? AND status='available' "
+            "SELECT id,duration_ms FROM tracks WHERE library_visible(library_id) AND status='available' "
             "AND id IN (SELECT value FROM json_each(?))",
-            (repository.library_id(), json.dumps(batch)),
+            (json.dumps(batch),),
         ).fetchall()
         found.update({row["id"]: row["duration_ms"] for row in rows})
     return found
@@ -82,7 +82,7 @@ def get_state(repository):
     with repository.database.connect() as connection:
         row = connection.execute(
             "SELECT * FROM playback_states WHERE user_id=? AND library_id=?",
-            (repository.database.user_id, repository.library_id()),
+            (repository.database.user_id, repository.default_library_id()),
         ).fetchone()
         if not row:
             return initial
@@ -110,7 +110,7 @@ def get_state(repository):
 
 
 def put_state(repository, body):
-    library_id = repository.library_id(create=True)
+    library_id = repository.default_library_id()
     updated_at = now()
     with repository.database.connect(write=True) as connection:
         connection.execute("BEGIN IMMEDIATE")

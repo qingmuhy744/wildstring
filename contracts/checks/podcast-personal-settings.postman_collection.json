@@ -1,0 +1,958 @@
+{
+  "info": {
+    "name": "WildString personal podcast policies and access",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://127.0.0.1:18822"
+    }
+  ],
+  "item": [
+    {
+      "name": "01 Owner login",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/auth/login",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"username\": \"admin\", \"password\": \"disposable-storage-check-password\"}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200',()=>pm.response.to.have.status(200));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "02 Require disposable fixture",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/podcasts/storage-resource-fixture"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200',()=>pm.response.to.have.status(200));",
+              "const safe=pm.response.json().podcast?.title==='Storage Resource Fixture';pm.test('isolated fixture',()=>pm.expect(safe).to.eql(true));if(!safe)pm.execution.setNextRequest(null);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "03 Read addition switch",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/podcasts/catalog-settings"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200',()=>pm.response.to.have.status(200));",
+              "pm.collectionVariables.set('catalog_version',pm.response.json().version);"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "04 Enable personal RSS addition",
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/podcasts/catalog-settings",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"version\": {{catalog_version}}, \"allow_user_subscriptions\": true}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200',()=>pm.response.to.have.status(200));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "05 Owner creates and follows simulated programme",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/podcasts",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"feed_url\": \"http://rss.wildstring.test/policies.xml\", \"auto_update\": false}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200',()=>pm.response.to.have.status(200));",
+              "const b=pm.response.json();pm.collectionVariables.set('show',b.podcast.id);for(const e of b.episodes)pm.collectionVariables.set(e.guid,e.id);pm.test('six real parsed episodes',()=>pm.expect(b.episodes.length).to.eql(6));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "06 Owner latest five",
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/podcasts/{{show}}/download-settings",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"version\": 1, \"download_policy\": \"latest_5\", \"retention_policy\": \"keep\"}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200',()=>pm.response.to.have.status(200));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "07 Create independent account",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/manage/users",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"username\": \"policy-listener\", \"password\": \"disposable-policy-password\", \"library_ids\": []}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 201',()=>pm.response.to.have.status(201));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "08 Logout owner",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/auth/logout"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 204',()=>pm.response.to.have.status(204));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "09 Login listener",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/auth/login",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"username\": \"policy-listener\", \"password\": \"disposable-policy-password\"}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200',()=>pm.response.to.have.status(200));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "10 Hidden catalogue cannot be enumerated",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/podcasts"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200',()=>pm.response.to.have.status(200));",
+              "pm.test('new user has no catalogue',()=>pm.expect(pm.response.json()).to.eql([]));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "11 Known ID is not authorization",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/podcasts/{{show}}"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 404',()=>pm.response.to.have.status(404));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "12 Known episode cannot stream",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/podcasts/episodes/{{policy-6}}/stream?cache=1"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 404',()=>pm.response.to.have.status(404));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "13 Known ID cannot bootstrap follow",
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/podcasts/{{show}}/follow",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"followed\": true}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 404',()=>pm.response.to.have.status(404));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "14 Add shared feed through permitted operation",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/podcasts",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"feed_url\": \"http://rss.wildstring.test/policies.xml\"}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200',()=>pm.response.to.have.status(200));",
+              "pm.test('same shared programme',()=>pm.expect(pm.response.json().podcast.id).to.eql(pm.collectionVariables.get('show')));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "15 Private policy defaults",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/podcasts/{{show}}/download-settings"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200',()=>pm.response.to.have.status(200));",
+              "pm.test('owner setting not inherited',()=>pm.expect(pm.response.json().download_policy).to.eql('none'));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "16 Listener latest three",
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/podcasts/{{show}}/download-settings",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"version\": 1, \"download_policy\": \"latest_3\", \"retention_policy\": \"delete_after_played\"}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200',()=>pm.response.to.have.status(200));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "17 Stale version rejected",
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/podcasts/{{show}}/download-settings",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"version\": 1, \"download_policy\": \"all\"}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 409',()=>pm.response.to.have.status(409));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "18 Cannot specify another account",
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/podcasts/{{show}}/download-settings",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"version\": 2, \"download_policy\": \"all\", \"user_id\": \"admin\"}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 422',()=>pm.response.to.have.status(422));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "19 Manual save adds origin",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/podcasts/episodes/{{policy-6}}/download"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200',()=>pm.response.to.have.status(200));",
+              "pm.test('existing bytes reused',()=>pm.expect(pm.response.json().reused).to.eql(true));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "20 Disable only personal automation",
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/podcasts/{{show}}/download-settings",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"version\": 2, \"download_policy\": \"none\", \"retention_policy\": \"keep\"}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200',()=>pm.response.to.have.status(200));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "21 Manual save survives",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/podcasts/episodes/{{policy-6}}"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200',()=>pm.response.to.have.status(200));",
+              "pm.test('manual preserved; automatic released',()=>{const b=pm.response.json();pm.expect(b.resource_saved).to.eql(true);pm.expect(b.resource_automatic).to.eql(false);});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "21a Stale tab cannot access a new session",
+      "request": {
+        "method": "GET",
+        "url": "{{base_url}}/api/v1/podcasts/{{show}}/download-settings",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          },
+          {
+            "key": "X-Wildstring-Account",
+            "value": "admin"
+          }
+        ]
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 401',()=>pm.response.to.have.status(401));",
+              "pm.test('mismatched account binding',()=>pm.expect(pm.response.json().detail).to.eql('account_session_changed'));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "22 Unfollow own programme",
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/podcasts/{{show}}/follow",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"followed\": false}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200',()=>pm.response.to.have.status(200));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "23 Historical association and bookmark access retained",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/podcasts/episodes/{{policy-6}}/progress"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200',()=>pm.response.to.have.status(200));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "24 Logout listener",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/auth/logout"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 204',()=>pm.response.to.have.status(204));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "25 Login owner",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/auth/login",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"username\": \"admin\", \"password\": \"disposable-storage-check-password\"}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200',()=>pm.response.to.have.status(200));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "26 Owner policy unchanged",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/podcasts/{{show}}/download-settings"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200',()=>pm.response.to.have.status(200));",
+              "pm.test('owner policy is private',()=>pm.expect(pm.response.json().download_policy).to.eql('latest_5'));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "26a Reconcile unchanged RSS",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/podcasts/{{show}}/refresh"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200',()=>pm.response.to.have.status(200));",
+              "pm.test('fixed window retains five cached episodes',()=>pm.expect(pm.response.json().episodes.filter(x=>x.download_status==='downloaded').length).to.eql(5));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "26b Reconcile unchanged RSS again",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/podcasts/{{show}}/refresh"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200',()=>pm.response.to.have.status(200));",
+              "pm.test('fixed window retains five cached episodes',()=>pm.expect(pm.response.json().episodes.filter(x=>x.download_status==='downloaded').length).to.eql(5));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "27 Shared reference counts",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/podcasts/resources"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200',()=>pm.response.to.have.status(200));",
+              "const b=pm.response.json().items;pm.test('one physical audio shared by two users',()=>pm.expect(b.find(x=>x.id===pm.collectionVariables.get('policy-6')).reference_count).to.eql(2));pm.test('outside fixed window not downloaded',()=>pm.expect(b.some(x=>x.id===pm.collectionVariables.get('policy-1'))).to.eql(false));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "28 Queue has no duplicate episode tasks",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-Wildstring-Client",
+            "value": "web"
+          }
+        ],
+        "url": "{{base_url}}/api/v1/podcasts/downloads/queue"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('HTTP 200',()=>pm.response.to.have.status(200));",
+              "const b=pm.response.json();pm.test('no duplicate completions',()=>{const ids=b.recent_completed.filter(x=>x.podcast_id===pm.collectionVariables.get('show')).map(x=>x.episode_id);pm.expect(new Set(ids).size).to.eql(ids.length);});"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,5 +1,13 @@
+import { observeLibraryAccess, selectedLibrary, libraryUser } from './library-context';
+
 export interface Track {
   id: string;
+  library_id?: string;
+  podcast_id?: string;
+  podcast_queue_origin?: 'auto';
+  podcast_list_order?: 'asc' | 'desc';
+  podcast_position_seconds?: number;
+  podcast_completed?: boolean;
   album_id: string;
   title: string;
   artists: string[];
@@ -18,6 +26,7 @@ export interface Track {
   original_date: string | null;
   external_ids: Record<string, string | string[]>;
   description: string;
+  cover_url?: string;
   track_number: number | null;
   disc_number: number | null;
   album: string | null;
@@ -60,6 +69,17 @@ export class ApiError extends Error {
 }
 
 const messages: Record<string, string> = {
+  folder_name_invalid: '请输入有效的文件夹名称，不含路径分隔符、控制字符或开头的点。',
+  folder_already_exists: '已有同名文件或文件夹，请换一个名称。',
+  folder_source_read_only: '音乐来源保持只读，请选择来源目录以外的位置新建文件夹。',
+  folder_not_writable: '服务器没有在此目录创建文件夹的权限。',
+  folder_create_failed: '无法创建文件夹，请检查服务器存储空间后重试。',
+  folder_path_invalid: '请输入有效的服务器绝对目录路径。',
+  folder_not_found: '目录不存在，请检查服务器上的路径。',
+  folder_not_readable: '服务器没有读取这个目录的权限。',
+  podcast_subscriptions_disabled: '管理员尚未开启普通用户添加 RSS，可先关注本服已有节目。',
+  podcast_catalog_management_required: '只有管理员可以修改全服节目设置。',
+  podcast_catalog_settings_conflict: '播客添加权限已被修改，请核对最新设置后重试。',
   invalid_avatar: '请选择有效的 JPG、PNG 或 WebP 图片，分辨率不超过 2500 万像素。',
   avatar_too_large: '头像图片超过 5 MiB，请压缩后重试。',
   avatar_account_changed: '账号已变化，请重新打开账号设置。',
@@ -145,6 +165,22 @@ const messages: Record<string, string> = {
   admin_required: '此操作需要管理员权限。',
   host_not_allowed: '当前访问域名不在白名单中，需要在服务端数据库中关闭白名单或修正配置。',
   invalid_account_input: '请检查账号格式及密码长度（12–128 个字符）。',
+  library_selection_required: '请先选择一个音乐库，再执行管理操作。',
+  library_access_required: '当前账号未获授权访问此音乐库。',
+  library_not_found: '音乐库不存在或当前账号无权访问。',
+  library_source_invalid: '源文件夹必须是服务端现有的绝对目录。',
+  library_storage_unavailable: '托管目录暂时无法创建，请检查服务端存储。',
+  library_sources_overlap: '源文件夹存在重复、父子重叠，或与托管目录重叠。',
+  library_migration_required: '已有库请通过目录迁移切换托管目录。',
+  library_migration_busy: '这个库正在迁移目录，完成后可继续管理。',
+  library_migration_not_retryable: '库的目录已变化，请重新读取后提交新的迁移。',
+  library_target_not_empty: '目标目录需要为空，已有内容不会覆盖。',
+  library_target_not_writable: '目标目录不可写，请检查服务端挂载和权限。',
+  library_target_invalid: '目标目录必须是独立的服务端绝对路径，不能与来源、其他库或运行数据交叉。',
+  podcast_resource_version_conflict: '资源设置已变化，请重新读取后再操作。',
+  library_version_conflict: '音乐库配置已变化，请重新读取后再保存。',
+  library_access_version_conflict: '库权限已被修改，已重新读取，请核对后再保存。',
+  default_library_required: '默认音乐库需要保留。',
   current_password_incorrect: '当前密码不正确。',
   username_taken: '这个用户名已被使用。',
   user_not_found: '账号不存在，请刷新列表。',
@@ -167,6 +203,11 @@ const messages: Record<string, string> = {
   playlist_track_limit: '每个普通歌单最多保存 5000 首歌曲。',
   invalid_credentials: '账号或密码不正确。',
   login_throttled: '尝试次数较多，请稍后一分钟再试。',
+  account_session_changed: '账号已在其他页面变化，请重新登录。',
+  podcast_follow_required: '请先关注此节目，再开启自动下载。',
+  podcast_download_settings_conflict: '设置已被其他设备修改，请重新读取后再试。',
+  podcast_not_found: '节目不存在或当前账号无权访问。',
+  podcast_publisher_not_found: '出品方不存在或没有你可访问的节目。',
   owner_setup_required: '请先在服务端设置所有者密码。',
   authentication_required: '登录已过期，请重新登录。',
 };
@@ -174,17 +215,25 @@ const messages: Record<string, string> = {
 export const errorCodeMessage = (code: string) => messages[code] || code;
 
 export async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const expectedOwner = libraryUser();
   const response = await fetch(`/api/v1${path}`, {
     ...options,
     credentials: 'same-origin',
     headers: {
       ...(options.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
       'X-Wildstring-Client': 'web',
+      ...(expectedOwner && !path.startsWith('/auth/')
+        ? { 'X-Wildstring-Account': expectedOwner }
+        : {}),
+      'X-Wildstring-Library': selectedLibrary(),
       ...options.headers,
     },
   });
+  if (expectedOwner !== libraryUser()) throw new DOMException('Account changed', 'AbortError');
+  observeLibraryAccess(response.headers.get('X-Wildstring-Library-Access'), expectedOwner);
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
+    if (expectedOwner !== libraryUser()) throw new DOMException('Account changed', 'AbortError');
     if (response.status === 401 && path !== '/auth/login') {
       window.dispatchEvent(new Event('wildstring:unauthorized'));
     }
@@ -207,13 +256,22 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
     const message = messages[code] || rawMessage || '请求未完成，请重试。';
     throw new ApiError(response.status, message, code, traceId);
   }
-  return response.status === 204 ? (undefined as T) : response.json();
+  const value = response.status === 204 ? (undefined as T) : await response.json();
+  if (expectedOwner !== libraryUser()) throw new DOMException('Account changed', 'AbortError');
+  return value;
 }
 
 export const artist = (track: Track) => track.artists.join(' / ') || '未知艺人';
 export const streamUrl = (track: Track) => {
   if (track.id.startsWith('podcast_ep_')) {
-    return `/api/v1/podcasts/episodes/${encodeURIComponent(track.id.replace('podcast_ep_', ''))}/stream`;
+    const connection = (navigator as Navigator & { connection?: { type?: string } }).connection;
+    const network =
+      connection?.type === 'wifi'
+        ? 'wifi'
+        : connection?.type === 'cellular'
+          ? 'cellular'
+          : 'unknown';
+    return `/api/v1/podcasts/episodes/${encodeURIComponent(track.id.replace('podcast_ep_', ''))}/stream?proxy=1&cache=1&network=${network}`;
   }
   return `/api/v1/tracks/${encodeURIComponent(track.id)}/stream`;
 };

@@ -8,7 +8,8 @@ export const rememberPodcastCover = (trackId: string, url: string) => {
   if (url) podcastCovers.set(trackId, url);
 };
 
-export const coverUrl = (trackId: string, size = 320) => {
+export const coverUrl = (trackId: string, size = 320, source = '') => {
+  if (source) return source;
   const custom = podcastCovers.get(trackId);
   if (custom) return custom;
   return `/api/v1/tracks/${encodeURIComponent(trackId)}/cover?size=${size}`;
@@ -19,12 +20,14 @@ export function Cover({
   title = '',
   size = 96,
   className = '',
+  source = '',
   onImage,
 }: {
   trackId: string;
   title?: string;
   size?: number;
   className?: string;
+  source?: string;
   onImage?: (image: HTMLImageElement) => void;
 }) {
   const [revision, setRevision] = useState(0);
@@ -36,6 +39,10 @@ export function Cover({
   const [local, setLocal] = useState('');
   const [failed, setFailed] = useState('');
   useEffect(() => {
+    if (source) {
+      setLocal('');
+      return;
+    }
     if (failed.startsWith('blob:') || (navigator.onLine && !usingOfflineAccess() && !failed))
       return;
     let live = true;
@@ -50,8 +57,9 @@ export function Cover({
       live = false;
       if (url) URL.revokeObjectURL(url);
     };
-  }, [trackId, failed]);
-  const src = local || coverUrl(trackId, size) + (revision ? `&revision=${revision}` : '');
+  }, [trackId, failed, source]);
+  const src =
+    source || local || coverUrl(trackId, size) + (revision ? `&revision=${revision}` : '');
   const hasFailed = failed === src;
   return (
     <span className={`cover ${className}`} aria-hidden="true">

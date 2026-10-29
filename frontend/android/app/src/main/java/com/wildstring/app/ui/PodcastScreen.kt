@@ -1,9 +1,14 @@
+@file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+
 package com.wildstring.app.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -11,25 +16,42 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.PlaylistPlay
+import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.text.HtmlCompat
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.wildstring.app.data.PodcastDetail
 import com.wildstring.app.data.PodcastEpisode
 import com.wildstring.app.data.PodcastSummary
+import com.wildstring.app.data.PodcastPublisher
+import com.wildstring.app.data.EpisodeProgress
+import com.wildstring.app.data.friendlyError
+import com.wildstring.app.data.podcastPublishedMillis
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CancellationException
 
 private val PRESET_FEEDS = listOf(
     "声东击西" to "https://etw.fm/rss",
@@ -37,141 +59,154 @@ private val PRESET_FEEDS = listOf(
     "NPR News" to "https://feeds.npr.org/500005/podcast.xml",
 )
 
+private fun podcastDescription(raw: String): String =
+    HtmlCompat.fromHtml(raw, HtmlCompat.FROM_HTML_MODE_COMPACT)
+        .toString()
+        .replace(Regex("[ \\t]+"), " ")
+        .replace(Regex("\\n{3,}"), "\n\n")
+        .trim()
+
 @Composable
 fun PodcastChannelPage(
     vm: MusicViewModel,
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
-    var podcasts by remember { mutableStateOf<List<PodcastSummary>>(emptyList()) }
-    var loading by remember { mutableStateOf(true) }
-    var selectedPodcast by remember { mutableStateOf<PodcastSummary?>(null) }
-    var selectedDetail by remember { mutableStateOf<PodcastDetail?>(null) }
-    var detailLoading by remember { mutableStateOf(false) }
-    var showSubscribeDialog by remember { mutableStateOf(false) }
+    val state by vm.state.collectAsStateWithLifecycle()
+    val positions by vm.podcastProgress.positions.collectAsStateWithLifecycle()
+    val browser by vm.podcastBrowser.state.collectAsStateWithLifecycle()
+    val owner = vm.repository.session.cacheScope()
+    val podcasts = browser.podcasts.takeIf { browser.owner == owner }.orEmpty()
+    val loading = browser.owner != owner || !browser.listLoaded || browser.listLoading
+    val pageStates = rememberSaveableStateHolder()
+    var selectedPublisherId by rememberSaveable { mutableStateOf<String?>(null) }
+    var selectedPublisherName by rememberSaveable { mutableStateOf("") }
+    val selectedPublisher = selectedPublisherId?.let { PodcastPublisher(it, selectedPublisherName) }
+    val selectedId = state.podcastId
+    val selectedDetail = selectedId?.let(browser.details::get).takeIf { browser.owner == owner }
+    val selectedPodcast = selectedId?.let { id ->
+        selectedDetail?.podcast ?: podcasts.find { it.id == id }
+        ?: PodcastSummary(id, state.current?.takeIf { it.podcast?.podcastId == id }?.album ?: "单集列表", feedUrl = "")
+    }
+    val detailLoading = browser.owner != owner || (selectedId != null &&
+        (selectedId !in browser.loadedDetails || selectedId in browser.loadingDetails))
+    var showSubscribeDialog by remember(owner) { mutableStateOf(false) }
+    var autoDownloadPodcast by remember(owner) { mutableStateOf<PodcastSummary?>(null) }
     var statusMessage by remember { mutableStateOf<String?>(null) }
-
-    fun refreshList() {
-        scope.launch {
-            loading = true
-            try {
-                podcasts = vm.repository.podcasts()
-            } catch (e: Exception) {
-                statusMessage = "获取播客订阅失败: ${e.message}"
-            } finally {
-                loading = false
-            }
-        }
+    var followingOnly by rememberSaveable { mutableStateOf(true) }
+    val canBrowseCatalog = state.account?.profile in listOf("owner", "librarian")
+    val personalOnly = !canBrowseCatalog || followingOnly
+    var canAddPodcast by remember(owner) { mutableStateOf(false) }
+    val canEditPublisher = state.account?.profile in listOf("owner", "librarian", "editor")
+    LaunchedEffect(owner, browser.listLoading) {
+        try {
+            val policy = vm.repository.podcastCatalogPolicy()
+            if (owner == vm.repository.session.cacheScope()) canAddPodcast = policy.canAdd
+        } catch (e: CancellationException) { throw e }
+        catch (_: Exception) { canAddPodcast = state.account?.profile in listOf("owner", "librarian") }
     }
+    BackHandler(enabled = selectedId == null && selectedPublisher != null) { selectedPublisherId = null }
 
-    fun loadDetail(p: PodcastSummary) {
-        selectedPodcast = p
-        scope.launch {
-            detailLoading = true
-            try {
-                selectedDetail = vm.repository.podcastDetail(p.id)
-            } catch (e: Exception) {
-                statusMessage = "加载单集列表失败: ${e.message}"
-            } finally {
-                detailLoading = false
-            }
-        }
-    }
-
-    LaunchedEffect(Unit) {
-        refreshList()
+    LaunchedEffect(owner, browser.listLoaded) { vm.podcastBrowser.ensureList() }
+    LaunchedEffect(owner, selectedId, selectedId in browser.loadedDetails) { selectedId?.let(vm.podcastBrowser::ensureDetail) }
+    LaunchedEffect(browser.message) {
+        browser.message?.let { statusMessage = it; vm.podcastBrowser.clearMessage() }
     }
 
     Box(modifier = modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         if (selectedPodcast != null) {
-            PodcastDetailView(
-                podcast = selectedPodcast!!,
-                detail = selectedDetail,
-                loading = detailLoading,
-                onBack = {
-                    selectedPodcast = null
-                    selectedDetail = null
-                    refreshList()
-                },
-                onRefresh = {
-                    scope.launch {
-                        detailLoading = true
+            pageStates.SaveableStateProvider("detail:${selectedPodcast.id}") {
+                PodcastDetailView(
+                    podcast = selectedPodcast,
+                    detail = selectedDetail,
+                    positions = positions,
+                    loading = detailLoading,
+                    onBack = vm::back,
+                    onRefresh = { vm.podcastBrowser.refresh(selectedPodcast.id, synchronize = false) },
+                    onPlayEpisode = { ep ->
+                        vm.playPodcastEpisode(ep, selectedPodcast)
+                    },
+                    onQueueEpisode = { ep, next ->
+                        vm.addPodcastEpisodeToQueue(ep, selectedPodcast, next)
+                    },
+                    onFollow = { vm.togglePodcastFollow(selectedPodcast) },
+                    onAutoDownload = { autoDownloadPodcast = selectedPodcast },
+                    onReadDownloads = { vm.podcastBrowser.refresh(selectedPodcast.id, synchronize = false) },
+                    onSaveEpisode = { episode -> scope.launch {
                         try {
-                            selectedDetail = vm.repository.refreshPodcast(selectedPodcast!!.id)
-                            statusMessage = "已从源端完成最新单集巡检同步"
-                        } catch (e: Exception) {
-                            statusMessage = "刷新失败: ${e.message}"
-                        } finally {
-                            detailLoading = false
-                        }
-                    }
-                },
-                onPlayEpisode = { ep ->
-                    val podcast = selectedPodcast!!
-                    if (podcast.coverUrl.isNotBlank()) {
-                        vm.repository.rememberPodcastCover("podcast_ep_${ep.id}", podcast.coverUrl)
-                    }
-                    val track = ep.toTrack(podcast)
-                    vm.play(listOf(track), 0)
-                    scope.launch {
-                        vm.repository.updatePodcastProgress(
-                            episodeId = ep.id,
-                            positionSec = ep.positionSeconds,
-                            durationSec = ep.durationSeconds,
-                            completed = ep.completed,
-                        )
-                    }
-                },
-            )
+                            val result = vm.repository.savePodcastEpisode(episode.id, !episode.resourceSaved)
+                            if (owner != vm.repository.session.cacheScope()) return@launch
+                            val current = vm.podcastBrowser.state.value.details[episode.podcastId]
+                            current?.let { detail -> vm.podcastBrowser.remember(detail.copy(episodes = detail.episodes.map { item ->
+                                if (item.id == episode.id) item.copy(resourceSaved = result.saved, downloadStatus = if (result.saved) (if (result.reused) "downloaded" else "queued") else item.downloadStatus) else item
+                            })) }
+                            statusMessage = if (!result.saved) "已取消个人保存，共享音频由服务器按策略保留" else if (result.reused) "已复用服务器已有音频，无需重复下载" else "已保存，正在准备服务器音频"
+                        } catch (e: CancellationException) { throw e }
+                        catch (e: Exception) { statusMessage = friendlyError(e) }
+                    } },
+                    publisher = {
+                        PublisherAffiliation(vm, selectedPodcast, canEditPublisher,
+                            onOpen = { selectedPublisherId = it.id; selectedPublisherName = it.name; vm.back() },
+                            onSaved = { detail ->
+                                vm.podcastBrowser.remember(detail)
+                                statusMessage = "出品方归属已保存"
+                            })
+                    },
+                )
+            }
+        } else if (selectedPublisher != null) {
+            PodcastPublisherPage(vm, selectedPublisher, { selectedPublisherId = null }, { vm.openPodcast(it.id) }, personalOnly)
         } else {
-            PodcastListView(
-                podcasts = podcasts,
-                loading = loading,
-                onSelect = { loadDetail(it) },
-                onAddClick = { showSubscribeDialog = true },
-                onRefreshAll = {
-                    scope.launch {
-                        loading = true
-                        try {
-                            vm.repository.refreshAllPodcasts()
-                            refreshList()
-                            statusMessage = "服务端已触发全量巡检更新"
-                        } catch (e: Exception) {
-                            statusMessage = "更新请求失败: ${e.message}"
-                        } finally {
-                            loading = false
+            pageStates.SaveableStateProvider("list") {
+                PodcastListView(
+                    podcasts = if (personalOnly) podcasts.filter { it.followed } else podcasts,
+                    followingOnly = personalOnly,
+                    canBrowseCatalog = canBrowseCatalog,
+                    onScope = { followingOnly = it; if (!it) vm.podcastBrowser.reloadList(synchronize = false) },
+                    canManage = false,
+                    canAdd = canAddPodcast,
+                    onFollow = vm::togglePodcastFollow,
+                    loading = loading,
+                    onSelect = { vm.openPodcast(it.id) },
+                    onAddClick = { showSubscribeDialog = true },
+                    onRefreshAll = { vm.podcastBrowser.reloadList(synchronize = false) },
+                    onDelete = { p ->
+                        scope.launch {
+                            try {
+                                vm.repository.deletePodcast(p.id)
+                                if (owner == vm.repository.session.cacheScope()) vm.podcastBrowser.remove(p.id)
+                                statusMessage = "已从本服删除节目: ${p.title}"
+                            } catch (e: CancellationException) { throw e }
+                            catch (e: Exception) {
+                                statusMessage = "删除节目失败: ${e.message}"
+                            }
                         }
-                    }
-                },
-                onDelete = { p ->
-                    scope.launch {
-                        try {
-                            vm.repository.deletePodcast(p.id)
-                            refreshList()
-                            statusMessage = "已取消订阅: ${p.title}"
-                        } catch (e: Exception) {
-                            statusMessage = "取消订阅失败: ${e.message}"
-                        }
-                    }
-                },
-            )
+                    },
+                )
+            }
         }
 
+        autoDownloadPodcast?.let { podcast ->
+            PodcastDownloadSettingsDialog(vm, podcast, onDismiss = { autoDownloadPodcast = null }, onSaved = {
+                vm.podcastBrowser.refresh(podcast.id, synchronize = false)
+                statusMessage = "已保存你的自动下载设置"
+            })
+        }
         if (showSubscribeDialog) {
             SubscribePodcastDialog(
                 onDismiss = { showSubscribeDialog = false },
                 onConfirm = { url ->
                     showSubscribeDialog = false
                     scope.launch {
-                        loading = true
                         try {
                             val detail = vm.repository.subscribePodcast(url)
-                            refreshList()
-                            loadDetail(detail.podcast)
-                            statusMessage = "成功订阅: ${detail.podcast.title}"
-                        } catch (e: Exception) {
+                            if (owner != vm.repository.session.cacheScope()) return@launch
+                            vm.podcastBrowser.remember(detail)
+                            vm.openPodcast(detail.podcast.id)
+                            statusMessage = "已添加并关注: ${detail.podcast.title}"
+                        } catch (e: CancellationException) { throw e }
+                        catch (e: Exception) {
                             statusMessage = "订阅失败: ${e.message}"
-                            loading = false
                         }
                     }
                 },
@@ -195,8 +230,29 @@ fun PodcastChannelPage(
 }
 
 @Composable
+private fun PodcastRefreshBox(loading: Boolean, onRefresh: () -> Unit, tag: String,
+    actionLabel: String, content: @Composable BoxScope.() -> Unit) {
+    val refresh = rememberPullToRefreshState()
+    PullToRefreshBox(isRefreshing = loading,
+        onRefresh = { if (!loading) onRefresh() }, state = refresh,
+        modifier = Modifier.fillMaxSize().testTag(tag).semantics {
+            customActions = listOf(CustomAccessibilityAction(actionLabel) {
+                if (loading) false else { onRefresh(); true }
+            })
+        },
+        indicator = { WildRefreshIndicator(loading, refresh, Modifier.align(Alignment.TopCenter)) },
+        content = content)
+}
+
+@Composable
 private fun PodcastListView(
     podcasts: List<PodcastSummary>,
+    followingOnly: Boolean,
+    canBrowseCatalog: Boolean,
+    onScope: (Boolean) -> Unit,
+    canManage: Boolean,
+    canAdd: Boolean,
+    onFollow: (PodcastSummary) -> Unit,
     loading: Boolean,
     onSelect: (PodcastSummary) -> Unit,
     onAddClick: () -> Unit,
@@ -221,43 +277,44 @@ private fun PodcastListView(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                IconButton(onClick = onRefreshAll, modifier = Modifier.size(36.dp)) {
-                    Icon(
-                        Icons.Default.Refresh,
-                        contentDescription = "全部更新",
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(20.dp),
-                    )
-                }
-                FilledTonalButton(
+                if (canAdd) FilledTonalButton(
                     onClick = onAddClick,
                     contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
                     shape = RoundedCornerShape(20.dp),
                 ) {
                     Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(4.dp))
-                    Text("添加订阅", fontSize = 13.sp, maxLines = 1, softWrap = false)
+                    Text("添加节目", fontSize = 13.sp, maxLines = 1, softWrap = false)
                 }
             }
         }
 
-        if (loading && podcasts.isEmpty()) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator()
-            }
-        } else if (podcasts.isEmpty()) {
-            EmptyPodcastState(onPresetSelect = onAddClick)
-        } else {
+        Row(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilterChip(followingOnly, { onScope(true) }, label = { Text("我的关注") })
+            if (canBrowseCatalog) FilterChip(!followingOnly, { onScope(false) }, label = { Text("本服节目") })
+        }
+        PodcastRefreshBox(loading, onRefreshAll, "podcast-list-refresh", "刷新播客订阅") {
             LazyColumn(
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier.fillMaxSize().testTag("podcast-list"),
                 contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 96.dp, top = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
+                if (podcasts.isEmpty() && !loading) item {
+                    Box(Modifier.fillParentMaxSize()) {
+                        if (followingOnly) Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text("还没有关注的节目")
+                            if (canAdd) TextButton(onAddClick) { Text("添加 RSS 并关注") }
+                            if (canBrowseCatalog) TextButton({ onScope(false) }) { Text("浏览本服节目") }
+                        } else EmptyPodcastState(canAdd = canAdd, onPresetSelect = onAddClick)
+                    }
+                }
                 items(podcasts, key = { it.id }) { podcast ->
                     PodcastCardItem(
                         podcast = podcast,
                         onClick = { onSelect(podcast) },
                         onDelete = { onDelete(podcast) },
+                        onFollow = { onFollow(podcast) },
+                        canManage = canManage,
                     )
                 }
             }
@@ -270,8 +327,11 @@ private fun PodcastCardItem(
     podcast: PodcastSummary,
     onClick: () -> Unit,
     onDelete: () -> Unit,
+    onFollow: () -> Unit,
+    canManage: Boolean,
 ) {
     var showMenu by remember { mutableStateOf(false) }
+    var deleting by remember { mutableStateOf(false) }
 
     Surface(
         shape = RoundedCornerShape(16.dp),
@@ -330,6 +390,7 @@ private fun PodcastCardItem(
                     overflow = TextOverflow.Ellipsis,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                TextButton(onFollow, contentPadding = PaddingValues(0.dp)) { Text(if (podcast.followed) "取消关注" else "关注节目") }
                 Spacer(Modifier.height(6.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Surface(
@@ -361,7 +422,7 @@ private fun PodcastCardItem(
                 }
             }
 
-            Box {
+            if (canManage) Box {
                 IconButton(onClick = { showMenu = true }) {
                     Icon(
                         Icons.Default.MoreVert,
@@ -374,10 +435,10 @@ private fun PodcastCardItem(
                     onDismissRequest = { showMenu = false },
                 ) {
                     DropdownMenuItem(
-                        text = { Text("取消订阅", color = MaterialTheme.colorScheme.error) },
+                        text = { Text("删除共享节目", color = MaterialTheme.colorScheme.error) },
                         onClick = {
                             showMenu = false
-                            onDelete()
+                            deleting = true
                         },
                         leadingIcon = {
                             Icon(
@@ -391,10 +452,15 @@ private fun PodcastCardItem(
             }
         }
     }
+    if (deleting) AlertDialog(onDismissRequest = { deleting = false }, title = { Text("从本服删除节目？") },
+        text = { Text("删除《${podcast.title}》会移除所有用户的关注和收听记录。仅取消自己的关注，请使用“取消关注”。") },
+        confirmButton = { TextButton({ deleting = false; onDelete() }) { Text("删除共享节目") } },
+        dismissButton = { TextButton({ deleting = false }) { Text("保留节目") } })
 }
 
 @Composable
 private fun EmptyPodcastState(
+    canAdd: Boolean,
     onPresetSelect: () -> Unit,
 ) {
     Column(
@@ -420,25 +486,25 @@ private fun EmptyPodcastState(
         }
         Spacer(Modifier.height(20.dp))
         Text(
-            text = "暂无订阅播客",
+            text = "本服暂无节目",
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.Bold,
         )
         Spacer(Modifier.height(8.dp))
         Text(
-            text = "输入 RSS 地址或从精选推荐中一键添加\n服务端会在后台自动为您检测最新单集",
+            text = if (canAdd) "添加 RSS 节目后，所有用户可分别关注\n服务端会统一获取最新单集" else "节目管理员添加节目后\n即可浏览并关注感兴趣的节目",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = androidx.compose.ui.text.style.TextAlign.Center,
         )
         Spacer(Modifier.height(24.dp))
-        Button(
+        if (canAdd) Button(
             onClick = onPresetSelect,
             shape = RoundedCornerShape(20.dp),
         ) {
             Icon(Icons.Default.Add, contentDescription = null)
             Spacer(Modifier.width(6.dp))
-            Text("立即添加订阅")
+            Text("添加节目")
         }
     }
 }
@@ -447,15 +513,30 @@ private fun EmptyPodcastState(
 private fun PodcastDetailView(
     podcast: PodcastSummary,
     detail: PodcastDetail?,
+    positions: Map<String, EpisodeProgress>,
     loading: Boolean,
     onBack: () -> Unit,
     onRefresh: () -> Unit,
     onPlayEpisode: (PodcastEpisode) -> Unit,
+    onQueueEpisode: (PodcastEpisode, Boolean) -> Unit,
+    onSaveEpisode: (PodcastEpisode) -> Unit,
+    onFollow: () -> Unit,
+    onAutoDownload: () -> Unit,
+    onReadDownloads: () -> Unit,
+    publisher: @Composable () -> Unit,
 ) {
-    var sortDescending by remember { mutableStateOf(true) }
+    var episodeScope by rememberSaveable(podcast.id) { mutableStateOf("all") }
+    var sortDescending by rememberSaveable(podcast.id) { mutableStateOf(true) }
+    var showDescription by remember(podcast.id) { mutableStateOf(false) }
 
-    val sortedEpisodes = remember(detail?.episodes, sortDescending) {
-        val list = detail?.episodes ?: emptyList()
+    val sortedEpisodes = remember(detail?.episodes, sortDescending, episodeScope) {
+        val list = detail?.episodes.orEmpty().filter {
+            when (episodeScope) {
+                "saved" -> it.resourceSaved || it.resourceAutomatic || it.resourcePlaybackCached
+                "downloaded" -> it.downloadStatus == "downloaded"
+                else -> true
+            }
+        }
         val parseNum = { ep: PodcastEpisode ->
             if (ep.episodeNumber != null) ep.episodeNumber
             else {
@@ -465,18 +546,15 @@ private fun PodcastDetailView(
                     ?: 0
             }
         }
-        if (sortDescending) {
-            list.sortedWith(compareByDescending<PodcastEpisode> { it.pubDate }.thenByDescending { parseNum(it) })
-        } else {
-            list.sortedWith(compareBy<PodcastEpisode> { it.pubDate }.thenBy { parseNum(it) })
-        }
+        val keys = list.associate { it.id to (podcastPublishedMillis(it.pubDate) to parseNum(it)) }
+        val comparator = compareBy<PodcastEpisode> { keys.getValue(it.id).first }.thenBy { keys.getValue(it.id).second }
+        list.sortedWith(if (sortDescending) comparator.reversed() else comparator)
     }
 
     Column(Modifier.fillMaxSize()) {
         Row(
             Modifier
                 .fillMaxWidth()
-                .statusBarsPadding()
                 .padding(horizontal = 8.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -491,142 +569,167 @@ private fun PodcastDetailView(
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
-            IconButton(onClick = onRefresh) {
-                if (loading) {
-                    CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                } else {
-                    Icon(Icons.Default.Refresh, contentDescription = "立即从源刷新")
-                }
-            }
         }
 
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(bottom = 96.dp),
-        ) {
-            item {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    verticalAlignment = Alignment.Top,
-                ) {
-                    Box(
+        PodcastRefreshBox(loading, onRefresh, "podcast-detail-refresh", "刷新单集列表") {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize().testTag("podcast-episodes"),
+                contentPadding = PaddingValues(bottom = 96.dp),
+            ) {
+                item {
+                    Row(
                         modifier = Modifier
-                            .size(100.dp)
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(MaterialTheme.colorScheme.surfaceContainerHighest),
-                        contentAlignment = Alignment.Center,
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        verticalAlignment = Alignment.Top,
                     ) {
-                        if (podcast.coverUrl.isNotBlank()) {
-                            AsyncImage(
-                                model = ImageRequest.Builder(LocalContext.current)
-                                    .data(podcast.coverUrl)
-                                    .crossfade(true)
-                                    .build(),
-                                contentDescription = podcast.title,
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier.fillMaxSize(),
+                        Box(
+                            modifier = Modifier
+                                .size(100.dp)
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(MaterialTheme.colorScheme.surfaceContainerHighest),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            if (podcast.coverUrl.isNotBlank()) {
+                                AsyncImage(
+                                    model = ImageRequest.Builder(LocalContext.current)
+                                        .data(podcast.coverUrl)
+                                        .crossfade(true)
+                                        .build(),
+                                    contentDescription = podcast.title,
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier.fillMaxSize(),
+                                )
+                            } else {
+                                Icon(
+                                    Icons.Default.Podcasts,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(48.dp),
+                                )
+                            }
+                        }
+
+                        Spacer(Modifier.width(16.dp))
+
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                text = podcast.title,
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.Bold,
                             )
-                        } else {
-                            Icon(
-                                Icons.Default.Podcasts,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(48.dp),
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                text = podcast.author.ifBlank { "未知创作者" },
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
+                            TextButton(onFollow, contentPadding = PaddingValues(0.dp)) { Text(if (podcast.followed) "取消关注" else "关注节目") }
+                            if (podcast.followed) TextButton(onAutoDownload, contentPadding = PaddingValues(0.dp)) { Text("自动下载") }
+                            publisher()
+                            Spacer(Modifier.height(8.dp))
+                            Text(
+                                text = podcastDescription(podcast.description).ifBlank { "暂无简介" },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 3,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.clickable { showDescription = true },
+                            )
+                            TextButton({ showDescription = true }, contentPadding = PaddingValues(0.dp)) { Text("节目介绍") }
                         }
                     }
+                    Row(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilterChip(episodeScope == "saved", { episodeScope = "saved"; onReadDownloads() }, label = { Text("我的下载") })
+                        FilterChip(episodeScope == "downloaded", { episodeScope = "downloaded" }, label = { Text("服务器已有") })
+                        FilterChip(episodeScope == "all", { episodeScope = "all" }, label = { Text("全部单集") })
+                    }
+                    if (episodeScope == "saved") Text("包含你的手动下载、自动下载和播放缓存。播放缓存可按服务器清理规则回收。",
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+                    Spacer(Modifier.height(8.dp))
 
-                    Spacer(Modifier.width(16.dp))
-
-                    Column(Modifier.weight(1f)) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
                         Text(
-                            text = podcast.title,
-                            style = MaterialTheme.typography.titleLarge,
+                            text = "单集列表 (${sortedEpisodes.size})",
+                            style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
                         )
-                        Spacer(Modifier.height(4.dp))
-                        Text(
-                            text = podcast.author.ifBlank { "未知创作者" },
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        Spacer(Modifier.height(8.dp))
-                        Text(
-                            text = podcast.description.replace(Regex("<[^>]+>"), " ").trim().ifBlank { "暂无简介" },
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 3,
-                            overflow = TextOverflow.Ellipsis,
-                        )
+                        TextButton(
+                            onClick = { sortDescending = !sortDescending },
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                        ) {
+                            Icon(
+                                if (sortDescending) Icons.Default.ArrowDownward else Icons.Default.ArrowUpward,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp),
+                            )
+                            Spacer(Modifier.width(4.dp))
+                            Text(if (sortDescending) "最近更新" else "最早发布", fontSize = 12.sp)
+                        }
                     }
                 }
-                HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
-                Spacer(Modifier.height(8.dp))
 
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 4.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        text = "单集列表 (${sortedEpisodes.size})",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                    )
-                    TextButton(
-                        onClick = { sortDescending = !sortDescending },
-                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                    ) {
-                        Icon(
-                            if (sortDescending) Icons.Default.ArrowDownward else Icons.Default.ArrowUpward,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp),
+                if (sortedEpisodes.isEmpty() && !loading) {
+                    item {
+                        Box(Modifier.fillMaxWidth().padding(48.dp), contentAlignment = Alignment.Center) {
+                            Text(when (episodeScope) {
+                                "saved" -> "还没有你的下载，播放时缓存或选择保存后会显示在这里"
+                                "downloaded" -> "服务器还没有已下载单集"
+                                else -> "暂无单集"
+                            }, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                } else {
+                    items(sortedEpisodes, key = { it.id }) { episode ->
+                        val ep = positions[episode.id]?.let { progress ->
+                            episode.copy(positionSeconds = progress.positionSeconds.toInt(), completed = progress.completed)
+                        } ?: episode
+                        EpisodeRowItem(
+                            episode = ep,
+                            onPlay = { onPlayEpisode(ep) },
+                            onPlayNext = { onQueueEpisode(ep, true) },
+                            onAddToQueue = { onQueueEpisode(ep, false) },
+                            onSave = { onSaveEpisode(ep) },
                         )
-                        Spacer(Modifier.width(4.dp))
-                        Text(if (sortDescending) "最近更新" else "最早发布", fontSize = 12.sp)
                     }
-                }
-            }
-
-            if (sortedEpisodes.isEmpty() && loading) {
-                item {
-                    Box(Modifier.fillMaxWidth().padding(48.dp), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator()
-                    }
-                }
-            } else if (sortedEpisodes.isEmpty()) {
-                item {
-                    Box(Modifier.fillMaxWidth().padding(48.dp), contentAlignment = Alignment.Center) {
-                        Text("暂无单集", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                }
-            } else {
-                items(sortedEpisodes, key = { it.id }) { ep ->
-                    EpisodeRowItem(
-                        episode = ep,
-                        onPlay = { onPlayEpisode(ep) },
-                    )
                 }
             }
         }
     }
+    if (showDescription) AlertDialog(onDismissRequest = { showDescription = false },
+        title = { Text(podcast.title) },
+        text = { Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
+            PodcastArticleText(podcast.description.ifBlank { "暂无节目介绍" }, Modifier.fillMaxWidth())
+        } },
+        confirmButton = { TextButton({ showDescription = false }) { Text("关闭") } })
 }
 
 @Composable
 private fun EpisodeRowItem(
     episode: PodcastEpisode,
     onPlay: () -> Unit,
+    onPlayNext: () -> Unit,
+    onAddToQueue: () -> Unit,
+    onSave: () -> Unit,
 ) {
+    var details by remember(episode.id) { mutableStateOf(false) }
+    var showMenu by remember(episode.id) { mutableStateOf(false) }
+    val feedback = LocalTactileFeedback.current
     val durationText = formatDuration(episode.durationSeconds)
 
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onPlay)
+            .testTag("podcast-episode-${episode.id}")
+            .combinedClickable(onClick = { details = true }, onLongClick = { showMenu = true }, onLongClickLabel = "单集操作")
             .padding(horizontal = 16.dp, vertical = 6.dp),
         shape = RoundedCornerShape(12.dp),
         color = MaterialTheme.colorScheme.surfaceContainerLow,
@@ -679,17 +782,70 @@ private fun EpisodeRowItem(
                             color = MaterialTheme.colorScheme.primary,
                         )
                     }
+                    if (episode.resourceSaved || episode.resourceAutomatic) { Spacer(Modifier.width(8.dp)); Text(if (episode.resourceSaved) "已保存" else "自动保存", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary) }
+                    else if (episode.resourcePlaybackCached) { Spacer(Modifier.width(8.dp)); Text("播放缓存", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                     if (episode.completed) {
                         Spacer(Modifier.width(8.dp))
                         Text(
-                            text = "已听",
+                            text = "已听完",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.outline,
                         )
                     }
                 }
+                if (!episode.completed && episode.positionSeconds > 0) {
+                    Text(text = "已听至 ${episode.positionSeconds / 60}:${(episode.positionSeconds % 60).toString().padStart(2, '0')}",
+                        style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(top = 4.dp))
+                }
+            }
+            Box {
+                IconButton(onClick = { showMenu = true }, modifier = Modifier.testTag("podcast-episode-actions-${episode.id}")) {
+                    Icon(Icons.Default.MoreVert, contentDescription = "单集操作：${episode.title}", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+                    DropdownMenuItem(
+                        text = { Text("下一集播放") },
+                        leadingIcon = { Icon(Icons.AutoMirrored.Filled.PlaylistPlay, null) },
+                        onClick = { showMenu = false; feedback(TactileKind.Tap); onPlayNext() },
+                        modifier = Modifier.testTag("podcast-episode-play-next-${episode.id}"),
+                    )
+                    DropdownMenuItem(
+                        text = { Text("加入播放队列") },
+                        leadingIcon = { Icon(Icons.AutoMirrored.Filled.QueueMusic, null) },
+                        onClick = { showMenu = false; feedback(TactileKind.Tap); onAddToQueue() },
+                        modifier = Modifier.testTag("podcast-episode-enqueue-${episode.id}"),
+                    )
+                    DropdownMenuItem(
+                        text = { Text(if (episode.resourceSaved) "取消个人保存" else "保存到服务器") },
+                        leadingIcon = { Icon(if (episode.resourceSaved) Icons.Default.BookmarkRemove else Icons.Default.BookmarkAdd, null) },
+                        onClick = { showMenu = false; onSave() },
+                        modifier = Modifier.testTag("podcast-episode-save-${episode.id}"),
+                    )
+                    HorizontalDivider()
+                    DropdownMenuItem(
+                        text = { Text("单集详情") },
+                        leadingIcon = { Icon(Icons.Default.Info, null) },
+                        onClick = { showMenu = false; details = true },
+                    )
+                }
             }
         }
+    }
+    if (details) {
+        AlertDialog(
+            onDismissRequest = { details = false },
+            title = { Text(episode.title) },
+            text = {
+                Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    PodcastArticleText(episode.description.ifBlank { "暂无单集简介" }, Modifier.fillMaxWidth())
+                    if (episode.pubDate.isNotBlank()) Text("发布时间：${episode.pubDate}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    if (durationText.isNotBlank()) Text("时长：$durationText", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            },
+            confirmButton = { Button(onClick = { details = false; onPlay() }) { Text("播放单集") } },
+            dismissButton = { TextButton(onClick = { details = false }) { Text("关闭") } },
+        )
     }
 }
 
@@ -714,9 +870,10 @@ private fun SubscribePodcastDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("订阅播客") },
+        title = { Text("添加 RSS 并关注") },
         text = {
             Column {
+                Text("输入节目 RSS 地址即可关注。已有节目会直接复用，你的关注和收听进度单独保存。", style = MaterialTheme.typography.bodySmall)
                 OutlinedTextField(
                     value = url,
                     onValueChange = { url = it },

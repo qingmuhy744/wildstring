@@ -11,6 +11,7 @@ from wildstring.agent_ai import Assistant
 from wildstring.agent_application import Application
 from wildstring.agent_automation import Automation
 from wildstring.agent_common import (
+    LIBRARY_TARGET_REQUIRED,
     TOOLS,
     Actor,
     digest,
@@ -309,8 +310,8 @@ class Core:
                     if (
                         not isinstance(identity, str)
                         or connection.execute(
-                            "SELECT 1 FROM tracks WHERE id=? AND library_id=? AND status='available'",
-                            (identity, self.library_id),
+                            "SELECT 1 FROM tracks WHERE id=? AND library_visible(library_id) AND status='available'",
+                            (identity,),
                         ).fetchone()
                         is None
                     ):
@@ -447,11 +448,11 @@ class Core:
     def drafts(self, actor, limit=50, offset=0, status=None):
         with self.database.connect() as connection:
             rows = connection.execute(
-                "SELECT id FROM agent_drafts WHERE user_id=? AND (? IS NULL OR status=?) ORDER BY CASE WHEN status IN ('pending','approved') THEN 0 ELSE 1 END,updated_at DESC,id DESC LIMIT ? OFFSET ?",
+                "SELECT id FROM agent_drafts WHERE user_id=? AND library_visible(library_id) AND (? IS NULL OR status=?) ORDER BY CASE WHEN status IN ('pending','approved') THEN 0 ELSE 1 END,updated_at DESC,id DESC LIMIT ? OFFSET ?",
                 (actor.user_id, status, status, limit, offset),
             ).fetchall()
             total = connection.execute(
-                "SELECT count(*) FROM agent_drafts WHERE user_id=? AND (? IS NULL OR status=?)",
+                "SELECT count(*) FROM agent_drafts WHERE user_id=? AND library_visible(library_id) AND (? IS NULL OR status=?)",
                 (actor.user_id, status, status),
             ).fetchone()[0]
             items = [self.draft(actor, row["id"], connection) for row in rows]
@@ -641,15 +642,25 @@ class Core:
         body = validate(PlaylistPayload, payload)
         identity = body.playlist_id or uuid4().hex
         store = PlaylistStore(self.repository_for(actor))
+        track_ids = body.track_ids
         if body.playlist_id:
             record = store._record(connection, identity, body.playlist_version, editable=True)
             if record["kind"] != "manual":
                 raise HTTPException(409, "smart_playlist_tracks_readonly")
+            old = connection.execute(
+                "SELECT p.track_id,library_visible(t.library_id) AND t.status='available' AS visible "
+                "FROM playlist_tracks p JOIN tracks t ON t.id=p.track_id "
+                "WHERE p.playlist_id=? ORDER BY p.position",
+                (identity,),
+            ).fetchall()
+            replacements = iter(body.track_ids)
+            track_ids = [row[0] if not row[1] else next(replacements, None) for row in old]
+            track_ids = [track for track in track_ids if track is not None] + list(replacements)
         for track_id in body.track_ids:
             if (
                 connection.execute(
-                    "SELECT 1 FROM tracks WHERE id=? AND library_id=? AND status='available'",
-                    (track_id, self.library_id),
+                    "SELECT 1 FROM tracks WHERE id=? AND library_visible(library_id) AND status='available'",
+                    (track_id,),
                 ).fetchone()
                 is None
             ):
@@ -663,16 +674,43 @@ class Core:
         else:
             connection.execute(
                 "INSERT INTO playlists(id,library_id,name,kind,created_at,updated_at,user_id) VALUES (?,?,?,'manual',?,?,?)",
-                (identity, self.library_id, body.name, now(), now(), actor.user_id),
+                (
+                    identity,
+                    store.library.default_library_id(),
+                    body.name,
+                    now(),
+                    now(),
+                    actor.user_id,
+                ),
             )
         connection.executemany(
             "INSERT INTO playlist_tracks VALUES (?,?,?)",
-            [(identity, track_id, index) for index, track_id in enumerate(body.track_ids)],
+            [(identity, track_id, index) for index, track_id in enumerate(track_ids)],
         )
         return {"playlist_id": identity}
 
     def execute_tool(self, actor, name, arguments):
         actor = self.refresh_actor(actor)
+        from wildstring.library.scope import actor_library_scope
+
+        if not isinstance(arguments, dict) or len(encoded(arguments).encode()) > 100000:
+            raise HTTPException(422, "agent_invalid_input")
+        scoped_arguments = dict(arguments)
+        library_id = scoped_arguments.pop("library_id", None)
+        if library_id is not None and (
+            not isinstance(library_id, str) or not 1 <= len(library_id) <= 128
+        ):
+            raise HTTPException(422, "agent_invalid_input")
+        with actor_library_scope(
+            self.database,
+            actor,
+            scoped_arguments,
+            library_id=library_id,
+            require_selection=name in LIBRARY_TARGET_REQUIRED,
+        ):
+            return self.execute_scoped_tool(actor, name, scoped_arguments)
+
+    def execute_scoped_tool(self, actor, name, arguments):
         if name in MUSIC_TOOLS:
             from wildstring.agent_music_tools import execute
 

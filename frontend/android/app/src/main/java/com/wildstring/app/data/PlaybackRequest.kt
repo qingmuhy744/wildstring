@@ -8,9 +8,11 @@ object PlaybackRequest {
     val bitrates = listOf(0, 128, 192, 256, 320)
     fun url(original: String, bitrate: Int, startMs: Long = 0): String {
         require(bitrate in bitrates && startMs >= 0)
-        return original.toHttpUrl().newBuilder().removeAllQueryParameters("format")
+        val source = original.toHttpUrl()
+        val podcast = source.encodedPath.contains("/podcasts/episodes/") && source.encodedPath.endsWith("/stream")
+        return source.newBuilder().removeAllQueryParameters("format")
             .removeAllQueryParameters("bitrate_kbps").removeAllQueryParameters("start_ms").apply {
-                if (bitrate != 0) { addQueryParameter("format", "aac"); addQueryParameter("bitrate_kbps", bitrate.toString()); addQueryParameter("start_ms", startMs.toString()) }
+                if (bitrate != 0 && !podcast) { addQueryParameter("format", "aac"); addQueryParameter("bitrate_kbps", bitrate.toString()); addQueryParameter("start_ms", startMs.toString()) }
             }.build().toString()
     }
     fun isAac(url: String) = url.toHttpUrl().queryParameter("format") == "aac"

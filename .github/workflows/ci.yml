@@ -109,7 +109,7 @@ jobs:
           key: playwright-${{ runner.os }}-${{ hashFiles('frontend/web/package-lock.json') }}
       - run: npm --prefix frontend/web exec -- playwright install --with-deps chromium
       - name: Run Web tests and browser regressions
-        run: make test-web test-large-web test-browse-web test-catalog-web test-transcoding-web
+        run: make test-web test-podcast-web test-publisher-web test-libraries-web test-large-web test-browse-web test-catalog-web test-transcoding-web
       - name: Upload browser visual evidence
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

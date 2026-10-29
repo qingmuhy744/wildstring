@@ -43,19 +43,26 @@ data class MusicState(
 
     val pendingFavorites: Set<String> = emptySet(), val mutationMessage: String? = null,
     val handoff: SharedPlayback? = null, val serverVersion: String? = null,
+    val podcastId: String? = null,
+    val libraries: List<MusicLibrary> = emptyList(), val selectedLibraryId: String = "all", val librariesSupported: Boolean = false,
 )
 
 @HiltViewModel
 class MusicViewModel @Inject constructor(
     val repository: Repository, val imageLoader: ImageLoader, val settings: AppSettings,
-    val sharing: PlaybackSharing, val sleep: com.wildstring.app.playback.SleepTimer, val audioCache: AudioCache, val playbackHealth: com.wildstring.app.playback.PlaybackHealth, @ApplicationContext private val context: Context,
+    val sharing: PlaybackSharing, val podcastProgress: PodcastProgress, val sleep: com.wildstring.app.playback.SleepTimer, val audioCache: AudioCache, val playbackHealth: com.wildstring.app.playback.PlaybackHealth, @ApplicationContext private val context: Context,
 ) : ViewModel() {
+    private val podcastImageLoader = ImageLoader.Builder(context).okHttpClient(repository.podcastImageClient).diskCache(null).build()
+    fun coverLoader(id: String?) = if (id != null && podcastEpisodeId(id) != null) podcastImageLoader else imageLoader
     val agent = AgentPlatform(repository)
     private var agentJob: Job? = null
     private var agentNetworkCallback: android.net.ConnectivityManager.NetworkCallback? = null
     private fun connectionState(error: String? = null) = MusicState(account = repository.session.account, server = repository.session.endpoint?.toString().orEmpty(), serverSelection = repository.session.requestState()?.selection.orEmpty(), localHttp = repository.session.localHttp, error = error)
     private val mutable = MutableStateFlow(connectionState())
     val state = mutable.asStateFlow()
+    val podcastBrowser = PodcastBrowser(viewModelScope, repository.session::cacheScope,
+        repository::podcasts, repository::cachedPodcastDetail, repository::podcastDetail,
+        repository::refreshPodcast, repository::refreshAllPodcasts)
     private val mutablePosition = MutableStateFlow(0L)
     val position = mutablePosition.asStateFlow()
     var controller: MediaController? = null
@@ -91,7 +98,7 @@ class MusicViewModel @Inject constructor(
     private val pages = object : LinkedHashMap<String, CatalogPage>(24, .75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, CatalogPage>?) = size > 24
     }
-    private fun query() = mutable.value.let { CatalogQuery(it.tab, it.kind, it.title, it.query, it.offset, it.collection, it.collectionId, it.activePlaylist, it.role, it.sort, it.albumFilter, it.order) }
+    private fun query() = mutable.value.let { CatalogQuery(it.tab, it.kind, it.title, it.query, it.offset, it.collection, it.collectionId, it.activePlaylist, it.role, it.sort, it.albumFilter, it.order, repository.selectedLibraryId) }
     private fun MusicState.withPage(page: CatalogPage) = copy(tracks = page.tracks.map { track -> track.copy(loved = optimisticFavorites[track.id] ?: repository.knownTracks[track.id]?.loved ?: track.loved) }, albums = page.albums, artists = page.artists,
         playlists = page.playlists, total = page.total, discs = page.discs.orEmpty(), hasContent = true)
     private fun MusicState.withWindow(value: CatalogWindow): MusicState {
@@ -104,7 +111,7 @@ class MusicViewModel @Inject constructor(
     fun clearCache() = viewModelScope.launch {
         val owner = repository.session.cacheScope()
         withContext(Dispatchers.IO) { repository.cache.clear(owner); audioCache.clear(owner) }
-        if (owner == repository.session.cacheScope()) { pages.clear(); windows.clear(); browseIndices.clear(); cancelRanges(); imageLoader.memoryCache?.clear() }
+        if (owner == repository.session.cacheScope()) { pages.clear(); windows.clear(); browseIndices.clear(); cancelRanges(); podcastBrowser.reset(); imageLoader.memoryCache?.clear() }
     }
     private fun requireOwner(owner: String?) { if (owner == null || owner != repository.session.cacheScope()) throw CancellationException("服务器或账号已变化。") }
     private suspend fun invalidateCatalog(owner: String? = repository.session.cacheScope()) {
@@ -123,7 +130,13 @@ class MusicViewModel @Inject constructor(
     }
 
     init {
-        viewModelScope.launch { repository.session.profiles.collect { agent.reset() } }
+        settings.bindAccount(repository.session.activeServerId, repository.session.account?.id)
+        viewModelScope.launch { state.map { it.connected to it.account?.id }.distinctUntilChanged().collect { (connected, _) -> if (connected) refreshLibraries() } }
+        viewModelScope.launch { repository.libraryAccessChanges.collect { refreshLibraries(recheck = true) } }
+        viewModelScope.launch { repository.session.profiles.collect {
+            settings.bindAccount(repository.session.activeServerId, repository.session.account?.id)
+            agent.reset(); podcastBrowser.reset()
+        } }
         controllerFuture.addListener({
             runCatching { controllerFuture.get() }.onSuccess { c -> controller = c; c.addListener(playerListener); rebuildQueue(); refreshPlayer() }
                 .onFailure { mutable.update { it.copy(error = "播放器连接失败，请重新打开应用。") } }
@@ -342,6 +355,68 @@ class MusicViewModel @Inject constructor(
         )
         show(target)
     }
+
+    fun refreshLibraries(recheck: Boolean = false) = viewModelScope.launch {
+        val owner = repository.session.cacheScope()
+        try {
+            val libraries = repository.libraries()
+            requireOwner(owner)
+            val allowed = libraries.map { it.id }.toSet()
+            val old = mutable.value
+            val revoked = old.libraries.any { it.id !in allowed }
+            val changed = repository.selectedLibraryId != "all" && repository.selectedLibraryId !in allowed
+            if (changed) repository.selectLibrary("all")
+            fun permitted(track: Track?) = track?.let { it.isPodcast || (it.libraryId?.let(allowed::contains) ?: libraries.any(MusicLibrary::isDefault)) } ?: libraries.any(MusicLibrary::isDefault)
+            val forbidden = repository.knownTracks.values.filterNot(::permitted).map { it.id }.toSet()
+            controller?.let { player ->
+                if (!permitted(old.current)) player.pause()
+                for (index in player.mediaItemCount - 1 downTo 0) {
+                    val identity = player.getMediaItemAt(index).mediaId
+                    if (podcastEpisodeId(identity) == null && (identity in forbidden || !permitted(repository.knownTracks[identity]))) player.removeMediaItem(index)
+                }
+            }
+            repository.knownTracks.keys.removeAll(forbidden)
+            for (entry in repository.downloads.entries.value) if (!permitted(entry.track)) repository.downloads.remove(entry.track.id)
+            mutable.update { it.copy(libraries = libraries, librariesSupported = true, selectedLibraryId = repository.selectedLibraryId) }
+            if (revoked || changed || recheck || !old.librariesSupported) {
+                loadGeneration++; loadJob?.cancel(); albumNavigationJob?.cancel()
+                invalidateCatalog(owner)
+                if (revoked || forbidden.isNotEmpty()) {
+                    withContext(Dispatchers.IO) { repository.cache.clear(owner) }
+                    requireOwner(owner)
+                    imageLoader.memoryCache?.clear()
+                }
+                tabs.clear(); history.clear()
+                mutable.update { it.copy(tracks = emptyList(), albums = emptyList(), artists = emptyList(), total = 0, hasContent = false,
+                    collection = null, collectionId = null, albumFilter = null) }
+                load()
+            }
+        } catch (e: CancellationException) { throw e }
+        catch (_: Exception) { /* Older servers retain their single-library UI. */ }
+    }
+
+    fun togglePodcastFollow(podcast: PodcastSummary) = viewModelScope.launch {
+        val owner = repository.session.cacheScope()
+        try {
+            val followed = repository.followPodcast(podcast.id, !podcast.followed)
+            requireOwner(owner)
+            podcastBrowser.followed(podcast.id, followed)
+            notify(if (followed) "已关注节目" else "已取消关注，收听进度已保留")
+        } catch (e: CancellationException) { throw e }
+        catch (e: Exception) { notify(friendlyError(e)) }
+    }
+
+    fun selectLibrary(id: String) = viewModelScope.launch {
+        if (id != "all" && mutable.value.libraries.none { it.id == id }) return@launch
+        if (repository.selectedLibraryId == id) return@launch
+        repository.selectLibrary(id)
+        loadGeneration++; loadJob?.cancel(); albumNavigationJob?.cancel()
+        invalidateCatalog()
+        tabs.clear(); history.clear()
+        mutable.update { it.copy(selectedLibraryId = id, tracks = emptyList(), albums = emptyList(), artists = emptyList(), hasContent = false,
+            collection = null, collectionId = null, albumFilter = null, query = "", offset = 0) }
+        load()
+    }
     fun browseAlbums() {
         if (mutable.value.tab != "library") tabs[mutable.value.tab] = query()
         history.remove("library")
@@ -350,7 +425,7 @@ class MusicViewModel @Inject constructor(
     private fun show(target: CatalogQuery, delayMs: Long = 0) {
         val context = catalogSortContext(target.kind, target.collection, target.albumFilter)
         val preference = context?.let { settings.catalogSort(repository.session.cacheScope(), it) }
-        val target = target.copy(offset = 0, sort = preference?.sort ?: target.sort, order = preference?.order ?: target.order)
+        val target = target.copy(offset = 0, sort = preference?.sort ?: target.sort, order = preference?.order ?: target.order, libraryId = repository.selectedLibraryId)
         val savedWindow = windows[target.key] ?: pages[target.key]?.let { CatalogWindow(mapOf(0 to it)) }
         mutable.update { current ->
             val next = current.copy(tab = target.tab, kind = target.kind, title = target.title, query = target.query, offset = target.offset,
@@ -363,7 +438,58 @@ class MusicViewModel @Inject constructor(
         }
         load(delayMs, preserveWindow = true)
     }
-    fun back() { history[mutable.value.tab]?.removeLastOrNull()?.let { show(it) } }
+    fun back() {
+        if (mutable.value.tab == "podcast" && mutable.value.podcastId != null) mutable.update { it.copy(podcastId = null) }
+        else history[mutable.value.tab]?.removeLastOrNull()?.let { show(it) }
+    }
+    fun openPodcast(id: String) {
+        navigate("podcast")
+        mutable.update { it.copy(podcastId = id) }
+    }
+    fun openPlayingPodcast() {
+        val track = mutable.value.current ?: return
+        track.podcast?.podcastId?.let { openPodcast(it); return }
+        val episodeId = track.podcastEpisodeId ?: return
+        val owner = repository.session.cacheScope()
+        viewModelScope.launch {
+            try {
+                val episode = repository.podcastEpisode(episodeId)
+                requireOwner(owner)
+                openPodcast(episode.podcastId)
+            } catch (error: CancellationException) { throw error }
+            catch (error: Exception) { notify(friendlyError(error)) }
+        }
+    }
+    fun playPodcastEpisode(episode: PodcastEpisode, podcast: PodcastSummary, positionMs: Long? = null) = viewModelScope.launch {
+        val owner = repository.session.cacheScope()
+        try {
+            val track = repository.rememberPodcastEpisode(episode, podcast)
+            requireOwner(owner)
+            play(listOf(track), positionMs = positionMs)
+        } catch (error: CancellationException) { throw error }
+        catch (error: Exception) { notify(friendlyError(error)) }
+    }
+    fun addPodcastEpisodeToQueue(episode: PodcastEpisode, podcast: PodcastSummary, next: Boolean = false) = viewModelScope.launch {
+        val owner = repository.session.cacheScope()
+        try {
+            val track = repository.rememberPodcastEpisode(episode, podcast)
+            requireOwner(owner)
+            val c = controller ?: run { notify("播放器正在准备，请稍后重试。"); return@launch }
+            if (c.mediaItemCount >= 5000) { notify("播放队列最多 5000 项。"); return@launch }
+            val item = track.mediaItem(repository)
+            localPlaybackEpoch++
+            if (c.mediaItemCount == 0) {
+                c.pause()
+                c.setMediaItem(item)
+                c.prepare()
+            } else if (next) c.addMediaItem(c.currentMediaItemIndex + 1, item)
+            else c.addMediaItem(item)
+            rebuildQueue()
+            refreshPlayer()
+            notify(if (next) "已排到下一集" else "已加入播放队列")
+        } catch (error: CancellationException) { throw error }
+        catch (_: Exception) { notify("未能加入播放队列，请重试。") }
+    }
     private fun open(target: CatalogQuery) {
         history.getOrPut(mutable.value.tab) { ArrayDeque() }.apply { if (size >= 20) removeFirst(); addLast(query()) }
         show(target)
@@ -564,7 +690,7 @@ class MusicViewModel @Inject constructor(
     suspend fun checkSharedPlayback(): Unit = withContext(Dispatchers.Main.immediate) {
         if (sharing.mode.value == "off") return@withContext
         val c = controller ?: return@withContext
-        if (c.isPlaying || c.playWhenReady) return@withContext
+        if (c.isPlaying || c.playWhenReady || mutable.value.current?.podcastEpisodeId != null) return@withContext
         val owner = repository.session.cacheScope(); requireOwner(owner)
         val epoch = localPlaybackEpoch
         val saved = repository.api().sharedPlayback(RequestOwner(owner)); requireOwner(owner)
@@ -605,6 +731,7 @@ class MusicViewModel @Inject constructor(
         sharing.publish(snapshot, claim = true) ?: throw IOException("尚无可同步的播放。")
     }
     suspend fun resumeShared(saved: SharedPlayback, requirePausedHandoff: Boolean = false): Unit = withContext(Dispatchers.Main.immediate) {
+        require(saved.trackIds.none { podcastEpisodeId(it) != null }) { "播客请从单集列表继续收听，每集进度独立保存。" }
         require(saved.trackIds.size <= 5000) { "共享队列超过本机 5000 首上限。" }
         val owner = repository.session.cacheScope()
         val epoch = localPlaybackEpoch
@@ -624,21 +751,28 @@ class MusicViewModel @Inject constructor(
         controller?.shuffleModeEnabled = saved.mode == "shuffle"
         controller?.repeatMode = when(saved.mode) { "repeat_one" -> Player.REPEAT_MODE_ONE; "repeat_all", "shuffle" -> Player.REPEAT_MODE_ALL; else -> Player.REPEAT_MODE_OFF }
     }
-    fun play(tracks: List<Track>, index: Int = 0, autoplay: Boolean = true, positionMs: Long = 0) {
+    fun play(tracks: List<Track>, index: Int = 0, autoplay: Boolean = true, positionMs: Long? = null) {
         val c = controller ?: return
         if (tracks.isEmpty()) return
         require(tracks.size <= 5000) { "播放队列最多 5000 首。" }
         // Media3 transports bundle lists with a retriever; smaller additions also bound each transaction.
         tracks.forEach { repository.rememberPlaybackTrack(it) }
-        val items = tracks.map { it.mediaItem(repository) }
+        val items = tracks.mapIndexed { itemIndex, track -> track.mediaItem(repository).let { item ->
+            if (itemIndex == index && track.podcastEpisodeId != null && positionMs != null) {
+                val extras = android.os.Bundle(item.mediaMetadata.extras).apply { putLong("podcast_requested_position", positionMs) }
+                item.buildUpon().setMediaMetadata(item.mediaMetadata.buildUpon().setExtras(extras).build()).build()
+            } else item
+        } }
         val previous = (0 until c.mediaItemCount).map { c.getMediaItemAt(it) }
         localPlaybackEpoch++
         val previousIndex = c.currentMediaItemIndex; val position = c.currentPosition; val previousAutoplay = c.playWhenReady
         try {
             val batches = items.chunked(100)
-            c.setMediaItems(batches.first(), 0, 0)
+            c.pause()
+            c.setMediaItems(batches.first(), index.coerceIn(batches.first().indices), (positionMs ?: 0).coerceAtLeast(0))
             batches.drop(1).forEach { c.addMediaItems(it) }
-            c.seekTo(index.coerceIn(tracks.indices), positionMs.coerceAtLeast(0)); c.prepare(); c.playWhenReady = autoplay; refreshPlayer()
+            if (index >= 100) c.seekTo(index.coerceIn(tracks.indices), (positionMs ?: 0).coerceAtLeast(0))
+            c.prepare(); c.playWhenReady = autoplay; refreshPlayer()
         } catch (e: Exception) {
             if (previous.isNotEmpty()) { c.setMediaItems(previous.take(100), 0, 0); previous.drop(100).chunked(100).forEach { c.addMediaItems(it) }; c.seekTo(previousIndex, position); c.prepare(); c.playWhenReady = previousAutoplay }
             else c.clearMediaItems()
@@ -900,11 +1034,12 @@ class MusicViewModel @Inject constructor(
             duration = c.duration.takeIf { d -> d > 0 } ?: track?.durationMs ?: 0,
             queue = queue, playbackQuality = c.mediaMetadata.description?.toString().orEmpty(), entryId = item?.mediaId, repeatMode = c.repeatMode, shuffle = c.shuffleModeEnabled,
             playbackError = c.playerError?.let { error -> generateSequence<Throwable>(error) { it.cause }.filterIsInstance<com.wildstring.app.playback.PlaybackResolutionException>().firstOrNull()?.message
-                ?: "无法播放这首歌，请检查连接或音频编码后重试。" }) }
+                ?: if (id?.let(::podcastEpisodeId) != null) "无法播放本期播客，请检查连接或音频格式后重试。"
+                else "无法播放这首歌，请检查连接或音频编码后重试。" }) }
         if (id != lyricTrack) {
             lyricTrack = id; lyricJob?.cancel()
-            mutable.update { it.copy(lyrics = Lyrics(), lyricsLoading = id != null, lyricsError = null) }
-            if (id != null) lyricJob = viewModelScope.launch {
+            mutable.update { it.copy(lyrics = Lyrics(), lyricsLoading = id != null && track?.isPodcast != true, lyricsError = null) }
+            if (id != null && podcastEpisodeId(id) == null) lyricJob = viewModelScope.launch {
                 try {
                     repository.cachedLyrics(id)?.let { cached -> if (lyricTrack == id) mutable.update { it.copy(lyrics = cached, lyricsLoading = false) } }
                     val lyrics = repository.lyrics(id)
@@ -917,6 +1052,7 @@ class MusicViewModel @Inject constructor(
         }
     }
     override fun onCleared() {
+        podcastImageLoader.shutdown()
         agentNetworkCallback?.let { callback -> runCatching { context.getSystemService(android.net.ConnectivityManager::class.java).unregisterNetworkCallback(callback) } }
         controller?.removeListener(playerListener); MediaController.releaseFuture(controllerFuture); super.onCleared()
     }

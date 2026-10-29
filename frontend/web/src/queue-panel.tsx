@@ -8,13 +8,24 @@ export function QueuePanel({
   onClose,
   onNotice,
   embedded = false,
+  upNextOnly = false,
+  upNextPodcastId,
 }: {
   player: Player;
   onClose: () => void;
   onNotice: (message: string) => void;
   embedded?: boolean;
+  upNextOnly?: boolean;
+  upNextPodcastId?: string;
 }) {
   const instruction = useId();
+  const entries = player.queue
+    .map((track, index) => ({ track, index }))
+    .filter(
+      ({ track, index }) =>
+        !upNextOnly ||
+        (index > player.index && (!upNextPodcastId || track.podcast_id === upNextPodcastId)),
+    );
 
   function move(from: number, to: number) {
     if (from === to) return;
@@ -27,7 +38,7 @@ export function QueuePanel({
         <div>
           <span className="eyebrow">UP NEXT</span>
           <h2>
-            播放队列 <small>{player.queue.length}</small>
+            {upNextOnly ? '下一集' : '播放队列'} <small>{entries.length}</small>
           </h2>
         </div>
         <button className="icon-button" onClick={onClose} aria-label="关闭队列">
@@ -37,9 +48,9 @@ export function QueuePanel({
       <p className="sr-only" id={instruction}>
         使用每首歌曲右侧的上移和下移按钮调整播放顺序。
       </p>
-      {player.queue.length ? (
+      {entries.length ? (
         <ol>
-          {player.queue.map((track, i) => (
+          {entries.map(({ track, index: i }, entryIndex) => (
             <li
               key={`${track.id}-${i}`}
               aria-current={i === player.index ? 'true' : undefined}
@@ -48,6 +59,8 @@ export function QueuePanel({
               <span className="queue-index">
                 {i === player.index ? (
                   <PlaybackIndicator playing={player.playing} buffering={player.buffering} />
+                ) : upNextOnly ? (
+                  entryIndex + 1
                 ) : (
                   i + 1
                 )}

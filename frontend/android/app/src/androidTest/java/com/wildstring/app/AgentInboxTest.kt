@@ -35,7 +35,7 @@ class AgentInboxTest {
             .addInterceptor(OriginGuard({ session.endpoint }, profile = session::cacheScope, unauthorized = session::invalidate))
             .addInterceptor(ScopedSessionInterceptor(session::requestState, session::cookieFor, session::cookieFrom)).build()
         val database = Room.inMemoryDatabaseBuilder(context, QueueDatabase::class.java).build()
-        val repository = Repository(session, client, database, cache, settings, OfflineDownloads(context, session, client))
+        val repository = Repository(context, session, client, database, cache, settings, OfflineDownloads(context, session, client))
         val agent = AgentPlatform(repository)
         fun select(server: MockWebServer, user: String) {
             session.configure(server.url("/").toString(), true); session.write("wildstring_session=$user; Path=/; Max-Age=3600"); session.bindAccount(Account(user, user, "listener")); agent.reset()

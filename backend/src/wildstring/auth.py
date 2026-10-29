@@ -34,6 +34,11 @@ def token_hash(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
 
+def login_guard_key(scope: str, client_host: str | None) -> str:
+    value = f"{scope.casefold()}\0{client_host or ''}"
+    return hashlib.sha256(value.encode()).hexdigest()
+
+
 class Login(BaseModel):
     model_config = ConfigDict(extra="forbid")
     username: str = Field(min_length=1, max_length=128)
@@ -66,6 +71,7 @@ class UserCreate(BaseModel):
     username: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,31}$")
     password: SecretStr = Field(min_length=12, max_length=128)
     profile: Literal["owner", "librarian", "editor", "listener"] = "listener"
+    library_ids: list[str] | None = Field(default=None, max_length=1000)
 
 
 class UserUpdate(BaseModel):
@@ -128,23 +134,27 @@ class Auth:
             )
             if result.rowcount:
                 connection.execute("DELETE FROM sessions WHERE user_id='admin'")
-                connection.execute("UPDATE login_guard SET failures=0,blocked_until=0")
+                connection.execute("DELETE FROM login_attempts")
 
     def require_session(self, request: Request) -> dict:
-        if getattr(request.state, "user", None) is not None:
-            return request.state.user
-        token = request.cookies.get(COOKIE, "")
-        if not token or len(token) > 128:
-            raise HTTPException(401, "authentication_required")
-        with self.database.connect() as connection:
-            row = connection.execute(
-                "SELECT u.* FROM sessions s JOIN users u ON u.id=s.user_id "
-                "WHERE s.token_hash=? AND s.expires_at>? AND u.enabled=1 AND u.password_hash IS NOT NULL",
-                (token_hash(token), int(time.time())),
-            ).fetchone()
-        if row is None:
-            raise HTTPException(401, "authentication_required")
-        request.state.user = public_user(row)
+        if getattr(request.state, "user", None) is None:
+            token = request.cookies.get(COOKIE, "")
+            if not token or len(token) > 128:
+                raise HTTPException(401, "authentication_required")
+            with self.database.connect() as connection:
+                row = connection.execute(
+                    "SELECT u.* FROM sessions s JOIN users u ON u.id=s.user_id "
+                    "WHERE s.token_hash=? AND s.expires_at>? AND u.enabled=1 AND u.password_hash IS NOT NULL",
+                    (token_hash(token), int(time.time())),
+                ).fetchone()
+            if row is None:
+                raise HTTPException(401, "authentication_required")
+            request.state.user = public_user(row)
+        # This optional binding never grants access. It prevents an old Web tab
+        # from writing to the new account when same-origin cookies have changed.
+        expected = request.headers.get("X-Wildstring-Account")
+        if expected is not None and expected != request.state.user["id"]:
+            raise HTTPException(401, "account_session_changed")
         return request.state.user
 
     def authenticated(self, request: Request) -> bool:
@@ -179,10 +189,13 @@ class Auth:
             raise HTTPException(403, "owner_required")
 
     @staticmethod
-    def verify_password(connection, hashed, password):
+    def verify_password(connection, hashed, password, guard_key):
         current = int(time.time())
-        guard = connection.execute("SELECT * FROM login_guard").fetchone()
-        if guard["blocked_until"] > current:
+        connection.execute("DELETE FROM login_attempts WHERE last_attempt<?", (current - 86400,))
+        guard = connection.execute(
+            "SELECT * FROM login_attempts WHERE guard_key=?", (guard_key,)
+        ).fetchone()
+        if guard and guard["blocked_until"] > current:
             raise HTTPException(429, "login_throttled", headers={"Retry-After": "60"})
         expected = hashed or DUMMY_HASH
         try:
@@ -193,16 +206,26 @@ class Auth:
         except (ValueError, UnicodeError):
             valid = False
         if not valid:
-            failures = guard["failures"] + 1 if guard["blocked_until"] == 0 else 1
+            failures = (
+                1
+                if guard and guard["blocked_until"] and guard["blocked_until"] <= current
+                else (guard["failures"] if guard else 0) + 1
+            )
             connection.execute(
-                "UPDATE login_guard SET failures=?,blocked_until=?",
-                (failures, current + 60 if failures >= 5 else 0),
+                """INSERT INTO login_attempts(guard_key,failures,blocked_until,last_attempt)
+                VALUES (?,?,?,?)
+                ON CONFLICT(guard_key) DO UPDATE SET
+                failures=excluded.failures,blocked_until=excluded.blocked_until,
+                last_attempt=excluded.last_attempt""",
+                (guard_key, failures, current + 60 if failures >= 5 else 0, current),
             )
             connection.commit()
             raise HTTPException(401, "invalid_credentials")
-        connection.execute("UPDATE login_guard SET failures=0,blocked_until=0")
+        connection.execute("DELETE FROM login_attempts WHERE guard_key=?", (guard_key,))
 
-    def login(self, username: str, password: str) -> tuple[str, dict]:
+    def login(
+        self, username: str, password: str, *, client_host: str | None = None
+    ) -> tuple[str, dict]:
         with self.database.connect(write=True) as connection:
             connection.execute("BEGIN IMMEDIATE")
             if (
@@ -217,7 +240,12 @@ class Auth:
             row = connection.execute(
                 "SELECT * FROM users WHERE username=? COLLATE NOCASE AND enabled=1", (username,)
             ).fetchone()
-            self.verify_password(connection, row["password_hash"] if row else None, password)
+            self.verify_password(
+                connection,
+                row["password_hash"] if row else None,
+                password,
+                login_guard_key(username, client_host),
+            )
             token = secrets.token_urlsafe(32)
             connection.execute(
                 "INSERT INTO sessions(token_hash,expires_at,user_id) VALUES (?,?,?)",
@@ -252,7 +280,11 @@ class Auth:
         def login(request: Request, response: Response, body: object = Body(...)):
             self.require_client(request)
             value = validated(Login, body)
-            token, user = self.login(value.username, value.password.get_secret_value())
+            token, user = self.login(
+                value.username,
+                value.password.get_secret_value(),
+                client_host=request.client.host if request.client else None,
+            )
             response.set_cookie(
                 COOKIE,
                 token,
@@ -278,7 +310,13 @@ class Auth:
                 ).fetchone()
                 try:
                     self.verify_password(
-                        connection, row[0], value.current_password.get_secret_value()
+                        connection,
+                        row[0],
+                        value.current_password.get_secret_value(),
+                        login_guard_key(
+                            f"self:{user['id']}",
+                            request.client.host if request.client else None,
+                        ),
                     )
                 except HTTPException as error:
                     if error.status_code == 401:
@@ -374,6 +412,24 @@ class Auth:
                 connection.execute(
                     "INSERT INTO users(id,username,password_hash,profile) VALUES (?,?,?,?)",
                     (user_id, value.username, hashed, value.profile),
+                )
+                ids = (
+                    set(value.library_ids)
+                    if value.library_ids is not None
+                    else {
+                        row[0]
+                        for row in connection.execute(
+                            "SELECT id FROM libraries WHERE default_access=1 AND enabled=1"
+                        )
+                    }
+                )
+                available = {
+                    row[0] for row in connection.execute("SELECT id FROM libraries WHERE enabled=1")
+                }
+                if not ids <= available:
+                    raise HTTPException(404, "library_not_found")
+                connection.executemany(
+                    "INSERT INTO user_library_access VALUES (?,?)", [(user_id, i) for i in ids]
                 )
                 return public_user(
                     connection.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()

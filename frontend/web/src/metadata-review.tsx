@@ -288,14 +288,6 @@ export function MetadataReviewWorkbench({
     setCover(null);
     setCoverReady(false);
   }
-  function nextAlbum() {
-    if (!page || !albums.length) return;
-    const currentIndex = albums.findIndex((a) => a.id === page.album_id);
-    const next = albums[(currentIndex + 1) % albums.length];
-    if (next && next.id !== page.album_id) {
-      void load(`album_id=${encodeURIComponent(next.id)}`);
-    }
-  }
   async function rejectAlbum() {
     if (request.current || busy || loading || !page || !page.album_id) return;
     request.current = true;

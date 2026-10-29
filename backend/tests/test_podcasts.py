@@ -1,5 +1,6 @@
 """Tests for server-side podcast subscription, auto-updater, and REST API."""
 
+import socket
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -67,6 +68,20 @@ def test_podcast_urls_reject_local_schemes_and_private_hosts():
 
     with pytest.raises(HTTPException) as private:
         fetch_and_parse_feed("http://127.0.0.1:18780/feed.xml")
+    assert private.value.status_code == 422
+
+
+def test_podcast_direct_fetch_rejects_hostname_resolving_to_private_address(monkeypatch):
+    real_getaddrinfo = socket.getaddrinfo
+
+    def resolve(host, port, *args, **kwargs):
+        if host == "localtest.me":
+            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", port))]
+        return real_getaddrinfo(host, port, *args, **kwargs)
+
+    monkeypatch.setattr(socket, "getaddrinfo", resolve)
+    with pytest.raises(HTTPException) as private:
+        fetch_and_parse_feed("http://localtest.me/feed.xml", proxy_mode="direct")
     assert private.value.status_code == 422
 
 
@@ -143,7 +158,7 @@ def test_podcast_queue_requires_session_and_manager_scope(settings, authenticate
         )
 
 
-def test_delete_after_played_removes_the_registered_local_file(
+def test_legacy_delete_after_played_keeps_shared_audio_until_reference_cleanup(
     settings: Settings, authenticated_client, monkeypatch
 ):
     monkeypatch.setattr(
@@ -172,6 +187,14 @@ def test_delete_after_played_removes_the_registered_local_file(
             detail = subscribed.json()
             podcast_id = detail["podcast"]["id"]
             episode_id = detail["episodes"][0]["id"]
+            assert (
+                client.put(
+                    f"/api/v1/podcasts/{podcast_id}/follow",
+                    headers=CLIENT_HEADERS,
+                    json={"followed": True},
+                ).status_code
+                == 200
+            )
             local_file = settings.podcasts_dir / podcast_folder_name(podcast_id) / "episode.mp3"
             local_file.parent.mkdir(parents=True, exist_ok=True)
             local_file.write_bytes(b"audio")
@@ -185,16 +208,24 @@ def test_delete_after_played_removes_the_registered_local_file(
             progress = client.put(
                 f"/api/v1/podcasts/episodes/{episode_id}/progress",
                 headers=CLIENT_HEADERS,
-                json={"position_seconds": 10, "duration_seconds": 10, "completed": True},
+                json={
+                    "position_seconds": 10,
+                    "duration_seconds": 10,
+                    "event": "ended",
+                    "session_id": "test-play-session-1",
+                    "device_id": "test-device",
+                    "base_version": 0,
+                    "sequence": 1,
+                },
             )
             assert progress.status_code == 200
-            assert not local_file.exists()
+            assert local_file.exists()
             with Database(settings.data_dir).connect() as connection:
                 row = connection.execute(
                     "SELECT local_path,download_status FROM podcast_episodes WHERE id=?",
                     (episode_id,),
                 ).fetchone()
-            assert row["local_path"] is None and row["download_status"] == "none"
+            assert row["local_path"] == str(local_file) and row["download_status"] == "downloaded"
 
 
 def test_podcast_full_lifecycle(settings: Settings, authenticated_client, monkeypatch):
@@ -220,6 +251,29 @@ def test_podcast_full_lifecycle(settings: Settings, authenticated_client, monkey
             res = client.get("/api/v1/podcasts")
             assert res.status_code == 200
             assert res.json() == []
+
+            playback_settings = client.get("/api/v1/podcasts/playback-settings")
+            assert playback_settings.status_code == 200
+            assert playback_settings.json() == {
+                "user_id": "admin",
+                "auto_cache_current": True,
+                "prefetch_next": False,
+                "network_policy": "wifi",
+                "version": 1,
+            }
+            updated_playback = client.put(
+                "/api/v1/podcasts/playback-settings",
+                headers=CLIENT_HEADERS,
+                json={
+                    "version": 1,
+                    "auto_cache_current": True,
+                    "prefetch_next": True,
+                    "network_policy": "any",
+                },
+            )
+            assert updated_playback.status_code == 200
+            assert updated_playback.json()["prefetch_next"] is True
+            assert updated_playback.json()["network_policy"] == "any"
 
             # 2. Subscribe to a new podcast
             sub_res = client.post(
@@ -266,9 +320,13 @@ def test_podcast_full_lifecycle(settings: Settings, authenticated_client, monkey
                 f"/api/v1/podcasts/episodes/{ep1_id}/progress",
                 headers=CLIENT_HEADERS,
                 json={
-                    "position_seconds": 300,
+                    "position_seconds": 2730,
                     "duration_seconds": 2730,
-                    "completed": True,
+                    "event": "ended",
+                    "session_id": "test-play-session-1",
+                    "device_id": "test-device",
+                    "base_version": 0,
+                    "sequence": 1,
                 },
             )
             assert prog_res.status_code == 200
@@ -280,7 +338,7 @@ def test_podcast_full_lifecycle(settings: Settings, authenticated_client, monkey
             assert detail["podcast"]["unplayed_episodes"] == 1
             updated_ep1 = next(e for e in detail["episodes"] if e["id"] == ep1_id)
             assert updated_ep1["completed"] is True
-            assert updated_ep1["position_seconds"] == 300
+            assert updated_ep1["position_seconds"] == 2730
 
             # 6. Refresh podcast endpoint
             refresh_res = client.post(
@@ -314,6 +372,12 @@ def test_podcast_full_lifecycle(settings: Settings, authenticated_client, monkey
             assert update_settings_res.json()["podcast"]["slow_download"] is True
             assert update_settings_res.json()["podcast"]["max_retries"] == 4
             assert update_settings_res.json()["podcast"]["retry_backoff_base"] == 10
+
+            cached_stream_res = client.get(
+                f"/api/v1/podcasts/episodes/{ep1_id}/stream?proxy=0&cache=1&network=unknown",
+                follow_redirects=False,
+            )
+            assert cached_stream_res.status_code == 307
 
             # 7.1.1 Trigger all episode downloads and keep the Web contract explicit
             download_all_res = client.post(

@@ -1,17 +1,21 @@
+import { readPreference, writePreference } from './user-preferences';
 import { useEffect, useRef, useState, type CSSProperties, type PointerEvent } from 'react';
-import { api, artist, time, type Lyrics } from './api';
+import { api, time, type Lyrics } from './api';
 import { Cover, coverUrl } from './cover';
 import { PlaybackVisual, usePlaybackStyle } from './playback-style';
 import { FavoriteButton, type Favorites } from './favorites';
 import {
   PlaybackControls,
   PlaybackError,
+  PlaybackRateControl,
   QualityControl,
   SleepControl,
   VolumeControl,
   type Player,
 } from './player';
 import { QueuePanel } from './queue-panel';
+import { PodcastStage } from './podcast-stage';
+import { ThemeToggleCompact } from './theme';
 
 function coverPalette(image: HTMLImageElement): string[] | null {
   try {
@@ -104,6 +108,7 @@ export function NowPlaying({
   );
   const [notice, setNotice] = useState('');
   const current = player.current;
+  const isPodcast = current?.id.startsWith('podcast_ep_') || false;
   const style = usePlaybackStyle();
   const [palette, setPalette] = useState<{ track: string; colors: string[] } | null>(null);
   const colors = palette?.track === current?.id ? palette?.colors : null;
@@ -182,6 +187,9 @@ export function NowPlaying({
       close.current?.focus({ preventScroll: true });
     }
   }, [current?.id, active]);
+  useEffect(() => {
+    if (isPodcast) setPanel('queue');
+  }, [current?.id, isPodcast]);
 
   return (
     <>
@@ -191,7 +199,8 @@ export function NowPlaying({
         ref={dialog}
         role="dialog"
         aria-modal="true"
-        aria-label="全屏播放"
+        aria-label={isPodcast ? '播客全屏播放' : '全屏播放'}
+        data-player-kind={isPodcast ? 'podcast' : 'music'}
         data-panel={panel || 'cover'}
         onPointerDown={(event) => {
           cancelHold();
@@ -204,7 +213,8 @@ export function NowPlaying({
             pointer: event.pointerId,
             blank: isBlank(event.target),
           };
-          if (current && canPreview(event.target)) {
+          const radio = event.target instanceof Element && event.target.closest('.visual-radio');
+          if (current && canPreview(event.target) && !radio) {
             holdTimer.current = setTimeout(() => {
               gesture.current.held = true;
               setArtwork(true);
@@ -238,7 +248,10 @@ export function NowPlaying({
         onTouchEnd={cancelHold}
         onTouchCancel={cancelHold}
         onContextMenu={(event) => {
-          if (canPreview(event.target)) event.preventDefault();
+          if (!canPreview(event.target)) return;
+          event.preventDefault();
+          const radio = event.target instanceof Element && event.target.closest('.visual-radio');
+          if (radio && current) setArtwork(true);
         }}
         onClickCapture={(event) => {
           if (
@@ -260,7 +273,7 @@ export function NowPlaying({
         {current && (
           <div
             className="player-atmosphere"
-            style={{ backgroundImage: `url("${coverUrl(current.id, 768)}")` }}
+            style={{ backgroundImage: `url("${coverUrl(current.id, 768, current.cover_url)}")` }}
             aria-hidden="true"
           />
         )}
@@ -279,88 +292,106 @@ export function NowPlaying({
           <span className="eyebrow">
             野弦 <span aria-hidden="true">/</span> WILDSTRING
           </span>
+          {isPodcast && <ThemeToggleCompact />}
         </header>
         {current ? (
-          <div className={`fullscreen-content ${panel ? '' : 'is-cover-only'}`}>
-            <div className="fullscreen-record">
-              <PlaybackVisual
-                track={current}
-                style={style}
-                playing={
-                  active &&
-                  player.playing &&
-                  !player.buffering &&
-                  !player.error &&
-                  !(landscape && panel) &&
-                  !artwork
-                }
-                position={player.position}
-                duration={player.duration}
-                phase={player.visualPhase}
-                onPreview={() => setArtwork(true)}
-                onImage={(image) => {
-                  if (image.currentSrc !== new URL(coverUrl(current.id, 768), location.href).href)
-                    return;
-                  const colors = coverPalette(image);
-                  if (colors) setPalette({ track: current.id, colors });
-                }}
-              />
-              <div className="fullscreen-metadata">
-                <FavoriteButton track={current} favorites={favorites} />
-                <h1>{current.title}</h1>
-                <div className="fullscreen-subtitles">
-                  <span className="fullscreen-artists">
-                    {current.artists.map((name, index) => (
-                      <span key={`${name}-${index}`}>
-                        {index > 0 && <span aria-hidden="true"> / </span>}
-                        <button
-                          type="button"
-                          className="player-meta-link player-artist-link"
-                          onClick={() => onOpenArtist(name)}
-                        >
-                          {name}
-                        </button>
+          isPodcast ? (
+            <PodcastStage
+              player={player}
+              showQueue={panel === 'queue'}
+              onPreview={() => setArtwork(true)}
+            />
+          ) : (
+            <div className={`fullscreen-content ${panel ? '' : 'is-cover-only'}`}>
+              <div className="fullscreen-record">
+                <PlaybackVisual
+                  track={current}
+                  style={style}
+                  playing={
+                    active &&
+                    player.playing &&
+                    !player.buffering &&
+                    !player.error &&
+                    !(landscape && panel) &&
+                    !artwork
+                  }
+                  position={player.position}
+                  duration={player.duration}
+                  phase={player.visualPhase}
+                  onPreview={() => setArtwork(true)}
+                  onImage={(image) => {
+                    if (
+                      image.currentSrc !==
+                      new URL(coverUrl(current.id, 768, current.cover_url), location.href).href
+                    )
+                      return;
+                    const colors = coverPalette(image);
+                    if (colors) setPalette({ track: current.id, colors });
+                  }}
+                />
+                <div className="fullscreen-metadata">
+                  <FavoriteButton track={current} favorites={favorites} />
+                  <>
+                    <h1>{current.title}</h1>
+                    <div className="fullscreen-subtitles">
+                      <span className="fullscreen-artists">
+                        {current.artists.map((name, index) => (
+                          <span key={`${name}-${index}`}>
+                            {index > 0 && <span aria-hidden="true"> / </span>}
+                            <button
+                              type="button"
+                              className="player-meta-link player-artist-link"
+                              onClick={() => onOpenArtist(name)}
+                            >
+                              {name}
+                            </button>
+                          </span>
+                        ))}
                       </span>
-                    ))}
-                  </span>
-                  {current.album && (
-                    <span aria-hidden="true" className="meta-dot">
-                      {' '}
-                      ·{' '}
-                    </span>
-                  )}
-                  <span className="fullscreen-album">
-                    {current.album_id ? (
-                      <button
-                        type="button"
-                        className="player-meta-link player-album-link"
-                        aria-label={`查看所属专辑 ${current.album || '未知专辑'}`}
-                        onClick={() => onOpenAlbum(current)}
-                      >
-                        {current.album}
-                      </button>
-                    ) : (
-                      <span>{current.album || '未知专辑'}</span>
-                    )}
-                  </span>
+                      {current.album && (
+                        <span aria-hidden="true" className="meta-dot">
+                          {' '}
+                          ·{' '}
+                        </span>
+                      )}
+                      <span className="fullscreen-album">
+                        {current.album_id ? (
+                          <button
+                            type="button"
+                            className="player-meta-link player-album-link"
+                            aria-label={`查看所属专辑 ${current.album || '未知专辑'}`}
+                            onClick={() => onOpenAlbum(current)}
+                          >
+                            {current.album}
+                          </button>
+                        ) : (
+                          <span>{current.album || '未知专辑'}</span>
+                        )}
+                      </span>
+                    </div>
+                  </>
                 </div>
               </div>
+              {panel === 'lyrics' && (
+                <LyricsPanel
+                  key={current.id}
+                  player={player}
+                  onTogglePanel={() => setPanel(null)}
+                />
+              )}
+              {panel === 'queue' && (
+                <QueuePanel
+                  player={player}
+                  embedded
+                  onNotice={setNotice}
+                  onClose={() => {
+                    setPanel(null);
+                    queueToggle.current?.focus({ preventScroll: true });
+                  }}
+                />
+              )}
             </div>
-            {panel === 'lyrics' && (
-              <LyricsPanel key={current.id} player={player} onTogglePanel={() => setPanel(null)} />
-            )}
-            {panel === 'queue' && (
-              <QueuePanel
-                player={player}
-                embedded
-                onNotice={setNotice}
-                onClose={() => {
-                  setPanel(null);
-                  queueToggle.current?.focus({ preventScroll: true });
-                }}
-              />
-            )}
-          </div>
+          )
         ) : (
           <p className="lyric-empty">先播放一首喜欢的歌。</p>
         )}
@@ -370,29 +401,33 @@ export function NowPlaying({
             <span>
               {player.playbackLabel}
               <small>
-                第 {player.index + 1} 首 / 共 {player.queue.length} 首
+                第 {player.index + 1} {isPodcast ? '集' : '首'} / 共 {player.queue.length}{' '}
+                {isPodcast ? '集' : '首'}
               </small>
             </span>
           </div>
           <PlaybackControls player={player} />
           <div className="fullscreen-options">
+            {isPodcast && <PlaybackRateControl player={player} />}
             <SleepControl player={player} />
-            <QualityControl player={player} />
+            {!isPodcast && <QualityControl player={player} />}
             <VolumeControl player={player} />
             <div className="fullscreen-panel-switches" role="group" aria-label="全屏显示内容">
-              <button
-                aria-label="显示歌词"
-                aria-pressed={panel === 'lyrics'}
-                data-help="查看同步歌词"
-                onClick={() => setPanel((current) => (current === 'lyrics' ? null : 'lyrics'))}
-              >
-                词
-              </button>
+              {!isPodcast && (
+                <button
+                  aria-label="显示歌词"
+                  aria-pressed={panel === 'lyrics'}
+                  data-help="查看同步歌词"
+                  onClick={() => setPanel((current) => (current === 'lyrics' ? null : 'lyrics'))}
+                >
+                  词
+                </button>
+              )}
               <button
                 ref={queueToggle}
-                aria-label="显示播放队列"
+                aria-label={isPodcast ? '显示接下来播放' : '显示播放队列'}
                 aria-pressed={panel === 'queue'}
-                data-help="查看播放队列"
+                data-help={isPodcast ? '查看接下来播放' : '查看播放队列'}
                 onClick={() => setPanel((current) => (current === 'queue' ? null : 'queue'))}
               >
                 <svg
@@ -404,7 +439,7 @@ export function NowPlaying({
                 >
                   <path d="M8 6h12M8 12h12M8 18h12M3 6h1M3 12h1M3 18h1" strokeLinecap="round" />
                 </svg>
-                <span>{player.queue.length}</span>
+                {!isPodcast && <span>{player.queue.length}</span>}
               </button>
             </div>
           </div>
@@ -455,7 +490,7 @@ export function NowPlaying({
           >
             ×
           </button>
-          <Cover trackId={current.id} title={current.title} size={768} />
+          <Cover trackId={current.id} title={current.title} size={768} source={current.cover_url} />
         </dialog>
       )}
     </>
@@ -476,7 +511,7 @@ function LyricsPanel({ player, onTogglePanel }: { player: Player; onTogglePanel:
   const [showRomanization, setShowRomanization] = useState(false);
   const [lyricSize, setLyricSize] = useState<LyricSize>(() => {
     try {
-      const value = localStorage.getItem('wildstring-lyric-size');
+      const value = readPreference('wildstring-lyric-size');
       return value === 'small' || value === 'large' ? value : 'medium';
     } catch {
       return 'medium';
@@ -488,13 +523,6 @@ function LyricsPanel({ player, onTogglePanel }: { player: Player; onTogglePanel:
     null,
   );
   const [displayPosition, setDisplayPosition] = useState(player.position);
-  useEffect(() => {
-    try {
-      localStorage.setItem('wildstring-lyric-size', lyricSize);
-    } catch {
-      /* Private browsing may deny local storage; the in-session value still works. */
-    }
-  }, [lyricSize]);
   useEffect(() => {
     if (!player.playing) {
       setDisplayPosition(player.position);
@@ -674,7 +702,10 @@ function LyricsPanel({ player, onTogglePanel }: { player: Player; onTogglePanel:
               className="text-button"
               aria-label={`歌词大小：${size === 'small' ? '小' : size === 'medium' ? '中' : '大'}`}
               aria-pressed={lyricSize === size}
-              onClick={() => setLyricSize(size)}
+              onClick={() => {
+                setLyricSize(size);
+                writePreference('wildstring-lyric-size', size);
+              }}
             >
               {size === 'small' ? '小' : size === 'medium' ? '中' : '大'}
             </button>
