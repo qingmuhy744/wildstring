@@ -188,7 +188,13 @@ class PodcastResources:
                 return None
             lease = self.acquire(db, identity)
         return FileResponse(
-            path, media_type="audio/mpeg", background=BackgroundTask(self.release_lease, lease)
+            path,
+            media_type="audio/mpeg",
+            background=BackgroundTask(self.release_lease, lease),
+            headers={
+                "X-Content-Type-Options": "nosniff",
+                "Content-Security-Policy": "sandbox; default-src 'none'",
+            },
         )
 
     def synchronize(self, db):

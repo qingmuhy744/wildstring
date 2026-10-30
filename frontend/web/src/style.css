@@ -713,6 +713,8 @@ a {
   background: transparent;
 }
 .track-title strong {
+  display: block;
+  min-width: 0;
   font-size: 13px;
   font-weight: 500;
   overflow: hidden;
