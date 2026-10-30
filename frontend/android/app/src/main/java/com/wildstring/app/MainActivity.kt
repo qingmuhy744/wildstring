@@ -1,5 +1,6 @@
 package com.wildstring.app
 
+import android.content.Context
 import android.content.pm.ActivityInfo
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -17,6 +18,7 @@ import com.wildstring.app.ui.WildStringApp
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
     private val model: MusicViewModel by viewModels()
+    override fun attachBaseContext(newBase: Context) { super.attachBaseContext(AppLanguage.wrap(newBase)) }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         com.wildstring.app.update.AppUpdater.get(this).checkAutomatically()
@@ -32,6 +34,10 @@ class MainActivity : ComponentActivity() {
                     else -> if (isTablet) ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED else ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
                 }
             }
+            val music by model.state.collectAsStateWithLifecycle()
+            // Signed in: the account language wins. Signed out: follow the system language.
+            val language = music.account?.language ?: if (music.connecting) null else "auto"
+            LaunchedEffect(language) { if (language != null) AppLanguage.apply(this@MainActivity, language) }
             WildStringApp(model)
         }
     }

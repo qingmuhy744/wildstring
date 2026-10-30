@@ -316,6 +316,11 @@ class MusicViewModel @Inject constructor(
         mutable.update { it.copy(account = updated) }
     }
 
+    suspend fun updateLanguage(language: String) {
+        val updated = repository.updateLanguage(language)
+        mutable.update { it.copy(account = updated) }
+    }
+
     suspend fun changePassword(current: String, next: String) {
         repository.changePassword(current, next)
         invalidationMessage = "密码已修改，请重新登录。"

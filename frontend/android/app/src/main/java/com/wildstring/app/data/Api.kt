@@ -53,6 +53,7 @@ interface Api {
     @POST("api/v1/auth/logout") suspend fun logout(): retrofit2.Response<Unit>
     @POST("api/v1/auth/password") suspend fun changePassword(@Header("Cookie") cookie: String, @Body body: PasswordChange): retrofit2.Response<Unit>
     @PUT("api/v1/auth/profile") suspend fun updateProfile(@Body body: ProfileUpdate): Account
+    @PUT("api/v1/auth/preferences") suspend fun updatePreferences(@Body body: PreferencesUpdate): Account
     @GET suspend fun tracks(@Url url: String, @Query("q") query: String, @Query("limit") limit: Int = 50, @Query("offset") offset: Int = 0): Page<Track>
     @GET suspend fun track(@Url url: String): Track
     @GET("api/v1/albums") suspend fun albums(@Query("q") query: String, @Query("limit") limit: Int = 50, @Query("offset") offset: Int = 0, @Query("sort") sort: String = "title", @Query("order") order: String = "asc"): Page<Album>

@@ -151,7 +151,7 @@ class AccountPlaybackTest {
             compose.waitUntil(5_000) { compose.onAllNodesWithContentDescription("设置").fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithContentDescription("设置").performClick()
             compose.onNodeWithText("alice · 听众").assertExists()
-            compose.onNodeWithTag("setting-播放音质").performScrollTo().performClick()
+            compose.onNodeWithTag("setting-quality").performScrollTo().performClick()
             compose.onNodeWithText("AAC · 192 kbps").performClick()
             try {
                 compose.waitUntil(15_000) { vm.state.value.playbackQuality == "AAC · 192 kbps" && compose.runOnIdle { vm.controller!!.playbackState == Player.STATE_READY } }

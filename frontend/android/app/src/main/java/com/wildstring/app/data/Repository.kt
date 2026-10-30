@@ -281,6 +281,15 @@ class Repository @Inject constructor(@param:ApplicationContext private val conte
         session.bindAccount(updated)
         return updated
     }
+    /** Saves the interface language on the account; it does not bump the profile version. */
+    suspend fun updateLanguage(language: String): Account {
+        val owner = session.cacheScope() ?: throw IOException("登录已失效。")
+        val endpoint = session.endpoint
+        val updated = api().updatePreferences(PreferencesUpdate(language))
+        if (owner != session.cacheScope() || endpoint != session.endpoint) throw CancellationException("会话已变化。")
+        session.bindAccount(updated)
+        return updated
+    }
     suspend fun changePassword(current: String, next: String) {
         val owner = session.cacheScope() ?: throw IOException("登录已失效。")
         val request = session.requestState() ?: throw IOException("尚未连接服务器。")
