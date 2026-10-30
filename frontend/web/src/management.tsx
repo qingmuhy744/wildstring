@@ -15,6 +15,7 @@ import { MetadataReviewDialog } from './metadata-review';
 import { FolderMetadataEditor } from './folder-metadata';
 import { LibrarySources } from './library-sources';
 import { MusicLibraryManager, LibrarySwitcher } from './music-libraries';
+import { PodcastIdentityAdmin } from './podcast-identity-admin';
 import { PodcastSearchSettings } from './podcast-search-settings';
 import { PodcastCatalogSettings } from './podcast-catalog-settings';
 
@@ -342,6 +343,7 @@ export function Management({
                 <MusicLibraryManager />
                 <PodcastCatalogSettings />
                 <PodcastSearchSettings />
+                <PodcastIdentityAdmin />
               </>
             )}
             {tab === 'intake' && (

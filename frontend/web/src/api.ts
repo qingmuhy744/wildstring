@@ -242,6 +242,10 @@ const messages: Record<string, string> = {
   podcast_opml_invalid: '无法读取这个 OPML 文件，请确认它是播客应用导出的 OPML。',
   podcast_opml_empty: '这个 OPML 文件里没有找到任何 RSS 节目。',
   podcast_opml_feed_failed: '这个节目导入失败，请稍后单独添加。',
+  podcast_identity_backfill_running: '回填正在进行，请等它完成。',
+  podcast_merge_unverified: '这两个节目没有核实为同一个 Apple 节目，不能合并。',
+  podcast_merge_busy: '这两个节目还有单集在下载，请等下载结束后再合并。',
+  podcast_merge_same: '不能把节目和它自己合并。',
 };
 
 const isCodeLike = (str: string) => /^[a-z0-9_-]+$/i.test(str);

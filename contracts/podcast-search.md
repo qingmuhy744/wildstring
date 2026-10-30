@@ -115,6 +115,29 @@
 
 表 `podcast_search_settings`：单行（`id=1`），`regions TEXT`（逗号分隔，`NULL`=默认）、`filter_explicit INTEGER`、`version INTEGER`、`updated_at TEXT`。
 
+## 已有节目回填与去重（schema 45）
+
+迁移 45 为所有已有节目计算 `feed_url_normalized`，并给 `podcasts` 增加 `itunes_checked_at`、`itunes_check_status`（`NULL`=未检查，`matched`/`no_match`/`failed` 由回填写入，`verified` 为添加时已核实，`existing` 为迁移前已有编号）。
+
+### 回填任务
+
+- `POST /api/v1/podcasts/identity/backfill`（仅所有者，需 `X-Wildstring-Client`）：请求体可选 `{"limit": 1..1000（默认 100）, "retry_unmatched": false}`，在后台线程启动一轮，返回 `202` 与状态；已在运行时 `409 podcast_identity_backfill_running`。
+- `GET /api/v1/podcasts/identity/backfill`（仅所有者）：`{"running", "processed", "matched", "no_match", "failed", "ambiguous", "paused_until", "last_run", "total", "with_itunes_id", "unchecked", "counts"}`。
+- 每个待检查节目：先请求一次 RSS 以得到重定向后的地址（两次请求至少间隔 2 秒），再以节目名称、必要时「名称 + 作者」在当前设置的区域搜索 Apple（iTunes 没有按 RSS 地址查询的接口）。**只有** Apple 记录的 `feedUrl` 规范化后等于本节目的规范化地址或重定向后的地址时才写入 `itunes_id`，绝不只按名称匹配。同一 RSS 在 Apple 有多个编号时取数值最小（最早上架）的一个，并计入 `ambiguous`。
+- 与用户搜索共用每分钟约 20 次的 Apple 预算，并为用户保留 5 次；预算用尽或 Apple 限流时任务等待（`paused_until`，单节目最多等 5 分钟），服务停止时立即结束。
+- 幂等：只处理 `itunes_id` 为空且未检查（或上次 `failed`）的节目；`retry_unmatched=true` 时也重试 `no_match`。已有的 `itunes_id` 和重定向地址从不被覆盖。可随时中断，下次从剩余节目继续。
+
+### 重复报告与合并
+
+- `GET /api/v1/podcasts/identity/duplicates`（仅所有者）：成对列出可能重复的节目，`{"duplicates": [{"confidence", "reasons", "itunes_id", "suggested_keep_id", "podcasts": [两条摘要]}], "verified", "possible"}`。`reasons` 取自 `itunes_id`（同一编号）、`feed`（规范化地址或重定向地址相同）、`title`（规范化名称相同且作者相同或其一为空）。
+- 只有两条记录的 `itunes_id` 相同（该编号已按 RSS 核实）才是 `verified`；其余都是 `possible`，只报告、不合并。建议保留：未重定向的地址优先，其次关注多、下载多、更早添加。
+- `POST /api/v1/podcasts/identity/merge`（仅所有者）`{"keep_id", "merge_id"}`：未核实 `409 podcast_merge_unverified`；任一节目有排队或下载中的单集 `409 podcast_merge_busy`；同一节目 `422 podcast_merge_same`；不存在 `404 podcast_not_found`。在一个事务内：
+  - 单集按 `guid`、其次按音频地址对齐；对不上的单集整条移入保留节目（进度、引用、下载随之）。
+  - 对齐的单集：同一账号两边都有进度时保留最近收听的一条（版本号递增）；播放缓存、资源引用（手动/自动标记取并集）、保护状态和租约迁到保留的单集。保留的单集没有下载而另一边有时，转移已下载文件；两边都有时删除重复的那份。
+  - 关注、个人目录与个人节目设置迁到保留节目（已存在则以保留节目为准）；出品方为空时继承。随后删除被合并的节目。
+  - 返回 `{"kept_id", "merged_id", "episodes_moved", "episodes_matched", "progress_moved", "progress_replaced", "downloads_moved", "follows_moved"}`。
+- 网页：管理 → 设置 →「播客去重与回填」显示统计、开始回填、进度，以及「已核实 / 疑似」重复列表；已核实的可选择保留哪条后二次确认合并，疑似的只给出核对建议。
+
 ## 数据库（schema 43）
 
 `podcasts` 增加 `itunes_id`、`feed_url_normalized`、`resolved_feed_url_normalized`（均为 TEXT，可空）及索引 `podcasts_by_itunes_id`（部分索引）、`podcasts_by_normalized_feed`、`podcasts_by_resolved_feed`。新增节目写入这三列。
@@ -130,5 +153,5 @@
 
 ## 验证
 
-- 后端：`backend/tests/test_podcast_search.py`，使用录制的 us / tw / cn iTunes 响应（`backend/tests/fixtures/itunes/`），不访问网络；`backend/tests/test_podcast_opml.py` 覆盖 OPML 解析、导入与导出。
-- 网页：`frontend/web/tests/podcast-search.spec.ts` 与 `podcast-opml.spec.ts`（模拟 API，桌面与移动端），随 `make test-podcast-web` 运行。
+- 后端：`backend/tests/test_podcast_search.py`，使用录制的 us / tw / cn iTunes 响应（`backend/tests/fixtures/itunes/`），不访问网络；`backend/tests/test_podcast_opml.py` 覆盖 OPML 解析、导入与导出；`backend/tests/test_podcast_identity_backfill.py` 覆盖迁移 45、只按 RSS 核实的回填（含 etw.fm 重定向到 fireside、同名不同源、多编号）、幂等与限流等待、重复报告和保留关注/进度/下载的合并。
+- 网页：`frontend/web/tests/podcast-search.spec.ts` 、`podcast-opml.spec.ts`、`podcast-search-settings.spec.ts` 与 `podcast-identity-admin.spec.ts`（模拟 API，桌面与移动端），随 `make test-podcast-web` 运行。

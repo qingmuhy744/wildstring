@@ -598,7 +598,7 @@ def test_schema_44_seeds_default_search_settings(settings):
         db.execute("PRAGMA user_version=43")
     database.initialize()
     with sqlite3.connect(database.path) as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION == 44
+        assert db.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
         row = db.execute(
             "SELECT regions, filter_explicit, version FROM podcast_search_settings"
         ).fetchall()

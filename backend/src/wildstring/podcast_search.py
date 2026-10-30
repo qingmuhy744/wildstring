@@ -119,7 +119,8 @@ class SearchGate:
                 for stale in [k for k, v in self.users.items() if not v or v[-1] <= now - 60]:
                     self.users.pop(stale, None)
 
-    def reserve_upstream(self, calls: int):
+    def reserve_upstream(self, calls: int, *, headroom: int = 0):
+        """Spend Apple calls, leaving ``headroom`` calls per minute for other callers."""
         if calls <= 0:
             return
         with self.lock:
@@ -127,9 +128,10 @@ class SearchGate:
             if self.cooldown_until > now:
                 raise SearchRateLimited(self.cooldown_until - now, upstream=True)
             self._prune(self.upstream, now)
-            overflow = len(self.upstream) + calls - self.upstream_per_minute
+            budget = max(1, self.upstream_per_minute - headroom)
+            overflow = len(self.upstream) + calls - budget
             if overflow > 0:
-                if calls > self.upstream_per_minute:
+                if calls > budget:
                     raise SearchRateLimited(60, upstream=True)
                 raise SearchRateLimited(self.upstream[overflow - 1] + 60 - now, upstream=True)
             self.upstream.extend([now] * calls)
@@ -416,7 +418,7 @@ class PodcastSearch:
                     self.seen_ids.pop(stale, None)
 
     def search_directory(
-        self, term: str, regions: Iterable[str], limit: int
+        self, term: str, regions: Iterable[str], limit: int, *, headroom: int = 0
     ) -> tuple[list[dict[str, Any]], list[dict[str, str]], bool]:
         """Return merged results, failed storefronts and whether everything was cached."""
         term_key = term.casefold()
@@ -430,7 +432,7 @@ class PodcastSearch:
                 found[region] = hit
         failures: dict[str, UpstreamFailure] = {}
         if needed:
-            self.gate.reserve_upstream(len(needed))
+            self.gate.reserve_upstream(len(needed), headroom=headroom)
             with ThreadPoolExecutor(max_workers=len(needed)) as pool:
                 futures = {
                     region: pool.submit(self._region, region, term, limit) for region in needed

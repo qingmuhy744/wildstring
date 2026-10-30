@@ -308,8 +308,9 @@ def find_existing_podcast(conn, keys: set[str], itunes_id: str | None, feed_url:
 def remember_itunes_id(conn, podcast_id: str, itunes_id: str | None):
     if itunes_id:
         conn.execute(
-            "UPDATE podcasts SET itunes_id=? WHERE id=? AND itunes_id IS NULL",
-            (itunes_id, podcast_id),
+            "UPDATE podcasts SET itunes_id=?, itunes_check_status='verified', "
+            "itunes_checked_at=COALESCE(itunes_checked_at, ?) WHERE id=? AND itunes_id IS NULL",
+            (itunes_id, now(), podcast_id),
         )
 
 
@@ -1073,8 +1074,9 @@ class PodcastManager:
                     id, title, author, description, feed_url, cover_url,
                     auto_update, update_interval_minutes, download_policy, retention_policy,
                     slow_download, max_retries, retry_backoff_base, last_updated_at, created_at,
-                    itunes_id, feed_url_normalized, resolved_feed_url_normalized
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    itunes_id, feed_url_normalized, resolved_feed_url_normalized,
+                    itunes_check_status, itunes_checked_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     podcast_id,
@@ -1095,6 +1097,8 @@ class PodcastManager:
                     verified,
                     normalize_feed_url(feed_url) or None,
                     normalize_feed_url(resolved_url) or None,
+                    "verified" if verified else None,
+                    created_time if verified else None,
                 ),
             )
             for ep in parsed["episodes"]:
@@ -2114,6 +2118,7 @@ def podcast_router(
     manager: PodcastManager, auth: Auth, *, search_regions: str = "us,tw,cn"
 ) -> APIRouter:
     from wildstring import podcast_opml
+    from wildstring.podcast_identity_backfill import IdentityBackfill
     from wildstring.podcast_search import PodcastSearch
 
     router = APIRouter(prefix="/api/v1/podcasts", tags=["podcasts"])
@@ -2122,6 +2127,8 @@ def podcast_router(
     catalog_policy.routes(router, auth)
     search = PodcastSearch(manager, regions=search_regions)
     search.routes(router, auth)
+    backfill = IdentityBackfill(manager, search)
+    backfill.routes(router, auth)
     podcast_opml.routes(
         router,
         auth,
