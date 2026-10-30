@@ -68,6 +68,13 @@ export class ApiError extends Error {
   }
 }
 
+export class NetworkError extends TypeError {
+  constructor(message = '网络连接失败，请检查网络设置后重试。') {
+    super(message);
+    this.name = 'NetworkError';
+  }
+}
+
 const messages: Record<string, string> = {
   folder_name_invalid: '请输入有效的文件夹名称，不含路径分隔符、控制字符或开头的点。',
   folder_already_exists: '已有同名文件或文件夹，请换一个名称。',
@@ -208,27 +215,92 @@ const messages: Record<string, string> = {
   podcast_download_settings_conflict: '设置已被其他设备修改，请重新读取后再试。',
   podcast_not_found: '节目不存在或当前账号无权访问。',
   podcast_publisher_not_found: '出品方不存在或没有你可访问的节目。',
+  invalid_podcast_feed_url: '播客 RSS 源地址无效或不可访问。',
+  podcast_feed_too_large: '播客 RSS 源文件过大。',
+  invalid_podcast_audio_url: '播客音频地址无效或不可访问。',
+  podcast_audio_too_large: '播客音频文件过大。',
+  invalid_podcast_network_policy: '播客网络策略设置无效。',
+  podcast_playback_settings_conflict: '播客播放设置已被修改，请刷新后重试。',
+  track_not_found: '曲目不存在或已被移除。',
+  scan_not_found: '扫描任务不存在。',
   owner_setup_required: '请先在服务端设置所有者密码。',
   authentication_required: '登录已过期，请重新登录。',
 };
 
-export const errorCodeMessage = (code: string) => messages[code] || code;
+const isCodeLike = (str: string) => /^[a-z0-9_-]+$/i.test(str);
 
-export async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
+export const errorCodeMessage = (code: string) =>
+  messages[code] || (code && !isCodeLike(code) ? code : '操作未完成，请重试。');
+
+export interface ApiOptions extends RequestInit {
+  timeoutMs?: number;
+}
+
+export async function api<T>(path: string, options: ApiOptions = {}): Promise<T> {
   const expectedOwner = libraryUser();
-  const response = await fetch(`/api/v1${path}`, {
-    ...options,
-    credentials: 'same-origin',
-    headers: {
-      ...(options.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
-      'X-Wildstring-Client': 'web',
-      ...(expectedOwner && !path.startsWith('/auth/')
-        ? { 'X-Wildstring-Account': expectedOwner }
-        : {}),
-      'X-Wildstring-Library': selectedLibrary(),
-      ...options.headers,
-    },
-  });
+  const timeoutMs = options.timeoutMs ?? 20000;
+  const controller = new AbortController();
+  let timedOut = false;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  if (timeoutMs > 0) {
+    timer = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, timeoutMs);
+  }
+  const userSignal = options.signal;
+  let userAbortHandler: (() => void) | null = null;
+  if (userSignal) {
+    if (userSignal.aborted) {
+      controller.abort(userSignal.reason);
+    } else {
+      userAbortHandler = () => controller.abort(userSignal.reason);
+      userSignal.addEventListener('abort', userAbortHandler, { once: true });
+    }
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(`/api/v1${path}`, {
+      ...options,
+      signal: controller.signal,
+      credentials: 'same-origin',
+      headers: {
+        ...(options.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
+        'X-Wildstring-Client': 'web',
+        ...(expectedOwner && !path.startsWith('/auth/')
+          ? { 'X-Wildstring-Account': expectedOwner }
+          : {}),
+        'X-Wildstring-Library': selectedLibrary(),
+        ...options.headers,
+      },
+    });
+  } catch (err: any) {
+    if (timedOut) {
+      throw new NetworkError('网络请求超时，请检查网络连接后重试。');
+    }
+    if (userSignal?.aborted) {
+      throw err;
+    }
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      throw err;
+    }
+    if (
+      err instanceof TypeError ||
+      (typeof navigator !== 'undefined' && !navigator.onLine) ||
+      (typeof err?.message === 'string' &&
+        (err.message.includes('fetch') || err.message.includes('NetworkError')))
+    ) {
+      throw new NetworkError('网络连接失败，请检查网络设置后重试。');
+    }
+    throw err;
+  } finally {
+    if (timer) clearTimeout(timer);
+    if (userSignal && userAbortHandler) {
+      userSignal.removeEventListener('abort', userAbortHandler);
+    }
+  }
+
   if (expectedOwner !== libraryUser()) throw new DOMException('Account changed', 'AbortError');
   observeLibraryAccess(response.headers.get('X-Wildstring-Library-Access'), expectedOwner);
   if (!response.ok) {
@@ -253,7 +325,8 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
         : typeof body.message === 'string'
           ? body.message
           : '';
-    const message = messages[code] || rawMessage || '请求未完成，请重试。';
+    const friendlyRaw = rawMessage && !isCodeLike(rawMessage) ? rawMessage : '';
+    const message = messages[code] || friendlyRaw || '请求未完成，请重试。';
     throw new ApiError(response.status, message, code, traceId);
   }
   const value = response.status === 204 ? (undefined as T) : await response.json();

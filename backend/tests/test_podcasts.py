@@ -476,3 +476,85 @@ def test_server_side_auto_update_scheduler(settings: Settings, authenticated_cli
             # Running again immediately should do nothing (since last_updated_at is fresh now)
             updated_count2 = manager.run_scheduled_updates()
             assert updated_count2 == 0
+
+
+def test_podcast_stream_security_and_content_type(tmp_path):
+    settings = Settings(data_dir=tmp_path / "data", music_dir=tmp_path / "music")
+    settings.data_dir.mkdir(parents=True, exist_ok=True)
+    settings.music_dir.mkdir(parents=True, exist_ok=True)
+
+    class MockStreamResp:
+        def __init__(self, content_type: str, body: bytes):
+            self.headers = {"Content-Type": content_type, "Content-Length": str(len(body))}
+            self.status = 200
+            self._body = body
+            self._pos = 0
+
+        def read(self, n=64 * 1024):
+            if self._pos >= len(self._body):
+                return b""
+            chunk = self._body[self._pos : self._pos + n]
+            self._pos += len(chunk)
+            return chunk
+
+        def close(self):
+            pass
+
+    # 1. 正常 audio/* 响应
+    mock_audio = MockStreamResp("audio/mpeg", b"fake audio content")
+    mock_opener = MagicMock()
+    mock_opener.open.return_value = mock_audio
+
+    from wildstring.database import Database
+    from wildstring.podcasts import PodcastManager
+
+    db = Database(settings.data_dir)
+    db.initialize()
+    manager = PodcastManager(db, storage_dir=settings.data_dir / "podcasts")
+
+    with patch("wildstring.podcasts.podcast_opener", return_value=mock_opener):
+        resp = manager.stream_remote_audio("https://example.com/audio.mp3")
+        assert resp.status_code == 200
+        assert resp.headers["Content-Type"] == "audio/mpeg"
+        assert resp.headers["X-Content-Type-Options"] == "nosniff"
+        assert resp.headers["Content-Security-Policy"] == "sandbox; default-src 'none'"
+
+    # 2. 上游返回 text/html（伪造或恶意 HTML 脚本）
+    mock_html = MockStreamResp(
+        "text/html; charset=utf-8", b"<!doctype html><script>alert(1)</script>"
+    )
+    mock_opener.open.return_value = mock_html
+    with patch("wildstring.podcasts.podcast_opener", return_value=mock_opener):
+        resp = manager.stream_remote_audio("https://example.com/audio.mp3")
+        assert resp.status_code == 200
+        assert resp.headers["Content-Type"] == "application/octet-stream"
+        assert resp.headers["X-Content-Type-Options"] == "nosniff"
+        assert resp.headers["Content-Security-Policy"] == "sandbox; default-src 'none'"
+
+    # 3. 本地缓存播客响应 (local_response)
+    manager.storage_dir.mkdir(parents=True, exist_ok=True)
+    audio_file = manager.storage_dir / "ep-cached.mp3"
+    audio_file.write_bytes(b"cached audio bytes")
+
+    with db.connect(write=True) as conn:
+        conn.execute(
+            "INSERT INTO podcasts (id, title, feed_url, created_at, last_updated_at) VALUES (?, ?, ?, datetime('now'), datetime('now'))",
+            ("pod_1", "Test Pod", "https://example.com/feed.xml"),
+        )
+        conn.execute(
+            "INSERT INTO podcast_episodes (id, podcast_id, guid, title, audio_url, created_at, local_path) VALUES (?, ?, ?, ?, ?, datetime('now'), ?)",
+            (
+                "ep_cached_1",
+                "pod_1",
+                "guid_1",
+                "Ep Cached",
+                "https://example.com/audio.mp3",
+                str(audio_file.resolve()),
+            ),
+        )
+
+    local_resp = manager.resources.local_response("ep_cached_1")
+    assert local_resp is not None
+    assert local_resp.media_type == "audio/mpeg"
+    assert local_resp.headers["X-Content-Type-Options"] == "nosniff"
+    assert local_resp.headers["Content-Security-Policy"] == "sandbox; default-src 'none'"
