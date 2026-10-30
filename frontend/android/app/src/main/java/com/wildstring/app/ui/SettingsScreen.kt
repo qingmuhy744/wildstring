@@ -95,7 +95,7 @@ private val LocalSettingsFeedback = staticCompositionLocalOf<() -> Unit> { {} }
             if (state.account?.isOwner == true) SettingsGroup("服务端管理") {
                 Text(
                     "音乐库、文件夹、权限、共享音频清理及插件配置请在网页端管理。",
-                    Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
+                    Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -168,7 +168,12 @@ private val LocalSettingsFeedback = staticCompositionLocalOf<() -> Unit> { {} }
                 }
             }
             SettingsGroup("外观与触感") {
-                Text("这些偏好按服务器和账号保存在本机。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    "这些偏好按服务器和账号保存在本机。",
+                    Modifier.padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 4.dp),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
 
                 SettingsChoice("歌曲列表大小", preferences.songListSize.label, Icons.Default.FormatSize,
                     com.wildstring.app.data.SongListSize.entries.map { it to it.label }, preferences.songListSize,
@@ -226,9 +231,11 @@ private val LocalSettingsFeedback = staticCompositionLocalOf<() -> Unit> { {} }
 }
 
 @Composable private fun SettingsGroup(title: String, content: @Composable ColumnScope.() -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(title, Modifier.padding(start = 16.dp), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-        Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surface) { Column(content = content) }
+        Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surface) {
+            Column(Modifier.fillMaxWidth(), content = content)
+        }
     }
 }
 

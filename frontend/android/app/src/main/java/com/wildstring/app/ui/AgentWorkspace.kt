@@ -288,6 +288,41 @@ internal fun generateFollowUpSuggestions(content: String): List<Pair<String, Str
     return result.distinctBy { it.first }.take(3)
 }
 
+internal fun summarizeConversationTitle(userText: String): String {
+    val raw = userText.trim().replace(Regex("\\s+"), " ")
+    if (raw.isEmpty()) return "新对话"
+    var cleaned = raw.replace(
+        Regex("^(?:请帮我|帮我|麻烦帮我|麻烦你|麻烦|请问一下|请问|我想让你|我想请你|我想|能不能帮我|能不能|可以帮我|可以|能否帮我|能否|试试这样问我[：:]?)\\s*"),
+        ""
+    ).trim()
+    if (Regex("^查漏补缺[：:]\\s*").containsMatchIn(cleaned)) {
+        val topic = cleaned
+            .replace(Regex("^查漏补缺[：:]\\s*"), "")
+            .replace(Regex("(?:我缺了哪几首|缺了哪几首|缺哪几首|有哪些缺口|缺哪些|我还没有)[？?！!。.]*$"), "")
+            .trim()
+        if (topic.isNotEmpty()) {
+            cleaned = "${topic.take(18).trimEnd()} 查漏补缺"
+        }
+    } else {
+        cleaned = cleaned.replace(
+            Regex("(?:我缺了哪几首|缺了哪几首|缺哪几首|好吗|可以吗|行吗|好不好|谢谢|一下吧|一下)[？?！!。.]*$"),
+            ""
+        ).trim()
+    }
+    cleaned = cleaned.trim(' ', '\t', '\r', '\n', '，', ',', '。', '！', '？', '?', '!', '：', ':', '；', ';', '、', '“', '”', '"', '\'', '‘', '’')
+    var firstClause = cleaned.split(Regex("[。！？?!\\n；;]")).firstOrNull()?.trim(' ', '\t', '，', ',', '：', ':').orEmpty()
+    if (firstClause.length > 20 && firstClause.contains(Regex("[，,]"))) {
+        val subClause = firstClause.split(Regex("[，,]")).firstOrNull()?.trim().orEmpty()
+        if (subClause.length >= 4) firstClause = subClause
+    }
+    val candidate = firstClause.ifEmpty { cleaned.ifEmpty { raw } }
+    return if (candidate.length > 24) {
+        candidate.take(24).trimEnd(' ', '\t', '，', ',', '：', ':', '、') + "…"
+    } else {
+        candidate.ifEmpty { "新对话" }
+    }
+}
+
 @Composable internal fun AgentChat(vm: MusicViewModel, openDraft: (String) -> Unit) {
     val links = LocalUriHandler.current
     var showSummary by remember { mutableStateOf(false) }
@@ -297,11 +332,27 @@ internal fun generateFollowUpSuggestions(content: String): List<Pair<String, Str
     var deleting by remember { mutableStateOf<JsonObject?>(null) }; var renaming by remember { mutableStateOf<JsonObject?>(null) }
     var title by remember { mutableStateOf("") }; var historyMenu by remember { mutableStateOf<String?>(null) }
     val action = remember { FeatureAction() }; val scope = rememberCoroutineScope()
+    suspend fun loadConversationsWithSummarizedTitles(): List<JsonObject> {
+        return vm.agent.all("conversations").map { item ->
+            if (item.text("title") == "新对话") {
+                runCatching {
+                    val detail = if (conversation?.text("id") == item.text("id")) conversation!! else vm.agent.request("conversations/${item.text("id")}")
+                    val firstUser = detail.objects("messages").firstOrNull { it.text("role") == "user" }?.text("content").orEmpty()
+                    val summarized = summarizeConversationTitle(firstUser)
+                    if (summarized.isNotBlank() && summarized != "新对话") {
+                        val patched = vm.agent.request("conversations/${item.text("id")}", "PATCH", jsonBody("title" to summarized))
+                        if (conversation?.text("id") == item.text("id")) conversation = patched
+                        patched
+                    } else item
+                }.getOrDefault(item)
+            } else item
+        }
+    }
     LaunchedEffect(Unit) {
         action.run {
             val loadedConnections = vm.agent.all("connections")
             connections = loadedConnections
-            conversations = vm.agent.all("conversations")
+            conversations = loadConversationsWithSummarizedTitles()
             if (connection == null) {
                 connection = loadedConnections.firstOrNull { it.flag("enabled") }?.text("id")
             }
@@ -323,7 +374,7 @@ internal fun generateFollowUpSuggestions(content: String): List<Pair<String, Str
     }
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            TextButton({ scope.launch { action.run { conversations = vm.agent.all("conversations"); history = true; action.message = null } } }, enabled = !action.busy) { Icon(Icons.Default.History, null); Text("历史") }
+            TextButton({ scope.launch { action.run { conversations = loadConversationsWithSummarizedTitles(); history = true; action.message = null } } }, enabled = !action.busy) { Icon(Icons.Default.History, null); Text("历史") }
             TextButton({ conversation = null; input = "" }, enabled = !action.busy) { Icon(Icons.Default.Add, null); Text("新对话") }
             Spacer(Modifier.weight(1f))
             if (conversation != null) {
@@ -394,7 +445,7 @@ internal fun generateFollowUpSuggestions(content: String): List<Pair<String, Str
                 triggerGapCheck(targetArtist)
             }
             scope.launch { action.run {
-                var current = conversation ?: vm.agent.request("conversations", "POST", jsonBody("connection_id" to connection)).also { conversation = it }
+                var current = conversation ?: vm.agent.request("conversations", "POST", jsonBody("title" to summarizeConversationTitle(content), "connection_id" to connection)).also { conversation = it }
                 val id = current.text("id")
                 try {
                     current = vm.agent.request("conversations/$id/messages", "POST", jsonBody("content" to content, "connection_id" to connection, "max_calls" to 4))

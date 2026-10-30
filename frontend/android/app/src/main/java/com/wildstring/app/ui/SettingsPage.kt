@@ -36,11 +36,19 @@ import androidx.compose.ui.unit.dp
             }, windowInsets = WindowInsets(0, 0, 0, 0),
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow))
         }) { padding ->
-        Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.TopCenter) {
-            Column(Modifier.widthIn(max = 720.dp).fillMaxHeight().fillMaxWidth()
+        Box(
+            Modifier.fillMaxSize()
+                .padding(padding)
                 .verticalScroll(scrollState, overscrollEffect = null)
-                .testTag("settings-scroll").padding(horizontal = 16.dp, vertical = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(20.dp), content = content)
+                .testTag("settings-scroll"),
+            contentAlignment = Alignment.TopCenter,
+        ) {
+            Column(
+                Modifier.widthIn(max = 720.dp).fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(20.dp),
+                content = content,
+            )
         }
     }
 }
