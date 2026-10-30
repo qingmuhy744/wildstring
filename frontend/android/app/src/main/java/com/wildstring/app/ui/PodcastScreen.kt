@@ -81,8 +81,15 @@ fun PodcastChannelPage(
     val pageStates = rememberSaveableStateHolder()
     var selectedPublisherId by rememberSaveable { mutableStateOf<String?>(null) }
     var selectedPublisherName by rememberSaveable { mutableStateOf("") }
+    var publisherOriginPodcastId by rememberSaveable { mutableStateOf<String?>(null) }
     val selectedPublisher = selectedPublisherId?.let { PodcastPublisher(it, selectedPublisherName) }
     val selectedId = state.podcastId
+    val closePublisher = {
+        val originId = publisherOriginPodcastId
+        selectedPublisherId = null
+        publisherOriginPodcastId = null
+        if (originId != null) vm.openPodcast(originId)
+    }
     val selectedDetail = selectedId?.let(browser.details::get).takeIf { browser.owner == owner }
     val selectedPodcast = selectedId?.let { id ->
         selectedDetail?.podcast ?: podcasts.find { it.id == id }
@@ -105,7 +112,7 @@ fun PodcastChannelPage(
         } catch (e: CancellationException) { throw e }
         catch (_: Exception) { canAddPodcast = state.account?.profile in listOf("owner", "librarian") }
     }
-    BackHandler(enabled = selectedId == null && selectedPublisher != null) { selectedPublisherId = null }
+    BackHandler(enabled = selectedId == null && selectedPublisher != null) { closePublisher() }
 
     LaunchedEffect(owner, browser.listLoaded) { vm.podcastBrowser.ensureList() }
     LaunchedEffect(owner, selectedId, selectedId in browser.loadedDetails) { selectedId?.let(vm.podcastBrowser::ensureDetail) }
@@ -146,7 +153,12 @@ fun PodcastChannelPage(
                     } },
                     publisher = {
                         PublisherAffiliation(vm, selectedPodcast, canEditPublisher,
-                            onOpen = { selectedPublisherId = it.id; selectedPublisherName = it.name; vm.back() },
+                            onOpen = {
+                                publisherOriginPodcastId = selectedPodcast.id
+                                selectedPublisherId = it.id
+                                selectedPublisherName = it.name
+                                vm.back()
+                            },
                             onSaved = { detail ->
                                 vm.podcastBrowser.remember(detail)
                                 statusMessage = "出品方归属已保存"
@@ -155,7 +167,19 @@ fun PodcastChannelPage(
                 )
             }
         } else if (selectedPublisher != null) {
-            PodcastPublisherPage(vm, selectedPublisher, { selectedPublisherId = null }, { vm.openPodcast(it.id) }, personalOnly)
+            PodcastPublisherPage(
+                vm = vm,
+                publisher = selectedPublisher,
+                onBack = closePublisher,
+                onSelect = {
+                    if (it.id == publisherOriginPodcastId) {
+                        selectedPublisherId = null
+                        publisherOriginPodcastId = null
+                    }
+                    vm.openPodcast(it.id)
+                },
+                personalOnly = personalOnly,
+            )
         } else {
             pageStates.SaveableStateProvider("list") {
                 PodcastListView(
@@ -233,14 +257,19 @@ fun PodcastChannelPage(
 private fun PodcastRefreshBox(loading: Boolean, onRefresh: () -> Unit, tag: String,
     actionLabel: String, content: @Composable BoxScope.() -> Unit) {
     val refresh = rememberPullToRefreshState()
-    PullToRefreshBox(isRefreshing = loading,
-        onRefresh = { if (!loading) onRefresh() }, state = refresh,
+    var manualRefresh by remember { mutableStateOf(false) }
+    LaunchedEffect(loading) {
+        if (!loading) manualRefresh = false
+    }
+    val showIndicator = manualRefresh && loading
+    PullToRefreshBox(isRefreshing = showIndicator,
+        onRefresh = { if (!loading) { manualRefresh = true; onRefresh() } }, state = refresh,
         modifier = Modifier.fillMaxSize().testTag(tag).semantics {
             customActions = listOf(CustomAccessibilityAction(actionLabel) {
-                if (loading) false else { onRefresh(); true }
+                if (loading) false else { manualRefresh = true; onRefresh(); true }
             })
         },
-        indicator = { WildRefreshIndicator(loading, refresh, Modifier.align(Alignment.TopCenter)) },
+        indicator = { WildRefreshIndicator(showIndicator, refresh, Modifier.align(Alignment.TopCenter)) },
         content = content)
 }
 
@@ -263,59 +292,77 @@ private fun PodcastListView(
         Row(
             Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 8.dp),
+                .padding(horizontal = 16.dp, vertical = 4.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(
-                text = "播客电台",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onBackground,
-            )
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                if (canAdd) FilledTonalButton(
-                    onClick = onAddClick,
-                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
-                    shape = RoundedCornerShape(20.dp),
-                ) {
-                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("添加节目", fontSize = 13.sp, maxLines = 1, softWrap = false)
-                }
+                FilterChip(followingOnly, { onScope(true) }, label = { Text("我的关注") })
+                if (canBrowseCatalog) FilterChip(!followingOnly, { onScope(false) }, label = { Text("本服节目") })
+            }
+            if (canAdd) FilledTonalButton(
+                onClick = onAddClick,
+                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
+                shape = RoundedCornerShape(20.dp),
+            ) {
+                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(4.dp))
+                Text("添加节目", fontSize = 13.sp, maxLines = 1, softWrap = false)
             }
         }
-
-        Row(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FilterChip(followingOnly, { onScope(true) }, label = { Text("我的关注") })
-            if (canBrowseCatalog) FilterChip(!followingOnly, { onScope(false) }, label = { Text("本服节目") })
-        }
         PodcastRefreshBox(loading, onRefreshAll, "podcast-list-refresh", "刷新播客订阅") {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize().testTag("podcast-list"),
-                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 96.dp, top = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                if (podcasts.isEmpty() && !loading) item {
-                    Box(Modifier.fillParentMaxSize()) {
-                        if (followingOnly) Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text("还没有关注的节目")
-                            if (canAdd) TextButton(onAddClick) { Text("添加 RSS 并关注") }
-                            if (canBrowseCatalog) TextButton({ onScope(false) }) { Text("浏览本服节目") }
-                        } else EmptyPodcastState(canAdd = canAdd, onPresetSelect = onAddClick)
+            BoxWithConstraints(Modifier.fillMaxSize()) {
+                val columns = if (maxWidth >= 720.dp) 2 else 1
+                val rows = remember(podcasts, columns) { podcasts.chunked(columns) }
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize().testTag("podcast-list"),
+                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 96.dp, top = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    if (podcasts.isEmpty() && !loading) item {
+                        Box(Modifier.fillParentMaxSize()) {
+                            if (followingOnly) Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text("还没有关注的节目")
+                                if (canAdd) TextButton(onAddClick) { Text("添加 RSS 并关注") }
+                                if (canBrowseCatalog) TextButton({ onScope(false) }) { Text("浏览本服节目") }
+                            } else EmptyPodcastState(canAdd = canAdd, onPresetSelect = onAddClick)
+                        }
                     }
-                }
-                items(podcasts, key = { it.id }) { podcast ->
-                    PodcastCardItem(
-                        podcast = podcast,
-                        onClick = { onSelect(podcast) },
-                        onDelete = { onDelete(podcast) },
-                        onFollow = { onFollow(podcast) },
-                        canManage = canManage,
-                    )
+                    items(rows, key = { row -> row.first().id }) { row ->
+                        if (columns == 1) {
+                            val podcast = row.first()
+                            PodcastCardItem(
+                                podcast = podcast,
+                                onClick = { onSelect(podcast) },
+                                onDelete = { onDelete(podcast) },
+                                onFollow = { onFollow(podcast) },
+                                canManage = canManage,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        } else {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            ) {
+                                row.forEach { podcast ->
+                                    PodcastCardItem(
+                                        podcast = podcast,
+                                        onClick = { onSelect(podcast) },
+                                        onDelete = { onDelete(podcast) },
+                                        onFollow = { onFollow(podcast) },
+                                        canManage = canManage,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                }
+                                if (row.size < columns) {
+                                    Spacer(Modifier.weight((columns - row.size).toFloat()))
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -329,16 +376,16 @@ private fun PodcastCardItem(
     onDelete: () -> Unit,
     onFollow: () -> Unit,
     canManage: Boolean,
+    modifier: Modifier = Modifier,
 ) {
     var showMenu by remember { mutableStateOf(false) }
     var deleting by remember { mutableStateOf(false) }
+    val summary = remember(podcast.description) { podcastDescription(podcast.description) }
 
     Surface(
         shape = RoundedCornerShape(16.dp),
         color = MaterialTheme.colorScheme.surfaceContainer,
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick),
+        modifier = modifier.clickable(onClick = onClick),
     ) {
         Row(
             modifier = Modifier.padding(14.dp),
@@ -346,8 +393,8 @@ private fun PodcastCardItem(
         ) {
             Box(
                 modifier = Modifier
-                    .size(68.dp)
-                    .clip(RoundedCornerShape(12.dp))
+                    .size(72.dp)
+                    .clip(RoundedCornerShape(14.dp))
                     .background(MaterialTheme.colorScheme.surfaceContainerHighest),
                 contentAlignment = Alignment.Center,
             ) {
@@ -373,7 +420,10 @@ private fun PodcastCardItem(
 
             Spacer(Modifier.width(14.dp))
 
-            Column(Modifier.weight(1f)) {
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
                 Text(
                     text = podcast.title,
                     style = MaterialTheme.typography.titleMedium,
@@ -382,7 +432,6 @@ private fun PodcastCardItem(
                     overflow = TextOverflow.Ellipsis,
                     color = MaterialTheme.colorScheme.onSurface,
                 )
-                Spacer(Modifier.height(3.dp))
                 Text(
                     text = podcast.author.ifBlank { "未知播客主" },
                     style = MaterialTheme.typography.bodySmall,
@@ -390,9 +439,19 @@ private fun PodcastCardItem(
                     overflow = TextOverflow.Ellipsis,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                TextButton(onFollow, contentPadding = PaddingValues(0.dp)) { Text(if (podcast.followed) "取消关注" else "关注节目") }
-                Spacer(Modifier.height(6.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                if (summary.isNotBlank()) {
+                    Text(
+                        text = summary,
+                        style = MaterialTheme.typography.bodySmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.78f),
+                    )
+                }
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(top = 2.dp),
+                ) {
                     Surface(
                         shape = RoundedCornerShape(6.dp),
                         color = MaterialTheme.colorScheme.secondaryContainer,
@@ -419,6 +478,28 @@ private fun PodcastCardItem(
                             )
                         }
                     }
+                }
+            }
+
+            Spacer(Modifier.width(12.dp))
+
+            if (podcast.followed) {
+                OutlinedButton(
+                    onClick = onFollow,
+                    shape = RoundedCornerShape(18.dp),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                    modifier = Modifier.height(34.dp),
+                ) {
+                    Text("取消关注", fontSize = 12.sp, maxLines = 1, softWrap = false)
+                }
+            } else {
+                FilledTonalButton(
+                    onClick = onFollow,
+                    shape = RoundedCornerShape(18.dp),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                    modifier = Modifier.height(34.dp),
+                ) {
+                    Text("关注节目", fontSize = 12.sp, maxLines = 1, softWrap = false)
                 }
             }
 
@@ -577,66 +658,153 @@ private fun PodcastDetailView(
                 contentPadding = PaddingValues(bottom = 96.dp),
             ) {
                 item {
-                    Row(
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(16.dp),
-                        verticalAlignment = Alignment.Top,
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .size(100.dp)
-                                .clip(RoundedCornerShape(16.dp))
-                                .background(MaterialTheme.colorScheme.surfaceContainerHighest),
-                            contentAlignment = Alignment.Center,
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.Top,
                         ) {
-                            if (podcast.coverUrl.isNotBlank()) {
-                                AsyncImage(
-                                    model = ImageRequest.Builder(LocalContext.current)
-                                        .data(podcast.coverUrl)
-                                        .crossfade(true)
-                                        .build(),
-                                    contentDescription = podcast.title,
-                                    contentScale = ContentScale.Crop,
-                                    modifier = Modifier.fillMaxSize(),
+                            Box(
+                                modifier = Modifier
+                                    .size(96.dp)
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .background(MaterialTheme.colorScheme.surfaceContainerHighest),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                if (podcast.coverUrl.isNotBlank()) {
+                                    AsyncImage(
+                                        model = ImageRequest.Builder(LocalContext.current)
+                                            .data(podcast.coverUrl)
+                                            .crossfade(true)
+                                            .build(),
+                                        contentDescription = podcast.title,
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier.fillMaxSize(),
+                                    )
+                                } else {
+                                    Icon(
+                                        Icons.Default.Podcasts,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(44.dp),
+                                    )
+                                }
+                            }
+
+                            Spacer(Modifier.width(16.dp))
+
+                            Column(
+                                modifier = Modifier.weight(1f),
+                                verticalArrangement = Arrangement.spacedBy(4.dp),
+                            ) {
+                                Text(
+                                    text = podcast.title,
+                                    style = MaterialTheme.typography.titleLarge,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
                                 )
-                            } else {
-                                Icon(
-                                    Icons.Default.Podcasts,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(48.dp),
+                                Text(
+                                    text = podcast.author.ifBlank { "未知创作者" },
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
                                 )
+                                publisher()
+                                val episodeTotal = podcast.totalEpisodes.coerceAtLeast(detail?.episodes?.size ?: 0)
+                                if (episodeTotal > 0 || podcast.unplayedEpisodes > 0) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                        modifier = Modifier.padding(top = 2.dp),
+                                    ) {
+                                        Surface(
+                                            shape = RoundedCornerShape(6.dp),
+                                            color = MaterialTheme.colorScheme.secondaryContainer,
+                                        ) {
+                                            Text(
+                                                text = "共 $episodeTotal 集",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                            )
+                                        }
+                                        if (podcast.unplayedEpisodes > 0) {
+                                            Surface(
+                                                shape = RoundedCornerShape(6.dp),
+                                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                                            ) {
+                                                Text(
+                                                    text = "${podcast.unplayedEpisodes} 未听",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = MaterialTheme.colorScheme.primary,
+                                                    fontWeight = FontWeight.Bold,
+                                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
 
-                        Spacer(Modifier.width(16.dp))
+                        Spacer(Modifier.height(14.dp))
 
-                        Column(Modifier.weight(1f)) {
-                            Text(
-                                text = podcast.title,
-                                style = MaterialTheme.typography.titleLarge,
-                                fontWeight = FontWeight.Bold,
-                            )
-                            Spacer(Modifier.height(4.dp))
-                            Text(
-                                text = podcast.author.ifBlank { "未知创作者" },
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            TextButton(onFollow, contentPadding = PaddingValues(0.dp)) { Text(if (podcast.followed) "取消关注" else "关注节目") }
-                            if (podcast.followed) TextButton(onAutoDownload, contentPadding = PaddingValues(0.dp)) { Text("自动下载") }
-                            publisher()
-                            Spacer(Modifier.height(8.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            FilledTonalButton(
+                                onClick = onFollow,
+                                shape = RoundedCornerShape(10.dp),
+                                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
+                                modifier = Modifier.height(36.dp),
+                            ) {
+                                Text(if (podcast.followed) "取消关注" else "关注节目", fontSize = 13.sp)
+                            }
+                            if (podcast.followed) {
+                                OutlinedButton(
+                                    onClick = onAutoDownload,
+                                    shape = RoundedCornerShape(10.dp),
+                                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
+                                    modifier = Modifier.height(36.dp),
+                                ) {
+                                    Text("自动下载", fontSize = 13.sp)
+                                }
+                            }
+                            OutlinedButton(
+                                onClick = { showDescription = true },
+                                shape = RoundedCornerShape(10.dp),
+                                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
+                                modifier = Modifier.height(36.dp),
+                            ) {
+                                Text("节目介绍", fontSize = 13.sp)
+                            }
+                        }
+
+                        Spacer(Modifier.height(12.dp))
+
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.surfaceContainerLow,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { showDescription = true },
+                        ) {
                             Text(
                                 text = podcastDescription(podcast.description).ifBlank { "暂无简介" },
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 maxLines = 3,
                                 overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.clickable { showDescription = true },
+                                lineHeight = 18.sp,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
                             )
-                            TextButton({ showDescription = true }, contentPadding = PaddingValues(0.dp)) { Text("节目介绍") }
                         }
                     }
                     Row(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -677,7 +845,13 @@ private fun PodcastDetailView(
                     }
                 }
 
-                if (sortedEpisodes.isEmpty() && !loading) {
+                if (sortedEpisodes.isEmpty() && loading) {
+                    item {
+                        Box(Modifier.fillMaxWidth().padding(48.dp), contentAlignment = Alignment.Center) {
+                            Text("正在加载单集…", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                } else if (sortedEpisodes.isEmpty() && !loading) {
                     item {
                         Box(Modifier.fillMaxWidth().padding(48.dp), contentAlignment = Alignment.Center) {
                             Text(when (episodeScope) {

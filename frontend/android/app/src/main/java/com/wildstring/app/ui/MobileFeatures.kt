@@ -1,10 +1,12 @@
 @file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 package com.wildstring.app.ui
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -54,7 +56,7 @@ internal fun FeatureDialog(vm: MusicViewModel, route: String, track: Track? = nu
     val title = when (route) {
         "assistant" -> "野弦助手"; "notifications" -> "通知"
         "connections" -> "模型连接"; "research" -> "联网与记忆"; "channels" -> "通知设置"
-        "external" -> "发现新音乐"; "rankings" -> "收听排行"; "daily" -> "每日推荐"; "ai" -> "AI 找歌与歌单"; "offline" -> "离线保存"; "statistics" -> "收听统计"; "devices" -> "其他设备继续"
+        "external" -> "发现新音乐"; "rankings" -> "收听排行"; "daily" -> "每日推荐"; "ai" -> "AI 找歌与歌单"; "offline" -> "离线保存"; "statistics" -> "收听统计"; "devices" -> "音乐跨设备接续"
         "playlist" -> if (playlist == null) "新建歌单" else "编辑歌单"; "order" -> "歌单排序"; "multi" -> "多选加入歌单"
         "lyric-scans" -> "歌词补全与洗版"; "gain" -> "响度均衡与手动调整"; "source-plugins" -> "数据源 ZIP 插件"; "management" -> "曲库管理"; "album-edit" -> "编辑专辑信息"
         "metadata" -> "编辑歌曲信息"; "lyrics" -> "编辑歌词"; "suggestions" -> "更新元数据与建议"; else -> "曲库管理"
@@ -211,20 +213,73 @@ private fun StatisticsPanel(vm: MusicViewModel) {
 @Composable
 private fun DevicesPanel(vm: MusicViewModel) {
     val player by vm.state.collectAsStateWithLifecycle()
+    val syncMode by vm.sharing.mode.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope(); val action = remember { FeatureAction() }
     var remote by remember { mutableStateOf<SharedPlayback?>(null) }
     val device = remember { vm.deviceId() }
     LaunchedEffect(Unit) { action.run { remote = vm.repository.api().sharedPlayback() } }
     Column(Modifier.padding(24.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        ActionStatus(action)
-        Text("暂停时自动保存进度。仅对其他设备最近 30 分钟内的暂停显示一次轻提示，载入后保持暂停；旧记录仍可在这里手动载入。")
-        remote?.let { saved ->
-            Text(if (saved.trackIds.isEmpty()) "还没有共享播放记录" else "${saved.trackIds.size} 首 · 第 ${saved.index + 1} 首 · ${formatTime(saved.positionMs)}")
-            if (saved.deviceId == device && saved.trackIds.isNotEmpty()) Text("这是本机最近同步的记录", style = MaterialTheme.typography.bodySmall)
-            Button({ scope.launch { action.run { vm.resumeShared(saved); action.message = "已载入进度，保持暂停" } } }, enabled = !action.busy && saved.trackIds.isNotEmpty()) { Text("从这条记录继续") }
+        Text("自动接续方式", style = MaterialTheme.typography.titleMedium)
+        Text(
+            "暂停时自动保存进度。仅提示其他设备最近 30 分钟内的暂停，每次暂停只提示一次；载入后保持暂停。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Column {
+            listOf(
+                "ask" to "轻提示（默认）· 发现其他设备暂停时提示接续",
+                "auto" to "自动恢复 · 打开应用时自动载入并保持暂停",
+                "off" to "关闭自动提示 · 仅在下方手动载入",
+            ).forEach { (id, label) ->
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clickable { vm.syncMode(id) }
+                        .padding(vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    RadioButton(selected = syncMode == id, onClick = { vm.syncMode(id) })
+                    Text(label, Modifier.padding(start = 12.dp), style = MaterialTheme.typography.bodyMedium)
+                }
+            }
         }
-        OutlinedButton({ scope.launch { action.run { remote = vm.sharePlayback(); action.message = "当前队列与进度已同步" } } }, enabled = !action.busy && player.queue.isNotEmpty()) { Text("同步本机当前播放") }
-        TextButton({ scope.launch { action.run { remote = vm.repository.api().sharedPlayback() } } }, enabled = !action.busy) { Text("刷新记录") }
+        HorizontalDivider()
+        Text("手动同步播放队列", style = MaterialTheme.typography.titleMedium)
+        Text(
+            "超过 30 分钟的旧记录或需要立即切换设备时，可在此手动载入或上传当前播放队列。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        ActionStatus(action)
+        remote?.let { saved ->
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerLow,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        if (saved.trackIds.isEmpty()) "还没有共享播放记录"
+                        else "云端记录：${saved.trackIds.size} 首队列 · 第 ${saved.index + 1} 首 · ${formatTime(saved.positionMs)}",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    if (saved.deviceId == device && saved.trackIds.isNotEmpty()) {
+                        Text("这是本机最近同步的记录", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Button(
+                    onClick = { scope.launch { action.run { vm.resumeShared(saved); action.message = "已载入进度，保持暂停" } } },
+                    enabled = !action.busy && saved.trackIds.isNotEmpty(),
+                ) { Text("从这条记录继续") }
+                OutlinedButton(
+                    onClick = { scope.launch { action.run { remote = vm.sharePlayback(); action.message = "当前队列与进度已同步" } } },
+                    enabled = !action.busy && player.queue.isNotEmpty(),
+                ) { Text("同步本机当前播放") }
+            }
+        }
+        TextButton({ scope.launch { action.run { remote = vm.repository.api().sharedPlayback() } } }, enabled = !action.busy) { Text("刷新云端记录") }
     }
 }
 

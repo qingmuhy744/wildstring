@@ -95,22 +95,12 @@ private val LocalSettingsFeedback = staticCompositionLocalOf<() -> Unit> { {} }
             if (state.account?.isOwner == true) SettingsGroup("服务端管理") {
                 Text(
                     "音乐库、文件夹、权限、共享音频清理及插件配置请在网页端管理。",
-                    Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
+                    Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
             SettingsGroup("播放") {
-                SettingsAction("播放诊断", Icons.Default.Troubleshoot) { diagnostics = true }
-                SettingsAction("其他设备继续", Icons.Default.Devices) { feature = "devices" }
-                val syncMode by vm.sharing.mode.collectAsStateWithLifecycle()
-                SettingsChoice("音乐跨设备接续", when(syncMode) { "off" -> "关闭"; "auto" -> "自动恢复"; else -> "轻提示" }, Icons.Default.Devices,
-                    listOf("off" to "关闭", "ask" to "轻提示（默认）", "auto" to "自动恢复"), syncMode,
-                    "暂停时自动保存进度。仅提示其他设备最近 30 分钟内的暂停，每次暂停只提示一次；载入后保持暂停。", vm::syncMode)
-                val podcastMode by vm.podcastProgress.mode.collectAsStateWithLifecycle()
-                SettingsChoice("播客单集接续", when(podcastMode) { "auto" -> "自动接续"; "restart" -> "从头播放"; else -> "播放前询问" }, Icons.Default.Podcasts,
-                    listOf("ask" to "播放前询问（默认）", "auto" to "自动接续", "restart" to "从头播放"), podcastMode,
-                    "每集进度独立保存。播放时定时同步，离线时先保存在本机；不同设备进度冲突时会让你选择。", vm.podcastProgress::mode)
                 SettingsChoice("播放音质", if (preferences.aacBitrate == 0) "原音" else "AAC · ${preferences.aacBitrate} kbps", Icons.Default.GraphicEq,
                     com.wildstring.app.data.PlaybackRequest.bitrates.map { it to if (it == 0) "原音" else "AAC · $it kbps" }, preferences.aacBitrate,
                     "默认原音。选择 AAC 后，无损音源转码，有损音源直放。切换保留播放位置和暂停状态。", vm.settings::quality)
@@ -120,7 +110,23 @@ private val LocalSettingsFeedback = staticCompositionLocalOf<() -> Unit> { {} }
                 SettingsChoice("歌词大小", preferences.lyricSize.label, Icons.Default.FormatSize,
                     com.wildstring.app.data.LyricSize.entries.map { it to it.label }, preferences.lyricSize,
                     "调整全屏歌词和逐字高亮的字号，只影响本机播放页。", vm.settings::lyricSize)
-                podcastPlayback?.let { playback ->
+                SettingsAction("播放诊断", Icons.Default.Troubleshoot, subtitle = "查看网络缓冲、音频解码与输出状态") { diagnostics = true }
+            }
+            SettingsGroup("跨设备接续") {
+                val syncMode by vm.sharing.mode.collectAsStateWithLifecycle()
+                val syncSubtitle = when (syncMode) {
+                    "off" -> "自动提示已关闭 · 点击可手动同步播放队列"
+                    "auto" -> "自动恢复 · 点击可手动同步播放队列"
+                    else -> "轻提示 · 点击可手动同步播放队列"
+                }
+                SettingsAction("音乐跨设备接续", Icons.Default.Devices, subtitle = syncSubtitle) { feature = "devices" }
+                val podcastMode by vm.podcastProgress.mode.collectAsStateWithLifecycle()
+                SettingsChoice("播客单集接续", when(podcastMode) { "auto" -> "自动接续上次位置"; "restart" -> "每次从头播放"; else -> "播放前询问是否续播" }, Icons.Default.Podcasts,
+                    listOf("ask" to "播放前询问（默认）", "auto" to "自动接续", "restart" to "从头播放"), podcastMode,
+                    "每集进度独立保存。播放时定时同步，离线时先保存在本机；不同设备进度冲突时会让你选择。", vm.podcastProgress::mode)
+            }
+            podcastPlayback?.let { playback ->
+                SettingsGroup("播客播放缓存") {
                     val savePodcastPlayback: (com.wildstring.app.data.PodcastPlaybackSettings) -> Unit = save@{ next ->
                         if (savingPodcastPlayback || settingsOwner != vm.repository.session.cacheScope()) return@save
                         podcastPlayback = next; savingPodcastPlayback = true
@@ -162,7 +168,12 @@ private val LocalSettingsFeedback = staticCompositionLocalOf<() -> Unit> { {} }
                 }
             }
             SettingsGroup("外观与触感") {
-                Text("这些偏好按服务器和账号保存在本机。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    "这些偏好按服务器和账号保存在本机。",
+                    Modifier.padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 4.dp),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
 
                 SettingsChoice("歌曲列表大小", preferences.songListSize.label, Icons.Default.FormatSize,
                     com.wildstring.app.data.SongListSize.entries.map { it to it.label }, preferences.songListSize,
@@ -220,15 +231,22 @@ private val LocalSettingsFeedback = staticCompositionLocalOf<() -> Unit> { {} }
 }
 
 @Composable private fun SettingsGroup(title: String, content: @Composable ColumnScope.() -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(title, Modifier.padding(start = 16.dp), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-        Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surface) { Column(content = content) }
+        Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surface) {
+            Column(Modifier.fillMaxWidth(), content = content)
+        }
     }
 }
 
-@Composable private fun SettingsAction(title: String, icon: ImageVector, enabled: Boolean = true, action: () -> Unit) {
-    ListItem(headlineContent = { Text(title) }, leadingContent = { Icon(icon, null) },
-        trailingContent = { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null) }, modifier = Modifier.clickable(enabled = enabled, onClick = action))
+@Composable private fun SettingsAction(title: String, icon: ImageVector, enabled: Boolean = true, subtitle: String? = null, action: () -> Unit) {
+    ListItem(
+        headlineContent = { Text(title) },
+        supportingContent = subtitle?.let { { Text(it) } },
+        leadingContent = { Icon(icon, null) },
+        trailingContent = { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null) },
+        modifier = Modifier.testTag("setting-$title").clickable(enabled = enabled, onClick = action),
+    )
 }
 
 @Composable private fun <T> SettingsChoice(title: String, value: String, icon: ImageVector, choices: List<Pair<T, String>>, selected: T,

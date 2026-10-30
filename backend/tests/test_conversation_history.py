@@ -98,3 +98,31 @@ def test_user_cannot_rename_or_delete_another_users_history(agent):
         ).status_code
         == 200
     )
+
+
+def test_first_message_summarizes_title_once_and_preserves_it_until_manual_rename(agent):
+    client, _ = agent
+    conversation = post(client, "/conversations", {})
+    assert conversation["title"] == "新对话"
+    path = "/conversations/" + conversation["id"]
+
+    first_turn = post(
+        client,
+        path + "/messages",
+        {"content": "帮我查漏补缺：许嵩全网热门 Top 10 我缺了哪几首？"},
+    )
+    assert first_turn["title"] == "许嵩全网热门 Top 10 查漏补缺"
+
+    second_turn = post(
+        client,
+        path + "/messages",
+        {"content": "再帮我推荐几首适合夜晚听的摇滚歌曲"},
+    )
+    assert second_turn["title"] == "许嵩全网热门 Top 10 查漏补缺"
+
+    renamed = client.patch(BASE + path, headers=HEADERS, json={"title": "许嵩与夜晚摇滚"})
+    assert renamed.status_code == 200
+    assert renamed.json()["title"] == "许嵩与夜晚摇滚"
+
+    third_turn = post(client, path + "/messages", {"content": "继续查找更多专辑"})
+    assert third_turn["title"] == "许嵩与夜晚摇滚"

@@ -48,12 +48,27 @@ class PlaylistStore:
         self.user_id = library.database.user_id
 
     def ensure_default(self):
+        with self.database.connect() as connection:
+            count = connection.execute(
+                "SELECT count(*) FROM playlists WHERE user_id=? AND kind='favorites'",
+                (self.user_id,),
+            ).fetchone()[0]
+        if count == 1:
+            return
         library_id = self.library.default_library_id()
         with self.database.connect(write=True) as connection:
-            if connection.execute(
-                "SELECT id FROM playlists WHERE user_id=? AND kind='favorites' LIMIT 1",
-                (self.user_id,),
-            ).fetchone():
+            connection.execute("BEGIN IMMEDIATE")
+            rows = connection.execute(
+                "SELECT id FROM playlists WHERE user_id=? AND kind='favorites' "
+                "ORDER BY (library_id=?) DESC, created_at ASC, id ASC",
+                (self.user_id, library_id),
+            ).fetchall()
+            if rows:
+                if len(rows) > 1:
+                    connection.executemany(
+                        "DELETE FROM playlists WHERE id=?",
+                        [(row["id"],) for row in rows[1:]],
+                    )
                 return
             connection.execute(
                 """INSERT OR IGNORE INTO playlists

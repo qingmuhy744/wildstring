@@ -145,7 +145,7 @@ export function Assistant({
       // A new conversation changes selection; use a separate controller for this run.
       const result = await api<Conversation>(`/agent/conversations/${session.id}/messages`, {
         method: 'POST',
-        body: JSON.stringify({ content: text, connection_id: connection, max_calls: 4 }),
+        body: JSON.stringify({ content: text, connection_id: connection }),
       });
       if (epoch !== sequence.current) return;
       setConversation(result);

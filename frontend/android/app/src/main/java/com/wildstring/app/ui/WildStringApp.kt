@@ -503,7 +503,7 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
         @Composable fun BaseDestination(target: String) {
             Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))) {
             if (target == "settings") savedPages.SaveableStateProvider("settings") { SettingsScreen(vm, bottomBar = {
-                MiniPlayer(vm, state, onQueue = { queue = true }) { playerFromSettings = true; settings = false; expanded = true; lyrics = false; queue = false }
+                MiniPlayer(vm, state, onQueue = { queue = true }, includeBottomInset = true) { playerFromSettings = true; settings = false; expanded = true; lyrics = false; queue = false }
             }) { settings = false } }
             else {
                 Row(Modifier.fillMaxSize()) {
@@ -524,9 +524,17 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
                                 color = MaterialTheme.colorScheme.surfaceContainer,
                                 tonalElevation = 0.dp,
                             ) {
-                                Column(Modifier.fillMaxWidth().windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Bottom))) {
+                                Column(
+                                    Modifier.fillMaxWidth().then(
+                                        if (!rail) {
+                                            Modifier.windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Bottom))
+                                        } else {
+                                            Modifier
+                                        }
+                                    )
+                                ) {
                                     if (state.current != null) {
-                                        MiniPlayer(vm, state, onQueue = { queue = true }) {
+                                        MiniPlayer(vm, state, onQueue = { queue = true }, includeBottomInset = rail) {
                                             playerReturnDepth = -1; playerFromSettings = false; expanded = true; lyrics = false; queue = false
                                         }
                                     }
@@ -1183,27 +1191,54 @@ private fun PlayerScreen(vm: MusicViewModel, state: MusicState, wide: Boolean, l
             Column(Modifier.weight(1.15f).fillMaxHeight().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.Center) {
                     PlaybackControls(vm, state, onQueue, onAlbum, onArtist, compact = true)
             }
-        } else if (wide) Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(48.dp), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(.9f).fillMaxHeight().widthIn(max = 380.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()
-                    .dismissPlayerSwipe(!lyrics && !queue, onDismiss, onUpdateDrag, thresholdTick, openQueueOnSwipeUp)
-                    .trackSwipeGestures(!lyrics && !queue,
-                        onPrevious = { feedback(TactileKind.Tap); vm.previous() },
-                        onNext = { feedback(TactileKind.Tap); vm.next() }), contentAlignment = Alignment.Center) {
-                    val visualSize = minOf(300.dp, maxWidth, maxHeight)
-                    PlaybackVisual(vm, track, preferences.playbackStyle, spinning, true, state.duration, rotation,
-                        Modifier.size(visualSize), showArtwork) { if (queue) onQueue() }
+        } else if (wide) Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+            Row(
+                Modifier.widthIn(max = 1120.dp).fillMaxSize().padding(vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(56.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(
+                    Modifier.weight(0.95f).fillMaxHeight(),
+                    verticalArrangement = Arrangement.Center,
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    BoxWithConstraints(
+                        Modifier.weight(1f, fill = false).fillMaxWidth()
+                            .dismissPlayerSwipe(!lyrics && !queue, onDismiss, onUpdateDrag, thresholdTick, openQueueOnSwipeUp)
+                            .trackSwipeGestures(
+                                !lyrics && !queue,
+                                onPrevious = { feedback(TactileKind.Tap); vm.previous() },
+                                onNext = { feedback(TactileKind.Tap); vm.next() },
+                            ),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        val visualSize = minOf(360.dp, maxWidth, maxHeight)
+                        PlaybackVisual(
+                            vm, track, preferences.playbackStyle, spinning, true, state.duration, rotation,
+                            Modifier.size(visualSize), showArtwork,
+                        ) { if (queue) onQueue() }
+                    }
+                    Spacer(Modifier.height(28.dp))
+                    PlaybackControls(
+                        vm, state, onQueue, onAlbum, onArtist,
+                        modifier = Modifier.widthIn(max = 420.dp).dismissPlayerSwipe(true, onDismiss, onUpdateDrag, thresholdTick, openQueueOnSwipeUp),
+                    )
                 }
-                Spacer(Modifier.height(20.dp))
-                PlaybackControls(vm, state, onQueue, onAlbum, onArtist,
-                    modifier = Modifier.dismissPlayerSwipe(true, onDismiss, onUpdateDrag, thresholdTick, openQueueOnSwipeUp))
-            }
-            Column(Modifier.weight(1.1f).fillMaxHeight().padding(top = 24.dp, bottom = 16.dp)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    FilterChip(!queue, { if (queue) onQueue() }, label = { Text("歌词") })
-                    FilterChip(queue, { if (!queue) onQueue() }, label = { Text("队列 · ${state.queue.size}") })
+                Column(
+                    Modifier.weight(1.05f).fillMaxHeight().padding(top = 12.dp, bottom = 12.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Row(
+                        Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        FilterChip(!queue, { if (queue) onQueue() }, label = { Text("歌词") })
+                        FilterChip(queue, { if (!queue) onQueue() }, label = { Text("队列 · ${state.queue.size}") })
+                    }
+                    if (queue) QueuePanel(vm, state, Modifier.weight(1f).fillMaxWidth())
+                    else LyricsPanel(vm, state, Modifier.weight(1f).fillMaxWidth(), onArtwork = showArtwork)
                 }
-                if (queue) QueuePanel(vm, state, Modifier.weight(1f)) else LyricsPanel(vm, state, Modifier.weight(1f), onArtwork = showArtwork)
             }
         } else {
             BoxWithConstraints(Modifier.weight(1f).fillMaxWidth().testTag("player-visual-stage")
