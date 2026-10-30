@@ -20,6 +20,14 @@
 
 schema 39 移除此前自动添加且未被手动修改过的历史保护（`protected=1 AND version=1`），保留明确设置的保护、已有引用、音频文件和自动清理配置。迁移本身不删除文件。后续发现已有音频也默认不添加保护，自动清理由管理员现有开关及保留天数决定。
 
+## 远程播客访问
+
+RSS、封面、音频下载与远程串流共用同一出站策略：只允许 http(s)，拒绝 URL 中的凭据、`localhost`/`.local`/`.internal` 与非公网 IP 字面量；直连时每个连接只解析一次 DNS，任一答案非公网即拒绝，重定向重新校验。走管理员配置的出站代理时由代理解析目标域名。
+
+DNS 答案落在 `198.18.0.0/15`（Clash/mihomo/Surge fake-ip 模式）时单独返回 422 `remote_url_fake_ip`，客户端提示开启选项或配置代理。服务端设置 `WILDSTRING_PODCAST_ALLOW_FAKE_IP=true` 后仅放行该段的 DNS 答案（含 IPv4 映射的 IPv6），默认关闭；其他私有范围及 URL 中直接写出的 `198.18.x.x` 仍拒绝。开启意味着信任本机 fake-ip 网关会把这些地址转发到公网，如果内网真实使用该网段则不要开启。
+
+`GET /api/v1/podcasts/episodes/{id}/stream` 优先返回服务器已有音频。带 `proxy=1` 时由服务端串流远程音频并转发 Range：上游连接失败或返回错误时返回 502 `podcast_audio_upstream_failed`，上游 416 原样返回 416 `podcast_audio_range_not_satisfiable`，地址被拒绝返回 422 `invalid_podcast_audio_url` 或 `remote_url_fake_ip`；不再回退为跨源 307，因为 Android 不跟随重定向、网页也会把它当成含糊的播放失败。网页与 Android 都使用 `proxy=1`。不带 `proxy=1` 的旧调用保持 307 到源站，由客户端自行访问。
+
 ## 共享音频管理
 
 仅所有者通过 `/api/v1/podcasts/resources` 分页查看资源、引用数、磁盘占用和保护状态；`GET/PUT /resources/settings` 采用版本校验，配置是否自动清理和零引用保留天数。`PUT /resources/{id}/protection` 显式设置或取消手动保护。
