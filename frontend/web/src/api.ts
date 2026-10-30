@@ -63,6 +63,7 @@ export class ApiError extends Error {
     message: string,
     public code?: string,
     public traceId?: string,
+    public retryAfter?: number,
   ) {
     super(traceId ? `${message}（诊断编号：${traceId}）` : message);
   }
@@ -225,6 +226,16 @@ const messages: Record<string, string> = {
   scan_not_found: '扫描任务不存在。',
   owner_setup_required: '请先在服务端设置所有者密码。',
   authentication_required: '登录已过期，请重新登录。',
+  podcast_search_query_invalid: '请输入 1 到 100 个字符的节目名称。',
+  podcast_search_query_is_url: '这是一个 RSS 地址，请直接预览或添加。',
+  podcast_search_region_invalid: '播客搜索区域设置无效，请联系管理员。',
+  podcast_search_rate_limited: '搜索太频繁了，请稍后再试。',
+  podcast_search_upstream_rate_limited: 'Apple 播客目录暂时限制了搜索，请稍后再试。',
+  podcast_search_upstream_failed: '播客目录暂时无法访问，请稍后重试，或直接粘贴 RSS 地址。',
+  podcast_search_timeout: '播客目录响应超时，请稍后重试。',
+  podcast_feed_fetch_failed: '无法获取这个 RSS 源，请检查地址或稍后重试。',
+  podcast_feed_parse_failed: '这个地址返回的内容无法解析为播客 RSS。',
+  podcast_feed_invalid: '这个地址不是有效的播客 RSS 源。',
 };
 
 const isCodeLike = (str: string) => /^[a-z0-9_-]+$/i.test(str);
@@ -327,7 +338,15 @@ export async function api<T>(path: string, options: ApiOptions = {}): Promise<T>
           : '';
     const friendlyRaw = rawMessage && !isCodeLike(rawMessage) ? rawMessage : '';
     const message = messages[code] || friendlyRaw || '请求未完成，请重试。';
-    throw new ApiError(response.status, message, code, traceId);
+    const retryHeader = Number(response.headers.get('Retry-After'));
+    const retryBody = Number(body.detail?.retry_after);
+    const retryAfter =
+      Number.isFinite(retryHeader) && retryHeader > 0
+        ? Math.ceil(retryHeader)
+        : Number.isFinite(retryBody) && retryBody > 0
+          ? Math.ceil(retryBody)
+          : undefined;
+    throw new ApiError(response.status, message, code, traceId, retryAfter);
   }
   const value = response.status === 204 ? (undefined as T) : await response.json();
   if (expectedOwner !== libraryUser()) throw new DOMException('Account changed', 'AbortError');

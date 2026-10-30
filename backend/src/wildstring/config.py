@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     web_dir: Path | None = None
     admin_password: SecretStr | None = None
     cookie_secure: bool = False
+    podcast_search_regions: str = "us,tw,cn"
 
     @field_validator("data_dir", "music_dir", "podcasts_dir", "web_dir")
     @classmethod

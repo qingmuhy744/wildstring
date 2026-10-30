@@ -1,5 +1,6 @@
 import { PodcastDownloadDialog } from './podcast-download-settings';
 import { useCanAddPodcast } from './podcast-catalog-settings';
+import { PodcastSearchDialog } from './podcast-search';
 import { PodcastResourceManager } from './podcast-resources';
 import { DialogCloseButton } from './dialog-close';
 import React, { useEffect, useState, useRef, useMemo } from 'react';
@@ -206,8 +207,6 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
   const [showSubscribeModal, setShowSubscribeModal] = useState(false);
   const canAddPodcast = useCanAddPodcast(userId, canManageSources);
   const [modalFeedUrl, setModalFeedUrl] = useState('');
-  const [modalError, setModalError] = useState<string | null>(null);
-  const [subscribing, setSubscribing] = useState(false);
   const [refreshingAll, setRefreshingAll] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [playbackSettings, setPlaybackSettings] = useState<PodcastPlaybackSettings | null>(null);
@@ -859,29 +858,26 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
     };
   }, []);
 
-  const handleSubscribe = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!modalFeedUrl.trim()) return;
-    try {
-      setSubscribing(true);
-      setModalError(null);
-      const detail = await api<PodcastDetail>('/podcasts', {
-        method: 'POST',
-        body: JSON.stringify({ feed_url: modalFeedUrl.trim() }),
-      });
-      showNotice(`已添加并关注《${detail.podcast.title}》`);
-      setShowSubscribeModal(false);
-      setModalFeedUrl('');
-      setModalError(null);
-      await loadPodcasts();
-      await openDetail(detail.podcast);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : '订阅失败，请检查 RSS 地址';
-      setModalError(msg);
-      showNotice(msg);
-    } finally {
-      setSubscribing(false);
-    }
+  const closeSubscribe = () => {
+    setShowSubscribeModal(false);
+    setModalFeedUrl('');
+  };
+
+  const openFromSearch = async (podcastId: string) => {
+    closeSubscribe();
+    const detail = await api<PodcastDetail>(`/podcasts/${encodeURIComponent(podcastId)}`).catch(
+      (err: Error) => {
+        showNotice(err.message);
+        return null;
+      },
+    );
+    if (detail) await openDetail(detail.podcast);
+  };
+
+  const handleSubscribed = async (podcastId: string, title: string) => {
+    showNotice(`已关注《${title}》`);
+    await loadPodcasts();
+    await openFromSearch(podcastId);
   };
 
   const playEpisode = (ep: PodcastEpisode, podcast: PodcastSummary) => {
@@ -1000,13 +996,13 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
               <Icon name="podcast" /> {refreshingAll ? '更新中…' : '全部更新'}
             </button>
           )}
-          {!selectedPodcast && canAddPodcast && (
+          {!selectedPodcast && (
             <button
               type="button"
               className="podcasts-action-btn primary"
               onClick={() => setShowSubscribeModal(true)}
             >
-              + 添加节目
+              {canAddPodcast ? '+ 添加节目' : '搜索节目'}
             </button>
           )}
         </div>
@@ -1348,11 +1344,9 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
                   ? '添加感兴趣的 RSS，你的关注与收听进度会单独保存。'
                   : '这里仅显示你关注的节目。管理员尚未开放添加 RSS。'}
               </p>
-              {canAddPodcast && (
-                <button type="button" onClick={() => setShowSubscribeModal(true)}>
-                  添加 RSS 并关注
-                </button>
-              )}
+              <button type="button" onClick={() => setShowSubscribeModal(true)}>
+                {canAddPodcast ? '搜索或添加节目' : '搜索节目'}
+              </button>
               {canManageSources && (
                 <button type="button" onClick={() => setFollowingOnly(false)}>
                   浏览本服节目
@@ -1919,75 +1913,15 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
         </div>
       )}
 
-      {/* Subscribe Modal */}
+      {/* Subscribe / search dialog */}
       {showSubscribeModal && (
-        <div className="podcasts-modal-backdrop" onClick={() => setShowSubscribeModal(false)}>
-          <div className="podcasts-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="podcasts-modal-header">
-              <h3>订阅新播客</h3>
-              <DialogCloseButton
-                className="modal-close-btn"
-                aria-label="关闭添加节目"
-                onClick={() => setShowSubscribeModal(false)}
-              />
-            </div>
-            <form onSubmit={handleSubscribe}>
-              {modalError && <div className="modal-error-message">{modalError}</div>}
-              <div className="modal-field">
-                <label htmlFor="feed-url">RSS 地址</label>
-                <input
-                  id="feed-url"
-                  type="url"
-                  placeholder="https://example.com/feed.xml"
-                  value={modalFeedUrl}
-                  onChange={(e) => {
-                    setModalFeedUrl(e.target.value);
-                    if (modalError) setModalError(null);
-                  }}
-                  required
-                  autoFocus
-                />
-              </div>
-
-              <div className="preset-chips in-modal">
-                <span className="preset-label">快速填入推荐：</span>
-                <div className="preset-chips-row">
-                  {PRESET_PODCASTS.map((item) => (
-                    <button
-                      key={item.name}
-                      type="button"
-                      className="preset-chip-btn"
-                      onClick={() => {
-                        setModalFeedUrl(item.url);
-                        if (modalError) setModalError(null);
-                      }}
-                    >
-                      {item.name}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="modal-actions">
-                <button
-                  type="button"
-                  className="modal-cancel-btn"
-                  onClick={() => setShowSubscribeModal(false)}
-                  disabled={subscribing}
-                >
-                  取消
-                </button>
-                <button
-                  type="submit"
-                  className="modal-submit-btn primary"
-                  disabled={subscribing || !modalFeedUrl.trim()}
-                >
-                  {subscribing ? '正在解析订阅…' : '立即订阅'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+        <PodcastSearchDialog
+          canAdd={canAddPodcast}
+          initialQuery={modalFeedUrl}
+          onClose={closeSubscribe}
+          onSubscribed={handleSubscribed}
+          onOpen={openFromSearch}
+        />
       )}
 
       {/* Download Queue Modal */}

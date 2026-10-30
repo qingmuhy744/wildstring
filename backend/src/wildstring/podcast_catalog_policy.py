@@ -29,7 +29,7 @@ class PodcastCatalogPolicy:
     def require_add(self, user, fields):
         if not self.read(user)["can_add"]:
             raise HTTPException(403, "podcast_subscriptions_disabled")
-        if user["profile"] not in {"owner", "librarian"} and fields - {"feed_url"}:
+        if user["profile"] not in {"owner", "librarian"} and fields - {"feed_url", "itunes_id"}:
             raise HTTPException(403, "podcast_catalog_management_required")
 
     def routes(self, router, auth):
