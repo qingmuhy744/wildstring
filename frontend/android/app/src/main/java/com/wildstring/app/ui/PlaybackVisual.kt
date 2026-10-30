@@ -84,7 +84,7 @@ internal val playbackStyles = listOf("cover" to "封面", "vinyl" to "黑胶", "
     }
     var settled by remember(track.id) { mutableStateOf(false) }
     LaunchedEffect(track.id) { delay(180); settled = true }
-    val arm by animateFloatAsState(if (playing && settled) 24f else -12f, tween(350), label = "tonearm")
+    val arm by animateFloatAsState(if (playing && settled) 26f else 8f, tween(350), label = "tonearm")
     Crossfade(style, modifier.testTag("playback-visual-$style").semantics {
         stateDescription = if (moving) "正在转动" else "静止"
     }.combinedClickable(
@@ -100,7 +100,7 @@ internal val playbackStyles = listOf("cover" to "封面", "vinyl" to "黑胶", "
             val side = minOf(maxWidth, maxHeight)
             when (selection) {
                 "vinyl" -> {
-                    Box(Modifier.offset(side * .07f, side * .10f).size(side * .86f).graphicsLayer { rotationZ = phase.angle }) {
+                    Box(Modifier.offset(side * .05f, side * .08f).size(side * .88f).graphicsLayer { rotationZ = phase.angle }) {
                         Canvas(Modifier.fillMaxSize()) {
                             val radius = size.minDimension / 2
                             drawCircle(Brush.radialGradient(listOf(Color(0xFF30352C), Color(0xFF11150F), Color(0xFF252B20))))
@@ -111,17 +111,25 @@ internal val playbackStyles = listOf("cover" to "封面", "vinyl" to "黑胶", "
                             Modifier.align(Alignment.Center).fillMaxSize(.56f).clip(CircleShape))
                         Box(Modifier.align(Alignment.Center).size(side * .023f).clip(CircleShape).background(Color(0xFF191C15)))
                     }
-                    Canvas(Modifier.offset(side * .07f, side * .10f).size(side * .86f)) {
+                    Canvas(Modifier.offset(side * .05f, side * .08f).size(side * .88f)) {
                         drawCircle(Brush.sweepGradient(listOf(Color.Transparent, Color.White.copy(alpha = .08f), Color.Transparent,
                             Color.Transparent, Color.White.copy(alpha = .08f), Color.Transparent)))
                     }
-                    Canvas(Modifier.offset(side * .89f, side * .03f).width(side * .025f).height(side * .46f)
-                        .graphicsLayer { rotationZ = arm; transformOrigin = TransformOrigin(.5f, .02f) }) {
-                        drawRoundRect(Brush.horizontalGradient(listOf(Color(0xFF606A59), Color(0xFFE0E1D7), Color(0xFF727B67))), cornerRadius = CornerRadius(4.dp.toPx()))
-                        drawCircle(Brush.radialGradient(listOf(Color(0xFFB2B9A4), Color(0xFF414C37))), radius = size.width * 1.5f, center = Offset(size.width / 2, size.height * .02f))
+                    Canvas(Modifier.offset(side * .84f, side * .06f).width(side * .028f).height(side * .48f)
+                        .graphicsLayer { rotationZ = arm; transformOrigin = TransformOrigin(.5f, .04f) }) {
+                        val pivot = Offset(size.width / 2, size.height * .04f)
+                        drawCircle(Color(0xFF272D22).copy(alpha = 0.55f), radius = size.width * 2.5f, center = pivot)
+                        drawCircle(Color(0xFF8A927E), radius = size.width * 2.1f, center = pivot, style = Stroke(1.5.dp.toPx()))
+                        drawRoundRect(
+                            Brush.horizontalGradient(listOf(Color(0xFF606A59), Color(0xFFE0E1D7), Color(0xFF727B67))),
+                            topLeft = Offset(0f, -size.height * .04f),
+                            size = Size(size.width, size.height * .90f),
+                            cornerRadius = CornerRadius(4.dp.toPx()),
+                        )
+                        drawCircle(Brush.radialGradient(listOf(Color(0xFFB2B9A4), Color(0xFF414C37))), radius = size.width * 1.55f, center = pivot)
                         drawRoundRect(Brush.horizontalGradient(listOf(Color(0xFF303B27), Color(0xFF67765B), Color(0xFF27321F))),
-                            topLeft = Offset(-size.width * .7f, size.height * .84f), size = Size(size.width * 2.4f, size.height * .19f), cornerRadius = CornerRadius(3.dp.toPx()))
-                        drawLine(Color(0xFFE98A6D), Offset(-size.width * .6f, size.height * 1.02f), Offset(size.width * 1.6f, size.height * 1.02f), 2.dp.toPx())
+                            topLeft = Offset(-size.width * .75f, size.height * .82f), size = Size(size.width * 2.5f, size.height * .19f), cornerRadius = CornerRadius(3.dp.toPx()))
+                        drawLine(Color(0xFFE98A6D), Offset(-size.width * .65f, size.height * 1.0f), Offset(size.width * 1.65f, size.height * 1.0f), 2.dp.toPx())
                     }
                 }
                 "cassette" -> {

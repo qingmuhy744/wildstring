@@ -41,7 +41,13 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 
 /** Album-tinted capsule with independent playback and queue targets. No per-frame artwork work. */
-@Composable internal fun MiniPlayer(vm: MusicViewModel, state: MusicState, onQueue: () -> Unit, expand: () -> Unit) {
+@Composable internal fun MiniPlayer(
+    vm: MusicViewModel,
+    state: MusicState,
+    onQueue: () -> Unit,
+    includeBottomInset: Boolean = false,
+    expand: () -> Unit,
+) {
     val track = state.current ?: return
     val feedback = LocalTactileFeedback.current
     val art = artworkAtmosphere(vm, track)
@@ -97,9 +103,19 @@ import androidx.compose.ui.unit.dp
             Box(Modifier.fillMaxWidth()) {
                 art?.let { Image(it.image, null, Modifier.matchParentSize(), contentScale = ContentScale.Crop,
                     alpha = if (LocalRedCloth.current) .10f else if (dark) .16f else .18f, filterQuality = FilterQuality.Medium) }
-                Row(Modifier.fillMaxWidth()
-                    .background(Brush.horizontalGradient(listOf(tint.copy(alpha = if (dark) .28f else .16f), tint.copy(alpha = .04f), Color.Transparent)))
-                    .padding(horizontal = 16.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    Modifier.fillMaxWidth()
+                        .background(Brush.horizontalGradient(listOf(tint.copy(alpha = if (dark) .28f else .16f), tint.copy(alpha = .04f), Color.Transparent)))
+                        .then(
+                            if (includeBottomInset) {
+                                Modifier.windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Bottom))
+                            } else {
+                                Modifier
+                            }
+                        )
+                        .padding(horizontal = 16.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
                     AnimatedContent(
                         targetState = track,
                         modifier = Modifier.weight(1f).testTag("mini-player-open")
@@ -151,7 +167,12 @@ import androidx.compose.ui.unit.dp
                         Icon(Icons.AutoMirrored.Filled.QueueMusic, "播放队列", tint = colors.onSurfaceVariant)
                     }
                 }
-                MiniPlayerProgress(vm, state.duration, colors.primary, Modifier.align(Alignment.BottomCenter))
+                MiniPlayerProgress(
+                    vm,
+                    state.duration,
+                    colors.primary,
+                    Modifier.align(if (includeBottomInset) Alignment.TopCenter else Alignment.BottomCenter),
+                )
             }
         }
     }

@@ -28,14 +28,7 @@ import androidx.compose.ui.unit.dp
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
         bottomBar = {
-            Surface(
-                color = MaterialTheme.colorScheme.surfaceContainer,
-                tonalElevation = 0.dp,
-            ) {
-                Box(Modifier.fillMaxWidth().windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Bottom))) {
-                    bottomBar()
-                }
-            }
+            bottomBar()
         },
         topBar = {
             TopAppBar(title = { Text("设置") }, navigationIcon = {
