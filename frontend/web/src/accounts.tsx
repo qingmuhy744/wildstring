@@ -237,7 +237,7 @@ export function AccountDialog({
       </form>
       <div className="account-version-info">
         <small className="muted">
-          WildString 网页端 v0.8.0{serverVersion ? ` · 服务端 v${serverVersion}` : ''}
+          WildString 网页端 v0.8.1{serverVersion ? ` · 服务端 v${serverVersion}` : ''}
         </small>
       </div>
     </dialog>
