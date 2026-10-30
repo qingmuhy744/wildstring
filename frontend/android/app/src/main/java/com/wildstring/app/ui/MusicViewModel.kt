@@ -1033,9 +1033,7 @@ class MusicViewModel @Inject constructor(
         mutable.update { it.copy(current = track, playing = c.isPlaying, buffering = c.playbackState == Player.STATE_BUFFERING,
             duration = c.duration.takeIf { d -> d > 0 } ?: track?.durationMs ?: 0,
             queue = queue, playbackQuality = c.mediaMetadata.description?.toString().orEmpty(), entryId = item?.mediaId, repeatMode = c.repeatMode, shuffle = c.shuffleModeEnabled,
-            playbackError = c.playerError?.let { error -> generateSequence<Throwable>(error) { it.cause }.filterIsInstance<com.wildstring.app.playback.PlaybackResolutionException>().firstOrNull()?.message
-                ?: if (id?.let(::podcastEpisodeId) != null) "无法播放本期播客，请检查连接或音频格式后重试。"
-                else "无法播放这首歌，请检查连接或音频编码后重试。" }) }
+            playbackError = c.playerError?.let { error -> com.wildstring.app.playback.playbackErrorMessage(error, podcast = id?.let(::podcastEpisodeId) != null) }) }
         if (id != lyricTrack) {
             lyricTrack = id; lyricJob?.cancel()
             mutable.update { it.copy(lyrics = Lyrics(), lyricsLoading = id != null && track?.isPodcast != true, lyricsError = null) }

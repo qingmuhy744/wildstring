@@ -471,7 +471,11 @@ fun friendlyError(error: Throwable): String = (when (error) {
             error.response()?.errorBody()?.string()?.contains("current_password_incorrect") == true -> "当前密码不正确。"
             else -> "服务器拒绝此访问地址，请检查域名白名单或输入内容。"
         }
-        422 -> "输入不符合服务器要求，请检查后重试。"
+        422 -> when {
+            error.response()?.errorBody()?.string()?.contains("remote_url_fake_ip") == true ->
+                "服务端 DNS 处于 fake-ip 模式（198.18.0.0/15），请在网页联网设置中配置出站代理，或在服务端开启 WILDSTRING_PODCAST_ALLOW_FAKE_IP。"
+            else -> "输入不符合服务器要求，请检查后重试。"
+        }
         401 -> "登录已失效，请重新登录。"
         403 -> "服务器拒绝请求，请检查服务版本与权限。"
         404 -> "内容不存在或已经移除。"
