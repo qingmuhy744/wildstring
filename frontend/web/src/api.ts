@@ -68,6 +68,13 @@ export class ApiError extends Error {
   }
 }
 
+export class NetworkError extends TypeError {
+  constructor(message = '网络连接失败，请检查网络设置后重试。') {
+    super(message);
+    this.name = 'NetworkError';
+  }
+}
+
 const messages: Record<string, string> = {
   folder_name_invalid: '请输入有效的文件夹名称，不含路径分隔符、控制字符或开头的点。',
   folder_already_exists: '已有同名文件或文件夹，请换一个名称。',
@@ -270,12 +277,12 @@ export async function api<T>(path: string, options: ApiOptions = {}): Promise<T>
     });
   } catch (err: any) {
     if (timedOut) {
-      throw new Error('网络请求超时，请检查网络连接后重试。');
+      throw new NetworkError('网络请求超时，请检查网络连接后重试。');
     }
     if (userSignal?.aborted) {
       throw err;
     }
-    if (err instanceof DOMException && err.name === 'AbortError' && !timedOut) {
+    if (err instanceof DOMException && err.name === 'AbortError') {
       throw err;
     }
     if (
@@ -284,7 +291,7 @@ export async function api<T>(path: string, options: ApiOptions = {}): Promise<T>
       (typeof err?.message === 'string' &&
         (err.message.includes('fetch') || err.message.includes('NetworkError')))
     ) {
-      throw new Error('网络连接失败，请检查网络设置后重试。');
+      throw new NetworkError('网络连接失败，请检查网络设置后重试。');
     }
     throw err;
   } finally {
