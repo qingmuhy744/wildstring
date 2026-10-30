@@ -1000,26 +1000,7 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
               <Icon name="podcast" /> {refreshingAll ? '更新中…' : '全部更新'}
             </button>
           )}
-          {selectedPodcast?.followed && (
-            <button
-              type="button"
-              className="podcasts-action-btn"
-              onClick={() => setPersonalDownload(selectedPodcast)}
-            >
-              自动下载
-            </button>
-          )}
-          {selectedPodcast && canManageSources && (
-            <button
-              type="button"
-              className="podcasts-action-btn"
-              onClick={() => handleOpenSettings(selectedPodcast)}
-              title="管理此节目的服务器下载与存储"
-            >
-              ⚙️ 服务器下载设置
-            </button>
-          )}
-          {canAddPodcast && (
+          {!selectedPodcast && canAddPodcast && (
             <button
               type="button"
               className="podcasts-action-btn primary"
@@ -1059,37 +1040,56 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
               )}
             </div>
             <div className="podcast-meta-info">
-              <h3>{selectedPodcast.title}</h3>
-              <p className="podcast-meta-author">{selectedPodcast.author || '未知播客主'}</p>
-              <button
-                type="button"
-                className="podcast-refresh-btn"
-                disabled={followBusy === selectedPodcast.id}
-                onClick={() => void toggleFollow(selectedPodcast)}
-              >
-                {selectedPodcast.followed ? '取消关注' : '关注节目'}
-              </button>
-              <PublisherAffiliation
-                podcast={selectedPodcast}
-                canEdit={canEditPublishers}
-                onOpen={(publisher) => void openPublisher(publisher)}
-                onSaved={publisherSaved}
-              />
+              <div className="podcast-meta-top">
+                <div className="podcast-meta-heading">
+                  <h3>{selectedPodcast.title}</h3>
+                  <div className="podcast-meta-subline">
+                    <p className="podcast-meta-author">{selectedPodcast.author || '未知播客主'}</p>
+                    <PublisherAffiliation
+                      podcast={selectedPodcast}
+                      canEdit={canEditPublishers}
+                      onOpen={(publisher) => void openPublisher(publisher)}
+                      onSaved={publisherSaved}
+                    />
+                  </div>
+                </div>
+                <div className="podcast-meta-actions">
+                  {selectedPodcast.followed && (
+                    <button
+                      type="button"
+                      className="podcast-refresh-btn"
+                      onClick={() => setPersonalDownload(selectedPodcast)}
+                    >
+                      自动下载
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="podcast-refresh-btn"
+                    disabled={followBusy === selectedPodcast.id}
+                    onClick={() => void toggleFollow(selectedPodcast)}
+                  >
+                    {selectedPodcast.followed ? '取消关注' : '关注节目'}
+                  </button>
+                </div>
+              </div>
               <div className="podcast-meta-desc">
                 {renderPodcastDescription(selectedPodcast.description) || '暂无详细介绍'}
               </div>
               <div className="podcast-meta-footer">
-                <span>共 {selectedPodcast.total_episodes} 集</span>
-                {selectedPodcast.downloaded_episodes > 0 && (
-                  <span className="ep-download-badge">
-                    ✓ 已下载 {selectedPodcast.downloaded_episodes} 集
-                  </span>
-                )}
-                {selectedPodcast.unplayed_episodes > 0 && (
-                  <span className="unplayed-tag">{selectedPodcast.unplayed_episodes} 未听</span>
-                )}
+                <div className="podcast-meta-stats">
+                  <span>共 {selectedPodcast.total_episodes} 集</span>
+                  {selectedPodcast.downloaded_episodes > 0 && (
+                    <span className="ep-download-badge">
+                      ✓ 已下载 {selectedPodcast.downloaded_episodes} 集
+                    </span>
+                  )}
+                  {selectedPodcast.unplayed_episodes > 0 && (
+                    <span className="unplayed-tag">{selectedPodcast.unplayed_episodes} 未听</span>
+                  )}
+                </div>
                 {canManageSources && (
-                  <>
+                  <div className="podcast-meta-footer-actions">
                     <button
                       type="button"
                       className="podcast-refresh-btn"
@@ -1105,7 +1105,7 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
                     >
                       存储与下载设置…
                     </button>
-                  </>
+                  </div>
                 )}
               </div>
             </div>

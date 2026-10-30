@@ -740,3 +740,33 @@ def test_schema37_policy_migration_preserves_existing_library_grants(catalog, se
             == 0
         )
     other.close()
+
+
+def test_duplicate_favorites_playlists_across_libraries_are_deduplicated(catalog, settings):
+    client, first, second, tracks, _ = catalog
+    with Database(settings.data_dir).connect(write=True) as db:
+        owner_id = db.execute("SELECT id FROM users LIMIT 1").fetchone()[0]
+        db.execute(
+            "INSERT OR IGNORE INTO playlists(id,library_id,user_id,name,kind,version,created_at,updated_at) VALUES (?,?,?,'我喜欢','favorites',1,'2026-01-01T00:00:00Z','2026-01-01T00:00:00Z')",
+            (f"fav-{first['id']}", first["id"], owner_id),
+        )
+        db.execute(
+            "INSERT OR IGNORE INTO playlists(id,library_id,user_id,name,kind,version,created_at,updated_at) VALUES (?,?,?,'我喜欢','favorites',1,'2026-01-02T00:00:00Z','2026-01-02T00:00:00Z')",
+            (f"fav-{second['id']}", second["id"], owner_id),
+        )
+        for track in tracks:
+            db.execute(
+                "INSERT OR REPLACE INTO user_track_state(user_id,track_id,loved,loved_at) VALUES (?,?,1,'2026-01-01T00:00:00Z')",
+                (owner_id, track["id"]),
+            )
+        assert (
+            db.execute(
+                "SELECT count(*) FROM playlists WHERE user_id=? AND kind='favorites'", (owner_id,)
+            ).fetchone()[0]
+            == 2
+        )
+
+    items = client.get("/api/v1/playlists").json()["items"]
+    favorites = [item for item in items if item["kind"] == "favorites"]
+    assert len(favorites) == 1
+    assert favorites[0]["track_count"] == 2

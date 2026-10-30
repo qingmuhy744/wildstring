@@ -14,6 +14,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -22,21 +23,44 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import retrofit2.HttpException
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun PublisherAffiliation(vm: MusicViewModel, podcast: PodcastSummary, canEdit: Boolean,
     onOpen: (PodcastPublisher) -> Unit, onSaved: (PodcastDetail) -> Unit) {
     var editing by remember(podcast.id) { mutableStateOf(false) }
-    Column {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("出品方：", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            val publisher = podcast.publisher
-            if (publisher == null) Text("未确认", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            else TextButton({ onOpen(publisher) }, contentPadding = PaddingValues(horizontal = 4.dp)) {
-                Text(publisher.name, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            }
+    FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement = Arrangement.Center,
+        itemVerticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text("出品方：", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        val publisher = podcast.publisher
+        if (publisher == null) {
+            Text("未确认", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        } else {
+            Text(
+                text = publisher.name,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.primary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(6.dp))
+                    .clickable { onOpen(publisher) }
+                    .padding(horizontal = 4.dp, vertical = 2.dp),
+            )
         }
-        if (canEdit) TextButton({ editing = true }, contentPadding = PaddingValues(0.dp)) {
-            Text(if (podcast.publisher == null) "确认出品方" else "修改出品方归属")
+        if (canEdit) {
+            Text("·", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
+            Text(
+                text = if (podcast.publisher == null) "确认出品方" else "修改出品方归属",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(6.dp))
+                    .clickable { editing = true }
+                    .padding(horizontal = 4.dp, vertical = 2.dp),
+            )
         }
     }
     if (editing) PublisherAssignmentDialog(vm, podcast, { editing = false }) { detail -> onSaved(detail); editing = false }
