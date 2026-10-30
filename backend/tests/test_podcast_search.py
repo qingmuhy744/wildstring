@@ -492,3 +492,114 @@ def test_schema_43_adds_identity_columns(settings):
         assert db.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
         indexes = {row[1] for row in db.execute("PRAGMA index_list(podcasts)")}
         assert "podcasts_by_itunes_id" in indexes
+
+
+def test_owner_settings_choose_regions_and_hide_explicit_shows(
+    settings, authenticated_client, itunes, monkeypatch
+):
+    def explicit_first(url, proxy_mode, proxy_url):
+        body = itunes(url, proxy_mode, proxy_url)
+        for item in body.get("results", [])[:1]:
+            item["collectionExplicitness"] = "explicit"
+        return body
+
+    monkeypatch.setattr(podcast_search, "fetch_itunes_json", explicit_first)
+    with authenticated_client(settings) as client:
+        current = client.get("/api/v1/podcasts/search-settings").json()
+        assert current["regions"] == ["us", "tw", "cn"]
+        assert current["custom_regions"] is False and current["filter_explicit"] is False
+        assert current["can_manage"] is True and "jp" in current["supported_regions"]
+
+        badge_only = search(client, "声东击西").json()
+        assert badge_only["explicit_hidden"] == 0
+        assert any(item["explicit"] for item in badge_only["results"])
+
+        url = "/api/v1/podcasts/search-settings"
+        bad = client.put(
+            url,
+            headers=HEADERS,
+            json={"version": current["version"], "regions": ["xx"], "filter_explicit": False},
+        )
+        assert bad.status_code == 422 and bad.json()["detail"] == "podcast_search_region_invalid"
+        too_many = client.put(
+            url,
+            headers=HEADERS,
+            json={
+                "version": current["version"],
+                "regions": ["us", "tw", "cn", "hk", "jp", "sg"],
+                "filter_explicit": False,
+            },
+        )
+        assert too_many.status_code == 422
+        updated = client.put(
+            url,
+            headers=HEADERS,
+            json={
+                "version": current["version"],
+                "regions": ["TW", "us", "tw"],
+                "filter_explicit": True,
+            },
+        )
+        assert updated.status_code == 200, updated.text
+        body = updated.json()
+        assert body["regions"] == ["tw", "us"] and body["custom_regions"] is True
+        assert body["filter_explicit"] is True and body["version"] == current["version"] + 1
+        stale = client.put(
+            url,
+            headers=HEADERS,
+            json={"version": current["version"], "regions": None, "filter_explicit": False},
+        )
+        assert stale.status_code == 409
+        assert stale.json()["detail"] == "podcast_search_settings_conflict"
+
+        itunes.calls.clear()
+        filtered = search(client, "王局拍案").json()
+        assert filtered["regions"] == ["tw", "us"]
+        assert sorted(call[1]["country"] for call in itunes.calls) == ["tw", "us"]
+        assert filtered["explicit_hidden"] >= 1
+        assert not any(item["explicit"] for item in filtered["results"])
+
+        reset = client.put(
+            url,
+            headers=HEADERS,
+            json={"version": body["version"], "regions": [], "filter_explicit": False},
+        ).json()
+        assert reset["regions"] == ["us", "tw", "cn"] and reset["custom_regions"] is False
+
+        created = client.post(
+            "/api/v1/manage/users",
+            headers=HEADERS,
+            json={"username": "regions", "password": "listener-password-1", "library_ids": []},
+        )
+        assert created.status_code == 201
+        listener = TestClient(client.app)
+        try:
+            listener.post(
+                "/api/v1/auth/login",
+                headers=HEADERS,
+                json={"username": "regions", "password": "listener-password-1"},
+            )
+            assert listener.get(url).json()["can_manage"] is False
+            denied = listener.put(
+                url,
+                headers=HEADERS,
+                json={"version": reset["version"], "regions": ["us"], "filter_explicit": True},
+            )
+            assert denied.status_code == 403
+        finally:
+            listener.close()
+
+
+def test_schema_44_seeds_default_search_settings(settings):
+    database = Database(settings.data_dir)
+    database.initialize()
+    with sqlite3.connect(database.path) as db:
+        db.execute("DROP TABLE podcast_search_settings")
+        db.execute("PRAGMA user_version=43")
+    database.initialize()
+    with sqlite3.connect(database.path) as db:
+        assert db.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION == 44
+        row = db.execute(
+            "SELECT regions, filter_explicit, version FROM podcast_search_settings"
+        ).fetchall()
+    assert row == [(None, 0, 1)]

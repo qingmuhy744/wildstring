@@ -15,6 +15,7 @@ import { MetadataReviewDialog } from './metadata-review';
 import { FolderMetadataEditor } from './folder-metadata';
 import { LibrarySources } from './library-sources';
 import { MusicLibraryManager, LibrarySwitcher } from './music-libraries';
+import { PodcastSearchSettings } from './podcast-search-settings';
 import { PodcastCatalogSettings } from './podcast-catalog-settings';
 
 type Directory = {
@@ -340,6 +341,7 @@ export function Management({
               <>
                 <MusicLibraryManager />
                 <PodcastCatalogSettings />
+                <PodcastSearchSettings />
               </>
             )}
             {tab === 'intake' && (

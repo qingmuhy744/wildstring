@@ -25,6 +25,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from wildstring import podcasts as podcast_module
+from wildstring.library.repository import now
 from wildstring.outbound import OutboundError, outbound_proxies, request_bytes
 from wildstring.podcast_access import catalog_manager, personal_ids
 from wildstring.podcast_follows import followed_ids
@@ -275,6 +276,14 @@ def merge_regions(per_region: list[tuple[str, list[dict[str, Any]]]]) -> list[di
     return merged
 
 
+class SearchSettingsUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    version: int = Field(ge=1, strict=True)
+    # Empty or null means "use the server default" (WILDSTRING_PODCAST_SEARCH_REGIONS).
+    regions: list[str] | None = Field(default=None, max_length=60)
+    filter_explicit: bool = Field(strict=True)
+
+
 class PodcastPreviewRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
     feed_url: str = Field(min_length=5, max_length=1024)
@@ -311,7 +320,39 @@ class PodcastSearch:
 
     # Settings ---------------------------------------------------------------------------
     def settings(self) -> dict[str, Any]:
-        return {"regions": list(self.default_regions), "filter_explicit": False}
+        """Effective settings: the owner's choice, else the server default regions."""
+        with self.database.connect() as db:
+            row = db.execute("SELECT * FROM podcast_search_settings WHERE id=1").fetchone()
+        regions = self.default_regions
+        custom = False
+        if row is not None and row["regions"]:
+            try:
+                regions = parse_regions(row["regions"])
+                custom = True
+            except ValueError:
+                logger.warning("Ignoring invalid stored podcast search regions")
+        return {
+            "version": row["version"] if row is not None else 1,
+            "regions": list(regions),
+            "custom_regions": custom,
+            "default_regions": list(self.default_regions),
+            "filter_explicit": bool(row["filter_explicit"]) if row is not None else False,
+        }
+
+    def update_settings(self, body: SearchSettingsUpdate) -> dict[str, Any]:
+        try:
+            regions = ",".join(parse_regions(body.regions)) if body.regions else None
+        except ValueError:
+            raise HTTPException(422, "podcast_search_region_invalid") from None
+        with self.database.connect(write=True) as db:
+            changed = db.execute(
+                "UPDATE podcast_search_settings SET regions=?, filter_explicit=?, "
+                "version=version+1, updated_at=? WHERE id=1 AND version=?",
+                (regions, int(body.filter_explicit), now(), body.version),
+            ).rowcount
+        if not changed:
+            raise HTTPException(409, "podcast_search_settings_conflict")
+        return self.settings()
 
     # Cache ------------------------------------------------------------------------------
     def _cached(self, key):
@@ -560,6 +601,22 @@ class PodcastSearch:
         }
 
     def routes(self, router: APIRouter, auth) -> None:
+        @router.get("/search-settings")
+        def read_settings(user: Annotated[dict, Depends(auth.require_session)]):
+            return {
+                **self.settings(),
+                "supported_regions": sorted(SUPPORTED_REGIONS),
+                "max_regions": MAX_REGIONS,
+                "can_manage": user["profile"] == "owner",
+            }
+
+        @router.put("/search-settings", dependencies=[Depends(auth.require_client)])
+        def update_settings(
+            body: SearchSettingsUpdate, user: Annotated[dict, Depends(auth.require_owner)]
+        ):
+            self.update_settings(body)
+            return read_settings(user)
+
         @router.get("/search")
         def search_directory(
             user: Annotated[dict, Depends(auth.require_session)],

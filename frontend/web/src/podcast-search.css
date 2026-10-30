@@ -348,3 +348,34 @@ a.podcasts-action-btn {
   align-items: center;
   text-decoration: none;
 }
+
+.podcast-search-settings-regions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin: 0.5rem 0;
+  padding-left: 1.4rem;
+}
+
+.podcast-search-settings-regions li > span {
+  display: inline-block;
+  min-width: 8rem;
+}
+
+.podcast-search-settings-regions button {
+  margin-left: 0.35rem;
+}
+
+.podcast-search-settings-add,
+.podcast-search-settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 0.5rem;
+}
+
+.podcast-search-settings-add label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}

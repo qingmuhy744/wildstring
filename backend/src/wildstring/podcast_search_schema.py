@@ -20,3 +20,19 @@ def migrate(connection):
     )
     connection.execute("PRAGMA user_version=43")
     connection.commit()
+
+
+def migrate_settings(connection):
+    """Schema 44: owner-editable search regions and explicit-content filter."""
+    connection.execute("BEGIN IMMEDIATE")
+    connection.execute(
+        "CREATE TABLE IF NOT EXISTS podcast_search_settings ("
+        "id INTEGER PRIMARY KEY CHECK (id = 1),"
+        "regions TEXT,"  # NULL = follow WILDSTRING_PODCAST_SEARCH_REGIONS
+        "filter_explicit INTEGER NOT NULL DEFAULT 0 CHECK (filter_explicit IN (0, 1)),"
+        "version INTEGER NOT NULL DEFAULT 1,"
+        "updated_at TEXT)"
+    )
+    connection.execute("INSERT OR IGNORE INTO podcast_search_settings(id) VALUES (1)")
+    connection.execute("PRAGMA user_version=44")
+    connection.commit()

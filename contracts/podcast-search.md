@@ -99,6 +99,22 @@
 - 上游返回 403 / 429 时进入 60 秒冷却，冷却期间不再请求 Apple。
 - 请求超时 10 秒，响应上限 1 MB。
 
+## 搜索设置（schema 44）
+
+### `GET /api/v1/podcasts/search-settings`
+
+任意登录账号可读：`{"version", "regions", "custom_regions", "default_regions", "filter_explicit", "supported_regions", "max_regions", "can_manage"}`。`regions` 为生效的区域（顺序即结果排序优先级）；`custom_regions=false` 表示沿用服务器默认 `WILDSTRING_PODCAST_SEARCH_REGIONS`（未设置时为 `us,tw,cn`）。
+
+### `PUT /api/v1/podcasts/search-settings`
+
+仅所有者。请求体 `{"version", "regions": [...] | null, "filter_explicit": bool}`；`regions` 为空或 `null` 即恢复服务器默认。区域代码不区分大小写、自动去重，必须是受支持的 Apple 店面代码且最多 5 个，否则 `422 podcast_search_region_invalid`；版本过期返回 `409 podcast_search_settings_conflict`。
+
+- `filter_explicit=false`（默认）：成人内容只显示「成人」标记。`true`：从搜索结果中移除，响应 `explicit_hidden` 给出隐藏数量；不影响已添加的节目和 RSS 地址预览。
+- 修改立即生效；各区域的缓存仍按区域分别保存 10 分钟。
+- 网页：管理 → 设置 →「播客目录搜索」，可添加、移除、调整区域顺序，勾选隐藏成人内容，或「恢复默认区域」。
+
+表 `podcast_search_settings`：单行（`id=1`），`regions TEXT`（逗号分隔，`NULL`=默认）、`filter_explicit INTEGER`、`version INTEGER`、`updated_at TEXT`。
+
 ## 数据库（schema 43）
 
 `podcasts` 增加 `itunes_id`、`feed_url_normalized`、`resolved_feed_url_normalized`（均为 TEXT，可空）及索引 `podcasts_by_itunes_id`（部分索引）、`podcasts_by_normalized_feed`、`podcasts_by_resolved_feed`。新增节目写入这三列。
