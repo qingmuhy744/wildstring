@@ -219,6 +219,11 @@ const messages: Record<string, string> = {
   podcast_feed_too_large: '播客 RSS 源文件过大。',
   invalid_podcast_audio_url: '播客音频地址无效或不可访问。',
   podcast_audio_too_large: '播客音频文件过大。',
+  podcast_audio_upstream_failed:
+    '播客源站暂时无法连接，请稍后重试；若持续失败请检查服务端网络或出站代理。',
+  podcast_audio_range_not_satisfiable: '播客音频的播放位置超出了文件范围，请从头播放。',
+  remote_url_fake_ip:
+    '服务端 DNS 处于 fake-ip 模式（198.18.0.0/15）。请在联网设置中配置出站代理，或在服务端设置 WILDSTRING_PODCAST_ALLOW_FAKE_IP=true 后重启。',
   invalid_podcast_network_policy: '播客网络策略设置无效。',
   podcast_playback_settings_conflict: '播客播放设置已被修改，请刷新后重试。',
   track_not_found: '曲目不存在或已被移除。',
