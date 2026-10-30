@@ -90,6 +90,7 @@ final class ConnectionModel {
             do {
                 let status = try await client.authStatus()
                 if status.authenticated, let user = status.user {
+                    InterfaceLanguage.store(user.language)
                     await activate(
                         client: client,
                         address: address,
@@ -119,6 +120,7 @@ final class ConnectionModel {
             let address = try makeAddress(serverText, allowInsecureHTTP: allowInsecureHTTP)
             let client = WildstringClient(server: address, store: store)
             let user = try await client.login(username: username, password: password)
+            InterfaceLanguage.store(user.language)
             serverText = address.description
             password = ""
             await activate(
@@ -162,6 +164,8 @@ final class ConnectionModel {
         username = ""
         password = ""
         errorMessage = nil
+        // Signed out: follow the system language until the next account loads.
+        InterfaceLanguage.store(nil)
         phase = servers.isEmpty ? .connect : .servers
     }
 
@@ -188,6 +192,7 @@ final class ConnectionModel {
             do {
                 let status = try await client.authStatus()
                 if status.authenticated, let user = status.user {
+                    InterfaceLanguage.store(user.language)
                     await activate(
                         client: client,
                         address: address,

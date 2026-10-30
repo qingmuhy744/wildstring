@@ -55,6 +55,27 @@ struct StubbedHTTPTests {
             #expect(hasSession)
         }
 
+        @Test func updateLanguagePutsPreferenceAndDecodesUser() async throws {
+            let store = InMemorySessionStore()
+            StubURLProtocol.respond { request in
+                #expect(request.httpMethod == "PUT")
+                #expect(request.url?.path == "/api/v1/auth/preferences")
+                let body = try #require(StubURLProtocol.bodyData(of: request))
+                let json = try #require(
+                    try JSONSerialization.jsonObject(with: body) as? [String: String]
+                )
+                #expect(json["language"] == "en")
+                return .json(
+                    status: 200,
+                    body:
+                        #"{"id":"u1","username":"amy","profile":"listener","version":2,"enabled":true,"language":"en"}"#
+                )
+            }
+            let client = try makeClient(store: store)
+            let user = try await client.updateLanguage("en")
+            #expect(user.language == "en")
+        }
+
         @Test func loginFailureSurfacesStableServerCode() async throws {
             let store = InMemorySessionStore()
             StubURLProtocol.respond { _ in

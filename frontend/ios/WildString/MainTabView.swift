@@ -20,13 +20,13 @@ struct MainTabView: View {
     var body: some View {
         TabView(selection: $selection) {
             BrowseView(client: client, playback: playback, autoPlayFirst: autoPlayFirst)
-                .tabItem { Label("曲库", systemImage: "music.note.list") }
+                .tabItem { Label("tab.library", systemImage: "music.note.list") }
                 .tag(0)
             DailyRecommendationsView(client: client, playback: playback)
-                .tabItem { Label("推荐", systemImage: "sparkles") }
+                .tabItem { Label("tab.recommended", systemImage: "sparkles") }
                 .tag(1)
             SearchView(client: client, playback: playback)
-                .tabItem { Label("搜索", systemImage: "magnifyingglass") }
+                .tabItem { Label("tab.search", systemImage: "magnifyingglass") }
                 .tag(2)
             AccountView(
                 client: client,
@@ -35,7 +35,7 @@ struct MainTabView: View {
                 username: username,
                 onLogout: onLogout
             )
-            .tabItem { Label("我的", systemImage: "person.crop.circle") }
+            .tabItem { Label("tab.mine", systemImage: "person.crop.circle") }
             .tag(3)
         }
         .environment(favorites)
@@ -64,7 +64,7 @@ struct MainTabView: View {
             Image(systemName: "arrow.triangle.2.circlepath.circle.fill")
                 .foregroundStyle(Color.wildAccent)
             VStack(alignment: .leading, spacing: 1) {
-                Text("其他设备有可接续的进度")
+                Text("handoff.available")
                     .font(.footnote.bold())
                 if handoff.tracks.indices.contains(handoff.state.index) {
                     Text(handoff.tracks[handoff.state.index].title)
@@ -74,10 +74,10 @@ struct MainTabView: View {
                 }
             }
             Spacer()
-            Button("忽略") { sharing.dismiss() }
+            Button("handoff.dismiss") { sharing.dismiss() }
                 .font(.footnote)
                 .buttonStyle(.plain)
-            Button("继续") {
+            Button("handoff.continue") {
                 Task { await sharing.accept(handoff) }
             }
             .font(.footnote.bold())
