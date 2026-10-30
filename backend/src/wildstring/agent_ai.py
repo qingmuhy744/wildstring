@@ -853,6 +853,7 @@ class Assistant:
             "retention_days": pref.get("retention_days", 30),
             "context_summary": pref.get("context_summary", True),
             "long_term_memory": pref.get("long_term_memory", True),
+            "chat_max_calls": pref.get("chat_max_calls", 4),
         }
 
     def save_assistant_preferences(self, actor, body):
@@ -1002,6 +1003,10 @@ class Assistant:
         return {"ok": True}
 
     def send_message(self, actor, identity, body):
+        if "max_calls" not in body.model_fields_set:
+            body = body.model_copy(
+                update={"max_calls": self.assistant_preferences(actor)["chat_max_calls"]}
+            )
         conversation = self.conversation(actor, identity)
         initial_title = conversation["title"]
         should_summarize_title = not conversation["messages"] and initial_title in {

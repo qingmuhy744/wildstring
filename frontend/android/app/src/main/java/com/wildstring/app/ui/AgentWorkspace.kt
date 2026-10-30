@@ -448,7 +448,7 @@ internal fun summarizeConversationTitle(userText: String): String {
                 var current = conversation ?: vm.agent.request("conversations", "POST", jsonBody("title" to summarizeConversationTitle(content), "connection_id" to connection)).also { conversation = it }
                 val id = current.text("id")
                 try {
-                    current = vm.agent.request("conversations/$id/messages", "POST", jsonBody("content" to content, "connection_id" to connection, "max_calls" to 4))
+                    current = vm.agent.request("conversations/$id/messages", "POST", jsonBody("content" to content, "connection_id" to connection))
                     conversation = current
                     input = ""
                     action.message = null

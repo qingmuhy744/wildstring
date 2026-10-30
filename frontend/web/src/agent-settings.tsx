@@ -705,14 +705,20 @@ export function ToolCredentials({ user }: { user: User }) {
   );
 }
 export function AssistantPreferences() {
-  const prefs = useWorkspaceResource<{ retention_days: number }>('/agent/assistant-preferences');
+  const prefs = useWorkspaceResource<{ retention_days: number; chat_max_calls?: number }>(
+    '/agent/assistant-preferences',
+  );
   const edited = useRef(false);
   const [days, setDays] = useState(30),
+    [chatMaxCalls, setChatMaxCalls] = useState(4),
     [busy, setBusy] = useState(false),
     [error, setError] = useState(''),
     [notice, setNotice] = useState('');
   useEffect(() => {
-    if (prefs.value && !edited.current) setDays(prefs.value.retention_days);
+    if (prefs.value && !edited.current) {
+      setDays(prefs.value.retention_days);
+      setChatMaxCalls(prefs.value.chat_max_calls ?? 4);
+    }
   }, [prefs.value]);
   async function act(clear = false) {
     if (clear && !confirm('清除所有助手对话？草案和已保存的歌单会保留。')) return;
@@ -721,7 +727,9 @@ export function AssistantPreferences() {
     try {
       await api(clear ? '/agent/conversations' : '/agent/assistant-preferences', {
         method: clear ? 'DELETE' : 'PUT',
-        ...(clear ? {} : { body: JSON.stringify({ retention_days: days }) }),
+        ...(clear
+          ? {}
+          : { body: JSON.stringify({ retention_days: days, chat_max_calls: chatMaxCalls }) }),
       });
       if (!clear) {
         edited.current = false;
@@ -736,8 +744,11 @@ export function AssistantPreferences() {
   }
   return prefs.unsupported ? null : (
     <section className="workspace-card" aria-label="助手历史设置">
-      <h2>助手对话历史</h2>
-      <p className="muted">按对话最后更新时间清理聊天记录，已有草案、歌单和音乐保留。</p>
+      <h2>助手对话历史与调用轮数</h2>
+      <p className="muted">
+        按对话最后更新时间清理聊天记录，已有草案、歌单和音乐保留；单次对话最大调用轮数控制每次提问可连续执行的模型与工具步数上限（1–20
+        轮，默认 4 轮）。
+      </p>
       <WorkspaceNotice error={error || prefs.error} notice={notice} />
       <div className="workspace-inline">
         <label>
@@ -755,8 +766,25 @@ export function AssistantPreferences() {
             }}
           />
         </label>
+        <label>
+          <span>单次对话最大调用轮数</span>
+          <input
+            aria-label="单次对话最大调用轮数"
+            type="number"
+            min={1}
+            max={20}
+            value={chatMaxCalls}
+            disabled={busy}
+            onChange={(e) => {
+              edited.current = true;
+              setChatMaxCalls(Number(e.target.value));
+            }}
+          />
+        </label>
         <button
-          disabled={busy || !prefs.value || days < 1 || days > 365}
+          disabled={
+            busy || !prefs.value || days < 1 || days > 365 || chatMaxCalls < 1 || chatMaxCalls > 20
+          }
           onClick={() => void act()}
         >
           保存保留时间
