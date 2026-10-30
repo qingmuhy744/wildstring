@@ -236,6 +236,11 @@ const messages: Record<string, string> = {
   podcast_feed_fetch_failed: '无法获取这个 RSS 源，请检查地址或稍后重试。',
   podcast_feed_parse_failed: '这个地址返回的内容无法解析为播客 RSS。',
   podcast_feed_invalid: '这个地址不是有效的播客 RSS 源。',
+  podcast_opml_too_large: 'OPML 文件过大（最多 1 MB）。',
+  podcast_opml_too_many: 'OPML 文件中的节目太多（最多 1000 个）。',
+  podcast_opml_invalid: '无法读取这个 OPML 文件，请确认它是播客应用导出的 OPML。',
+  podcast_opml_empty: '这个 OPML 文件里没有找到任何 RSS 节目。',
+  podcast_opml_feed_failed: '这个节目导入失败，请稍后单独添加。',
 };
 
 const isCodeLike = (str: string) => /^[a-z0-9_-]+$/i.test(str);

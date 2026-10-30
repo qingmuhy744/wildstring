@@ -291,3 +291,60 @@
     display: inline-block;
   }
 }
+
+.podcast-opml-file {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-bottom: 0.75rem;
+  font-size: 0.9rem;
+}
+
+.podcast-opml-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-height: 0;
+  overflow: auto;
+}
+
+.podcast-opml-summary {
+  font-size: 0.85rem;
+  color: var(--muted, #9ca3af);
+}
+
+.podcast-opml-bulk {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.podcast-opml-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.5rem 0.25rem;
+  cursor: pointer;
+}
+
+.podcast-opml-row .podcast-search-card-meta,
+.podcast-opml-result .podcast-search-card-meta {
+  overflow-wrap: anywhere;
+}
+
+.podcast-opml-result {
+  padding: 0.45rem 0.25rem;
+}
+
+.podcast-opml-result.failed .podcast-search-card-meta {
+  color: var(--danger, #f87171);
+}
+
+.podcast-opml-preview progress {
+  width: 100%;
+}
+
+a.podcasts-action-btn {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+}

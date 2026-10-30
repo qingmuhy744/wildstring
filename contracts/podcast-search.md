@@ -64,6 +64,29 @@
 - 客户端提交的 `itunes_id` 只有在与搜索缓存或一次 iTunes lookup 中该 ID 的 `feedUrl` 规范化后与原始地址或重定向地址一致时才写入，防止伪造 ID 污染目录。
 - 行为变化：RSS 抓取失败由原来的 `400`（中文文本）改为 `502 podcast_feed_fetch_failed`，解析失败为 `422`。
 
+## OPML 导入与导出
+
+导入分两步，解析不产生任何副作用：
+
+### `POST /api/v1/podcasts/opml/parse`
+
+- 需要登录会话与客户端头；请求体 `{"content": "<OPML 文本>"}`，最多 1 MB（超出为 `413 podcast_opml_too_large`）。
+- 含 `DOCTYPE`/`ENTITY` 声明、不是 XML 或根元素不是 `opml` 时返回 `422 podcast_opml_invalid`；没有任何 RSS 节目时返回 `422 podcast_opml_empty`；超过 1000 个节目返回 `413 podcast_opml_too_many`。
+- 读取任意层级 `outline` 的 `xmlUrl`（属性名不区分大小写；`type="rss"` 时也接受 `url`），按规范化 RSS 地址去重，非 http(s) 地址计入 `invalid`。
+- 响应：`{"feeds": [{"title", "feed_url", "html_url", "in_catalog", "catalog_podcast_id", "followed"}], "invalid": n, "duplicates": n}`；`in_catalog`/`followed` 与搜索结果一样只反映当前账号可见的节目。
+
+### `POST /api/v1/podcasts/opml/import`
+
+- 与 `POST /api/v1/podcasts` 相同的添加权限（`podcast_subscriptions_disabled` 等）；请求体 `{"feeds": [{"feed_url"}]}`，每批 1–10 个，网页端自动分批并显示进度。
+- 每个地址都走与添加对话框完全相同的路径（网络策略、SSRF 校验、按 iTunes ID/规范化地址/重定向去重、关注、自动下载协调）。单个节目失败不影响同批其余节目。
+- 响应：`{"results": [{"feed_url", "status", "podcast_id"?, "title"?, "code"?}]}`，`status` 为 `added`（新入库并关注）、`followed`（本服已有，新关注）、`already_followed`（原本已关注）或 `failed`（附错误码）。
+
+### `GET /api/v1/podcasts/opml/export`
+
+- 任意登录账号都可导出自己关注的节目：OPML 2.0，`outline type="rss" text title xmlUrl`，按标题排序；`Content-Type: text/x-opml`，`Content-Disposition: attachment; filename="wildstring-podcasts.opml"`，不缓存。
+
+网页：节目页顶部「导入 OPML」（仅能添加节目的账号可见）与「导出 OPML」（所有账号）。导入对话框选择文件后列出节目，已关注的不可选，默认勾选其余节目，可「全选未关注」/「全不选」；导入后逐条显示「已添加并关注 / 已关注 / 原本已关注 / 失败：原因」。
+
 ## 规范化 RSS 地址
 
 `normalize_feed_url`：去掉协议，主机名小写，去掉默认端口 80/443，合并重复斜杠，去掉末尾斜杠，保留查询串，去掉片段；非 http(s) 或非法地址返回空串。例如 `HTTPS://Feeds.Fireside.fm//shengdongjixi/rss/` → `feeds.fireside.fm/shengdongjixi/rss`。
@@ -91,5 +114,5 @@
 
 ## 验证
 
-- 后端：`backend/tests/test_podcast_search.py`，使用录制的 us / tw / cn iTunes 响应（`backend/tests/fixtures/itunes/`），不访问网络。
-- 网页：`frontend/web/tests/podcast-search.spec.ts`（模拟 API，桌面与移动端），随 `make test-podcast-web` 运行。
+- 后端：`backend/tests/test_podcast_search.py`，使用录制的 us / tw / cn iTunes 响应（`backend/tests/fixtures/itunes/`），不访问网络；`backend/tests/test_podcast_opml.py` 覆盖 OPML 解析、导入与导出。
+- 网页：`frontend/web/tests/podcast-search.spec.ts` 与 `podcast-opml.spec.ts`（模拟 API，桌面与移动端），随 `make test-podcast-web` 运行。

@@ -2113,6 +2113,7 @@ class PodcastManager:
 def podcast_router(
     manager: PodcastManager, auth: Auth, *, search_regions: str = "us,tw,cn"
 ) -> APIRouter:
+    from wildstring import podcast_opml
     from wildstring.podcast_search import PodcastSearch
 
     router = APIRouter(prefix="/api/v1/podcasts", tags=["podcasts"])
@@ -2121,6 +2122,14 @@ def podcast_router(
     catalog_policy.routes(router, auth)
     search = PodcastSearch(manager, regions=search_regions)
     search.routes(router, auth)
+    podcast_opml.routes(
+        router,
+        auth,
+        database=manager.database,
+        annotate=search.annotate,
+        add_and_follow=lambda user, url: add_and_follow(user, PodcastCreateRequest(feed_url=url)),
+        require_add=lambda user: catalog_policy.require_add(user, {"feed_url"}),
+    )
 
     @router.get("/publishers", response_model=list[PublisherSummary])
     def list_publishers(user: Annotated[dict, Depends(auth.require_session)]):
@@ -2181,15 +2190,8 @@ def podcast_router(
         manager.auto_downloads.reconcile(user["id"], podcast_id)
         return result
 
-    @router.post(
-        "",
-        response_model=PodcastDetailResponse,
-        dependencies=[Depends(auth.require_client)],
-    )
-    def subscribe_podcast(
-        payload: PodcastCreateRequest,
-        user: Annotated[dict, Depends(auth.require_session)],
-    ):
+    def add_and_follow(user: dict, payload: PodcastCreateRequest) -> dict:
+        """Shared by the add dialog and OPML import: policy, dedupe, follow, auto-download."""
         catalog_policy.require_add(user, payload.model_fields_set)
         result = manager.subscribe(
             feed_url=payload.feed_url,
@@ -2219,6 +2221,17 @@ def podcast_router(
         else:
             manager.auto_downloads.reconcile(user["id"], podcast_id)
         return manager.get_podcast_detail(result["podcast"]["id"], user["id"])
+
+    @router.post(
+        "",
+        response_model=PodcastDetailResponse,
+        dependencies=[Depends(auth.require_client)],
+    )
+    def subscribe_podcast(
+        payload: PodcastCreateRequest,
+        user: Annotated[dict, Depends(auth.require_session)],
+    ):
+        return add_and_follow(user, payload)
 
     @router.put(
         "/{podcast_id}/settings",

@@ -1,5 +1,6 @@
 import { PodcastDownloadDialog } from './podcast-download-settings';
 import { useCanAddPodcast } from './podcast-catalog-settings';
+import { OPML_EXPORT_URL, PodcastOpmlImportDialog } from './podcast-opml';
 import { PodcastSearchDialog } from './podcast-search';
 import { PodcastResourceManager } from './podcast-resources';
 import { DialogCloseButton } from './dialog-close';
@@ -205,6 +206,7 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
   const [selectedEpisode, setSelectedEpisode] = useState<PodcastEpisode | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [showSubscribeModal, setShowSubscribeModal] = useState(false);
+  const [showOpmlImport, setShowOpmlImport] = useState(false);
   const canAddPodcast = useCanAddPodcast(userId, canManageSources);
   const [modalFeedUrl, setModalFeedUrl] = useState('');
   const [refreshingAll, setRefreshingAll] = useState(false);
@@ -995,6 +997,26 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
             >
               <Icon name="podcast" /> {refreshingAll ? '更新中…' : '全部更新'}
             </button>
+          )}
+          {!selectedPodcast && canAddPodcast && (
+            <button
+              type="button"
+              className="podcasts-action-btn"
+              onClick={() => setShowOpmlImport(true)}
+              title="从其他播客应用导出的 OPML 文件批量关注节目"
+            >
+              导入 OPML
+            </button>
+          )}
+          {!selectedPodcast && (
+            <a
+              className="podcasts-action-btn"
+              href={OPML_EXPORT_URL}
+              download="wildstring-podcasts.opml"
+              title="把我关注的节目导出为 OPML 文件"
+            >
+              导出 OPML
+            </a>
           )}
           {!selectedPodcast && (
             <button
@@ -1921,6 +1943,13 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
           onClose={closeSubscribe}
           onSubscribed={handleSubscribed}
           onOpen={openFromSearch}
+        />
+      )}
+
+      {showOpmlImport && (
+        <PodcastOpmlImportDialog
+          onClose={() => setShowOpmlImport(false)}
+          onImported={() => void loadPodcasts()}
         />
       )}
 
