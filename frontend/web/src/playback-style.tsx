@@ -7,6 +7,7 @@ import {
 import { useEffect, useRef, useState, type CSSProperties, type MutableRefObject } from 'react';
 import { artist, time, type Track } from './api';
 import { Cover } from './cover';
+import { useTranslation } from 'react-i18next';
 import './playback-style.css';
 
 export type PlaybackStyle = 'cover' | 'vinyl' | 'cassette';
@@ -55,12 +56,13 @@ export function usePlaybackStyle() {
 }
 
 export function PlaybackStyleControl() {
+  const { t } = useTranslation();
   const style = usePlaybackStyle();
   return (
     <label className="theme-control playback-style-control">
-      <span>播放样式</span>
+      <span>{t('playbackStyle.label')}</span>
       <select
-        aria-label="播放样式"
+        aria-label={t('playbackStyle.label')}
         value={style}
         onChange={(event) => {
           const value = event.target.value;
@@ -74,9 +76,9 @@ export function PlaybackStyleControl() {
           window.dispatchEvent(new Event('wildstring:playback-style'));
         }}
       >
-        {playbackStyles.map(([value, label]) => (
+        {playbackStyles.map(([value]) => (
           <option key={value} value={value}>
-            {label}
+            {t(`playbackStyle.${value}`)}
           </option>
         ))}
       </select>

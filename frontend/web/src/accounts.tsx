@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useTranslation } from 'react-i18next';
 import { api, type User } from './api';
+import { applyLanguagePreference, languagePreferences, type LanguagePreference } from './i18n';
 import { LastfmAccount } from './providers';
 import { ThemeControl } from './theme';
 import { PlaybackStyleControl } from './playback-style';
@@ -10,12 +12,65 @@ import type { MusicLibrary } from './music-libraries';
 import { UserLibraryAccessDialog } from './user-library-access';
 
 type Profile = User['profile'];
-const profileLabels: Record<Profile, string> = {
-  owner: '所有者',
-  librarian: '曲库管理员',
-  editor: '资料编辑员',
-  listener: '听众',
-};
+/** Account-wide language; saved on the server so every device follows it. */
+function LanguageControl({
+  user,
+  disabled,
+  onUserChange,
+}: {
+  user: User;
+  disabled?: boolean;
+  onUserChange?: (user: User) => void;
+}) {
+  const { t } = useTranslation();
+  const [value, setValue] = useState<LanguagePreference>(user.language || 'auto');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  async function choose(next: LanguagePreference) {
+    const previous = value;
+    setValue(next);
+    setError('');
+    setSaving(true);
+    applyLanguagePreference(next);
+    try {
+      const updated = await api<User>('/auth/preferences', {
+        method: 'PUT',
+        body: JSON.stringify({ language: next }),
+      });
+      onUserChange?.(updated);
+    } catch (reason) {
+      setValue(previous);
+      applyLanguagePreference(previous);
+      setError(reason instanceof Error ? reason.message : t('language.saveFailed'));
+    } finally {
+      setSaving(false);
+    }
+  }
+  return (
+    <>
+      <label className="theme-control language-control">
+        <span>{t('language.label')}</span>
+        <select
+          aria-label={t('language.aria')}
+          value={value}
+          disabled={disabled || saving}
+          onChange={(event) => void choose(event.target.value as LanguagePreference)}
+        >
+          {languagePreferences.map((option) => (
+            <option key={option} value={option} lang={option === 'auto' ? undefined : option}>
+              {t(`language.${option}`)}
+            </option>
+          ))}
+        </select>
+      </label>
+      {error && (
+        <p className="error" role="alert">
+          {error}
+        </p>
+      )}
+    </>
+  );
+}
 const userProfile = (user: User): Profile => user.profile;
 
 export function AccountDialog({
@@ -27,6 +82,7 @@ export function AccountDialog({
   onClose: () => void;
   onUserChange?: (user: User) => void;
 }) {
+  const { t } = useTranslation();
   const dialog = useRef<HTMLDialogElement>(null);
   const [current, setCurrent] = useState(''),
     [password, setPassword] = useState(''),
@@ -55,7 +111,7 @@ export function AccountDialog({
     event.preventDefault();
     setError('');
     if (password !== confirm) {
-      setError('两次输入的新密码不一致。');
+      setError(t('account.passwordMismatch'));
       return;
     }
     setBusy(true);
@@ -68,10 +124,10 @@ export function AccountDialog({
       setPassword('');
       setConfirm('');
       window.dispatchEvent(
-        new CustomEvent('wildstring:unauthorized', { detail: '密码已修改，请使用新密码登录。' }),
+        new CustomEvent('wildstring:unauthorized', { detail: t('session.passwordChanged') }),
       );
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '修改未完成，请重试。');
+      setError(reason instanceof Error ? reason.message : t('account.passwordFailed'));
     } finally {
       setBusy(false);
     }
@@ -94,10 +150,10 @@ export function AccountDialog({
       setUsername(updated.username);
       setDisplayName(updated.display_name || '');
       setEmail(updated.email || '');
-      setProfileSuccess('个人资料已保存。');
+      setProfileSuccess(t('account.profileSaved'));
       onUserChange?.(updated);
     } catch (reason) {
-      setProfileError(reason instanceof Error ? reason.message : '资料保存未完成，请重试。');
+      setProfileError(reason instanceof Error ? reason.message : t('account.profileFailed'));
     } finally {
       setBusy(false);
     }
@@ -106,7 +162,7 @@ export function AccountDialog({
     <dialog
       ref={dialog}
       className="playlist-editor account-dialog"
-      aria-label="账号设置"
+      aria-label={t('account.title')}
       onCancel={(event) => {
         event.preventDefault();
         if (!busy) onClose();
@@ -114,19 +170,19 @@ export function AccountDialog({
     >
       <div className="editor-heading">
         <div>
-          <span className="eyebrow">YOUR ACCOUNT</span>
-          <h2>账号设置</h2>
+          <span className="eyebrow">{t('account.eyebrow')}</span>
+          <h2>{t('account.title')}</h2>
           <p className="muted">
-            {user.username} · {profileLabels[userProfile(user)]}
+            {user.username} · {t(`roles.${userProfile(user)}`)}
           </p>
         </div>
-        <DialogCloseButton aria-label="关闭账号设置" disabled={busy} onClick={onClose} />
+        <DialogCloseButton aria-label={t('account.close')} disabled={busy} onClick={onClose} />
       </div>
       <AvatarEditor user={user} disabled={busy} onBusy={setBusy} />
-      <form className="account-form" onSubmit={saveProfile} aria-label="个人资料">
-        <h3>个人资料</h3>
+      <form className="account-form" onSubmit={saveProfile} aria-label={t('account.profile')}>
+        <h3>{t('account.profile')}</h3>
         <label>
-          登录 ID
+          {t('account.loginId')}
           <input
             value={username}
             onChange={(event) => setUsername(event.target.value)}
@@ -137,26 +193,26 @@ export function AccountDialog({
           />
         </label>
         <label>
-          昵称
+          {t('account.displayName')}
           <input
             value={displayName}
             onChange={(event) => setDisplayName(event.target.value)}
             maxLength={80}
-            placeholder="显示给自己和设备的名称"
+            placeholder={t('account.displayNamePlaceholder')}
           />
         </label>
         <label>
-          邮箱（仅作资料）
+          {t('account.email')}
           <input
             type="email"
             value={email}
             onChange={(event) => setEmail(event.target.value)}
             maxLength={254}
-            placeholder="暂不用于找回密码"
+            placeholder={t('account.emailPlaceholder')}
             autoComplete="email"
           />
         </label>
-        <p className="muted">邮箱当前只保存为账号资料，不会发送邮件或用于找回密码。</p>
+        <p className="muted">{t('account.emailNote')}</p>
         {profileError && (
           <p className="error" role="alert">
             {profileError}
@@ -170,14 +226,15 @@ export function AccountDialog({
         <div className="editor-footer">
           <span />
           <button className="primary" disabled={busy}>
-            {busy ? '保存中…' : '保存个人资料'}
+            {busy ? t('account.saving') : t('account.saveProfile')}
           </button>
         </div>
       </form>
-      <section className="account-preferences-section" aria-label="界面与偏好">
-        <h3>界面与偏好</h3>
-        <p className="muted">这些偏好按账号保存在当前浏览器。</p>
+      <section className="account-preferences-section" aria-label={t('account.preferences')}>
+        <h3>{t('account.preferences')}</h3>
+        <p className="muted">{t('account.preferencesNote')}</p>
         <div className="account-preferences-list">
+          <LanguageControl user={user} disabled={busy} onUserChange={onUserChange} />
           <ThemeControl />
           <PlaybackStyleControl />
           <TrackListSizeControl />
@@ -186,7 +243,7 @@ export function AccountDialog({
       <LastfmAccount />
       <form className="account-form" onSubmit={submit}>
         <label>
-          当前密码
+          {t('account.currentPassword')}
           <input
             type="password"
             autoComplete="current-password"
@@ -197,7 +254,7 @@ export function AccountDialog({
           />
         </label>
         <label>
-          新密码
+          {t('account.newPassword')}
           <input
             type="password"
             autoComplete="new-password"
@@ -209,7 +266,7 @@ export function AccountDialog({
           />
         </label>
         <label>
-          确认新密码
+          {t('account.confirmPassword')}
           <input
             type="password"
             autoComplete="new-password"
@@ -220,7 +277,7 @@ export function AccountDialog({
             onChange={(e) => setConfirm(e.target.value)}
           />
         </label>
-        <p className="muted">密码为 12–128 个字符。修改后，所有设备都需要重新登录。</p>
+        <p className="muted">{t('account.passwordNote')}</p>
         {error && (
           <p className="error" role="alert">
             {error}
@@ -228,16 +285,17 @@ export function AccountDialog({
         )}
         <div className="editor-footer">
           <button type="button" disabled={busy} onClick={onClose}>
-            取消
+            {t('common.cancel')}
           </button>
           <button className="primary" disabled={busy}>
-            {busy ? '修改中…' : '修改密码'}
+            {busy ? t('account.changing') : t('account.changePassword')}
           </button>
         </div>
       </form>
       <div className="account-version-info">
         <small className="muted">
-          WildString 网页端 v0.8.1{serverVersion ? ` · 服务端 v${serverVersion}` : ''}
+          {t('account.versionWeb', { version: '0.8.1' })}
+          {serverVersion ? t('account.versionServer', { version: serverVersion }) : ''}
         </small>
       </div>
     </dialog>

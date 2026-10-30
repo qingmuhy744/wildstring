@@ -5,6 +5,7 @@ import {
   writePreference,
 } from './user-preferences';
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 type Theme = 'system' | 'light' | 'dark';
 const KEY = 'wildstring-theme';
@@ -40,6 +41,7 @@ if (typeof window !== 'undefined') {
   });
 }
 export function ThemeControl() {
+  const { t } = useTranslation();
   const [theme, setTheme] = useState<Theme>(savedTheme);
   useEffect(() => {
     const system = matchMedia('(prefers-color-scheme: dark)');
@@ -66,9 +68,9 @@ export function ThemeControl() {
   }, [theme]);
   return (
     <label className="theme-control">
-      <span>外观</span>
+      <span>{t('theme.label')}</span>
       <select
-        aria-label="外观模式"
+        aria-label={t('theme.aria')}
         value={theme}
         onChange={(event) => {
           const value = event.target.value as Theme;
@@ -82,15 +84,16 @@ export function ThemeControl() {
           window.dispatchEvent(new CustomEvent('wildstring:theme-changed', { detail: value }));
         }}
       >
-        <option value="system">跟随系统</option>
-        <option value="light">浅色</option>
-        <option value="dark">深色</option>
+        <option value="system">{t('theme.system')}</option>
+        <option value="light">{t('theme.light')}</option>
+        <option value="dark">{t('theme.dark')}</option>
       </select>
     </label>
   );
 }
 
 export function ThemeToggleCompact() {
+  const { t } = useTranslation();
   const [theme, setTheme] = useState<Theme>(savedTheme);
   useEffect(() => {
     const sync = () => setTheme(savedTheme());
@@ -117,14 +120,14 @@ export function ThemeToggleCompact() {
     window.dispatchEvent(new CustomEvent('wildstring:theme-changed', { detail: target }));
   };
 
-  const label = theme === 'system' ? '跟随系统' : theme === 'dark' ? '深色' : '浅色';
+  const label = t(`theme.${theme}`);
   return (
     <button
       type="button"
       className="theme-toggle-compact"
       onClick={next}
-      title={`当前外观：${label}，点击切换`}
-      aria-label={`外观：${label}`}
+      title={t('theme.compactTitle', { label })}
+      aria-label={t('theme.compactAria', { label })}
     >
       <span className="theme-toggle-dot" />
       <span>{label}</span>
