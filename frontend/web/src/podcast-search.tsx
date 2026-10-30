@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ApiError, api } from './api';
 import { DialogCloseButton } from './dialog-close';
+import { cleanPodcastDescription } from './podcast-description';
 import './podcast-search.css';
 
 export interface PodcastSearchResult {
@@ -477,7 +478,9 @@ export function PodcastSearchDialog({
               {preview && (
                 <>
                   {preview.description && (
-                    <p className="podcast-search-description">{preview.description}</p>
+                    <p className="podcast-search-description">
+                      {cleanPodcastDescription(preview.description)}
+                    </p>
                   )}
                   <h5>最新单集 · 共 {preview.episode_count} 集</h5>
                   <ol className="podcast-search-episodes">

@@ -50,7 +50,7 @@ const previewBody = {
   resolved_feed_url: fireside.feed_url,
   title: '声东击西',
   author: '声东击西',
-  description: '一档关注社会与文化的中文播客。',
+  description: '<p>一档关注<b>社会与文化</b>的中文播客。<br />每周更新</p>',
   cover_url: '',
   episode_count: 434,
   latest_episodes: [
@@ -110,6 +110,9 @@ test('预览不落库，确认后带 itunes_id 添加并打开节目', async ({ 
   const preview = dialog.getByRole('region', { name: '节目预览' });
   await expect(preview).toContainText('第一集：预览单集');
   await expect(preview).toContainText('共 434 集');
+  await expect(preview.locator('.podcast-search-description')).toHaveText(
+    '一档关注社会与文化的中文播客。每周更新',
+  );
   expect(previews).toEqual([{ feed_url: fireside.feed_url, itunes_id: '1183662640' }]);
   await preview.getByRole('button', { name: '添加并关注' }).click();
   await expect(dialog).toHaveCount(0);
