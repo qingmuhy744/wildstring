@@ -16,9 +16,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.automirrored.filled.FactCheck
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -72,7 +76,14 @@ import java.time.format.DateTimeFormatter
 }
 
 @Composable private fun AgentError(message: String?) { message?.let { SelectionContainer { Text(it, Modifier.padding(vertical = 8.dp), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) } } }
-@Composable private fun AgentTrace(value: JsonObject) { value.text("trace_id").takeIf { it.isNotBlank() }?.let { SelectionContainer { Text("诊断编号：$it", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) } } }
+private fun JsonObject.showTrace(): Boolean {
+    val status = text("status")
+    return text("error_code").isNotBlank() || text("severity") in setOf("error", "warning") || status in setOf("failed", "interrupted", "partial", "unknown", "retry_wait")
+}
+@Composable private fun AgentTrace(value: JsonObject) {
+    if (!value.showTrace()) return
+    value.text("trace_id").takeIf { it.isNotBlank() }?.let { SelectionContainer { Text("诊断编号：$it", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) } }
+}
 @Composable private fun AgentEmpty(text: String) { Text(text, Modifier.padding(vertical = 24.dp), color = MaterialTheme.colorScheme.onSurfaceVariant) }
 @Composable private fun AgentCard(content: @Composable ColumnScope.() -> Unit) {
     Surface(Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.surfaceContainerLow) {
@@ -323,7 +334,13 @@ internal fun summarizeConversationTitle(userText: String): String {
     }
 }
 
-@Composable internal fun AgentChat(vm: MusicViewModel, openDraft: (String) -> Unit) {
+@Composable internal fun AgentChat(
+    vm: MusicViewModel,
+    onNotifications: (() -> Unit)? = null,
+    onSettings: (() -> Unit)? = null,
+    unread: Int = 0,
+    openDraft: (String) -> Unit,
+) {
     val links = LocalUriHandler.current
     var showSummary by remember { mutableStateOf(false) }
     var conversations by remember { mutableStateOf<List<JsonObject>>(emptyList()) }; var conversation by remember { mutableStateOf<JsonObject?>(null) }
@@ -331,6 +348,7 @@ internal fun summarizeConversationTitle(userText: String): String {
     var input by remember { mutableStateOf("") }; var history by remember { mutableStateOf(false) }
     var deleting by remember { mutableStateOf<JsonObject?>(null) }; var renaming by remember { mutableStateOf<JsonObject?>(null) }
     var title by remember { mutableStateOf("") }; var historyMenu by remember { mutableStateOf<String?>(null) }
+    var conversationMenu by remember { mutableStateOf(false) }
     val action = remember { FeatureAction() }; val scope = rememberCoroutineScope()
     suspend fun loadConversationsWithSummarizedTitles(): List<JsonObject> {
         return vm.agent.all("conversations").map { item ->
@@ -360,6 +378,8 @@ internal fun summarizeConversationTitle(userText: String): String {
         if (action.message == "已完成") action.message = null
     }
     val running = conversation?.objects("runs")?.any { it.text("status") == "running" } == true
+    val playback by vm.state.collectAsStateWithLifecycle()
+    val handoffClearance = if (playback.handoff != null && !playback.playing) 72.dp else 0.dp
     LaunchedEffect(conversation?.text("id"), action.busy, running) {
         val id = conversation?.text("id") ?: return@LaunchedEffect
         if (!action.busy && !running) return@LaunchedEffect
@@ -372,17 +392,69 @@ internal fun summarizeConversationTitle(userText: String): String {
             catch (_: Exception) { /* The send operation retains its diagnostic. */ }
         }
     }
-    Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            TextButton({ scope.launch { action.run { conversations = loadConversationsWithSummarizedTitles(); history = true; action.message = null } } }, enabled = !action.busy) { Icon(Icons.Default.History, null); Text("历史") }
-            TextButton({ conversation = null; input = "" }, enabled = !action.busy) { Icon(Icons.Default.Add, null); Text("新对话") }
-            Spacer(Modifier.weight(1f))
-            if (conversation != null) {
+    val pageChrome = onNotifications != null || onSettings != null
+    Column(Modifier.fillMaxSize()) {
+        Row(Modifier.fillMaxWidth().heightIn(min = 44.dp).padding(start = 12.dp, end = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (pageChrome && playback.canGoBack) {
+                IconButton(vm::back) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回上一页") }
+            }
+            Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
+                AgentConnectionChoice(connections, connection, !action.busy, compact = true) { connection = it }
+            }
+            TextButton(
+                { scope.launch { action.run { conversations = loadConversationsWithSummarizedTitles(); history = true; action.message = null } } },
+                enabled = !action.busy,
+                modifier = Modifier.defaultMinSize(minWidth = 1.dp, minHeight = 1.dp),
+                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+            ) { Text("历史", style = MaterialTheme.typography.labelLarge) }
+            TextButton(
+                { conversation = null; input = "" },
+                enabled = !action.busy,
+                modifier = Modifier.defaultMinSize(minWidth = 1.dp, minHeight = 1.dp),
+                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+            ) { Text("新对话", style = MaterialTheme.typography.labelLarge) }
+            if (!pageChrome && conversation != null) {
                 IconButton({ scope.launch { action.run { conversation = vm.agent.request("conversations/${conversation!!.text("id")}"); action.message = null } } }, enabled = !action.busy) { Icon(Icons.Default.Refresh, "刷新当前对话") }
                 IconButton({ deleting = conversation; action.message = null }, enabled = !action.busy) { Icon(Icons.Default.DeleteOutline, "删除当前对话") }
             }
+            if (pageChrome) {
+                onSettings?.let { open -> IconButton(open) { Icon(Icons.Default.Settings, "设置") } }
+                Box {
+                    IconButton({ conversationMenu = true }, enabled = !action.busy) {
+                        BadgedBox(badge = { if (unread > 0) Badge { Text(if (unread > 99) "99+" else unread.toString()) } }) {
+                            Icon(Icons.Default.MoreVert, "更多")
+                        }
+                    }
+                    DropdownMenu(conversationMenu, { conversationMenu = false }) {
+                        onNotifications?.let { open ->
+                            DropdownMenuItem(
+                                text = { Text(if (unread > 0) "通知 · $unread" else "通知") },
+                                leadingIcon = { Icon(Icons.Default.NotificationsNone, "通知") },
+                                modifier = Modifier.testTag("open-notifications"),
+                                onClick = { conversationMenu = false; open() },
+                            )
+                        }
+                        if (conversation != null) {
+                            DropdownMenuItem(
+                                text = { Text("刷新") },
+                                leadingIcon = { Icon(Icons.Default.Refresh, "刷新当前对话") },
+                                enabled = !action.busy,
+                                onClick = {
+                                    conversationMenu = false
+                                    scope.launch { action.run { conversation = vm.agent.request("conversations/${conversation!!.text("id")}"); action.message = null } }
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("删除") },
+                                leadingIcon = { Icon(Icons.Default.DeleteOutline, "删除当前对话") },
+                                enabled = !action.busy,
+                                onClick = { conversationMenu = false; deleting = conversation; action.message = null },
+                            )
+                        }
+                    }
+                }
+            }
         }
-        AgentConnectionChoice(connections, connection, !action.busy) { connection = it }
         val allMessages = conversation?.objects("messages") ?: emptyList()
         val lastAssistantId = allMessages.lastOrNull { it.text("role") == "assistant" }?.text("id")
     var activeGapData by remember { mutableStateOf<CatalogGapUiData?>(null) }
@@ -463,7 +535,7 @@ internal fun summarizeConversationTitle(userText: String): String {
             } }
         }
 
-        LazyColumn(Modifier.weight(1f).fillMaxWidth().testTag("agent-messages"), verticalArrangement = Arrangement.spacedBy(12.dp), contentPadding = PaddingValues(vertical = 12.dp)) {
+        LazyColumn(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 16.dp).testTag("agent-messages"), verticalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(top = 2.dp, bottom = 4.dp + handoffClearance)) {
             conversation?.get("context_summary")?.takeIf { it.isJsonObject }?.asJsonObject?.let { summary -> item {
                 TextButton({ showSummary = !showSummary }) { Text("已压缩较早对话 · 查看上下文摘要") }
                 if (showSummary) { Text(summary.text("summary"), style = MaterialTheme.typography.bodySmall); TextButton({ scope.launch { action.run { val id = conversation!!.text("id"); vm.agent.request("conversations/$id/summary", "DELETE"); conversation = vm.agent.request("conversations/$id") } } }, enabled = !action.busy) { Text("清除摘要") } }
@@ -537,96 +609,118 @@ internal fun summarizeConversationTitle(userText: String): String {
             items(allMessages, key = { it.text("id") }) { message ->
                 val isAssistant = message.text("role") == "assistant"
                 val isLatestAssistant = isAssistant && message.text("id") == lastAssistantId
-                AgentCard {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text(if (isAssistant) "野弦" else "你", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
-                        if (isAssistant) {
-                            Surface(shape = RoundedCornerShape(4.dp), color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f)) {
-                                Text("AI 音乐伴侣", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp))
+                if (isAssistant) {
+                    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (message.flag("partial")) Text("正在生成 · 内容尚未完成", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        SelectionContainer { AssistantMarkdown(message.text("content")) }
+                        message.objects("sources").forEach { source ->
+                            source.text("url").takeIf { it.startsWith("https://") }?.let { url ->
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = MaterialTheme.colorScheme.surfaceContainerLow,
+                                    modifier = Modifier.clickable { runCatching { links.openUri(url) }.onFailure { action.message = "无法打开来源。" } },
+                                ) {
+                                    Row(Modifier.padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        Icon(Icons.Default.Public, null, modifier = Modifier.size(12.dp), tint = MaterialTheme.colorScheme.primary)
+                                        Text("来源：${source.text("title").ifBlank { url }}", style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    }
+                                }
                             }
                         }
-                    }
-                    if (message.flag("partial")) Text("正在生成 · 内容尚未完成", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    SelectionContainer { if (isAssistant) AssistantMarkdown(message.text("content")) else Text(message.text("content")) }
-                    message.objects("sources").forEach { source ->
-                        source.text("url").takeIf { it.startsWith("https://") }?.let { url ->
-                            Surface(
-                                shape = RoundedCornerShape(8.dp),
-                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                                modifier = Modifier.padding(vertical = 2.dp).clickable { runCatching { links.openUri(url) }.onFailure { action.message = "无法打开来源。" } }
-                            ) {
-                                Row(Modifier.padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                    Icon(Icons.Default.Public, null, modifier = Modifier.size(12.dp), tint = MaterialTheme.colorScheme.primary)
-                                    Text("来源：${source.text("title").ifBlank { url }}", style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        if (isLatestAssistant && !message.flag("partial") && !running) {
+                            val suggestions = remember(message.text("content")) { generateFollowUpSuggestions(message.text("content")) }
+                            if (suggestions.isNotEmpty()) {
+                                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    suggestions.forEach { (label, prompt) ->
+                                        SuggestionChip(
+                                            onClick = { sendMessage(prompt) },
+                                            label = { Text(label, style = MaterialTheme.typography.labelSmall, maxLines = 1) },
+                                            shape = RoundedCornerShape(12.dp),
+                                            colors = SuggestionChipDefaults.suggestionChipColors(
+                                                containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                                            ),
+                                            border = null,
+                                        )
+                                    }
                                 }
                             }
                         }
                     }
-
-                    // 智能快捷后续操作胶囊
-                    if (isLatestAssistant && !message.flag("partial") && !running) {
-                        val suggestions = remember(message.text("content")) { generateFollowUpSuggestions(message.text("content")) }
-                        if (suggestions.isNotEmpty()) {
-                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f), modifier = Modifier.padding(top = 4.dp))
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Icon(Icons.Default.AutoAwesome, null, modifier = Modifier.size(12.dp), tint = MaterialTheme.colorScheme.primary)
-                                Text("你可能想做：", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Medium)
-                            }
-                            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                suggestions.forEach { (label, prompt) ->
-                                    SuggestionChip(
-                                        onClick = { sendMessage(prompt) },
-                                        label = { Text(label, style = MaterialTheme.typography.labelSmall) },
-                                        shape = RoundedCornerShape(12.dp),
-                                        colors = SuggestionChipDefaults.suggestionChipColors(
-                                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-                                        ),
-                                        border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
-                                    )
-                                }
+                } else {
+                    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
+                        Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.primaryContainer, modifier = Modifier.widthIn(max = 300.dp)) {
+                            SelectionContainer {
+                                Text(message.text("content"), Modifier.padding(horizontal = 12.dp, vertical = 8.dp), style = MaterialTheme.typography.bodyMedium)
                             }
                         }
                     }
                 }
             }
-            conversation?.objects("runs")?.forEach { run -> item(key = "run-${run.text("id")}") {
-                if (run.text("status") == "running") Text(when (run.text("stage")) { "search" -> "正在检索联网来源…"; "tools" -> "正在查询曲库与处理工具结果…"; "writing" -> "正在生成回答…"; else -> "正在分析已有资料…" }, style = MaterialTheme.typography.bodySmall)
+            conversation?.objects("runs")?.forEach { run ->
+                val failed = run.text("error_code").isNotBlank() || run.text("status") in setOf("failed", "interrupted")
                 val fallback = run.text("status") == "local_fallback"
-                if (fallback) Text("本地关键词检索 · 未调用模型", style = MaterialTheme.typography.bodySmall)
-                if (run.text("error_code").isNotBlank()) Text("状态：${run.text("status")} · ${run.text("error_code")}", style = MaterialTheme.typography.bodySmall)
-                run.getAsJsonArray("draft_ids")?.forEach { draft ->
-                    Surface(
-                        shape = RoundedCornerShape(10.dp),
-                        color = MaterialTheme.colorScheme.primaryContainer,
-                        modifier = Modifier.padding(vertical = 4.dp).clickable { openDraft(draft.asString) }
-                    ) {
-                        Row(
-                            Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                val drafts = run.getAsJsonArray("draft_ids")
+                if (!failed && !fallback && (drafts == null || drafts.size() == 0)) return@forEach
+                item(key = "run-${run.text("id")}") {
+                    if (fallback) Text("本地关键词检索 · 未调用模型", style = MaterialTheme.typography.bodySmall)
+                    if (failed) Text("状态：${run.text("status")} · ${run.text("error_code")}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                    if (failed) AgentTrace(run)
+                    drafts?.forEach { draft ->
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                            modifier = Modifier.clickable { openDraft(draft.asString) },
                         ) {
-                            Icon(Icons.AutoMirrored.Filled.PlaylistAdd, null, tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(16.dp))
-                            Text("已生成歌单/整理草案 · 点击查看并一键应用", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                            Row(
+                                Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            ) {
+                                Icon(Icons.AutoMirrored.Filled.PlaylistAdd, null, tint = MaterialTheme.colorScheme.onPrimaryContainer, modifier = Modifier.size(16.dp))
+                                Text("已生成歌单/整理草案 · 点击查看并一键应用", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                            }
                         }
                     }
                 }
-                AgentTrace(run)
-            } }
-            item { ActionStatus(action) }
+            }
+            item {
+                if (!action.busy && !action.message.isNullOrBlank() && action.message != "已完成") ActionStatus(action)
+            }
         }
         conversation?.objects("runs")?.firstOrNull { it.text("status") == "running" }?.let { run ->
-            Text(when (run.text("stage")) { "search" -> "正在检索联网来源…"; "tools" -> "正在查询曲库与处理工具结果…"; "writing" -> "正在生成回答…"; else -> "正在分析已有资料…" }, Modifier.padding(vertical = 4.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(when (run.text("stage")) { "search" -> "正在检索联网来源…"; "tools" -> "正在查询曲库与处理工具结果…"; "writing" -> "正在生成回答…"; else -> "正在分析已有资料…" }, Modifier.padding(horizontal = 16.dp, vertical = 2.dp), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        Row(Modifier.fillMaxWidth().padding(bottom = 12.dp), verticalAlignment = Alignment.Bottom) {
-            OutlinedTextField(input, { input = it }, Modifier.weight(1f).testTag("agent-chat-input"), placeholder = { Text("聊聊你的音乐") }, maxLines = 4, enabled = !action.busy && !running)
-            IconButton(
-                onClick = { sendMessage(input) },
-                enabled = !action.busy && !running && input.isNotBlank(),
-                modifier = Modifier.testTag("agent-chat-send")
-            ) {
-                if (action.busy) CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
-                else Icon(Icons.AutoMirrored.Filled.Send, "发送")
-            }
+        Surface(color = MaterialTheme.colorScheme.background, modifier = Modifier.fillMaxWidth()) {
+            TextField(
+                input,
+                { input = it },
+                Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp).testTag("agent-chat-input"),
+                placeholder = { Text("聊聊你的音乐") },
+                shape = RoundedCornerShape(24.dp),
+                maxLines = 4,
+                enabled = !action.busy && !running,
+                textStyle = MaterialTheme.typography.bodyMedium,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                keyboardActions = KeyboardActions(onSend = { sendMessage(input) }),
+                trailingIcon = {
+                    IconButton(
+                        onClick = { sendMessage(input) },
+                        enabled = !action.busy && !running && input.isNotBlank(),
+                        modifier = Modifier.testTag("agent-chat-send"),
+                    ) {
+                        if (action.busy) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                        else Icon(Icons.AutoMirrored.Filled.Send, "发送")
+                    }
+                },
+                colors = TextFieldDefaults.colors(
+                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                    focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                    disabledContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                    unfocusedIndicatorColor = Color.Transparent,
+                    focusedIndicatorColor = Color.Transparent,
+                    disabledIndicatorColor = Color.Transparent,
+                ),
+            )
         }
     }
     if (history) AlertDialog(modifier = Modifier.testTag("agent-history-dialog"), onDismissRequest = { if (!action.busy) history = false }, title = { Text("历史对话") }, text = {
@@ -665,7 +759,7 @@ internal fun summarizeConversationTitle(userText: String): String {
 }
 
 /** Every AI entry point uses the same permission-filtered connection list. */
-@Composable internal fun AgentConnectionChoice(connections: List<JsonObject>, selected: String?, enabled: Boolean = true, emptyLabel: String = "未配置 AI 模型", choose: (String?) -> Unit) {
+@Composable internal fun AgentConnectionChoice(connections: List<JsonObject>, selected: String?, enabled: Boolean = true, emptyLabel: String = "未配置 AI 模型", compact: Boolean = false, choose: (String?) -> Unit) {
     var open by remember { mutableStateOf(false) }
     val enabledConnections = connections.filter { it.flag("enabled") }
     val chosen = enabledConnections.firstOrNull { it.text("id") == selected } ?: enabledConnections.firstOrNull()
@@ -680,41 +774,50 @@ internal fun summarizeConversationTitle(userText: String): String {
     Column {
         Box {
             if (enabledConnections.isEmpty()) {
-                Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f),
-                    modifier = Modifier.padding(vertical = 4.dp),
-                ) {
-                    Text(
-                        text = "未配置可用 AI 渠道 · 请在账号设置中添加模型",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.error,
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                    )
-                }
+                Text(
+                    text = if (compact) emptyLabel else "未配置可用 AI 渠道 · 请在账号设置中添加模型",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.error,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(horizontal = if (compact) 0.dp else 10.dp, vertical = if (compact) 0.dp else 6.dp),
+                )
             } else if (enabledConnections.size == 1) {
                 Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f),
-                    modifier = Modifier.padding(vertical = 4.dp),
+                    shape = RoundedCornerShape(if (compact) 14.dp else 8.dp),
+                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f),
+                    modifier = if (compact) Modifier.fillMaxWidth().height(32.dp) else Modifier.padding(vertical = 4.dp),
                 ) {
                     Row(
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = if (compact) 0.dp else 6.dp).then(if (compact) Modifier.fillMaxHeight() else Modifier),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
                         Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primary, modifier = Modifier.size(6.dp)) {}
                         Text(
                             text = "${chosen?.text("name")} · ${chosen?.text("model")}",
-                            style = MaterialTheme.typography.labelSmall,
+                            style = if (compact) MaterialTheme.typography.labelMedium else MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.Medium,
                             color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = if (compact) Modifier.weight(1f) else Modifier,
                         )
                     }
                 }
             } else {
-                TextButton({ open = true }, enabled = enabled, modifier = Modifier.testTag("ai-connection-choice")) {
-                    Text(chosen?.let { "${it.text("name")} · ${it.text("model")}" } ?: emptyLabel)
+                TextButton(
+                    { open = true },
+                    enabled = enabled,
+                    modifier = Modifier.testTag("ai-connection-choice").then(if (compact) Modifier.fillMaxWidth().height(36.dp).defaultMinSize(minWidth = 1.dp, minHeight = 1.dp) else Modifier),
+                    contentPadding = if (compact) PaddingValues(horizontal = 8.dp, vertical = 0.dp) else ButtonDefaults.TextButtonContentPadding,
+                ) {
+                    Text(
+                        chosen?.let { "${it.text("name")} · ${it.text("model")}" } ?: emptyLabel,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = if (compact) Modifier.weight(1f, fill = false) else Modifier,
+                    )
                     Icon(Icons.Default.ArrowDropDown, null)
                 }
                 DropdownMenu(open, { open = false }) {
@@ -736,7 +839,7 @@ internal fun summarizeConversationTitle(userText: String): String {
                 }
             }
         }
-        if (chosen != null && enabledConnections.size > 1) {
+        if (!compact && chosen != null && enabledConnections.size > 1) {
             Text(connectionBudget(chosen), Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.bodySmall)
         }
     }

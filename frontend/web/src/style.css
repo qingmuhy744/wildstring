@@ -542,6 +542,12 @@ a {
   align-items: end;
   gap: 24px;
 }
+.collection-heading-main {
+  display: flex;
+  align-items: end;
+  gap: 22px;
+  min-width: 0;
+}
 .collection-eyebrow {
   display: inline-flex;
   align-items: center;

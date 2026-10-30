@@ -243,7 +243,8 @@ fun WildStringApp(model: MusicViewModel) {
                         val navBarBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
                         val isTablet = LocalConfiguration.current.screenWidthDp >= 600
                         val dockHeight = (if (state.current != null) 62.dp else 0.dp) + (if (!isTablet) 80.dp else 0.dp)
-                        val bottomPad = navBarBottom + dockHeight + 12.dp
+                        val assistantComposer = if (state.tab == "assistant") 72.dp else 0.dp
+                        val bottomPad = navBarBottom + dockHeight + assistantComposer + 12.dp
                         Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)).padding(horizontal = 16.dp).padding(bottom = bottomPad), contentAlignment = Alignment.BottomCenter) {
                             Surface(
                                 Modifier.widthIn(max = 380.dp).fillMaxWidth().testTag("playback-handoff-notice"),
@@ -514,7 +515,7 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
                     val showGlobalMore = state.tab == "search" && state.collection == null && state.kind != "recent"
                     Scaffold(
                         contentWindowInsets = WindowInsets(0, 0, 0, 0),
-                        topBar = { if (state.tab != "podcast" || state.podcastId == null) CatalogTopBar(state, vm::back, { settings = true }, compact = true, unread = unread,
+                        topBar = { if (state.tab != "assistant" && (state.tab != "podcast" || state.podcastId == null)) CatalogTopBar(state, vm::back, { settings = true }, compact = true, unread = unread,
                             notifications = { feature = "notifications" },
                             queue = if (showGlobalMore) ({ queue = true }) else null,
                             recent = if (showGlobalMore) vm::recent else null,
@@ -562,7 +563,7 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
                             if (state.tab == "podcast") {
                                 savedPages.SaveableStateProvider("podcast") { PodcastChannelPage(vm) }
                             } else if (state.tab == "assistant") {
-                                MobileAssistantPage(vm)
+                                MobileAssistantPage(vm, unread, { feature = "notifications" }, { settings = true })
                             } else {
                             Column(Modifier.fillMaxSize()) {
                                 MusicLibraryChoice(vm)
@@ -965,10 +966,8 @@ private fun SongAction(label: String, icon: ImageVector, navigate: Boolean = fal
 
 
 @Composable
-private fun MobileAssistantPage(vm: MusicViewModel) {
-    Column(Modifier.fillMaxSize()) {
-        AgentChat(vm) { }
-    }
+private fun MobileAssistantPage(vm: MusicViewModel, unread: Int, onNotifications: () -> Unit, onSettings: () -> Unit) {
+    AgentChat(vm, onNotifications, onSettings, unread) {}
 }
 
 @Composable

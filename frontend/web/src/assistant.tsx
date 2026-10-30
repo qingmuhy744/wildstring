@@ -382,7 +382,9 @@ export function Assistant({
                   ) : (
                     <StateBadge state={run.status} />
                   )}
-                  <DiagnosticId id={run.trace_id} />
+                  {(run.error_code || run.status === 'failed' || run.status === 'interrupted') && (
+                    <DiagnosticId id={run.trace_id} />
+                  )}
                   {run.error_code && <p className="muted">{run.error_code}</p>}
                   <div className="workspace-actions">
                     {run.draft_ids.map((id) => (

@@ -1268,57 +1268,59 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
             <section
               className={`collection-heading ${album || selectedArtist ? 'album-heading' : ''}`}
             >
-              <div>
-                {(album || selectedArtist || playlist) && (
-                  <button className="back-button text-button" onClick={backToLocation}>
-                    ←{' '}
-                    {navigation.at(-1)?.playerOpen
-                      ? '返回播放'
-                      : album
-                        ? selectedArtist
-                          ? `返回 ${selectedArtist.name}`
-                          : '返回专辑'
-                        : selectedArtist
-                          ? '返回艺人'
-                          : '返回歌单'}
-                  </button>
+              <div className="collection-heading-main">
+                <div>
+                  {(album || selectedArtist || playlist) && (
+                    <button className="back-button text-button" onClick={backToLocation}>
+                      ←{' '}
+                      {navigation.at(-1)?.playerOpen
+                        ? '返回播放'
+                        : album
+                          ? selectedArtist
+                            ? `返回 ${selectedArtist.name}`
+                            : '返回专辑'
+                          : selectedArtist
+                            ? '返回艺人'
+                            : '返回歌单'}
+                    </button>
+                  )}
+                  {!specialView && (
+                    <p className="eyebrow collection-eyebrow">
+                      <span className="eyebrow-tagline">YOUR OWN COLLECTION</span>
+                      <span className="eyebrow-sep" aria-hidden="true">
+                        ·
+                      </span>
+                      <span className="eyebrow-crumb">
+                        曲库 /{' '}
+                        {album
+                          ? '专辑'
+                          : selectedArtist
+                            ? '艺人'
+                            : activePlaylist
+                              ? activePlaylist.kind === 'smart'
+                                ? '智能歌单'
+                                : '歌单'
+                              : query
+                                ? '搜索'
+                                : view === 'tracks'
+                                  ? '歌曲'
+                                  : labels[view]}
+                      </span>
+                    </p>
+                  )}
+                  <h1>{title}</h1>
+                  <p className="muted">{subtitle}</p>
+                </div>
+                {headingCover && (
+                  <Cover
+                    key={`${headingCover}-${revision}`}
+                    trackId={headingCover}
+                    title={title}
+                    size={320}
+                    className={`album-heading-cover ${selectedArtist && !album ? 'artist-portrait' : ''}`}
+                  />
                 )}
-                {!specialView && (
-                  <p className="eyebrow collection-eyebrow">
-                    <span className="eyebrow-tagline">YOUR OWN COLLECTION</span>
-                    <span className="eyebrow-sep" aria-hidden="true">
-                      ·
-                    </span>
-                    <span className="eyebrow-crumb">
-                      曲库 /{' '}
-                      {album
-                        ? '专辑'
-                        : selectedArtist
-                          ? '艺人'
-                          : activePlaylist
-                            ? activePlaylist.kind === 'smart'
-                              ? '智能歌单'
-                              : '歌单'
-                            : query
-                              ? '搜索'
-                              : view === 'tracks'
-                                ? '歌曲'
-                                : labels[view]}
-                    </span>
-                  </p>
-                )}
-                <h1>{title}</h1>
-                <p className="muted">{subtitle}</p>
               </div>
-              {headingCover && (
-                <Cover
-                  key={`${headingCover}-${revision}`}
-                  trackId={headingCover}
-                  title={title}
-                  size={320}
-                  className={`album-heading-cover ${selectedArtist && !album ? 'artist-portrait' : ''}`}
-                />
-              )}
               <div className="collection-stat">
                 <strong>{visible?.total ?? '—'}</strong>
                 <span>
