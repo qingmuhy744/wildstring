@@ -39,12 +39,12 @@ import androidx.compose.ui.unit.dp
         Box(
             Modifier.fillMaxSize()
                 .padding(padding)
-                .verticalScroll(scrollState, overscrollEffect = null)
-                .testTag("settings-scroll"),
+                .verticalScroll(scrollState, overscrollEffect = null),
             contentAlignment = Alignment.TopCenter,
         ) {
             Column(
                 Modifier.widthIn(max = 720.dp).fillMaxWidth()
+                    .testTag("settings-scroll")
                     .padding(horizontal = 16.dp, vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(20.dp),
                 content = content,
