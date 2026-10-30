@@ -14,6 +14,7 @@ from wildstring import get_app_version
 from wildstring.config import Settings
 from wildstring.database import Database
 from wildstring.permissions import require_owner, require_scope
+from wildstring.user_language_schema import resolve_language
 
 COOKIE = "wildstring_session"
 SESSION_SECONDS = 7 * 24 * 60 * 60
@@ -66,6 +67,11 @@ class ProfileUpdate(BaseModel):
         return value
 
 
+class PreferencesUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    language: Literal["auto", "zh", "en"]
+
+
 class UserCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     username: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,31}$")
@@ -100,6 +106,7 @@ def public_user(row):
         key: row[key] for key in ("id", "username", "profile", "version", "display_name", "email")
     } | {
         "enabled": bool(row["enabled"]),
+        "language": row["language"] if "language" in row.keys() else "auto",
     }
 
 
@@ -272,8 +279,14 @@ class Auth:
                 "authenticated": authenticated,
                 "version": get_app_version(),
             }
+            preference = None
             if authenticated:
                 result["user"] = self.require_session(request)
+                preference = result["user"]["language"]
+            # Clients use this before login, when no account setting exists yet.
+            result["language"] = resolve_language(
+                preference, request.headers.get("Accept-Language")
+            )
             return result
 
         @router.post("/login")
@@ -355,6 +368,23 @@ class Auth:
                     "SELECT * FROM users WHERE id=?", (actor["id"],)
                 ).fetchone()
                 return public_user(updated)
+
+        @router.put("/preferences")
+        def update_preferences(request: Request, body: object = Body(...)):
+            # Interface preferences do not bump the profile version, so an open
+            # profile form on another device does not become a conflict.
+            self.require_client(request)
+            actor = self.require_session(request)
+            value = validated(PreferencesUpdate, body)
+            with self.database.connect(write=True) as connection:
+                connection.execute(
+                    "UPDATE users SET language=? WHERE id=?", (value.language, actor["id"])
+                )
+                updated = connection.execute(
+                    "SELECT * FROM users WHERE id=?", (actor["id"],)
+                ).fetchone()
+            request.state.user = public_user(updated)
+            return request.state.user
 
         @router.post("/logout", status_code=204)
         def logout(request: Request):
