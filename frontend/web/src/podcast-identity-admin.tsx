@@ -232,8 +232,10 @@ export function PodcastIdentityAdmin() {
                         />
                       )}
                       <span>
-                        <strong>{show.title}</strong>
-                        {show.author ? ` · ${show.author}` : ''}
+                        <span>
+                          <strong>{show.title}</strong>
+                          {show.author ? ` · ${show.author}` : ''}
+                        </span>
                         <small className="podcast-duplicate-feed">
                           {show.feed_url}
                           {show.redirects ? '（已重定向）' : ''}
