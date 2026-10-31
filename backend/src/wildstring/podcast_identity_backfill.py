@@ -35,7 +35,6 @@ FEED_FETCH_INTERVAL_SECONDS = 2.0
 MAX_RATE_LIMIT_WAIT_SECONDS = 300
 DEFAULT_BATCH = 100
 MAX_BATCH = 1000
-BUSY_DOWNLOADS = ("queued", "downloading")
 # A show Apple did not list is looked up again only after this long.
 NO_MATCH_RETRY_DAYS = 7
 

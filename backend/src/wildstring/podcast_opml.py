@@ -6,12 +6,13 @@ network policy, SSRF checks and dedupe all apply per feed.
 """
 
 import logging
-import re
-import xml.etree.ElementTree as ET  # nosec B405 - DTDs are rejected before parsing
+import xml.etree.ElementTree as ET  # nosec B405 - only used to build XML, never parse it
 from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Annotated, Any
 
+from defusedxml import ElementTree as SafeET
+from defusedxml.common import DefusedXmlException
 from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -22,7 +23,6 @@ logger = logging.getLogger(__name__)
 MAX_OPML_BYTES = 1_000_000
 MAX_OPML_FEEDS = 1000
 MAX_IMPORT_BATCH = 10
-_DECLARATION = re.compile(rb"<!\s*(DOCTYPE|ENTITY)", re.IGNORECASE)
 
 
 class OpmlParseRequest(BaseModel):
@@ -48,11 +48,9 @@ def parse_opml(content: str) -> dict[str, Any]:
     data = content.encode("utf-8")
     if len(data) > MAX_OPML_BYTES:
         raise HTTPException(413, "podcast_opml_too_large")
-    if _DECLARATION.search(data):
-        raise HTTPException(422, "podcast_opml_invalid")
     try:
-        root = ET.fromstring(data)  # nosec B314 - size-bounded, no DTD or entities
-    except ET.ParseError:
+        root = SafeET.fromstring(data, forbid_dtd=True)
+    except (ET.ParseError, DefusedXmlException):
         raise HTTPException(422, "podcast_opml_invalid") from None
     if _local(root.tag) != "opml":
         raise HTTPException(422, "podcast_opml_invalid")

