@@ -318,6 +318,26 @@
     "invalid_podcast_audio_url": "The podcast audio URL is invalid or unreachable.",
     "podcast_audio_too_large": "The podcast audio file is too large.",
     "podcast_audio_upstream_failed": "The podcast host can't be reached right now. Try again later; if it keeps failing, check the server's network or outbound proxy.",
-    "podcast_audio_range_not_satisfiable": "The playback position is beyond the end of the podcast audio. Play from the start."
+    "podcast_audio_range_not_satisfiable": "The playback position is beyond the end of the podcast audio. Play from the start.",
+    "podcast_search_query_invalid": "Enter a show name between 1 and 100 characters.",
+    "podcast_search_query_is_url": "This is an RSS URL. Preview or add it directly.",
+    "podcast_search_region_invalid": "The podcast search region is invalid. Contact your administrator.",
+    "podcast_search_rate_limited": "Too many searches. Try again shortly.",
+    "podcast_search_upstream_rate_limited": "Apple Podcasts is limiting searches temporarily. Try again later.",
+    "podcast_search_upstream_failed": "The podcast directory is unavailable. Try again later or paste an RSS URL.",
+    "podcast_search_timeout": "The podcast directory timed out. Try again later.",
+    "podcast_feed_fetch_failed": "Could not fetch this RSS feed. Check the URL or try again later.",
+    "podcast_feed_parse_failed": "This address did not return readable podcast RSS.",
+    "podcast_feed_invalid": "This address is not a valid podcast RSS feed.",
+    "podcast_search_settings_conflict": "Podcast search settings changed elsewhere. Refresh and try again.",
+    "podcast_opml_too_large": "The OPML file exceeds the 1 MB limit.",
+    "podcast_opml_too_many": "The OPML file contains more than 1000 shows.",
+    "podcast_opml_invalid": "Could not read this file. Choose an OPML export from a podcast app.",
+    "podcast_opml_empty": "No RSS shows were found in this OPML file.",
+    "podcast_opml_feed_failed": "This show could not be imported. Try adding it separately later.",
+    "podcast_identity_backfill_running": "Identity backfill is already running. Wait for it to finish.",
+    "podcast_merge_unverified": "These shows have not been verified as the same Apple podcast and cannot be merged.",
+    "podcast_merge_busy": "Episodes from these shows are still downloading. Wait before merging.",
+    "podcast_merge_same": "A show cannot be merged with itself."
   }
 }

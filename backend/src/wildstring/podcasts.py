@@ -15,6 +15,7 @@ import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
 from collections import deque
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from threading import Event, RLock, Thread
@@ -45,6 +46,7 @@ from wildstring.podcast_download_settings import (
     ordered_episodes,
 )
 from wildstring.podcast_follows import FollowUpdate, follow, followed_ids
+from wildstring.podcast_identity import feed_keys, normalize_feed_url
 from wildstring.podcast_progress import ProgressState, ProgressWrite, get_progress, save_progress
 from wildstring.podcast_publishers import (
     PodcastPublishers,
@@ -326,9 +328,32 @@ def format_bytes_human(n: int | float) -> str:
     return f"{n:.1f} PB"
 
 
+def find_existing_podcast(conn, keys: set[str], itunes_id: str | None, feed_url: str):
+    """Return the oldest programme sharing a feed key or a verified iTunes id."""
+    marks = ",".join("?" * len(keys)) or "NULL"
+    row = conn.execute(
+        f"""SELECT id FROM podcasts WHERE feed_url=?
+        OR feed_url_normalized IN ({marks}) OR resolved_feed_url_normalized IN ({marks})
+        OR (? IS NOT NULL AND itunes_id=?)
+        ORDER BY feed_url<>?, created_at LIMIT 1""",  # nosec B608 -- placeholders only
+        (feed_url, *sorted(keys), *sorted(keys), itunes_id, itunes_id, feed_url),
+    ).fetchone()
+    return row["id"] if row else None
+
+
+def remember_itunes_id(conn, podcast_id: str, itunes_id: str | None):
+    if itunes_id:
+        conn.execute(
+            "UPDATE podcasts SET itunes_id=?, itunes_check_status='verified', "
+            "itunes_checked_at=COALESCE(itunes_checked_at, ?) WHERE id=? AND itunes_id IS NULL",
+            (itunes_id, now(), podcast_id),
+        )
+
+
 class PodcastCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
     feed_url: str = Field(min_length=5, max_length=1024)
+    itunes_id: str | None = Field(default=None, pattern=r"^[1-9][0-9]{0,19}$")
     auto_update: bool = True
     update_interval_minutes: int = Field(default=60, ge=5, le=1440)
     download_policy: Literal["latest_3", "latest_5", "latest_10", "unplayed", "all", "none"] = (
@@ -484,6 +509,9 @@ def fetch_and_parse_feed(
             req, timeout=timeout
         ) as resp:
             data = read_bounded(resp, MAX_FEED_BYTES)
+            resolved_url = resp.geturl() if hasattr(resp, "geturl") else feed_url
+            if not isinstance(resolved_url, str) or not resolved_url:
+                resolved_url = feed_url
     except PodcastURLRejected as exc:
         raise HTTPException(status_code=422, detail=rejected_detail(exc, "feed")) from exc
     except PodcastPayloadTooLarge as exc:
@@ -491,17 +519,23 @@ def fetch_and_parse_feed(
     except Exception as e:
         logger.error("Failed to fetch podcast feed host=%s: %s", urlsplit(feed_url).hostname, e)
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="无法获取播客 RSS 源",
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="podcast_feed_fetch_failed",
         ) from e
+    parsed = parse_feed_document(data, feed_url)
+    parsed["resolved_url"] = resolved_url
+    return parsed
 
+
+def parse_feed_document(data: bytes, feed_url: str) -> dict[str, Any]:
+    """Parse RSS or Atom bytes into the subscription shape shared by add and preview."""
     try:
         root = ET.fromstring(data)  # nosec B314
     except Exception as e:
         logger.error("Failed to parse podcast XML host=%s: %s", urlsplit(feed_url).hostname, e)
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"RSS 源 XML 解析失败: {e}",
+            detail="podcast_feed_parse_failed",
         ) from e
 
     channel = root.find("channel")
@@ -511,7 +545,7 @@ def fetch_and_parse_feed(
             return _parse_atom_feed(root, feed_url)
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="无效的播客源：未找到 channel 或 feed 根节点",
+            detail="podcast_feed_invalid",
         )
 
     title = channel.findtext("title") or "未命名播客"
@@ -600,6 +634,7 @@ def fetch_and_parse_feed(
         "author": author.strip(),
         "description": description.strip(),
         "cover_url": cover_url.strip(),
+        "new_feed_url": (channel.findtext(f"{ITUNES_NS}new-feed-url") or "").strip(),
         "episodes": episodes,
     }
 
@@ -682,6 +717,7 @@ class PodcastManager:
         self.storage_dir = Path(storage_dir) if storage_dir else Path("data/podcasts")
         self.stopping = Event()
         self.thread: Thread | None = None
+        self.identity_backfill: Any | None = None
 
         # Download queue & workers
         self._download_queue: queue.Queue[str] = queue.Queue()
@@ -1039,14 +1075,22 @@ class PodcastManager:
         slow_download: bool = False,
         max_retries: int = 3,
         retry_backoff_base: int = 5,
+        itunes_id: str | None = None,
+        verify_itunes_id: Callable[..., str | None] | None = None,
     ) -> dict[str, Any]:
-        with self.database.connect() as conn:
-            existing = conn.execute(
-                "SELECT id FROM podcasts WHERE feed_url = ?", (feed_url,)
-            ).fetchone()
+        """Add one feed, reusing an existing programme with the same feed or iTunes id.
+
+        A client-supplied iTunes id is only stored after ``verify_itunes_id`` confirms
+        that Apple lists the same feed for it, so a wrong id cannot redirect later
+        additions of another show to this row.
+        """
+        verify = verify_itunes_id or (lambda *_args: None)
+        verified = verify(itunes_id, feed_url) if itunes_id else None
+        with self.database.connect(write=True) as conn:
+            existing = find_existing_podcast(conn, feed_keys(feed_url), verified, feed_url)
             if existing:
-                podcast_id = existing["id"]
-                return self.get_podcast_detail(podcast_id, user_id=None)
+                remember_itunes_id(conn, existing, verified)
+                return self.get_podcast_detail(existing, user_id=None)
 
         proxy_mode, proxy_url = self.get_network_policy()
         parsed = fetch_and_parse_feed(
@@ -1055,24 +1099,31 @@ class PodcastManager:
             proxy_url=proxy_url,
             allow_fake_ip=self.allow_fake_ip,
         )
+        resolved_url = parsed.get("resolved_url") or feed_url
+        if itunes_id and verified is None and feed_keys(resolved_url) - feed_keys(feed_url):
+            verified = verify(itunes_id, feed_url, resolved_url)
         podcast_id = str(uuid4())
         created_time = now()
 
         with self.database.connect(write=True) as conn:
             conn.execute("BEGIN IMMEDIATE")
-            # A concurrent addition may have fetched the same feed while we parsed it.
-            existing = conn.execute(
-                "SELECT id FROM podcasts WHERE feed_url=?", (feed_url,)
-            ).fetchone()
+            # A concurrent addition may have fetched the same feed while we parsed it,
+            # or the feed may redirect to a programme that is already in the catalog.
+            existing = find_existing_podcast(
+                conn, feed_keys(feed_url, resolved_url), verified, feed_url
+            )
             if existing:
-                return self.get_podcast_detail(existing["id"], user_id=None)
+                remember_itunes_id(conn, existing, verified)
+                return self.get_podcast_detail(existing, user_id=None)
             conn.execute(
                 """
                 INSERT INTO podcasts (
                     id, title, author, description, feed_url, cover_url,
                     auto_update, update_interval_minutes, download_policy, retention_policy,
-                    slow_download, max_retries, retry_backoff_base, last_updated_at, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    slow_download, max_retries, retry_backoff_base, last_updated_at, created_at,
+                    itunes_id, feed_url_normalized, resolved_feed_url_normalized,
+                    itunes_check_status, itunes_checked_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     podcast_id,
@@ -1090,6 +1141,11 @@ class PodcastManager:
                     retry_backoff_base,
                     created_time,
                     created_time,
+                    verified,
+                    normalize_feed_url(feed_url) or None,
+                    normalize_feed_url(resolved_url) or None,
+                    "verified" if verified else None,
+                    created_time if verified else None,
                 ),
             )
             for ep in parsed["episodes"]:
@@ -2137,11 +2193,31 @@ class PodcastManager:
             }
 
 
-def podcast_router(manager: PodcastManager, auth: Auth) -> APIRouter:
+def podcast_router(
+    manager: PodcastManager, auth: Auth, *, search_regions: str = "us,tw,cn"
+) -> APIRouter:
+    from wildstring import podcast_opml
+    from wildstring.podcast_identity_backfill import IdentityBackfill
+    from wildstring.podcast_search import PodcastSearch
+
     router = APIRouter(prefix="/api/v1/podcasts", tags=["podcasts"])
     publishers = PodcastPublishers(manager.database)
     catalog_policy = PodcastCatalogPolicy(manager.database)
     catalog_policy.routes(router, auth)
+    search = PodcastSearch(manager, regions=search_regions)
+    search.routes(router, auth)
+    backfill = IdentityBackfill(manager, search)
+    backfill.routes(router, auth)
+    # The application lifespan schedules the automatic start-up run on this instance.
+    manager.identity_backfill = backfill
+    podcast_opml.routes(
+        router,
+        auth,
+        database=manager.database,
+        annotate=search.annotate,
+        add_and_follow=lambda user, url: add_and_follow(user, PodcastCreateRequest(feed_url=url)),
+        require_add=lambda user: catalog_policy.require_add(user, {"feed_url"}),
+    )
 
     @router.get("/publishers", response_model=list[PublisherSummary])
     def list_publishers(user: Annotated[dict, Depends(auth.require_session)]):
@@ -2202,18 +2278,13 @@ def podcast_router(manager: PodcastManager, auth: Auth) -> APIRouter:
         manager.auto_downloads.reconcile(user["id"], podcast_id)
         return result
 
-    @router.post(
-        "",
-        response_model=PodcastDetailResponse,
-        dependencies=[Depends(auth.require_client)],
-    )
-    def subscribe_podcast(
-        payload: PodcastCreateRequest,
-        user: Annotated[dict, Depends(auth.require_session)],
-    ):
+    def add_and_follow(user: dict, payload: PodcastCreateRequest) -> dict:
+        """Shared by the add dialog and OPML import: policy, dedupe, follow, auto-download."""
         catalog_policy.require_add(user, payload.model_fields_set)
         result = manager.subscribe(
             feed_url=payload.feed_url,
+            itunes_id=payload.itunes_id,
+            verify_itunes_id=search.verify_itunes_id,
             auto_update=payload.auto_update,
             update_interval_minutes=payload.update_interval_minutes,
             download_policy=payload.download_policy,
@@ -2238,6 +2309,17 @@ def podcast_router(manager: PodcastManager, auth: Auth) -> APIRouter:
         else:
             manager.auto_downloads.reconcile(user["id"], podcast_id)
         return manager.get_podcast_detail(result["podcast"]["id"], user["id"])
+
+    @router.post(
+        "",
+        response_model=PodcastDetailResponse,
+        dependencies=[Depends(auth.require_client)],
+    )
+    def subscribe_podcast(
+        payload: PodcastCreateRequest,
+        user: Annotated[dict, Depends(auth.require_session)],
+    ):
+        return add_and_follow(user, payload)
 
     @router.put(
         "/{podcast_id}/settings",

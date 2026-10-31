@@ -15,6 +15,8 @@ import { MetadataReviewDialog } from './metadata-review';
 import { FolderMetadataEditor } from './folder-metadata';
 import { LibrarySources } from './library-sources';
 import { MusicLibraryManager, LibrarySwitcher } from './music-libraries';
+import { PodcastIdentityAdmin } from './podcast-identity-admin';
+import { PodcastSearchSettings } from './podcast-search-settings';
 import { PodcastCatalogSettings } from './podcast-catalog-settings';
 
 type Directory = {
@@ -163,6 +165,8 @@ export function Management({
 }) {
   const canOwner = profile === 'owner';
   const canImport = profile === 'owner' || profile === 'librarian';
+  // Library admins (曲库管理员) open 设置 for podcast search and duplicate management only.
+  const canPodcastAdmin = canImport;
   const [tab, updateTab] = useState<ManagementTab>(initialTab);
   function setTab(value: ManagementTab) {
     updateTab(value);
@@ -310,7 +314,9 @@ export function Management({
           ] as const
         )
           .filter(
-            ([key]) => canOwner || (key !== 'settings' && key !== 'users' && key !== 'diagnostics'),
+            ([key]) =>
+              canOwner ||
+              (key === 'settings' ? canPodcastAdmin : key !== 'users' && key !== 'diagnostics'),
           )
           .filter(([key]) => canImport || key !== 'intake')
           .map(([key, label]) => (
@@ -338,8 +344,14 @@ export function Management({
             {tab === 'diagnostics' && <SystemDiagnostics />}
             {tab === 'settings' && (
               <>
-                <MusicLibraryManager />
-                <PodcastCatalogSettings />
+                {canOwner && (
+                  <>
+                    <MusicLibraryManager />
+                    <PodcastCatalogSettings />
+                  </>
+                )}
+                <PodcastSearchSettings />
+                <PodcastIdentityAdmin />
               </>
             )}
             {tab === 'intake' && (
@@ -585,7 +597,7 @@ export function Management({
                 )}
               </section>
             )}
-            {tab === 'settings' && (
+            {tab === 'settings' && canOwner && (
               <>
                 <ProviderSettings />
                 <section className="management-card">

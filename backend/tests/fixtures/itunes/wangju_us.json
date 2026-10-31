@@ -1,0 +1,30 @@
+{
+ "resultCount": 1,
+ "results": [
+  {
+   "wrapperType": "track",
+   "kind": "podcast",
+   "collectionId": 1623536653,
+   "trackId": 1623536653,
+   "artistName": "王局千古",
+   "collectionName": "「王局拍案」搬自YouTube",
+   "collectionViewUrl": "https://podcasts.apple.com/us/podcast/%E7%8E%8B%E5%B1%80%E6%8B%8D%E6%A1%88-%E6%90%AC%E8%87%AAyoutube/id1623536653?uo=4",
+   "feedUrl": "https://feed.firstory.me/rss/user/cl316z4xe006w01wrfn4p73xq",
+   "artworkUrl100": "https://is1-ssl.mzstatic.com/image/thumb/Podcasts122/v4/8f/50/6d/8f506d3e-5b76-7358-7895-c8f8d4a64c2b/mza_14412880125832916587.jpg/100x100bb.jpg",
+   "artworkUrl600": "https://is1-ssl.mzstatic.com/image/thumb/Podcasts122/v4/8f/50/6d/8f506d3e-5b76-7358-7895-c8f8d4a64c2b/mza_14412880125832916587.jpg/600x600bb.jpg",
+   "releaseDate": "2022-05-12T09:51:00Z",
+   "collectionExplicitness": "notExplicit",
+   "trackExplicitness": "cleaned",
+   "trackCount": 2,
+   "country": "USA",
+   "primaryGenreName": "Personal Journals",
+   "genres": [
+    "Personal Journals",
+    "Podcasts",
+    "Society & Culture",
+    "News",
+    "Politics"
+   ]
+  }
+ ]
+}

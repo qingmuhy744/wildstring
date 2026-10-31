@@ -89,6 +89,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         providers.start()
         platform.start()
         podcasts.start()
+        if current.podcast_identity_auto_backfill and podcasts.identity_backfill is not None:
+            podcasts.identity_backfill.schedule_auto(
+                current.podcast_identity_auto_backfill_delay_seconds
+            )
         try:
             async with mcp.run():
                 yield
@@ -166,7 +170,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(management_router(management, auth, providers))
     app.include_router(experience_router(repository, auth, providers, platform))
     app.include_router(podcasts.resources.router(auth))
-    app.include_router(podcast_router(podcasts, auth))
+    app.include_router(
+        podcast_router(podcasts, auth, search_regions=current.podcast_search_regions)
+    )
     app.include_router(catalog_gaps_router(database, auth))
 
     app.include_router(diagnostics_router(diagnostics, auth, database))
