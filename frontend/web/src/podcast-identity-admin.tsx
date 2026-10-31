@@ -9,6 +9,8 @@ type BackfillRun = {
   ambiguous: number;
   finished_at?: string | null;
   stopped_reason?: string | null;
+  trigger?: 'auto' | 'manual';
+  duplicates?: { verified: number; possible: number } | null;
 };
 
 export type BackfillStatus = Partial<BackfillRun> & {
@@ -66,7 +68,6 @@ export function PodcastIdentityAdmin() {
   const [retryUnmatched, setRetryUnmatched] = useState(false);
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState('');
-  const [keep, setKeep] = useState<Record<string, string>>({});
   const [confirming, setConfirming] = useState('');
   const wasRunning = useRef(false);
 
@@ -126,15 +127,13 @@ export function PodcastIdentityAdmin() {
   }
 
   async function merge(pair: DuplicatePair) {
-    const keepId = keep[pairKey(pair)] || pair.suggested_keep_id;
-    const mergeId = pair.podcasts.find((show) => show.id !== keepId)?.id;
-    if (!mergeId) return;
     setBusy(pairKey(pair));
     setMessage('');
     try {
       const result = await api<MergeResult>(`${BASE}/merge`, {
         method: 'POST',
-        body: JSON.stringify({ keep_id: keepId, merge_id: mergeId }),
+        // The server picks the show to keep; the pair order does not matter.
+        body: JSON.stringify({ podcast_ids: pair.podcasts.map((show) => show.id) }),
       });
       setMessage(
         `已合并：移入 ${result.episodes_moved} 集，对齐 ${result.episodes_matched} 集，` +
@@ -160,7 +159,9 @@ export function PodcastIdentityAdmin() {
       <p className="muted">
         为早期添加的节目补上 Apple Podcasts 编号：按节目名称搜索，但只有 Apple 记录的 RSS
         地址和本节目的地址（或它重定向到的地址）一致时才采用，绝不只凭名称匹配。查询与用户搜索共用
-        Apple 的调用额度，并给用户留出余量，所以节目多时会慢慢进行。
+        Apple
+        的调用额度，并给用户留出余量，所以节目多时会慢慢进行。服务器启动几分钟后会自动回填一次缺少编号的节目（未找到的
+        7 天内不再重试），自动回填只补编号、不会合并，重复节目需要在下面确认。
       </p>
       {status && (
         <p>
@@ -174,9 +175,12 @@ export function PodcastIdentityAdmin() {
             ? status.paused_until
               ? `等待 Apple 频率限制…已检查 ${run.processed} 个`
               : `正在检查…已检查 ${run.processed} 个`
-            : `上次回填：检查 ${run.processed} 个`}
+            : `${run.trigger === 'auto' ? '上次回填（启动后自动）' : '上次回填'}：检查 ${run.processed} 个`}
           ，匹配 {run.matched}，未找到 {run.no_match}，失败 {run.failed}
           {run.ambiguous ? `（${run.ambiguous} 个在 Apple 有多个编号，取最早的）` : ''}
+          {!status?.running && run.duplicates
+            ? `；发现已核实重复 ${run.duplicates.verified} 组、疑似 ${run.duplicates.possible} 组，待管理员确认`
+            : ''}
         </p>
       )}
       <label className="music-library-grant-option">
@@ -199,13 +203,16 @@ export function PodcastIdentityAdmin() {
       </div>
 
       <h3>重复节目</h3>
+      <p className="muted">
+        合并时保留哪个节目由服务器决定：订阅地址没有重定向的优先；两个都重定向或都没有时，保留关注更多的。
+      </p>
       {pairs.length === 0 ? (
         <p className="muted">没有发现重复的节目。</p>
       ) : (
         <ul className="podcast-duplicates" aria-label="重复节目">
           {[...verified, ...possible].map((pair) => {
             const id = pairKey(pair);
-            const keepId = keep[id] || pair.suggested_keep_id;
+            const keepId = pair.suggested_keep_id;
             const isVerified = pair.confidence === 'verified';
             return (
               <li key={id} className="podcast-duplicate">
@@ -220,21 +227,22 @@ export function PodcastIdentityAdmin() {
                 </p>
                 <div className="podcast-duplicate-shows">
                   {pair.podcasts.map((show) => (
-                    <label key={show.id} className="podcast-duplicate-show">
-                      {isVerified && (
-                        <input
-                          type="radio"
-                          name={`keep-${id}`}
-                          checked={keepId === show.id}
-                          disabled={Boolean(busy)}
-                          onChange={() => setKeep({ ...keep, [id]: show.id })}
-                          aria-label={`保留「${show.title}」${show.feed_url}`}
-                        />
-                      )}
+                    <div
+                      key={show.id}
+                      className="podcast-duplicate-show"
+                      role="group"
+                      aria-label={`「${show.title}」${show.feed_url}`}
+                    >
                       <span>
                         <span>
                           <strong>{show.title}</strong>
                           {show.author ? ` · ${show.author}` : ''}
+                          {isVerified && keepId === show.id && (
+                            <>
+                              {' '}
+                              <span className="podcast-duplicate-badge is-verified">将保留</span>
+                            </>
+                          )}
                         </span>
                         <small className="podcast-duplicate-feed">
                           {show.feed_url}
@@ -245,14 +253,14 @@ export function PodcastIdentityAdmin() {
                           {show.itunes_id ? '' : ' · 无 Apple 编号'}
                         </small>
                       </span>
-                    </label>
+                    </div>
                   ))}
                 </div>
                 {isVerified ? (
                   confirming === id ? (
                     <div className="podcast-search-settings-actions">
                       <span>
-                        把另一个节目的关注、播放进度和已下载文件并入所选节目，然后删除它？
+                        把另一个节目的单集、关注、播放进度和已下载文件并入标为「将保留」的节目，然后删除它？
                       </span>
                       <button
                         type="button"
@@ -276,7 +284,7 @@ export function PodcastIdentityAdmin() {
                         disabled={Boolean(busy)}
                         onClick={() => setConfirming(id)}
                       >
-                        合并到所选节目…
+                        合并…
                       </button>
                     </div>
                   )
