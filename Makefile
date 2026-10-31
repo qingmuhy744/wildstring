@@ -54,7 +54,7 @@ dev-web: ## Run React at 127.0.0.1:18781 with an API proxy
 android-design: ## Preview the Android design at http://127.0.0.1:18782/android-v1.html
 	$(RUN) python -m http.server 18782 --bind 127.0.0.1 --directory docs/design
 
-.PHONY: android-check android-test android-assemble android-codeql android-package android-ci android-connected-test android-locks android-release android-release-smoke
+.PHONY: android-check android-test android-assemble android-codeql android-package android-ci android-connected-test android-test-api android-locks android-release android-release-smoke
 android-check: ## Run Android Lint (requires JDK 21 and Android SDK 37)
 	$(ANDROID) :app:lintDebug
 
@@ -71,7 +71,7 @@ android-package: android-assemble ## Copy APK and SHA256SUMS into artifacts/andr
 	$(PYTHON) scripts/package_android.py
 
 android-ci: ## Check, test and package the native Android application
-	$(ANDROID) :app:assembleDebug :app:testDebugUnitTest :app:lintDebug
+	$(ANDROID) :app:assembleDebug :app:testDebugUnitTest :app:compileDebugAndroidTestKotlin :app:lintDebug
 	$(ANDROID) :app:assembleRelease :app:lintRelease
 	$(PYTHON) scripts/package_android.py
 
@@ -83,6 +83,9 @@ android-release: ## Build and verify a signed release APK (requires ANDROID sign
 
 android-release-smoke: ## Install and smoke-test the signed release APK on a disposable device
 	$(PYTHON) scripts/smoke_android_release.py
+
+android-test-api: ## Start a disposable synthetic API for local Android regression
+	WILDSTRING_WEB_TEST_PORT=19885 WILDSTRING_TEST_LARGE_LIBRARY=1 WILDSTRING_TEST_API_ONLY=1 $(RUN) python scripts/serve_web_tests.py
 
 android-connected-test: ## Run native UI/playback tests on a connected emulator/device
 	$(ANDROID) :app:connectedDebugAndroidTest $(ANDROID_TEST_ARGS)

@@ -84,6 +84,8 @@ dependencies {
     androidTestImplementation(libs.compose.test)
     androidTestImplementation(libs.android.test)
     androidTestImplementation(libs.test.runner)
+    // Compose otherwise pulls Espresso 3.5, whose hidden input API was removed in API 37.
+    androidTestImplementation(libs.espresso)
     androidTestImplementation(libs.mockwebserver)
     debugImplementation(libs.compose.tooling)
     debugImplementation(libs.compose.test.manifest)

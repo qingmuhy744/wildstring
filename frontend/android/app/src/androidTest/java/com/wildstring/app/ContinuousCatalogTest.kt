@@ -336,7 +336,7 @@ class ContinuousCatalogTest {
                     compose.onNodeWithContentDescription("设置").performClick()
                     compose.onNodeWithTag("setting-song-list-size").performScrollTo().performClick()
                     if (size == SongListSize.SMALL) capture("song-list-size-settings.png")
-                    compose.onNodeWithText(size.label).performClick()
+                    compose.onNodeWithText(compose.activity.getString(com.wildstring.app.ui.songListSizeLabel(size))).performClick()
                     compose.onNodeWithTag("mini-player").assertIsDisplayed()
                     assertEquals(size, vm.settings.state.value.songListSize)
                     compose.waitUntil(5_000) {
