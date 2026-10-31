@@ -179,8 +179,8 @@ test-multiple-libraries: ## Verify grants, cross-library playlists, personal fol
 test-libraries-web: build-web ## Verify library selection, owner configuration, grants and personal podcast follows
 	WILDSTRING_TEST_LIBRARIES=1 WILDSTRING_TEST_PODCAST=1 npm --prefix frontend/web run test -- music-libraries.spec.ts
 
-test-podcast-web: build-web ## Verify the day/night radio, podcast continuation and saved progress locally
-	WILDSTRING_TEST_PODCAST=1 npm --prefix frontend/web run test -- podcast-continuation.spec.ts podcast-player.spec.ts podcast-progress.spec.ts personal-settings.spec.ts
+test-podcast-web: build-web ## Verify radio playback, progress, directory search, OPML and identity management
+	WILDSTRING_TEST_PODCAST=1 npm --prefix frontend/web run test -- podcast-continuation.spec.ts podcast-player.spec.ts podcast-progress.spec.ts personal-settings.spec.ts podcast-search.spec.ts podcast-search-settings.spec.ts podcast-opml.spec.ts podcast-identity-admin.spec.ts
 
 test-large-web: build-web ## Verify real API pagination and continuous playback with 257 album tracks
 	WILDSTRING_TEST_LARGE_LIBRARY=1 npm --prefix frontend/web run test -- multipage-real.spec.ts
