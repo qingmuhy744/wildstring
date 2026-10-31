@@ -533,3 +533,122 @@ test('真实后端：切换账号后推荐偏好与私人连接隔离', async ({
   ).toHaveCount(0);
   await expect(panel.getByLabel('找歌与推荐模型连接')).toHaveValue('local');
 });
+
+test('每日推荐单曲菜单和多选保留当前播放，可预览歌词并保存自选歌单', async ({ page }, info) => {
+  const { tracks } = await fixture(page);
+  const panel = page.getByRole('region', { name: '音乐发现', exact: true });
+  const savedQueue = () =>
+    page.evaluate(() => {
+      const key = Object.keys(localStorage).find((key) => key.startsWith('wildstring:playback:'));
+      return key ? JSON.parse(localStorage.getItem(key)!) : null;
+    });
+  await panel.getByRole('button', { name: '播放推荐', exact: true }).click();
+  await expect.poll(async () => (await audio(page)).paused).toBe(false);
+  await page.locator('audio').evaluate((element: HTMLAudioElement) => element.pause());
+  const before = await audio(page);
+  const first = panel
+    .locator('.daily-track')
+    .filter({ has: page.getByRole('button', { name: `播放 ${tracks[0].title}`, exact: true }) });
+  if (info.project.name === 'desktop') await first.click({ button: 'right' });
+  else await first.getByRole('button', { name: /更多操作/ }).click();
+  await page.getByRole('menuitem', { name: '查看歌词', exact: true }).click();
+  const lyrics = page.getByRole('dialog', { name: `歌词 · ${tracks[0].title}` });
+  await expect(lyrics).toContainText('第一行');
+  await page.getByRole('button', { name: '关闭歌词预览' }).click();
+  expect((await audio(page)).source).toBe(before.source);
+  expect((await audio(page)).paused).toBe(true);
+  expect((await audio(page)).time).toBeCloseTo(before.time, 1);
+
+  await panel
+    .locator('.daily-track')
+    .last()
+    .getByRole('button', { name: /更多操作/ })
+    .click();
+  await page.getByRole('menuitem', { name: '下一首播放', exact: true }).click();
+  await expect
+    .poll(async () => (await savedQueue())?.tracks.map((track: any) => track.id))
+    .toEqual([tracks[0].id, tracks[1].id, tracks[1].id]);
+  await panel.getByRole('button', { name: '挑选歌曲', exact: true }).click();
+  await panel.getByRole('checkbox', { name: `选择 ${tracks[1].title}`, exact: true }).check();
+  await panel.getByRole('checkbox', { name: `选择 ${tracks[0].title}`, exact: true }).check();
+  await panel
+    .getByRole('group', { name: '挑选推荐歌曲' })
+    .getByRole('button', { name: '加入播放队列', exact: true })
+    .click();
+  await expect
+    .poll(async () => (await savedQueue())?.tracks.map((track: any) => track.id))
+    .toEqual([tracks[0].id, tracks[1].id, tracks[1].id, tracks[0].id, tracks[1].id]);
+  expect((await audio(page)).source).toBe(before.source);
+  expect((await audio(page)).paused).toBe(true);
+
+  await panel.getByRole('button', { name: '挑选歌曲', exact: true }).click();
+  await panel.getByRole('checkbox', { name: `选择 ${tracks[1].title}`, exact: true }).check();
+  await panel
+    .getByRole('group', { name: '挑选推荐歌曲' })
+    .getByRole('button', { name: '加入歌单…', exact: true })
+    .click();
+  const dialog = page.getByRole('dialog', { name: '加入歌单', exact: true });
+  await dialog.getByLabel('目标歌单').selectOption('new');
+  const playlistName = `我的今日挑选-${info.project.name}`;
+  await dialog.getByLabel('歌单名称').fill(playlistName);
+  await dialog.getByRole('button', { name: '确认加入' }).click();
+  await expect(dialog).not.toBeVisible();
+  const lists = await (await page.request.get('/api/v1/playlists?limit=100')).json();
+  const saved = lists.items.find((list: any) => list.name === playlistName);
+  expect(saved).toBeTruthy();
+  const content = await (await page.request.get(`/api/v1/playlists/${saved.id}/tracks`)).json();
+  expect(content.items.map((track: any) => track.id)).toEqual([tracks[1].id]);
+  expect((await audio(page)).paused).toBe(true);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({
+    path: `../../artifacts/daily-actions-${info.project.name}.png`,
+    fullPage: true,
+  });
+});
+
+test('每日推荐加入已有歌单失败保留所选，可重试且不重复创建歌单', async ({ page }) => {
+  const { tracks } = await fixture(page);
+  const panel = page.getByRole('region', { name: '音乐发现', exact: true });
+  let creates = 0,
+    writes = 0;
+  const list = {
+    id: 'daily-retry',
+    name: '失败重试歌单',
+    kind: 'manual',
+    version: 1,
+    track_count: 0,
+    duration_ms: 0,
+    cover_track_id: null,
+  };
+  await page.route('**/api/v1/playlists', async (route) => {
+    if (route.request().method() !== 'POST') return route.fallback();
+    creates++;
+    return route.fulfill({ json: list });
+  });
+  await page.route('**/api/v1/playlists/daily-retry', (route) => route.fulfill({ json: list }));
+  await page.route('**/api/v1/playlists/daily-retry/tracks', (route) => {
+    writes++;
+    expect(route.request().postDataJSON().track_ids).toEqual([tracks[0].id]);
+    return route.fulfill(
+      writes === 1
+        ? { status: 409, json: { detail: 'playlist_version_conflict' } }
+        : { json: { ...list, version: 2, track_count: 1 } },
+    );
+  });
+  await panel.getByRole('button', { name: '挑选歌曲', exact: true }).click();
+  await panel.getByRole('checkbox', { name: `选择 ${tracks[0].title}`, exact: true }).check();
+  await panel
+    .getByRole('group', { name: '挑选推荐歌曲' })
+    .getByRole('button', { name: '加入歌单…' })
+    .click();
+  const dialog = page.getByRole('dialog', { name: '加入歌单', exact: true });
+  await dialog.getByLabel('目标歌单').selectOption('new');
+  await dialog.getByLabel('歌单名称').fill(list.name);
+  await dialog.getByRole('button', { name: '确认加入' }).click();
+  await expect(dialog.getByRole('alert')).toContainText('歌单已创建');
+  await expect(dialog).toContainText('已选 1 首');
+  await dialog.getByRole('button', { name: '确认加入' }).click();
+  await expect(dialog).not.toBeVisible();
+  expect(creates).toBe(1);
+  expect(writes).toBe(2);
+});

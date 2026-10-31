@@ -6,6 +6,33 @@ import Testing
 @Suite("PlaybackService", .serialized)
 @MainActor
 struct PlaybackServiceTests {
+    @Test func podcastSpeedDoesNotStartPausedPlaybackOrAffectMusic() async throws {
+        let store = InMemoryQueueStore()
+        let episode = PlaybackService.Item(trackID: "podcast_ep_e1", title: "Episode", artist: "Show",
+            streamPath: "api/v1/podcasts/episodes/e1/stream")
+        try await store.saveQueue([episode], currentIndex: 0)
+        try await store.saveProgress(QueueProgress(index: 0, position: 42))
+        let service = try makeService(store: store)
+        await service.restore()
+        service.setPodcastPlaybackRate(1.5)
+        #expect(service.playbackRate == 1.5)
+        #expect(service.player.rate == 0)
+        #expect(service.currentTime == 42)
+        #expect(!service.isPlaying)
+        service.setPodcastPlaybackRate(.nan)
+        #expect(service.podcastPlaybackRate == 1.5)
+        let musicStore = InMemoryQueueStore()
+        try await musicStore.saveQueue([
+            PlaybackService.Item(trackID: "music", title: "Song", artist: "Artist",
+                streamPath: "api/v1/tracks/music/stream")
+        ], currentIndex: 0)
+        let music = try makeService(store: musicStore)
+        await music.restore()
+        music.setPodcastPlaybackRate(2)
+        #expect(music.playbackRate == 1)
+        #expect(music.player.rate == 0)
+    }
+
     private func makeService(store: any QueueStore) throws -> PlaybackService {
         PlaybackService(
             server: try ServerAddress(input: "music.example.com"),
@@ -35,12 +62,60 @@ struct PlaybackServiceTests {
         #expect(service.isPlaying == false)
     }
 
+    @Test func enqueuePreservesPausedPositionAndPersistsBatchOrder() async throws {
+        let store = InMemoryQueueStore()
+        let items = ["a", "b"].map { PlaybackService.Item(trackID: $0, title: $0, artist: "X", streamPath: "api/v1/tracks/\($0)/stream") }
+        try await store.saveQueue(items, currentIndex: 0)
+        try await store.saveProgress(QueueProgress(index: 0, position: 42))
+        let service = try makeService(store: store)
+        await service.restore()
+        let more = ["c", "d"].map { PlaybackService.Item(trackID: $0, title: $0, artist: "X", streamPath: "api/v1/tracks/\($0)/stream") }
+        #expect(service.enqueue(items: more, next: true))
+        #expect(service.currentItem?.id == items[0].id)
+        #expect(service.currentTime == 42)
+        #expect(!service.isPlaying)
+        #expect(service.items.map(\.trackID) == ["a", "c", "d", "b"])
+        await service.flushPersistence()
+        let restored = try makeService(store: store)
+        await restored.restore()
+        #expect(restored.items == service.items)
+        #expect(restored.currentTime == 42)
+    }
+
     @Test func restoreWithoutPersistedQueueKeepsEmptyState() async throws {
         let service = try makeService(store: InMemoryQueueStore())
         await service.restore()
         #expect(service.items.isEmpty)
         #expect(service.currentIndex == nil)
         #expect(service.currentItem == nil)
+    }
+
+    @Test func queueReorderAndRemovalPreservePausedTrackTimeAndRestoredPosition() async throws {
+        let store = InMemoryQueueStore()
+        let entries = ["a", "b", "a", "c"].map {
+            PlaybackService.Item(trackID: $0, title: $0, artist: "X", streamPath: "api/v1/tracks/\($0)/stream")
+        }
+        try await store.saveQueue(entries, currentIndex: 2)
+        try await store.saveProgress(QueueProgress(index: 2, position: 42.5))
+        let service = try makeService(store: store)
+        await service.restore()
+        service.movePlaybackEntries(fromOffsets: IndexSet(integer: 2), toOffset: 1)
+        service.removeQueueEntry(at: 0)
+        #expect(service.currentItem?.id == entries[2].id)
+        #expect(service.currentIndex == 0)
+        #expect(service.currentTime == 42.5)
+        #expect(service.lyricTime == 42.5)
+        #expect(!service.isPlaying)
+        #expect(service.items == [entries[2], entries[1], entries[3]])
+        service.removeQueueEntry(at: 0)
+        #expect(service.items.count == 3)
+        await service.flushPersistence()
+        let restored = try makeService(store: store)
+        await restored.restore()
+        #expect(restored.items == service.items)
+        #expect(restored.currentItem?.id == entries[2].id)
+        #expect(restored.currentTime == 42.5)
+        #expect(!restored.isPlaying)
     }
 
     @Test func persistedItemsWithoutArtworkFlagRemainReadable() throws {

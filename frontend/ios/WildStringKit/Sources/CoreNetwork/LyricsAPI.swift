@@ -22,15 +22,39 @@ public struct Lyrics: Decodable, Equatable, Sendable {
 public struct LyricLine: Decodable, Equatable, Sendable {
     public let timeMs: Int64?
     public let text: String
+    public let words: [LyricWord]?
+    public let translation: String?
+    public let romanization: String?
 
-    public init(timeMs: Int64?, text: String) {
+    public init(timeMs: Int64?, text: String, words: [LyricWord]? = nil, translation: String? = nil, romanization: String? = nil) {
         self.timeMs = timeMs
+        self.text = text
+        self.words = words
+        self.translation = translation
+        self.romanization = romanization
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case text, words, translation, romanization
+        case timeMs = "time_ms"
+    }
+}
+
+public struct LyricWord: Decodable, Equatable, Sendable {
+    public let startMs: Int64
+    public let endMs: Int64
+    public let text: String
+
+    public init(startMs: Int64, endMs: Int64, text: String) {
+        self.startMs = startMs
+        self.endMs = endMs
         self.text = text
     }
 
     enum CodingKeys: String, CodingKey {
+        case startMs = "start_ms"
+        case endMs = "end_ms"
         case text
-        case timeMs = "time_ms"
     }
 }
 

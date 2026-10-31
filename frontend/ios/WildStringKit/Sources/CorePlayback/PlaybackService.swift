@@ -85,10 +85,22 @@ public final class PlaybackService {
     public private(set) var errorMessage: String?
 
     public var items: [Item] { queue.items }
+    public var playbackItems: [Item] { queue.playbackItems }
     public var currentIndex: Int? { queue.currentIndex }
     public var currentItem: Item? { queue.current }
     public var repeatMode: PlaybackQueue.RepeatMode { queue.repeatMode }
     public var isShuffled: Bool { queue.isShuffled }
+    public private(set) var podcastPlaybackRate: Float = 1
+    public var playbackRate: Float {
+        currentItem?.trackID.hasPrefix("podcast_ep_") == true ? podcastPlaybackRate : 1
+    }
+
+    /// Sampled by visible lyric views; keeps animation separate from persistence ticks.
+    public var lyricTime: Double {
+        guard isPlaying, player.currentItem != nil else { return currentTime }
+        let seconds = player.currentTime().seconds
+        return seconds.isFinite ? transcodeBaseSeconds + seconds : currentTime
+    }
 
     @ObservationIgnored let server: ServerAddress
     @ObservationIgnored let player: AVPlayer
@@ -193,8 +205,15 @@ public final class PlaybackService {
         if player.currentItem == nil {
             startCurrent(autoplay: true, startAt: currentTime)
         } else {
-            player.play()
+            player.playImmediately(atRate: playbackRate)
         }
+    }
+
+    public func setPodcastPlaybackRate(_ rate: Float) {
+        guard (0.5...3).contains(rate) else { return }
+        podcastPlaybackRate = rate
+        if intendedPlaying { player.playImmediately(atRate: playbackRate) }
+        updateSystemNowPlaying()
     }
 
     public func pause() {
@@ -216,6 +235,20 @@ public final class PlaybackService {
 
     // MARK: - Queue editing and modes
 
+    @discardableResult
+    public func enqueue(items: [Item], next: Bool = false) -> Bool {
+        guard !items.isEmpty else { return false }
+        guard queue.count + items.count <= 5000 else {
+            errorMessage = "播放队列最多 5000 首。"
+            return false
+        }
+        let wasEmpty = queue.count == 0
+        queue.enqueue(items, next: next)
+        persistQueueAndProgress()
+        if wasEmpty { startCurrent(autoplay: true, startAt: 0) }
+        return true
+    }
+
     public func toggleShuffle() {
         queue.toggleShuffle()
         persistQueueAndProgress()
@@ -232,7 +265,13 @@ public final class PlaybackService {
     }
 
     public func removeQueueEntry(at index: Int) {
+        guard index != currentIndex else { return }
         queue.remove(at: index)
+        persistQueueAndProgress()
+    }
+
+    public func movePlaybackEntries(fromOffsets offsets: IndexSet, toOffset destination: Int) {
+        queue.movePlaybackEntries(fromOffsets: offsets, toOffset: destination)
         persistQueueAndProgress()
     }
 
@@ -451,7 +490,7 @@ public final class PlaybackService {
             )
             return
         }
-        if let planProvider, preferredBitrateKbps != nil {
+        if planProvider != nil, preferredBitrateKbps != nil {
             assetLoadTask = Task {
                 await self.resolveTranscodeAndStart(autoplay: autoplay, startAt: startAt)
             }
@@ -535,9 +574,10 @@ public final class PlaybackService {
     ) {
         let asset = AVURLAsset(url: url)
         if !url.isFileURL {
-            asset.resourceLoader.setDelegate(resourceLoader, queue: .main)
+            asset.resourceLoader.setDelegate(resourceLoader, queue: resourceLoader.callbackQueue)
         }
         let playerItem = AVPlayerItem(asset: asset)
+        playerItem.audioTimePitchAlgorithm = .timeDomain
         player.replaceCurrentItem(with: playerItem)
         observe(playerItem: playerItem)
         if isTranscode {
@@ -555,7 +595,7 @@ public final class PlaybackService {
             player.seek(to: CMTime(seconds: startAt, preferredTimescale: 600))
         }
         if autoplay {
-            player.play()
+            player.playImmediately(atRate: playbackRate)
             isPlaying = true
         } else {
             isPlaying = false
@@ -586,50 +626,25 @@ public final class PlaybackService {
     }
 
     private func observe(playerItem: AVPlayerItem) {
-        itemObservations = [
-            playerItem.observe(\.status, options: [.new]) { [weak self] item, _ in
-                let status = item.status
-                let error = item.error
-                Task { @MainActor [weak self] in
-                    self?.itemStatusChanged(status: status, error: error)
-                }
-            }
-        ]
+        // Handlers are built outside this main-actor method. Closures formed
+        // here inherit a main-actor check, and AVFoundation invokes KVO on its
+        // own queue, which traps in `_dispatch_assert_queue_fail`.
+        let box = PlaybackServiceBox(self)
+        let item = CallbackRef(value: playerItem)
+        itemObservations = [observeItemStatus(item, box: box)]
         if timeControlObservation == nil {
-            timeControlObservation = player.observe(\.timeControlStatus, options: [.new]) {
-                [weak self] player, _ in
-                let status = player.timeControlStatus
-                Task { @MainActor [weak self] in
-                    self?.timeControlChanged(status: status)
-                }
-            }
+            timeControlObservation = observeTimeControl(CallbackRef(value: player), box: box)
         }
         if let endObserver {
             NotificationCenter.default.removeObserver(endObserver)
         }
-        endObserver = NotificationCenter.default.addObserver(
-            forName: AVPlayerItem.didPlayToEndTimeNotification,
-            object: playerItem,
-            queue: .main
-        ) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                self?.handleItemEnded()
-            }
-        }
+        endObserver = observeItemEnded(item, box: box)
         if timeObserverToken == nil {
-            timeObserverToken = player.addPeriodicTimeObserver(
-                forInterval: CMTime(seconds: 1, preferredTimescale: 1),
-                queue: .main
-            ) { [weak self] time in
-                let seconds = time.seconds
-                Task { @MainActor [weak self] in
-                    self?.handleTick(seconds: seconds)
-                }
-            }
+            timeObserverToken = observePlaybackTicks(CallbackRef(value: player), box: box)
         }
     }
 
-    private func itemStatusChanged(status: AVPlayerItem.Status, error: Error?) {
+    fileprivate func itemStatusChanged(status: AVPlayerItem.Status, error: Error?) {
         switch status {
         case .failed:
             isPlaying = false
@@ -680,7 +695,7 @@ public final class PlaybackService {
         }
     }
 
-    private func timeControlChanged(status: AVPlayer.TimeControlStatus) {
+    fileprivate func timeControlChanged(status: AVPlayer.TimeControlStatus) {
         isPlaying = status == .playing
         isBuffering = status == .waitingToPlayAtSpecifiedRate
         if status == .paused {
@@ -689,7 +704,7 @@ public final class PlaybackService {
         updateSystemNowPlaying()
     }
 
-    private func handleTick(seconds: Double) {
+    fileprivate func handleTick(seconds: Double) {
         guard seconds.isFinite else { return }
         currentTime = transcodeBaseSeconds + seconds
         secondsSinceCheckpoint += 1
@@ -709,7 +724,7 @@ public final class PlaybackService {
         checkpointPodcast(event: isPlaying ? "progress" : "pause", force: false)
     }
 
-    private func handleItemEnded() {
+    fileprivate func handleItemEnded() {
         if pauseAfterCurrentTrack {
             pauseAfterCurrentTrack = false
             isPlaying = false
@@ -722,7 +737,7 @@ public final class PlaybackService {
             listening.reanchor(nowMs: Self.monotonicMs(), positionMs: 0, playing: true)
             player.seek(to: .zero)
             currentTime = 0
-            player.play()
+            player.playImmediately(atRate: playbackRate)
             isPlaying = true
             persistProgress()
             updateSystemNowPlaying()
@@ -867,6 +882,79 @@ public final class PlaybackService {
         func clearSystemNowPlaying() {}
     }
 #endif
+
+/// Holds the player service for callbacks AVFoundation makes off the main actor.
+final class PlaybackServiceBox: @unchecked Sendable {
+    nonisolated(unsafe) weak var service: PlaybackService?
+
+    init(_ service: PlaybackService) {
+        self.service = service
+    }
+}
+
+private struct CallbackRef<T>: @unchecked Sendable {
+    let value: T
+}
+
+/// Status KVO is delivered on an AVFoundation queue, not the main queue.
+private func observeItemStatus(
+    _ item: CallbackRef<AVPlayerItem>,
+    box: PlaybackServiceBox
+) -> NSKeyValueObservation {
+    item.value.observe(\.status, options: [.new]) { item, _ in
+        let status = item.status
+        let failure = item.error.map(CallbackRef.init(value:))
+        let service = box.service
+        Task { @MainActor in
+            service?.itemStatusChanged(status: status, error: failure?.value)
+        }
+    }
+}
+
+private func observeTimeControl(
+    _ player: CallbackRef<AVPlayer>,
+    box: PlaybackServiceBox
+) -> NSKeyValueObservation {
+    player.value.observe(\.timeControlStatus, options: [.new]) { player, _ in
+        let status = player.timeControlStatus
+        let service = box.service
+        Task { @MainActor in
+            service?.timeControlChanged(status: status)
+        }
+    }
+}
+
+private func observeItemEnded(
+    _ item: CallbackRef<AVPlayerItem>,
+    box: PlaybackServiceBox
+) -> NSObjectProtocol {
+    NotificationCenter.default.addObserver(
+        forName: AVPlayerItem.didPlayToEndTimeNotification,
+        object: item.value,
+        queue: .main
+    ) { _ in
+        let service = box.service
+        Task { @MainActor in
+            service?.handleItemEnded()
+        }
+    }
+}
+
+private func observePlaybackTicks(
+    _ player: CallbackRef<AVPlayer>,
+    box: PlaybackServiceBox
+) -> Any {
+    player.value.addPeriodicTimeObserver(
+        forInterval: CMTime(seconds: 1, preferredTimescale: 1),
+        queue: .main
+    ) { time in
+        let seconds = time.seconds
+        let service = box.service
+        Task { @MainActor in
+            service?.handleTick(seconds: seconds)
+        }
+    }
+}
 
 /// Serializes fire-and-forget persistence writes in call order.
 final class PersistenceQueue: @unchecked Sendable {

@@ -101,7 +101,7 @@ ios-test: ## Run the iOS core package unit tests
 ios-build: ios-gen ## Build the iOS app for the simulator
 	xcodebuild -project frontend/ios/WildString.xcodeproj -scheme WildString -destination 'generic/platform=iOS Simulator' build
 
-.PHONY: macos-gen macos-build macos-dmg
+.PHONY: macos-gen macos-build macos-dmg macos-test
 macos-gen: ## Generate the Mac Xcode project from frontend/macos/project.yml (requires XcodeGen)
 	cd frontend/macos && xcodegen generate
 
@@ -110,6 +110,9 @@ macos-build: macos-gen ## Build the Mac app
 
 macos-dmg: macos-build ## Pack the Mac app into a DMG under artifacts/
 	bash scripts/package_macos_dmg.sh
+
+macos-test: macos-gen ## Run native Mac assistant regression tests
+	xcodebuild -project frontend/macos/WildStringMac.xcodeproj -scheme WildString -destination 'platform=macOS' -configuration Debug -derivedDataPath artifacts/macos-test-derived CODE_SIGN_IDENTITY=- test
 
 scan: env ## Rescan the managed library; use SCAN_ARGS=--full to refresh all tags
 	$(RUN) python -m wildstring.scan $(SCAN_ARGS)

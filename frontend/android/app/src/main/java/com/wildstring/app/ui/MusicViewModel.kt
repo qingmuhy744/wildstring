@@ -864,17 +864,17 @@ class MusicViewModel @Inject constructor(
             c.repeatMode == Player.REPEAT_MODE_ALL -> c.repeatMode = Player.REPEAT_MODE_ONE
             else -> { c.repeatMode = Player.REPEAT_MODE_ALL; c.shuffleModeEnabled = true } }
     } }
-    fun addToQueue(tracks: List<Track>, next: Boolean = false) {
+    fun addToQueue(tracks: List<Track>, next: Boolean = false): Boolean {
+        val c = controller ?: return false
+        if (tracks.isEmpty()) return false
+        if (c.mediaItemCount + tracks.size > 5000) { mutable.update { it.copy(error = "播放队列最多 5000 项。") }; return false }
         localPlaybackEpoch++
-        controller?.let { c ->
-            if (tracks.isEmpty()) return
-            if (c.mediaItemCount + tracks.size > 5000) { mutable.update { it.copy(error = "播放队列最多 5000 项。") }; return }
-            tracks.forEach { repository.rememberPlaybackTrack(it) }
-            val items = tracks.map { it.mediaItem(repository) }
-            if (c.mediaItemCount == 0) play(tracks)
-            else if (next) c.addMediaItems(c.currentMediaItemIndex + 1, items)
-            else c.addMediaItems(items)
-        }
+        tracks.forEach { repository.rememberPlaybackTrack(it) }
+        val items = tracks.map { it.mediaItem(repository) }
+        if (c.mediaItemCount == 0) play(tracks)
+        else if (next) c.addMediaItems(c.currentMediaItemIndex + 1, items)
+        else c.addMediaItems(items)
+        return true
     }
     fun addToQueue(track: Track, next: Boolean = false) = addToQueue(listOf(track), next)
     fun playQueue(index: Int) { localPlaybackEpoch++; controller?.let { it.seekToDefaultPosition(index); it.prepare(); it.play() } }

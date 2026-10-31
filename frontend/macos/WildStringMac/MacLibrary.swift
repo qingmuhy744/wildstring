@@ -5,235 +5,73 @@ import SwiftUI
 struct MacMusicView: View {
     let client: WildstringClient
     let playback: PlaybackService
+    var favorites: MacFavorites?
+    var canManage = false
+    @Binding var focusSearch: Bool
 
     @State private var query = ""
     @State private var tracks: [Track] = []
+    @State private var total = 0
     @State private var message: String?
+    @State private var loading = true
+    @FocusState private var searchFocused: Bool
 
     var body: some View {
-        List(tracks) { track in
-            Button {
-                play(track)
-            } label: {
-                HStack(spacing: 10) {
-                    MacCover(client: client, trackID: track.hasCover ? track.id : nil, side: 36)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(track.title).lineLimit(1)
-                        Text(track.artists.joined(separator: " / "))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-                    Spacer()
-                    if playback.currentItem?.trackID == track.id {
-                        Image(systemName: "speaker.wave.2.fill")
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            }
-            .buttonStyle(.plain)
+        MacPlayableTracks(
+            client: client,
+            playback: playback,
+            favorites: favorites,
+            tracks: tracks,
+            emptyTitle: message == nil ? (query.isEmpty ? "曲库是空的" : "没有找到「\(query)」") : "无法加载曲库",
+            emptyDetail: message,
+            canManage: canManage,
+            isLoading: loading
+        )
+        .navigationTitle("全部歌曲")
+        .toolbar {
+            TextField("搜索歌曲、艺人或专辑", text: $query)
+                .textFieldStyle(.roundedBorder).frame(width: 260).focused($searchFocused)
         }
-        .navigationTitle("音乐")
-        .searchable(text: $query, prompt: "歌曲、艺人或专辑")
-        .overlay {
-            if tracks.isEmpty, message == nil, !query.isEmpty {
-                ContentUnavailableView.search(text: query)
-            } else if tracks.isEmpty, let message {
-                ContentUnavailableView("无法加载曲库", systemImage: "music.note", description: Text(message))
+        .onChange(of: focusSearch) { _, requested in
+            if requested { searchFocused = true; focusSearch = false }
+        }
+        .onAppear {
+            if focusSearch { searchFocused = true; focusSearch = false }
+        }
+        .safeAreaInset(edge: .bottom) {
+            if tracks.count < total {
+                Button("还有 \(total - tracks.count) 首") { Task { await load(reset: false) } }
+                    .buttonStyle(.bordered)
+                    .padding(8)
             }
         }
-        .task(id: query) { await load() }
+        .task(id: query) { await load(reset: true) }
     }
 
-    private func load() async {
+    private func load(reset: Bool) async {
+        if reset { loading = tracks.isEmpty }
         do {
             let text = query.trimmingCharacters(in: .whitespaces)
-            if !text.isEmpty {
-                try? await Task.sleep(for: .milliseconds(280))
+            if reset, !text.isEmpty {
+                try await Task.sleep(for: .milliseconds(280))
                 guard !Task.isCancelled else { return }
             }
-            tracks = try await client.tracks(limit: 80, query: text.isEmpty ? nil : text).items
+            let page = try await client.tracks(
+                limit: 200,
+                offset: reset ? 0 : tracks.count,
+                query: text.isEmpty ? nil : text
+            )
+            guard !Task.isCancelled else { return }
+            tracks = reset ? page.items : tracks + page.items
+            total = page.total
             message = nil
+        } catch is CancellationError {
+            return
         } catch {
-            message = "曲库暂时无法加载"
+            if reset { tracks = [] }
+            message = MacErrorText.message(for: error)
         }
-    }
-
-    private func play(_ track: Track) {
-        guard let index = tracks.firstIndex(where: { $0.id == track.id }) else { return }
-        playback.play(
-            items: tracks.map { item in
-                PlaybackService.Item(
-                    trackID: item.id,
-                    title: item.title,
-                    artist: item.artists.joined(separator: " / "),
-                    album: item.album,
-                    hasCover: item.hasCover,
-                    streamPath: "api/v1/tracks/\(item.id)/stream"
-                )
-            },
-            startingAt: index
-        )
-    }
-}
-
-struct MacDiscoverView: View {
-    let client: WildstringClient
-    let playback: PlaybackService
-
-    @State private var summary: ListeningSummary?
-    @State private var rankings: [RankingRow] = []
-    @State private var scope = "personal"
-    @State private var period = "30d"
-
-    var body: some View {
-        List {
-            if let summary {
-                Section("收听") {
-                    LabeledContent("播放次数", value: "\(summary.playCount)")
-                    LabeledContent("听过的歌", value: "\(summary.tracksPlayed)")
-                    LabeledContent("收藏", value: "\(summary.favorites)")
-                }
-            }
-            Section("排行") {
-                Picker("范围", selection: $scope) {
-                    Text("我的").tag("personal")
-                    Text("大家").tag("community")
-                }
-                .pickerStyle(.segmented)
-                Picker("时间", selection: $period) {
-                    Text("7 天").tag("7d")
-                    Text("30 天").tag("30d")
-                    Text("全部").tag("all")
-                }
-                ForEach(rankings) { row in
-                    Button {
-                        play(row.track)
-                    } label: {
-                        Text("\(row.rank). \(row.track.title)")
-                            .lineLimit(1)
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-        }
-        .navigationTitle("发现")
-        .task { await reload() }
-        .onChange(of: scope) { _, _ in Task { await reload() } }
-        .onChange(of: period) { _, _ in Task { await reload() } }
-    }
-
-    private func reload() async {
-        summary = try? await client.listeningSummary()
-        rankings = (try? await client.rankings(scope: scope, period: period, metric: "plays"))?.items ?? []
-    }
-
-    private func play(_ track: Track) {
-        let items = rankings.map(\.track)
-        guard let index = items.firstIndex(where: { $0.id == track.id }) else { return }
-        playback.play(
-            items: items.map { item in
-                PlaybackService.Item(
-                    trackID: item.id,
-                    title: item.title,
-                    artist: item.artists.joined(separator: " / "),
-                    album: item.album,
-                    hasCover: item.hasCover,
-                    streamPath: "api/v1/tracks/\(item.id)/stream"
-                )
-            },
-            startingAt: index
-        )
-    }
-}
-
-struct MacPodcastsView: View {
-    let client: WildstringClient
-    let playback: PlaybackService
-
-    @State private var shows: [PodcastSummary] = []
-    @State private var detail: PodcastDetail?
-    @State private var resume: PodcastEpisode?
-
-    var body: some View {
-        List {
-            if detail == nil {
-                ForEach(shows) { show in
-                    Button(show.title) { Task { await open(show.id) } }
-                        .buttonStyle(.plain)
-                }
-            } else if let detail {
-                Section {
-                    Button(detail.podcast.followed ? "取消订阅" : "订阅") {
-                        Task { await toggle(detail.podcast) }
-                    }
-                    Button("返回节目列表") { self.detail = nil }
-                }
-                Section(detail.podcast.title) {
-                    ForEach(detail.episodes) { episode in
-                        Button(episode.title) { choose(episode, in: detail.episodes) }
-                            .buttonStyle(.plain)
-                    }
-                }
-            }
-        }
-        .navigationTitle("电台")
-        .task { await loadShows() }
-        .confirmationDialog("从上次的位置继续？", isPresented: Binding(
-            get: { resume != nil },
-            set: { if !$0 { resume = nil } }
-        )) {
-            Button("继续") {
-                if let episode = resume, let detail {
-                    start(episode, in: detail.episodes, at: Double(episode.positionSeconds))
-                }
-                resume = nil
-            }
-            Button("从头播放") {
-                if let episode = resume, let detail {
-                    start(episode, in: detail.episodes, at: 0)
-                }
-                resume = nil
-            }
-        }
-    }
-
-    private func loadShows() async {
-        shows = (try? await client.podcasts(followed: true)) ?? []
-    }
-
-    private func open(_ id: String) async {
-        detail = try? await client.podcast(id: id)
-    }
-
-    private func toggle(_ show: PodcastSummary) async {
-        try? await client.setPodcastFollowed(id: show.id, followed: !show.followed)
-        await open(show.id)
-    }
-
-    private func choose(_ episode: PodcastEpisode, in episodes: [PodcastEpisode]) {
-        let remaining = episode.durationSeconds - episode.positionSeconds
-        if episode.positionSeconds > 15, episode.durationSeconds == 0 || remaining > 30 {
-            resume = episode
-        } else {
-            start(episode, in: episodes, at: 0)
-        }
-    }
-
-    private func start(_ episode: PodcastEpisode, in episodes: [PodcastEpisode], at position: Double) {
-        guard let index = episodes.firstIndex(where: { $0.id == episode.id }) else { return }
-        playback.play(
-            items: episodes.map { item in
-                PlaybackService.Item(
-                    trackID: "podcast_ep_\(item.id)",
-                    title: item.title,
-                    artist: "电台",
-                    streamPath: "api/v1/podcasts/episodes/\(item.id)/stream?proxy=1&cache=1"
-                )
-            },
-            startingAt: index,
-            position: position
-        )
+        loading = false
     }
 }
 
@@ -241,23 +79,72 @@ struct MacSettingsView: View {
     let session: MacSession
     @AppStorage("menuBarPlayerEnabled") private var menuBarPlayerEnabled = true
     @AppStorage("desktopLyricsClickThrough") private var clickThrough = false
+    @AppStorage("macPreferredBitrate") private var preferredBitrate = 0
+    @AppStorage("lyricsWordHighlight") private var wordHighlight = true
+    @AppStorage("lyricsShowTranslation") private var showTranslation = true
+    @AppStorage("lyricsShowRomanization") private var showRomanization = false
+    @AppStorage("macAppearance") private var appearance = "system"
 
     var body: some View {
         Form {
-            Toggle("在菜单栏显示播放器", isOn: $menuBarPlayerEnabled)
-            Text("关掉后，右边状态项里的野弦图标会消失。播放仍可从窗口和「控制」菜单操作。")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-            Toggle("桌面歌词穿透点击", isOn: $clickThrough)
-            Button("打开桌面歌词") {
-                NotificationCenter.default.post(name: .wildstringShowDesktopLyrics, object: nil)
+            Section("外观") {
+                Picker("日夜模式", selection: $appearance) {
+                    Text("跟随系统").tag("system")
+                    Text("浅色").tag("light")
+                    Text("深色").tag("dark")
+                }
+                .pickerStyle(.segmented)
+                Text("同时应用于曲库、歌词和全屏播放页。")
+                    .font(.caption).foregroundStyle(.secondary)
             }
-            Button("退出登录", role: .destructive) {
-                Task { await session.logout() }
+            Section("播放") {
+                Picker("播放音质", selection: $preferredBitrate) {
+                    Text("原音").tag(0)
+                    Text("AAC · 128 kbps").tag(128)
+                    Text("AAC · 192 kbps").tag(192)
+                    Text("AAC · 256 kbps").tag(256)
+                    Text("AAC · 320 kbps").tag(320)
+                }
+                Text("切换音质从下次播放生效。AAC 档位用于无损音源，已有有损音源保持原音。")
+                    .font(.caption).foregroundStyle(.secondary)
+                Toggle("在菜单栏显示播放器", isOn: $menuBarPlayerEnabled)
+            }
+            Section("歌词") {
+                Toggle("逐字高亮", isOn: $wordHighlight)
+                Toggle("显示翻译", isOn: $showTranslation)
+                Toggle("显示音译", isOn: $showRomanization)
+                Text("逐字高亮需要歌词包含单字时间；普通歌词仍按行显示。")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section("桌面歌词") {
+                Toggle("穿透点击", isOn: $clickThrough)
+                Text("开启后鼠标可点击歌词下方的窗口；需要移动或关闭歌词时，请先关闭穿透。")
+                    .font(.caption).foregroundStyle(.secondary)
+                Button(session.desktopLyricsVisible ? "关闭桌面歌词" : "打开桌面歌词") {
+                    NotificationCenter.default.post(name: .wildstringShowDesktopLyrics, object: nil)
+                }
+            }
+            Section("账号与服务器") {
+                LabeledContent("账号", value: session.username)
+                if let server = session.client?.server {
+                    LabeledContent("服务器", value: server.description)
+                    Link(destination: server.url) {
+                        Label("打开网页版", systemImage: "arrow.up.right.square")
+                    }
+                }
+                Text("账号资料、服务端连接和完整曲库管理可在网页版中设置。")
+                    .font(.caption).foregroundStyle(.secondary)
+                Button("退出登录", role: .destructive) {
+                    Task { await session.logout() }
+                }
             }
         }
         .formStyle(.grouped)
+        .frame(maxWidth: 760)
+        .frame(maxWidth: .infinity)
         .navigationTitle("设置")
-        .padding()
+        .onChange(of: preferredBitrate) { _, value in
+            session.playback?.preferredBitrateKbps = value == 0 ? nil : value
+        }
     }
 }

@@ -4,6 +4,7 @@ import { api, eventId, artist, time, type Playlist, type Track, type User } from
 import { Cover } from './cover';
 import { FavoriteButton, type Favorites } from './favorites';
 import { RowMenu } from './row-menu';
+import { RecommendationLyricsDialog, RecommendationPlaylistDialog } from './recommendation-dialogs';
 import type { Player } from './player';
 import { SyncModeControl } from './playback-sync';
 import { modeNames, QUEUE_LIMIT, type PlaybackMode } from './playback-state';
@@ -43,12 +44,24 @@ function Choices({
   favorites,
   feedback,
   onChange,
+  onPlaylist,
+  onLyrics,
+  onNotice,
+  onOpenAlbum,
+  selected,
+  onSelect,
 }: {
   items: Choice[];
   player: Player;
   favorites: Favorites;
   feedback?: (id: string, action: string) => void;
   onChange?: (items: Choice[]) => void;
+  onPlaylist: (tracks: Track[]) => void;
+  onLyrics: (track: Track) => void;
+  onNotice: (message: string) => void;
+  onOpenAlbum: (track: Track) => void;
+  selected?: Set<string>;
+  onSelect?: (id: string) => void;
 }) {
   return (
     <div className="discovery-list">
@@ -56,8 +69,33 @@ function Choices({
         <RowMenu
           key={track.id}
           label={track.title}
-          className={`discovery-track ${feedback ? 'daily-track' : ''} ${player.current?.id === track.id ? 'is-current' : ''}`}
+          className={`discovery-track ${feedback ? 'daily-track' : ''} ${player.current?.id === track.id ? 'is-current' : ''} ${selected?.has(track.id) ? 'is-selected' : ''}`}
           actions={[
+            {
+              label: '下一首播放',
+              icon: 'next',
+              run: () =>
+                onNotice(
+                  player.playNext(track)
+                    ? `下一首播放：${track.title}`
+                    : '播放队列已满，请先移除一些歌曲。',
+                ),
+            },
+            {
+              label: '加入播放队列',
+              icon: 'queue',
+              run: () =>
+                onNotice(
+                  player.enqueue(track)
+                    ? `已加入队列：${track.title}`
+                    : '播放队列已满，请先移除一些歌曲。',
+                ),
+            },
+            { label: '加入歌单…', icon: 'playlist', run: () => onPlaylist([track]) },
+            { label: '查看歌词', icon: 'draft', run: () => onLyrics(track) },
+            ...(track.album_id
+              ? [{ label: '查看所属专辑', icon: 'album' as const, run: () => onOpenAlbum(track) }]
+              : []),
             {
               label: favorites.ids.has(track.id) ? '取消收藏' : '收藏',
               icon: 'heart',
@@ -82,7 +120,14 @@ function Choices({
         >
           {feedback && (
             <span className="daily-track-number">
-              {player.current?.id === track.id ? (
+              {onSelect ? (
+                <input
+                  type="checkbox"
+                  aria-label={`选择 ${track.title}`}
+                  checked={selected?.has(track.id) ?? false}
+                  onChange={() => onSelect(track.id)}
+                />
+              ) : player.current?.id === track.id ? (
                 <PlaybackIndicator playing={player.playing} buffering={player.buffering} />
               ) : (
                 String(index + 1).padStart(2, '0')
@@ -94,6 +139,10 @@ function Choices({
             className="track-title"
             aria-current={player.current?.id === track.id ? 'true' : undefined}
             onClick={() => {
+              if (onSelect) {
+                onSelect(track.id);
+                return;
+              }
               player.start(
                 items.map((i) => i.track),
                 index,
@@ -166,14 +215,22 @@ export function Discover({
   favorites,
   onSaved,
   onConnections,
+  playlists,
+  onOpenAlbum,
 }: {
   player: Player;
   favorites: Favorites;
   onSaved: (list: Playlist) => void;
   onConnections: () => void;
+  playlists: Playlist[];
+  onOpenAlbum: (track: Track) => void;
 }) {
   const connections = useModelConnections();
   const [section, setSection] = useState('daily');
+  const [selecting, setSelecting] = useState(false);
+  const [selected, setSelected] = useState(new Set<string>());
+  const [playlistTracks, setPlaylistTracks] = useState<Track[] | null>(null);
+  const [lyricTrack, setLyricTrack] = useState<Track | null>(null);
   const [daily, setDaily] = useState<Daily | null>(null),
     [preferences, setPreferences] = useState<Preferences | null>(null);
   const [draftPreferences, setDraftPreferences] = useState<Preferences | null>(null);
@@ -187,6 +244,29 @@ export function Discover({
   const pending = useRef(false),
     feedbackPending = useRef(new Set<string>());
   const pendingLists = useRef(new Map<string, Playlist>());
+  const chosen =
+    daily?.items.filter(({ track }) => selected.has(track.id)).map(({ track }) => track) || [];
+  function selectTrack(id: string) {
+    setSelected((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+  function queueSelection(next = false) {
+    if (player.addToQueue(chosen, next)) {
+      setMessage(`已将 ${chosen.length} 首${next ? '安排为接下来播放' : '加入播放队列'}。`);
+      setSelected(new Set());
+      setSelecting(false);
+    } else setError('播放队列已满，请先移除一些歌曲。');
+  }
+  const choiceActions = {
+    onPlaylist: setPlaylistTracks,
+    onLyrics: setLyricTrack,
+    onNotice: setMessage,
+    onOpenAlbum,
+  };
   async function saveList(name: string, ids: string[]) {
     const key = JSON.stringify([name, ids]);
     let list = pendingLists.current.get(key);
@@ -397,6 +477,7 @@ export function Discover({
               items={discovery.items}
               player={player}
               favorites={favorites}
+              {...choiceActions}
               onChange={(items) => setDiscovery((current) => current && { ...current, items })}
             />
             {!discovery.items.length ? (
@@ -483,6 +564,8 @@ export function Discover({
               disabled={!!busy}
               onClick={() =>
                 void action('正在换一批…', async () => {
+                  setSelected(new Set());
+                  setSelecting(false);
                   if (!Array.isArray(preferences?.sources)) {
                     const page = await api<{ items: Track[] }>(
                       `/tracks?limit=${draftPreferences?.count || 20}`,
@@ -530,8 +613,60 @@ export function Discover({
             </button>
           </div>
         </div>
+        <div className="daily-selection" role="group" aria-label="挑选推荐歌曲">
+          <div>
+            <strong>{selecting ? `已选 ${chosen.length} 首` : '把今天想听的，放在一起'}</strong>
+            <p className="muted">可逐首加入队列，也可以多选后存入自己的歌单。</p>
+          </div>
+          <div className="toolbar-actions">
+            {selecting && (
+              <>
+                <button
+                  onClick={() =>
+                    setSelected(
+                      new Set(
+                        chosen.length === daily?.items.length
+                          ? []
+                          : daily?.items.map(({ track }) => track.id),
+                      ),
+                    )
+                  }
+                >
+                  {chosen.length === daily?.items.length ? '取消全选' : '全选'}
+                </button>
+                <button disabled={!chosen.length} onClick={() => queueSelection(true)}>
+                  下一首播放所选
+                </button>
+                <button disabled={!chosen.length} onClick={() => queueSelection()}>
+                  加入播放队列
+                </button>
+                <button disabled={!chosen.length} onClick={() => setPlaylistTracks(chosen)}>
+                  加入歌单…
+                </button>
+              </>
+            )}
+            <button
+              disabled={!daily?.items.length && !selecting}
+              aria-pressed={selecting}
+              onClick={() => {
+                setSelecting(!selecting);
+                setSelected(new Set());
+              }}
+            >
+              {selecting ? '完成挑选' : '挑选歌曲'}
+            </button>
+          </div>
+        </div>
         {daily && (
-          <Choices items={daily.items} player={player} favorites={favorites} feedback={feedback} />
+          <Choices
+            items={daily.items}
+            player={player}
+            favorites={favorites}
+            feedback={feedback}
+            {...choiceActions}
+            selected={selected}
+            onSelect={selecting ? selectTrack : undefined}
+          />
         )}
         <RecommendationSources
           items={daily?.source_status}
@@ -539,6 +674,26 @@ export function Discover({
           degraded={daily?.degraded}
         />
       </div>
+      {playlistTracks && (
+        <RecommendationPlaylistDialog
+          tracks={playlistTracks}
+          playlists={playlists}
+          onClose={() => setPlaylistTracks(null)}
+          onSaved={(list) => {
+            onSaved(list);
+            setMessage(`已加入「${list.name}」`);
+            setSelected(new Set());
+            setSelecting(false);
+          }}
+        />
+      )}
+      {lyricTrack && (
+        <RecommendationLyricsDialog
+          key={lyricTrack.id}
+          track={lyricTrack}
+          onClose={() => setLyricTrack(null)}
+        />
+      )}
       {draftPreferences && (
         <RecommendationPreferencesForm
           value={draftPreferences}

@@ -32,62 +32,7 @@ extension PlaybackService {
         center.skipBackwardCommand.isEnabled = true
         center.skipForwardCommand.preferredIntervals = [NSNumber(value: 30)]
         center.skipBackwardCommand.preferredIntervals = [NSNumber(value: 15)]
-
-        center.playCommand.addTarget { [weak self] _ in
-            Task { @MainActor in self?.resume() }
-            return .success
-        }
-        center.pauseCommand.addTarget { [weak self] _ in
-            Task { @MainActor in self?.pause() }
-            return .success
-        }
-        center.togglePlayPauseCommand.addTarget { [weak self] _ in
-            Task { @MainActor in self?.togglePlayPause() }
-            return .success
-        }
-        center.nextTrackCommand.addTarget { [weak self] _ in
-            Task { @MainActor in
-                guard let self else { return }
-                if self.currentItem?.trackID.hasPrefix("podcast_ep_") == true {
-                    self.seek(to: self.currentTime + 30)
-                } else {
-                    self.next()
-                }
-            }
-            return .success
-        }
-        center.previousTrackCommand.addTarget { [weak self] _ in
-            Task { @MainActor in
-                guard let self else { return }
-                if self.currentItem?.trackID.hasPrefix("podcast_ep_") == true {
-                    self.seek(to: self.currentTime - 15)
-                } else {
-                    self.previous()
-                }
-            }
-            return .success
-        }
-        center.skipForwardCommand.addTarget { [weak self] _ in
-            Task { @MainActor in
-                guard let self else { return }
-                self.seek(to: self.currentTime + 30)
-            }
-            return .success
-        }
-        center.skipBackwardCommand.addTarget { [weak self] _ in
-            Task { @MainActor in
-                guard let self else { return }
-                self.seek(to: self.currentTime - 15)
-            }
-            return .success
-        }
-        center.changePlaybackPositionCommand.addTarget { [weak self] event in
-            guard let event = event as? MPChangePlaybackPositionCommandEvent else {
-                return .commandFailed
-            }
-            Task { @MainActor in self?.seek(to: event.positionTime) }
-            return .success
-        }
+        installRemoteCommandHandlers(PlaybackServiceBox(self))
     }
 
     #if os(iOS)
@@ -159,7 +104,7 @@ extension PlaybackService {
             MPMediaItemPropertyTitle: item.title,
             MPMediaItemPropertyArtist: item.artist,
             MPNowPlayingInfoPropertyElapsedPlaybackTime: currentTime,
-            MPNowPlayingInfoPropertyPlaybackRate: isPlaying ? 1.0 : 0.0,
+            MPNowPlayingInfoPropertyPlaybackRate: isPlaying ? playbackRate : 0,
         ]
         if let album = item.album, !album.isEmpty {
             info[MPMediaItemPropertyAlbumTitle] = album
@@ -216,10 +161,90 @@ extension PlaybackService {
     private func applyArtwork(_ image: NowPlayingImage, to trackID: String) {
         guard currentItem?.trackID == trackID else { return }
         var info = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
-        info[MPMediaItemPropertyArtwork] = MPMediaItemArtwork(boundsSize: image.size) { _ in
-            image
-        }
+        info[MPMediaItemPropertyArtwork] = makeNowPlayingArtwork(ArtworkBox(image: image))
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+    }
+}
+
+/// MediaPlayer calls this on `MPNowPlayingInfoCenter/accessQueue`. A closure
+/// formed in a main-actor method carries an executor check and traps there.
+private struct ArtworkBox: @unchecked Sendable {
+    let image: NowPlayingImage
+}
+
+private func makeNowPlayingArtwork(_ box: ArtworkBox) -> MPMediaItemArtwork {
+    MPMediaItemArtwork(boundsSize: box.image.size) { _ in
+        box.image
+    }
+}
+
+/// Media Player invokes these handlers on its own queue. Building them in a
+/// main-actor method inserts an executor check that traps off the main queue.
+private func installRemoteCommandHandlers(_ box: PlaybackServiceBox) {
+    let center = MPRemoteCommandCenter.shared()
+    center.playCommand.addTarget { _ in
+        let service = box.service
+        Task { @MainActor in service?.resume() }
+        return .success
+    }
+    center.pauseCommand.addTarget { _ in
+        let service = box.service
+        Task { @MainActor in service?.pause() }
+        return .success
+    }
+    center.togglePlayPauseCommand.addTarget { _ in
+        let service = box.service
+        Task { @MainActor in service?.togglePlayPause() }
+        return .success
+    }
+    center.nextTrackCommand.addTarget { _ in
+        let service = box.service
+        Task { @MainActor in
+            guard let service else { return }
+            if service.currentItem?.trackID.hasPrefix("podcast_ep_") == true {
+                service.seek(to: service.currentTime + 30)
+            } else {
+                service.next()
+            }
+        }
+        return .success
+    }
+    center.previousTrackCommand.addTarget { _ in
+        let service = box.service
+        Task { @MainActor in
+            guard let service else { return }
+            if service.currentItem?.trackID.hasPrefix("podcast_ep_") == true {
+                service.seek(to: service.currentTime - 15)
+            } else {
+                service.previous()
+            }
+        }
+        return .success
+    }
+    center.skipForwardCommand.addTarget { _ in
+        let service = box.service
+        Task { @MainActor in
+            guard let service else { return }
+            service.seek(to: service.currentTime + 30)
+        }
+        return .success
+    }
+    center.skipBackwardCommand.addTarget { _ in
+        let service = box.service
+        Task { @MainActor in
+            guard let service else { return }
+            service.seek(to: service.currentTime - 15)
+        }
+        return .success
+    }
+    center.changePlaybackPositionCommand.addTarget { event in
+        guard let event = event as? MPChangePlaybackPositionCommandEvent else {
+            return .commandFailed
+        }
+        let seconds = event.positionTime
+        let service = box.service
+        Task { @MainActor in service?.seek(to: seconds) }
+        return .success
     }
 }
 

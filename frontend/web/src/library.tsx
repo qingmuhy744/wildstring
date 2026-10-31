@@ -1199,6 +1199,8 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
           </header>
           {view === 'discover' && (
             <Discover
+              playlists={operations.playlists}
+              onOpenAlbum={operations.onOpenAlbum!}
               player={player}
               favorites={favorites}
               onConnections={openModelConnections}

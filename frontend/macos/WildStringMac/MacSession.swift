@@ -4,28 +4,96 @@ import CryptoKit
 import Foundation
 import Observation
 
-enum MacPage: String, CaseIterable, Identifiable {
-    case music
+#if DEBUG
+/// Ad-hoc debug signing changes the app's Keychain access identity between
+/// builds. Keep the debug session in a separate local defaults suite so a
+/// rebuild or restart does not fail before the login screen can load.
+private final class MacDebugSessionStore: SessionStore, @unchecked Sendable {
+    private let defaults: UserDefaults
+    private let lock = NSLock()
+
+    init() {
+        defaults = UserDefaults(suiteName: "com.wildstring.mac.debug.session") ?? .standard
+    }
+
+    func loadSession(origin: String) throws -> StoredSession? {
+        let data = lock.withLock { defaults.data(forKey: key(origin)) }
+        guard let data else { return nil }
+        return try JSONDecoder().decode(StoredSession.self, from: data)
+    }
+
+    func saveSession(_ session: StoredSession, origin: String) throws {
+        let data = try JSONEncoder().encode(session)
+        lock.withLock { defaults.set(data, forKey: key(origin)) }
+    }
+
+    func clearSession(origin: String) throws {
+        lock.withLock { defaults.removeObject(forKey: key(origin)) }
+    }
+
+    private func key(_ origin: String) -> String {
+        "session.\(Data(origin.utf8).base64EncodedString())"
+    }
+}
+#endif
+
+enum MacPage: String, Identifiable, Hashable {
+    case tracks
+    case albums
+    case artists
+    case playlists
+    case favorites
     case discover
     case podcasts
+    case assistant
+    case listening
+    case devices
+    case notifications
+    case drafts
+    case manage
     case settings
+
+    static let library: [MacPage] = [.tracks, .albums, .artists, .playlists, .favorites]
+    static let explore: [MacPage] = [.discover, .podcasts, .assistant]
+    static let more: [MacPage] = [.listening, .devices, .notifications]
+    static let tools: [MacPage] = [.drafts]
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
-        case .music: return "音乐"
-        case .discover: return "发现"
+        case .tracks: return "全部歌曲"
+        case .albums: return "专辑"
+        case .artists: return "艺人"
+        case .playlists: return "歌单"
+        case .favorites: return "我喜欢"
+        case .discover: return "每日推荐"
         case .podcasts: return "电台"
+        case .assistant: return "音乐助手"
+        case .listening: return "收听记录"
+        case .devices: return "跨设备继续"
+        case .notifications: return "通知"
+        case .drafts: return "待确认草案"
+        case .manage: return "管理"
         case .settings: return "设置"
         }
     }
 
     var symbol: String {
         switch self {
-        case .music: return "music.note"
+        case .tracks: return "music.note"
+        case .albums: return "square.stack"
+        case .artists: return "person.2"
+        case .playlists: return "music.note.list"
+        case .favorites: return "heart"
         case .discover: return "sparkles"
         case .podcasts: return "antenna.radiowaves.left.and.right"
+        case .assistant: return "bubble.left.and.bubble.right"
+        case .listening: return "clock"
+        case .devices: return "arrow.triangle.2.circlepath"
+        case .notifications: return "bell"
+        case .drafts: return "checklist"
+        case .manage: return "slider.horizontal.3"
         case .settings: return "gearshape"
         }
     }
@@ -65,6 +133,7 @@ enum MacServers {
 @MainActor
 @Observable
 final class MacSession {
+    var focusLibrarySearch = false
     enum Phase: Equatable {
         case loading
         case connect
@@ -78,19 +147,32 @@ final class MacSession {
     var allowInsecureHTTP = false
     var isBusy = false
     var errorMessage: String?
-    var page: MacPage = .music
-    var showLyrics = true
+    var page: MacPage = .tracks
+    var desktopLyricsVisible = false
+    var showLyrics = false
     var showQueue = false
+    var showFullscreen = false
+    var selectedLibraryID: String?
 
     private(set) var client: WildstringClient?
     private(set) var playback: PlaybackService?
+    private(set) var favorites: MacFavorites?
+    private(set) var sync: MacPlaybackSync?
+    private(set) var assistant: MacAssistantModel?
+    private(set) var profile = "listener"
+
+    var canManage: Bool { profile != "listener" }
     private(set) var servers: [MacSavedServer] = []
 
-    private let store: KeychainSessionStore
+    private let store: any SessionStore
     private let queueStore: any QueueStore
 
     init() {
+#if DEBUG
+        store = MacDebugSessionStore()
+#else
         store = KeychainSessionStore(service: "com.wildstring.mac.session")
+#endif
         queueStore = (try? SwiftDataQueueStore.makeDefault()) ?? InMemoryQueueStore()
         servers = MacServers.load()
     }
@@ -139,9 +221,29 @@ final class MacSession {
     func logout() async {
         playback?.shutdown()
         playback = nil
+        favorites = nil
+        assistant = nil
+        sync?.stop()
+        sync = nil
+        profile = "listener"
+        if page == .manage { page = .tracks }
         if let client { try? await client.logout() }
         client = nil
         phase = .connect
+    }
+
+    func selectLibrary(_ id: String?) {
+        client?.selectLibrary(id)
+        selectedLibraryID = id
+        let favorites = favorites
+        Task { await favorites?.load() }
+        guard case .connected(let server, let username) = phase else { return }
+        let key = "mac.library.\(server)|\(username)"
+        if let id, !id.isEmpty {
+            UserDefaults.standard.set(id, forKey: key)
+        } else {
+            UserDefaults.standard.removeObject(forKey: key)
+        }
     }
 
     func seek(by seconds: Double) {
@@ -151,6 +253,7 @@ final class MacSession {
 
     private func activate(client: WildstringClient, address: ServerAddress, username: String) async {
         self.client = client
+        assistant = MacAssistantModel(client: client)
         let space = Self.spaceName(address.origin)
         let cache = AudioDiskCache(
             directory: FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
@@ -167,10 +270,17 @@ final class MacSession {
             }
         )
         playback.clientHeaderName = "macos"
+        let bitrate = UserDefaults.standard.integer(forKey: "macPreferredBitrate")
+        playback.preferredBitrateKbps = bitrate == 0 ? nil : bitrate
+        let rate = UserDefaults.standard.double(forKey: "podcastPlaybackRate")
+        if rate > 0 { playback.setPodcastPlaybackRate(Float(rate)) }
         playback.podcastDeviceID = Self.deviceID()
         let libraryKey = "mac.library.\(address.description)|\(username)"
         if let library = UserDefaults.standard.string(forKey: libraryKey), !library.isEmpty {
             client.selectLibrary(library)
+            selectedLibraryID = library
+        } else {
+            selectedLibraryID = nil
         }
         playback.submitListening = { [weak client] report in
             guard let client else { return false }
@@ -198,6 +308,12 @@ final class MacSession {
         }
         await playback.restore()
         self.playback = playback
+        let favorites = MacFavorites(client: client)
+        self.favorites = favorites
+        let sync = MacPlaybackSync(client: client, playback: playback, deviceId: Self.deviceID())
+        self.sync = sync
+        sync.start()
+        Task { await favorites.load() }
         MacServers.upsert(
             MacSavedServer(
                 address: address.description,
@@ -207,6 +323,9 @@ final class MacSession {
             )
         )
         servers = MacServers.load()
+        if let status = try? await client.authStatus() {
+            profile = status.user?.profile ?? "listener"
+        }
         phase = .connected(server: address.description, username: username)
     }
 

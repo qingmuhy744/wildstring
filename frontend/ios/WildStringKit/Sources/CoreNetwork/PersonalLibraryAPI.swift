@@ -212,6 +212,19 @@ extension WildstringClient {
         return try JSONDecoder().decode(DailyRecommendations.self, from: data)
     }
 
+    public func recommendationFeedback(trackID: String, action: String) async throws {
+        struct Body: Encodable {
+            let event_id: String
+            let track_id: String
+            let action: String
+        }
+        _ = try await perform(Request(
+            method: "POST", path: "api/v1/recommendations/feedback",
+            body: try JSONEncoder().encode(Body(event_id: UUID().uuidString, track_id: trackID, action: action)),
+            contentType: "application/json"
+        ))
+    }
+
     public func refreshDailyRecommendations() async throws -> DailyRecommendations {
         let data = try await perform(
             Request(

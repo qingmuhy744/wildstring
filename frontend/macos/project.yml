@@ -41,10 +41,26 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.wildstring.mac
         PRODUCT_NAME: WildString
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         CODE_SIGN_STYLE: Manual
         CODE_SIGN_IDENTITY: "-"
         ENABLE_HARDENED_RUNTIME: YES
         ENABLE_APP_SANDBOX: NO
+  WildStringMacTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: WildStringMacTests
+      - path: ../ios/WildStringKit/Tests/CoreNetworkTests/StubURLProtocol.swift
+    dependencies:
+      - target: WildString
+      - package: WildStringKit
+        product: CoreNetwork
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.wildstring.mac.tests
+        GENERATE_INFOPLIST_FILE: YES
+        CODE_SIGN_IDENTITY: "-"
 schemes:
   WildString:
     build:
@@ -52,3 +68,6 @@ schemes:
         WildString: all
     run:
       config: Debug
+    test:
+      targets:
+        - WildStringMacTests

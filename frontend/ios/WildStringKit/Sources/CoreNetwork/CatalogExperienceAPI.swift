@@ -58,6 +58,7 @@ public struct PodcastSummary: Decodable, Equatable, Sendable, Identifiable {
     public let totalEpisodes: Int
     public let unplayedEpisodes: Int
     public let followed: Bool
+    public let coverURL: URL?
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -68,12 +69,17 @@ public struct PodcastSummary: Decodable, Equatable, Sendable, Identifiable {
         totalEpisodes = try container.decodeIfPresent(Int.self, forKey: .totalEpisodes) ?? 0
         unplayedEpisodes = try container.decodeIfPresent(Int.self, forKey: .unplayedEpisodes) ?? 0
         followed = try container.decodeIfPresent(Bool.self, forKey: .followed) ?? false
+        coverURL = try container.decodeIfPresent(String.self, forKey: .coverURL).flatMap { value in
+            guard let url = URL(string: value), ["http", "https"].contains(url.scheme?.lowercased() ?? "") else { return nil }
+            return url
+        }
     }
 
     enum CodingKeys: String, CodingKey {
         case id, title, author, description, followed
         case totalEpisodes = "total_episodes"
         case unplayedEpisodes = "unplayed_episodes"
+        case coverURL = "cover_url"
     }
 }
 
@@ -173,6 +179,11 @@ extension WildstringClient {
     public func podcast(id: String) async throws -> PodcastDetail {
         let data = try await perform(Request(method: "GET", path: "api/v1/podcasts/\(id)"))
         return try JSONDecoder().decode(PodcastDetail.self, from: data)
+    }
+
+    public func podcastEpisode(id: String) async throws -> PodcastEpisode {
+        let data = try await perform(Request(method: "GET", path: "api/v1/podcasts/episodes/\(id)"))
+        return try JSONDecoder().decode(PodcastEpisode.self, from: data)
     }
 
     public func setPodcastFollowed(id: String, followed: Bool) async throws {
