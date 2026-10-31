@@ -90,6 +90,7 @@ final class ConnectionModel {
             do {
                 let status = try await client.authStatus()
                 if status.authenticated, let user = status.user {
+                    InterfaceLanguage.store(user.language)
                     await activate(
                         client: client,
                         address: address,
@@ -119,6 +120,7 @@ final class ConnectionModel {
             let address = try makeAddress(serverText, allowInsecureHTTP: allowInsecureHTTP)
             let client = WildstringClient(server: address, store: store)
             let user = try await client.login(username: username, password: password)
+            InterfaceLanguage.store(user.language)
             serverText = address.description
             password = ""
             await activate(
@@ -162,6 +164,8 @@ final class ConnectionModel {
         username = ""
         password = ""
         errorMessage = nil
+        // Signed out: follow the system language until the next account loads.
+        InterfaceLanguage.store(nil)
         phase = servers.isEmpty ? .connect : .servers
     }
 
@@ -188,6 +192,7 @@ final class ConnectionModel {
             do {
                 let status = try await client.authStatus()
                 if status.authenticated, let user = status.user {
+                    InterfaceLanguage.store(user.language)
                     await activate(
                         client: client,
                         address: address,
@@ -254,13 +259,14 @@ final class ConnectionModel {
         return hasher.finalize().prefix(8).map { String(format: "%02x", $0) }.joined()
     }
 
-    private static func fragmentCacheLimitBytes() -> Int64 {
-        let stored = UserDefaults.standard.object(forKey: "fragmentCacheLimitMB") as? Int
-        return Int64(stored ?? 512) * 1_048_576
-    }
-
-    private static func savedQualityBitrate() -> Int? {
-        Int(UserDefaults.standard.string(forKey: "playbackQuality") ?? "original")
+    private static func deviceID() -> String {
+        let defaults = UserDefaults.standard
+        if let stored = defaults.string(forKey: "playbackSyncDeviceID"), !stored.isEmpty {
+            return stored
+        }
+        let created = UUID().uuidString
+        defaults.set(created, forKey: "playbackSyncDeviceID")
+        return created
     }
 
     private func activate(
@@ -270,10 +276,16 @@ final class ConnectionModel {
         profile: String
     ) async {
         self.client = client
+        let preferences = AccountPreferences(server: address.description, username: username)
+        preferences.applyMirrors()
+        OfflineDownloads.allowsCellularAccess = preferences.allowsCellularDownloads
+        if let library = preferences.libraryID {
+            client.selectLibrary(library)
+        }
         let space = Self.spaceName(for: address)
         let fragmentCache = AudioDiskCache(
             directory: Self.cachesRoot().appendingPathComponent(space, isDirectory: true),
-            limitBytes: Self.fragmentCacheLimitBytes()
+            limitBytes: Int64(preferences.cacheLimitMB) * 1_048_576
         )
         let offlineDirectory = Self.offlineRoot().appendingPathComponent(
             space,
@@ -308,13 +320,47 @@ final class ConnectionModel {
                 )
             }
         )
-        playback.preferredBitrateKbps = Self.savedQualityBitrate()
+        playback.preferredBitrateKbps = preferences.qualityBitrate
+        playback.podcastDeviceID = Self.deviceID()
+        playback.submitListening = { [weak client] report in
+            guard let client else { return false }
+            do {
+                try await client.reportListening(report)
+                return true
+            } catch {
+                return false
+            }
+        }
+        playback.loadPodcastBaseVersion = { [weak client] episodeID in
+            guard let client else { return nil }
+            return try? await client.podcastProgress(episodeId: episodeID).version
+        }
+        playback.submitPodcastProgress = { [weak client] episodeID, write in
+            guard let client else { return .failed }
+            do {
+                try await client.savePodcastProgress(episodeId: episodeID, write: write)
+                return .ok
+            } catch let error as APIError where error.statusCode == 409 {
+                return .conflict
+            } catch {
+                return .failed
+            }
+        }
         await playback.restore()
         self.playback = playback
         self.favorites = FavoritesModel(client: client)
         self.offline = OfflineModel(downloads: downloads)
         self.profile = profile
         self.sharing = PlaybackSharingModel(client: client, playback: playback)
+        Task {
+            guard let libraries = try? await client.libraries() else { return }
+            if let selected = client.selectedLibrary(),
+                !libraries.contains(where: { $0.id == selected })
+            {
+                client.selectLibrary(nil)
+                preferences.setLibraryID(nil)
+            }
+        }
         SavedServersStore.upsert(
             SavedServer(address: address.description, username: username, lastUsedAt: .now, allowInsecureHTTP: allowInsecureHTTP)
         )

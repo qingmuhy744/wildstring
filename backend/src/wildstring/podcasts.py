@@ -70,8 +70,23 @@ class PodcastURLRejected(ValueError):
     """Raised when a podcast URL could access a non-public local resource."""
 
 
-def public_socket_addresses(host, port):
-    """Resolve one endpoint once and reject mixed or non-public DNS answers."""
+# Clash/mihomo/Surge fake-ip DNS answers come from the RFC 2544 benchmarking range.
+FAKE_IP_NETWORK = ipaddress.ip_network("198.18.0.0/15")
+
+
+def is_fake_ip(address: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped is not None:
+        address = address.ipv4_mapped
+    return isinstance(address, ipaddress.IPv4Address) and address in FAKE_IP_NETWORK
+
+
+def public_socket_addresses(host, port, allow_fake_ip: bool = False):
+    """Resolve one endpoint once and reject mixed or non-public DNS answers.
+
+    ``allow_fake_ip`` admits only DNS answers inside 198.18.0.0/15, so a host whose
+    resolver runs in fake-ip mode can still be reached through the local TUN proxy.
+    Literal IPs in URLs and every other private range stay rejected.
+    """
     try:
         values = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
     except (OSError, UnicodeError) as error:
@@ -85,7 +100,11 @@ def public_socket_addresses(host, port):
         except ValueError:
             continue
         if not address.is_global:
-            raise PodcastURLRejected("remote_url_private_host")
+            if is_fake_ip(address):
+                if not allow_fake_ip:
+                    raise PodcastURLRejected("remote_url_fake_ip")
+            else:
+                raise PodcastURLRejected("remote_url_private_host")
         key = (family, sockaddr)
         if key not in seen:
             seen.add(key)
@@ -95,10 +114,10 @@ def public_socket_addresses(host, port):
     return addresses
 
 
-def connect_public_socket(host, port, timeout, source_address):
+def connect_public_socket(host, port, timeout, source_address, allow_fake_ip: bool = False):
     """Connect only to the public addresses validated for this connection."""
     last_error = None
-    for family, socktype, protocol, sockaddr in public_socket_addresses(host, port):
+    for family, socktype, protocol, sockaddr in public_socket_addresses(host, port, allow_fake_ip):
         stream = socket.socket(family, socktype, protocol)
         try:
             stream.settimeout(timeout)
@@ -127,8 +146,9 @@ def proxy_endpoints(proxies):
 
 
 class SafeHTTPConnection(http.client.HTTPConnection):
-    def __init__(self, host, *, trusted_proxy_endpoints=(), **kwargs):
+    def __init__(self, host, *, trusted_proxy_endpoints=(), allow_fake_ip=False, **kwargs):
         self.trusted_proxy_endpoints = trusted_proxy_endpoints
+        self.allow_fake_ip = allow_fake_ip
         super().__init__(host, **kwargs)
 
     def connect(self):
@@ -136,7 +156,7 @@ class SafeHTTPConnection(http.client.HTTPConnection):
             super().connect()
         else:
             self.sock = connect_public_socket(
-                self.host, self.port, self.timeout, self.source_address
+                self.host, self.port, self.timeout, self.source_address, self.allow_fake_ip
             )
             try:
                 self.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
@@ -145,8 +165,9 @@ class SafeHTTPConnection(http.client.HTTPConnection):
 
 
 class SafeHTTPSConnection(http.client.HTTPSConnection):
-    def __init__(self, host, *, trusted_proxy_endpoints=(), **kwargs):
+    def __init__(self, host, *, trusted_proxy_endpoints=(), allow_fake_ip=False, **kwargs):
         self.trusted_proxy_endpoints = trusted_proxy_endpoints
+        self.allow_fake_ip = allow_fake_ip
         super().__init__(host, **kwargs)
 
     def connect(self):
@@ -154,7 +175,7 @@ class SafeHTTPSConnection(http.client.HTTPSConnection):
             super().connect()
         else:
             self.sock = connect_public_socket(
-                self.host, self.port, self.timeout, self.source_address
+                self.host, self.port, self.timeout, self.source_address, self.allow_fake_ip
             )
             try:
                 self.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
@@ -164,28 +185,36 @@ class SafeHTTPSConnection(http.client.HTTPSConnection):
 
 
 class SafeHTTPHandler(urllib.request.HTTPHandler):
-    def __init__(self, trusted_proxy_endpoints):
+    def __init__(self, trusted_proxy_endpoints, allow_fake_ip=False):
         super().__init__()
         self.trusted_proxy_endpoints = trusted_proxy_endpoints
+        self.allow_fake_ip = allow_fake_ip
 
     def http_open(self, req):
         return self.do_open(
             lambda host, **kwargs: SafeHTTPConnection(
-                host, trusted_proxy_endpoints=self.trusted_proxy_endpoints, **kwargs
+                host,
+                trusted_proxy_endpoints=self.trusted_proxy_endpoints,
+                allow_fake_ip=self.allow_fake_ip,
+                **kwargs,
             ),
             req,
         )
 
 
 class SafeHTTPSHandler(urllib.request.HTTPSHandler):
-    def __init__(self, trusted_proxy_endpoints):
+    def __init__(self, trusted_proxy_endpoints, allow_fake_ip=False):
         super().__init__()
         self.trusted_proxy_endpoints = trusted_proxy_endpoints
+        self.allow_fake_ip = allow_fake_ip
 
     def https_open(self, req):
         return self.do_open(
             lambda host, **kwargs: SafeHTTPSConnection(
-                host, trusted_proxy_endpoints=self.trusted_proxy_endpoints, **kwargs
+                host,
+                trusted_proxy_endpoints=self.trusted_proxy_endpoints,
+                allow_fake_ip=self.allow_fake_ip,
+                **kwargs,
             ),
             req,
             context=self._context,
@@ -238,7 +267,7 @@ class PodcastRedirectHandler(urllib.request.HTTPRedirectHandler):
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
-def podcast_opener(proxy_mode: str, proxy_url: str | None):
+def podcast_opener(proxy_mode: str, proxy_url: str | None, allow_fake_ip: bool = False):
     """Build one opener with proxy and redirect policy for every podcast request."""
     try:
         proxies = outbound_proxies(proxy_mode, proxy_url)
@@ -248,8 +277,8 @@ def podcast_opener(proxy_mode: str, proxy_url: str | None):
     trusted = proxy_endpoints(proxies)
     return urllib.request.build_opener(
         urllib.request.ProxyHandler(proxies),
-        SafeHTTPHandler(trusted),
-        SafeHTTPSHandler(trusted),
+        SafeHTTPHandler(trusted, allow_fake_ip),
+        SafeHTTPSHandler(trusted, allow_fake_ip),
         PodcastRedirectHandler(),
     )
 
@@ -259,6 +288,13 @@ def read_bounded(response, limit: int) -> bytes:
     if len(data) > limit:
         raise PodcastPayloadTooLarge("remote_response_too_large")
     return data
+
+
+def rejected_detail(exc: PodcastURLRejected, kind: Literal["feed", "audio"]) -> str:
+    """Keep fake-ip DNS distinct so clients can explain the opt-in instead of a bad URL."""
+    if str(exc) == "remote_url_fake_ip":
+        return "remote_url_fake_ip"
+    return "invalid_podcast_feed_url" if kind == "feed" else "invalid_podcast_audio_url"
 
 
 def podcast_folder_name(podcast_id: str) -> str:
@@ -430,6 +466,7 @@ def fetch_and_parse_feed(
     timeout: int = 25,
     proxy_mode: str = "environment",
     proxy_url: str | None = None,
+    allow_fake_ip: bool = False,
 ) -> dict[str, Any]:
     try:
         feed_url = validate_remote_url(feed_url)
@@ -443,10 +480,12 @@ def fetch_and_parse_feed(
         },
     )
     try:
-        with podcast_opener(proxy_mode, proxy_url).open(req, timeout=timeout) as resp:  # nosec B310
+        with podcast_opener(proxy_mode, proxy_url, allow_fake_ip).open(  # nosec B310
+            req, timeout=timeout
+        ) as resp:
             data = read_bounded(resp, MAX_FEED_BYTES)
     except PodcastURLRejected as exc:
-        raise HTTPException(status_code=422, detail="invalid_podcast_feed_url") from exc
+        raise HTTPException(status_code=422, detail=rejected_detail(exc, "feed")) from exc
     except PodcastPayloadTooLarge as exc:
         raise HTTPException(status_code=413, detail="podcast_feed_too_large") from exc
     except Exception as e:
@@ -634,8 +673,10 @@ class PodcastManager:
         check_interval_seconds: int = 60,
         providers: Any | None = None,
         storage_dir: Path | None = None,
+        allow_fake_ip: bool = False,
     ):
         self.database = database
+        self.allow_fake_ip = allow_fake_ip
         self.check_interval_seconds = check_interval_seconds
         self.providers = providers
         self.storage_dir = Path(storage_dir) if storage_dir else Path("data/podcasts")
@@ -1008,7 +1049,12 @@ class PodcastManager:
                 return self.get_podcast_detail(podcast_id, user_id=None)
 
         proxy_mode, proxy_url = self.get_network_policy()
-        parsed = fetch_and_parse_feed(feed_url, proxy_mode=proxy_mode, proxy_url=proxy_url)
+        parsed = fetch_and_parse_feed(
+            feed_url,
+            proxy_mode=proxy_mode,
+            proxy_url=proxy_url,
+            allow_fake_ip=self.allow_fake_ip,
+        )
         podcast_id = str(uuid4())
         created_time = now()
 
@@ -1160,7 +1206,12 @@ class PodcastManager:
             feed_url = row["feed_url"]
 
         proxy_mode, proxy_url = self.get_network_policy()
-        parsed = fetch_and_parse_feed(feed_url, proxy_mode=proxy_mode, proxy_url=proxy_url)
+        parsed = fetch_and_parse_feed(
+            feed_url,
+            proxy_mode=proxy_mode,
+            proxy_url=proxy_url,
+            allow_fake_ip=self.allow_fake_ip,
+        )
         updated_time = now()
 
         with self.database.connect(write=True) as conn:
@@ -1233,7 +1284,9 @@ class PodcastManager:
                 cover_url = validate_remote_url(p_data["cover_url"])
                 req = urllib.request.Request(cover_url, headers={"User-Agent": USER_AGENT})
                 temporary = podcast_dir / ".cover.jpg.part"
-                with podcast_opener(proxy_mode, proxy_url).open(req, timeout=15) as resp:  # nosec B310
+                with podcast_opener(proxy_mode, proxy_url, self.allow_fake_ip).open(  # nosec B310
+                    req, timeout=15
+                ) as resp:
                     total = 0
                     with open(temporary, "wb") as stream:
                         while True:
@@ -1335,7 +1388,7 @@ class PodcastManager:
             )
 
         proxy_mode, proxy_url = self.get_network_policy()
-        opener = podcast_opener(proxy_mode, proxy_url)
+        opener = podcast_opener(proxy_mode, proxy_url, self.allow_fake_ip)
 
         try:
             audio_url = validate_remote_url(audio_url)
@@ -1429,8 +1482,14 @@ class PodcastManager:
         except PodcastPayloadTooLarge:
             self._record_failed(episode_id, row, "播客音频超过大小限制", temp_path)
             return False
-        except PodcastURLRejected:
-            self._record_failed(episode_id, row, "播客音频地址指向非公网资源", temp_path)
+        except PodcastURLRejected as exc:
+            message = (
+                "源站域名被解析为 fake-ip 地址（198.18.0.0/15），请在服务端开启 "
+                "WILDSTRING_PODCAST_ALLOW_FAKE_IP 或配置出站代理"
+                if str(exc) == "remote_url_fake_ip"
+                else "播客音频地址指向非公网资源"
+            )
+            self._record_failed(episode_id, row, message, temp_path)
             return False
         except urllib.error.HTTPError as e:
             if e.code == 429:
@@ -1755,17 +1814,36 @@ class PodcastManager:
         if client_range:
             headers["Range"] = client_range
         req = urllib.request.Request(audio_url, headers=headers)
-        opener = podcast_opener(proxy_mode, proxy_url)
+        opener = podcast_opener(proxy_mode, proxy_url, self.allow_fake_ip)
 
         try:
             resp = opener.open(req, timeout=15)  # nosec B310
         except PodcastURLRejected as exc:
-            raise HTTPException(status_code=422, detail="invalid_podcast_audio_url") from exc
+            raise HTTPException(status_code=422, detail=rejected_detail(exc, "audio")) from exc
+        except urllib.error.HTTPError as e:
+            e.close()
+            host = urlsplit(audio_url).hostname
+            if e.code == 416:
+                # Players probe past the end while seeking; keep the range answer intact.
+                headers = {"Content-Range": e.headers.get("Content-Range")} if e.headers else {}
+                raise HTTPException(
+                    status_code=416,
+                    detail="podcast_audio_range_not_satisfiable",
+                    headers={k: v for k, v in headers.items() if v},
+                ) from e
+            logger.warning("Remote audio upstream returned %s (host=%s)", e.code, host)
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY, detail="podcast_audio_upstream_failed"
+            ) from e
         except Exception as e:
+            # A proxied request must not fall back to a cross-origin redirect: the Android
+            # client never follows redirects and the Web player then reports a vague error.
             logger.warning(
-                "Remote audio stream proxy failed (%s): %s; redirecting client", audio_url, e
+                "Remote audio stream proxy failed (host=%s): %s", urlsplit(audio_url).hostname, e
             )
-            return RedirectResponse(url=audio_url, status_code=status.HTTP_307_TEMPORARY_REDIRECT)
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY, detail="podcast_audio_upstream_failed"
+            ) from e
 
         status_code = resp.status if hasattr(resp, "status") else 200
         raw_content_type = resp.headers.get("Content-Type") or "audio/mpeg"

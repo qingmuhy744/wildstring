@@ -1,6 +1,15 @@
 import { hints } from './help-content';
 import { useEffect, useId, useRef, useState } from 'react';
-import { api, eventId, artist, streamUrl, time, type PlaybackPlan, type Track } from './api';
+import {
+  api,
+  eventId,
+  artist,
+  errorCodeMessage,
+  streamUrl,
+  time,
+  type PlaybackPlan,
+  type Track,
+} from './api';
 import { Cover } from './cover';
 import { Icon } from './icons';
 import { FavoriteButton, type Favorites } from './favorites';
@@ -559,6 +568,31 @@ export function usePlayer(userId: string) {
     }
   }
 
+  function addToQueue(tracks: Track[], next = false) {
+    if (!tracks.length) return false;
+    if (queue.length + tracks.length > QUEUE_LIMIT) {
+      setError(`播放队列最多 ${QUEUE_LIMIT} 首。`);
+      return false;
+    }
+    if (index < 0 && next) {
+      start(tracks, 0);
+      return true;
+    }
+    setQueue((items) => {
+      if (items.length + tracks.length > QUEUE_LIMIT) return items;
+      const autoAt = items.findIndex(
+        (item, i) => i > index && item.podcast_queue_origin === 'auto',
+      );
+      const at = next ? index + 1 : autoAt < 0 ? items.length : autoAt;
+      return [
+        ...items.slice(0, at),
+        ...tracks.map((track) => ({ ...track, podcast_queue_origin: undefined })),
+        ...items.slice(at),
+      ];
+    });
+    return true;
+  }
+
   function seek(value: number) {
     if (!audio.current || !current || !duration) return;
     const target = Math.max(0, Math.min(value, duration - 0.05));
@@ -635,6 +669,34 @@ export function usePlayer(userId: string) {
     setPlaying(false);
     if (!current || loading.current || !audio.current?.getAttribute('src')) return;
     try {
+      if (current.podcast_id) {
+        // The podcast stream route is GET-only; a one-byte range read surfaces the server's error code.
+        const response = await fetch(audio.current.currentSrc, { headers: { Range: 'bytes=0-0' } });
+        if (attempt !== generation.current) return;
+        if (response.status === 401) {
+          window.dispatchEvent(new Event('wildstring:unauthorized'));
+          return;
+        }
+        if (!response.ok) {
+          const detail = await response
+            .json()
+            .then((body: { detail?: unknown }) => body?.detail)
+            .catch(() => undefined);
+          setError(
+            typeof detail === 'string'
+              ? errorCodeMessage(detail)
+              : `无法播放本期播客（${response.status}），请稍后重试。`,
+          );
+          return;
+        }
+        void response.body?.cancel();
+        setError(
+          code === 3 || code === 4
+            ? '浏览器无法解码本期播客的音频格式。'
+            : '播客音频连接中断，请点击播放重试。',
+        );
+        return;
+      }
       // HEAD diagnoses expired sessions, missing files and changed sources without downloading audio.
       const response = await fetch(audio.current.currentSrc, {
         method: 'HEAD',
@@ -768,22 +830,8 @@ export function usePlayer(userId: string) {
     refreshTrack: (track: Track) => {
       setQueue((items) => items.map((item) => (item.id === track.id ? track : item)));
     },
-    playNext: (track: Track) => {
-      if (queue.length >= QUEUE_LIMIT) {
-        setError(`播放队列最多 ${QUEUE_LIMIT} 首。`);
-        return false;
-      }
-      if (index < 0) {
-        start([track], 0);
-        return true;
-      }
-      setQueue((items) =>
-        items.length < QUEUE_LIMIT
-          ? [...items.slice(0, index + 1), track, ...items.slice(index + 1)]
-          : items,
-      );
-      return true;
-    },
+    addToQueue,
+    playNext: (track: Track) => addToQueue([track], true),
     move: (from: number, to: number) => {
       if (from < 0 || to < 0 || from >= queue.length || to >= queue.length || from === to) return;
       const next = [...queue];
@@ -796,25 +844,7 @@ export function usePlayer(userId: string) {
       else if (from < index && to >= index) setIndex(index - 1);
       else if (from > index && to <= index) setIndex(index + 1);
     },
-    enqueue: (track: Track) => {
-      if (queue.length >= QUEUE_LIMIT) {
-        setError(`播放队列最多 ${QUEUE_LIMIT} 首。`);
-        return false;
-      }
-      setQueue((items) => {
-        if (items.length >= QUEUE_LIMIT) return items;
-        const autoAt = items.findIndex(
-          (item, i) => i > index && item.podcast_queue_origin === 'auto',
-        );
-        const at = autoAt < 0 ? items.length : autoAt;
-        return [
-          ...items.slice(0, at),
-          { ...track, podcast_queue_origin: undefined },
-          ...items.slice(at),
-        ];
-      });
-      return true;
-    },
+    enqueue: (track: Track) => addToQueue([track]),
     remove: (target: number) => {
       if (target === index) return;
       if (queue[target]?.podcast_queue_origin === 'auto')

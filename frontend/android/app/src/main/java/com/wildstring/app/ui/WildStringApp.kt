@@ -243,7 +243,8 @@ fun WildStringApp(model: MusicViewModel) {
                         val navBarBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
                         val isTablet = LocalConfiguration.current.screenWidthDp >= 600
                         val dockHeight = (if (state.current != null) 62.dp else 0.dp) + (if (!isTablet) 80.dp else 0.dp)
-                        val bottomPad = navBarBottom + dockHeight + 12.dp
+                        val assistantComposer = if (state.tab == "assistant") 72.dp else 0.dp
+                        val bottomPad = navBarBottom + dockHeight + assistantComposer + 12.dp
                         Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)).padding(horizontal = 16.dp).padding(bottom = bottomPad), contentAlignment = Alignment.BottomCenter) {
                             Surface(
                                 Modifier.widthIn(max = 380.dp).fillMaxWidth().testTag("playback-handoff-notice"),
@@ -514,7 +515,7 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
                     val showGlobalMore = state.tab == "search" && state.collection == null && state.kind != "recent"
                     Scaffold(
                         contentWindowInsets = WindowInsets(0, 0, 0, 0),
-                        topBar = { if (state.tab != "podcast" || state.podcastId == null) CatalogTopBar(state, vm::back, { settings = true }, compact = true, unread = unread,
+                        topBar = { if (state.tab != "assistant" && (state.tab != "podcast" || state.podcastId == null)) CatalogTopBar(state, vm::back, { settings = true }, compact = true, unread = unread,
                             notifications = { feature = "notifications" },
                             queue = if (showGlobalMore) ({ queue = true }) else null,
                             recent = if (showGlobalMore) vm::recent else null,
@@ -562,7 +563,7 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
                             if (state.tab == "podcast") {
                                 savedPages.SaveableStateProvider("podcast") { PodcastChannelPage(vm) }
                             } else if (state.tab == "assistant") {
-                                MobileAssistantPage(vm)
+                                MobileAssistantPage(vm, unread, { feature = "notifications" }, { settings = true })
                             } else {
                             Column(Modifier.fillMaxSize()) {
                                 MusicLibraryChoice(vm)
@@ -965,35 +966,31 @@ private fun SongAction(label: String, icon: ImageVector, navigate: Boolean = fal
 
 
 @Composable
-private fun MobileAssistantPage(vm: MusicViewModel) {
-    Column(Modifier.fillMaxSize()) {
-        AgentChat(vm) { }
-    }
+private fun MobileAssistantPage(vm: MusicViewModel, unread: Int, onNotifications: () -> Unit, onSettings: () -> Unit) {
+    AgentChat(vm, onNotifications, onSettings, unread) {}
 }
+
+/** Main navigation destinations; labels follow the interface language. */
+@Composable
+private fun navItems() = listOf(
+    Triple("search", androidx.compose.ui.res.stringResource(R.string.nav_discover), Icons.Default.Search),
+    Triple("podcast", androidx.compose.ui.res.stringResource(R.string.nav_radio), Icons.Default.Podcasts),
+    Triple("assistant", androidx.compose.ui.res.stringResource(R.string.nav_assistant), Icons.Default.AutoAwesome),
+    Triple("library", androidx.compose.ui.res.stringResource(R.string.nav_music), Icons.Default.LibraryMusic),
+    Triple("mine", androidx.compose.ui.res.stringResource(R.string.nav_mine), Icons.Default.Person),
+)
 
 @Composable
 private fun RailItems(state: MusicState, vm: MusicViewModel) {
     val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
-    listOf(
-        Triple("search", "发现", Icons.Default.Search),
-        Triple("podcast", "电台", Icons.Default.Podcasts),
-        Triple("assistant", "AI 助手", Icons.Default.AutoAwesome),
-        Triple("library", "音乐", Icons.Default.LibraryMusic),
-        Triple("mine", "我的", Icons.Default.Person),
-    ).forEach { (id, label, icon) ->
+    navItems().forEach { (id, label, icon) ->
         NavigationRailItem(state.tab == id, { keyboard?.hide(); vm.navigate(id) }, modifier = Modifier.testTag("nav-$id"), icon = { Icon(icon, label) }, label = { Text(label) })
     }
 }
 @Composable
 private fun RowScope.BottomItems(state: MusicState, vm: MusicViewModel) {
     val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
-    listOf(
-        Triple("search", "发现", Icons.Default.Search),
-        Triple("podcast", "电台", Icons.Default.Podcasts),
-        Triple("assistant", "AI 助手", Icons.Default.AutoAwesome),
-        Triple("library", "音乐", Icons.Default.LibraryMusic),
-        Triple("mine", "我的", Icons.Default.Person),
-    ).forEach { (id, label, icon) ->
+    navItems().forEach { (id, label, icon) ->
         val isAssistant = id == "assistant"
         NavigationBarItem(
             selected = state.tab == id,

@@ -8,7 +8,9 @@ data class Page<T>(val items: List<T>, val total: Int, val limit: Int, val offse
 data class Account(val id: String, val username: String,
     val profile: String = "listener", val enabled: Boolean = true, val version: Int = 1,
     @SerializedName("display_name") val displayName: String? = null,
-    val email: String? = null) {
+    val email: String? = null,
+    /** Interface language stored on the account: "auto" | "zh" | "en". */
+    val language: String? = null) {
     val isOwner: Boolean get() = profile == "owner"
     val profileLabel: String get() = when (profile) {
         "owner" -> "所有者"
@@ -23,6 +25,7 @@ data class ProfileUpdate(
     @SerializedName("display_name") val displayName: String = "",
     val email: String = ""
 )
+data class PreferencesUpdate(val language: String)
 data class AuthStatus(val configured: Boolean, val authenticated: Boolean, val user: Account? = null, val version: String? = null)
 data class PasswordChange(@SerializedName("current_password") val currentPassword: String, @SerializedName("new_password") val newPassword: String)
 data class LoginRequest(val username: String, val password: String)

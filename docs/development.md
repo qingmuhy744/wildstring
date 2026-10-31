@@ -69,6 +69,8 @@ make docker-down
 
 如果宿主机需要代理联网，在本地 `.env` 设置 `DOCKER_HTTP_PROXY` 与 `DOCKER_HTTPS_PROXY`，地址使用 Docker 可访问的宿主机网关，例如 `http://host.docker.internal:7890`。它们仅作为构建参数传入，不配置为运行容器环境变量。不要在容器内使用宿主机的 `127.0.0.1` 代理地址。
 
+播客 RSS、封面和音频只连接公网地址。宿主机或容器的 DNS 若由 Clash/mihomo 的 fake-ip 模式接管（域名解析到 `198.18.0.0/15`），订阅会返回 `remote_url_fake_ip`。优先在 `HTTP_PROXY` / `HTTPS_PROXY` 或网页联网设置中配置出站代理，此时目标域名由代理解析；无法配置代理时可在 `.env` 设置 `WILDSTRING_PODCAST_ALLOW_FAKE_IP=true` 并重启。该开关只放行 DNS 解析得到的 `198.18.0.0/15`，URL 中直接写出的 IP 和其他私有、回环、链路本地地址仍拒绝；详见 [远程播客访问](../contracts/storage-and-podcast-resources.md#远程播客访问)。
+
 运行目录保存 `wildstring.sqlite3` 和扫描锁，SQLite 使用 WAL。数据库启动时逐步迁移到 v14（含歌词覆盖、本地用户、Host 白名单、转码缓存、元数据来源、跨设备快照与个人推荐），保留原曲库与曲目 ID；不支持更高版本数据库自动降级。备份应使用 SQLite backup API 获取一致快照，不在运行时仅复制主文件并遗漏 WAL。
 
 首次启动后执行 `make docker-admin`，或仅首次通过 `.env` 中 `WILDSTRING_ADMIN_PASSWORD` 初始化管理员。现有管理员不会被启动配置覆盖；重置密码会撤销目标用户全部会话。Cookie 默认为本机 HTTP 配置，通过 HTTPS 访问时设置 `WILDSTRING_COOKIE_SECURE=true`。

@@ -12,6 +12,8 @@ export default defineConfig({
   reporter: 'list',
   use: {
     baseURL,
+    // Existing specs assert the Chinese UI; i18n.spec.ts covers English.
+    locale: 'zh-CN',
     screenshot: 'only-on-failure',
     trace: 'off',
   },

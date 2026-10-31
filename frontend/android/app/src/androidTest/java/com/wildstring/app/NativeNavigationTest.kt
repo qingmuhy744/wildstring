@@ -275,16 +275,17 @@ class NativeNavigationTest {
                 compose.onNodeWithContentDescription("设置").performClick()
                 compose.onNodeWithTag("mini-player").assertIsDisplayed()
                 capture("reference-phone-settings-player.png")
-                compose.onNodeWithTag("setting-最近播放音频").performScrollTo().assertIsDisplayed()
+                compose.onNodeWithTag("setting-audio-cache").performScrollTo().assertIsDisplayed()
                 compose.onNodeWithTag("mini-player-open").performClick()
                 compose.onNodeWithTag("player-phone").assertIsDisplayed()
                 compose.onNodeWithContentDescription("收起播放器").performClick()
                 compose.onNodeWithTag("settings-page").assertIsDisplayed()
-                compose.onNodeWithTag("setting-最近播放音频").assertIsDisplayed()
+                compose.onNodeWithTag("setting-audio-cache").assertIsDisplayed()
                 assertEquals(entry, vm.state.value.entryId)
                 assertEquals(position, compose.runOnIdle { vm.controller!!.currentPosition })
                 assertEquals("Settings, capsule and queue actions must not reopen the stream", streams, streamRequests.get())
                 assertFalse(compose.runOnIdle { vm.controller!!.isPlaying })
+                val phoneSettingsWidth = compose.onNodeWithTag("settings-page").fetchSemanticsNode().size.width
                 shell("wm size 1600x1000"); shell("wm density 160")
                 compose.waitUntil(15_000) { compose.onNodeWithTag("settings-page").fetchSemanticsNode().size.width > 1200 }
                 // Tablet settings now use the same full-width mini player as the
@@ -293,7 +294,7 @@ class NativeNavigationTest {
                 assertTrue(compose.onNodeWithTag("mini-player").fetchSemanticsNode().size.width > 0)
                 capture("reference-tablet-settings-player.png")
                 shell("wm size reset"); shell("wm density reset")
-                compose.waitUntil(15_000) { compose.onNodeWithTag("settings-page").fetchSemanticsNode().size.width < 1200 }
+                compose.waitUntil(15_000) { compose.onNodeWithTag("settings-page").fetchSemanticsNode().size.width == phoneSettingsWidth }
                 compose.onNodeWithTag("settings-back").performClick()
                 history.set(false)
                 compose.runOnIdle { vm.load() }

@@ -126,6 +126,40 @@ class RecommendationExperienceTest {
             } finally { cleanup(vm) }
         }
     }
+    @Test fun dailySelectionAndLyricsKeepTheCurrentQueueAndPauseState() {
+        Fixture().use { fixture -> val vm = connect(fixture)
+            try {
+                open("每日推荐")
+                compose.waitUntil(10_000) { compose.onAllNodesWithTag("daily-track-local-a").fetchSemanticsNodes().isNotEmpty() }
+                compose.onNodeWithText("播放推荐", substring = false).performClick()
+                compose.waitUntil(10_000) { vm.state.value.current?.id == "local-a" }
+                compose.runOnIdle { vm.controller?.pause() }
+                compose.waitUntil(5_000) { !vm.state.value.playing }
+                val entry = vm.state.value.entryId
+                val before = compose.runOnIdle { vm.controller!!.currentPosition }
+                compose.onNodeWithTag("daily-recommendations").performScrollToNode(hasTestTag("daily-track-local-a"))
+                compose.onNode(hasTestTag("daily-more-local-a") and hasClickAction(), useUnmergedTree = true).performScrollTo().performClick()
+                compose.onNodeWithText("查看歌词", substring = false).performClick()
+                compose.onNodeWithTag("recommendation-lyrics").assertExists()
+                compose.onNodeWithText("关闭歌词预览", substring = false).performClick()
+                assertEquals(entry, vm.state.value.entryId)
+                assertFalse(vm.state.value.playing)
+                assertTrue(kotlin.math.abs(compose.runOnIdle { vm.controller!!.currentPosition } - before) < 250)
+                compose.onNodeWithTag("daily-recommendations").performScrollToIndex(2)
+                compose.onNodeWithText("挑选歌曲", substring = false).performClick()
+                compose.onNodeWithTag("daily-recommendations").performScrollToNode(hasTestTag("daily-select-local-a"))
+                compose.onNodeWithTag("daily-select-local-a", useUnmergedTree = true).performClick()
+                compose.onNodeWithTag("daily-recommendations").performScrollToIndex(2)
+                compose.onNodeWithText("下一首播放所选", substring = false).performClick()
+                compose.waitUntil(5_000) { vm.state.value.queue.size == 2 }
+                assertEquals(entry, vm.state.value.entryId)
+                assertFalse(vm.state.value.playing)
+                assertEquals(listOf("local-a", "local-a"), vm.state.value.queue.map { it.trackId })
+                capture("recommendation-selection-queue.png")
+            } finally { cleanup(vm) }
+        }
+    }
+
     @Test fun assistantEntryUsesCurrentMobileWorkspace() {
         Fixture().use { fixture -> val vm = connect(fixture)
             try {

@@ -12,6 +12,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.automirrored.filled.PlaylistPlay
+import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -64,6 +66,10 @@ internal fun recommendationIssue(code: String): String = when {
     var rejected by remember { mutableStateOf(setOf<String>()) }
     var evidence by remember { mutableStateOf(false) }
     var trackMenu by remember { mutableStateOf<String?>(null) }
+    var selecting by remember { mutableStateOf(false) }
+    var selectedIds by remember { mutableStateOf(setOf<String>()) }
+    var playlistTracks by remember { mutableStateOf<List<Track>?>(null) }
+    var lyricTrack by remember { mutableStateOf<Track?>(null) }
     LaunchedEffect(Unit) {
         action.run {
             preferences = vm.repository.api().recommendationPreferences()
@@ -83,7 +89,16 @@ internal fun recommendationIssue(code: String): String = when {
         }
     }; return }
     val entries = daily?.items.orEmpty().filter { it.track.id !in rejected }
-    LazyColumn(Modifier.fillMaxSize().testTag("daily-recommendations"), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    val selectedTracks = entries.map { it.track }.filter { it.id in selectedIds }
+    fun selectTrack(id: String) { selectedIds = if (id in selectedIds) selectedIds - id else selectedIds + id }
+    fun enqueue(tracks: List<Track>, next: Boolean = false) {
+        if (vm.addToQueue(tracks, next)) {
+            action.message = "已将 ${tracks.size} 首${if (next) "安排为接下来播放" else "加入播放队列"}"
+            selecting = false; selectedIds = emptySet()
+        } else action.message = "未能加入播放队列，请检查播放器或队列容量。"
+    }
+    Column(Modifier.fillMaxSize()) {
+    LazyColumn(Modifier.weight(1f).fillMaxWidth().testTag("daily-recommendations"), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text("属于你的每日推荐", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
@@ -91,7 +106,7 @@ internal fun recommendationIssue(code: String): String = when {
             }
             Text("${entries.size} 首 · 今日的临时歌单", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Row {
-                TextButton({ scope.launch { action.run { daily = vm.repository.agentApi().refreshDaily(); rejected = emptySet() } } }, enabled = !action.busy) { Text(if (action.busy) "正在生成…" else "换一批") }
+                TextButton({ scope.launch { action.run { daily = vm.repository.agentApi().refreshDaily(); rejected = emptySet(); selectedIds = emptySet(); selecting = false } } }, enabled = !action.busy) { Text(if (action.busy) "正在生成…" else "换一批") }
                 TextButton({ rankings = true }) { Text("收听排行") }
                 TextButton({ external = true }) { Text("发现新音乐") }
             }
@@ -103,16 +118,35 @@ internal fun recommendationIssue(code: String): String = when {
             Button({ vm.play(entries.map { it.track }); entries.firstOrNull()?.let { first -> scope.launch { runCatching { vm.repository.feedback(RecommendationFeedback(trackId = first.track.id, action = "accept")).close() } } } }, enabled = entries.isNotEmpty()) { Text("播放推荐") }
             TextButton({ scope.launch { action.run { saveRecommendations(vm, "每日推荐 ${daily?.date.orEmpty()}", entries); action.message = "已保存为歌单" } } }, enabled = !action.busy && entries.isNotEmpty()) { Text("保存歌单") }
         } }
+        item {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(if (selecting) "已选 ${selectedTracks.size} 首" else "挑几首，放进自己的播放队列", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+                    TextButton({ selecting = !selecting; selectedIds = emptySet() }, enabled = entries.isNotEmpty() || selecting) { Text(if (selecting) "完成挑选" else "挑选歌曲") }
+                }
+                if (selecting) {
+                    Row {
+                        TextButton({ selectedIds = if (selectedTracks.size == entries.size) emptySet() else entries.map { it.track.id }.toSet() }) { Text(if (selectedTracks.size == entries.size) "取消全选" else "全选") }
+                        TextButton({ enqueue(selectedTracks, true) }, enabled = selectedTracks.isNotEmpty()) { Text("下一首播放所选") }
+                    }
+                    Row {
+                        OutlinedButton({ enqueue(selectedTracks) }, enabled = selectedTracks.isNotEmpty()) { Text("加入播放队列") }
+                        TextButton({ playlistTracks = selectedTracks }, enabled = selectedTracks.isNotEmpty()) { Text("加入歌单") }
+                    }
+                }
+            }
+        }
         items(entries, key = { it.track.id }) { item ->
             val active = current.current?.id == item.track.id
             Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).testTag("daily-track-${item.track.id}")
                 .clip(RoundedCornerShape(10.dp))
                 .background(if (active) MaterialTheme.colorScheme.primary.copy(alpha = .08f) else androidx.compose.ui.graphics.Color.Transparent)
-                .semantics { selected = active }
-                .combinedClickable(onClick = { vm.play(entries.map { it.track }, entries.indexOf(item)) }, onLongClick = { trackMenu = item.track.id }),
+                .semantics { selected = if (selecting) item.track.id in selectedIds else active }
+                .combinedClickable(onClick = { if (selecting) selectTrack(item.track.id) else vm.play(entries.map { it.track }, entries.indexOf(item)) }, onLongClick = { trackMenu = item.track.id }),
                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Box(Modifier.width(24.dp), contentAlignment = Alignment.Center) {
-                    if (active) PlaybackIndicator(current.playing, current.buffering)
+                Box(Modifier.width(if (selecting) 40.dp else 24.dp), contentAlignment = Alignment.Center) {
+                    if (selecting) Checkbox(item.track.id in selectedIds, { selectTrack(item.track.id) }, Modifier.testTag("daily-select-${item.track.id}"))
+                    else if (active) PlaybackIndicator(current.playing, current.buffering)
                     else Text((entries.indexOf(item) + 1).toString().padStart(2, '0'), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 Cover(vm, item.track.id.takeIf { item.track.hasCover }, item.track.title, Modifier.size(44.dp).clip(RoundedCornerShape(8.dp)))
@@ -124,6 +158,11 @@ internal fun recommendationIssue(code: String): String = when {
                 Box {
                     IconButton({ trackMenu = item.track.id }, Modifier.testTag("daily-more-${item.track.id}")) { Icon(Icons.Default.MoreVert, "${item.track.title}的更多操作") }
                     DropdownMenu(trackMenu == item.track.id, { trackMenu = null }) {
+                    DropdownMenuItem(text = { Text("下一首播放") }, leadingIcon = { Icon(Icons.AutoMirrored.Filled.PlaylistPlay, null) }, onClick = { trackMenu = null; enqueue(listOf(item.track), true) })
+                    DropdownMenuItem(text = { Text("加入播放队列") }, leadingIcon = { Icon(Icons.AutoMirrored.Filled.QueueMusic, null) }, onClick = { trackMenu = null; enqueue(listOf(item.track)) })
+                    DropdownMenuItem(text = { Text("加入歌单") }, leadingIcon = { Icon(Icons.Default.LibraryMusic, null) }, onClick = { trackMenu = null; playlistTracks = listOf(item.track) })
+                    DropdownMenuItem(text = { Text("查看歌词") }, leadingIcon = { Icon(Icons.Default.Lyrics, null) }, onClick = { trackMenu = null; lyricTrack = item.track })
+                    HorizontalDivider()
                     DropdownMenuItem(text = { Text(if (vm.repository.knownTracks[item.track.id]?.loved ?: item.track.loved) "取消收藏" else "收藏") },
                         leadingIcon = { Icon(Icons.Default.FavoriteBorder, null) }, enabled = item.track.id !in current.pendingFavorites,
                         onClick = { trackMenu = null; vm.favorite(item.track) })
@@ -137,6 +176,23 @@ internal fun recommendationIssue(code: String): String = when {
         }
         if (entries.isEmpty() && !action.busy) item { Text("暂无推荐，可增加曲库或调整偏好后换一批。") }
     }
+    current.current?.let { playing ->
+        HorizontalDivider()
+        Row(Modifier.fillMaxWidth().clickable(enabled = !playing.isPodcast) { lyricTrack = playing }.padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Cover(vm, playing.id.takeIf { playing.hasCover }, playing.title, Modifier.size(40.dp).clip(RoundedCornerShape(8.dp)))
+            Column(Modifier.weight(1f)) {
+                Text(playing.title, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium)
+                Text(if (playing.isPodcast) "${playing.artist} · 播客" else "${playing.artist} · 点击查看歌词", maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            IconButton({ vm.toggle() }) { Icon(if (current.playing) Icons.Default.Pause else Icons.Default.PlayArrow, if (current.playing) "暂停" else "播放") }
+            IconButton({ vm.next() }) { Icon(Icons.Default.SkipNext, "下一首") }
+        }
+    }
+    }
+    playlistTracks?.let { tracks -> RecommendationPlaylistDialog(vm, tracks, { playlistTracks = null }) {
+        playlistTracks = null; selectedIds = emptySet(); selecting = false; action.message = it
+    } }
+    lyricTrack?.let { track -> RecommendationLyricsDialog(vm, track) { lyricTrack = null } }
     if (settings) preferences?.let { original -> RecommendationSettings(original, connections, connectionsError, action.busy, action.message, { settings = false }) { updated ->
         scope.launch { action.run { preferences = vm.repository.api().saveRecommendationPreferences(updated); settings = false; action.message = "偏好已保存，下次换一批生效" } }
     } }

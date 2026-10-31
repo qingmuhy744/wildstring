@@ -55,6 +55,27 @@ struct StubbedHTTPTests {
             #expect(hasSession)
         }
 
+        @Test func updateLanguagePutsPreferenceAndDecodesUser() async throws {
+            let store = InMemorySessionStore()
+            StubURLProtocol.respond { request in
+                #expect(request.httpMethod == "PUT")
+                #expect(request.url?.path == "/api/v1/auth/preferences")
+                let body = try #require(StubURLProtocol.bodyData(of: request))
+                let json = try #require(
+                    try JSONSerialization.jsonObject(with: body) as? [String: String]
+                )
+                #expect(json["language"] == "en")
+                return .json(
+                    status: 200,
+                    body:
+                        #"{"id":"u1","username":"amy","profile":"listener","version":2,"enabled":true,"language":"en"}"#
+                )
+            }
+            let client = try makeClient(store: store)
+            let user = try await client.updateLanguage("en")
+            #expect(user.language == "en")
+        }
+
         @Test func loginFailureSurfacesStableServerCode() async throws {
             let store = InMemorySessionStore()
             StubURLProtocol.respond { _ in
@@ -748,6 +769,19 @@ struct StubbedHTTPTests {
             #expect(daily.items.first?.reason == "常听")
         }
 
+        @Test func recommendationFeedbackUsesRealTrackAndUniqueEvent() async throws {
+            StubURLProtocol.respond { request in
+                #expect(request.httpMethod == "POST")
+                #expect(request.url?.path == "/api/v1/recommendations/feedback")
+                let body = try JSONSerialization.jsonObject(with: try #require(StubURLProtocol.bodyData(of: request))) as! [String: String]
+                #expect(body["track_id"] == "t1")
+                #expect(body["action"] == "dismiss_track")
+                #expect(UUID(uuidString: body["event_id"] ?? "") != nil)
+                return .json(status: 200, body: "{}")
+            }
+            try await makeClient().recommendationFeedback(trackID: "t1", action: "dismiss_track")
+        }
+
         @Test func refreshDailyUsesRefreshEndpoint() async throws {
             StubURLProtocol.respond { request in
                 #expect(request.httpMethod == "POST")
@@ -864,6 +898,93 @@ struct StubbedHTTPTests {
             let detail = try await makeClient().createConversation()
             #expect(detail.id == "c2")
             #expect(detail.messages.isEmpty)
+        }
+
+        @Test func modelSelectionAndServerCallBudgetArePreserved() async throws {
+            StubURLProtocol.respond { request in
+                let body = try #require(StubURLProtocol.bodyData(of: request))
+                let json = try #require(try JSONSerialization.jsonObject(with: body) as? [String: Any])
+                #expect(json["connection_id"] as? String == "model-1")
+                #expect(json["max_calls"] == nil)
+                if request.url?.path.hasSuffix("/messages") == true {
+                    #expect(request.timeoutInterval == 180)
+                }
+                return .json(body: #"{"id":"c1","title":"夜晚歌单","connection_id":"model-1","messages":[],"runs":[]}"#)
+            }
+            let client = try makeClient()
+            let created = try await client.createConversation(title: "夜晚歌单", connectionID: "model-1")
+            #expect(created.connectionID == "model-1")
+            _ = try await client.sendMessage(conversationID: "c1", content: "找歌", connectionID: "model-1")
+        }
+
+        @Test func localModeIsExplicitAndDoesNotReuseConversationModel() async throws {
+            StubURLProtocol.respond { request in
+                let body = try #require(StubURLProtocol.bodyData(of: request))
+                let json = try #require(try JSONSerialization.jsonObject(with: body) as? [String: Any])
+                #expect(json["connection_id"] as? String == "local")
+                return .json(body: #"{"id":"c1","title":"夜曲","connection_id":null,"messages":[],"runs":[{"id":"r1","status":"local_fallback","stage":null,"connection_id":null,"error_code":null,"draft_ids":[]}] }"#)
+            }
+            let value = try await makeClient().sendMessage(conversationID: "c1", content: "夜曲", connectionID: "local")
+            #expect(value.connectionID == nil)
+            #expect(value.runs?.first?.status == "local_fallback")
+        }
+
+        @Test func conversationDecodesProgressSourcesAndRelatedDrafts() async throws {
+            StubURLProtocol.respond { _ in
+                .json(body: #"{"id":"c1","title":"找歌","connection_id":"model-1","messages":[{"id":"m1","role":"assistant","content":"**歌单**","partial":true,"run_id":"r1","sources":[{"id":"s1","title":"发行信息","url":"https://example.com/music"}]}],"runs":[{"id":"r1","status":"running","stage":"writing","connection_id":"model-1","error_code":null,"draft_ids":["d1"]}]}"#)
+            }
+            let value = try await makeClient().conversation(id: "c1")
+            #expect(value.messages.first?.sources?.first?.title == "发行信息")
+            #expect(value.messages.first?.runID == "r1")
+            #expect(value.messages.first?.partial == true)
+            #expect(value.runs?.first?.stage == "writing")
+            #expect(value.runs?.first?.draftIDs == ["d1"])
+        }
+
+        @Test func assistantConnectionsDecodeReadOnlySharedConnection() async throws {
+            StubURLProtocol.respond { request in
+                #expect(request.url?.path == "/api/v1/agent/connections")
+                #expect(request.url?.query == "limit=100&offset=100")
+                return .json(body: #"{"items":[{"id":"shared","name":"共享模型","model":"configured-model","enabled":true,"daily_calls_remaining":42,"read_only":true}],"total":101,"offset":100,"limit":100}"#)
+            }
+            let page = try await makeClient().assistantConnections(offset: 100)
+            #expect(page.items.first?.dailyCallsRemaining == 42)
+            #expect(page.items.first?.enabled == true)
+        }
+
+        @Test func acceptPlaylistSendsReviewedVersionAndIdempotencyKey() async throws {
+            StubURLProtocol.respond { request in
+                #expect(request.url?.path == "/api/v1/agent/drafts/d1/accept")
+                #expect(request.httpMethod == "POST")
+                let body = try #require(StubURLProtocol.bodyData(of: request))
+                let json = try #require(try JSONSerialization.jsonObject(with: body) as? [String: Any])
+                #expect(json["version"] as? Int == 3)
+                #expect(json["preview_digest"] as? String == "reviewed-digest")
+                #expect(json["idempotency_key"] as? String == "macos-fixed-save-key")
+                return .json(body: #"{"id":"d1","kind":"playlist","title":"晚安","status":"applied","version":3,"payload":{"name":"晚安","track_ids":["t1"],"playlist_id":"p1"},"evidence":[],"result":{"playlist_id":"p1"}}"#)
+            }
+            let result = try await makeClient().acceptDraft(id: "d1", version: 3, previewDigest: "reviewed-digest", idempotencyKey: "macos-fixed-save-key")
+            #expect(result.isApplied)
+            #expect(result.result?.playlistId == "p1")
+            #expect(result.payload?.playlistID == "p1")
+        }
+
+        @Test func historyActionsUseConversationScopedRoutes() async throws {
+            StubURLProtocol.respond { request in
+                #expect(request.url?.path == "/api/v1/agent/conversations/c1")
+                if request.httpMethod == "PATCH" {
+                    let body = try #require(StubURLProtocol.bodyData(of: request))
+                    let json = try #require(try JSONSerialization.jsonObject(with: body) as? [String: String])
+                    #expect(json["title"] == "新名称")
+                    return .json(body: #"{"id":"c1","title":"新名称","messages":[]}"#)
+                }
+                #expect(request.httpMethod == "DELETE")
+                return .json(body: #"{"ok":true}"#)
+            }
+            let client = try makeClient()
+            let result = try await client.renameConversation(id: "c1", title: "新名称")
+            #expect(result.title == "新名称")
+            try await client.deleteConversation(id: "c1")
         }
 
         @Test func metadataReviewDecodesCandidatesAndDuplicates() async throws {

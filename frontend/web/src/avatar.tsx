@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { api, type User } from './api';
 
 function useAvatar(user: User) {
@@ -59,6 +60,7 @@ export function AvatarEditor({
   disabled?: boolean;
   onBusy?: (value: boolean) => void;
 }) {
+  const { t } = useTranslation();
   const [file, setFile] = useState<File | null>(null),
     [previewReady, setPreviewReady] = useState(false);
   const canvas = useRef<HTMLCanvasElement>(null);
@@ -95,7 +97,7 @@ export function AvatarEditor({
         .catch(() => {
           if (!cancelled) {
             setFile(null);
-            setMessage('无法预览此图片，请选择有效的 JPG、PNG 或 WebP。');
+            setMessage(t('avatar.invalidPreview'));
           }
         });
     return () => {
@@ -106,7 +108,7 @@ export function AvatarEditor({
     if (busy || disabled || (!remove && !file)) return;
     setBusy(true);
     onBusy?.(true);
-    setMessage('正在保存头像…');
+    setMessage(t('avatar.saving'));
     try {
       await api(
         '/auth/avatar',
@@ -123,16 +125,16 @@ export function AvatarEditor({
       );
       setFile(null);
       window.dispatchEvent(new Event('wildstring:avatar-changed'));
-      setMessage(remove ? '已恢复默认头像。' : '头像已保存。');
+      setMessage(remove ? t('avatar.restored') : t('avatar.saved'));
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : '头像未保存，请重试。');
+      setMessage(error instanceof Error ? error.message : t('avatar.failed'));
     } finally {
       setBusy(false);
       onBusy?.(false);
     }
   }
   return (
-    <section className="avatar-editor" aria-label="自定义头像">
+    <section className="avatar-editor" aria-label={t('avatar.section')}>
       <div className="avatar-preview">
         {file ? (
           <canvas
@@ -141,7 +143,7 @@ export function AvatarEditor({
             width={256}
             height={256}
             role="img"
-            aria-label="头像预览"
+            aria-label={t('avatar.preview')}
           />
         ) : (
           <AccountAvatar user={user} />
@@ -149,7 +151,7 @@ export function AvatarEditor({
       </div>
       <div className="avatar-controls">
         <label>
-          选择头像
+          {t('avatar.choose')}
           <input
             type="file"
             accept="image/jpeg,image/png,image/webp"
@@ -158,7 +160,7 @@ export function AvatarEditor({
               const selected = event.target.files?.[0] || null;
               event.target.value = '';
               if (selected && selected.size > 5 * 1024 * 1024) {
-                setMessage('请选择不超过 5 MiB 的图片。');
+                setMessage(t('avatar.tooLarge'));
                 return;
               }
               setFile(selected);
@@ -166,19 +168,17 @@ export function AvatarEditor({
             }}
           />
         </label>
-        <small className="muted">
-          JPG / PNG / WebP，最多 5 MiB；居中裁成方形，保存时移除图片附带信息。
-        </small>
+        <small className="muted">{t('avatar.hint')}</small>
         <div className="avatar-actions">
           <button
             type="button"
             disabled={busy || disabled || !file || !previewReady}
             onClick={() => void save()}
           >
-            上传头像
+            {t('avatar.upload')}
           </button>
           <button type="button" disabled={busy || disabled} onClick={() => void save(true)}>
-            恢复默认头像
+            {t('avatar.reset')}
           </button>
         </div>
         {message && <p role="status">{message}</p>}

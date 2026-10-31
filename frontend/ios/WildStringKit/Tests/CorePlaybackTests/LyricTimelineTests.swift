@@ -46,4 +46,36 @@ struct LyricTimelineTests {
         let timeline = timeline(kind: "none", ms: [], texts: [])
         #expect(timeline.isEmpty)
     }
+
+    @Test func wordTimingKeepsLanguagesAndFollowsFractionalProgressAfterSeek() {
+        let timeline = LyricTimeline(lyrics: Lyrics(kind: "synced", lines: [
+            LyricLine(timeMs: 1_000, text: "甲乙", words: [
+                LyricWord(startMs: 1_000, endMs: 1_500, text: "甲"),
+                LyricWord(startMs: 1_500, endMs: 2_500, text: "乙")
+            ], translation: "A B", romanization: "jia yi"),
+            LyricLine(timeMs: 3_000, text: "下一行")
+        ]))
+        let line = timeline.lines[0]
+        #expect(line.translation == "A B")
+        #expect(line.romanization == "jia yi")
+        #expect(line.words[0].start == 1)
+        #expect(line.words[0].end == 1.5)
+        #expect(line.words[0].progress(at: 0.8) == 0)
+        #expect(line.words[0].progress(at: 1.25) == 0.5)
+        #expect(line.words[0].progress(at: 3) == 1)
+        #expect(line.words[1].progress(at: 2) == 0.5)
+        #expect(timeline.currentIndex(at: 4) == 1)
+        #expect(timeline.currentIndex(at: 1.25) == 0)
+        #expect(line.words[1].progress(at: 1.25) == 0)
+        #expect(timeline.lines[1].words.isEmpty)
+    }
+
+    @Test func zeroDurationWordSwitchesAtItsStart() {
+        let timeline = LyricTimeline(lyrics: Lyrics(kind: "synced", lines: [
+            LyricLine(timeMs: 1_000, text: "甲", words: [LyricWord(startMs: 1_000, endMs: 1_000, text: "甲")])
+        ]))
+        let word = timeline.lines[0].words[0]
+        #expect(word.progress(at: 0.999) == 0)
+        #expect(word.progress(at: 1) == 1)
+    }
 }

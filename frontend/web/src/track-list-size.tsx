@@ -5,6 +5,7 @@ import {
   writePreference,
 } from './user-preferences';
 import { useSyncExternalStore } from 'react';
+import { useTranslation } from 'react-i18next';
 
 export type TrackListSize = 'small' | 'medium' | 'large';
 const KEY = 'wildstring:track-list-size';
@@ -65,18 +66,19 @@ function choose(value: string) {
   publish(size);
 }
 export function TrackListSizeControl() {
+  const { t } = useTranslation();
   const size = useTrackListSize();
   return (
     <label className="theme-control track-list-size-control">
-      <span>歌曲列表大小</span>
+      <span>{t('trackListSize.label')}</span>
       <select
-        aria-label="歌曲列表大小"
+        aria-label={t('trackListSize.label')}
         value={size}
         onChange={(event) => choose(event.target.value)}
       >
-        <option value="small">小</option>
-        <option value="medium">中（推荐）</option>
-        <option value="large">大</option>
+        <option value="small">{t('trackListSize.small')}</option>
+        <option value="medium">{t('trackListSize.medium')}</option>
+        <option value="large">{t('trackListSize.large')}</option>
       </select>
     </label>
   );

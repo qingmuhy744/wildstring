@@ -9,12 +9,14 @@ struct NowPlayingView: View {
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.horizontalSizeClass) private var sizeClass
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(FavoritesModel.self) private var favorites
     @AppStorage("playerStyle") private var playerStyleRaw = PlayerStyle.cover.rawValue
     @State private var showLyrics: Bool
     @State private var scrubTime: Double?
     @State private var showingQueue = false
     @State private var showingArtwork = false
+    @State private var layoutWidth: CGFloat = 390
 
     init(client: WildstringClient, playback: PlaybackService, initiallyShowsLyrics: Bool = false) {
         self.client = client
@@ -63,7 +65,17 @@ struct NowPlayingView: View {
                     .presentationDetents([.medium, .large])
             }
         }
+        .background {
+            GeometryReader { proxy in
+                Color.clear.preference(key: PlayerWidthKey.self, value: proxy.size.width)
+            }
+        }
+        .onPreferenceChange(PlayerWidthKey.self) { layoutWidth = $0 }
         .task { openQueueForDemoIfNeeded() }
+    }
+
+    private var isPodcast: Bool {
+        playback.currentItem?.trackID.hasPrefix("podcast_ep_") == true
     }
 
     private func openQueueForDemoIfNeeded() {
@@ -163,6 +175,12 @@ struct NowPlayingView: View {
                             .font(.caption2)
                             .foregroundStyle(.tertiary)
                     }
+                    if let message = playback.podcastProgressMessage {
+                        Text(message)
+                            .font(.caption2)
+                            .foregroundStyle(.orange)
+                            .multilineTextAlignment(.center)
+                    }
                 }
                 progressSection
             } else {
@@ -173,7 +191,7 @@ struct NowPlayingView: View {
     }
 
     private var coverSize: CGFloat {
-        let width = UIScreen.main.bounds.width
+        let width = layoutWidth > 0 ? layoutWidth : 390
         return min(width * 0.72, isRegular ? 320 : 340)
     }
 
@@ -218,11 +236,16 @@ struct NowPlayingView: View {
                 .buttonStyle(.plain)
                 Button {
                     Haptics.tap()
-                    playback.previous()
+                    if isPodcast {
+                        playback.seek(to: playback.currentTime - 15)
+                    } else {
+                        playback.previous()
+                    }
                 } label: {
-                    Image(systemName: "backward.fill").font(.title2)
+                    Image(systemName: isPodcast ? "gobackward.15" : "backward.fill").font(.title2)
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel(isPodcast ? "后退 15 秒" : "上一首")
                 Button {
                     Haptics.tap()
                     playback.togglePlayPause()
@@ -231,13 +254,19 @@ struct NowPlayingView: View {
                         .font(.system(size: 64))
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel(playback.isPlaying ? "暂停" : "播放")
                 Button {
                     Haptics.tap()
-                    playback.next()
+                    if isPodcast {
+                        playback.seek(to: playback.currentTime + 30)
+                    } else {
+                        playback.next()
+                    }
                 } label: {
-                    Image(systemName: "forward.fill").font(.title2)
+                    Image(systemName: isPodcast ? "goforward.30" : "forward.fill").font(.title2)
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel(isPodcast ? "前进 30 秒" : "下一首")
                 Button {
                     Haptics.selection()
                     playback.cycleRepeatMode()
@@ -252,6 +281,9 @@ struct NowPlayingView: View {
             }
             HStack(spacing: 44) {
                 sleepTimerMenu
+                AirPlayRouteButton()
+                    .frame(width: 28, height: 28)
+                    .accessibilityLabel("隔空播放")
                 Button {
                     showingQueue = true
                 } label: {
@@ -307,17 +339,26 @@ struct NowPlayingView: View {
                 client: client,
                 trackID: item.trackID,
                 size: coverSize,
-                isPlaying: playback.isPlaying
+                isPlaying: playback.isPlaying && !reduceMotion
             )
         case .cassette:
             CassetteArtwork(
                 client: client,
                 trackID: item.trackID,
                 width: coverSize,
-                isPlaying: playback.isPlaying,
+                isPlaying: playback.isPlaying && !reduceMotion,
+                progress: playback.duration > 0 ? playback.currentTime / playback.duration : 0,
                 title: item.title
             )
         }
+    }
+}
+
+private struct PlayerWidthKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        let next = nextValue()
+        if next > 0 { value = next }
     }
 }
 
@@ -327,17 +368,23 @@ private func timeText(_ seconds: Double) -> String {
     return String(format: "%d:%02d", total / 60, total % 60)
 }
 
-/// Rotating vinyl disc with the cover in the center; spins only while playing.
+/// Vinyl disc at about one turn every 20 seconds. Pausing keeps the angle.
 private struct VinylArtwork: View {
     let client: WildstringClient
     let trackID: String
     let size: CGFloat
     let isPlaying: Bool
 
+    @State private var baseAngle: Double = 0
+    @State private var spinStarted: Date?
+
     var body: some View {
         TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !isPlaying)) { context in
-            let seconds = context.date.timeIntervalSinceReferenceDate
-            let angle = isPlaying ? seconds.truncatingRemainder(dividingBy: 12) / 12 * 360 : 0
+            let live =
+                isPlaying && spinStarted != nil
+                ? context.date.timeIntervalSince(spinStarted ?? context.date) / 20 * 360
+                : 0
+            let angle = (baseAngle + live).truncatingRemainder(dividingBy: 360)
             ZStack {
                 Circle()
                     .fill(
@@ -349,16 +396,37 @@ private struct VinylArtwork: View {
                         )
                     )
                     .overlay(Circle().stroke(Color(white: 0.28), lineWidth: 1))
+                    .rotationEffect(.degrees(angle))
                 CoverImage(
                     client: client,
                     trackID: trackID,
                     size: size * 0.42,
                     circular: true
                 )
+                Capsule()
+                    .fill(Color(white: 0.72))
+                    .frame(width: size * 0.03, height: size * 0.22)
+                    .offset(x: size * 0.30, y: -size * 0.18)
+                    .rotationEffect(.degrees(isPlaying ? 16 : 28), anchor: .top)
             }
             .frame(width: size, height: size)
-            .rotationEffect(.degrees(angle))
         }
+        .onAppear { spinStarted = isPlaying ? .now : nil }
+        .onChange(of: isPlaying) { _, playing in
+            anchorSpin(playing: playing, at: .now)
+        }
+        .onChange(of: trackID) { _, _ in
+            baseAngle = 0
+            spinStarted = isPlaying ? .now : nil
+        }
+    }
+
+    private func anchorSpin(playing: Bool, at date: Date) {
+        if let spinStarted {
+            let delta = date.timeIntervalSince(spinStarted) / 20 * 360
+            baseAngle = (baseAngle + delta).truncatingRemainder(dividingBy: 360)
+        }
+        spinStarted = playing ? date : nil
     }
 }
 
@@ -368,14 +436,22 @@ private struct CassetteArtwork: View {
     let trackID: String
     let width: CGFloat
     let isPlaying: Bool
+    let progress: Double
     let title: String
 
+    @State private var baseAngle: Double = 0
+    @State private var spinStarted: Date?
+
     private var height: CGFloat { width * 0.66 }
+    private var clampedProgress: Double { min(max(progress, 0), 1) }
 
     var body: some View {
         TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !isPlaying)) { context in
-            let seconds = context.date.timeIntervalSinceReferenceDate
-            let spin = isPlaying ? seconds.truncatingRemainder(dividingBy: 6) / 6 * 360 : 0
+            let live =
+                isPlaying && spinStarted != nil
+                ? context.date.timeIntervalSince(spinStarted ?? context.date) / 6 * 360
+                : 0
+            let spin = (baseAngle + live).truncatingRemainder(dividingBy: 360)
             ZStack {
                 RoundedRectangle(cornerRadius: 14)
                     .fill(Color(.secondarySystemBackground))
@@ -389,8 +465,8 @@ private struct CassetteArtwork: View {
                         .lineLimit(1)
                         .padding(.horizontal, width * 0.08)
                     HStack(spacing: width * 0.2) {
-                        reel(rotation: spin)
-                        reel(rotation: -spin)
+                        reel(rotation: spin, diameter: width * 0.18 * (1 - clampedProgress * 0.45))
+                        reel(rotation: -spin, diameter: width * 0.18 * (0.55 + clampedProgress * 0.45))
                     }
                     Spacer(minLength: 0)
                 }
@@ -398,9 +474,17 @@ private struct CassetteArtwork: View {
             }
             .frame(width: width, height: height)
         }
+        .onAppear { spinStarted = isPlaying ? .now : nil }
+        .onChange(of: isPlaying) { _, playing in
+            if let spinStarted {
+                let delta = Date().timeIntervalSince(spinStarted) / 6 * 360
+                baseAngle = (baseAngle + delta).truncatingRemainder(dividingBy: 360)
+            }
+            spinStarted = playing ? .now : nil
+        }
     }
 
-    private func reel(rotation: Double) -> some View {
+    private func reel(rotation: Double, diameter: CGFloat) -> some View {
         ZStack {
             Circle()
                 .fill(Color(.tertiarySystemFill))
@@ -409,12 +493,12 @@ private struct CassetteArtwork: View {
             ForEach(0..<3, id: \.self) { index in
                 Capsule()
                     .fill(Color(.systemGray2))
-                    .frame(width: width * 0.018, height: width * 0.08)
-                    .offset(y: -width * 0.03)
+                    .frame(width: max(diameter * 0.08, 1), height: diameter * 0.42)
+                    .offset(y: -diameter * 0.16)
                     .rotationEffect(.degrees(Double(index) * 120))
             }
         }
-        .frame(width: width * 0.16, height: width * 0.16)
+        .frame(width: diameter, height: diameter)
         .rotationEffect(.degrees(rotation))
     }
 }
@@ -431,11 +515,15 @@ private struct ArtworkPreview: View {
                 Color(.systemBackground)
                     .ignoresSafeArea()
                 VStack(spacing: 18) {
-                    CoverImage(
-                        client: client,
-                        trackID: item.hasCover ? item.trackID : nil,
-                        size: min(UIScreen.main.bounds.width - 48, 420)
-                    )
+                    GeometryReader { proxy in
+                        CoverImage(
+                            client: client,
+                            trackID: item.hasCover ? item.trackID : nil,
+                            size: min(proxy.size.width - 48, 420)
+                        )
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
+                    .aspectRatio(1, contentMode: .fit)
                     .shadow(color: .black.opacity(0.18), radius: 22, y: 10)
                     VStack(spacing: 4) {
                         Text(item.title)

@@ -4,6 +4,7 @@ import SwiftUI
 @MainActor
 struct AssistantView: View {
     let client: WildstringClient
+    var showsDismiss = true
 
     @Environment(\.dismiss) private var dismiss
     @State private var conversation: ConversationDetail?
@@ -32,7 +33,9 @@ struct AssistantView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button("关闭") { dismiss() }
+                    if showsDismiss {
+                        Button("关闭") { dismiss() }
+                    }
                 }
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     Button {

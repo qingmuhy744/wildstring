@@ -115,7 +115,7 @@ class AgentWorkspaceTest {
             connect(vm, fixture)
             compose.onNodeWithContentDescription("设置").performClick()
             compose.onNodeWithText("模型连接", substring = false).assertDoesNotExist()
-            compose.onNodeWithText("野弦助手 / 通知与草案").performScrollTo().performClick()
+            compose.onNodeWithText(compose.activity.getString(R.string.settings_assistant)).performScrollTo().performClick()
             compose.onNodeWithTag("agent-tab-connections").assertDoesNotExist()
             compose.onNodeWithText("整理方式", substring = false).assertDoesNotExist()
             assertFalse(fixture.requests.any { it.first.contains("/application-settings") })
@@ -126,7 +126,7 @@ class AgentWorkspaceTest {
         Fixture().use { fixture -> try {
             connect(vm, fixture)
             compose.onNodeWithContentDescription("设置").performClick()
-            compose.onNodeWithText("野弦助手 / 通知与草案").performScrollTo().performClick()
+            compose.onNodeWithText(compose.activity.getString(R.string.settings_assistant)).performScrollTo().performClick()
             compose.onNodeWithTag("agent-tab-research").performScrollTo().performClick()
             compose.waitUntil(15_000) { fixture.requests.any { it.first == "GET /api/v1/agent/search-settings" } }
             compose.onNodeWithTag("agent-memory-input").performScrollTo().performTextInput("优先录音室版本")
@@ -181,7 +181,7 @@ class AgentWorkspaceTest {
             fixture.rejectHistoryDelete = true
             connect(vm, fixture)
             compose.onNodeWithContentDescription("设置").performClick()
-            compose.onNodeWithText("野弦助手 / 通知与草案").performScrollTo().performClick()
+            compose.onNodeWithText(compose.activity.getString(R.string.settings_assistant)).performScrollTo().performClick()
             compose.waitUntil(15_000) { compose.onAllNodes(hasText("历史") and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithText("历史", substring = false).performClick()
             compose.waitUntil(15_000) { compose.onAllNodesWithTag("history-open-history-b").fetchSemanticsNodes().isNotEmpty() }
@@ -222,7 +222,7 @@ class AgentWorkspaceTest {
         Fixture().use { fixture -> try {
             connect(vm, fixture)
             compose.onNodeWithContentDescription("设置").performClick()
-            compose.onNodeWithText("野弦助手 / 通知与草案").performScrollTo().performClick()
+            compose.onNodeWithText(compose.activity.getString(R.string.settings_assistant)).performScrollTo().performClick()
             compose.onNodeWithTag("agent-tab-tasks").assertDoesNotExist()
             compose.onNodeWithText("开始巡检", substring = false).assertDoesNotExist()
             compose.onNodeWithText("新建计划", substring = false).assertDoesNotExist()
@@ -235,7 +235,7 @@ class AgentWorkspaceTest {
             fixture.draftActionResponseDelayMs = 350
             connect(vm, fixture)
             compose.onNodeWithContentDescription("设置").performClick()
-            compose.onNodeWithText("野弦助手 / 通知与草案").performScrollTo().performClick()
+            compose.onNodeWithText(compose.activity.getString(R.string.settings_assistant)).performScrollTo().performClick()
             compose.onNodeWithTag("agent-workspace").assertIsDisplayed()
             compose.onNodeWithTag("agent-tab-notifications").performClick()
             compose.waitUntil(15_000) { compose.onAllNodesWithText("新草案待确认").fetchSemanticsNodes().isNotEmpty() }
@@ -290,7 +290,7 @@ class AgentWorkspaceTest {
             fixture.replacementDraft = JsonParser.parseString("""{"id":"draft-one","kind":"lyrics","title":"选用双语逐字歌词","payload":{"candidate_id":"candidate-one","version":1,"file_version":"${"a".repeat(64)}","offset_ms":250},"before":{"track_id":"song-a","title":"合成歌曲甲","provider":"合成来源","current_quality":{"label":"静态歌词"},"candidate_quality":{"label":"双语逐字动态"},"match":{"score":0.99},"current_lines":[{"text":"原歌词预览"}],"candidate_lines":[{"text":"Synthetic lyric","translation":"合成译文"}]},"evidence":[],"status":"pending","version":1,"trace_id":"${fixture.trace}"}""").asJsonObject.apply { add("result", com.google.gson.JsonNull.INSTANCE) }
             connect(vm, fixture)
             compose.onNodeWithContentDescription("设置").performClick()
-            compose.onNodeWithText("野弦助手 / 通知与草案").performScrollTo().performClick()
+            compose.onNodeWithText(compose.activity.getString(R.string.settings_assistant)).performScrollTo().performClick()
             compose.onNodeWithTag("agent-tab-drafts").performClick()
             compose.waitUntil(15_000) { compose.onAllNodesWithTag("draft-open-draft-one").fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithTag("draft-open-draft-one").performClick()
@@ -308,7 +308,7 @@ class AgentWorkspaceTest {
             fixture.replacementDraft = JsonParser.parseString("""{"id":"draft-one","kind":"metadata_batch","title":"专辑批量核对","payload":{"items":[{"track_id":"song-a","metadata_version":2,"overrides":{"track_number":9}},{"track_id":"song-b","metadata_version":3,"overrides":{"track_number":10}}]},"before":{"items":[{"track_id":"song-a","title":"合成歌曲甲","effective":{"track_number":8}},{"track_id":"song-b","title":"合成歌曲乙","effective":{"track_number":9}}]},"evidence":[],"status":"pending","version":1,"trace_id":"${fixture.trace}"}""").asJsonObject
             connect(vm, fixture)
             compose.onNodeWithContentDescription("设置").performClick()
-            compose.onNodeWithText("野弦助手 / 通知与草案").performScrollTo().performClick()
+            compose.onNodeWithText(compose.activity.getString(R.string.settings_assistant)).performScrollTo().performClick()
             compose.onNodeWithTag("agent-tab-drafts").performClick()
             compose.waitUntil(15_000) { compose.onAllNodesWithTag("draft-open-draft-one").fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithTag("draft-open-draft-one").performClick()
@@ -326,7 +326,7 @@ class AgentWorkspaceTest {
             fixture.replacementDraft = JsonParser.parseString("""{"id":"draft-one","kind":"cover","title":"封面核对","payload":{"suggestion_id":"candidate","metadata_version":1,"image_sha256":"${"a".repeat(64)}"},"before":{"title":"合成歌曲甲","provider":"合成来源"},"evidence":[],"status":"pending","version":1,"trace_id":"${fixture.trace}"}""").asJsonObject
             connect(vm, fixture)
             compose.onNodeWithContentDescription("设置").performClick()
-            compose.onNodeWithText("野弦助手 / 通知与草案").performScrollTo().performClick()
+            compose.onNodeWithText(compose.activity.getString(R.string.settings_assistant)).performScrollTo().performClick()
             compose.onNodeWithTag("agent-tab-drafts").performClick()
             compose.waitUntil(15_000) { compose.onAllNodesWithTag("draft-open-draft-one").fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithTag("draft-open-draft-one").performClick()
@@ -370,7 +370,7 @@ class AgentWorkspaceTest {
         Fixture().use { fixture -> try {
             connect(vm, fixture)
             compose.onNodeWithContentDescription("设置").performClick()
-            compose.onNodeWithText("播放诊断").performScrollTo().performClick()
+            compose.onNodeWithText(compose.activity.getString(R.string.settings_diagnostics)).performScrollTo().performClick()
             compose.onNodeWithTag("playback-diagnostics").assertExists()
             compose.onNodeWithTag("copy-playback-diagnostics").performClick()
             val copied = compose.runOnIdle {

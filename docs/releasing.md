@@ -4,15 +4,15 @@
 
 `.github/workflows/ci.yml` 在 main 提交、PR、手动触发和 Release 复用调用时执行：锁定依赖、hooks、Python/Web 测试、Web 构建与锁文件检查。容器任务执行 `make docker-up docker-smoke docker-test`，检查 API、Web、FFmpeg、非 root、只读音乐及后端测试，最后停止容器并保留数据卷。
 
-`.github/workflows/android.yml` 检查 Android Lint、JVM 测试、debug 构建和 R8 release 构建，再通过模拟器检查登录、认证音频串流、播放/暂停、手机全屏歌词和平板双栏。上传 `wildstring-android-debug` 与报告/截图。debug 使用临时签名，供开发验证；正式安装包从 Releases 下载。
+`.github/workflows/android.yml` 的日常 PR / main 检查包含 Android Lint、JVM 测试、debug 与 R8 release 构建，以及设备测试源码编译。上传的 `wildstring-android-debug` 是「野弦 Dev」调试包，使用临时签名，可与正式版共存；正式安装包从 Releases 下载。
 
-Android CI 会启动一次性合成曲库 API，再把 `realBackend` 参数传给模拟器，验证真实后端契约；不连接个人服务器或曲库。后端及合成夹具变更同样触发原生验证。
+完整设备回归日常在本地 Pixel 上执行，命令见 [Android 构建说明](../frontend/android/README.md)。发版前手动运行 **Android APK**，选择待发布提交所在分支并勾选 `run_emulator`。该运行启动一次性合成曲库 API，再把 `realBackend` 参数传给模拟器，验证登录、认证音频串流、播放/暂停、歌词与手机/平板布局；不连接个人服务器或曲库。日常 CI 通过不等于设备回归通过。
 
 PR 工作流只有仓库读取权限，不读取发布私钥。
 
 ## 版本和签名
 
-显示名称「野弦 / WildString」。正式 Android applicationId 为 `com.wildstring.app`，debug 为 `com.wildstring.app.debug`。0.1.0 的 Android versionCode 为 2；0.2.0 为 3，0.2.1 为 4，0.2.2 为 5，未发布 0.2.3 为 6、0.3.0 为 7、0.3.1 为 8、0.3.2 为 9、0.3.3 为 10、0.3.4 为 11、0.4.0 为 12，0.5.14 为 28，0.5.15 为 29，0.6.0 为 30，0.6.1 为 31，0.6.2 为 32，0.6.3 为 33，0.7.0 为 34，0.7.1 为 35，0.8.0 为 36，0.8.1 为 37，后续发布必须递增。旧的 `dev.wildstring.app.debug` 属于独立应用，安装新版后重新连接即可，服务端数据保留。
+显示名称「野弦 / WildString」，debug 显示「野弦 Dev」。正式 Android applicationId 为 `com.wildstring.app`，debug 为 `com.wildstring.app.dev`。0.1.0 的 Android versionCode 为 2；0.2.0 为 3，0.2.1 为 4，0.2.2 为 5，未发布 0.2.3 为 6、0.3.0 为 7、0.3.1 为 8、0.3.2 为 9、0.3.3 为 10、0.3.4 为 11、0.4.0 为 12，0.5.14 为 28，0.5.15 为 29，0.6.0 为 30，0.6.1 为 31，0.6.2 为 32，0.6.3 为 33，0.7.0 为 34，0.7.1 为 35，0.8.0 为 36，0.8.1 为 37，后续发布必须递增。旧的 `dev.wildstring.app.debug` 属于独立应用，安装新版后重新连接即可，服务端数据保留。
 
 同时更新 Python、Web、Android 版本及对应锁文件：
 
@@ -46,9 +46,9 @@ PR 工作流只有仓库读取权限，不读取发布私钥。
 ## 发布顺序
 
 1. 用户确认版本号后，将 `CHANGELOG.md` 的本批「未发布」条目归入对应版本，并准备 `docs/releases/vX.Y.Z.md`，说明已实现能力、验证及限制。
-2. 通过 PR 合并进入 main，确认主线 CI 与 Android APK 工作流成功。
+2. 通过 PR 合并进入 main，确认主线 CI 与 Android APK 工作流成功，并在该提交手动运行开启 `run_emulator` 的 **Android APK** 完整回归，确认用例实际通过。
 3. 在这个已合并提交创建并推送 `vX.Y.Z` 标签。
-4. **Release** 工作流核对标签、三个端版本及 main 祖先关系，重新执行完整 CI、Android 功能测试，构建固定签名 APK，并在模拟器实际安装 R8 正式包、检查连接页。
+4. **Release** 工作流核对标签、三个端版本及 main 祖先关系，重新执行完整 CI 与 Android 构建、单元测试和 Lint，构建固定签名 APK，并在模拟器实际安装 R8 正式包、检查连接页。
 5. 全部通过后构建 Web ZIP 和 linux/amd64、linux/arm64 镜像，推送 GHCR，最后自动创建带全部附件的 GitHub Release。
 
 工作流也支持手动重试：选择对应标签作为运行 ref，并填入同一 tag。工作流提交必须与标签一致，避免用另一提交的检查代替发布验证。只保存 Release 草稿或直接在网页发布 Release 不会触发构建。发布步骤失败时应先检查日志，再重跑同一标签；不移动已有发布标签。

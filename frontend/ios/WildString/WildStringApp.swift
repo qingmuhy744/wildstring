@@ -1,7 +1,22 @@
+import CorePlayback
 import SwiftUI
+import UIKit
+
+final class AppDelegate: NSObject, UIApplicationDelegate {
+    func application(
+        _ application: UIApplication,
+        handleEventsForBackgroundURLSession identifier: String,
+        completionHandler: @escaping () -> Void
+    ) {
+        OfflineBackgroundEvents.store(completionHandler)
+        OfflineBackgroundEvents.reconnect?()
+    }
+}
 
 @main
 struct WildStringApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+
     var body: some Scene {
         WindowGroup {
             RootView()
@@ -13,12 +28,13 @@ struct WildStringApp: App {
 struct RootView: View {
     @State private var model = ConnectionModel()
     @AppStorage("appearanceTheme") private var theme = ThemeChoice.system.rawValue
+    @AppStorage(InterfaceLanguage.storageKey) private var language = InterfaceLanguage.auto.rawValue
 
     var body: some View {
         Group {
             switch model.phase {
             case .loading:
-                ProgressView("正在连接…")
+                ProgressView("connection.connecting")
             case .servers:
                 ServersView(model: model)
             case .connect:
@@ -50,6 +66,7 @@ struct RootView: View {
             await model.restore()
         }
         .preferredColorScheme((ThemeChoice(rawValue: theme) ?? .system).colorScheme)
+        .environment(\.locale, InterfaceLanguage(preference: language).locale)
     }
 
     private static func applyDemoDefaults() {

@@ -25,6 +25,7 @@ services:
       WILDSTRING_WEB_DIR: /app/web
       WILDSTRING_ADMIN_PASSWORD: ${WILDSTRING_ADMIN_PASSWORD:-}
       WILDSTRING_COOKIE_SECURE: ${WILDSTRING_COOKIE_SECURE:-false}
+      WILDSTRING_PODCAST_ALLOW_FAKE_IP: ${WILDSTRING_PODCAST_ALLOW_FAKE_IP:-false}
     volumes:
       - data:/data
       - podcasts:/podcasts

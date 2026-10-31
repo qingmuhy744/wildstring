@@ -24,7 +24,9 @@ Kotlin / Compose / Media3 原生客户端，Android 8.0（API 26）起可安装�
 
 ## 构建
 
-准备 JDK 21、Android SDK `platforms;android-37` 与 `build-tools;36.1.0`。在仓库根目录执行：
+日常 PR / main 的 Android CI 编译 Debug、Release 和设备测试源码，运行单元测试与 Lint，上传可与正式版共存的 `野弦 Dev`（`com.wildstring.app.dev`）Debug APK。完整模拟器回归平时在本地 Pixel 上执行；发版前在 GitHub Actions 手动运行 **Android APK**，选择待发布分支并勾选 `run_emulator`（默认开启）。该手动运行仍需全部通过，不将跳过模拟器的日常 CI 记作设备验收。正式签名包的发版安装冒烟仍由 Release 工作流执行。
+
+准备 JDK 21、Android SDK `platforms;android-37.0` 与 `build-tools;36.1.0`。在仓库根目录执行：
 
 ```sh
 make android-ci                 # Android Lint、单元测试、debug APK 与校验和
@@ -34,13 +36,15 @@ make android-locks              # 修改依赖后刷新锁与 SHA-256 校验元�
 
 `ANDROID_HOME` 指向本机 SDK，`JAVA_HOME` 指向 JDK；`local.properties` 只用于本机且不跟踪。Gradle Wrapper、版本目录与依赖校验资料入库，构建缓存、APK 和签名私钥不提交。
 
-`make android-ci` 的安装包位于 `artifacts/android/`，包含 `wildstring-<version>-debug.apk`（当前开发包为 `wildstring-0.5.2-debug.apk`）与 `SHA256SUMS`。GitHub 的 **Android APK** 工作流通过后，在该次运行的 **Artifacts → wildstring-android-debug** 下载并解压 ZIP 后安装 APK。原有 Python/Web/Docker CI 继续独立运行。
+`make android-ci` 的安装包位于 `artifacts/android/`，包含 `wildstring-<version>-debug.apk`与 `SHA256SUMS`。GitHub 的 **Android APK** 工作流通过后，在该次运行的 **Artifacts → wildstring-android-debug** 下载并解压 ZIP 后安装 APK。原有 Python/Web/Docker CI 继续独立运行。
 
-CI 另启动一次性合成曲库，并通过 `ANDROID_TEST_ARGS=-Pandroid.testInstrumentationRunnerArguments.realBackend=http://10.0.2.2:19882/` 运行真实 API 集成。该参数只允许指向临时测试实例，使用固定的公开测试账号，会创建／删除测试歌单及修改测试曲目。不要指向个人服务器。
+本地完整回归先启动手机模拟器，在一个终端运行 `make android-test-api`，另一个终端运行 `make android-connected-test ANDROID_TEST_ARGS=-Pandroid.testInstrumentationRunnerArguments.realBackend=http://10.0.2.2:19885/`。连接多个设备时用 `ANDROID_SERIAL` 指定模拟器；测试结束后在 API 终端按 Ctrl-C 停止。设备测试显式固定 Espresso 3.7，以兼容 API 37 的输入接口。
+
+手动模拟器 CI 另启动一次性合成曲库，并通过 `ANDROID_TEST_ARGS=-Pandroid.testInstrumentationRunnerArguments.realBackend=http://10.0.2.2:19882/` 运行真实 API 集成。该参数只允许指向临时测试实例，使用固定的公开测试账号，会创建／删除测试歌单及修改测试曲目。不要指向个人服务器。
 
 设备测试用 `UiAutomation.takeScreenshot()` 生成手机和平板 PNG，写入 AGP 传入的 `additionalTestOutputDir`，在测试卸载应用前自动取回到 `frontend/android/app/build/outputs/connected_android_test_additional_output/`。Actions 的 `android-test-reports` 同时保存这些截图及失败截图。手工查看本地已连接设备时，也可用 `adb exec-out screencap -p > screenshot.png` 保存当前屏幕。
 
-debug 包 ID 为 `com.wildstring.app.debug`，与正式包 `com.wildstring.app` 隔离。CI 使用一次性 debug 签名，不上传私钥；不同运行的签名可能不同，安装更新提示签名不匹配时需卸载旧测试包。卸载会清空本机连接/队列，服务端曲库、收藏和歌单保留。
+debug 包 ID 为 `com.wildstring.app.dev`，与正式包 `com.wildstring.app` 隔离。CI 使用一次性 debug 签名，不上传私钥；不同运行的签名可能不同，安装更新提示签名不匹配时需卸载旧测试包。卸载会清空本机连接/队列，服务端曲库、收藏和歌单保留。
 
 ## 正式发布
 

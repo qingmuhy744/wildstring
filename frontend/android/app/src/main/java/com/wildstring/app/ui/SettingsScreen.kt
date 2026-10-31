@@ -25,6 +25,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.platform.LocalResources
 import com.wildstring.app.R
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -69,64 +71,67 @@ private val LocalSettingsFeedback = staticCompositionLocalOf<() -> Unit> { {} }
         catch (_: Exception) { if (settingsOwner == vm.repository.session.cacheScope()) podcastPlayback = null }
     }
     fun mb(bytes: Long) = "%.1f MB".format(bytes / 1048576.0)
+    val resources = LocalResources.current
     CompositionLocalProvider(LocalSettingsFeedback provides tactile {}) {
         SettingsPage(back, bottomBar) {
-            SettingsGroup("账号") {
+            SettingsGroup(stringResource(R.string.settings_group_account)) {
                 val acc = state.account
+                val role = acc?.let { stringResource(roleLabel(it.profile)) }
                 val header = if (acc != null) {
-                    if (!acc.displayName.isNullOrBlank()) "${acc.displayName} (${acc.username}) · ${acc.profileLabel}"
-                    else "${acc.username} · ${acc.profileLabel}"
-                } else "已连接"
+                    if (!acc.displayName.isNullOrBlank()) "${acc.displayName} (${acc.username}) · $role"
+                    else "${acc.username} · $role"
+                } else stringResource(R.string.settings_connected)
                 ListItem(headlineContent = { Text(header) },
                     supportingContent = { Text(state.server) }, leadingContent = { Icon(Icons.Default.AccountCircle, null) })
-                SettingsAction("服务器 / 切换服务器", Icons.Default.Dns) { servers = true }
-                if (state.account != null) SettingsAction("个人资料", Icons.Default.Badge) { profile = true }
+                SettingsAction(stringResource(R.string.settings_servers), Icons.Default.Dns) { servers = true }
+                if (state.account != null) SettingsAction(stringResource(R.string.settings_profile), Icons.Default.Badge) { profile = true }
                 if (state.account != null) AvatarSettings(vm)
-                if (state.account != null) SettingsAction("修改密码", Icons.Default.Lock) { password = true }
+                if (state.account != null) SettingsAction(stringResource(R.string.settings_change_password), Icons.Default.Lock) { password = true }
             }
             SettingsGroup("Last.fm") { LastfmSettings(vm) }
-            SettingsGroup("助手与通知") {
-                SettingsAction("野弦助手 / 通知与草案", Icons.Default.AutoAwesome) { assistant = true }
-                Text(if (inbox.owner == vm.repository.session.cacheScope() && inbox.unread > 0) "${inbox.unread} 条未读通知" else "对话找歌、通知与轻量资料修正",
+            SettingsGroup(stringResource(R.string.settings_group_assistant)) {
+                SettingsAction(stringResource(R.string.settings_assistant), Icons.Default.AutoAwesome) { assistant = true }
+                Text(if (inbox.owner == vm.repository.session.cacheScope() && inbox.unread > 0) stringResource(R.string.settings_unread, inbox.unread) else stringResource(R.string.settings_assistant_hint),
                     Modifier.padding(start = 16.dp, end = 16.dp, bottom = 16.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                SettingsAction("联网与记忆", Icons.Default.TravelExplore) { feature = "research" }
-                SettingsAction("通知设置", Icons.Default.Notifications) { feature = "channels" }
+                SettingsAction(stringResource(R.string.settings_research), Icons.Default.TravelExplore) { feature = "research" }
+                SettingsAction(stringResource(R.string.settings_notifications), Icons.Default.Notifications) { feature = "channels" }
             }
-            if (state.account?.isOwner == true) SettingsGroup("服务端管理") {
+            if (state.account?.isOwner == true) SettingsGroup(stringResource(R.string.settings_group_server_admin)) {
                 Text(
-                    "音乐库、文件夹、权限、共享音频清理及插件配置请在网页端管理。",
+                    stringResource(R.string.settings_server_admin_hint),
                     Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            SettingsGroup("播放") {
-                SettingsChoice("播放音质", if (preferences.aacBitrate == 0) "原音" else "AAC · ${preferences.aacBitrate} kbps", Icons.Default.GraphicEq,
-                    com.wildstring.app.data.PlaybackRequest.bitrates.map { it to if (it == 0) "原音" else "AAC · $it kbps" }, preferences.aacBitrate,
-                    "默认原音。选择 AAC 后，无损音源转码，有损音源直放。切换保留播放位置和暂停状态。", vm.settings::quality)
-                SettingsChoice("歌词恢复跟随", "${preferences.lyricFollowSeconds} 秒", Icons.Default.Lyrics,
-                    listOf(1, 2, 3, 5, 10).map { it to "$it 秒" }, preferences.lyricFollowSeconds,
-                    "滑动或点选歌词后，停止操作多久恢复当前歌词。滚动过程中不计时。", vm.settings::lyricFollowSeconds)
-                SettingsChoice("歌词大小", preferences.lyricSize.label, Icons.Default.FormatSize,
-                    com.wildstring.app.data.LyricSize.entries.map { it to it.label }, preferences.lyricSize,
-                    "调整全屏歌词和逐字高亮的字号，只影响本机播放页。", vm.settings::lyricSize)
-                SettingsAction("播放诊断", Icons.Default.Troubleshoot, subtitle = "查看网络缓冲、音频解码与输出状态") { diagnostics = true }
+            SettingsGroup(stringResource(R.string.settings_group_playback)) {
+                val qualityLabel: (Int) -> String = { rate -> if (rate == 0) resources.getString(R.string.quality_original) else resources.getString(R.string.quality_aac, rate) }
+                SettingsChoice(stringResource(R.string.settings_quality), qualityLabel(preferences.aacBitrate), Icons.Default.GraphicEq,
+                    com.wildstring.app.data.PlaybackRequest.bitrates.map { it to qualityLabel(it) }, preferences.aacBitrate,
+                    stringResource(R.string.settings_quality_hint), vm.settings::quality, tag = "quality")
+                SettingsChoice(stringResource(R.string.settings_lyric_follow), stringResource(R.string.seconds_value, preferences.lyricFollowSeconds), Icons.Default.Lyrics,
+                    listOf(1, 2, 3, 5, 10).map { it to resources.getString(R.string.seconds_value, it) }, preferences.lyricFollowSeconds,
+                    stringResource(R.string.settings_lyric_follow_hint), vm.settings::lyricFollowSeconds)
+                SettingsChoice(stringResource(R.string.settings_lyric_size), stringResource(lyricSizeLabel(preferences.lyricSize)), Icons.Default.FormatSize,
+                    com.wildstring.app.data.LyricSize.entries.map { it to resources.getString(lyricSizeLabel(it)) }, preferences.lyricSize,
+                    stringResource(R.string.settings_lyric_size_hint), vm.settings::lyricSize)
+                SettingsAction(stringResource(R.string.settings_diagnostics), Icons.Default.Troubleshoot, subtitle = stringResource(R.string.settings_diagnostics_hint)) { diagnostics = true }
             }
-            SettingsGroup("跨设备接续") {
+            SettingsGroup(stringResource(R.string.settings_group_handoff)) {
                 val syncMode by vm.sharing.mode.collectAsStateWithLifecycle()
-                val syncSubtitle = when (syncMode) {
-                    "off" -> "自动提示已关闭 · 点击可手动同步播放队列"
-                    "auto" -> "自动恢复 · 点击可手动同步播放队列"
-                    else -> "轻提示 · 点击可手动同步播放队列"
-                }
-                SettingsAction("音乐跨设备接续", Icons.Default.Devices, subtitle = syncSubtitle) { feature = "devices" }
+                val syncSubtitle = stringResource(when (syncMode) {
+                    "off" -> R.string.handoff_off
+                    "auto" -> R.string.handoff_auto
+                    else -> R.string.handoff_hint
+                })
+                SettingsAction(stringResource(R.string.settings_music_handoff), Icons.Default.Devices, subtitle = syncSubtitle) { feature = "devices" }
                 val podcastMode by vm.podcastProgress.mode.collectAsStateWithLifecycle()
-                SettingsChoice("播客单集接续", when(podcastMode) { "auto" -> "自动接续上次位置"; "restart" -> "每次从头播放"; else -> "播放前询问是否续播" }, Icons.Default.Podcasts,
-                    listOf("ask" to "播放前询问（默认）", "auto" to "自动接续", "restart" to "从头播放"), podcastMode,
-                    "每集进度独立保存。播放时定时同步，离线时先保存在本机；不同设备进度冲突时会让你选择。", vm.podcastProgress::mode)
+                SettingsChoice(stringResource(R.string.settings_podcast_resume), stringResource(when(podcastMode) { "auto" -> R.string.podcast_resume_auto_value; "restart" -> R.string.podcast_resume_restart_value; else -> R.string.podcast_resume_ask_value }), Icons.Default.Podcasts,
+                    listOf("ask" to stringResource(R.string.podcast_resume_ask), "auto" to stringResource(R.string.podcast_resume_auto), "restart" to stringResource(R.string.podcast_resume_restart)), podcastMode,
+                    stringResource(R.string.podcast_resume_hint), vm.podcastProgress::mode)
             }
             podcastPlayback?.let { playback ->
-                SettingsGroup("播客播放缓存") {
+                SettingsGroup(stringResource(R.string.settings_group_podcast_cache)) {
                     val savePodcastPlayback: (com.wildstring.app.data.PodcastPlaybackSettings) -> Unit = save@{ next ->
                         if (savingPodcastPlayback || settingsOwner != vm.repository.session.cacheScope()) return@save
                         podcastPlayback = next; savingPodcastPlayback = true
@@ -134,64 +139,66 @@ private val LocalSettingsFeedback = staticCompositionLocalOf<() -> Unit> { {} }
                             try {
                                 val saved = vm.repository.updatePodcastPlaybackSettings(next, settingsOwner)
                                 if (settingsOwner == vm.repository.session.cacheScope()) {
-                                    podcastPlayback = saved; message = "播客播放缓存设置已保存。"
+                                    podcastPlayback = saved; message = resources.getString(R.string.podcast_cache_saved)
                                 }
                             } catch (e: kotlinx.coroutines.CancellationException) { throw e }
                             catch (_: Exception) {
                                 if (settingsOwner == vm.repository.session.cacheScope()) {
-                                    podcastPlayback = playback; message = "播客播放缓存设置保存失败，请重新打开设置后重试。"
+                                    podcastPlayback = playback; message = resources.getString(R.string.podcast_cache_failed)
                                 }
                             } finally { if (settingsOwner == vm.repository.session.cacheScope()) savingPodcastPlayback = false }
                         }
                     }
                     ListItem(
-                        headlineContent = { Text("播放时缓存播客单集") },
-                        supportingContent = { Text("服务端缓存当前单集，已有音频直接复用，并记入「我的下载」") },
+                        headlineContent = { Text(stringResource(R.string.podcast_cache_current)) },
+                        supportingContent = { Text(stringResource(R.string.podcast_cache_current_hint)) },
                         leadingContent = { Icon(Icons.Default.Podcasts, null) },
                         trailingContent = { Switch(playback.autoCacheCurrent, { enabled -> savePodcastPlayback(playback.copy(autoCacheCurrent = enabled)) }, enabled = !savingPodcastPlayback) },
                     )
                     ListItem(
-                        headlineContent = { Text("预缓存下一集") },
-                        supportingContent = { Text("当前单集开始缓存后，再加入下一集") },
+                        headlineContent = { Text(stringResource(R.string.podcast_prefetch)) },
+                        supportingContent = { Text(stringResource(R.string.podcast_prefetch_hint)) },
                         leadingContent = { Icon(Icons.Default.SkipNext, null) },
                         trailingContent = { Switch(playback.prefetchNext, { enabled -> savePodcastPlayback(playback.copy(prefetchNext = enabled)) }, enabled = !savingPodcastPlayback) },
                     )
                     SettingsChoice(
-                        "播客缓存网络",
-                        when (playback.networkPolicy) { "off" -> "关闭自动缓存"; "any" -> "Wi‑Fi 和移动网络"; else -> "仅 Wi‑Fi" },
+                        stringResource(R.string.podcast_cache_network),
+                        stringResource(when (playback.networkPolicy) { "off" -> R.string.network_off; "any" -> R.string.network_any; else -> R.string.network_wifi }),
                         Icons.Default.NetworkCheck,
-                        listOf("off" to "关闭自动缓存", "wifi" to "仅 Wi‑Fi（推荐）", "any" to "Wi‑Fi 和移动网络"),
+                        listOf("off" to stringResource(R.string.network_off), "wifi" to stringResource(R.string.network_wifi_recommended), "any" to stringResource(R.string.network_any)),
                         playback.networkPolicy,
-                        "播放仍会立即开始；网络策略只限制后台缓存任务。",
+                        stringResource(R.string.podcast_cache_network_hint),
                         change = { policy -> savePodcastPlayback(playback.copy(networkPolicy = policy)) },
                     )
                 }
             }
-            SettingsGroup("外观与触感") {
+            SettingsGroup(stringResource(R.string.settings_group_appearance)) {
+                state.account?.let { account -> LanguageChoice(vm, account.language) { message = it } }
                 Text(
-                    "这些偏好按服务器和账号保存在本机。",
+                    stringResource(R.string.settings_appearance_note),
                     Modifier.padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 4.dp),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
 
-                SettingsChoice("歌曲列表大小", preferences.songListSize.label, Icons.Default.FormatSize,
-                    com.wildstring.app.data.SongListSize.entries.map { it to it.label }, preferences.songListSize,
-                    "按习惯选择歌曲列表的显示大小。", vm.settings::songListSize)
-                SettingsChoice("播放样式", playbackStyles.first { it.first == preferences.playbackStyle }.second, Icons.Default.Style,
-                    playbackStyles, preferences.playbackStyle, change = vm.settings::playbackStyle)
-                SettingsChoice("主题", if (preferences.redCloth) "一块红布" else "经典野弦", Icons.Default.Palette,
-                    listOf(false to "经典野弦", true to "一块红布"), preferences.redCloth, change = { vm.settings.theme(it) })
-                if (!preferences.redCloth) SettingsChoice("日夜模式", when (preferences.appearance) { "light" -> "浅色"; "dark" -> "深色"; else -> "跟随系统" }, Icons.Default.BrightnessAuto,
-                    listOf("system" to "跟随系统", "light" to "浅色", "dark" to "深色"), preferences.appearance, change = vm.settings::appearance)
-                SettingsChoice("桌面图标", if (preferences.redIcon) "红布" else "经典", Icons.Default.Apps,
-                    listOf(false to "经典", true to "红布"), preferences.redIcon, "桌面可能需要片刻更新图标。", change = {
-                        runCatching { vm.settings.icon(it) }.onFailure { message = "图标切换失败，请重试。" }
-                    })
-                SettingsChoice("屏幕方向", when (preferences.orientation) { "portrait" -> "锁定竖屏"; "sensor" -> "自动旋转"; else -> "智能自适应" }, Icons.Default.ScreenRotation,
-                    listOf("auto" to "智能自适应（手机竖屏 · 平板自适应）", "portrait" to "锁定竖屏", "sensor" to "自动旋转（跟随重力感应）"), preferences.orientation,
-                    "手机设备默认锁定竖屏，避免倾斜误触发横屏；平板设备允许根据姿势自适应。也可开启自动旋转自由翻转。", change = vm.settings::orientation)
-                ListItem(headlineContent = { Text("轻触反馈") }, supportingContent = { Text("播放与关键操作轻反馈，遵循系统设置") },
+                SettingsChoice(stringResource(R.string.settings_song_list_size), stringResource(songListSizeLabel(preferences.songListSize)), Icons.Default.FormatSize,
+                    com.wildstring.app.data.SongListSize.entries.map { it to resources.getString(songListSizeLabel(it)) }, preferences.songListSize,
+                    stringResource(R.string.settings_song_list_size_hint), vm.settings::songListSize, tag = "song-list-size")
+                val styles = playbackStyles.map { (id, _) -> id to resources.getString(playbackStyleLabel(id)) }
+                SettingsChoice(stringResource(R.string.settings_playback_style), styles.first { it.first == preferences.playbackStyle }.second, Icons.Default.Style,
+                    styles, preferences.playbackStyle, change = vm.settings::playbackStyle, tag = "playback-style")
+                SettingsChoice(stringResource(R.string.settings_theme), stringResource(if (preferences.redCloth) R.string.theme_red_cloth else R.string.theme_classic), Icons.Default.Palette,
+                    listOf(false to stringResource(R.string.theme_classic), true to stringResource(R.string.theme_red_cloth)), preferences.redCloth, change = { vm.settings.theme(it) }, tag = "theme")
+                if (!preferences.redCloth) SettingsChoice(stringResource(R.string.settings_day_night), stringResource(when (preferences.appearance) { "light" -> R.string.appearance_light; "dark" -> R.string.appearance_dark; else -> R.string.appearance_system }), Icons.Default.BrightnessAuto,
+                    listOf("system" to stringResource(R.string.appearance_system), "light" to stringResource(R.string.appearance_light), "dark" to stringResource(R.string.appearance_dark)), preferences.appearance, change = vm.settings::appearance, tag = "day-night")
+                SettingsChoice(stringResource(R.string.settings_icon), stringResource(if (preferences.redIcon) R.string.icon_red else R.string.icon_classic), Icons.Default.Apps,
+                    listOf(false to stringResource(R.string.icon_classic), true to stringResource(R.string.icon_red)), preferences.redIcon, stringResource(R.string.settings_icon_hint), change = {
+                        runCatching { vm.settings.icon(it) }.onFailure { message = resources.getString(R.string.settings_icon_failed) }
+                    }, tag = "app-icon")
+                SettingsChoice(stringResource(R.string.settings_orientation), stringResource(when (preferences.orientation) { "portrait" -> R.string.orientation_portrait; "sensor" -> R.string.orientation_sensor; else -> R.string.orientation_auto }), Icons.Default.ScreenRotation,
+                    listOf("auto" to stringResource(R.string.orientation_auto_option), "portrait" to stringResource(R.string.orientation_portrait), "sensor" to stringResource(R.string.orientation_sensor_option)), preferences.orientation,
+                    stringResource(R.string.settings_orientation_hint), change = vm.settings::orientation)
+                ListItem(headlineContent = { Text(stringResource(R.string.settings_haptics)) }, supportingContent = { Text(stringResource(R.string.settings_haptics_hint)) },
                     leadingContent = { Icon(Icons.Default.Vibration, null) },
                     trailingContent = { Switch(preferences.haptics, { enabled -> vm.settings.haptics(enabled); if (enabled) feedback(TactileKind.Tap) }) },
                     modifier = Modifier.clickable {
@@ -200,23 +207,23 @@ private val LocalSettingsFeedback = staticCompositionLocalOf<() -> Unit> { {} }
                         if (enabled) feedback(TactileKind.Tap)
                     })
             }
-            SettingsGroup("本机缓存") {
-                CacheLimit("曲库与歌词", usage.first, preferences.metadataMb, listOf(0, 8, 32, 64)) { vm.settings.limits(it, preferences.artworkMb, preferences.audioMb) }
-                CacheLimit("封面", usage.second, preferences.artworkMb, listOf(0, 32, 64, 128)) { vm.settings.limits(preferences.metadataMb, it, preferences.audioMb) }
-                CacheLimit("最近播放音频", usage.third, preferences.audioMb, listOf(0, 128, 256, 512, 1024)) { vm.settings.limits(preferences.metadataMb, preferences.artworkMb, it) }
-                SettingsAction(if (clearing) "正在清理…" else "清理缓存", Icons.Default.DeleteOutline, enabled = !clearing) {
+            SettingsGroup(stringResource(R.string.settings_group_cache)) {
+                CacheLimit(stringResource(R.string.cache_metadata), usage.first, preferences.metadataMb, listOf(0, 8, 32, 64)) { vm.settings.limits(it, preferences.artworkMb, preferences.audioMb) }
+                CacheLimit(stringResource(R.string.cache_artwork), usage.second, preferences.artworkMb, listOf(0, 32, 64, 128)) { vm.settings.limits(preferences.metadataMb, it, preferences.audioMb) }
+                CacheLimit(stringResource(R.string.cache_audio), usage.third, preferences.audioMb, listOf(0, 128, 256, 512, 1024), tag = "audio-cache") { vm.settings.limits(preferences.metadataMb, preferences.artworkMb, it) }
+                SettingsAction(stringResource(if (clearing) R.string.cache_clearing else R.string.cache_clear), Icons.Default.DeleteOutline, enabled = !clearing) {
                     clearing = true
-                    scope.launch { vm.clearCache().join(); clearing = false; message = "缓存已清理，播放过程中可能继续产生缓存。" }
+                    scope.launch { vm.clearCache().join(); clearing = false; message = resources.getString(R.string.cache_cleared) }
                 }
-                Text("已缓存 ${mb(usage.first + usage.second + usage.third)}。内容优先从本机显示，再联网刷新。短时断网可播放已缓存片段；缓存可能被系统回收。",
+                Text(stringResource(R.string.cache_summary, mb(usage.first + usage.second + usage.third)),
                     Modifier.padding(start = 16.dp, end = 16.dp, bottom = 16.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             message?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
-            SettingsGroup("关于") {
+            SettingsGroup(stringResource(R.string.settings_group_about)) {
                 com.wildstring.app.update.UpdateSettings()
-                ListItem(headlineContent = { Text("野弦") }, supportingContent = { Text("WildString · 客户端 v${BuildConfig.VERSION_NAME}${state.serverVersion?.let { " · 服务端 v$it" } ?: ""}") },
+                ListItem(headlineContent = { Text(stringResource(R.string.brand_name)) }, supportingContent = { Text(stringResource(R.string.about_version, BuildConfig.VERSION_NAME) + (state.serverVersion?.let { stringResource(R.string.about_server_version, it) } ?: "")) },
                     leadingContent = { Icon(painterResource(R.drawable.ic_wildstring), null, Modifier.size(36.dp), tint = Color.Unspecified) })
-                SettingsAction("退出登录", Icons.AutoMirrored.Filled.Logout) { logout = true }
+                SettingsAction(stringResource(R.string.logout), Icons.AutoMirrored.Filled.Logout) { logout = true }
             }
             Spacer(Modifier.height(8.dp))
         }
@@ -225,7 +232,7 @@ private val LocalSettingsFeedback = staticCompositionLocalOf<() -> Unit> { {} }
     if (assistant) FeatureDialog(vm, "assistant") { assistant = false }
     if (diagnostics) PlaybackDiagnosticsDialog(vm) { diagnostics = false }
     feature?.let { route -> FeatureDialog(vm, route) { feature = null } }
-    if (logout) AlertDialog(onDismissRequest = { logout = false }, title = { Text("退出当前服务器？") }, text = { Text("将清除当前服务器在本机的登录和私密缓存，其他服务器的登录保留。") }, confirmButton = { TextButton({ logout = false; back(); vm.logout() }) { Text("退出登录") } }, dismissButton = { TextButton({ logout = false }) { Text("取消") } })
+    if (logout) AlertDialog(onDismissRequest = { logout = false }, title = { Text(stringResource(R.string.logout_title)) }, text = { Text(stringResource(R.string.logout_message)) }, confirmButton = { TextButton({ logout = false; back(); vm.logout() }) { Text(stringResource(R.string.logout)) } }, dismissButton = { TextButton({ logout = false }) { Text(stringResource(R.string.cancel)) } })
     if (profile) ProfileDialog(vm) { profile = false }
     if (password) PasswordDialog(vm) { password = false }
 }
@@ -239,22 +246,22 @@ private val LocalSettingsFeedback = staticCompositionLocalOf<() -> Unit> { {} }
     }
 }
 
-@Composable private fun SettingsAction(title: String, icon: ImageVector, enabled: Boolean = true, subtitle: String? = null, action: () -> Unit) {
+@Composable private fun SettingsAction(title: String, icon: ImageVector, enabled: Boolean = true, subtitle: String? = null, tag: String = title, action: () -> Unit) {
     ListItem(
         headlineContent = { Text(title) },
         supportingContent = subtitle?.let { { Text(it) } },
         leadingContent = { Icon(icon, null) },
         trailingContent = { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null) },
-        modifier = Modifier.testTag("setting-$title").clickable(enabled = enabled, onClick = action),
+        modifier = Modifier.testTag("setting-$tag").clickable(enabled = enabled, onClick = action),
     )
 }
 
 @Composable private fun <T> SettingsChoice(title: String, value: String, icon: ImageVector, choices: List<Pair<T, String>>, selected: T,
-    description: String? = null, change: (T) -> Unit) {
+    description: String? = null, change: (T) -> Unit, tag: String = title) {
     var open by remember { mutableStateOf(false) }
     val feedback = LocalSettingsFeedback.current
     ListItem(headlineContent = { Text(title) }, supportingContent = { Text(value) }, leadingContent = { Icon(icon, null) },
-        trailingContent = { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null) }, modifier = Modifier.testTag("setting-$title").clickable { open = true })
+        trailingContent = { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null) }, modifier = Modifier.testTag("setting-$tag").clickable { open = true })
     if (open) AlertDialog(onDismissRequest = { open = false }, title = { Text(title) }, text = {
         Column(Modifier.heightIn(max = 480.dp).verticalScroll(rememberScrollState())) {
             description?.let { Text(it, Modifier.padding(bottom = 12.dp), style = MaterialTheme.typography.bodySmall) }
@@ -266,7 +273,7 @@ private val LocalSettingsFeedback = staticCompositionLocalOf<() -> Unit> { {} }
                 }
             }
         }
-    }, confirmButton = { TextButton({ open = false }) { Text("取消") } })
+    }, confirmButton = { TextButton({ open = false }) { Text(stringResource(R.string.cancel)) } })
 }
 
 @Composable private fun PasswordDialog(vm: MusicViewModel, dismiss: () -> Unit) {
@@ -277,10 +284,10 @@ private val LocalSettingsFeedback = staticCompositionLocalOf<() -> Unit> { {} }
     var error by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
     val count = next.codePointCount(0, next.length)
-    AlertDialog(onDismissRequest = { if (!busy) dismiss() }, title = { Text("修改密码") },
+    AlertDialog(onDismissRequest = { if (!busy) dismiss() }, title = { Text(stringResource(R.string.settings_change_password)) },
         text = { Column(Modifier.heightIn(max = 480.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("修改后，所有设备都需要重新登录。新密码为 12–128 个字符。", fontSize = 12.sp)
-            listOf("当前密码" to current, "新密码" to next, "确认新密码" to confirm).forEachIndexed { index, (label, value) ->
+            Text(stringResource(R.string.password_note), fontSize = 12.sp)
+            listOf(stringResource(R.string.current_password) to current, stringResource(R.string.new_password) to next, stringResource(R.string.confirm_password) to confirm).forEachIndexed { index, (label, value) ->
                 OutlinedTextField(value, { text -> when (index) { 0 -> current = text.take(256); 1 -> next = text.take(256); else -> confirm = text.take(256) } }, label = { Text(label) },
                     singleLine = true, enabled = !busy, visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
                     keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Password))
@@ -295,8 +302,8 @@ private val LocalSettingsFeedback = staticCompositionLocalOf<() -> Unit> { {} }
                 catch (e: Exception) { error = com.wildstring.app.data.friendlyError(e) }
                 finally { busy = false }
             }
-        }, enabled = !busy && current.isNotEmpty() && count in 12..128 && confirm == next) { Text(if (busy) "正在修改…" else "保存新密码") } },
-        dismissButton = { TextButton(dismiss, enabled = !busy) { Text("取消") } })
+        }, enabled = !busy && current.isNotEmpty() && count in 12..128 && confirm == next) { Text(stringResource(if (busy) R.string.password_changing else R.string.password_save)) } },
+        dismissButton = { TextButton(dismiss, enabled = !busy) { Text(stringResource(R.string.cancel)) } })
 }
 
 @Composable private fun ProfileDialog(vm: MusicViewModel, dismiss: () -> Unit) {
@@ -311,14 +318,14 @@ private val LocalSettingsFeedback = staticCompositionLocalOf<() -> Unit> { {} }
     val emailValid = email.isBlank() || (email.contains('@') && email.length <= 254)
     val changed = username.trim() != account.username || displayName.trim() != account.displayName.orEmpty() || email.trim() != account.email.orEmpty()
 
-    AlertDialog(onDismissRequest = { if (!busy) dismiss() }, title = { Text("修改个人资料") },
+    AlertDialog(onDismissRequest = { if (!busy) dismiss() }, title = { Text(stringResource(R.string.profile_title)) },
         text = { Column(Modifier.heightIn(max = 480.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("登录 ID 用于账号登录，昵称用于界面展示与活动记录。邮箱仅作为账号资料保存。", fontSize = 12.sp)
-            OutlinedTextField(username, { username = it.take(32) }, label = { Text("登录 ID") },
+            Text(stringResource(R.string.profile_note), fontSize = 12.sp)
+            OutlinedTextField(username, { username = it.take(32) }, label = { Text(stringResource(R.string.login_id)) },
                 singleLine = true, enabled = !busy)
-            OutlinedTextField(displayName, { displayName = it.take(50) }, label = { Text("昵称") },
+            OutlinedTextField(displayName, { displayName = it.take(50) }, label = { Text(stringResource(R.string.display_name)) },
                 singleLine = true, enabled = !busy)
-            OutlinedTextField(email, { email = it.take(254) }, label = { Text("邮箱（仅资料保存）") },
+            OutlinedTextField(email, { email = it.take(254) }, label = { Text(stringResource(R.string.email_profile)) },
                 singleLine = true, enabled = !busy,
                 keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Email))
             error?.let { Text(it, color = MaterialTheme.colorScheme.error, fontSize = 12.sp) }
@@ -337,13 +344,62 @@ private val LocalSettingsFeedback = staticCompositionLocalOf<() -> Unit> { {} }
                     busy = false
                 }
             }
-        }, enabled = !busy && usernameValid && emailValid && changed) { Text(if (busy) "正在保存…" else "保存资料") } },
-        dismissButton = { TextButton(dismiss, enabled = !busy) { Text("取消") } })
+        }, enabled = !busy && usernameValid && emailValid && changed) { Text(stringResource(if (busy) R.string.saving else R.string.profile_save)) } },
+        dismissButton = { TextButton(dismiss, enabled = !busy) { Text(stringResource(R.string.cancel)) } })
 }
 
-@Composable private fun CacheLimit(label: String, used: Long, value: Int, options: List<Int>, change: (Int) -> Unit) {
-    SettingsChoice(label, "${if (value == 0) "关闭" else "$value MB"} · 已用 ${"%.1f".format(used / 1048576.0)} MB", Icons.Default.Storage,
-        options.map { it to if (it == 0) "关闭" else "$it MB" }, value, change = change)
+@Composable private fun CacheLimit(label: String, used: Long, value: Int, options: List<Int>, tag: String = label, change: (Int) -> Unit) {
+    val resources = LocalResources.current
+    val limit: (Int) -> String = { mb -> if (mb == 0) resources.getString(R.string.cache_off) else resources.getString(R.string.cache_mb, mb) }
+    SettingsChoice(label, stringResource(R.string.cache_limit_value, limit(value), "%.1f".format(used / 1048576.0)), Icons.Default.Storage,
+        options.map { it to limit(it) }, value, change = change, tag = tag)
+}
+
+/** Account-wide interface language; saved on the server so every device follows it. */
+@Composable private fun LanguageChoice(vm: MusicViewModel, current: String?, report: (String) -> Unit) {
+    val scope = rememberCoroutineScope()
+    val resources = LocalResources.current
+    var saving by remember { mutableStateOf(false) }
+    val selected = com.wildstring.app.AppLanguage.normalize(current)
+    val choices = listOf("auto" to stringResource(R.string.language_auto), "zh" to stringResource(R.string.language_zh), "en" to stringResource(R.string.language_en))
+    SettingsChoice(stringResource(R.string.settings_language), choices.first { it.first == selected }.second, Icons.Default.Language,
+        choices, selected, stringResource(R.string.settings_language_hint), change = { next ->
+            if (!saving && next != selected) {
+                saving = true
+                scope.launch {
+                    // MainActivity applies the saved account language, so no local apply here.
+                    try { vm.updateLanguage(next) }
+                    catch (e: kotlinx.coroutines.CancellationException) { throw e }
+                    catch (_: Exception) { report(resources.getString(R.string.language_failed)) }
+                    finally { saving = false }
+                }
+            }
+        }, tag = "language")
+}
+
+@androidx.annotation.StringRes internal fun roleLabel(profile: String): Int = when (profile) {
+    "owner" -> R.string.role_owner
+    "librarian" -> R.string.role_librarian
+    "editor" -> R.string.role_editor
+    else -> R.string.role_listener
+}
+
+@androidx.annotation.StringRes internal fun lyricSizeLabel(size: com.wildstring.app.data.LyricSize): Int = when (size) {
+    com.wildstring.app.data.LyricSize.SMALL -> R.string.size_small
+    com.wildstring.app.data.LyricSize.MEDIUM -> R.string.size_medium_default
+    com.wildstring.app.data.LyricSize.LARGE -> R.string.size_large
+}
+
+@androidx.annotation.StringRes internal fun songListSizeLabel(size: com.wildstring.app.data.SongListSize): Int = when (size) {
+    com.wildstring.app.data.SongListSize.SMALL -> R.string.size_small
+    com.wildstring.app.data.SongListSize.MEDIUM -> R.string.size_medium_recommended
+    com.wildstring.app.data.SongListSize.LARGE -> R.string.size_large
+}
+
+@androidx.annotation.StringRes internal fun playbackStyleLabel(id: String): Int = when (id) {
+    "vinyl" -> R.string.style_vinyl
+    "cassette" -> R.string.style_cassette
+    else -> R.string.style_cover
 }
 
 /** Static vector folds keep the theme inexpensive while music is playing. */

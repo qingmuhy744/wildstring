@@ -86,7 +86,7 @@ def test_expiration_reset_and_bootstrap_does_not_overwrite(settings):
         assert login(client, "a-new-admin-password").status_code == 200
 
 
-@pytest.mark.parametrize("client_header", ["android", "ios"])
+@pytest.mark.parametrize("client_header", ["android", "ios", "macos"])
 def test_mobile_session_keeps_normal_authentication_and_client_validation(settings, client_header):
     settings.admin_password = SecretStr(PASSWORD)
     mobile = {"X-Wildstring-Client": client_header}

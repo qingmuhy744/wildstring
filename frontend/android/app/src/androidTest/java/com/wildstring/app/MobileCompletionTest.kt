@@ -271,8 +271,8 @@ class MobileCompletionTest {
         Fixture().use { fixture -> val vm = connect(fixture)
             try {
                 compose.onNodeWithContentDescription("设置").performClick()
-                compose.onNodeWithText("服务端管理", substring = false).performScrollTo().assertIsDisplayed()
-                compose.onNodeWithText("音乐库、文件夹、权限、共享音频清理及插件配置请在网页端管理。", substring = true)
+                compose.onNodeWithText(compose.activity.getString(R.string.settings_group_server_admin), substring = false).performScrollTo().assertIsDisplayed()
+                compose.onNodeWithText(compose.activity.getString(R.string.settings_server_admin_hint), substring = true)
                     .performScrollTo().assertIsDisplayed()
                 compose.onNodeWithText("曲库管理", substring = false).assertDoesNotExist()
                 compose.onNodeWithText("音乐库与权限", substring = false).assertDoesNotExist()

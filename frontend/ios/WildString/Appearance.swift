@@ -6,11 +6,11 @@ enum PlayerStyle: String, CaseIterable {
     case vinyl
     case cassette
 
-    var label: String {
+    var label: LocalizedStringKey {
         switch self {
-        case .cover: return "封面"
-        case .vinyl: return "黑胶"
-        case .cassette: return "磁带"
+        case .cover: return "playerStyle.cover"
+        case .vinyl: return "playerStyle.vinyl"
+        case .cassette: return "playerStyle.cassette"
         }
     }
 }
@@ -20,11 +20,11 @@ enum SongListSize: String, CaseIterable {
     case medium
     case large
 
-    var label: String {
+    var label: LocalizedStringKey {
         switch self {
-        case .small: return "小"
-        case .medium: return "中（推荐）"
-        case .large: return "大"
+        case .small: return "size.small"
+        case .medium: return "size.mediumRecommended"
+        case .large: return "size.large"
         }
     }
 
@@ -50,11 +50,11 @@ enum ThemeChoice: String, CaseIterable {
     case light
     case dark
 
-    var label: String {
+    var label: LocalizedStringKey {
         switch self {
-        case .system: return "跟随系统"
-        case .light: return "浅色"
-        case .dark: return "深色"
+        case .system: return "theme.system"
+        case .light: return "theme.light"
+        case .dark: return "theme.dark"
         }
     }
 

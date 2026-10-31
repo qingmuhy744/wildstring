@@ -38,4 +38,8 @@ frontend/ios/*.xcodeproj
 frontend/ios/DerivedData/
 frontend/ios/**/.build/
 frontend/ios/WildString/Info.plist
+
+# macOS
+frontend/macos/*.xcodeproj
+frontend/macos/DerivedData/
 xcuserdata/

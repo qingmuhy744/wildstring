@@ -5,8 +5,50 @@ public struct AssistantMessage: Decodable, Equatable, Sendable, Identifiable {
     public let role: String
     public let content: String
     public let partial: Bool?
+    public let sources: [AssistantSource]?
+    public let runID: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, role, content, partial, sources
+        case runID = "run_id"
+    }
 
     public var isUser: Bool { role == "user" }
+}
+
+public struct AssistantSource: Decodable, Equatable, Sendable, Identifiable {
+    public let id: String
+    public let title: String
+    public let url: String
+}
+
+public struct AssistantRun: Decodable, Equatable, Sendable, Identifiable {
+    public let id: String
+    public let status: String
+    public let stage: String?
+    public let errorCode: String?
+    public let connectionID: String?
+    public let draftIDs: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case id, status, stage
+        case errorCode = "error_code"
+        case connectionID = "connection_id"
+        case draftIDs = "draft_ids"
+    }
+}
+
+public struct AssistantConnection: Decodable, Equatable, Sendable, Identifiable {
+    public let id: String
+    public let name: String
+    public let model: String
+    public let enabled: Bool
+    public let dailyCallsRemaining: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, model, enabled
+        case dailyCallsRemaining = "daily_calls_remaining"
+    }
 }
 
 public struct ConversationSummary: Decodable, Equatable, Sendable, Identifiable {
@@ -24,6 +66,13 @@ public struct ConversationDetail: Decodable, Equatable, Sendable {
     public let id: String
     public let title: String
     public let messages: [AssistantMessage]
+    public let connectionID: String?
+    public let runs: [AssistantRun]?
+
+    enum CodingKeys: String, CodingKey {
+        case id, title, messages, runs
+        case connectionID = "connection_id"
+    }
 }
 
 public struct DraftEvidence: Decodable, Equatable, Sendable {
@@ -35,10 +84,12 @@ public struct DraftEvidence: Decodable, Equatable, Sendable {
 public struct DraftPayload: Decodable, Equatable, Sendable {
     public let name: String?
     public let trackIds: [String]?
+    public let playlistID: String?
 
     enum CodingKeys: String, CodingKey {
         case name
         case trackIds = "track_ids"
+        case playlistID = "playlist_id"
     }
 }
 
@@ -76,6 +127,20 @@ public struct Draft: Decodable, Equatable, Sendable, Identifiable {
 extension WildstringClient {
     // MARK: - Conversations
 
+    public func assistantConnections(limit: Int = 100, offset: Int = 0) async throws
+        -> Page<AssistantConnection>
+    {
+        let data = try await perform(
+            Request(
+                method: "GET", path: "api/v1/agent/connections",
+                queryItems: [
+                    URLQueryItem(name: "limit", value: String(limit)),
+                    URLQueryItem(name: "offset", value: String(offset)),
+                ]
+            ))
+        return try JSONDecoder().decode(Page<AssistantConnection>.self, from: data)
+    }
+
     public func conversations(limit: Int = 50, offset: Int = 0) async throws
         -> Page<ConversationSummary>
     {
@@ -99,30 +164,57 @@ extension WildstringClient {
         return try JSONDecoder().decode(ConversationDetail.self, from: data)
     }
 
-    public func createConversation(title: String = "新对话") async throws -> ConversationDetail {
-        struct Body: Encodable { let title: String }
+    public func createConversation(
+        title: String = "新对话", connectionID: String? = nil
+    ) async throws -> ConversationDetail {
+        struct Body: Encodable {
+            let title: String
+            let connectionID: String?
+
+            enum CodingKeys: String, CodingKey {
+                case title
+                case connectionID = "connection_id"
+            }
+        }
         let data = try await perform(
             Request(
                 method: "POST",
                 path: "api/v1/agent/conversations",
-                body: try JSONEncoder().encode(Body(title: title)),
+                body: try JSONEncoder().encode(Body(title: title, connectionID: connectionID)),
                 contentType: "application/json"
             )
         )
         return try JSONDecoder().decode(ConversationDetail.self, from: data)
     }
 
+    public func renameConversation(id: String, title: String) async throws -> ConversationDetail {
+        struct Body: Encodable { let title: String }
+        let data = try await perform(
+            Request(
+                method: "PATCH", path: "api/v1/agent/conversations/\(id)",
+                body: try JSONEncoder().encode(Body(title: title)), contentType: "application/json"
+            ))
+        return try JSONDecoder().decode(ConversationDetail.self, from: data)
+    }
+
+    public func deleteConversation(id: String) async throws {
+        _ = try await perform(Request(method: "DELETE", path: "api/v1/agent/conversations/\(id)"))
+    }
+
     public func sendMessage(
         conversationID: String,
         content: String,
-        maxCalls: Int = 4
+        connectionID: String? = nil,
+        maxCalls: Int? = nil
     ) async throws -> ConversationDetail {
         struct Body: Encodable {
             let content: String
-            let maxCalls: Int
+            let connectionID: String?
+            let maxCalls: Int?
 
             enum CodingKeys: String, CodingKey {
                 case content
+                case connectionID = "connection_id"
                 case maxCalls = "max_calls"
             }
         }
@@ -130,9 +222,12 @@ extension WildstringClient {
             Request(
                 method: "POST",
                 path: "api/v1/agent/conversations/\(conversationID)/messages",
-                body: try JSONEncoder().encode(Body(content: content, maxCalls: maxCalls)),
+                body: try JSONEncoder().encode(
+                    Body(
+                        content: content, connectionID: connectionID, maxCalls: maxCalls
+                    )),
                 contentType: "application/json",
-                timeout: 120
+                timeout: 180
             )
         )
         return try JSONDecoder().decode(ConversationDetail.self, from: data)

@@ -1,6 +1,6 @@
 # 艺人、歌单、收藏与收听记录
 
-当前支持各用户独立的个人数据；个人曲库最初在 schema 5 引入，多库权限在 schema 36 引入，详见[多库与个人关注](multiple-libraries.md)。以下能力已实现；验证结果见 PR 与交付说明。所有接口要求用户会话，写操作还要求 `X-Wildstring-Client: web|android|ios`。收藏、普通/规则歌单和收听统计按登录用户隔离，历史数据迁移给原 admin；见 [账号与访问](users-and-access.md)。它们不修改音频标签、封面、导入源或托管音频。
+当前支持各用户独立的个人数据；个人曲库最初在 schema 5 引入，多库权限在 schema 36 引入，详见[多库与个人关注](multiple-libraries.md)。以下能力已实现；验证结果见 PR 与交付说明。所有接口要求用户会话，写操作还要求 `X-Wildstring-Client: web|android|ios|macos`。收藏、普通/规则歌单和收听统计按登录用户隔离，历史数据迁移给原 admin；见 [账号与访问](users-and-access.md)。它们不修改音频标签、封面、导入源或托管音频。
 
 ## 艺人
 

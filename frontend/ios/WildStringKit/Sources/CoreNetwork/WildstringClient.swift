@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 public struct APIError: Error, Equatable, Sendable {
     public let statusCode: Int
@@ -16,6 +17,8 @@ public struct User: Decodable, Equatable, Sendable {
     public let profile: String
     public let version: Int
     public let enabled: Bool
+    /// Interface language stored on the account: "auto", "zh" or "en". Older servers omit it.
+    public let language: String?
 }
 
 public struct AuthStatus: Decodable, Equatable, Sendable {
@@ -30,6 +33,22 @@ public final class WildstringClient: Sendable {
 
     private let session: URLSession
     private let cookies: CookieJar
+    private let librarySelection = OSAllocatedUnfairLock<String?>(initialState: nil)
+    private let preferredClient = OSAllocatedUnfairLock<String>(initialState: "ios")
+
+    /// Overrides the default `ios` client header. A 403 `client_header_required` still retries as `web`.
+    public func preferClientHeader(_ name: String) {
+        preferredClient.withLock { $0 = name }
+    }
+
+    /// Limits later requests to one library. Nil uses the server's authorized default.
+    public func selectLibrary(_ id: String?) {
+        librarySelection.withLock { $0 = id }
+    }
+
+    public func selectedLibrary() -> String? {
+        librarySelection.withLock { $0 }
+    }
 
     public init(
         server: ServerAddress,
@@ -73,6 +92,22 @@ public final class WildstringClient: Sendable {
                 body: body,
                 contentType: "application/json",
                 clearsSessionOnUnauthorized: false
+            )
+        )
+        return try JSONDecoder().decode(User.self, from: data)
+    }
+
+    /// Saves the interface language on the account so every device follows it.
+    public func updateLanguage(_ language: String) async throws -> User {
+        struct Preferences: Encodable {
+            let language: String
+        }
+        let data = try await perform(
+            Request(
+                method: "PUT",
+                path: "api/v1/auth/preferences",
+                body: try JSONEncoder().encode(Preferences(language: language)),
+                contentType: "application/json"
             )
         )
         return try JSONDecoder().decode(User.self, from: data)
@@ -130,6 +165,9 @@ public final class WildstringClient: Sendable {
 
     func perform(_ request: Request) async throws -> Data {
         var attempt = request
+        if attempt.clientHeader == "ios" {
+            attempt.clientHeader = preferredClient.withLock { $0 }
+        }
         while true {
             let (data, response) = try await send(attempt)
             if (200..<300).contains(response.statusCode) {
@@ -147,6 +185,9 @@ public final class WildstringClient: Sendable {
             }
             if response.statusCode == 401, attempt.clearsSessionOnUnauthorized {
                 try? await cookies.clear()
+            }
+            if code == "library_access_required" {
+                librarySelection.withLock { $0 = nil }
             }
             throw APIError(statusCode: response.statusCode, code: code)
         }
@@ -169,6 +210,9 @@ public final class WildstringClient: Sendable {
             urlRequest.setValue(contentType, forHTTPHeaderField: "Content-Type")
         }
         urlRequest.setValue(request.clientHeader, forHTTPHeaderField: "X-Wildstring-Client")
+        if let library = librarySelection.withLock({ $0 }), !library.isEmpty {
+            urlRequest.setValue(library, forHTTPHeaderField: "X-Wildstring-Library")
+        }
         if let cookieHeader = try await cookies.headerValue() {
             urlRequest.setValue(cookieHeader, forHTTPHeaderField: "Cookie")
         }

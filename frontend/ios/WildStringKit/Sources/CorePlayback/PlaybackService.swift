@@ -85,10 +85,22 @@ public final class PlaybackService {
     public private(set) var errorMessage: String?
 
     public var items: [Item] { queue.items }
+    public var playbackItems: [Item] { queue.playbackItems }
     public var currentIndex: Int? { queue.currentIndex }
     public var currentItem: Item? { queue.current }
     public var repeatMode: PlaybackQueue.RepeatMode { queue.repeatMode }
     public var isShuffled: Bool { queue.isShuffled }
+    public private(set) var podcastPlaybackRate: Float = 1
+    public var playbackRate: Float {
+        currentItem?.trackID.hasPrefix("podcast_ep_") == true ? podcastPlaybackRate : 1
+    }
+
+    /// Sampled by visible lyric views; keeps animation separate from persistence ticks.
+    public var lyricTime: Double {
+        guard isPlaying, player.currentItem != nil else { return currentTime }
+        let seconds = player.currentTime().seconds
+        return seconds.isFinite ? transcodeBaseSeconds + seconds : currentTime
+    }
 
     @ObservationIgnored let server: ServerAddress
     @ObservationIgnored let player: AVPlayer
@@ -109,6 +121,18 @@ public final class PlaybackService {
     @ObservationIgnored private var intendedPlaying = false
     /// AAC 档位（kbps）；nil 表示原音。
     @ObservationIgnored public var preferredBitrateKbps: Int?
+    @ObservationIgnored private var listening = ListeningTracker()
+    @ObservationIgnored private var activeMediaID: String?
+    /// Return false when the upload failed so the same cumulative total is retried.
+    @ObservationIgnored public var submitListening: (@Sendable (ListeningReport) async -> Bool)?
+    @ObservationIgnored private var podcast = PodcastBookmark()
+    @ObservationIgnored private var podcastBoot: Task<Void, Never>?
+    @ObservationIgnored public var podcastDeviceID = ""
+    /// Reads the bookmark version before a new episode session. Nil means the read failed.
+    @ObservationIgnored public var loadPodcastBaseVersion: (@Sendable (String) async -> Int?)?
+    @ObservationIgnored public var submitPodcastProgress:
+        (@Sendable (String, PodcastProgressWrite) async -> PodcastSubmitResult)?
+    public private(set) var podcastProgressMessage: String?
     public private(set) var currentOutputLabel: String?
     public private(set) var sleepTimerEnd: Date?
     public private(set) var pauseAfterCurrentTrack = false
@@ -119,10 +143,12 @@ public final class PlaybackService {
     @ObservationIgnored private var secondsSinceCheckpoint: Double = 0
     @ObservationIgnored var systemControlsConfigured = false
     @ObservationIgnored var systemObserverTokens: [NSObjectProtocol] = []
-#if os(iOS)
+#if os(iOS) || os(macOS)
     @ObservationIgnored var nowPlayingArtworkTask: Task<Void, Never>?
     @ObservationIgnored var nowPlayingArtworkTrackID: String?
 #endif
+    /// Sent with cover fetches for Now Playing artwork. The Mac app sets `macos`.
+    @ObservationIgnored public var clientHeaderName = "ios"
 
     public init(
         server: ServerAddress,
@@ -159,9 +185,9 @@ public final class PlaybackService {
 
     // MARK: - Commands
 
-    public func play(items: [Item], startingAt index: Int) {
+    public func play(items: [Item], startingAt index: Int, position: Double = 0) {
         queue.set(items: items, startingAt: index)
-        startCurrent(autoplay: true, startAt: 0)
+        startCurrent(autoplay: true, startAt: max(0, position))
         persistQueueAndProgress()
     }
 
@@ -179,8 +205,15 @@ public final class PlaybackService {
         if player.currentItem == nil {
             startCurrent(autoplay: true, startAt: currentTime)
         } else {
-            player.play()
+            player.playImmediately(atRate: playbackRate)
         }
+    }
+
+    public func setPodcastPlaybackRate(_ rate: Float) {
+        guard (0.5...3).contains(rate) else { return }
+        podcastPlaybackRate = rate
+        if intendedPlaying { player.playImmediately(atRate: playbackRate) }
+        updateSystemNowPlaying()
     }
 
     public func pause() {
@@ -188,6 +221,8 @@ public final class PlaybackService {
         didFinishQueue = false
         player.pause()
         persistProgress()
+        checkpointListening(state: "paused")
+        checkpointPodcast(event: "pause", force: true)
     }
 
     public func next() {
@@ -199,6 +234,20 @@ public final class PlaybackService {
     }
 
     // MARK: - Queue editing and modes
+
+    @discardableResult
+    public func enqueue(items: [Item], next: Bool = false) -> Bool {
+        guard !items.isEmpty else { return false }
+        guard queue.count + items.count <= 5000 else {
+            errorMessage = "播放队列最多 5000 首。"
+            return false
+        }
+        let wasEmpty = queue.count == 0
+        queue.enqueue(items, next: next)
+        persistQueueAndProgress()
+        if wasEmpty { startCurrent(autoplay: true, startAt: 0) }
+        return true
+    }
 
     public func toggleShuffle() {
         queue.toggleShuffle()
@@ -216,7 +265,13 @@ public final class PlaybackService {
     }
 
     public func removeQueueEntry(at index: Int) {
+        guard index != currentIndex else { return }
         queue.remove(at: index)
+        persistQueueAndProgress()
+    }
+
+    public func movePlaybackEntries(fromOffsets offsets: IndexSet, toOffset destination: Int) {
+        queue.movePlaybackEntries(fromOffsets: offsets, toOffset: destination)
         persistQueueAndProgress()
     }
 
@@ -239,6 +294,12 @@ public final class PlaybackService {
         player.seek(to: CMTime(seconds: target, preferredTimescale: 600))
         currentTime = target
         persistProgress()
+        listening.reanchor(
+            nowMs: Self.monotonicMs(),
+            positionMs: Self.milliseconds(target),
+            playing: isPlaying
+        )
+        checkpointPodcast(event: "seek", force: true)
     }
 
     public func stopAndClear() {
@@ -257,6 +318,17 @@ public final class PlaybackService {
         currentIsTranscode = false
         currentOutputLabel = nil
         clearSystemNowPlaying()
+        _ = listening.begin(
+            trackID: nil,
+            nowMs: Self.monotonicMs(),
+            positionMs: 0,
+            playing: false,
+            startedAt: Date().timeIntervalSince1970
+        )
+        activeMediaID = nil
+        podcastBoot?.cancel()
+        podcast.clear()
+        podcastProgressMessage = nil
         persistence.enqueue { store in try? await store.clear() }
     }
 
@@ -395,10 +467,12 @@ public final class PlaybackService {
 
     private func startCurrent(autoplay: Bool, startAt: Double) {
         guard let item = currentItem else {
+            adoptMedia(autoplay: false, startAt: 0)
             player.replaceCurrentItem(with: nil)
             isPlaying = false
             return
         }
+        adoptMedia(autoplay: autoplay, startAt: startAt)
         didFinishQueue = false
         configureSystemPlaybackIfNeeded()
         assetLoadTask?.cancel()
@@ -416,7 +490,7 @@ public final class PlaybackService {
             )
             return
         }
-        if let planProvider, preferredBitrateKbps != nil {
+        if planProvider != nil, preferredBitrateKbps != nil {
             assetLoadTask = Task {
                 await self.resolveTranscodeAndStart(autoplay: autoplay, startAt: startAt)
             }
@@ -500,9 +574,10 @@ public final class PlaybackService {
     ) {
         let asset = AVURLAsset(url: url)
         if !url.isFileURL {
-            asset.resourceLoader.setDelegate(resourceLoader, queue: .main)
+            asset.resourceLoader.setDelegate(resourceLoader, queue: resourceLoader.callbackQueue)
         }
         let playerItem = AVPlayerItem(asset: asset)
+        playerItem.audioTimePitchAlgorithm = .timeDomain
         player.replaceCurrentItem(with: playerItem)
         observe(playerItem: playerItem)
         if isTranscode {
@@ -520,7 +595,7 @@ public final class PlaybackService {
             player.seek(to: CMTime(seconds: startAt, preferredTimescale: 600))
         }
         if autoplay {
-            player.play()
+            player.playImmediately(atRate: playbackRate)
             isPlaying = true
         } else {
             isPlaying = false
@@ -551,50 +626,25 @@ public final class PlaybackService {
     }
 
     private func observe(playerItem: AVPlayerItem) {
-        itemObservations = [
-            playerItem.observe(\.status, options: [.new]) { [weak self] item, _ in
-                let status = item.status
-                let error = item.error
-                Task { @MainActor [weak self] in
-                    self?.itemStatusChanged(status: status, error: error)
-                }
-            }
-        ]
+        // Handlers are built outside this main-actor method. Closures formed
+        // here inherit a main-actor check, and AVFoundation invokes KVO on its
+        // own queue, which traps in `_dispatch_assert_queue_fail`.
+        let box = PlaybackServiceBox(self)
+        let item = CallbackRef(value: playerItem)
+        itemObservations = [observeItemStatus(item, box: box)]
         if timeControlObservation == nil {
-            timeControlObservation = player.observe(\.timeControlStatus, options: [.new]) {
-                [weak self] player, _ in
-                let status = player.timeControlStatus
-                Task { @MainActor [weak self] in
-                    self?.timeControlChanged(status: status)
-                }
-            }
+            timeControlObservation = observeTimeControl(CallbackRef(value: player), box: box)
         }
         if let endObserver {
             NotificationCenter.default.removeObserver(endObserver)
         }
-        endObserver = NotificationCenter.default.addObserver(
-            forName: AVPlayerItem.didPlayToEndTimeNotification,
-            object: playerItem,
-            queue: .main
-        ) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                self?.handleItemEnded()
-            }
-        }
+        endObserver = observeItemEnded(item, box: box)
         if timeObserverToken == nil {
-            timeObserverToken = player.addPeriodicTimeObserver(
-                forInterval: CMTime(seconds: 1, preferredTimescale: 1),
-                queue: .main
-            ) { [weak self] time in
-                let seconds = time.seconds
-                Task { @MainActor [weak self] in
-                    self?.handleTick(seconds: seconds)
-                }
-            }
+            timeObserverToken = observePlaybackTicks(CallbackRef(value: player), box: box)
         }
     }
 
-    private func itemStatusChanged(status: AVPlayerItem.Status, error: Error?) {
+    fileprivate func itemStatusChanged(status: AVPlayerItem.Status, error: Error?) {
         switch status {
         case .failed:
             isPlaying = false
@@ -645,7 +695,7 @@ public final class PlaybackService {
         }
     }
 
-    private func timeControlChanged(status: AVPlayer.TimeControlStatus) {
+    fileprivate func timeControlChanged(status: AVPlayer.TimeControlStatus) {
         isPlaying = status == .playing
         isBuffering = status == .waitingToPlayAtSpecifiedRate
         if status == .paused {
@@ -654,7 +704,7 @@ public final class PlaybackService {
         updateSystemNowPlaying()
     }
 
-    private func handleTick(seconds: Double) {
+    fileprivate func handleTick(seconds: Double) {
         guard seconds.isFinite else { return }
         currentTime = transcodeBaseSeconds + seconds
         secondsSinceCheckpoint += 1
@@ -662,10 +712,19 @@ public final class PlaybackService {
             secondsSinceCheckpoint = 0
             persistProgress()
         }
-        updateSystemNowPlaying()
+        let state = isPlaying ? "playing" : "paused"
+        if let report = listening.sample(
+            nowMs: Self.monotonicMs(),
+            positionMs: Self.milliseconds(currentTime),
+            playing: isPlaying,
+            state: state
+        ) {
+            deliver(report)
+        }
+        checkpointPodcast(event: isPlaying ? "progress" : "pause", force: false)
     }
 
-    private func handleItemEnded() {
+    fileprivate func handleItemEnded() {
         if pauseAfterCurrentTrack {
             pauseAfterCurrentTrack = false
             isPlaying = false
@@ -675,14 +734,23 @@ public final class PlaybackService {
             return
         }
         if queue.repeatMode == .one {
+            listening.reanchor(nowMs: Self.monotonicMs(), positionMs: 0, playing: true)
             player.seek(to: .zero)
             currentTime = 0
-            player.play()
+            player.playImmediately(atRate: playbackRate)
             isPlaying = true
             persistProgress()
             updateSystemNowPlaying()
             return
         }
+        if let report = listening.flush(
+            state: "ended",
+            nowMs: Self.monotonicMs(),
+            positionMs: Self.milliseconds(currentTime)
+        ) {
+            deliver(report)
+        }
+        checkpointPodcast(event: "ended", force: true)
         if queue.advance() != nil {
             startCurrent(autoplay: true, startAt: 0)
             persistProgress()
@@ -712,6 +780,91 @@ public final class PlaybackService {
         }
     }
 
+    private func adoptMedia(autoplay: Bool, startAt: Double) {
+        let identifier = currentItem?.trackID
+        let now = Self.monotonicMs()
+        let position = Self.milliseconds(startAt)
+        if identifier == activeMediaID {
+            listening.reanchor(nowMs: now, positionMs: position, playing: autoplay)
+            checkpointPodcast(event: "seek", force: true)
+            return
+        }
+        if let report = listening.begin(
+            trackID: identifier,
+            nowMs: now,
+            positionMs: position,
+            playing: autoplay,
+            startedAt: Date().timeIntervalSince1970
+        ) {
+            deliver(report)
+        }
+        activeMediaID = identifier
+        podcastBoot?.cancel()
+        podcast.clear()
+        podcastProgressMessage = nil
+        guard let identifier, ListeningTracker.isPodcast(identifier) else { return }
+        let episode = String(identifier.dropFirst("podcast_ep_".count))
+        podcastBoot = Task { [weak self] in
+            await self?.bootPodcast(episode)
+        }
+    }
+
+    private func bootPodcast(_ episode: String) async {
+        guard let load = loadPodcastBaseVersion else { return }
+        guard let version = await load(episode) else { return }
+        if Task.isCancelled || currentItem?.trackID != "podcast_ep_\(episode)" { return }
+        podcast.begin(episodeId: episode, deviceId: podcastDeviceID, baseVersion: version)
+        checkpointPodcast(event: "play", force: true)
+    }
+
+    private func checkpointListening(state: String) {
+        if let report = listening.flush(
+            state: state,
+            nowMs: Self.monotonicMs(),
+            positionMs: Self.milliseconds(currentTime)
+        ) {
+            deliver(report)
+        }
+    }
+
+    private func checkpointPodcast(event: String, force: Bool) {
+        guard let write = podcast.next(
+            positionSeconds: Int(currentTime.rounded()),
+            durationSeconds: Int(duration.rounded()),
+            event: event,
+            nowMs: Self.monotonicMs(),
+            force: force
+        ) else { return }
+        let episode = podcast.episodeId
+        guard let submit = submitPodcastProgress else { return }
+        Task { @MainActor in
+            let result = await submit(episode, write)
+            if result == .conflict {
+                self.podcast.block()
+                self.podcastProgressMessage = "这集在其他设备有更新的进度"
+            }
+        }
+    }
+
+    private func deliver(_ report: ListeningReport) {
+        guard let submit = submitListening else { return }
+        Task { @MainActor in
+            let ok = await submit(report)
+            if !ok {
+                self.listening.reject(sessionId: report.sessionId)
+            }
+        }
+    }
+
+    private static func monotonicMs() -> Int64 {
+        Int64((ProcessInfo.processInfo.systemUptime * 1000).rounded())
+    }
+
+    private static func milliseconds(_ seconds: Double) -> Int64 {
+        guard seconds.isFinite else { return 0 }
+        return Int64((seconds * 1000).rounded())
+    }
+
     private static func message(for error: APIError) -> String {
         switch error.code {
         case "authentication_required": return "登录已过期，请重新登录"
@@ -722,13 +875,86 @@ public final class PlaybackService {
     }
 }
 
-#if !os(iOS)
+#if !os(iOS) && !os(macOS)
     extension PlaybackService {
         func configureSystemPlaybackIfNeeded() {}
         func updateSystemNowPlaying() {}
         func clearSystemNowPlaying() {}
     }
 #endif
+
+/// Holds the player service for callbacks AVFoundation makes off the main actor.
+final class PlaybackServiceBox: @unchecked Sendable {
+    nonisolated(unsafe) weak var service: PlaybackService?
+
+    init(_ service: PlaybackService) {
+        self.service = service
+    }
+}
+
+private struct CallbackRef<T>: @unchecked Sendable {
+    let value: T
+}
+
+/// Status KVO is delivered on an AVFoundation queue, not the main queue.
+private func observeItemStatus(
+    _ item: CallbackRef<AVPlayerItem>,
+    box: PlaybackServiceBox
+) -> NSKeyValueObservation {
+    item.value.observe(\.status, options: [.new]) { item, _ in
+        let status = item.status
+        let failure = item.error.map(CallbackRef.init(value:))
+        let service = box.service
+        Task { @MainActor in
+            service?.itemStatusChanged(status: status, error: failure?.value)
+        }
+    }
+}
+
+private func observeTimeControl(
+    _ player: CallbackRef<AVPlayer>,
+    box: PlaybackServiceBox
+) -> NSKeyValueObservation {
+    player.value.observe(\.timeControlStatus, options: [.new]) { player, _ in
+        let status = player.timeControlStatus
+        let service = box.service
+        Task { @MainActor in
+            service?.timeControlChanged(status: status)
+        }
+    }
+}
+
+private func observeItemEnded(
+    _ item: CallbackRef<AVPlayerItem>,
+    box: PlaybackServiceBox
+) -> NSObjectProtocol {
+    NotificationCenter.default.addObserver(
+        forName: AVPlayerItem.didPlayToEndTimeNotification,
+        object: item.value,
+        queue: .main
+    ) { _ in
+        let service = box.service
+        Task { @MainActor in
+            service?.handleItemEnded()
+        }
+    }
+}
+
+private func observePlaybackTicks(
+    _ player: CallbackRef<AVPlayer>,
+    box: PlaybackServiceBox
+) -> Any {
+    player.value.addPeriodicTimeObserver(
+        forInterval: CMTime(seconds: 1, preferredTimescale: 1),
+        queue: .main
+    ) { time in
+        let seconds = time.seconds
+        let service = box.service
+        Task { @MainActor in
+            service?.handleTick(seconds: seconds)
+        }
+    }
+}
 
 /// Serializes fire-and-forget persistence writes in call order.
 final class PersistenceQueue: @unchecked Sendable {

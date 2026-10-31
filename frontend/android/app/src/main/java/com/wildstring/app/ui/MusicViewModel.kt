@@ -316,6 +316,11 @@ class MusicViewModel @Inject constructor(
         mutable.update { it.copy(account = updated) }
     }
 
+    suspend fun updateLanguage(language: String) {
+        val updated = repository.updateLanguage(language)
+        mutable.update { it.copy(account = updated) }
+    }
+
     suspend fun changePassword(current: String, next: String) {
         repository.changePassword(current, next)
         invalidationMessage = "密码已修改，请重新登录。"
@@ -864,17 +869,17 @@ class MusicViewModel @Inject constructor(
             c.repeatMode == Player.REPEAT_MODE_ALL -> c.repeatMode = Player.REPEAT_MODE_ONE
             else -> { c.repeatMode = Player.REPEAT_MODE_ALL; c.shuffleModeEnabled = true } }
     } }
-    fun addToQueue(tracks: List<Track>, next: Boolean = false) {
+    fun addToQueue(tracks: List<Track>, next: Boolean = false): Boolean {
+        val c = controller ?: return false
+        if (tracks.isEmpty()) return false
+        if (c.mediaItemCount + tracks.size > 5000) { mutable.update { it.copy(error = "播放队列最多 5000 项。") }; return false }
         localPlaybackEpoch++
-        controller?.let { c ->
-            if (tracks.isEmpty()) return
-            if (c.mediaItemCount + tracks.size > 5000) { mutable.update { it.copy(error = "播放队列最多 5000 项。") }; return }
-            tracks.forEach { repository.rememberPlaybackTrack(it) }
-            val items = tracks.map { it.mediaItem(repository) }
-            if (c.mediaItemCount == 0) play(tracks)
-            else if (next) c.addMediaItems(c.currentMediaItemIndex + 1, items)
-            else c.addMediaItems(items)
-        }
+        tracks.forEach { repository.rememberPlaybackTrack(it) }
+        val items = tracks.map { it.mediaItem(repository) }
+        if (c.mediaItemCount == 0) play(tracks)
+        else if (next) c.addMediaItems(c.currentMediaItemIndex + 1, items)
+        else c.addMediaItems(items)
+        return true
     }
     fun addToQueue(track: Track, next: Boolean = false) = addToQueue(listOf(track), next)
     fun playQueue(index: Int) { localPlaybackEpoch++; controller?.let { it.seekToDefaultPosition(index); it.prepare(); it.play() } }
@@ -1033,9 +1038,7 @@ class MusicViewModel @Inject constructor(
         mutable.update { it.copy(current = track, playing = c.isPlaying, buffering = c.playbackState == Player.STATE_BUFFERING,
             duration = c.duration.takeIf { d -> d > 0 } ?: track?.durationMs ?: 0,
             queue = queue, playbackQuality = c.mediaMetadata.description?.toString().orEmpty(), entryId = item?.mediaId, repeatMode = c.repeatMode, shuffle = c.shuffleModeEnabled,
-            playbackError = c.playerError?.let { error -> generateSequence<Throwable>(error) { it.cause }.filterIsInstance<com.wildstring.app.playback.PlaybackResolutionException>().firstOrNull()?.message
-                ?: if (id?.let(::podcastEpisodeId) != null) "无法播放本期播客，请检查连接或音频格式后重试。"
-                else "无法播放这首歌，请检查连接或音频编码后重试。" }) }
+            playbackError = c.playerError?.let { error -> com.wildstring.app.playback.playbackErrorMessage(error, podcast = id?.let(::podcastEpisodeId) != null) }) }
         if (id != lyricTrack) {
             lyricTrack = id; lyricJob?.cancel()
             mutable.update { it.copy(lyrics = Lyrics(), lyricsLoading = id != null && track?.isPodcast != true, lyricsError = null) }
