@@ -65,6 +65,7 @@ export class ApiError extends Error {
     message: string,
     public code?: string,
     public traceId?: string,
+    public retryAfter?: number,
   ) {
     super(traceId ? i18n.t('api.withDiagnostic', { message, id: traceId }) : message);
   }
@@ -183,7 +184,15 @@ export async function api<T>(path: string, options: ApiOptions = {}): Promise<T>
           : '';
     const friendlyRaw = rawMessage && !isCodeLike(rawMessage) ? rawMessage : '';
     const message = codeMessage(code) || friendlyRaw || i18n.t('api.requestFailed');
-    throw new ApiError(response.status, message, code, traceId);
+    const retryHeader = Number(response.headers.get('Retry-After'));
+    const retryBody = Number(body.detail?.retry_after);
+    const retryAfter =
+      Number.isFinite(retryHeader) && retryHeader > 0
+        ? Math.ceil(retryHeader)
+        : Number.isFinite(retryBody) && retryBody > 0
+          ? Math.ceil(retryBody)
+          : undefined;
+    throw new ApiError(response.status, message, code, traceId, retryAfter);
   }
   const value = response.status === 204 ? (undefined as T) : await response.json();
   if (expectedOwner !== libraryUser()) throw new DOMException('Account changed', 'AbortError');

@@ -100,7 +100,7 @@ def test_schema_43_adds_language_to_existing_users(settings):
         connection.execute("PRAGMA user_version = 42")
     database.initialize()
     with database.connect() as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION == 43
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
         assert connection.execute("SELECT language FROM users WHERE id='admin'").fetchone()[0] == (
             "auto"
         )

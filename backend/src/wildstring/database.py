@@ -9,7 +9,7 @@ from pathlib import Path
 from wildstring.library.albums import album_key
 from wildstring.provider_schema import SCHEMA as PROVIDER_SCHEMA
 
-SCHEMA_VERSION = 43
+SCHEMA_VERSION = 46
 PODCAST_SCHEMA = """
 BEGIN IMMEDIATE;
 CREATE TABLE IF NOT EXISTS podcasts (
@@ -635,10 +635,28 @@ class Database:
                 from wildstring.login_guard_schema import migrate as migrate_login_guards
 
                 migrate_login_guards(connection)
+            # Pre-merge podcast-search development databases used versions 43-45
+            # without the language column. Replay the additive migrations from 42.
+            if 43 <= current <= 45:
+                columns = {row[1] for row in connection.execute("PRAGMA table_info(users)")}
+                if "language" not in columns:
+                    current = 42
             if current < 43:
                 from wildstring.user_language_schema import migrate as migrate_user_language
 
                 migrate_user_language(connection)
+            if current < 44:
+                from wildstring.podcast_search_schema import migrate as migrate_podcast_search
+
+                migrate_podcast_search(connection)
+            if current < 45:
+                from wildstring.podcast_search_schema import migrate_settings
+
+                migrate_settings(connection)
+            if current < 46:
+                from wildstring.podcast_identity_backfill import migrate as migrate_identity
+
+                migrate_identity(connection)
             connection.execute("PRAGMA journal_mode = WAL")
 
     def check_ready(self) -> bool:

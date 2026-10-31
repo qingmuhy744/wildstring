@@ -1,0 +1,97 @@
+{
+ "resultCount": 4,
+ "results": [
+  {
+   "wrapperType": "track",
+   "kind": "podcast",
+   "collectionId": 1183662640,
+   "trackId": 1183662640,
+   "artistName": "ETW Studio",
+   "collectionName": "声东击西",
+   "collectionViewUrl": "https://podcasts.apple.com/us/podcast/%E5%A3%B0%E4%B8%9C%E5%87%BB%E8%A5%BF/id1183662640?uo=4",
+   "feedUrl": "https://feeds.fireside.fm/shengdongjixi/rss",
+   "artworkUrl100": "https://is1-ssl.mzstatic.com/image/thumb/Podcasts221/v4/34/fe/fd/34fefd10-2039-380d-7015-dbc28b79f625/mza_7380566725793754773.jpg/100x100bb.jpg",
+   "artworkUrl600": "https://is1-ssl.mzstatic.com/image/thumb/Podcasts221/v4/34/fe/fd/34fefd10-2039-380d-7015-dbc28b79f625/mza_7380566725793754773.jpg/600x600bb.jpg",
+   "releaseDate": "2026-10-16T10:00:00Z",
+   "collectionExplicitness": "notExplicit",
+   "trackExplicitness": "cleaned",
+   "trackCount": 434,
+   "country": "USA",
+   "primaryGenreName": "Society & Culture",
+   "genres": [
+    "Society & Culture",
+    "Podcasts",
+    "Leisure"
+   ]
+  },
+  {
+   "wrapperType": "track",
+   "kind": "podcast",
+   "collectionId": 1740872075,
+   "trackId": 1740872075,
+   "artistName": "Michelle和她的朋友们",
+   "collectionName": "声东击西小杨说",
+   "collectionViewUrl": "https://podcasts.apple.com/us/podcast/%E5%A3%B0%E4%B8%9C%E5%87%BB%E8%A5%BF%E5%B0%8F%E6%9D%A8%E8%AF%B4/id1740872075?uo=4",
+   "feedUrl": "https://anchor.fm/s/10908695c/podcast/rss",
+   "artworkUrl100": "https://is1-ssl.mzstatic.com/image/thumb/Podcasts211/v4/cf/f3/fc/cff3fc5d-4cc3-cdf3-a83d-fa99ad0b19e8/mza_5163593479559285794.jpg/100x100bb.jpg",
+   "artworkUrl600": "https://is1-ssl.mzstatic.com/image/thumb/Podcasts211/v4/cf/f3/fc/cff3fc5d-4cc3-cdf3-a83d-fa99ad0b19e8/mza_5163593479559285794.jpg/600x600bb.jpg",
+   "releaseDate": "2025-12-16T17:45:00Z",
+   "collectionExplicitness": "notExplicit",
+   "trackExplicitness": "cleaned",
+   "trackCount": 6,
+   "country": "USA",
+   "primaryGenreName": "Relationships",
+   "genres": [
+    "Relationships",
+    "Podcasts",
+    "Society & Culture"
+   ]
+  },
+  {
+   "wrapperType": "track",
+   "kind": "podcast",
+   "collectionId": 1838853648,
+   "trackId": 1838853648,
+   "artistName": "Michelle和她的朋友们",
+   "collectionName": "声东击西小杨说",
+   "collectionViewUrl": "https://podcasts.apple.com/us/podcast/%E5%A3%B0%E4%B8%9C%E5%87%BB%E8%A5%BF%E5%B0%8F%E6%9D%A8%E8%AF%B4/id1838853648?uo=4",
+   "feedUrl": "https://anchor.fm/s/10908695c/podcast/rss",
+   "artworkUrl100": "https://is1-ssl.mzstatic.com/image/thumb/Podcasts221/v4/d2/ec/8d/d2ec8d52-9cb6-7582-f497-88c7d59cc2c8/mza_9924021328526678247.jpg/100x100bb.jpg",
+   "artworkUrl600": "https://is1-ssl.mzstatic.com/image/thumb/Podcasts221/v4/d2/ec/8d/d2ec8d52-9cb6-7582-f497-88c7d59cc2c8/mza_9924021328526678247.jpg/600x600bb.jpg",
+   "releaseDate": "2025-12-16T17:45:00Z",
+   "collectionExplicitness": "notExplicit",
+   "trackExplicitness": "cleaned",
+   "trackCount": 6,
+   "country": "USA",
+   "primaryGenreName": "Relationships",
+   "genres": [
+    "Relationships",
+    "Podcasts",
+    "Society & Culture"
+   ]
+  },
+  {
+   "wrapperType": "track",
+   "kind": "podcast",
+   "collectionId": 1861888165,
+   "trackId": 1861888165,
+   "artistName": "Michelle和她的朋友们",
+   "collectionName": "声东击西小杨说",
+   "collectionViewUrl": "https://podcasts.apple.com/us/podcast/%E5%A3%B0%E4%B8%9C%E5%87%BB%E8%A5%BF%E5%B0%8F%E6%9D%A8%E8%AF%B4/id1861888165?uo=4",
+   "feedUrl": "https://anchor.fm/s/10908695c/podcast/rss",
+   "artworkUrl100": "https://is1-ssl.mzstatic.com/image/thumb/Podcasts221/v4/25/b5/9c/25b59c29-fbd1-5cd8-795a-dcec0009ba0d/mza_1578041667758612388.jpg/100x100bb.jpg",
+   "artworkUrl600": "https://is1-ssl.mzstatic.com/image/thumb/Podcasts221/v4/25/b5/9c/25b59c29-fbd1-5cd8-795a-dcec0009ba0d/mza_1578041667758612388.jpg/600x600bb.jpg",
+   "releaseDate": "2025-12-16T17:45:00Z",
+   "collectionExplicitness": "notExplicit",
+   "trackExplicitness": "cleaned",
+   "trackCount": 6,
+   "country": "USA",
+   "primaryGenreName": "Relationships",
+   "genres": [
+    "Relationships",
+    "Podcasts",
+    "Society & Culture"
+   ]
+  }
+ ]
+}

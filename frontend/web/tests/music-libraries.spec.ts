@@ -585,11 +585,9 @@ test('管理员可切换普通用户添加 RSS，普通用户只添加并关注'
   await section(page, '电台 · 播客');
   await expect(page.getByRole('button', { name: '本服节目', exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: '+ 添加节目', exact: true }).click();
-  await page.getByLabel('RSS 地址', { exact: true }).fill(detail.podcast.feed_url);
-  await page
-    .locator('.podcasts-modal')
-    .getByRole('button', { name: '立即订阅', exact: true })
-    .click();
+  const search = page.getByRole('dialog', { name: '搜索或添加节目', exact: true });
+  await search.getByLabel('节目名称或 RSS 地址', { exact: true }).fill(detail.podcast.feed_url);
+  await search.getByRole('button', { name: '添加并关注', exact: true }).click();
   await expect(page.getByRole('button', { name: '取消关注', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: '自动下载设置', exact: true })).toHaveCount(0);
   await expect(page.getByRole('button', { name: '共享音频管理', exact: true })).toHaveCount(0);
