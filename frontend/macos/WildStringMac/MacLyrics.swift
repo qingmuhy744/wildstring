@@ -18,14 +18,17 @@ struct MacTimedLyricText: View {
                 Text(line.text.isEmpty ? "♪" : line.text)
                     .foregroundStyle(active ? highlight : inactive)
                     .multilineTextAlignment(centered ? .center : .leading)
+                    .fixedSize(horizontal: false, vertical: true)
             } else {
                 MacLyricFlow(centered: centered) {
                     ForEach(Array(line.words.enumerated()), id: \.offset) { _, word in
                         Text(word.text)
+                            .multilineTextAlignment(centered ? .center : .leading)
                             .foregroundStyle(inactive)
                             .overlay(alignment: .leading) {
                                 if active {
                                     Text(word.text)
+                                        .multilineTextAlignment(centered ? .center : .leading)
                                         .foregroundStyle(highlight)
                                         .mask {
                                             GeometryReader { geo in
@@ -34,7 +37,7 @@ struct MacTimedLyricText: View {
                                         }
                                 }
                             }
-                            .fixedSize()
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
             }
@@ -61,7 +64,7 @@ private struct MacLyricFlow: Layout {
         for row in rows(subviews, width: bounds.width) {
             var x = bounds.minX + (centered ? max(0, (bounds.width - row.width) / 2) : 0)
             for index in row.indices {
-                let size = subviews[index].sizeThatFits(.unspecified)
+                let size = subviews[index].sizeThatFits(ProposedViewSize(width: bounds.width, height: nil))
                 subviews[index].place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(size))
                 x += size.width
             }
@@ -79,7 +82,7 @@ private struct MacLyricFlow: Layout {
         var result: [Row] = []
         var row = Row()
         for index in subviews.indices {
-            let size = subviews[index].sizeThatFits(.unspecified)
+            let size = subviews[index].sizeThatFits(ProposedViewSize(width: width, height: nil))
             if !row.indices.isEmpty, row.width + size.width > width {
                 result.append(row)
                 row = Row()
