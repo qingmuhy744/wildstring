@@ -13,6 +13,9 @@ from wildstring.main import create_app
 
 
 def pytest_configure(config: pytest.Config) -> None:
+    # Never let a test app start the start-up identity backfill (it would call Apple).
+    # The ``test`` environment already defaults it off; this covers Settings built without it.
+    os.environ.setdefault("WILDSTRING_PODCAST_IDENTITY_AUTO_BACKFILL", "false")
     for _key in ("no_proxy", "NO_PROXY"):
         _current = os.environ.get(_key, "")
         _items = [item.strip() for item in _current.split(",") if item.strip()]

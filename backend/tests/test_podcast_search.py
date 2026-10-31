@@ -603,3 +603,44 @@ def test_schema_44_seeds_default_search_settings(settings):
             "SELECT regions, filter_explicit, version FROM podcast_search_settings"
         ).fetchall()
     assert row == [(None, 0, 1)]
+
+
+def test_library_admins_change_search_settings_but_editors_cannot(
+    settings, authenticated_client, itunes
+):
+    url = "/api/v1/podcasts/search-settings"
+    with authenticated_client(settings) as client:
+        sessions = {}
+        for username, profile in (("curator", "librarian"), ("writer", "editor")):
+            created = client.post(
+                "/api/v1/manage/users",
+                headers=HEADERS,
+                json={
+                    "username": username,
+                    "password": f"{username}-password-1",
+                    "profile": profile,
+                    "library_ids": [],
+                },
+            )
+            assert created.status_code == 201, created.text
+            session = TestClient(client.app)
+            session.post(
+                "/api/v1/auth/login",
+                headers=HEADERS,
+                json={"username": username, "password": f"{username}-password-1"},
+            )
+            sessions[profile] = session
+        try:
+            librarian, editor = sessions["librarian"], sessions["editor"]
+            current = librarian.get(url).json()
+            assert current["can_manage"] is True
+            assert editor.get(url).json()["can_manage"] is False
+            body = {"version": current["version"], "regions": ["jp"], "filter_explicit": True}
+            assert editor.put(url, headers=HEADERS, json=body).status_code == 403
+            saved = librarian.put(url, headers=HEADERS, json=body)
+            assert saved.status_code == 200, saved.text
+            assert saved.json()["regions"] == ["jp"] and saved.json()["filter_explicit"] is True
+            assert client.get(url).json()["regions"] == ["jp"]
+        finally:
+            for session in sessions.values():
+                session.close()

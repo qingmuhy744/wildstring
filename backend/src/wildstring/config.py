@@ -23,6 +23,10 @@ class Settings(BaseSettings):
     admin_password: SecretStr | None = None
     cookie_secure: bool = False
     podcast_search_regions: str = "us,tw,cn"
+    # Fill missing Apple Podcasts ids once, a few minutes after start-up. Unset means on,
+    # except in the test environment; WILDSTRING_PODCAST_IDENTITY_AUTO_BACKFILL=false disables.
+    podcast_identity_auto_backfill: bool | None = None
+    podcast_identity_auto_backfill_delay_seconds: int = Field(default=180, ge=0, le=86400)
 
     @field_validator("data_dir", "music_dir", "podcasts_dir", "web_dir")
     @classmethod
@@ -41,6 +45,8 @@ class Settings(BaseSettings):
             self.library_dir
         ):
             raise ValueError("Managed library and import source must be separate directories")
+        if self.podcast_identity_auto_backfill is None:
+            self.podcast_identity_auto_backfill = self.environment != "test"
         if self.web_dir is None and self.environment != "test":
             candidate = Path("frontend/web/dist").resolve()
             if candidate.is_dir() and (candidate / "index.html").is_file():

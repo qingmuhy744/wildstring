@@ -676,6 +676,7 @@ class PodcastManager:
         self.storage_dir = Path(storage_dir) if storage_dir else Path("data/podcasts")
         self.stopping = Event()
         self.thread: Thread | None = None
+        self.identity_backfill: Any | None = None
 
         # Download queue & workers
         self._download_queue: queue.Queue[str] = queue.Queue()
@@ -2129,6 +2130,8 @@ def podcast_router(
     search.routes(router, auth)
     backfill = IdentityBackfill(manager, search)
     backfill.routes(router, auth)
+    # The application lifespan schedules the automatic start-up run on this instance.
+    manager.identity_backfill = backfill
     podcast_opml.routes(
         router,
         auth,

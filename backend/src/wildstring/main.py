@@ -88,6 +88,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         providers.start()
         platform.start()
         podcasts.start()
+        if current.podcast_identity_auto_backfill and podcasts.identity_backfill is not None:
+            podcasts.identity_backfill.schedule_auto(
+                current.podcast_identity_auto_backfill_delay_seconds
+            )
         try:
             async with mcp.run():
                 yield

@@ -27,6 +27,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from wildstring import podcasts as podcast_module
 from wildstring.library.repository import now
 from wildstring.outbound import OutboundError, outbound_proxies, request_bytes
+from wildstring.permissions import scopes_for
 from wildstring.podcast_access import catalog_manager, personal_ids
 from wildstring.podcast_follows import followed_ids
 from wildstring.podcast_identity import feed_keys, normalize_feed_url, valid_itunes_id
@@ -53,6 +54,8 @@ THROTTLE_COOLDOWN_SECONDS = 60
 UPSTREAM_TIMEOUT_SECONDS = 10
 MAX_RESPONSE_BYTES = 1024 * 1024
 PREVIEW_EPISODES = 5
+# Owners and library admins (曲库管理员) change search regions and explicit filtering.
+MANAGE_SCOPE = "library:manage"
 
 
 def parse_regions(value: str | Iterable[str] | None) -> tuple[str, ...]:
@@ -609,12 +612,13 @@ class PodcastSearch:
                 **self.settings(),
                 "supported_regions": sorted(SUPPORTED_REGIONS),
                 "max_regions": MAX_REGIONS,
-                "can_manage": user["profile"] == "owner",
+                "can_manage": MANAGE_SCOPE in scopes_for(user),
             }
 
         @router.put("/search-settings", dependencies=[Depends(auth.require_client)])
         def update_settings(
-            body: SearchSettingsUpdate, user: Annotated[dict, Depends(auth.require_owner)]
+            body: SearchSettingsUpdate,
+            user: Annotated[dict, Depends(auth.require_permission(MANAGE_SCOPE))],
         ):
             self.update_settings(body)
             return read_settings(user)

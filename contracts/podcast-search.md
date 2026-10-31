@@ -107,11 +107,11 @@
 
 ### `PUT /api/v1/podcasts/search-settings`
 
-仅所有者。请求体 `{"version", "regions": [...] | null, "filter_explicit": bool}`；`regions` 为空或 `null` 即恢复服务器默认。区域代码不区分大小写、自动去重，必须是受支持的 Apple 店面代码且最多 5 个，否则 `422 podcast_search_region_invalid`；版本过期返回 `409 podcast_search_settings_conflict`。
+所有者与曲库管理员（`library:manage`，`can_manage=true`）。请求体 `{"version", "regions": [...] | null, "filter_explicit": bool}`；`regions` 为空或 `null` 即恢复服务器默认。区域代码不区分大小写、自动去重，必须是受支持的 Apple 店面代码且最多 5 个，否则 `422 podcast_search_region_invalid`；版本过期返回 `409 podcast_search_settings_conflict`。
 
 - `filter_explicit=false`（默认）：成人内容只显示「成人」标记。`true`：从搜索结果中移除，响应 `explicit_hidden` 给出隐藏数量；不影响已添加的节目和 RSS 地址预览。
 - 修改立即生效；各区域的缓存仍按区域分别保存 10 分钟。
-- 网页：管理 → 设置 →「播客目录搜索」，可添加、移除、调整区域顺序，勾选隐藏成人内容，或「恢复默认区域」。
+- 网页：管理 → 设置 →「播客目录搜索」（所有者与曲库管理员可见），可添加、移除、调整区域顺序，勾选隐藏成人内容，或「恢复默认区域」。
 
 表 `podcast_search_settings`：单行（`id=1`），`regions TEXT`（逗号分隔，`NULL`=默认）、`filter_explicit INTEGER`、`version INTEGER`、`updated_at TEXT`。
 
@@ -121,22 +121,28 @@
 
 ### 回填任务
 
-- `POST /api/v1/podcasts/identity/backfill`（仅所有者，需 `X-Wildstring-Client`）：请求体可选 `{"limit": 1..1000（默认 100）, "retry_unmatched": false}`，在后台线程启动一轮，返回 `202` 与状态；已在运行时 `409 podcast_identity_backfill_running`。
-- `GET /api/v1/podcasts/identity/backfill`（仅所有者）：`{"running", "processed", "matched", "no_match", "failed", "ambiguous", "paused_until", "last_run", "total", "with_itunes_id", "unchecked", "counts"}`。
+- `POST /api/v1/podcasts/identity/backfill`（所有者与曲库管理员，需 `X-Wildstring-Client`）：请求体可选 `{"limit": 1..1000（默认 100）, "retry_unmatched": false}`，在后台线程启动一轮，返回 `202` 与状态；已在运行时 `409 podcast_identity_backfill_running`。
+- `GET /api/v1/podcasts/identity/backfill`（所有者与曲库管理员）：`{"running", "processed", "matched", "no_match", "failed", "ambiguous", "paused_until", "trigger", "last_run", "total", "with_itunes_id", "unchecked", "counts"}`。
 - 每个待检查节目：先请求一次 RSS 以得到重定向后的地址（两次请求至少间隔 2 秒），再以节目名称、必要时「名称 + 作者」在当前设置的区域搜索 Apple（iTunes 没有按 RSS 地址查询的接口）。**只有** Apple 记录的 `feedUrl` 规范化后等于本节目的规范化地址或重定向后的地址时才写入 `itunes_id`，绝不只按名称匹配。同一 RSS 在 Apple 有多个编号时取数值最小（最早上架）的一个，并计入 `ambiguous`。
 - 与用户搜索共用每分钟约 20 次的 Apple 预算，并为用户保留 5 次；预算用尽或 Apple 限流时任务等待（`paused_until`，单节目最多等 5 分钟），服务停止时立即结束。
-- 幂等：只处理 `itunes_id` 为空且未检查（或上次 `failed`）的节目；`retry_unmatched=true` 时也重试 `no_match`。已有的 `itunes_id` 和重定向地址从不被覆盖。可随时中断，下次从剩余节目继续。
+- 幂等：只处理 `itunes_id` 为空且未检查（或上次 `failed`）的节目；`no_match` 的节目以 `itunes_checked_at` 为准 7 天内不再重试，`retry_unmatched=true` 时立即重试。`last_run` 额外给出 `trigger`（`manual` / `auto`）与结束时的重复统计 `duplicates: {"verified", "possible"}`。已有的 `itunes_id` 和重定向地址从不被覆盖。可随时中断，下次从剩余节目继续。
+
+### 启动后自动回填
+
+- 服务启动后在后台等待 `WILDSTRING_PODCAST_IDENTITY_AUTO_BACKFILL_DELAY_SECONDS`（默认 180 秒）再运行一轮（最多 1000 个节目，`trigger="auto"`），不阻塞启动；没有待检查节目时不发起任何请求，因此重启是幂等的。规则、限流与上面的手动回填完全相同；服务停止时立即退出。
+- 自动回填**从不合并**：只补 `itunes_id`，补上后已核实的重复节目出现在下面的重复报告中，等待管理员确认合并。
+- `WILDSTRING_PODCAST_IDENTITY_AUTO_BACKFILL=false` 关闭；未设置时除 `test` 环境外默认开启。已有手动回填在运行时自动回填跳过本轮。
 
 ### 重复报告与合并
 
-- `GET /api/v1/podcasts/identity/duplicates`（仅所有者）：成对列出可能重复的节目，`{"duplicates": [{"confidence", "reasons", "itunes_id", "suggested_keep_id", "podcasts": [两条摘要]}], "verified", "possible"}`。`reasons` 取自 `itunes_id`（同一编号）、`feed`（规范化地址或重定向地址相同）、`title`（规范化名称相同且作者相同或其一为空）。
-- 只有两条记录的 `itunes_id` 相同（该编号已按 RSS 核实）才是 `verified`；其余都是 `possible`，只报告、不合并。建议保留：未重定向的地址优先，其次关注多、下载多、更早添加。
-- `POST /api/v1/podcasts/identity/merge`（仅所有者）`{"keep_id", "merge_id"}`：未核实 `409 podcast_merge_unverified`；任一节目有排队或下载中的单集 `409 podcast_merge_busy`；同一节目 `422 podcast_merge_same`；不存在 `404 podcast_not_found`。在一个事务内：
+- `GET /api/v1/podcasts/identity/duplicates`（所有者与曲库管理员）：成对列出可能重复的节目，`{"duplicates": [{"confidence", "reasons", "itunes_id", "suggested_keep_id", "podcasts": [两条摘要]}], "verified", "possible"}`。`reasons` 取自 `itunes_id`（同一编号）、`feed`（规范化地址或重定向地址相同）、`title`（规范化名称相同且作者相同或其一为空）。
+- 只有两条记录的 `itunes_id` 相同（该编号已按 RSS 核实）才是 `verified`；其余都是 `possible`，只报告、不合并。保留规则（`suggested_keep_id`，合并时由服务器执行）：订阅地址未重定向的优先；两个都重定向或都未重定向时保留关注多的，再依次比较下载多、更早添加。
+- `POST /api/v1/podcasts/identity/merge`（所有者与曲库管理员）`{"podcast_ids": [两个节目 ID]}`：顺序无关，保留哪一个按上面的保留规则由服务器决定。未核实 `409 podcast_merge_unverified`；任一节目有排队或下载中的单集 `409 podcast_merge_busy`；同一节目 `422 podcast_merge_same`；不存在 `404 podcast_not_found`。在一个事务内：
   - 单集按 `guid`、其次按音频地址对齐；对不上的单集整条移入保留节目（进度、引用、下载随之）。
   - 对齐的单集：同一账号两边都有进度时保留最近收听的一条（版本号递增）；播放缓存、资源引用（手动/自动标记取并集）、保护状态和租约迁到保留的单集。保留的单集没有下载而另一边有时，转移已下载文件；两边都有时删除重复的那份。
   - 关注、个人目录与个人节目设置迁到保留节目（已存在则以保留节目为准）；出品方为空时继承。随后删除被合并的节目。
   - 返回 `{"kept_id", "merged_id", "episodes_moved", "episodes_matched", "progress_moved", "progress_replaced", "downloads_moved", "follows_moved"}`。
-- 网页：管理 → 设置 →「播客去重与回填」显示统计、开始回填、进度，以及「已核实 / 疑似」重复列表；已核实的可选择保留哪条后二次确认合并，疑似的只给出核对建议。
+- 网页：管理 → 设置 →「播客去重与回填」显示统计、开始回填、进度，以及「已核实 / 疑似」重复列表；已核实的标出「将保留」的节目，二次确认后合并，疑似的只给出核对建议。所有者与曲库管理员可见；设置页对曲库管理员只显示「播客目录搜索」与「播客去重与回填」。
 
 ## 数据库（schema 43）
 

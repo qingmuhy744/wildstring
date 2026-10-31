@@ -4,6 +4,10 @@ The job never trusts a title. Apple is searched by title (and title plus author)
 iTunes id is stored only when Apple's ``feedUrl`` normalises to the programme's own feed
 or to the URL its feed redirects to. Duplicate rows are reported to the owner; only rows
 that share such a verified id can be merged, and merging is always an explicit action.
+
+A few minutes after start-up the server runs the job once on its own (see
+``schedule_auto``). That run only fills ids for rows that have none; suspected duplicates
+it uncovers appear in the duplicate report for a library admin to confirm. It never merges.
 """
 
 import logging
@@ -12,6 +16,7 @@ import threading
 import time
 import unicodedata
 from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -20,7 +25,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from wildstring.library.repository import now
 from wildstring.podcast_identity import feed_keys, normalize_feed_url
-from wildstring.podcast_search import SearchRateLimited
+from wildstring.podcast_search import MANAGE_SCOPE, SearchRateLimited
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +36,8 @@ MAX_RATE_LIMIT_WAIT_SECONDS = 300
 DEFAULT_BATCH = 100
 MAX_BATCH = 1000
 BUSY_DOWNLOADS = ("queued", "downloading")
+# A show Apple did not list is looked up again only after this long.
+NO_MATCH_RETRY_DAYS = 7
 
 
 def migrate(connection):
@@ -68,9 +75,12 @@ class BackfillStart(BaseModel):
 
 
 class MergeRequest(BaseModel):
+    """The pair to merge; the server decides which show is kept (see ``keeper``)."""
+
     model_config = ConfigDict(extra="forbid")
-    keep_id: str = Field(min_length=1, max_length=100)
-    merge_id: str = Field(min_length=1, max_length=100)
+    podcast_ids: list[Annotated[str, Field(min_length=1, max_length=100)]] = Field(
+        min_length=2, max_length=2
+    )
 
 
 class IdentityBackfill:
@@ -92,6 +102,7 @@ class IdentityBackfill:
         self.wait = wait or self.stop.wait
         self.lock = threading.Lock()
         self.thread: threading.Thread | None = None
+        self.auto_thread: threading.Thread | None = None
         self.last_feed_fetch = float("-inf")
         self.run_state: dict[str, Any] = {"running": False, "last_run": None}
 
@@ -120,12 +131,15 @@ class IdentityBackfill:
         }
 
     # Running ----------------------------------------------------------------------------
-    def start(self, limit: int = DEFAULT_BATCH, retry_unmatched: bool = False) -> dict[str, Any]:
+    def start(
+        self, limit: int = DEFAULT_BATCH, retry_unmatched: bool = False, *, trigger: str = "manual"
+    ) -> dict[str, Any]:
         with self.lock:
             if self.run_state["running"]:
                 raise HTTPException(409, "podcast_identity_backfill_running")
             self.run_state = {
                 "running": True,
+                "trigger": trigger,
                 "started_at": now(),
                 "finished_at": None,
                 "processed": 0,
@@ -158,11 +172,18 @@ class IdentityBackfill:
             self.run_state[key] = self.run_state.get(key, 0) + 1
 
     def _finish(self, reason: str):
+        try:
+            report = self.duplicates()
+            found = {"verified": report["verified"], "possible": report["possible"]}
+        except Exception:
+            logger.exception("Duplicate report failed after identity backfill")
+            found = None
         with self.lock:
             summary = {
                 key: self.run_state.get(key)
-                for key in ("processed", "matched", "no_match", "failed", "ambiguous")
+                for key in ("processed", "matched", "no_match", "failed", "ambiguous", "trigger")
             }
+            summary["duplicates"] = found
             self.run_state.update(
                 running=False,
                 finished_at=now(),
@@ -172,17 +193,47 @@ class IdentityBackfill:
             )
 
     def candidates(self, limit: int, retry_unmatched: bool) -> list[dict[str, Any]]:
-        statuses = "('failed','no_match')" if retry_unmatched else "('failed')"
+        """Rows without an id: unchecked, failed, or unmatched for ``NO_MATCH_RETRY_DAYS``."""
+        cutoff = (datetime.now(UTC) - timedelta(days=NO_MATCH_RETRY_DAYS)).isoformat()
         with self.database.connect() as db:
             rows = db.execute(
-                f"""SELECT id, title, author, feed_url, feed_url_normalized,
+                """SELECT id, title, author, feed_url, feed_url_normalized,
                 resolved_feed_url_normalized, itunes_id FROM podcasts
                 WHERE itunes_id IS NULL AND (itunes_check_status IS NULL
-                    OR itunes_check_status IN {statuses})
-                ORDER BY itunes_check_status IS NOT NULL, created_at, id LIMIT ?""",  # nosec B608
-                (limit,),
+                    OR itunes_check_status = 'failed'
+                    OR (itunes_check_status = 'no_match' AND (? OR itunes_checked_at IS NULL
+                        OR itunes_checked_at < ?)))
+                ORDER BY itunes_check_status IS NOT NULL, created_at, id LIMIT ?""",
+                (int(retry_unmatched), cutoff, limit),
             ).fetchall()
         return [dict(row) for row in rows]
+
+    def schedule_auto(self, delay_seconds: float, limit: int = MAX_BATCH) -> threading.Thread:
+        """Run the job once in the background after ``delay_seconds``; never blocks start-up.
+
+        The automatic run only fills missing ids. It skips itself when an admin run is
+        already going and exits early when the server shuts down during the delay.
+        """
+
+        def wait_then_run():
+            if self.stop.wait(max(0.0, delay_seconds)):
+                return
+            if not self.candidates(1, False):
+                logger.info("Automatic podcast identity backfill: nothing to check")
+                return
+            try:
+                self.start(limit, False, trigger="auto")
+            except HTTPException:
+                logger.info("Automatic podcast identity backfill skipped: a run is in progress")
+                return
+            logger.info("Automatic podcast identity backfill started")
+
+        thread = threading.Thread(
+            target=wait_then_run, name="podcast-identity-auto-backfill", daemon=True
+        )
+        thread.start()
+        self.auto_thread = thread
+        return thread
 
     def run(self, limit: int = DEFAULT_BATCH, retry_unmatched: bool = False) -> dict[str, Any]:
         """Check up to ``limit`` programmes; safe to repeat and to interrupt at any row."""
@@ -190,6 +241,7 @@ class IdentityBackfill:
             if not self.run_state.get("running"):
                 self.run_state.update(
                     running=True,
+                    trigger="manual",
                     started_at=now(),
                     processed=0,
                     matched=0,
@@ -311,27 +363,35 @@ class IdentityBackfill:
         return status
 
     # Duplicates -------------------------------------------------------------------------
+    def _rows(self, db, ids: tuple[str, ...] | None = None) -> list[dict[str, Any]]:
+        where = f"WHERE p.id IN ({','.join('?' * len(ids))})" if ids else ""
+        rows = [
+            dict(row)
+            for row in db.execute(
+                f"""SELECT p.id, p.title, p.author, p.feed_url, p.cover_url, p.itunes_id,
+                p.itunes_check_status, p.created_at, p.publisher_id,
+                COALESCE(p.feed_url_normalized, '') AS feed_key,
+                COALESCE(p.resolved_feed_url_normalized, '') AS resolved_key,
+                (SELECT COUNT(*) FROM podcast_follows f WHERE f.podcast_id=p.id) AS followers,
+                (SELECT COUNT(*) FROM podcast_episodes e WHERE e.podcast_id=p.id) AS episodes,
+                (SELECT COUNT(*) FROM podcast_episodes e WHERE e.podcast_id=p.id
+                    AND e.download_status='downloaded') AS downloaded
+                FROM podcasts p {where} ORDER BY p.created_at, p.id""",  # nosec B608
+                ids or (),
+            )
+        ]
+        for row in rows:
+            row["feed_key"] = row["feed_key"] or normalize_feed_url(row["feed_url"])
+            # A feed redirects when the URL it finally answers on differs from its own.
+            row["redirects"] = bool(row["resolved_key"]) and row["resolved_key"] != row["feed_key"]
+        return rows
+
     def duplicates(self) -> dict[str, Any]:
         with self.database.connect() as db:
-            rows = [
-                dict(row)
-                for row in db.execute(
-                    """SELECT p.id, p.title, p.author, p.feed_url, p.cover_url, p.itunes_id,
-                    p.itunes_check_status, p.created_at,
-                    COALESCE(p.feed_url_normalized, '') AS feed_key,
-                    COALESCE(p.resolved_feed_url_normalized, '') AS resolved_key,
-                    (SELECT COUNT(*) FROM podcast_follows f WHERE f.podcast_id=p.id) AS followers,
-                    (SELECT COUNT(*) FROM podcast_episodes e WHERE e.podcast_id=p.id) AS episodes,
-                    (SELECT COUNT(*) FROM podcast_episodes e WHERE e.podcast_id=p.id
-                        AND e.download_status='downloaded') AS downloaded
-                    FROM podcasts p ORDER BY p.created_at, p.id"""
-                )
-            ]
+            rows = self._rows(db)
         buckets: dict[tuple[str, str], list[str]] = {}
         by_id = {row["id"]: row for row in rows}
         for row in rows:
-            row["feed_key"] = row["feed_key"] or normalize_feed_url(row["feed_url"])
-            row["redirects"] = bool(row["resolved_key"]) and row["resolved_key"] != row["feed_key"]
             marks = {("feed", key) for key in (row["feed_key"], row["resolved_key"]) if key}
             if row["itunes_id"]:
                 marks.add(("itunes_id", row["itunes_id"]))
@@ -350,7 +410,7 @@ class IdentityBackfill:
         for (first, second), reasons in pairs.items():
             a, b = by_id[first], by_id[second]
             verified = bool(a["itunes_id"]) and a["itunes_id"] == b["itunes_id"]
-            keep = min((a, b), key=self._keep_rank)
+            keep = self.keeper(a, b)
             report.append(
                 {
                     "confidence": "verified" if verified else "possible",
@@ -375,8 +435,23 @@ class IdentityBackfill:
         return not first or not second or first == second
 
     @staticmethod
-    def _keep_rank(row):
-        return (row["redirects"], -row["followers"], -row["downloaded"], row["created_at"])
+    def keeper(a: dict[str, Any], b: dict[str, Any]) -> dict[str, Any]:
+        """The show a merge keeps.
+
+        A show whose own feed URL is final (it does not redirect) wins; when both or neither
+        redirect, the one with more followers wins. Downloads, age and id break exact ties
+        so the choice is stable.
+        """
+        return min(
+            (a, b),
+            key=lambda row: (
+                row["redirects"],
+                -row["followers"],
+                -row["downloaded"],
+                row["created_at"] or "",
+                row["id"],
+            ),
+        )
 
     @staticmethod
     def _summary(row) -> dict[str, Any]:
@@ -399,20 +474,17 @@ class IdentityBackfill:
         }
 
     # Merge ------------------------------------------------------------------------------
-    def merge(self, keep_id: str, merge_id: str) -> dict[str, Any]:
-        if keep_id == merge_id:
+    def merge(self, first_id: str, second_id: str) -> dict[str, Any]:
+        """Merge a verified pair into the show ``keeper`` picks; the order given is ignored."""
+        if first_id == second_id:
             raise HTTPException(422, "podcast_merge_same")
         manager = self.manager
         with self.database.connect() as db:
-            shows = {
-                row["id"]: row
-                for row in db.execute(
-                    "SELECT id, itunes_id, publisher_id FROM podcasts WHERE id IN (?, ?)",
-                    (keep_id, merge_id),
-                )
-            }
+            shows = {row["id"]: row for row in self._rows(db, (first_id, second_id))}
             if len(shows) != 2:
                 raise HTTPException(404, "podcast_not_found")
+            keep_id = self.keeper(shows[first_id], shows[second_id])["id"]
+            merge_id = second_id if keep_id == first_id else first_id
             if not shows[keep_id]["itunes_id"] or (
                 shows[keep_id]["itunes_id"] != shows[merge_id]["itunes_id"]
             ):
@@ -579,26 +651,27 @@ class IdentityBackfill:
 
     # HTTP -------------------------------------------------------------------------------
     def routes(self, router: APIRouter, auth) -> None:
+        # Owners and library admins share these; ``library:manage`` is the existing scope.
+        manager = Annotated[dict, Depends(auth.require_permission(MANAGE_SCOPE))]
+
         @router.get("/identity/backfill")
-        def backfill_status(_user: Annotated[dict, Depends(auth.require_owner)]):
+        def backfill_status(_user: manager):
             return self.status()
 
         @router.post(
             "/identity/backfill", status_code=202, dependencies=[Depends(auth.require_client)]
         )
-        def start_backfill(
-            _user: Annotated[dict, Depends(auth.require_owner)], body: BackfillStart | None = None
-        ):
+        def start_backfill(_user: manager, body: BackfillStart | None = None):
             body = body or BackfillStart()
             return self.start(body.limit, body.retry_unmatched)
 
         @router.get("/identity/duplicates")
-        def list_duplicates(_user: Annotated[dict, Depends(auth.require_owner)]):
+        def list_duplicates(_user: manager):
             return self.duplicates()
 
         @router.post("/identity/merge", dependencies=[Depends(auth.require_client)])
-        def merge(body: MergeRequest, _user: Annotated[dict, Depends(auth.require_owner)]):
-            return self.merge(body.keep_id, body.merge_id)
+        def merge(body: MergeRequest, _user: manager):
+            return self.merge(*body.podcast_ids)
 
 
 __all__ = ["IdentityBackfill", "migrate", "title_key"]
