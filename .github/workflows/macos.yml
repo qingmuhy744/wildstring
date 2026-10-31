@@ -1,0 +1,56 @@
+name: macOS Build
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "frontend/macos/**"
+      - "frontend/ios/WildStringKit/**"
+      - ".github/workflows/macos.yml"
+      - "scripts/package_macos_dmg.sh"
+      - "Makefile"
+  pull_request:
+    paths:
+      - "frontend/macos/**"
+      - "frontend/ios/WildStringKit/**"
+      - ".github/workflows/macos.yml"
+      - "scripts/package_macos_dmg.sh"
+      - "Makefile"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dmg:
+    runs-on: macos-latest
+    timeout-minutes: 45
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Test shared kit
+        run: make ios-test
+      - name: Build and pack a DMG
+        env:
+          APPLE_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_NOTARY_APPLE_ID: ${{ secrets.APPLE_NOTARY_APPLE_ID }}
+          APPLE_NOTARY_PASSWORD: ${{ secrets.APPLE_NOTARY_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: make macos-dmg
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: wildstring-macos-dmg
+          path: artifacts/WildString-macOS.dmg
+          if-no-files-found: error
+          retention-days: 14

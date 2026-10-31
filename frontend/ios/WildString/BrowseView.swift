@@ -6,6 +6,8 @@ import SwiftUI
 struct BrowseView: View {
     let client: WildstringClient
     let playback: PlaybackService
+    let server: String
+    let username: String
     var autoPlayFirst = false
 
     enum Section: String, CaseIterable {
@@ -29,10 +31,21 @@ struct BrowseView: View {
     @State private var songOrder: CatalogSortOrder
     @State private var albumSort: AlbumSort
     @State private var albumOrder: CatalogSortOrder
+    @State private var libraries: [MusicLibrary] = []
+    @State private var artistRole = ""
+    @State private var showingSearch = false
 
-    init(client: WildstringClient, playback: PlaybackService, autoPlayFirst: Bool = false) {
+    init(
+        client: WildstringClient,
+        playback: PlaybackService,
+        server: String,
+        username: String,
+        autoPlayFirst: Bool = false
+    ) {
         self.client = client
         self.playback = playback
+        self.server = server
+        self.username = username
         self.autoPlayFirst = autoPlayFirst
         let preferences = CatalogSortPreference(origin: client.server.origin)
         _songSort = State(initialValue: preferences.songSort)
@@ -56,16 +69,45 @@ struct BrowseView: View {
                 .pickerStyle(.segmented)
                 .padding(.horizontal)
                 .padding(.vertical, 6)
+                if section == .artists {
+                    Picker("角色", selection: $artistRole) {
+                        Text("全部").tag("")
+                        Text("艺人").tag("artist")
+                        Text("专辑艺人").tag("album_artist")
+                        Text("演唱").tag("vocalist")
+                        Text("作词").tag("lyricist")
+                        Text("作曲").tag("composer")
+                        Text("编曲").tag("arranger")
+                    }
+                    .pickerStyle(.menu)
+                    .padding(.horizontal)
+                }
 
                 content
             }
-            .navigationTitle("曲库")
+            .navigationTitle("音乐")
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        showingSearch = true
+                    } label: {
+                        Image(systemName: "magnifyingglass")
+                    }
+                    .accessibilityLabel("搜索")
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    if libraries.count > 1 {
+                        libraryMenu
+                    }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     if section != .artists {
                         sortMenu
                     }
                 }
+            }
+            .sheet(isPresented: $showingSearch) {
+                SearchView(client: client, playback: playback)
             }
             .navigationDestination(for: Album.self) { album in
                 AlbumDetailView(client: client, playback: playback, album: album)
@@ -88,9 +130,53 @@ struct BrowseView: View {
             .miniPlayer(playback, client: client)
         }
         .task { await ensureSectionLoaded() }
+        .task { await loadLibraries() }
+        .task { openSearchForDemoIfNeeded() }
         .onChange(of: section) { _, _ in
             Task { await ensureSectionLoaded() }
         }
+        .onChange(of: artistRole) { _, _ in
+            artistsLoader = nil
+            Task { await ensureSectionLoaded() }
+        }
+    }
+
+    private var libraryMenu: some View {
+        Menu {
+            Button("默认曲库") { selectLibrary(nil) }
+            ForEach(libraries) { library in
+                Button(library.name) { selectLibrary(library.id) }
+            }
+        } label: {
+            Image(systemName: "books.vertical")
+        }
+        .accessibilityLabel("曲库")
+    }
+
+    private func selectLibrary(_ id: String?) {
+        client.selectLibrary(id)
+        AccountPreferences(server: server, username: username).setLibraryID(id)
+        songsLoader = nil
+        albumsLoader = nil
+        artistsLoader = nil
+        browseGroups = []
+        Task { await ensureSectionLoaded() }
+    }
+
+    private func loadLibraries() async {
+        guard let loaded = try? await client.libraries() else { return }
+        libraries = loaded.filter(\.enabled)
+        let saved = AccountPreferences(server: server, username: username).libraryID
+        if let saved, !libraries.contains(where: { $0.id == saved }) {
+            selectLibrary(nil)
+        }
+    }
+
+    private func openSearchForDemoIfNeeded() {
+        #if DEBUG
+            guard ProcessInfo.processInfo.environment["WILDSTRING_DEMO_TAB"] == "search" else { return }
+            showingSearch = true
+        #endif
     }
 
     @ViewBuilder private var content: some View {
@@ -198,8 +284,13 @@ struct BrowseView: View {
             }
         case .artists:
             if artistsLoader == nil {
+                let role = artistRole
                 artistsLoader = PagedListModel<Artist>(pageSize: 50) { [client] limit, offset in
-                    try await client.artists(limit: limit, offset: offset)
+                    try await client.artists(
+                        limit: limit,
+                        offset: offset,
+                        role: role.isEmpty ? nil : role
+                    )
                 }
             }
             if artistsLoader?.didLoadOnce == false {

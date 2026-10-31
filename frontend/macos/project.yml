@@ -1,0 +1,54 @@
+name: WildStringMac
+options:
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+packages:
+  WildStringKit:
+    path: ../ios/WildStringKit
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    MARKETING_VERSION: "0.8.1"
+    CURRENT_PROJECT_VERSION: "36"
+targets:
+  WildString:
+    type: application
+    platform: macOS
+    sources:
+      - path: WildStringMac
+    dependencies:
+      - package: WildStringKit
+        product: CoreNetwork
+      - package: WildStringKit
+        product: CorePlayback
+    info:
+      path: WildStringMac/Info.plist
+      properties:
+        CFBundleDisplayName: "野弦"
+        CFBundleExecutable: "$(EXECUTABLE_NAME)"
+        CFBundleIdentifier: "$(PRODUCT_BUNDLE_IDENTIFIER)"
+        CFBundleName: "$(PRODUCT_NAME)"
+        CFBundlePackageType: APPL
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        LSMinimumSystemVersion: "14.0"
+        NSLocalNetworkUsageDescription: "用于连接您局域网中的野弦服务器。"
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+          NSAllowsLocalNetworking: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.wildstring.mac
+        PRODUCT_NAME: WildString
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_IDENTITY: "-"
+        ENABLE_HARDENED_RUNTIME: YES
+        ENABLE_APP_SANDBOX: NO
+schemes:
+  WildString:
+    build:
+      targets:
+        WildString: all
+    run:
+      config: Debug

@@ -1,6 +1,6 @@
 # 曲库管理接口
 
-已实现首批管理页，SQLite schema v11。所有 `/api/v1/manage` 接口要求管理员会话，写请求和模型测试还要求 `X-Wildstring-Client: web|android|ios`。共用当前 Python 服务，不增加独立任务服务。
+已实现首批管理页，SQLite schema v11。所有 `/api/v1/manage` 接口要求管理员会话，写请求和模型测试还要求 `X-Wildstring-Client: web|android|ios|macos`。共用当前 Python 服务，不增加独立任务服务。
 
 ## 概览与设置
 

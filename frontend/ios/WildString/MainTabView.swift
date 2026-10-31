@@ -19,15 +19,24 @@ struct MainTabView: View {
 
     var body: some View {
         TabView(selection: $selection) {
-            BrowseView(client: client, playback: playback, autoPlayFirst: autoPlayFirst)
-                .tabItem { Label("曲库", systemImage: "music.note.list") }
+            DiscoverView(client: client, playback: playback)
+                .tabItem { Label("发现", systemImage: "sparkles") }
                 .tag(0)
-            DailyRecommendationsView(client: client, playback: playback)
-                .tabItem { Label("推荐", systemImage: "sparkles") }
+            PodcastsView(client: client, playback: playback)
+                .tabItem { Label("电台", systemImage: "antenna.radiowaves.left.and.right") }
                 .tag(1)
-            SearchView(client: client, playback: playback)
-                .tabItem { Label("搜索", systemImage: "magnifyingglass") }
+            AssistantView(client: client, showsDismiss: false)
+                .tabItem { Label("AI 助手", systemImage: "bubble.left.and.bubble.right") }
                 .tag(2)
+            BrowseView(
+                client: client,
+                playback: playback,
+                server: server,
+                username: username,
+                autoPlayFirst: autoPlayFirst
+            )
+            .tabItem { Label("音乐", systemImage: "music.note") }
+            .tag(3)
             AccountView(
                 client: client,
                 playback: playback,
@@ -36,7 +45,7 @@ struct MainTabView: View {
                 onLogout: onLogout
             )
             .tabItem { Label("我的", systemImage: "person.crop.circle") }
-            .tag(3)
+            .tag(4)
         }
         .environment(favorites)
         .environment(offline)
@@ -109,11 +118,16 @@ struct MainTabView: View {
     /// Debug-only hook used by the simulator verification runs.
     private static var demoTab: Int {
         #if DEBUG
+            if ProcessInfo.processInfo.environment["WILDSTRING_DEMO_OPEN_ASSISTANT"] == "1" {
+                return 2
+            }
             switch ProcessInfo.processInfo.environment["WILDSTRING_DEMO_TAB"] {
-            case "recommendations": return 1
-            case "search": return 2
-            case "account": return 3
-            default: return 0
+            case "recommendations", "discover": return 0
+            case "podcasts", "radio": return 1
+            case "assistant": return 2
+            case "search", "library", "browse": return 3
+            case "account": return 4
+            default: return 3
             }
         #else
             return 0

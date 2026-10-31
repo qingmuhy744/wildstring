@@ -63,7 +63,8 @@ extension WildstringClient {
         offset: Int = 0,
         query: String? = nil,
         sort: TrackSort = .title,
-        order: CatalogSortOrder? = nil
+        order: CatalogSortOrder? = nil,
+        playedOnly: Bool = false
     ) async throws -> Page<Track> {
         var queryItems = [
             URLQueryItem(name: "limit", value: String(limit)),
@@ -75,6 +76,9 @@ extension WildstringClient {
         }
         if let order {
             queryItems.append(URLQueryItem(name: "order", value: order.rawValue))
+        }
+        if playedOnly {
+            queryItems.append(URLQueryItem(name: "played_only", value: "true"))
         }
         let data = try await perform(
             Request(method: "GET", path: "api/v1/tracks", queryItems: queryItems)

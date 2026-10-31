@@ -126,10 +126,19 @@ extension WildstringClient {
         return try JSONDecoder().decode(AlbumTrackPage.self, from: data)
     }
 
-    public func artists(limit: Int = 50, offset: Int = 0, query: String? = nil) async throws
-        -> Page<Artist>
-    {
-        try await page(path: "api/v1/artists", limit: limit, offset: offset, query: query)
+    public func artists(
+        limit: Int = 50,
+        offset: Int = 0,
+        query: String? = nil,
+        role: String? = nil
+    ) async throws -> Page<Artist> {
+        try await page(
+            path: "api/v1/artists",
+            limit: limit,
+            offset: offset,
+            query: query,
+            role: role
+        )
     }
 
     public func artistTracks(
@@ -194,7 +203,8 @@ extension WildstringClient {
         path: String,
         limit: Int,
         offset: Int,
-        query: String?
+        query: String?,
+        role: String? = nil
     ) async throws -> Page<Element> {
         var queryItems = [
             URLQueryItem(name: "limit", value: String(limit)),
@@ -202,6 +212,9 @@ extension WildstringClient {
         ]
         if let query, !query.isEmpty {
             queryItems.insert(URLQueryItem(name: "q", value: query), at: 0)
+        }
+        if let role, !role.isEmpty {
+            queryItems.append(URLQueryItem(name: "role", value: role))
         }
         let data = try await perform(
             Request(method: "GET", path: path, queryItems: queryItems)

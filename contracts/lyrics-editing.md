@@ -4,7 +4,7 @@
 
 ## 接口
 
-下列接口要求管理员会话，写请求和预览要求 `X-Wildstring-Client: web|android|ios`。
+下列接口要求管理员会话，写请求和预览要求 `X-Wildstring-Client: web|android|ios|macos`。
 
 - `GET /api/v1/manage/tracks/{id}/lyrics`：返回 `{track_id,version,file_version,override,observed,observed_text,effective,text}`。
 - `POST /api/v1/manage/tracks/{id}/lyrics/preview`：提交 `{text:string|null}`，使用正式解析器返回 `{kind,source,lines}`，不保存。

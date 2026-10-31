@@ -117,8 +117,37 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
+  macos:
+    needs: source
+    runs-on: macos-latest
+    timeout-minutes: 45
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.tag || github.ref_name }}
+          persist-credentials: false
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Build and pack a DMG
+        env:
+          APPLE_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_NOTARY_APPLE_ID: ${{ secrets.APPLE_NOTARY_APPLE_ID }}
+          APPLE_NOTARY_PASSWORD: ${{ secrets.APPLE_NOTARY_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: make macos-dmg
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: wildstring-macos-dmg
+          path: artifacts/WildString-macOS.dmg
+          if-no-files-found: error
+          retention-days: 30
+
   publish:
-    needs: [source, verify, verify_android, android]
+    needs: [source, verify, verify_android, android, macos]
     runs-on: ubuntu-latest
     timeout-minutes: 25
     permissions:
@@ -146,11 +175,15 @@ jobs:
         with:
           name: wildstring-android-release
           path: artifacts/release
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: wildstring-macos-dmg
+          path: artifacts/release
       - name: Verify APK and combine asset checksums
         working-directory: artifacts/release
         run: |
           sha256sum --check SHA256SUMS
-          sha256sum -- *.apk *.zip android-signing-certificate.sha256 > SHA256SUMS
+          sha256sum -- *.apk *.zip *.dmg android-signing-certificate.sha256 > SHA256SUMS
       - name: Image identity
         id: image
         run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"

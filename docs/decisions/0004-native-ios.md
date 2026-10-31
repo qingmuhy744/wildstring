@@ -54,7 +54,7 @@ iOS 不会自动获得离线下载、无缝播放、全编码兼容或 AI 能力
 
 沿用服务端 7 天可撤销 Cookie 与写请求 `X-Wildstring-Client` 机制。**决策：Cookie 数据保存进 Keychain**（`kSecAttrAccessibleAfterFirstUnlock`，不参与备份），启动时注入 `HTTPCookieStorage`，供 URLSession 与媒体请求共用；401 统一停受保护播放并回登录。每服务器独立存储空间，退出只清当前服务器。不在客户端延长有效期，不新增 Bearer / refresh-token。
 
-后端配套小改动：`backend/src/wildstring/auth.py` 的 `require_client` 白名单从 `web|android` 扩为含 `ios`，同步契约表述与兼容测试；旧服务返回 `client_header_required` 时沿用 Android 的 Web 标识重试策略。
+后端配套小改动：`backend/src/wildstring/auth.py` 的 `require_client` 白名单从 `web|android` 扩为含 `ios`，同步契约表述与兼容测试；旧服务返回 `client_header_required` 时沿用 Android 的 Web 标识重试策略。Mac 客户端使用 `macos`，同样在旧服务上退回 `web`。
 
 ### 3. 本地持久化
 

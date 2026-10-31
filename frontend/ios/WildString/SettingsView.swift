@@ -6,18 +6,41 @@ import SwiftUI
 struct SettingsView: View {
     let playback: PlaybackService
     let client: WildstringClient
+    let server: String
+    let username: String
 
     @Environment(OfflineModel.self) private var offline
     @Environment(\.isAdmin) private var isAdmin
-    @AppStorage("fragmentCacheLimitMB") private var limitMB = 512
-    @AppStorage("appearanceTheme") private var theme = ThemeChoice.system.rawValue
-    @AppStorage("playerStyle") private var playerStyle = PlayerStyle.cover.rawValue
-    @AppStorage("songListSize") private var songListSize = SongListSize.medium.rawValue
-    @AppStorage("hapticsEnabled") private var hapticsEnabled = true
-    @AppStorage("playbackQuality") private var playbackQuality = "original"
-    @AppStorage("playbackSyncMode") private var syncMode = "ask"
+    @State private var limitMB = 512
+    @State private var theme = ThemeChoice.system.rawValue
+    @State private var playerStyle = PlayerStyle.cover.rawValue
+    @State private var songListSize = SongListSize.medium.rawValue
+    @State private var hapticsEnabled = true
+    @State private var playbackQuality = "original"
+    @State private var syncMode = "ask"
+    @State private var allowsCellular = true
     @State private var cacheBytes: Int64 = 0
     @State private var showingReview = false
+
+    private var preferences: AccountPreferences {
+        AccountPreferences(server: server, username: username)
+    }
+
+    init(playback: PlaybackService, client: WildstringClient, server: String, username: String) {
+        self.playback = playback
+        self.client = client
+        self.server = server
+        self.username = username
+        let stored = AccountPreferences(server: server, username: username)
+        _limitMB = State(initialValue: stored.cacheLimitMB)
+        _theme = State(initialValue: stored.string("appearanceTheme", default: ThemeChoice.system.rawValue))
+        _playerStyle = State(initialValue: stored.string("playerStyle", default: PlayerStyle.cover.rawValue))
+        _songListSize = State(initialValue: stored.string("songListSize", default: SongListSize.medium.rawValue))
+        _hapticsEnabled = State(initialValue: stored.bool("hapticsEnabled", default: true))
+        _playbackQuality = State(initialValue: stored.qualityRaw)
+        _syncMode = State(initialValue: stored.string("playbackSyncMode", default: "ask"))
+        _allowsCellular = State(initialValue: stored.allowsCellularDownloads)
+    }
 
     var body: some View {
         List {
@@ -123,27 +146,63 @@ struct SettingsView: View {
                     Task { await offline.clearAll() }
                 }
                 .disabled(offline.items.isEmpty)
+                Toggle("允许使用蜂窝网络下载", isOn: $allowsCellular)
+                Text("当前正在进行的下载仍按连接时的设置。下次登录后，新的下载会改用这里的选择。")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
             }
         }
         .navigationTitle("设置")
         .onChange(of: limitMB) { _, newValue in
+            preferences.setInt("fragmentCacheLimitMB", newValue, mirrorGlobal: true)
             playback.setFragmentCacheLimit(Int64(newValue) * 1_048_576)
         }
         .onChange(of: playbackQuality) { _, newValue in
+            preferences.setString("playbackQuality", newValue, mirrorGlobal: true)
             playback.preferredBitrateKbps = Int(newValue)
         }
+        .onChange(of: theme) { _, newValue in
+            preferences.setString("appearanceTheme", newValue, mirrorGlobal: true)
+        }
+        .onChange(of: playerStyle) { _, newValue in
+            preferences.setString("playerStyle", newValue, mirrorGlobal: true)
+        }
+        .onChange(of: songListSize) { _, newValue in
+            preferences.setString("songListSize", newValue, mirrorGlobal: true)
+        }
+        .onChange(of: hapticsEnabled) { _, newValue in
+            preferences.setBool("hapticsEnabled", newValue, mirrorGlobal: true)
+        }
+        .onChange(of: syncMode) { _, newValue in
+            preferences.setString("playbackSyncMode", newValue, mirrorGlobal: true)
+        }
+        .onChange(of: allowsCellular) { _, newValue in
+            preferences.setBool("allowsCellularDownloads", newValue)
+            OfflineDownloads.allowsCellularAccess = newValue
+        }
+        .onAppear(perform: loadPreferences)
         .task {
             playback.setFragmentCacheLimit(Int64(limitMB) * 1_048_576)
             playback.preferredBitrateKbps = Int(playbackQuality)
             await refresh()
             await offline.refresh()
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(1))
-                if Task.isCancelled { break }
-                await refresh()
-                await offline.refresh()
-            }
         }
+        .onChange(of: offline.items) { _, _ in
+            Task { await refresh() }
+        }
+    }
+
+    private func loadPreferences() {
+        let stored = preferences
+        limitMB = stored.cacheLimitMB
+        theme = stored.string("appearanceTheme", default: ThemeChoice.system.rawValue)
+        playerStyle = stored.string("playerStyle", default: PlayerStyle.cover.rawValue)
+        songListSize = stored.string("songListSize", default: SongListSize.medium.rawValue)
+        hapticsEnabled = stored.bool("hapticsEnabled", default: true)
+        playbackQuality = stored.qualityRaw
+        syncMode = stored.string("playbackSyncMode", default: "ask")
+        allowsCellular = stored.allowsCellularDownloads
+        stored.applyMirrors()
     }
 
     private func refresh() async {

@@ -13,6 +13,11 @@ final class OfflineModel {
 
     init(downloads: OfflineDownloads) {
         self.downloads = downloads
+        let downloads = downloads
+        OfflineBackgroundEvents.reconnect = {
+            Task { await downloads.attachBackgroundSession() }
+        }
+        Task { await downloads.attachBackgroundSession() }
     }
 
     func refresh() async {
@@ -43,6 +48,7 @@ final class OfflineModel {
     }
 
     func shutdown() async {
+        OfflineBackgroundEvents.reconnect = nil
         await downloads.shutdown()
     }
 }

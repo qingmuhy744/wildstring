@@ -8,7 +8,7 @@
 - 可通过未跟踪的 `.env` 中 `WILDSTRING_ADMIN_PASSWORD` 在首次启动时初始化；已有管理员时忽略该值。密码使用随机盐与 scrypt 存储，服务端不保存明文。
 - 修改密码撤销该用户全部会话；退出撤销当前会话；会话有效期 7 天，重启后保留。SQLite 只保存令牌哈希，原令牌仅发到 Cookie。
 - 连续 5 次失败会暂停登录 60 秒；这是单实例的基础限流，不是公网接入方案。
-- 登录、退出及其他写接口需 `X-Wildstring-Client: web`、`android` 或 `ios` 请求头，三者共用有效 Cookie 认证，不开放跨域 CORS。Android / iOS 普通请求、封面与媒体 Range 共用认证客户端，不在 URL 中携带令牌；旧服务返回 `client_header_required` 时的兼容重试见各客户端说明。HTTPS 部署设置 `WILDSTRING_COOKIE_SECURE=true`；本机 HTTP 默认 false。
+- 登录、退出及其他写接口需 `X-Wildstring-Client: web`、`android`、`ios` 或 `macos` 请求头，共用有效 Cookie 认证，不开放跨域 CORS。Android / iOS / Mac 普通请求、封面与媒体 Range 共用认证客户端，不在 URL 中携带令牌；旧服务返回 `client_header_required` 时的兼容重试见各客户端说明。HTTPS 部署设置 `WILDSTRING_COOKIE_SECURE=true`；本机 HTTP 默认 false。
 
 | 方法 | 路径 | 行为 |
 | --- | --- | --- |

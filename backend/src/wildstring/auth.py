@@ -175,7 +175,7 @@ class Auth:
 
     @staticmethod
     def require_client(request: Request) -> None:
-        if request.headers.get("x-wildstring-client") not in {"web", "android", "ios"}:
+        if request.headers.get("x-wildstring-client") not in {"web", "android", "ios", "macos"}:
             raise HTTPException(403, "client_header_required")
 
     @staticmethod

@@ -1,5 +1,6 @@
 import CoreNetwork
 import Foundation
+import os
 
 /// Full-track offline downloads, kept separate from the fragment cache.
 /// Downloads run through a background URLSession; completed files live under
@@ -71,6 +72,14 @@ public actor OfflineDownloads {
         self.sessionIdentifier = sessionIdentifier
         self.server = server
         self.cookieHeader = cookieHeader
+    }
+
+    /// When false, background downloads wait for Wi-Fi. Read when the session is created.
+    private static let cellularAccess = OSAllocatedUnfairLock(initialState: true)
+
+    public static var allowsCellularAccess: Bool {
+        get { cellularAccess.withLock { $0 } }
+        set { cellularAccess.withLock { $0 = newValue } }
     }
 
     /// File name convention shared with the playback offline lookup.
@@ -145,6 +154,11 @@ public actor OfflineDownloads {
         delegateProxy = nil
     }
 
+    /// Creates the background session so a relaunched app can receive download events.
+    public func attachBackgroundSession() {
+        _ = activeSession()
+    }
+
     // MARK: - Session and delegate plumbing
 
     private func activeSession() -> URLSession {
@@ -153,6 +167,7 @@ public actor OfflineDownloads {
             withIdentifier: sessionIdentifier
         )
         configuration.sessionSendsLaunchEvents = true
+        configuration.allowsCellularAccess = OfflineDownloads.allowsCellularAccess
         let delegate = DownloadDelegate()
         delegate.onFinish = { [weak self] trackID, location in
             Task { await self?.finish(trackID: trackID, location: location) }
@@ -236,6 +251,60 @@ public actor OfflineDownloads {
     }
 }
 
+/// Holds the system completion handler until the background session finishes delivering events.
+public enum OfflineBackgroundEvents {
+    private static let box = BackgroundEventBox()
+
+    /// Recreates the background session after the system wakes the app.
+    public static var reconnect: (@Sendable () -> Void)? {
+        get { box.reconnect() }
+        set { box.setReconnect(newValue) }
+    }
+
+    public static func store(_ handler: @escaping () -> Void) {
+        let previous = box.store(handler)
+        previous?()
+    }
+
+    static func take() -> (() -> Void)? {
+        box.take()
+    }
+}
+
+private final class BackgroundEventBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var completion: (() -> Void)?
+    private var reconnectHandler: (@Sendable () -> Void)?
+
+    func store(_ handler: @escaping () -> Void) -> (() -> Void)? {
+        lock.lock()
+        let previous = completion
+        completion = handler
+        lock.unlock()
+        return previous
+    }
+
+    func take() -> (() -> Void)? {
+        lock.lock()
+        let handler = completion
+        completion = nil
+        lock.unlock()
+        return handler
+    }
+
+    func reconnect() -> (@Sendable () -> Void)? {
+        lock.lock()
+        defer { lock.unlock() }
+        return reconnectHandler
+    }
+
+    func setReconnect(_ value: (@Sendable () -> Void)?) {
+        lock.lock()
+        reconnectHandler = value
+        lock.unlock()
+    }
+}
+
 private final class DownloadDelegate: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
     var onFinish: (@Sendable (String, URL) -> Void)?
     var onProgress: (@Sendable (String, Int64, Int64) -> Void)?
@@ -247,6 +316,11 @@ private final class DownloadDelegate: NSObject, URLSessionDownloadDelegate, @unc
         didFinishDownloadingTo location: URL
     ) {
         guard let trackID = downloadTask.taskDescription else { return }
+        let status = (downloadTask.response as? HTTPURLResponse)?.statusCode ?? 0
+        guard (200..<300).contains(status) else {
+            onComplete?(trackID, "http_\(status)")
+            return
+        }
         // The temporary file is only guaranteed during this callback; move it now.
         let stagingDirectory = FileManager.default.temporaryDirectory
             .appendingPathComponent("WildStringDownloads", isDirectory: true)
@@ -272,6 +346,13 @@ private final class DownloadDelegate: NSObject, URLSessionDownloadDelegate, @unc
     ) {
         guard let trackID = downloadTask.taskDescription else { return }
         onProgress?(trackID, totalBytesWritten, totalBytesExpectedToWrite)
+    }
+
+    func urlSessionDidFinishEvents(forBackgroundURLSession session: URLSession) {
+        let handler = OfflineBackgroundEvents.take()
+        DispatchQueue.main.async {
+            handler?()
+        }
     }
 
     func urlSession(

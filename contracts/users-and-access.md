@@ -11,7 +11,7 @@
 - `editor`：在获授权库内编辑资料。
 - `listener`：浏览和播放获授权库，管理自己的歌单、收藏、关注与收听进度。
 - `/api/v1/manage/**` 按具体能力校验；仅隐藏网页管理入口不能构成授权。AI/MCP 与后台任务沿用同样的检查。
-- HTTP Cookie、认证音频和写请求的 `X-Wildstring-Client: web|android|ios` 规则继续生效，不把令牌放入 URL。
+- HTTP Cookie、认证音频和写请求的 `X-Wildstring-Client: web|android|ios|macos` 规则继续生效，不把令牌放入 URL。
 
 `GET /api/v1/auth/status` 保留 `configured`、`authenticated`；已登录时增加 `user`。`POST /api/v1/auth/login` 接受 `{username,password}`，返回用户的 `profile` 等公开资料。用户名不区分大小写，内置账号 ID 仍为 admin。
 

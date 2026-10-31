@@ -101,6 +101,16 @@ ios-test: ## Run the iOS core package unit tests
 ios-build: ios-gen ## Build the iOS app for the simulator
 	xcodebuild -project frontend/ios/WildString.xcodeproj -scheme WildString -destination 'generic/platform=iOS Simulator' build
 
+.PHONY: macos-gen macos-build macos-dmg
+macos-gen: ## Generate the Mac Xcode project from frontend/macos/project.yml (requires XcodeGen)
+	cd frontend/macos && xcodegen generate
+
+macos-build: macos-gen ## Build the Mac app
+	xcodebuild -project frontend/macos/WildStringMac.xcodeproj -scheme WildString -destination 'platform=macOS' -configuration Release -derivedDataPath artifacts/macos-derived CODE_SIGN_IDENTITY=- CODE_SIGNING_ALLOWED=YES ENABLE_HARDENED_RUNTIME=YES build
+
+macos-dmg: macos-build ## Pack the Mac app into a DMG under artifacts/
+	bash scripts/package_macos_dmg.sh
+
 scan: env ## Rescan the managed library; use SCAN_ARGS=--full to refresh all tags
 	$(RUN) python -m wildstring.scan $(SCAN_ARGS)
 

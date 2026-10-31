@@ -6,6 +6,7 @@ import SwiftUI
 struct DailyRecommendationsView: View {
     let client: WildstringClient
     let playback: PlaybackService
+    var embedded = false
 
     @State private var items: [RecommendationItem] = []
     @State private var isLoading = true
@@ -14,6 +15,35 @@ struct DailyRecommendationsView: View {
     @State private var degraded = false
 
     var body: some View {
+        if embedded {
+            embeddedContent
+        } else {
+            standalone
+        }
+    }
+
+    private var embeddedContent: some View {
+        Group {
+            if degraded {
+                Text("部分来源暂不可用，展示本地推荐。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            recommendationRows
+            if isLoading || isRefreshing {
+                ProgressView()
+            } else if items.isEmpty {
+                Text(errorMessage ?? "今天没有推荐。多听一些再回来看看。")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            Button("换一批") { Task { await refresh() } }
+                .disabled(isRefreshing || isLoading)
+        }
+        .task { await load() }
+    }
+
+    private var standalone: some View {
         NavigationStack {
             List {
                 if degraded {
@@ -21,27 +51,7 @@ struct DailyRecommendationsView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-                ForEach(items) { item in
-                    TrackActionRow(client: client, track: item.track) {
-                        Button {
-                            play(item)
-                        } label: {
-                            VStack(alignment: .leading, spacing: 2) {
-                                TrackRow(
-                                    client: client,
-                                    track: item.track,
-                                    isCurrent: playback.currentItem?.trackID == item.track.id
-                                )
-                                if !item.reason.isEmpty {
-                                    Text(item.reason)
-                                        .font(.caption2)
-                                        .foregroundStyle(.tertiary)
-                                }
-                            }
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
+                recommendationRows
                 if isLoading || isRefreshing {
                     HStack {
                         Spacer()
@@ -87,6 +97,30 @@ struct DailyRecommendationsView: View {
             .miniPlayer(playback, client: client)
             .task { await load() }
             .refreshable { await load() }
+        }
+    }
+
+    private var recommendationRows: some View {
+        ForEach(items) { item in
+            TrackActionRow(client: client, track: item.track) {
+                Button {
+                    play(item)
+                } label: {
+                    VStack(alignment: .leading, spacing: 2) {
+                        TrackRow(
+                            client: client,
+                            track: item.track,
+                            isCurrent: playback.currentItem?.trackID == item.track.id
+                        )
+                        if !item.reason.isEmpty {
+                            Text(item.reason)
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+            }
         }
     }
 

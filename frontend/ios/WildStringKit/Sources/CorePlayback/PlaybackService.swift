@@ -109,6 +109,18 @@ public final class PlaybackService {
     @ObservationIgnored private var intendedPlaying = false
     /// AAC 档位（kbps）；nil 表示原音。
     @ObservationIgnored public var preferredBitrateKbps: Int?
+    @ObservationIgnored private var listening = ListeningTracker()
+    @ObservationIgnored private var activeMediaID: String?
+    /// Return false when the upload failed so the same cumulative total is retried.
+    @ObservationIgnored public var submitListening: (@Sendable (ListeningReport) async -> Bool)?
+    @ObservationIgnored private var podcast = PodcastBookmark()
+    @ObservationIgnored private var podcastBoot: Task<Void, Never>?
+    @ObservationIgnored public var podcastDeviceID = ""
+    /// Reads the bookmark version before a new episode session. Nil means the read failed.
+    @ObservationIgnored public var loadPodcastBaseVersion: (@Sendable (String) async -> Int?)?
+    @ObservationIgnored public var submitPodcastProgress:
+        (@Sendable (String, PodcastProgressWrite) async -> PodcastSubmitResult)?
+    public private(set) var podcastProgressMessage: String?
     public private(set) var currentOutputLabel: String?
     public private(set) var sleepTimerEnd: Date?
     public private(set) var pauseAfterCurrentTrack = false
@@ -119,10 +131,12 @@ public final class PlaybackService {
     @ObservationIgnored private var secondsSinceCheckpoint: Double = 0
     @ObservationIgnored var systemControlsConfigured = false
     @ObservationIgnored var systemObserverTokens: [NSObjectProtocol] = []
-#if os(iOS)
+#if os(iOS) || os(macOS)
     @ObservationIgnored var nowPlayingArtworkTask: Task<Void, Never>?
     @ObservationIgnored var nowPlayingArtworkTrackID: String?
 #endif
+    /// Sent with cover fetches for Now Playing artwork. The Mac app sets `macos`.
+    @ObservationIgnored public var clientHeaderName = "ios"
 
     public init(
         server: ServerAddress,
@@ -159,9 +173,9 @@ public final class PlaybackService {
 
     // MARK: - Commands
 
-    public func play(items: [Item], startingAt index: Int) {
+    public func play(items: [Item], startingAt index: Int, position: Double = 0) {
         queue.set(items: items, startingAt: index)
-        startCurrent(autoplay: true, startAt: 0)
+        startCurrent(autoplay: true, startAt: max(0, position))
         persistQueueAndProgress()
     }
 
@@ -188,6 +202,8 @@ public final class PlaybackService {
         didFinishQueue = false
         player.pause()
         persistProgress()
+        checkpointListening(state: "paused")
+        checkpointPodcast(event: "pause", force: true)
     }
 
     public func next() {
@@ -239,6 +255,12 @@ public final class PlaybackService {
         player.seek(to: CMTime(seconds: target, preferredTimescale: 600))
         currentTime = target
         persistProgress()
+        listening.reanchor(
+            nowMs: Self.monotonicMs(),
+            positionMs: Self.milliseconds(target),
+            playing: isPlaying
+        )
+        checkpointPodcast(event: "seek", force: true)
     }
 
     public func stopAndClear() {
@@ -257,6 +279,17 @@ public final class PlaybackService {
         currentIsTranscode = false
         currentOutputLabel = nil
         clearSystemNowPlaying()
+        _ = listening.begin(
+            trackID: nil,
+            nowMs: Self.monotonicMs(),
+            positionMs: 0,
+            playing: false,
+            startedAt: Date().timeIntervalSince1970
+        )
+        activeMediaID = nil
+        podcastBoot?.cancel()
+        podcast.clear()
+        podcastProgressMessage = nil
         persistence.enqueue { store in try? await store.clear() }
     }
 
@@ -395,10 +428,12 @@ public final class PlaybackService {
 
     private func startCurrent(autoplay: Bool, startAt: Double) {
         guard let item = currentItem else {
+            adoptMedia(autoplay: false, startAt: 0)
             player.replaceCurrentItem(with: nil)
             isPlaying = false
             return
         }
+        adoptMedia(autoplay: autoplay, startAt: startAt)
         didFinishQueue = false
         configureSystemPlaybackIfNeeded()
         assetLoadTask?.cancel()
@@ -662,7 +697,16 @@ public final class PlaybackService {
             secondsSinceCheckpoint = 0
             persistProgress()
         }
-        updateSystemNowPlaying()
+        let state = isPlaying ? "playing" : "paused"
+        if let report = listening.sample(
+            nowMs: Self.monotonicMs(),
+            positionMs: Self.milliseconds(currentTime),
+            playing: isPlaying,
+            state: state
+        ) {
+            deliver(report)
+        }
+        checkpointPodcast(event: isPlaying ? "progress" : "pause", force: false)
     }
 
     private func handleItemEnded() {
@@ -675,6 +719,7 @@ public final class PlaybackService {
             return
         }
         if queue.repeatMode == .one {
+            listening.reanchor(nowMs: Self.monotonicMs(), positionMs: 0, playing: true)
             player.seek(to: .zero)
             currentTime = 0
             player.play()
@@ -683,6 +728,14 @@ public final class PlaybackService {
             updateSystemNowPlaying()
             return
         }
+        if let report = listening.flush(
+            state: "ended",
+            nowMs: Self.monotonicMs(),
+            positionMs: Self.milliseconds(currentTime)
+        ) {
+            deliver(report)
+        }
+        checkpointPodcast(event: "ended", force: true)
         if queue.advance() != nil {
             startCurrent(autoplay: true, startAt: 0)
             persistProgress()
@@ -712,6 +765,91 @@ public final class PlaybackService {
         }
     }
 
+    private func adoptMedia(autoplay: Bool, startAt: Double) {
+        let identifier = currentItem?.trackID
+        let now = Self.monotonicMs()
+        let position = Self.milliseconds(startAt)
+        if identifier == activeMediaID {
+            listening.reanchor(nowMs: now, positionMs: position, playing: autoplay)
+            checkpointPodcast(event: "seek", force: true)
+            return
+        }
+        if let report = listening.begin(
+            trackID: identifier,
+            nowMs: now,
+            positionMs: position,
+            playing: autoplay,
+            startedAt: Date().timeIntervalSince1970
+        ) {
+            deliver(report)
+        }
+        activeMediaID = identifier
+        podcastBoot?.cancel()
+        podcast.clear()
+        podcastProgressMessage = nil
+        guard let identifier, ListeningTracker.isPodcast(identifier) else { return }
+        let episode = String(identifier.dropFirst("podcast_ep_".count))
+        podcastBoot = Task { [weak self] in
+            await self?.bootPodcast(episode)
+        }
+    }
+
+    private func bootPodcast(_ episode: String) async {
+        guard let load = loadPodcastBaseVersion else { return }
+        guard let version = await load(episode) else { return }
+        if Task.isCancelled || currentItem?.trackID != "podcast_ep_\(episode)" { return }
+        podcast.begin(episodeId: episode, deviceId: podcastDeviceID, baseVersion: version)
+        checkpointPodcast(event: "play", force: true)
+    }
+
+    private func checkpointListening(state: String) {
+        if let report = listening.flush(
+            state: state,
+            nowMs: Self.monotonicMs(),
+            positionMs: Self.milliseconds(currentTime)
+        ) {
+            deliver(report)
+        }
+    }
+
+    private func checkpointPodcast(event: String, force: Bool) {
+        guard let write = podcast.next(
+            positionSeconds: Int(currentTime.rounded()),
+            durationSeconds: Int(duration.rounded()),
+            event: event,
+            nowMs: Self.monotonicMs(),
+            force: force
+        ) else { return }
+        let episode = podcast.episodeId
+        guard let submit = submitPodcastProgress else { return }
+        Task { @MainActor in
+            let result = await submit(episode, write)
+            if result == .conflict {
+                self.podcast.block()
+                self.podcastProgressMessage = "这集在其他设备有更新的进度"
+            }
+        }
+    }
+
+    private func deliver(_ report: ListeningReport) {
+        guard let submit = submitListening else { return }
+        Task { @MainActor in
+            let ok = await submit(report)
+            if !ok {
+                self.listening.reject(sessionId: report.sessionId)
+            }
+        }
+    }
+
+    private static func monotonicMs() -> Int64 {
+        Int64((ProcessInfo.processInfo.systemUptime * 1000).rounded())
+    }
+
+    private static func milliseconds(_ seconds: Double) -> Int64 {
+        guard seconds.isFinite else { return 0 }
+        return Int64((seconds * 1000).rounded())
+    }
+
     private static func message(for error: APIError) -> String {
         switch error.code {
         case "authentication_required": return "登录已过期，请重新登录"
@@ -722,7 +860,7 @@ public final class PlaybackService {
     }
 }
 
-#if !os(iOS)
+#if !os(iOS) && !os(macOS)
     extension PlaybackService {
         func configureSystemPlaybackIfNeeded() {}
         func updateSystemNowPlaying() {}
