@@ -42,7 +42,7 @@ class MultiServerUiTest {
     }
     private fun manager() {
         compose.onNodeWithContentDescription("设置").performClick()
-        compose.onNodeWithText("服务器 / 切换服务器").performScrollTo().performClick()
+        compose.onNodeWithText(compose.activity.getString(R.string.settings_servers)).performScrollTo().performClick()
         compose.onNodeWithTag("server-manager").assertIsDisplayed()
     }
     private fun serverAction(tag: String) {
@@ -121,8 +121,8 @@ class MultiServerUiTest {
                 assertEquals(1, aRequests.count { it.requestUrl!!.encodedPath.endsWith("/auth/login") })
                 compose.onNodeWithContentDescription("设置").performClick()
                 compose.onAllNodesWithText("退出登录 / 更换服务器").assertCountEquals(0)
-                compose.onNodeWithText("退出登录", substring = false).performScrollTo().performClick()
-                compose.onAllNodesWithText("退出登录", substring = false).onLast().performClick()
+                compose.onNodeWithText(compose.activity.getString(R.string.logout), substring = false).performScrollTo().performClick()
+                compose.onAllNodesWithText(compose.activity.getString(R.string.logout), substring = false).onLast().performClick()
                 compose.waitUntil(15000) { !vm.state.value.connected && !vm.repository.session.hasSession(aId) }
                 assertTrue(vm.repository.session.hasSession(bId))
                 compose.onNodeWithTag("connection-servers").performScrollTo().performClick()

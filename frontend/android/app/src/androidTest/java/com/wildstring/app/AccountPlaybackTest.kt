@@ -150,7 +150,7 @@ class AccountPlaybackTest {
             }
             compose.waitUntil(5_000) { compose.onAllNodesWithContentDescription("设置").fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithContentDescription("设置").performClick()
-            compose.onNodeWithText("alice · 听众").assertExists()
+            compose.onNodeWithText("alice · ${compose.activity.getString(R.string.role_listener)}").assertExists()
             compose.onNodeWithTag("setting-quality").performScrollTo().performClick()
             compose.onNodeWithText("AAC · 192 kbps").performClick()
             try {
@@ -217,17 +217,17 @@ class AccountPlaybackTest {
             assertTrue(vm.state.value.queue.isEmpty())
             assertTrue(runBlocking { vm.repository.database.queue().entries().isEmpty() })
             compose.onNodeWithContentDescription("设置").performClick()
-            compose.onNodeWithText("bob · 听众").assertExists()
+            compose.onNodeWithText("bob · ${compose.activity.getString(R.string.role_listener)}").assertExists()
             capture("account-settings.png")
-            compose.onNodeWithText("修改密码").performClick()
-            compose.onNodeWithText("当前密码").performTextInput("wrong-password")
-            compose.onNodeWithText("新密码", substring = false).performTextInput("test-password-updated")
-            compose.onNodeWithText("确认新密码").performTextInput("test-password-updated")
-            compose.onNodeWithText("保存新密码").performClick()
+            compose.onNodeWithText(compose.activity.getString(R.string.settings_change_password)).performClick()
+            compose.onNodeWithText(compose.activity.getString(R.string.current_password)).performTextInput("wrong-password")
+            compose.onNodeWithText(compose.activity.getString(R.string.new_password), substring = false).performTextInput("test-password-updated")
+            compose.onNodeWithText(compose.activity.getString(R.string.confirm_password)).performTextInput("test-password-updated")
+            compose.onNodeWithText(compose.activity.getString(R.string.password_save)).performClick()
             compose.waitUntil(10_000) { compose.onAllNodesWithText("当前密码不正确。").fetchSemanticsNodes().isNotEmpty() }
             assertTrue(vm.state.value.connected)
-            compose.onNodeWithText("当前密码").performTextReplacement("test-password-original")
-            compose.onNodeWithText("保存新密码").performClick()
+            compose.onNodeWithText(compose.activity.getString(R.string.current_password)).performTextReplacement("test-password-original")
+            compose.onNodeWithText(compose.activity.getString(R.string.password_save)).performClick()
             compose.waitUntil(10_000) { !vm.state.value.connected }
             compose.onNodeWithText("密码已修改，请重新登录。").assertExists()
             compose.waitUntil(10_000) { vm.audioCache.bytes() == 0L && runBlocking { vm.repository.database.queue().entries().isEmpty() } }

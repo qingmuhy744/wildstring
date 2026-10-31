@@ -386,7 +386,8 @@ class NativePlaybackTest {
             val styleEntry = compose.runOnIdle { player.currentMediaItem!!.mediaId }
             val stylePosition = compose.runOnIdle { player.currentPosition }
             val styleStreams = requests.count { it.path?.contains("/stream") == true }
-            for ((key, label) in listOf("vinyl" to "黑胶", "cassette" to "磁带", "cover" to "封面")) {
+            for ((key, labelResource) in listOf("vinyl" to R.string.style_vinyl, "cassette" to R.string.style_cassette, "cover" to R.string.style_cover)) {
+                val label = compose.activity.getString(labelResource)
                 stage("style begin $key")
                 val playerBack = if (compose.onAllNodesWithContentDescription("返回封面").fetchSemanticsNodes().isNotEmpty()) "返回封面" else "收起播放器"
                 compose.onNodeWithContentDescription(playerBack).performClick()
@@ -525,27 +526,27 @@ class NativePlaybackTest {
             compose.onNodeWithContentDescription("设置").performClick()
             compose.onNodeWithTag("setting-day-night").performScrollTo().performClick()
             waitForDialogWindow("dark choice")
-            compose.onNodeWithText("深色", substring = false).performClick()
+            compose.onNodeWithText(compose.activity.getString(R.string.appearance_dark), substring = false).performClick()
             waitForActivityWindow()
             compose.onNodeWithTag("appearance-dark").assertExists()
             compose.onNodeWithTag("setting-day-night").performScrollTo().performClick()
             waitForDialogWindow("light choice")
-            compose.onNodeWithText("浅色", substring = false).performClick()
+            compose.onNodeWithText(compose.activity.getString(R.string.appearance_light), substring = false).performClick()
             waitForActivityWindow()
             compose.onNodeWithTag("appearance-light").assertExists()
             compose.onNodeWithTag("setting-day-night").performScrollTo().performClick()
             waitForDialogWindow("system choice")
-            compose.onNodeWithText("跟随系统").performClick()
+            compose.onNodeWithText(compose.activity.getString(R.string.appearance_system)).performClick()
             waitForActivityWindow()
             compose.onNodeWithTag("setting-theme").performScrollTo().performClick()
             waitForDialogWindow("theme choice")
-            compose.onNodeWithText("一块红布").performClick()
+            compose.onNodeWithText(compose.activity.getString(R.string.theme_red_cloth)).performClick()
             waitForActivityWindow()
             compose.onNodeWithTag("appearance-red-cloth").assertExists()
-            compose.onAllNodesWithText("日夜模式").assertCountEquals(0)
+            compose.onAllNodesWithText(compose.activity.getString(R.string.settings_day_night)).assertCountEquals(0)
             compose.onNodeWithTag("setting-app-icon").performScrollTo().performClick()
             waitForDialogWindow("icon choice")
-            compose.onNodeWithText("红布", substring = false).performClick()
+            compose.onNodeWithText(compose.activity.getString(R.string.icon_red), substring = false).performClick()
             waitForActivityWindow()
             compose.onNodeWithTag("setting-audio-cache").performScrollTo().performClick()
             waitForDialogWindow("cache choice")
@@ -554,7 +555,7 @@ class NativePlaybackTest {
             compose.waitUntil { vm.settings.state.value.audioMb == 128 && vm.settings.state.value.redCloth && vm.settings.state.value.redIcon }
             capture("red-cloth-settings.png")
             compose.onNodeWithTag("settings-back").performClick()
-            compose.waitUntil(10_000) { compose.onAllNodesWithText("一块红布").fetchSemanticsNodes().isEmpty() }
+            compose.waitUntil(10_000) { compose.onAllNodesWithText(compose.activity.getString(R.string.theme_red_cloth)).fetchSemanticsNodes().isEmpty() }
             compose.onAllNodesWithText("接口测试歌曲").onLast().performClick()
             compose.onNodeWithTag("player-visual-stage").performTouchInput { click(androidx.compose.ui.geometry.Offset(4f, 4f)) }
             capture("red-cloth-phone.png")
