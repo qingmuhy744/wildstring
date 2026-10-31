@@ -1,6 +1,15 @@
 import { hints } from './help-content';
 import { useEffect, useId, useRef, useState } from 'react';
-import { api, eventId, artist, streamUrl, time, type PlaybackPlan, type Track } from './api';
+import {
+  api,
+  eventId,
+  artist,
+  errorCodeMessage,
+  streamUrl,
+  time,
+  type PlaybackPlan,
+  type Track,
+} from './api';
 import { Cover } from './cover';
 import { Icon } from './icons';
 import { FavoriteButton, type Favorites } from './favorites';
@@ -660,6 +669,34 @@ export function usePlayer(userId: string) {
     setPlaying(false);
     if (!current || loading.current || !audio.current?.getAttribute('src')) return;
     try {
+      if (current.podcast_id) {
+        // The podcast stream route is GET-only; a one-byte range read surfaces the server's error code.
+        const response = await fetch(audio.current.currentSrc, { headers: { Range: 'bytes=0-0' } });
+        if (attempt !== generation.current) return;
+        if (response.status === 401) {
+          window.dispatchEvent(new Event('wildstring:unauthorized'));
+          return;
+        }
+        if (!response.ok) {
+          const detail = await response
+            .json()
+            .then((body: { detail?: unknown }) => body?.detail)
+            .catch(() => undefined);
+          setError(
+            typeof detail === 'string'
+              ? errorCodeMessage(detail)
+              : `无法播放本期播客（${response.status}），请稍后重试。`,
+          );
+          return;
+        }
+        void response.body?.cancel();
+        setError(
+          code === 3 || code === 4
+            ? '浏览器无法解码本期播客的音频格式。'
+            : '播客音频连接中断，请点击播放重试。',
+        );
+        return;
+      }
       // HEAD diagnoses expired sessions, missing files and changed sources without downloading audio.
       const response = await fetch(audio.current.currentSrc, {
         method: 'HEAD',

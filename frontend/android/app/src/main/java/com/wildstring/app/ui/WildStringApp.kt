@@ -970,29 +970,27 @@ private fun MobileAssistantPage(vm: MusicViewModel, unread: Int, onNotifications
     AgentChat(vm, onNotifications, onSettings, unread) {}
 }
 
+/** Main navigation destinations; labels follow the interface language. */
+@Composable
+private fun navItems() = listOf(
+    Triple("search", androidx.compose.ui.res.stringResource(R.string.nav_discover), Icons.Default.Search),
+    Triple("podcast", androidx.compose.ui.res.stringResource(R.string.nav_radio), Icons.Default.Podcasts),
+    Triple("assistant", androidx.compose.ui.res.stringResource(R.string.nav_assistant), Icons.Default.AutoAwesome),
+    Triple("library", androidx.compose.ui.res.stringResource(R.string.nav_music), Icons.Default.LibraryMusic),
+    Triple("mine", androidx.compose.ui.res.stringResource(R.string.nav_mine), Icons.Default.Person),
+)
+
 @Composable
 private fun RailItems(state: MusicState, vm: MusicViewModel) {
     val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
-    listOf(
-        Triple("search", "发现", Icons.Default.Search),
-        Triple("podcast", "电台", Icons.Default.Podcasts),
-        Triple("assistant", "AI 助手", Icons.Default.AutoAwesome),
-        Triple("library", "音乐", Icons.Default.LibraryMusic),
-        Triple("mine", "我的", Icons.Default.Person),
-    ).forEach { (id, label, icon) ->
+    navItems().forEach { (id, label, icon) ->
         NavigationRailItem(state.tab == id, { keyboard?.hide(); vm.navigate(id) }, modifier = Modifier.testTag("nav-$id"), icon = { Icon(icon, label) }, label = { Text(label) })
     }
 }
 @Composable
 private fun RowScope.BottomItems(state: MusicState, vm: MusicViewModel) {
     val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
-    listOf(
-        Triple("search", "发现", Icons.Default.Search),
-        Triple("podcast", "电台", Icons.Default.Podcasts),
-        Triple("assistant", "AI 助手", Icons.Default.AutoAwesome),
-        Triple("library", "音乐", Icons.Default.LibraryMusic),
-        Triple("mine", "我的", Icons.Default.Person),
-    ).forEach { (id, label, icon) ->
+    navItems().forEach { (id, label, icon) ->
         val isAssistant = id == "assistant"
         NavigationBarItem(
             selected = state.tab == id,

@@ -17,6 +17,8 @@ public struct User: Decodable, Equatable, Sendable {
     public let profile: String
     public let version: Int
     public let enabled: Bool
+    /// Interface language stored on the account: "auto", "zh" or "en". Older servers omit it.
+    public let language: String?
 }
 
 public struct AuthStatus: Decodable, Equatable, Sendable {
@@ -90,6 +92,22 @@ public final class WildstringClient: Sendable {
                 body: body,
                 contentType: "application/json",
                 clearsSessionOnUnauthorized: false
+            )
+        )
+        return try JSONDecoder().decode(User.self, from: data)
+    }
+
+    /// Saves the interface language on the account so every device follows it.
+    public func updateLanguage(_ language: String) async throws -> User {
+        struct Preferences: Encodable {
+            let language: String
+        }
+        let data = try await perform(
+            Request(
+                method: "PUT",
+                path: "api/v1/auth/preferences",
+                body: try JSONEncoder().encode(Preferences(language: language)),
+                contentType: "application/json"
             )
         )
         return try JSONDecoder().decode(User.self, from: data)

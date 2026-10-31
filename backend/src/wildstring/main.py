@@ -64,6 +64,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         database,
         providers=providers,
         storage_dir=current.podcasts_dir,
+        allow_fake_ip=current.podcast_allow_fake_ip,
     )
     mcp = HTTPMCP(platform)
 

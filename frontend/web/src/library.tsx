@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import { readPreference, writePreference } from './user-preferences';
 import { CatalogSortControl, useCatalogSorting } from './catalog-sort';
 import { bindLibraryUser, selectedLibrary } from './library-context';
@@ -115,6 +116,7 @@ function AlbumSkeleton() {
     </div>
   );
 }
+// Display names come from locales (`views.*`); this map only lists valid views.
 const labels: Record<View, string> = {
   tracks: '全部歌曲',
   albums: '专辑',
@@ -181,6 +183,7 @@ type CatalogLocation = {
 };
 
 export function Library({ onLogout, user }: { onLogout: () => Promise<void>; user: User }) {
+  const { t } = useTranslation();
   bindLibraryUser(user.id);
   const [currentUser, setCurrentUser] = useState(user);
   const profile = currentUser.profile;
@@ -1018,9 +1021,9 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
       <span className="nav-icon" aria-hidden="true">
         <Icon name={viewIcons[target]} />
       </span>
-      <span className="nav-label">{labels[target]}</span>
+      <span className="nav-label">{t(`views.${target}`)}</span>
       {target === 'notifications' && inbox.unread > 0 ? (
-        <small className="notification-count" aria-label={`${inbox.unread} 条未读通知`}>
+        <small className="notification-count" aria-label={t('nav.unread', { count: inbox.unread })}>
           {inbox.unread > 99 ? '99+' : inbox.unread}
         </small>
       ) : target === 'favorites' ? (
@@ -1037,10 +1040,10 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
       <div className="app-shell" inert={lyricsOpen} aria-hidden={lyricsOpen || undefined}>
         <aside className="sidebar">
           <Brand />
-          <nav aria-label="主导航" className="sidebar-navigation">
-            <p className="sidebar-group-label">曲库</p>
+          <nav aria-label={t('nav.main')} className="sidebar-navigation">
+            <p className="sidebar-group-label">{t('nav.library')}</p>
             {(['tracks', 'albums', 'artists', 'playlists', 'favorites'] as View[]).map(nav)}
-            <p className="sidebar-group-label">发现与电台</p>
+            <p className="sidebar-group-label">{t('nav.discoverGroup')}</p>
             {(['discover', 'podcasts', 'assistant'] as View[]).map(nav)}
             <button
               className={`nav-button ${queueOpen ? 'selected' : ''}`}
@@ -1053,21 +1056,21 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
               <span className="nav-icon" aria-hidden="true">
                 <Icon name="queue" />
               </span>
-              <span className="nav-label">播放队列</span>
+              <span className="nav-label">{t('nav.queue')}</span>
               <small>{player.queue.length}</small>
             </button>
             <details
               className="sidebar-group"
               open={['listening', 'offline', 'devices'].includes(view) || undefined}
             >
-              <summary>更多音乐</summary>
+              <summary>{t('nav.moreMusic')}</summary>
               {(['listening', 'offline', 'devices'] as View[]).map(nav)}
             </details>
             <details
               className="sidebar-group"
               open={['drafts', 'tasks', 'assistant-settings'].includes(view) || undefined}
             >
-              <summary>助手工具</summary>
+              <summary>{t('nav.assistantTools')}</summary>
               {(['drafts', 'tasks', 'assistant-settings'] as View[]).map(nav)}
             </details>
           </nav>
@@ -1083,19 +1086,19 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
                 <span className="nav-icon" aria-hidden="true">
                   <Icon name="settings" />
                 </span>
-                <span className="nav-label">管理</span>
+                <span className="nav-label">{t('nav.manage')}</span>
               </button>
             )}
             <button className="nav-button account-entry" onClick={() => setAccountOpen(true)}>
               <span className="nav-icon" aria-hidden="true">
                 <AccountAvatar user={currentUser} />
               </span>
-              <span className="nav-label">账号设置</span>
+              <span className="nav-label">{t('nav.account')}</span>
             </button>
             <div className="sidebar-bottom-actions">
               <ThemeToggleCompact />
-              <button className="text-button logout-link" onClick={logout} title="退出登录">
-                退出登录 ↗
+              <button className="text-button logout-link" onClick={logout} title={t('nav.logout')}>
+                {t('nav.logoutArrow')}
               </button>
             </div>
           </div>
@@ -1125,14 +1128,14 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
         <main className={`library ${album ? 'is-album' : ''}`} hidden={manageOpen}>
           <header className={`topbar ${specialView ? 'topbar-context' : ''}`}>
             <div>
-              <span className="mobile-brand">野弦 / WILDSTRING</span>
+              <span className="mobile-brand">{t('nav.mobileBrand')}</span>
               <button className="mobile-logout text-button" onClick={logout}>
-                退出登录
+                {t('nav.logout')}
               </button>
             </div>
             <select
               className="mobile-section"
-              aria-label="浏览方式"
+              aria-label={t('nav.browseMode')}
               value={view}
               onChange={(event) =>
                 event.target.value === 'manage'
@@ -1144,18 +1147,18 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
             >
               {(Object.keys(labels) as View[]).map((target) => (
                 <option key={target} value={target}>
-                  {labels[target]}
+                  {t(`views.${target}`)}
                 </option>
               ))}
-              {canManage && <option value="manage">管理</option>}
-              <option value="account">账号设置</option>
+              {canManage && <option value="manage">{t('nav.manage')}</option>}
+              <option value="account">{t('nav.account')}</option>
             </select>
             <div className="topbar-actions">
               <LibrarySwitcher onChanged={refreshLibrary} visible={!specialView} />
               {!specialView && (
                 <form className="search" onSubmit={search} role="search" autoComplete="off">
                   <label className="sr-only" htmlFor="search">
-                    搜索曲库
+                    {t('nav.searchLabel')}
                   </label>
                   <span aria-hidden="true">⌕</span>
                   <input
@@ -1166,26 +1169,28 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
                     spellCheck={false}
                     placeholder={
                       artistGrid
-                        ? '搜索艺人、乐队'
+                        ? t('nav.searchArtists')
                         : playlistGrid
-                          ? '搜索歌单'
+                          ? t('nav.searchPlaylists')
                           : selectedArtist
-                            ? `搜索 ${selectedArtist.name} 的歌曲、专辑`
-                            : '搜索歌曲、艺人、专辑'
+                            ? t('nav.searchInArtist', { name: selectedArtist.name })
+                            : t('nav.searchAll')
                     }
                     maxLength={256}
                     value={draft}
                     onChange={(event) => setDraft(event.target.value)}
                   />
-                  <button type="submit" aria-label="搜索">
+                  <button type="submit" aria-label={t('nav.search')}>
                     ↵
                   </button>
                 </form>
               )}
               <button
                 className={`notification-entry icon-button ${view === 'notifications' ? 'selected' : ''}`}
-                aria-label="通知中心"
-                data-help={inbox.unread ? `${inbox.unread} 条未读通知` : '通知中心'}
+                aria-label={t('views.notifications')}
+                data-help={
+                  inbox.unread ? t('nav.unread', { count: inbox.unread }) : t('views.notifications')
+                }
                 onClick={() => switchView('notifications')}
               >
                 <Icon name="bell" />
@@ -1306,7 +1311,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
                                 ? '搜索'
                                 : view === 'tracks'
                                   ? '歌曲'
-                                  : labels[view]}
+                                  : t(`views.${view}`)}
                       </span>
                     </p>
                   )}

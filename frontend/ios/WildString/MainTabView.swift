@@ -20,13 +20,13 @@ struct MainTabView: View {
     var body: some View {
         TabView(selection: $selection) {
             DiscoverView(client: client, playback: playback)
-                .tabItem { Label("发现", systemImage: "sparkles") }
+                .tabItem { Label("tab.discover", systemImage: "sparkles") }
                 .tag(0)
             PodcastsView(client: client, playback: playback)
-                .tabItem { Label("电台", systemImage: "antenna.radiowaves.left.and.right") }
+                .tabItem { Label("tab.radio", systemImage: "antenna.radiowaves.left.and.right") }
                 .tag(1)
             AssistantView(client: client, showsDismiss: false)
-                .tabItem { Label("AI 助手", systemImage: "bubble.left.and.bubble.right") }
+                .tabItem { Label("tab.assistant", systemImage: "bubble.left.and.bubble.right") }
                 .tag(2)
             BrowseView(
                 client: client,
@@ -35,7 +35,7 @@ struct MainTabView: View {
                 username: username,
                 autoPlayFirst: autoPlayFirst
             )
-            .tabItem { Label("音乐", systemImage: "music.note") }
+            .tabItem { Label("tab.music", systemImage: "music.note") }
             .tag(3)
             AccountView(
                 client: client,
@@ -44,7 +44,7 @@ struct MainTabView: View {
                 username: username,
                 onLogout: onLogout
             )
-            .tabItem { Label("我的", systemImage: "person.crop.circle") }
+            .tabItem { Label("tab.mine", systemImage: "person.crop.circle") }
             .tag(4)
         }
         .environment(favorites)
@@ -73,7 +73,7 @@ struct MainTabView: View {
             Image(systemName: "arrow.triangle.2.circlepath.circle.fill")
                 .foregroundStyle(Color.wildAccent)
             VStack(alignment: .leading, spacing: 1) {
-                Text("其他设备有可接续的进度")
+                Text("handoff.available")
                     .font(.footnote.bold())
                 if handoff.tracks.indices.contains(handoff.state.index) {
                     Text(handoff.tracks[handoff.state.index].title)
@@ -83,10 +83,10 @@ struct MainTabView: View {
                 }
             }
             Spacer()
-            Button("忽略") { sharing.dismiss() }
+            Button("handoff.dismiss") { sharing.dismiss() }
                 .font(.footnote)
                 .buttonStyle(.plain)
-            Button("继续") {
+            Button("handoff.continue") {
                 Task { await sharing.accept(handoff) }
             }
             .font(.footnote.bold())

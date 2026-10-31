@@ -22,6 +22,8 @@ class Settings(BaseSettings):
     web_dir: Path | None = None
     admin_password: SecretStr | None = None
     cookie_secure: bool = False
+    # Opt-in for hosts whose DNS runs Clash/mihomo fake-ip mode (198.18.0.0/15 answers).
+    podcast_allow_fake_ip: bool = False
 
     @field_validator("data_dir", "music_dir", "podcasts_dir", "web_dir")
     @classmethod
