@@ -80,6 +80,40 @@ def test_full_scan_reads_tags_even_when_fingerprint_matches(settings: Settings):
     assert path.is_file()
 
 
+def test_targeted_scan_leaves_other_tracks_and_missing_checks_for_regular_scan(settings):
+    old = audio(settings, name="old.mp3")
+    scan_library(settings)
+    original = repository(settings).tracks()["items"][0]
+    old.unlink()
+    audio(settings, name="new.mp3")
+    report = scan_library(settings, paths={"new.mp3"})
+    assert report["counts"]["visited"] == 1
+    assert report["counts"]["added"] == 1
+    assert report["counts"]["missing"] == 0
+    assert repository(settings).track(original["id"])["status"] == "available"
+    assert scan_library(settings)["counts"]["missing"] == 1
+
+
+def test_unchanged_scan_batches_writes_without_losing_seen_tracks(settings, monkeypatch):
+    for index in range(40):
+        audio(settings, name=f"song-{index}.mp3")
+    scan_library(settings)
+    writes = []
+    connect = Database.connect
+
+    def counted(self, *, write=False, create=False):
+        if write:
+            writes.append(True)
+        return connect(self, write=write, create=create)
+
+    monkeypatch.setattr(Database, "connect", counted)
+    report = scan_library(settings)
+    assert report["counts"]["unchanged"] == 40
+    assert report["counts"]["missing"] == 0
+    assert len(writes) < 20
+    assert repository(settings).tracks()["total"] == 40
+
+
 def test_missing_and_restored_files_keep_metadata_and_id(settings: Settings):
     path = audio(settings)
     scan_library(settings)

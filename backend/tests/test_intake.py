@@ -73,6 +73,29 @@ def test_stability_survives_restart_and_sidecar_restarts_clock(settings):
     assert report["counts"]["waiting"] == 1 and not list(settings.library_dir.rglob("*.flac"))
 
 
+def test_discovery_shares_directory_observations_only_within_one_pass(settings, monkeypatch):
+    from wildstring.library import intake as intake_module
+
+    intake = setup(settings)
+    first = source(settings, "one.flac")
+    source(settings, "two.flac")
+    intake.configure(IntakeSettings(version=1, enabled=True, interval_seconds=15, stable_seconds=5))
+    pending = intake_module.pending
+    reads = []
+
+    def recorded(*args):
+        reads.append(args[1])
+        return pending(*args)
+
+    monkeypatch.setattr(intake_module, "pending", recorded)
+    assert not intake.has_work()
+    assert len(reads) == 1
+    first.with_suffix(".lrc").write_text("[00:00]新歌词")
+    assert not intake.has_work()
+    assert len(reads) == 2
+    assert {item["version"] for item in intake.items()["items"]} == {2}
+
+
 def test_review_snapshot_approval_and_rescan_preserve_identity(settings):
     intake = setup(settings)
     path = source(settings, complete=False)

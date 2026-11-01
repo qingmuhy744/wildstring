@@ -2,6 +2,7 @@
 
 import json
 import os
+import time
 from pathlib import Path
 from uuid import uuid4
 
@@ -47,8 +48,12 @@ class MusicImporter:
         self.counts = dict.fromkeys(COUNTERS, 0)
         self.errors: list[dict] = []
         self.run_id = uuid4().hex
+        self.targets: set[str] = set()
+        self.last_progress = time.monotonic()
 
     def progress(self, status="running"):
+        if status == "running" and time.monotonic() - self.last_progress < 0.5:
+            return
         with self.database.connect(write=True) as connection:
             connection.execute(
                 "UPDATE import_runs SET status=?, finished_at=?, counts=?, errors=? WHERE id=?",
@@ -60,6 +65,7 @@ class MusicImporter:
                     self.run_id,
                 ),
             )
+        self.last_progress = time.monotonic()
 
     def error(self, path: Path, code: str, *, conflict=False):
         self.counts["conflicts" if conflict else "errors"] += 1
@@ -101,6 +107,7 @@ class MusicImporter:
                 # Existing managed edits are deliberately not hashed, replaced or renamed.
                 with open_source(self.root, target):
                     pass
+                self.targets.add(target.as_posix())
                 if (before.st_size, before.st_mtime_ns) == (
                     previous["source_size"],
                     previous["source_mtime"],
@@ -158,6 +165,7 @@ class MusicImporter:
                         self.error(relative, "target_collision", conflict=True)
                         return None
                 self.save(relative, target, before, sha256)
+        self.targets.add(target.as_posix())
         self.import_sidecars(relative, target)
         return target
 
@@ -328,7 +336,13 @@ class MusicImporter:
                         self.error(relative, "import_file_unavailable")
                     self.progress()
             self.migrate_legacy()
-            scan = scan_library(self.settings, full=full, _lock_owned=True, on_start=on_scan)
+            scan = scan_library(
+                self.settings,
+                full=full,
+                paths=None if full else self.targets,
+                _lock_owned=True,
+                on_start=on_scan,
+            )
             intake.apply_overrides()
             status = (
                 "completed_with_errors"

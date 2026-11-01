@@ -565,9 +565,18 @@ class Management:
             }
         ]
 
+    def source_root(self, source_id):
+        sources = self.source_roots()
+        source = next((item for item in sources if item["id"] == source_id), None)
+        if source is None and source_id == "import":
+            source = sources[0]
+        if source is None:
+            raise HTTPException(404, "source_not_found")
+        return Path(source["path"]).resolve()
+
     def source_folders(self, source_id="import", path="."):
         relative = Path(".") if path == "." else Path(validate_folder(path))
-        root = self.settings.music_dir.resolve()
+        root = self.source_root(source_id)
         directory = (root / relative).resolve()
         if not directory.is_relative_to(root) or not directory.is_dir():
             raise HTTPException(404, "source_folder_not_found")
@@ -596,15 +605,11 @@ class Management:
 
     def import_preview(self, body):
         folder = Path(".") if body.path == "." else Path(validate_folder(body.path))
-        root = self.settings.music_dir.resolve()
+        root = self.source_root(body.source_id)
         directory = (root / folder).resolve()
         if not directory.is_relative_to(root) or not directory.is_dir():
             raise HTTPException(404, "source_folder_not_found")
-        files = [
-            relative.as_posix()
-            for relative in self.intake.paths()
-            if folder == Path(".") or relative == folder or folder in relative.parents
-        ]
+        files = [relative.as_posix() for relative in self.intake.paths(folder, source_root=root)]
         return {
             "source_id": body.source_id,
             "path": body.path,

@@ -15,7 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from wildstring.library.conversion import convert
 from wildstring.library.cue import parse_cue
-from wildstring.library.download_policy import DownloadPolicy, partial, pending
+from wildstring.library.download_policy import DownloadPolicy, album_directory, partial, pending
 from wildstring.library.edits import FIELDS, Overrides, apply_effective
 from wildstring.library.import_files import copy_exclusive, digest, organized_path, target_digest
 from wildstring.library.metadata import SUPPORTED_SUFFIXES, read_metadata
@@ -158,10 +158,11 @@ class Intake:
             "offset": offset,
         }
 
-    def paths(self):
+    def paths(self, relative_root=Path("."), *, source_root=None):
         policy = self.preferences()["download_policy"]
+        root = source_root or self.settings.music_dir
         for directory, folders, files in os.walk(
-            self.settings.music_dir,
+            root / relative_root,
             followlinks=False,
             onerror=lambda error: logger.warning("An import directory is unreadable"),
         ):
@@ -180,13 +181,16 @@ class Intake:
                     and not name.startswith(".")
                     and not partial(name, policy)
                 ):
-                    yield path.relative_to(self.settings.music_dir)
+                    yield path.relative_to(root)
 
-    def signature(self, relative):
+    def signature(self, relative, sidecars=None):
         with open_source(self.settings.music_dir, relative) as source:
             result = {"audio": list(fingerprint(os.fstat(source.fileno()))), "cues": []}
         # CUE and sidecar updates restart stability even when audio bytes are unchanged.
         parent = self.settings.music_dir / relative.parent
+        if sidecars is not None and parent in sidecars:
+            result["cues"] = sidecars[parent]
+            return result
         for path in sorted(parent.iterdir()):
             if (
                 path.suffix.lower() in {".cue", ".lrc", ".lryc", ".jpg", ".jpeg", ".png", ".webp"}
@@ -194,10 +198,13 @@ class Intake:
                 and not path.is_symlink()
             ):
                 result["cues"].append([path.name, *fingerprint(path.stat())])
+        if sidecars is not None:
+            sidecars[parent] = result["cues"]
         return result
 
-    def observe(self, relative, automatic):
-        signature = self.signature(relative)
+    def observe(self, relative, automatic, *, cache=None):
+        preferences = cache["preferences"] if cache is not None else self.preferences()
+        signature = self.signature(relative, cache["sidecars"] if cache is not None else None)
         encoded = json.dumps(signature)
         stamp = time.time()
         with self.database.connect(write=True) as connection:
@@ -254,8 +261,14 @@ class Intake:
                         ),
                     )
         item = self.item(item_id)
-        policy = self.preferences()["download_policy"]
-        directory, markers = pending(self.settings.music_dir, relative, policy)
+        policy = preferences["download_policy"]
+        directory = album_directory(self.settings.music_dir, relative)
+        if cache is not None and directory in cache["downloads"]:
+            markers = cache["downloads"][directory]
+        else:
+            directory, markers = pending(self.settings.music_dir, relative, policy)
+            if cache is not None:
+                cache["downloads"][directory] = markers
         marker_signature = json.dumps(markers, ensure_ascii=False)
         with self.database.connect(write=True) as connection:
             previous = connection.execute(
@@ -292,13 +305,13 @@ class Intake:
             item = self.item(item_id)
         if item["state"] == "waiting" and (
             not automatic
-            or stamp - max(item["changed_at"], changed_at) >= self.preferences()["stable_seconds"]
+            or stamp - max(item["changed_at"], changed_at) >= preferences["stable_seconds"]
         ):
             self.update(item_id, state="ready", issues=[])
             item = self.item(item_id)
         return item | {
             "download_waiting": bool(markers)
-            or bool(automatic and stamp - changed_at < self.preferences()["stable_seconds"])
+            or bool(automatic and stamp - changed_at < preferences["stable_seconds"])
         }
 
     def update(self, item_id, **fields):
@@ -323,14 +336,16 @@ class Intake:
                 "SELECT id,source_path FROM intake_items WHERE library_id=? AND state IN ('approved','retry') AND source_root=?",
                 (self.repository.library_id(), str(self.settings.music_dir)),
             ).fetchall()
-        enabled = self.preferences()["enabled"]
+        preferences = self.preferences()
+        enabled = preferences["enabled"]
+        cache = {"preferences": preferences, "sidecars": {}, "downloads": {}}
         if not enabled and not approved:
             return False
         with os.scandir(self.settings.music_dir) as entries:
             next(entries, None)
         for row in approved:
             try:
-                if (item := self.observe(Path(row["source_path"]), True))["state"] in {
+                if (item := self.observe(Path(row["source_path"]), True, cache=cache))["state"] in {
                     "approved",
                     "retry",
                 } and not item.get("download_waiting"):
@@ -342,7 +357,7 @@ class Intake:
         ready = False
         for path in self.paths():
             try:
-                ready = self.observe(path, True)["state"] == "ready" or ready
+                ready = self.observe(path, True, cache=cache)["state"] == "ready" or ready
             except OSError:
                 logger.warning("An import file is unreadable")
         return ready
@@ -499,6 +514,7 @@ class Intake:
             ] += 1
             return
         if item["state"] == "imported":
+            importer.targets.update(output["path"] for output in item["outputs"])
             if all(
                 (self.settings.library_dir / output["path"]).is_file() for output in item["outputs"]
             ):
@@ -660,6 +676,7 @@ class Intake:
                     published = []
                     for output in outputs:
                         target = prepared.import_track(output.relative_to(temporary))
+                        importer.targets.update(prepared.targets)
                         if target is not None:
                             published.append({"path": target.as_posix(), "overrides": {}})
                     for key in importer.counts:
@@ -687,6 +704,7 @@ class Intake:
                         **{key: value for key, value in overrides.items() if key in FIELDS},
                     ),
                 )
+                importer.targets.update(prepared.targets)
                 for key in importer.counts:
                     importer.counts[key] += prepared.counts[key]
                 if target is None:

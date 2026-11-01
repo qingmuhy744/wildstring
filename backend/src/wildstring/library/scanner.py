@@ -2,6 +2,7 @@
 
 import os
 import stat
+import time
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
 
@@ -68,7 +69,12 @@ def fingerprint(value: os.stat_result) -> tuple[int, int, int, int]:
 
 
 def scan_library(
-    settings: Settings, *, full: bool = False, _lock_owned: bool = False, on_start=None
+    settings: Settings,
+    *,
+    full: bool = False,
+    paths: set[str] | None = None,
+    _lock_owned: bool = False,
+    on_start=None,
 ) -> dict:
     settings.data_dir.mkdir(parents=True, exist_ok=True)
     lock = FileLock(settings.data_dir / "library-scan.lock", timeout=0)
@@ -89,11 +95,20 @@ def scan_library(
             on_start(run_id)
         counts = dict.fromkeys(COUNTERS, 0)
         complete = True
+        unchanged = []
+        last_progress = time.monotonic()
+
+        def report(status="running"):
+            nonlocal last_progress
+            if unchanged:
+                repository.touch_many(unchanged, run_id)
+                unchanged.clear()
+            repository.progress(run_id, counts, status)
+            last_progress = time.monotonic()
 
         def record_error(path: str, code: str) -> None:
             counts["errors"] += 1
             repository.error(run_id, path, code)
-            repository.progress(run_id, counts)
 
         def directory_error(error: OSError) -> None:
             nonlocal complete
@@ -104,13 +119,11 @@ def scan_library(
                 path = "."
             record_error(path, "directory_unreadable")
 
-        try:
-            root_stat = settings.library_dir.stat()
-            if not stat.S_ISDIR(root_stat.st_mode):
-                raise OSError("Music root is not a directory")
-            # Checking scandir explicitly distinguishes an unavailable root from an empty library.
-            with os.scandir(settings.library_dir) as entries:
-                next(entries, None)
+        def candidates():
+            if paths is not None:
+                for key in sorted(paths):
+                    yield settings.library_dir / key
+                return
             for directory, folders, files in os.walk(
                 settings.library_dir, followlinks=False, onerror=directory_error
             ):
@@ -120,63 +133,74 @@ def scan_library(
                 counts["skipped"] += len(folders) - len(normal_folders)
                 folders[:] = sorted(normal_folders)
                 for name in sorted(files):
-                    from wildstring.library.scope import require_current_library
+                    yield Path(directory) / name
 
-                    require_current_library(database, "library:manage")
-                    path = Path(directory) / name
-                    if path.suffix.lower() not in SUPPORTED_SUFFIXES or path.is_symlink():
-                        counts["skipped"] += 1
-                        continue
-                    relative = path.relative_to(settings.library_dir)
-                    key = relative.as_posix()
-                    counts["visited"] += 1
-                    try:
-                        before = path.stat(follow_symlinks=False)
-                        if not stat.S_ISREG(before.st_mode):
-                            raise OSError("Source is not a regular file")
-                        existing = repository.existing(key)
-                        if (
-                            not full
-                            and existing is not None
-                            and existing["status"] == "available"
-                            and existing["size_bytes"] == before.st_size
-                            and existing["mtime_ns"] == before.st_mtime_ns
-                        ):
-                            repository.touch(existing["id"], run_id)
-                            counts["unchanged"] += 1
-                        else:
-                            with open_source(settings.library_dir, relative) as source:
-                                if fingerprint(os.fstat(source.fileno())) != fingerprint(before):
-                                    raise SourceChangedError
-                                metadata = read_metadata(source, path)
-                                if fingerprint(os.fstat(source.fileno())) != fingerprint(before):
-                                    raise SourceChangedError
-                            if fingerprint(path.stat(follow_symlinks=False)) != fingerprint(before):
+        try:
+            root_stat = settings.library_dir.stat()
+            if not stat.S_ISDIR(root_stat.st_mode):
+                raise OSError("Music root is not a directory")
+            # Checking scandir explicitly distinguishes an unavailable root from an empty library.
+            with os.scandir(settings.library_dir) as entries:
+                next(entries, None)
+            for path in candidates():
+                from wildstring.library.scope import require_current_library
+
+                require_current_library(database, "library:manage")
+                if path.suffix.lower() not in SUPPORTED_SUFFIXES or path.is_symlink():
+                    counts["skipped"] += 1
+                    continue
+                relative = path.relative_to(settings.library_dir)
+                key = relative.as_posix()
+                counts["visited"] += 1
+                try:
+                    before = path.stat(follow_symlinks=False)
+                    if not stat.S_ISREG(before.st_mode):
+                        raise OSError("Source is not a regular file")
+                    existing = repository.existing(key)
+                    if (
+                        not full
+                        and existing is not None
+                        and existing["status"] == "available"
+                        and existing["size_bytes"] == before.st_size
+                        and existing["mtime_ns"] == before.st_mtime_ns
+                    ):
+                        unchanged.append(existing["id"])
+                        counts["unchanged"] += 1
+                    else:
+                        with open_source(settings.library_dir, relative) as source:
+                            if fingerprint(os.fstat(source.fileno())) != fingerprint(before):
                                 raise SourceChangedError
-                            repository.save(
-                                key, metadata, before.st_size, before.st_mtime_ns, run_id
-                            )
-                            counts["updated" if existing else "added"] += 1
-                    except SourceChangedError:
-                        record_error(key, "file_changed")
-                    except OSError:
-                        record_error(key, "file_unreadable")
-                    except (MutagenError, ValueError, TypeError, IndexError, OverflowError):
-                        record_error(key, "metadata_invalid")
-                    repository.progress(run_id, counts)
+                            metadata = read_metadata(source, path)
+                            if fingerprint(os.fstat(source.fileno())) != fingerprint(before):
+                                raise SourceChangedError
+                        if fingerprint(path.stat(follow_symlinks=False)) != fingerprint(before):
+                            raise SourceChangedError
+                        repository.save(key, metadata, before.st_size, before.st_mtime_ns, run_id)
+                        counts["updated" if existing else "added"] += 1
+                except SourceChangedError:
+                    record_error(key, "file_changed")
+                except OSError:
+                    record_error(key, "file_unreadable")
+                except (MutagenError, ValueError, TypeError, IndexError, OverflowError):
+                    record_error(key, "metadata_invalid")
+                if len(unchanged) >= 250 or time.monotonic() - last_progress >= 0.5:
+                    report()
             final_root = settings.library_dir.stat()
             if (root_stat.st_dev, root_stat.st_ino) != (final_root.st_dev, final_root.st_ino):
                 raise OSError("Music root changed during scanning")
-            if complete:
+            if unchanged:
+                repository.touch_many(unchanged, run_id)
+                unchanged.clear()
+            if complete and paths is None:
                 counts["missing"] = repository.mark_missing(run_id)
             status = "completed" if counts["errors"] == 0 else "completed_with_errors"
         except OSError:
             record_error(".", "root_unavailable")
             status = "failed"
         except BaseException:
-            repository.progress(run_id, counts, "interrupted")
+            report("interrupted")
             raise
-        repository.progress(run_id, counts, status)
+        report(status)
         return repository.scan(run_id)
     finally:
         if not _lock_owned:
