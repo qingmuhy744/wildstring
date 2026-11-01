@@ -75,6 +75,8 @@ export function TrackList({
   const boundaries = new Map(
     groupDiscs && multiDisc ? page.discs?.map((disc) => [disc.offset, disc]) : [],
   );
+  const playTrack = (track: TrackPage['items'][number], index: number) =>
+    onPlay ? onPlay(track) : player.start(page.items, index);
   return (
     <div
       className={`track-list ${albumTracks ? 'album-tracks' : ''}`}
@@ -118,6 +120,14 @@ export function TrackList({
             aria-current={player.current?.id === track.id ? 'true' : undefined}
             key={track.id}
             data-browse-id={track.id}
+            onClick={(event) => {
+              if (
+                event.target instanceof Element &&
+                event.target.closest('button, a, input, select, summary, label')
+              )
+                return;
+              playTrack(track, i);
+            }}
           >
             <span role="cell" className="track-number">
               {player.current?.id === track.id ? (
@@ -139,7 +149,7 @@ export function TrackList({
               <div className="track-title-group">
                 <button
                   className="track-title"
-                  onClick={() => (onPlay ? onPlay(track) : player.start(page.items, i))}
+                  onClick={() => playTrack(track, i)}
                   aria-label={`播放 ${track.title}`}
                 >
                   <strong>{track.title}</strong>

@@ -1,6 +1,20 @@
 import { expect, test } from '@playwright/test';
 import { audio, login } from './helpers';
 
+test('歌曲行非按钮区域也可以直接播放', async ({ page }) => {
+  await login(page);
+  const row = page.getByRole('table').getByRole('row').filter({ hasText: '晴天测试曲' }).first();
+  await expect(row).not.toHaveAttribute('aria-current', 'true');
+  await row.locator('.track-number').click();
+  await expect(row).toHaveAttribute('aria-current', 'true');
+  await expect(
+    page.getByRole('region', { name: '音乐播放器', exact: true }).getByRole('button', {
+      name: '暂停',
+      exact: true,
+    }),
+  ).toBeVisible();
+});
+
 test('歌曲菜单图标与文字对齐，深浅色及窄屏保持控件可达', async ({ page }, info) => {
   await login(page);
   for (const theme of ['light', 'dark']) {

@@ -636,6 +636,8 @@ a {
   border-bottom: 1px solid #2b2e25;
   font-size: 12px;
   padding: 10px 0;
+  cursor: pointer;
+  touch-action: manipulation;
 }
 .track-row:hover {
   background: #20231c;
