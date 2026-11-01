@@ -2,6 +2,9 @@
 
 import io
 import json
+import os
+from importlib.machinery import EXTENSION_SUFFIXES
+from pathlib import Path
 from zipfile import ZipFile
 
 import pytest
@@ -12,6 +15,7 @@ from test_providers import HEADERS
 from wildstring.library.scanner import scan_library
 from wildstring.plugin_archives import inspect_package
 from wildstring.providers import Providers
+from wildstring.source_plugins import InstalledPlugin, Manifest
 
 BASE = "/api/v1/manage/source-plugins"
 MANIFEST = {
@@ -50,6 +54,120 @@ def package(extra=None, manifest=None):
 def test_unsafe_zip_is_rejected_before_import(path):
     with pytest.raises(HTTPException, match="source_plugin_invalid_zip"):
         inspect_package(package({path: "not extracted"}))
+
+
+@pytest.mark.parametrize("folder", [".", "lib"])
+@pytest.mark.parametrize("suffix", [".py", "/__init__.py", *EXTENSION_SUFFIXES])
+def test_packaged_dependencies_are_found_without_importing(tmp_path, folder, suffix):
+    dependency = tmp_path / folder / ("fixture_core" + suffix)
+    dependency.parent.mkdir(parents=True, exist_ok=True)
+    # Invalid native bytes and raising Python source prove discovery does not execute them.
+    dependency.write_bytes(b"raise RuntimeError('must only execute in the worker')")
+    installed = InstalledPlugin(
+        Manifest(**MANIFEST, requires_modules=["fixture_core"]), tmp_path, "fixture"
+    )
+    assert installed.available()
+
+
+def test_incompatible_binary_suffix_does_not_report_available(tmp_path):
+    (tmp_path / "fixture_core.cpython-399-unknown.so").write_bytes(b"incompatible")
+    installed = InstalledPlugin(
+        Manifest(**MANIFEST, requires_modules=["fixture_core"]), tmp_path, "fixture"
+    )
+    assert not installed.available()
+
+
+def test_manual_plugin_installation_survives_restart_without_default_plugins(
+    settings, authenticated_client
+):
+    source_zip = package()
+    with authenticated_client(settings) as client:
+        assert client.get(BASE).json()["items"] == []
+        imported = client.post(BASE + "/import", headers=HEADERS, content=source_zip)
+        assert imported.status_code == 200
+        saved = client.put(
+            BASE + "/fixture-source",
+            headers=HEADERS,
+            json={
+                "version": 1,
+                "enabled": True,
+                "config": {"cookie": "synthetic-preserved-secret"},
+            },
+        )
+        assert saved.status_code == 200
+        before = saved.json()
+    with authenticated_client(settings) as client:
+        items = client.get(BASE).json()["items"]
+        assert len(items) == 1
+        assert items[0]["id"] == "fixture-source"
+        assert items[0]["enabled"] is True and items[0]["version"] == before["version"]
+        assert items[0]["configured_secrets"] == ["cookie"]
+        assert client.get(BASE + "/fixture-source/export").content == source_zip
+        assert client.post(BASE + "/fixture-source/test", headers=HEADERS).json()["ok"] is True
+
+
+@pytest.mark.skipif(
+    not os.environ.get("WILDSTRING_NATIVE_PLUGIN_DIR"),
+    reason="Run make test-native-plugin to compile the fixture",
+)
+def test_native_module_zip_worker_and_upgrade(settings, authenticated_client, monkeypatch):
+    from wildstring.music_sources import PluginContext
+
+    monkeypatch.setattr(Providers, "start", lambda self: None)
+    directory = Path(os.environ["WILDSTRING_NATIVE_PLUGIN_DIR"])
+    binary = next(
+        directory / ("native_core" + suffix)
+        for suffix in EXTENSION_SUFFIXES
+        if (directory / ("native_core" + suffix)).is_file()
+    )
+    with authenticated_client(settings) as client:
+        for revision in (1, 2):
+            output = io.BytesIO()
+            with ZipFile(output, "w") as archive:
+                archive.writestr(
+                    "manifest.json",
+                    json.dumps(
+                        MANIFEST
+                        | {"version": f"{revision}.0.0", "requires_modules": ["native_core"]}
+                    ),
+                )
+                archive.writestr(
+                    "adapter.py",
+                    f"from native_core import Plugin as Core\nclass Plugin(Core):\n    revision = {revision}\n",
+                )
+                archive.write(binary, "lib/" + binary.name)
+            url = (
+                BASE
+                + "/import"
+                + ("?expected_id=fixture-source&expected_version=2" if revision == 2 else "")
+            )
+            imported = client.post(url, headers=HEADERS, content=output.getvalue())
+            assert imported.status_code == 200, imported.text
+            assert imported.json()["available"] is True
+            assert imported.json()["enabled"] is False
+            version = imported.json()["version"]
+            enabled = client.put(
+                BASE + "/fixture-source",
+                headers=HEADERS,
+                json={"version": version, "enabled": True},
+            )
+            assert enabled.status_code == 200
+            assert client.post(BASE + "/fixture-source/test", headers=HEADERS).json() == {
+                "ok": True,
+                "count": 1,
+            }
+            manager = client.app.state.providers.sources
+            plugin = manager.plugins["fixture-source"]
+            context = PluginContext(manager, "fixture-source", manager.settings("fixture-source"))
+            assert (
+                plugin.metadata(context, {"id": "native-song"})["fields"]["title"]
+                == "Compiled fixture"
+            )
+            assert (
+                plugin.lyrics(context, {"id": "native-song"})["original"]
+                == "[00:01]Compiled fixture"
+            )
+            assert client.get(BASE + "/fixture-source/export").content == output.getvalue()
 
 
 def test_zip_lifecycle_worker_matching_and_lyrics(settings, authenticated_client, monkeypatch):

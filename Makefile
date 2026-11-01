@@ -32,7 +32,7 @@ sync: ## Install locked Python and Web dependencies
 	$(UV) sync --locked --project backend --extra community-sources
 	npm --prefix frontend/web ci
 
-.PHONY: source-plugins source-providers-check
+.PHONY: source-plugins source-providers-check test-native-plugin
 source-providers-check: ## Verify provider subsets against integrity-pinned upstream archives
 	$(RUN) python scripts/vendor_source_providers.py --check
 
@@ -41,6 +41,10 @@ source-plugins: ## Package independently importable community source ZIPs
 	npm --prefix plugins/node-runtime test
 	node scripts/build_source_runtimes.mjs
 	$(RUN) python scripts/package_source_plugins.py
+
+test-native-plugin: ## Compile a synthetic Nuitka module and test ZIP installation, invocation and upgrade
+	$(UV) run --no-project --python 3.12 --with Nuitka==2.8.10 python -m nuitka --module --output-dir=.cache/plugin-native --remove-output --no-pyi-file tests/fixtures/plugins/native_core.py
+	WILDSTRING_NATIVE_PLUGIN_DIR="$(CURDIR)/.cache/plugin-native" $(RUN) pytest -c backend/pyproject.toml backend/tests/test_source_plugins.py -k native_module -q
 
 setup: env sync ## Set up dependencies and install the local Git hook
 	$(RUN) pre-commit install --install-hooks
