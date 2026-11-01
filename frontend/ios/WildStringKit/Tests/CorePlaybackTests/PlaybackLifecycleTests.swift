@@ -53,15 +53,22 @@ struct PlaybackLifecycleTests {
             try await waitUntil { service.isPlaying && service.player.currentTime().seconds >= 10 }
             #expect(service.player.rate == 1.5)
             service.seek(to: 28.349)
-            try await waitUntil { service.isPlaying && service.player.currentTime().seconds >= 28.349 }
+            #expect(!service.isPlaying)
+            #expect(service.isBuffering)
+            #expect(service.player.rate == 0)
+            try await waitUntil {
+                service.isPlaying && service.player.rate == 1.5
+                    && service.player.currentTime().seconds >= 28.349
+            }
             #expect(service.player.rate == 1.5)
             service.setPodcastPlaybackRate(2)
+            try await waitUntil { service.isPlaying && service.player.rate == 2 }
             #expect(service.player.rate == 2)
             service.pause()
             service.setPodcastPlaybackRate(0.75)
             #expect(service.player.rate == 0)
             service.resume()
-            try await waitUntil { service.isPlaying }
+            try await waitUntil { service.isPlaying && service.player.rate == 0.75 }
             #expect(service.player.rate == 0.75)
         }
     }

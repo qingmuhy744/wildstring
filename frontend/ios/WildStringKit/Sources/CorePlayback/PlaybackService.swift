@@ -310,6 +310,8 @@ public final class PlaybackService {
         }
         pendingSeek = target
         player.pause()
+        isPlaying = false
+        isBuffering = intendedPlaying
         seekPendingPosition()
     }
 
