@@ -1,8 +1,8 @@
 """Personal saves and conservative collection of shared podcast audio."""
 
 import json
-import mimetypes
 import time
+from pathlib import Path
 from typing import Annotated
 from uuid import uuid4
 
@@ -188,9 +188,22 @@ class PodcastResources:
             if path is None:
                 return None
             lease = self.acquire(db, identity)
+        media_type = "audio/mpeg"
+        if filename:
+            # Minimal container images may have no system MIME database.
+            media_type = {
+                ".mp3": "audio/mpeg",
+                ".m4a": "audio/mp4",
+                ".aac": "audio/aac",
+                ".ogg": "audio/ogg",
+                ".opus": "audio/opus",
+                ".flac": "audio/flac",
+                ".wav": "audio/wav",
+                ".webm": "audio/webm",
+            }.get(Path(filename).suffix.lower(), "application/octet-stream")
         return FileResponse(
             path,
-            media_type=mimetypes.guess_type(filename)[0] if filename else "audio/mpeg",
+            media_type=media_type,
             filename=filename,
             background=BackgroundTask(self.release_lease, lease),
             headers={
