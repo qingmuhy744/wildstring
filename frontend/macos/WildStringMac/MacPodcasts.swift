@@ -18,6 +18,7 @@ struct MacPodcastsView: View {
     @State private var choosingShow = false
     @State private var showQuery = ""
     @State private var descriptionExpanded = false
+    @State private var exploring = false
 
     var body: some View {
         GeometryReader { geo in
@@ -43,6 +44,7 @@ struct MacPodcastsView: View {
         .navigationTitle("电台")
         .toolbar {
             ToolbarItemGroup {
+                Button { exploring = true } label: { Label("探索", systemImage: "safari") }
                 Picker("范围", selection: $followedOnly) {
                     Text("已订阅").tag(true)
                     Text("全部").tag(false)
@@ -59,6 +61,13 @@ struct MacPodcastsView: View {
             }
         }
         .task(id: followedOnly) { await loadShows() }
+        .sheet(isPresented: $exploring) {
+            MacPodcastExplore(client: client) { id in
+                followedOnly = true
+                selectedShowID = id
+                Task { await loadShows() }
+            }
+        }
         .sheet(isPresented: $choosingShow) {
             VStack(spacing: 0) {
                 HStack { Spacer(); Button("关闭") { choosingShow = false } }

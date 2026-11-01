@@ -10,14 +10,22 @@ import AppKit
 typealias NowPlayingImage = NSImage
 #endif
 
+func activateSystemAudioSession() throws {
+    #if os(iOS)
+        let session = AVAudioSession.sharedInstance()
+        try session.setCategory(.playback, mode: .default)
+        try session.setActive(true)
+    #endif
+}
+
 extension PlaybackService {
     func configureSystemPlaybackIfNeeded() {
         guard !systemControlsConfigured else { return }
-        systemControlsConfigured = true
         #if os(iOS)
-            configureAudioSession()
+            observeAudioSession()
         #endif
         configureRemoteCommands()
+        systemControlsConfigured = true
     }
 
     private func configureRemoteCommands() {
@@ -36,10 +44,8 @@ extension PlaybackService {
     }
 
     #if os(iOS)
-        private func configureAudioSession() {
+        private func observeAudioSession() {
             let session = AVAudioSession.sharedInstance()
-            try? session.setCategory(.playback, mode: .default)
-            try? session.setActive(true)
 
             let interruptionToken = NotificationCenter.default.addObserver(
                 forName: AVAudioSession.interruptionNotification,
@@ -77,8 +83,10 @@ extension PlaybackService {
                 player.pause()
             case .ended:
                 let options = AVAudioSession.InterruptionOptions(rawValue: optionsRaw)
-                if options.contains(.shouldResume) {
+                if options.contains(.shouldResume), intendedPlaying {
                     resume()
+                } else {
+                    pause()
                 }
             @unknown default:
                 break

@@ -124,21 +124,23 @@ struct MacPodcastPlayer: View {
                 Text("本集结束后停止。可以从单集列表安排下一集。")
                     .font(.callout).foregroundStyle(.secondary)
             } else {
-                ForEach(upcoming.prefix(3)) { item in
-                    Button {
-                        if let index = playback.items.firstIndex(where: { $0.id == item.id }) {
-                            playback.playQueueEntry(at: index)
-                        }
-                    } label: {
-                        HStack(alignment: .top, spacing: 9) {
-                            Image(systemName: "play.circle").foregroundStyle(MacTheme.accentDeep)
-                            Text(item.title).font(.callout).lineLimit(3).multilineTextAlignment(.leading)
-                            Spacer(minLength: 0)
-                        }
-                    }.buttonStyle(.plain)
-                }
                 Button("查看与调整队列") { showQueue = true }.buttonStyle(.plain)
                     .font(.caption).foregroundStyle(MacTheme.accentDeep)
+                LazyVStack(alignment: .leading, spacing: 20) {
+                    ForEach(upcoming) { item in
+                        Button {
+                            if let index = playback.items.firstIndex(where: { $0.id == item.id }) {
+                                playback.playQueueEntry(at: index)
+                            }
+                        } label: {
+                            HStack(alignment: .top, spacing: 9) {
+                                Image(systemName: "play.circle").foregroundStyle(MacTheme.accentDeep)
+                                Text(item.title).font(.callout).lineLimit(3).multilineTextAlignment(.leading)
+                                Spacer(minLength: 0)
+                            }
+                        }.buttonStyle(.plain)
+                    }
+                }
             }
         }.padding(.vertical, 12)
     }

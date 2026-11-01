@@ -11,10 +11,13 @@ struct MacCover: View {
     var placeholder = "music.note"
 
     @State private var image: NSImage?
+    @State private var podcastCover: URL?
 
     var body: some View {
         Group {
-            if let image {
+            if let podcastCover {
+                MacPodcastArtwork(url: podcastCover, side: side)
+            } else if let image {
                 Image(nsImage: image)
                     .resizable()
                     .scaledToFill()
@@ -31,9 +34,17 @@ struct MacCover: View {
 
     private func load() async {
         image = nil
-        guard let trackID,
+        podcastCover = nil
+        guard let trackID else { return }
+        if trackID.hasPrefix("podcast_ep_") {
+            guard let episode = try? await client.podcastEpisode(id: String(trackID.dropFirst("podcast_ep_".count))),
+                let detail = try? await client.podcast(id: episode.podcastId), !Task.isCancelled else { return }
+            podcastCover = detail.podcast.coverURL
+            return
+        }
+        guard
             let data = try? await client.authorizedData(path: "api/v1/tracks/\(trackID)/cover"),
-            let loaded = NSImage(data: data)
+            let loaded = NSImage(data: data), !Task.isCancelled
         else { return }
         image = loaded
     }
@@ -56,7 +67,7 @@ struct MacTransportBar: View {
                     if let item = playback.currentItem {
                         Button { session.showFullscreen = true } label: {
                             HStack(spacing: 12) {
-                                MacCover(client: client, trackID: item.hasCover ? item.trackID : nil, side: 52,
+                                MacCover(client: client, trackID: item.hasCover || isPodcast ? item.trackID : nil, side: 52,
                                     placeholder: isPodcast ? "antenna.radiowaves.left.and.right" : "music.note")
                                 VStack(alignment: .leading, spacing: 4) {
                                     Text(item.title).font(.callout.weight(.semibold)).lineLimit(1)
@@ -173,6 +184,17 @@ struct MacPlayerInspector: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Button {
+                    session.showLyrics = false
+                    session.showQueue = false
+                } label: {
+                    Image(systemName: "xmark").frame(width: 24, height: 24)
+                }.buttonStyle(.plain).help("关闭侧栏").accessibilityLabel("关闭侧栏")
+                Text(focus == .queue && session.showQueue || !session.showLyrics ? "播放队列" : "歌词")
+                    .font(.headline)
+                Spacer()
+            }
             if session.showLyrics && session.showQueue {
                 Picker("正在看", selection: $focus) {
                     Text("歌词").tag(InspectorFocus.lyrics)
@@ -310,7 +332,7 @@ struct MenuBarPlayer: View {
                 }.font(.caption).foregroundStyle(.secondary)
                 Button { openPlayer() } label: {
                     HStack(alignment: .top, spacing: 12) {
-                        MacCover(client: client, trackID: item.hasCover ? item.trackID : nil, side: 56,
+                        MacCover(client: client, trackID: item.hasCover || isPodcast ? item.trackID : nil, side: 56,
                             placeholder: isPodcast ? "antenna.radiowaves.left.and.right" : "music.note")
                         VStack(alignment: .leading, spacing: 5) {
                             Text(item.title).font(.system(size: 15, weight: .semibold)).lineLimit(3)
@@ -414,9 +436,6 @@ struct DesktopLyricsView: View {
     let session: MacSession
     @AppStorage("desktopLyricsClickThrough") private var clickThrough = false
     @State private var timeline: LyricTimeline?
-    @State private var loadedTrackID: String?
-
-    @Environment(\.dismissWindow) private var dismissWindow
 
     var body: some View {
         ZStack(alignment: .topLeading) {
@@ -424,98 +443,66 @@ struct DesktopLyricsView: View {
                 if let playback = session.playback, let timeline, !timeline.isEmpty {
                     TimelineView(.animation(minimumInterval: 1.0 / 20, paused: !playback.isPlaying)) { _ in
                         if let index = timeline.currentIndex(at: playback.lyricTime) {
-                            MacTimedLyricText(line: timeline.lines[index], time: playback.lyricTime,
-                                font: .system(size: lyricSize(timeline.lines[index].text), weight: .semibold), highlight: .white,
-                                inactive: .white.opacity(0.85), centered: true)
+                            DesktopLyricLine(line: timeline.lines[index], time: playback.lyricTime)
                         } else {
-                            Text(playback.currentItem?.title ?? "野弦")
-                                .font(.system(size: 26, weight: .semibold)).foregroundStyle(.white)
+                            title
                         }
                     }
                 } else {
-                    Text(session.playback?.currentItem?.title ?? "野弦")
-                        .font(.system(size: 26, weight: .semibold)).foregroundStyle(.white)
-                        .lineLimit(2).minimumScaleFactor(0.7)
+                    title
                 }
             }
             .shadow(color: .black.opacity(0.6), radius: 3, y: 1)
-            .padding(.horizontal, 32).padding(.vertical, 10)
+            .padding(.horizontal, 34).padding(.vertical, 12)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            Button {
-                session.desktopLyricsVisible = false
-                dismissWindow(id: "desktop-lyrics")
-            } label: {
+            .overlay { DesktopLyricsDragArea() }
+            Button { session.desktopLyrics.close() } label: {
                 Image(systemName: "xmark").font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.85)).frame(width: 20, height: 20)
+                    .foregroundStyle(.white.opacity(0.85)).frame(width: 24, height: 24)
             }.buttonStyle(.plain).help("关闭桌面歌词").accessibilityLabel("关闭桌面歌词")
-                .padding(6)
+                .padding(4)
         }
-        .frame(width: 540, height: 72)
+        .frame(width: 540, height: 112)
         .background(.black.opacity(0.62), in: RoundedRectangle(cornerRadius: 10))
-        .background(DesktopLyricsWindow(clickThrough: clickThrough))
-        .ignoresSafeArea()
-        .onAppear { session.desktopLyricsVisible = true }
-        .onDisappear { session.desktopLyricsVisible = false }
-        .task(id: session.playback?.currentItem?.trackID) { await load() }
-    }
-
-    private func lyricSize(_ text: String) -> CGFloat {
-        let width = (text as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: 26, weight: .semibold)]).width
-        return min(26, max(15, 26 * 476 / max(1, width)))
-    }
-
-    private func load() async {
-        guard let client = session.client,
-            let trackID = session.playback?.currentItem?.trackID,
-            !trackID.hasPrefix("podcast_ep_")
-        else {
+        .onAppear { session.desktopLyrics.setClickThrough(clickThrough) }
+        .onChange(of: clickThrough) { _, value in session.desktopLyrics.setClickThrough(value) }
+        .task(id: session.playback?.currentItem?.trackID) {
             timeline = nil
-            loadedTrackID = nil
-            return
+            guard let client = session.client, let id = session.playback?.currentItem?.trackID,
+                !id.hasPrefix("podcast_ep_") else { return }
+            if let lyrics = try? await client.lyrics(trackID: id), !Task.isCancelled {
+                timeline = LyricTimeline(lyrics: lyrics)
+            }
         }
-        guard loadedTrackID != trackID else { return }
-        loadedTrackID = trackID
-        timeline = nil
-        if let lyrics = try? await client.lyrics(trackID: trackID) {
-            timeline = LyricTimeline(lyrics: lyrics)
-        }
+    }
+
+    private var title: some View {
+        Text(session.playback?.currentItem?.title ?? "野弦")
+            .font(.system(size: 24, weight: .semibold)).foregroundStyle(.white)
+            .lineLimit(2).minimumScaleFactor(0.7)
     }
 }
 
-private struct DesktopLyricsWindow: NSViewRepresentable {
-    var clickThrough: Bool
+struct DesktopLyricLine: View {
+    let line: LyricTimeline.Line
+    let time: Double
+    @AppStorage("lyricsShowTranslation") private var showTranslation = true
+    @AppStorage("lyricsShowRomanization") private var showRomanization = false
 
-    func makeNSView(context: Context) -> NSView {
-        let view = NSView()
-        let clickThrough = clickThrough
-        DispatchQueue.main.async { apply(to: view, clickThrough: clickThrough) }
-        return view
-    }
-
-    func updateNSView(_ view: NSView, context: Context) {
-        let clickThrough = clickThrough
-        DispatchQueue.main.async { apply(to: view, clickThrough: clickThrough) }
-    }
-
-    private func apply(to view: NSView, clickThrough: Bool) {
-        guard let window = view.window else { return }
-        let background = NSColor.clear
-        if window.isOpaque { window.isOpaque = false }
-        if window.backgroundColor != background { window.backgroundColor = background }
-        if window.level != .floating { window.level = .floating }
-        let behavior: NSWindow.CollectionBehavior = [
-            .canJoinAllSpaces, .fullScreenAuxiliary, .stationary,
-        ]
-        if window.collectionBehavior != behavior { window.collectionBehavior = behavior }
-        if !window.isMovableByWindowBackground { window.isMovableByWindowBackground = true }
-        if window.ignoresMouseEvents != clickThrough { window.ignoresMouseEvents = clickThrough }
-        for type in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
-            window.standardWindowButton(type)?.isHidden = true
-        }
-        if !window.styleMask.intersection([.titled, .miniaturizable, .resizable]).isEmpty {
-            window.styleMask.remove([.titled, .miniaturizable, .resizable])
-        }
-        if window.titleVisibility != .hidden { window.titleVisibility = .hidden }
-        if !window.titlebarAppearsTransparent { window.titlebarAppearsTransparent = true }
+    var body: some View {
+        VStack(spacing: 6) {
+            let width = (line.text as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: 24, weight: .semibold)]).width
+            MacTimedLyricText(line: line, time: time,
+                font: .system(size: min(24, max(14, 24 * 472 / max(1, width))), weight: .semibold),
+                highlight: .white, inactive: .white.opacity(0.85), centered: true)
+            if showTranslation, let text = line.translation, !text.isEmpty {
+                Text(text).font(.system(size: 15)).foregroundStyle(.white.opacity(0.9))
+                    .lineLimit(2).minimumScaleFactor(0.8)
+            }
+            if showRomanization, let text = line.romanization, !text.isEmpty {
+                Text(text).font(.system(size: 13)).foregroundStyle(.white.opacity(0.75))
+                    .lineLimit(1).minimumScaleFactor(0.8)
+            }
+        }.multilineTextAlignment(.center)
     }
 }

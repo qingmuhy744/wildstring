@@ -114,31 +114,31 @@ struct MacLyricScroll: View {
         GeometryReader { geo in
             ScrollViewReader { proxy in
                 ScrollView {
-                    VStack(alignment: prominent ? .center : .leading, spacing: prominent ? 28 : 20) {
+                    VStack(alignment: .center, spacing: prominent ? 26 : 22) {
                         if let timeline, !timeline.isEmpty {
                             let current = timeline.currentIndex(at: time)
                             ForEach(Array(timeline.lines.enumerated()), id: \.offset) { index, line in
                                 Button {
                                     if let time = line.time { playback.seek(to: time) }
                                 } label: {
-                                    VStack(alignment: prominent ? .center : .leading, spacing: 9) {
+                                    VStack(alignment: .center, spacing: 7) {
                                         MacTimedLyricText(
                                             line: line, time: time, active: index == current,
-                                            font: prominent ? .system(size: 30, weight: .semibold) : .system(size: 18, weight: .medium),
+                                            font: .system(size: prominent ? min(27, max(22, geo.size.width * 0.045)) : 16, weight: .medium),
                                             highlight: prominent ? .primary : MacTheme.accentDeep,
                                             inactive: prominent ? .primary.opacity(index == current ? 0.48 : 0.42) : .secondary,
-                                            centered: prominent
+                                            centered: true
                                         )
                                         if showTranslation, let text = line.translation, !text.isEmpty {
-                                            Text(text).font(prominent ? .body : .caption)
+                                            Text(text).font(.system(size: prominent ? 17 : 13))
                                                 .foregroundStyle(.secondary)
                                         }
                                         if showRomanization, let text = line.romanization, !text.isEmpty {
                                             Text(text).font(.caption).foregroundStyle(.secondary)
                                         }
                                     }
-                                    .multilineTextAlignment(prominent ? .center : .leading)
-                                    .frame(maxWidth: .infinity, alignment: prominent ? .center : .leading)
+                                    .multilineTextAlignment(.center)
+                                    .frame(maxWidth: .infinity, alignment: .center)
                                     .contentShape(Rectangle())
                                 }
                                 .buttonStyle(.plain)
