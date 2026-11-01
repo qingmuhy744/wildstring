@@ -63,7 +63,7 @@ class QueueReorderTest {
         compose.runOnIdle { assertEquals(1, moves.size); assertEquals("entry-0", rows.value[2].entryId)
             assertEquals(listOf(TactileKind.DragStart, TactileKind.DragEnd, TactileKind.DragStart), haptics) }
         val actions = compose.onNodeWithTag("queue-handle-entry-0").fetchSemanticsNode().config[SemanticsActions.CustomActions]
-        compose.runOnIdle { assertTrue(actions.first { it.label == "向前移动" }.action()) }
+        compose.runOnIdle { assertTrue(actions.first { it.label == uiString(R.string.queue_move_up) }.action()) }
         compose.runOnIdle { assertEquals("entry-0", rows.value[1].entryId) }
     }
     @Test fun edgeScrollReachesOffscreenRowsAndExternalChangeCancelsDrop() {

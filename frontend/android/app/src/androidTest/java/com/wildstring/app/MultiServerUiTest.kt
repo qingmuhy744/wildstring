@@ -88,7 +88,7 @@ class MultiServerUiTest {
                 compose.waitUntil(15000) { vm.state.value.account?.username == "甲" && vm.state.value.connected }
                 val aId = vm.repository.session.activeServerId!!
                 compose.waitUntil(15000) { !vm.state.value.loading && compose.onAllNodesWithText("甲 的歌曲", useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
-                compose.onNode(hasText("甲 的歌曲") and hasClickAction())
+                compose.onNodeWithTag("discovery-added-same-track")
                     .performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnClick) { click -> assertTrue(click()) }
                 compose.waitUntil(15000) { compose.runOnIdle { vm.controller?.isPlaying == true && vm.controller!!.currentPosition >= 1200 } }
                 android.util.Log.i("MultiServerStage", "A is playing, share snapshot")

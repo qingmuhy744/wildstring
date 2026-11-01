@@ -283,7 +283,7 @@
     <string name="album_edit">Edit album details</string>
     <string name="preparing">Preparing…</string>
     <string name="play_all">Play all</string>
-    <string name="sort_track_name">Song title</string>
+    <string name="sort_track_name">Title</string>
     <string name="list_actions">List actions</string>
     <string name="lyrics_scan">Find &amp; improve lyrics</string>
     <string name="album_refresh">Refresh album metadata</string>

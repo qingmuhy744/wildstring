@@ -104,7 +104,7 @@ class RecommendationExperienceTest {
     @Test fun dailyPreferencesShareConnectionsAndRankingsOnlyExposePlayableAggregate() {
         Fixture().use { fixture -> val vm = connect(fixture)
             try {
-                open("每日推荐")
+                open(uiString(R.string.daily_recommendations))
                 compose.waitUntil(10_000) { compose.onAllNodesWithText("1 首 · 今日的临时歌单").fetchSemanticsNodes().isNotEmpty() }
                 compose.onNodeWithTag("daily-recommendations").performScrollToNode(hasTestTag("daily-track-local-a"))
                 val more = hasTestTag("daily-more-local-a") and hasClickAction()
@@ -144,7 +144,7 @@ class RecommendationExperienceTest {
     @Test fun dailySelectionAndLyricsKeepTheCurrentQueueAndPauseState() {
         Fixture().use { fixture -> val vm = connect(fixture)
             try {
-                open("每日推荐")
+                open(uiString(R.string.daily_recommendations))
                 compose.waitUntil(10_000) { compose.onAllNodesWithTag("daily-track-local-a").fetchSemanticsNodes().isNotEmpty() }
                 compose.onNodeWithText("播放推荐", substring = false).performClick()
                 compose.waitUntil(10_000) { vm.state.value.current?.id == "local-a" }
@@ -200,7 +200,7 @@ class RecommendationExperienceTest {
                 compose.onNodeWithTag("assistant-paused-player").assertIsDisplayed().performClick()
                 assertEquals(entry, vm.state.value.entryId)
                 assertFalse(vm.state.value.playing)
-                compose.onNodeWithContentDescription("播放", useUnmergedTree = true).performClick()
+                compose.onNodeWithContentDescription(uiString(R.string.play), useUnmergedTree = true).performClick()
                 compose.waitUntil(5_000) { vm.state.value.playing }
                 InstrumentationRegistry.getInstrumentation().uiAutomation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK)
                 compose.waitUntil(5_000) { compose.onAllNodesWithTag("mini-player").fetchSemanticsNodes().isNotEmpty() }
@@ -258,7 +258,7 @@ class RecommendationExperienceTest {
                 compose.onNodeWithTag("podcast-open-explore").performClick()
                 compose.waitUntil(10_000) { compose.onAllNodesWithText("播客目录暂时限制了请求，请稍后重试。").fetchSemanticsNodes().isNotEmpty() }
                 fixture.directoryThrottled = false
-                compose.onNodeWithText("重试", substring = false).performClick()
+                compose.onNodeWithText(uiString(R.string.retry), substring = false).performClick()
                 compose.waitUntil(10_000) { compose.onAllNodesWithTag("podcast-explore-12345").fetchSemanticsNodes().isNotEmpty() }
                 compose.onNodeWithTag("podcast-explore-12345").performClick()
                 compose.waitUntil(10_000) { compose.onAllNodesWithTag("podcast-explore-follow").fetchSemanticsNodes().isNotEmpty() }
@@ -272,9 +272,9 @@ class RecommendationExperienceTest {
     @Test fun externalMusicHasNoFakePlaybackSupportsWantAndManualRefreshFrequency() {
         Fixture().use { fixture -> val vm = connect(fixture)
             try {
-                open("发现新音乐")
+                open(uiString(R.string.discover_new_music))
                 compose.waitUntil(10_000) { compose.onAllNodesWithText("想去寻找的新声音").fetchSemanticsNodes().isNotEmpty() }
-                compose.onAllNodes(hasText("播放", substring = false) and hasAnyAncestor(hasTestTag("external-item-outside"))).assertCountEquals(0)
+                compose.onAllNodes(hasText(uiString(R.string.play), substring = false) and hasAnyAncestor(hasTestTag("external-item-outside"))).assertCountEquals(0)
                 compose.onNodeWithText("库外音乐 · 需自行获取后导入").assertExists()
                 capture("recommendation-external-phone.png")
                 compose.onAllNodesWithText("复制歌名").onFirst().performClick()

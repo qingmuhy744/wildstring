@@ -181,11 +181,11 @@ class ContinuousCatalogTest {
                 compose.onNodeWithTag("catalog-item-149").assertIsDisplayed()
                 compose.onNodeWithTag("alphabet-M").assertIsSelected()
                 compose.onNodeWithTag("alphabet-Z").performClick()
-                compose.onNodeWithContentDescription("Z 旋律 160的操作").performClick()
+                compose.onNodeWithContentDescription(uiString(R.string.track_actions_named, "Z 旋律 160")).performClick()
                 compose.onNodeWithText("查看所属专辑").performClick()
                 compose.waitUntil(10_000) { vm.state.value.collectionId == "album-v" && !vm.state.value.loading }
                 compose.onNodeWithTag("alphabet-rail").assertDoesNotExist()
-                compose.onNodeWithContentDescription("返回上一页").performClick()
+                compose.onNodeWithContentDescription(uiString(R.string.back_previous)).performClick()
                 ready(vm)
                 compose.onNodeWithTag("catalog-item-160").assertIsDisplayed()
                 capture("continuous-catalog-light.png")
@@ -211,7 +211,7 @@ class ContinuousCatalogTest {
                 compose.onNodeWithTag("catalog-item-160").assertIsDisplayed()
                 compose.onNodeWithTag("catalog-list").performScrollToIndex(0)
                 compose.onNodeWithTag("catalog-sort").performClick()
-                compose.onNodeWithText("播放次数").performClick()
+                compose.onNodeWithText(uiString(R.string.sort_plays)).performClick()
                 compose.waitUntil(10_000) { !vm.state.value.loading && vm.state.value.sort == "play_count" }
                 compose.onNodeWithTag("alphabet-rail").assertDoesNotExist()
                 compose.runOnIdle { vm.recent() }
@@ -219,7 +219,7 @@ class ContinuousCatalogTest {
                 assertEquals("last_played_at", vm.state.value.sort)
                 assertTrue(requests.last { it.startsWith("/api/v1/tracks?") && it.contains("played_only=true") }.contains("sort=last_played_at"))
                 compose.onNodeWithTag("catalog-sort").performClick()
-                compose.onNodeWithText("歌曲名称").performClick()
+                compose.onNodeWithText(uiString(R.string.sort_track_name)).performClick()
                 compose.waitUntil(10_000) { !vm.state.value.loading && vm.state.value.sort == "title" }
                 val recentRequest = requests.last { it.startsWith("/api/v1/tracks?") && it.contains("played_only=true") }
                 assertTrue(recentRequest.contains("sort=title"))
@@ -271,7 +271,7 @@ class ContinuousCatalogTest {
                 capture("chinese-search-editor.png")
                 compose.onNodeWithTag("catalog-search").performImeAction()
                 compose.waitUntil(5_000) { compose.onAllNodesWithTag("alphabet-rail").fetchSemanticsNodes().isNotEmpty() }
-                compose.onNodeWithContentDescription("清空搜索").performClick()
+                compose.onNodeWithContentDescription(uiString(R.string.clear_search)).performClick()
                 compose.waitUntil(10_000) { vm.state.value.kind == "discover" && !vm.state.value.loading }
                 compose.onNodeWithTag("catalog-search").assert(SemanticsMatcher.expectValue(androidx.compose.ui.semantics.SemanticsProperties.EditableText, androidx.compose.ui.text.AnnotatedString(""))).assertIsFocused()
             } finally { compose.runOnIdle { vm.repository.session.invalidate() } }
@@ -297,11 +297,11 @@ class ContinuousCatalogTest {
                 capture("compact-album-light.png")
                 compose.onNodeWithTag("catalog-global-more").assertDoesNotExist()
                 compose.onNodeWithTag("catalog-more").performClick()
-                compose.onNodeWithText("更新专辑元数据").assertDoesNotExist()
-                compose.onNodeWithText("歌词补全与洗版").assertDoesNotExist()
+                compose.onNodeWithText(uiString(R.string.album_refresh)).assertDoesNotExist()
+                compose.onNodeWithText(uiString(R.string.lyrics_scan)).assertDoesNotExist()
                 compose.onNodeWithText("刷新曲库").assertDoesNotExist()
                 InstrumentationRegistry.getInstrumentation().sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
-                compose.onNodeWithText("更新专辑元数据").assertDoesNotExist()
+                compose.onNodeWithText(uiString(R.string.album_refresh)).assertDoesNotExist()
                 assertEquals("album-v", vm.state.value.collectionId)
                 val beforeRefresh = requests.count { it.startsWith("/api/v1/albums/album-v/tracks?") }
                 compose.onNodeWithTag("catalog-list").performTouchInput { swipeDown(startY = 40f, endY = 650f, durationMillis = 600) }
@@ -315,9 +315,9 @@ class ContinuousCatalogTest {
                 compose.onNodeWithTag("player-phone").assertDoesNotExist()
                 compose.runOnIdle { vm.openArtist(Artist("artist-0", "艺人", 257, null)) }
                 compose.waitUntil(10_000) { vm.state.value.collection == "artists" && !vm.state.value.loading }
-                compose.onNodeWithContentDescription("返回上一页").performClick()
+                compose.onNodeWithContentDescription(uiString(R.string.back_previous)).performClick()
                 compose.onNodeWithTag("player-phone").assertDoesNotExist()
-                compose.onNodeWithContentDescription("返回上一页").performClick()
+                compose.onNodeWithContentDescription(uiString(R.string.back_previous)).performClick()
                 compose.onNodeWithTag("player-phone").assertIsDisplayed()
                 val playerBack = if (compose.onAllNodesWithContentDescription("返回封面").fetchSemanticsNodes().isNotEmpty()) "返回封面" else "收起播放器"
                 compose.onNodeWithContentDescription(playerBack).assertIsDisplayed()
@@ -353,6 +353,7 @@ class ContinuousCatalogTest {
                 capture("song-list-medium-scrolled.png")
                 listOf(SongListSize.SMALL, SongListSize.LARGE, SongListSize.MEDIUM).forEach { size ->
                     compose.onNodeWithContentDescription(uiString(R.string.settings_title)).performClick()
+                    compose.onNodeWithTag("setting-category-appearance").performClick()
                     compose.onNodeWithTag("setting-song-list-size").performScrollTo().performClick()
                     if (size == SongListSize.SMALL) capture("song-list-size-settings.png")
                     compose.onNodeWithText(compose.activity.getString(com.wildstring.app.ui.songListSizeLabel(size))).performClick()
@@ -363,6 +364,7 @@ class ContinuousCatalogTest {
                         reopened.bindAccount(vm.repository.session.activeServerId, vm.repository.session.account?.id)
                         reopened.state.value.songListSize == size
                     }
+                    compose.onNodeWithTag("settings-back").performClick()
                     compose.onNodeWithTag("settings-back").performClick()
                     compose.onNodeWithTag("catalog-item-60").assertIsDisplayed()
                     assertSongRowSize(60, size)

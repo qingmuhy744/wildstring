@@ -92,7 +92,9 @@ android-test-api: ## Start a disposable synthetic API for local Android regressi
 	WILDSTRING_WEB_TEST_PORT=19885 WILDSTRING_TEST_LARGE_LIBRARY=1 WILDSTRING_TEST_API_ONLY=1 $(RUN) python scripts/serve_web_tests.py
 
 android-connected-test: ## Run native UI/playback tests on a connected emulator/device
+	rm -rf frontend/android/app/build/outputs/androidTest-results/connected/debug
 	$(ANDROID) :app:connectedDebugAndroidTest $(ANDROID_TEST_ARGS)
+	$(PYTHON) scripts/check_android_test_results.py
 
 android-locks: ## Refresh Android dependency locks and SHA-256 verification metadata
 	$(ANDROID) :app:assembleDebug :app:testDebugUnitTest :app:lintDebug :app:assembleDebugAndroidTest --write-locks --write-verification-metadata sha256

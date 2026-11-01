@@ -178,8 +178,10 @@ class NativeNavigationTest {
                 compose.onNodeWithTag("nav-search").performClick()
                 compose.onAllNodesWithText(uiString(R.string.view_all)).onFirst().performClick()
                 compose.waitUntil(15_000) { vm.state.value.kind == "albums" && !vm.state.value.loading }
-                assertNull("View all must open the album root, even after a saved album detail", vm.state.value.collection)
-                assertFalse(vm.state.value.canGoBack)
+                assertNull("Recent additions must not reopen the saved album detail", vm.state.value.collection)
+                assertEquals("added_at", vm.state.value.sort)
+                assertEquals("desc", vm.state.value.order)
+                assertTrue("Recent additions retain the route back to discovery", vm.state.value.canGoBack)
                 compose.onNodeWithText("布局测试专辑 17").assertIsDisplayed()
                 val count = requests.get()
                 compose.onNodeWithContentDescription(uiString(R.string.settings_title)).performClick()

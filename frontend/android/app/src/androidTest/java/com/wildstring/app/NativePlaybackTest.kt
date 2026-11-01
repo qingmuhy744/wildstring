@@ -389,7 +389,7 @@ class NativePlaybackTest {
             for ((key, labelResource) in listOf("vinyl" to R.string.style_vinyl, "cassette" to R.string.style_cassette, "cover" to R.string.style_cover)) {
                 val label = compose.activity.getString(labelResource)
                 stage("style begin $key")
-                val playerBack = if (compose.onAllNodesWithContentDescription("返回封面").fetchSemanticsNodes().isNotEmpty()) "返回封面" else "收起播放器"
+                val playerBack = if (compose.onAllNodesWithContentDescription("返回封面").fetchSemanticsNodes().isNotEmpty()) "返回封面" else uiString(R.string.player_collapse)
                 compose.onNodeWithContentDescription(playerBack).performClick()
                 compose.waitUntil(5_000) { compose.onAllNodesWithContentDescription(uiString(R.string.settings_title)).fetchSemanticsNodes().isNotEmpty() || compose.onAllNodesWithTag("mini-player-open").fetchSemanticsNodes().isNotEmpty() || compose.onAllNodesWithTag("player-phone").fetchSemanticsNodes().isNotEmpty() }
                 if (compose.onAllNodesWithContentDescription(uiString(R.string.settings_title)).fetchSemanticsNodes().isEmpty() && compose.onAllNodesWithTag("mini-player-open").fetchSemanticsNodes().isNotEmpty()) {
@@ -399,10 +399,12 @@ class NativePlaybackTest {
                 }
                 compose.waitUntil(15_000) { compose.onAllNodesWithContentDescription(uiString(R.string.settings_title)).fetchSemanticsNodes().isNotEmpty() }
                 compose.onNodeWithContentDescription(uiString(R.string.settings_title)).performClick()
+                compose.onNodeWithTag("setting-category-appearance").performClick()
                 compose.onNodeWithTag("setting-playback-style").performScrollTo().performClick()
                 waitForDialogWindow("style choice $key")
                 compose.onNode(hasText(label) and hasAnyAncestor(isDialog()), useUnmergedTree = true).performClick()
                 waitForActivityWindow()
+                compose.onNodeWithTag("settings-back").performClick()
                 compose.onNodeWithTag("settings-back").performClick()
                 compose.onNodeWithTag("mini-player-open").performClick()
                 compose.mainClock.advanceTimeBy(250)
@@ -518,12 +520,13 @@ class NativePlaybackTest {
             stage("appearance controls begin")
             compose.runOnIdle { player.removeMediaItems(1, player.mediaItemCount) }
             // Exercise actual controls during playback and inspect both appearance options.
-            val appearanceBack = if (compose.onAllNodesWithContentDescription("返回封面").fetchSemanticsNodes().isNotEmpty()) "返回封面" else "收起播放器"
+            val appearanceBack = if (compose.onAllNodesWithContentDescription("返回封面").fetchSemanticsNodes().isNotEmpty()) "返回封面" else uiString(R.string.player_collapse)
             compose.onNodeWithContentDescription(appearanceBack).performClick()
             if (compose.onAllNodesWithContentDescription(uiString(R.string.settings_title)).fetchSemanticsNodes().isEmpty() && compose.onAllNodesWithContentDescription(uiString(R.string.player_collapse)).fetchSemanticsNodes().isNotEmpty())
                 compose.onNodeWithContentDescription(uiString(R.string.player_collapse)).performClick()
             compose.waitUntil(15_000) { compose.onAllNodesWithContentDescription(uiString(R.string.settings_title)).fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithContentDescription(uiString(R.string.settings_title)).performClick()
+            compose.onNodeWithTag("setting-category-appearance").performClick()
             compose.onNodeWithTag("setting-day-night").performScrollTo().performClick()
             waitForDialogWindow("dark choice")
             compose.onNode(hasText(compose.activity.getString(R.string.appearance_dark)) and hasAnyAncestor(isDialog())).performClick()
@@ -548,12 +551,15 @@ class NativePlaybackTest {
             waitForDialogWindow("icon choice")
             compose.onNode(hasText(compose.activity.getString(R.string.icon_red)) and hasAnyAncestor(isDialog())).performClick()
             waitForActivityWindow()
+            compose.onNodeWithTag("settings-back").performClick()
+            compose.onNodeWithTag("setting-category-storage").performClick()
             compose.onNodeWithTag("setting-audio-cache").performScrollTo().performClick()
             waitForDialogWindow("cache choice")
             compose.onNode(hasText("128 MB") and hasAnyAncestor(isDialog())).performClick()
             waitForActivityWindow()
             compose.waitUntil { vm.settings.state.value.audioMb == 128 && vm.settings.state.value.redCloth && vm.settings.state.value.redIcon }
             capture("red-cloth-settings.png")
+            compose.onNodeWithTag("settings-back").performClick()
             compose.onNodeWithTag("settings-back").performClick()
             compose.waitUntil(10_000) { compose.onAllNodesWithText(compose.activity.getString(R.string.theme_red_cloth)).fetchSemanticsNodes().isEmpty() }
             compose.onAllNodesWithText("接口测试歌曲").onLast().performClick()
