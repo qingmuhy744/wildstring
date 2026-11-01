@@ -157,7 +157,11 @@ class SettingsExperienceTest {
                 category("appearance")
                 compose.onNodeWithTag("setting-language").performScrollTo().performClick()
                 compose.onNodeWithTag("setting-option-language-zh").performClick()
-                compose.waitUntil(10_000) { fixture.language == "zh" && compose.onAllNodesWithText("外观与语言").fetchSemanticsNodes().isNotEmpty() }
+                compose.waitUntil(10_000) {
+                    fixture.language == "zh" && runCatching {
+                        compose.onAllNodesWithText("外观与语言").fetchSemanticsNodes().isNotEmpty()
+                    }.getOrDefault(false)
+                }
                 compose.onNodeWithText("语言").assertIsDisplayed()
                 compose.onNodeWithTag("settings-back").performClick()
                 compose.onNodeWithText("缓存与下载").assertIsDisplayed()
