@@ -4,10 +4,11 @@ import sqlite3
 import time
 
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
-from wildstring.auth import COOKIE, Auth, password_hash, token_hash
+from wildstring.auth import COOKIE, Auth, login_guard_key, password_hash, token_hash
 from wildstring.database import SCHEMA, SCHEMA_VERSION, Database
 from wildstring.main import create_app
 
@@ -175,3 +176,66 @@ def test_v1_database_migrates_without_losing_library(settings):
         assert connection.execute("SELECT id FROM libraries").fetchone()[0] == "existing"
         assert connection.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
     assert database.check_ready()
+
+
+@pytest.mark.parametrize("version", [42, 43, 44, 45, 46])
+def test_legacy_login_attempts_gain_timestamp_without_losing_accounts_or_blocks(settings, version):
+    database = Database(settings.data_dir)
+    database.initialize()
+    auth = Auth(database, settings)
+    auth.set_password(PASSWORD)
+    token, _ = auth.login("admin", PASSWORD)
+    blocked_until = int(time.time()) + 60
+    guard = login_guard_key("admin", "blocked-client")
+    with database.connect(write=True) as connection:
+        connection.execute("ALTER TABLE login_attempts DROP COLUMN last_attempt")
+        connection.execute("INSERT INTO login_attempts VALUES (?,?,?)", (guard, 5, blocked_until))
+        connection.execute(f"PRAGMA user_version={version}")
+
+    database.initialize()
+    with database.connect() as connection:
+        row = connection.execute("SELECT * FROM login_attempts").fetchone()
+        stamp = row["last_attempt"]
+        assert (row["guard_key"], row["failures"], row["blocked_until"]) == (
+            guard,
+            5,
+            blocked_until,
+        )
+        assert int(time.time()) - 5 <= stamp <= int(time.time())
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
+    database.initialize()
+    with database.connect() as connection:
+        assert connection.execute("SELECT last_attempt FROM login_attempts").fetchone()[0] == stamp
+
+    with TestClient(create_app(settings)) as client:
+        client.cookies.set(COOKIE, token)
+        assert client.get("/api/v1/auth/status").json()["authenticated"] is True
+        assert login(client, "incorrect-password").status_code == 401
+        assert login(client).status_code == 200
+        assert (
+            client.post(
+                "/api/v1/auth/login",
+                headers=CLIENT,
+                json={"username": "admin", "password": PASSWORD},
+            ).status_code
+            == 200
+        )
+    with pytest.raises(HTTPException) as caught:
+        auth.login("admin", PASSWORD, client_host="blocked-client")
+    assert caught.value.status_code == 429
+
+
+def test_login_timestamp_upgrade_preserves_existing_expiry(settings):
+    database = Database(settings.data_dir)
+    database.initialize()
+    with database.connect(write=True) as connection:
+        connection.execute("INSERT INTO login_attempts VALUES ('known-client',2,0,123)")
+        connection.execute("PRAGMA user_version=46")
+    database.initialize()
+    with database.connect() as connection:
+        assert tuple(connection.execute("SELECT * FROM login_attempts").fetchone()) == (
+            "known-client",
+            2,
+            0,
+            123,
+        )

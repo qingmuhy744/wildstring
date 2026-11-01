@@ -110,7 +110,7 @@ def test_schema_46_normalises_feeds_already_in_the_catalog(settings):
     assert rows["etw"]["itunes_check_status"] is None
     assert rows["known"]["itunes_check_status"] == "existing"
     with connect(settings) as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION == 46
+        assert db.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
 
 
 def test_backfill_accepts_feed_matches_only_and_is_idempotent(
