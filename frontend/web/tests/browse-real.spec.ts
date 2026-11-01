@@ -239,7 +239,7 @@ test('加载第二批歌曲后跨标签页切换小大中，保留首个完整�
     await page.evaluate((value) => {
       const key = 'wildstring:user-preferences:admin:wildstring:track-list-size';
       localStorage.setItem(key, value);
-      const event = new StorageEvent('storage');
+      const event = new Event('storage');
       Object.defineProperties(event, {
         key: { value: key },
         newValue: { value },
