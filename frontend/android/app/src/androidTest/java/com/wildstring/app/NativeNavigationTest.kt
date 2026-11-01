@@ -232,6 +232,9 @@ class NativeNavigationTest {
                 compose.waitUntil(15_000) { vm.state.value.collection == "albums" && !vm.state.value.loading }
                 compose.onNodeWithContentDescription(uiString(R.string.back_previous)).performClick()
                 compose.waitUntil(15_000) { vm.state.value.kind == "albums" && vm.state.value.collection == null && !vm.state.value.loading }
+                // Recent additions also update the album sort preference, so
+                // returning to the album root creates a new sorted viewport.
+                compose.onNodeWithTag("album-grid").performScrollToIndex(16)
                 compose.onNodeWithText("布局测试专辑 17").assertIsDisplayed()
                 compose.onNodeWithTag("catalog-tracks").performClick()
                 compose.waitUntil(15_000) { vm.state.value.tracks.isNotEmpty() }
