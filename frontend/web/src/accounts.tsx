@@ -1,10 +1,9 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api, type User } from './api';
 import { applyLanguagePreference, languagePreferences, type LanguagePreference } from './i18n';
 import { LastfmAccount } from './providers';
 import { AvatarEditor } from './avatar';
-import { DialogCloseButton } from './dialog-close';
 import type { MusicLibrary } from './music-libraries';
 import { UserLibraryAccessDialog } from './user-library-access';
 
