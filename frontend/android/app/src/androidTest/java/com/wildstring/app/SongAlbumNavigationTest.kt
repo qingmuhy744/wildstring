@@ -72,7 +72,7 @@ class SongAlbumNavigationTest {
                 compose.waitUntil(15_000) { vm.state.value.account?.id == "album-user" && !vm.state.value.loading }
                 compose.runOnIdle { vm.openArtist(Artist("guest", "客席", 1, null)); vm.kind("tracks") }
                 compose.waitUntil(10_000) { vm.state.value.tracks.size == 1 && !vm.state.value.loading }
-                compose.onNodeWithContentDescription("第一首的操作").performClick()
+                compose.onNodeWithContentDescription(uiString(R.string.track_actions_named, "第一首")).performClick()
                 compose.onNodeWithTag("song-action-离线保存").assertIsDisplayed()
                 val sheet = compose.onNodeWithTag("song-actions-sheet")
                 val sheetTop = sheet.fetchSemanticsNode().boundsInRoot.top
@@ -84,20 +84,20 @@ class SongAlbumNavigationTest {
                     compose.waitForIdle()
                     assertEquals(sheetTop, sheet.fetchSemanticsNode().boundsInRoot.top, 1f)
                 }
-                compose.onNodeWithTag("song-action-查看所属专辑").performScrollTo()
-                val labelPositions = listOf("查看所属专辑", "下一首播放", "加入播放队列").map {
+                compose.onNodeWithTag("song-action-${uiString(R.string.open_album)}").performScrollTo()
+                val labelPositions = listOf(R.string.open_album, R.string.play_next, R.string.queue_add).map { uiString(it) }.map {
                     compose.onNodeWithText(it, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot.left
                 }
                 assertTrue("Song action labels should align", labelPositions.max() - labelPositions.min() <= 1f)
                 capture("song-actions-light.png")
                 compose.runOnIdle { vm.settings.appearance("dark") }
                 capture("song-actions-dark.png")
-                compose.onNodeWithText("查看所属专辑").performClick()
+                compose.onNodeWithText(uiString(R.string.open_album)).performClick()
                 compose.waitUntil(10_000) { vm.state.value.collectionId == "exact-album" && !vm.state.value.loading }
                 assertEquals("albums", vm.state.value.collection)
                 assertNull(vm.state.value.albumFilter)
                 assertEquals(listOf("第一首", "第二首"), vm.state.value.tracks.map { it.title })
-                compose.onNodeWithContentDescription("返回上一页").performClick()
+                compose.onNodeWithContentDescription(uiString(R.string.back_previous)).performClick()
                 compose.waitUntil(10_000) { vm.state.value.collection == "artists" && !vm.state.value.loading }
                 assertEquals("guest", vm.state.value.collectionId)
                 // Older saved queue entries lack album_id. Resolve the track by ID, never by title.
@@ -129,12 +129,12 @@ class SongAlbumNavigationTest {
                 assertFalse(requests.any { it.contains("/albums/wrong-album/") })
                 // Same-album navigation still has an explicit player origin, even when the
                 // underlying catalog was already this album before expanding playback.
-                compose.onNodeWithContentDescription("返回上一页").performClick()
+                compose.onNodeWithContentDescription(uiString(R.string.back_previous)).performClick()
                 compose.waitUntil(10_000) { compose.onAllNodesWithTag("player-phone").fetchSemanticsNodes().size == 1 }
                 compose.onNodeWithTag("player-phone").assertIsDisplayed()
                 assertEquals("exact-album", vm.state.value.collectionId)
-                compose.onNodeWithContentDescription("收起播放器").performClick()
-                compose.onNodeWithContentDescription("返回上一页").performClick()
+                compose.onNodeWithContentDescription(uiString(R.string.player_collapse)).performClick()
+                compose.onNodeWithContentDescription(uiString(R.string.back_previous)).performClick()
                 compose.waitUntil(10_000) { vm.state.value.collection == "artists" && !vm.state.value.loading }
                 assertEquals("guest", vm.state.value.collectionId)
             } finally { compose.runOnIdle { vm.controller?.stop(); vm.repository.session.invalidate() } }

@@ -118,7 +118,7 @@ class NativeNavigationTest {
                 compose.onNode(isToggleable()).performScrollTo().apply {
                     if (fetchSemanticsNode().config[androidx.compose.ui.semantics.SemanticsProperties.ToggleableState] != androidx.compose.ui.state.ToggleableState.On) performClick()
                 }
-                compose.onNodeWithText("连接并登录").performScrollTo().performClick()
+                compose.onNodeWithText(uiString(R.string.connect_sign_in)).performScrollTo().performClick()
                 try {
                     compose.waitUntil(15_000) { vm.state.value.albums.size == 20 && !vm.state.value.loading }
                 } catch (error: Throwable) {
@@ -127,7 +127,9 @@ class NativeNavigationTest {
                 compose.onNodeWithTag("bottom-navigation").assertIsDisplayed()
                 compose.onNodeWithTag("nav-search").assertIsSelected()
                 compose.onNodeWithTag("discovery-albums").assertIsDisplayed()
-                compose.onNodeWithText("最近听过").assertIsDisplayed()
+                compose.onNodeWithTag("discovery-page").performScrollToNode(hasText(uiString(R.string.recently_played)))
+                compose.onNodeWithText(uiString(R.string.recently_played)).assertIsDisplayed()
+                compose.onNodeWithTag("discovery-page").performScrollToIndex(0)
                 capture("reference-phone-discovery.png")
                 compose.onNodeWithTag("catalog-global-more").performClick()
                 compose.onNodeWithTag("catalog-open-queue").assertIsDisplayed()
@@ -136,17 +138,17 @@ class NativeNavigationTest {
                 compose.onNodeWithText("刷新曲库").assertDoesNotExist()
                 capture("discovery-actions.png")
                 compose.onNodeWithTag("catalog-open-queue").performClick()
-                compose.onNodeWithText("播放队列 · ", substring = true).assertIsDisplayed()
+                compose.onNodeWithText("${uiString(R.string.play_queue)} · ", substring = true).assertIsDisplayed()
                 compose.runOnUiThread { compose.activity.onBackPressedDispatcher.onBackPressed() }
-                compose.waitUntil(5_000) { compose.onAllNodesWithText("播放队列 · ", substring = true).fetchSemanticsNodes().isEmpty() }
+                compose.waitUntil(5_000) { compose.onAllNodesWithText("${uiString(R.string.play_queue)} · ", substring = true).fetchSemanticsNodes().isEmpty() }
                 compose.onNodeWithTag("catalog-global-more").performClick()
                 compose.onNodeWithTag("catalog-open-offline").performClick()
                 compose.onNodeWithTag("feature-offline").assertIsDisplayed()
-                compose.onNodeWithContentDescription("返回").performClick()
+                compose.onNodeWithContentDescription(uiString(R.string.back)).performClick()
                 compose.onNodeWithTag("catalog-global-more").performClick()
                 compose.onNodeWithTag("catalog-open-recent").performClick()
                 compose.waitUntil(10_000) { vm.state.value.kind == "recent" && !vm.state.value.loading }
-                compose.onNodeWithContentDescription("返回上一页").performClick()
+                compose.onNodeWithContentDescription(uiString(R.string.back_previous)).performClick()
                 compose.waitUntil(10_000) { vm.state.value.kind == "discover" && !vm.state.value.loading }
                 val beforePull = connectionRequests.count { it == "/api/v1/albums" }
                 slowRefresh.set(true)
@@ -161,7 +163,7 @@ class NativeNavigationTest {
                 slowRefresh.set(false)
                 val beforeAccessibleRefresh = connectionRequests.count { it == "/api/v1/albums" }
                 val accessibleActions = compose.onNodeWithTag("catalog-refresh-area").fetchSemanticsNode().config[androidx.compose.ui.semantics.SemanticsActions.CustomActions]
-                compose.runOnIdle { assertTrue(accessibleActions.single { it.label == "刷新当前页面" }.action()) }
+                compose.runOnIdle { assertTrue(accessibleActions.single { it.label == uiString(R.string.refresh_page) }.action()) }
                 compose.waitUntil(10_000) { connectionRequests.count { it == "/api/v1/albums" } > beforeAccessibleRefresh && !vm.state.value.loading }
                 compose.onNodeWithTag("nav-library").performClick()
                 compose.waitUntil(15_000) { vm.state.value.kind == "albums" && !vm.state.value.loading }
@@ -174,20 +176,20 @@ class NativeNavigationTest {
                 compose.onNodeWithText("布局测试专辑 17").performClick()
                 compose.waitUntil(15_000) { vm.state.value.collection == "albums" && !vm.state.value.loading }
                 compose.onNodeWithTag("nav-search").performClick()
-                compose.onNodeWithText("查看全部").performClick()
+                compose.onAllNodesWithText(uiString(R.string.view_all)).onFirst().performClick()
                 compose.waitUntil(15_000) { vm.state.value.kind == "albums" && !vm.state.value.loading }
                 assertNull("View all must open the album root, even after a saved album detail", vm.state.value.collection)
                 assertFalse(vm.state.value.canGoBack)
                 compose.onNodeWithText("布局测试专辑 17").assertIsDisplayed()
                 val count = requests.get()
-                compose.onNodeWithContentDescription("设置").performClick()
+                compose.onNodeWithContentDescription(uiString(R.string.settings_title)).performClick()
                 compose.onNodeWithTag("settings-page").assertIsDisplayed()
                 compose.onNodeWithTag("bottom-navigation").assertDoesNotExist()
                 capture("native-phone-settings.png")
                 compose.onNodeWithTag("settings-back").performClick()
                 compose.onNodeWithText("布局测试专辑 17").assertIsDisplayed()
                 assertEquals(count, requests.get())
-                compose.onNodeWithContentDescription("设置").performClick()
+                compose.onNodeWithContentDescription(uiString(R.string.settings_title)).performClick()
                 // Configuration changes retain the destination, and tablets constrain the settings column.
                 shell("wm size 1600x1000"); shell("wm density 160")
                 compose.waitUntil(15_000) { compose.onNodeWithTag("settings-page").fetchSemanticsNode().size.width > 1200 }
@@ -203,7 +205,7 @@ class NativeNavigationTest {
                 compose.onNodeWithTag("album-grid").performScrollToIndex(16)
                 compose.onNodeWithTag("nav-search").performClick()
                 compose.onNodeWithTag("catalog-search").performTextInput("测试")
-                compose.onNodeWithContentDescription("清空搜索").performClick()
+                compose.onNodeWithContentDescription(uiString(R.string.clear_search)).performClick()
                 compose.onNodeWithTag("catalog-search").assert(hasText("", substring = false))
                 assertEquals("", vm.state.value.query)
                 compose.onNodeWithTag("catalog-search").performImeAction()
@@ -217,9 +219,9 @@ class NativeNavigationTest {
                 compose.waitUntil(15_000) { vm.state.value.playlists.isNotEmpty() }
                 compose.onNodeWithText("布局测试歌单").assertIsDisplayed()
                 capture("native-phone-mine.png")
-                compose.onNodeWithText("最近听过").performClick()
+                compose.onNodeWithText(uiString(R.string.recently_played)).performClick()
                 compose.waitUntil(15_000) { vm.state.value.kind == "recent" && !vm.state.value.loading }
-                compose.onNodeWithContentDescription("返回上一页").performClick()
+                compose.onNodeWithContentDescription(uiString(R.string.back_previous)).performClick()
                 compose.waitUntil(15_000) { vm.state.value.kind == "playlists" }
                 compose.onNodeWithTag("nav-library").performClick()
                 compose.onNodeWithText("布局测试专辑 17").assertIsDisplayed()
@@ -263,7 +265,7 @@ class NativeNavigationTest {
                         lastPausedPositions = positions; unchangedSince = now; false
                     } else now - unchangedSince >= 3_500
                 }
-                compose.onNodeWithContentDescription("收起播放器").performClick()
+                compose.onNodeWithContentDescription(uiString(R.string.player_collapse)).performClick()
                 compose.onNodeWithTag("mini-player").assertIsDisplayed()
                 val entry = vm.state.value.entryId
                 val position = compose.runOnIdle { vm.controller!!.currentPosition }
@@ -272,13 +274,14 @@ class NativeNavigationTest {
                 compose.onNodeWithTag("mini-player-queue").performClick()
                 compose.onNodeWithTag("playback-queue").assertIsDisplayed()
                 compose.runOnIdle { compose.activity.onBackPressedDispatcher.onBackPressed() }
-                compose.onNodeWithContentDescription("设置").performClick()
+                compose.onNodeWithContentDescription(uiString(R.string.settings_title)).performClick()
                 compose.onNodeWithTag("mini-player").assertIsDisplayed()
                 capture("reference-phone-settings-player.png")
+                compose.onNodeWithTag("setting-category-storage").performScrollTo().performClick()
                 compose.onNodeWithTag("setting-audio-cache").performScrollTo().assertIsDisplayed()
                 compose.onNodeWithTag("mini-player-open").performClick()
                 compose.onNodeWithTag("player-phone").assertIsDisplayed()
-                compose.onNodeWithContentDescription("收起播放器").performClick()
+                compose.onNodeWithContentDescription(uiString(R.string.player_collapse)).performClick()
                 compose.onNodeWithTag("settings-page").assertIsDisplayed()
                 compose.onNodeWithTag("setting-audio-cache").assertIsDisplayed()
                 assertEquals(entry, vm.state.value.entryId)
@@ -296,11 +299,12 @@ class NativeNavigationTest {
                 shell("wm size reset"); shell("wm density reset")
                 compose.waitUntil(15_000) { compose.onNodeWithTag("settings-page").fetchSemanticsNode().size.width == phoneSettingsWidth }
                 compose.onNodeWithTag("settings-back").performClick()
+                compose.onNodeWithTag("settings-back").performClick()
                 history.set(false)
                 compose.runOnIdle { vm.load() }
                 compose.waitUntil(15_000) { !vm.state.value.loading && vm.state.value.tracks.isEmpty() }
-                compose.onNodeWithTag("discovery-page").performScrollToNode(hasText("听过的歌曲会出现在这里。"))
-                compose.onNodeWithText("听过的歌曲会出现在这里。").assertIsDisplayed()
+                compose.onNodeWithTag("discovery-page").performScrollToNode(hasText(uiString(R.string.discovery_recent_empty)))
+                compose.onNodeWithText(uiString(R.string.discovery_recent_empty)).assertIsDisplayed()
                 assertTrue(vm.state.value.albums.isNotEmpty())
             } catch (failure: Throwable) {
                 runCatching { capture("native-navigation-failure.png") }

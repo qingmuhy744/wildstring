@@ -34,7 +34,8 @@ data class CatalogQuery(val tab: String = "search", val kind: String = "discover
     val key: String get() = Gson().toJson(listOf(tab, kind, query, offset, collection, collectionId, role, sort, albumFilter, order, libraryId))
 }
 data class CatalogPage(val tracks: List<Track> = emptyList(), val albums: List<Album> = emptyList(),
-    val artists: List<Artist> = emptyList(), val playlists: List<Playlist> = emptyList(), val total: Int = 0, val discs: List<DiscSummary>? = null)
+    val artists: List<Artist> = emptyList(), val playlists: List<Playlist> = emptyList(), val total: Int = 0, val discs: List<DiscSummary>? = null,
+    val addedTracks: List<Track>? = null)
 
 @Singleton
 class Repository @Inject constructor(@param:ApplicationContext private val context: Context, val session: SessionStore, val client: OkHttpClient, val database: QueueDatabase, val cache: ClientCache, val settings: AppSettings, val downloads: OfflineDownloads) {
@@ -195,9 +196,18 @@ class Repository @Inject constructor(@param:ApplicationContext private val conte
         val owner = session.cacheScope(); requireProfile(owner)
         return api().podcastCatalogPolicy(RequestOwner(owner)).also { requireProfile(owner) }
     }
-    suspend fun subscribePodcast(feedUrl: String): PodcastDetail {
+    suspend fun subscribePodcast(feedUrl: String, itunesId: String? = null): PodcastDetail {
         val owner = session.cacheScope(); requireProfile(owner)
-        return api().subscribePodcast(PodcastSubscribeRequest(feedUrl), RequestOwner(owner)).also { requireProfile(owner) }
+        return api().subscribePodcast(PodcastSubscribeRequest(feedUrl, itunesId), RequestOwner(owner)).also { requireProfile(owner) }
+    }
+    suspend fun podcastDirectory(query: String, region: String): PodcastDirectoryPage {
+        val parameters = if (query.isNotBlank()) mapOf("q" to query) else if (region.isNotEmpty()) mapOf("region" to region) else emptyMap()
+        val data = feature(if (query.isBlank()) "podcasts/discover" else "podcasts/search", query = parameters)
+        return gson.fromJson(data, PodcastDirectoryPage::class.java)
+    }
+    suspend fun previewPodcast(feedUrl: String): PodcastFeedPreview {
+        val data = feature("podcasts/preview", "POST", com.google.gson.JsonObject().apply { addProperty("feed_url", feedUrl) })
+        return gson.fromJson(data, PodcastFeedPreview::class.java)
     }
     suspend fun podcastDetail(id: String): PodcastDetail {
         val owner = session.cacheScope(); requireProfile(owner)
@@ -336,7 +346,10 @@ class Repository @Inject constructor(@param:ApplicationContext private val conte
         }
         requireProfile(owner)
         if (!response.isSuccessful) {
-            val code = response.errorBody()?.use { runCatching { gson.fromJson(it.string(), com.google.gson.JsonObject::class.java).text("detail") }.getOrDefault("") }.orEmpty()
+            val code = response.errorBody()?.use { runCatching {
+                val error = gson.fromJson(it.string(), com.google.gson.JsonObject::class.java)
+                error.objectOrNull("detail")?.text("code") ?: error.text("detail")
+            }.getOrDefault("") }.orEmpty()
             throw AgentApiException(response.code(), code, diagnosticId(response.headers()["X-Wildstring-Trace-Id"]))
         }
         return response.body() ?: com.google.gson.JsonObject()
@@ -363,10 +376,11 @@ class Repository @Inject constructor(@param:ApplicationContext private val conte
         val revision = cache.catalogRevision
         val page = when (query.kind) {
             "discover" -> coroutineScope {
-                val albums = async { api().albums("", limit = 12) }
-                val recent = async { tracks(recent = true) }
+                val albums = async { api().albums("", limit = 12, sort = "added_at", order = "desc") }
+                val added = async { tracks(sort = "added_at", order = "desc", limit = 6) }
+                val recent = async { tracks(recent = true, limit = 6) }
                 val albumPage = albums.await()
-                CatalogPage(albums = albumPage.items, tracks = recent.await().items, total = albumPage.total)
+                CatalogPage(albums = albumPage.items, tracks = recent.await().items, addedTracks = added.await().items, total = albumPage.total)
             }
             "albums" -> (if (query.collection == "artists" && query.collectionId != null) api().artistAlbums(url("api", "v1", "artists", query.collectionId, "albums"), query.query, offset = query.offset, role = query.role, sort = query.sort, order = query.order) else api().albums(query.query, offset = query.offset, sort = query.sort, order = query.order)).checked(query).let { CatalogPage(albums = it.items, total = it.total) }
             "artists" -> api().artists(query.query, offset = query.offset, role = query.role).checked(query).let { CatalogPage(artists = it.items, total = it.total) }
@@ -377,7 +391,7 @@ class Repository @Inject constructor(@param:ApplicationContext private val conte
         if (query.libraryId != selectedLibraryId) throw CancellationException("音乐库已切换。")
         if (revision != cache.catalogRevision) throw CancellationException("曲库已更新。")
         save("catalog:${query.key}", page, profile, revision)
-        page.tracks.forEach { save("track:${it.id}", it, profile, revision) }
+        (page.tracks + page.addedTracks.orEmpty()).forEach { save("track:${it.id}", it, profile, revision) }
         if (revision != cache.catalogRevision) throw CancellationException("曲库已更新。")
         return page
     }

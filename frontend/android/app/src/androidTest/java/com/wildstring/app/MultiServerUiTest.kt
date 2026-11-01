@@ -36,12 +36,13 @@ class MultiServerUiTest {
                 performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnClick) { click -> assertTrue(click()) }
             assertIsOn()
         }
-        compose.waitUntil(10000) { compose.onAllNodes(hasText("连接并登录") and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
-        compose.onNodeWithText("连接并登录").assertIsEnabled()
+        compose.waitUntil(10000) { compose.onAllNodes(hasText(uiString(R.string.connect_sign_in)) and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText(uiString(R.string.connect_sign_in)).assertIsEnabled()
             .performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnClick) { click -> assertTrue(click()) }
     }
     private fun manager() {
-        compose.onNodeWithContentDescription("设置").performClick()
+        compose.onNodeWithContentDescription(uiString(R.string.settings_title)).performClick()
+        compose.onNodeWithTag("setting-category-account").performScrollTo().performClick()
         compose.onNodeWithText(compose.activity.getString(R.string.settings_servers)).performScrollTo().performClick()
         compose.onNodeWithTag("server-manager").assertIsDisplayed()
     }
@@ -93,7 +94,7 @@ class MultiServerUiTest {
                 android.util.Log.i("MultiServerStage", "A is playing, share snapshot")
                 runBlocking { vm.sharing.publish(SharedPlayback(trackIds = listOf("same-track")), claim = true) }
                 android.util.Log.i("MultiServerStage", "open server manager")
-                compose.onNodeWithContentDescription("收起播放器").performClick()
+                compose.onNodeWithContentDescription(uiString(R.string.player_collapse)).performClick()
                 manager()
                 compose.onNodeWithTag("server-add").performClick()
                 compose.onNodeWithTag("server-name").performTextReplacement("卧室服务")
@@ -119,7 +120,8 @@ class MultiServerUiTest {
                 assertEquals("甲 的专辑", vm.state.value.albums.single().title)
                 assertTrue(vm.state.value.queue.isEmpty()); assertNull(vm.state.value.current)
                 assertEquals(1, aRequests.count { it.requestUrl!!.encodedPath.endsWith("/auth/login") })
-                compose.onNodeWithContentDescription("设置").performClick()
+                compose.onNodeWithContentDescription(uiString(R.string.settings_title)).performClick()
+        compose.onNodeWithTag("setting-category-account").performScrollTo().performClick()
                 compose.onAllNodesWithText("退出登录 / 更换服务器").assertCountEquals(0)
                 compose.onNodeWithText(compose.activity.getString(R.string.logout), substring = false).performScrollTo().performClick()
                 compose.onAllNodesWithText(compose.activity.getString(R.string.logout), substring = false).onLast().performClick()
@@ -138,7 +140,7 @@ class MultiServerUiTest {
                 compose.waitUntil(10000) { vm.repository.session.servers.value.any { it.name == "客厅服务" } }
                 assertTrue(vm.repository.session.hasSession(bId))
                 serverAction("server-delete-$aId")
-                compose.onNodeWithText("删除", substring = false).performClick()
+                compose.onNodeWithText(uiString(R.string.delete), substring = false).performClick()
                 compose.waitUntil(10000) { vm.repository.session.servers.value.none { it.id == aId } }
                 assertTrue(vm.repository.session.hasSession(bId))
                 compose.onNodeWithTag("servers-back").performClick()
@@ -154,7 +156,7 @@ class MultiServerUiTest {
                 runBlocking { runCatching { vm.repository.status() } }
                 compose.waitUntil(10000) { !vm.state.value.connected && !vm.repository.session.hasSession(bId) }
                 assertNull(vm.repository.session.read())
-                compose.onNodeWithText("连接并登录").assertExists()
+                compose.onNodeWithText(uiString(R.string.connect_sign_in)).assertExists()
             } catch (failure: Throwable) {
                 android.util.Log.e("MultiServerStage", "Failure before cleanup: connected=${vm.state.value.connected}, connecting=${vm.state.value.connecting}, error=${vm.state.value.error}; A paths=${aRequests.map { it.requestUrl!!.encodedPath }}; B paths=${bRequests.map { it.requestUrl!!.encodedPath }}", failure)
                 throw failure

@@ -71,9 +71,9 @@ class ContinuousCatalogTest {
                         json(Page(items.drop(offset).take(limit), 12, limit, offset, if (multiDisc.get()) numbers.mapIndexed { index, number -> DiscSummary(number, 6, 72000, index * 6) } else listOf(DiscSummary(1, 12, 144000, 0))))
                     }
                     path == "/api/v1/tracks" || path.matches(Regex("/api/v1/artists/[^/]+/tracks")) -> {
-                        if (failRange.get() && url.queryParameter("offset") == "150") MockResponse().setResponseCode(503) else page(songs)
+                        if (failRange.get() && url.queryParameter("offset") == "150") MockResponse().setResponseCode(503) else page(if (url.queryParameter("sort") == "added_at") songs.reversed() else songs)
                     }
-                    path == "/api/v1/albums" || path.endsWith("/albums") -> page(names.mapIndexed { index, name -> Album("album-$index", name, listOf("演唱者"), 12, null) })
+                    path == "/api/v1/albums" || path.endsWith("/albums") -> page(names.mapIndexed { index, name -> Album("album-$index", name, listOf("演唱者"), 12, null) }.let { if (url.queryParameter("sort") == "added_at") it.reversed() else it })
                     path == "/api/v1/artists" -> page(names.mapIndexed { index, name -> Artist("artist-$index", name, 257, null) })
                     path.endsWith("/stream") -> audioStreamFixture(request, audio, "audio/mpeg", "\"continuous-v1\"")
                     path.endsWith("/lyrics") -> json(Lyrics())
@@ -106,6 +106,25 @@ class ContinuousCatalogTest {
         val directory = InstrumentationRegistry.getArguments().getString("additionalTestOutputDir")?.let(::File)
             ?: checkNotNull(instrumentation.targetContext.getExternalFilesDir(null))
         directory.mkdirs(); File(directory, name).outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }; bitmap.recycle()
+    }
+
+    @Test fun discoverySeparatesNewArrivalsFromListeningHistory() {
+        MockWebServer().use { server ->
+            fixture(server); val vm = connect(server)
+            try {
+                assertEquals("album-256", vm.state.value.albums.first().id)
+                assertEquals("song-256", vm.state.value.addedTracks.first().id)
+                assertEquals("song-0", vm.state.value.tracks.first().id)
+                assertTrue(requests.any { it.startsWith("/api/v1/albums?") && it.contains("sort=added_at") && it.contains("order=desc") })
+                assertTrue(requests.any { it.startsWith("/api/v1/tracks?") && it.contains("sort=added_at") && it.contains("order=desc") })
+                assertTrue(requests.any { it.startsWith("/api/v1/tracks?") && it.contains("played_only=true") && it.contains("sort=last_played_at") })
+                compose.onNodeWithTag("discovery-page").performScrollToNode(hasTestTag("discovery-added-song-256"))
+                compose.onNodeWithTag("discovery-added-song-256").performClick()
+                compose.waitUntil(10_000) { vm.state.value.current?.id == "song-256" }
+                assertEquals((251..256).reversed().map { "song-$it" }, vm.state.value.queue.map { it.trackId })
+                capture("discovery-recently-added.png")
+            } finally { compose.runOnIdle { vm.controller?.stop(); vm.controller?.clearMediaItems(); vm.repository.session.invalidate() } }
+        }
     }
 
     @Test fun searchAndAlbumViewportKeepCountComplete() {
@@ -333,7 +352,7 @@ class ContinuousCatalogTest {
                 assertSongRowSize(60, SongListSize.MEDIUM)
                 capture("song-list-medium-scrolled.png")
                 listOf(SongListSize.SMALL, SongListSize.LARGE, SongListSize.MEDIUM).forEach { size ->
-                    compose.onNodeWithContentDescription("设置").performClick()
+                    compose.onNodeWithContentDescription(uiString(R.string.settings_title)).performClick()
                     compose.onNodeWithTag("setting-song-list-size").performScrollTo().performClick()
                     if (size == SongListSize.SMALL) capture("song-list-size-settings.png")
                     compose.onNodeWithText(compose.activity.getString(com.wildstring.app.ui.songListSizeLabel(size))).performClick()

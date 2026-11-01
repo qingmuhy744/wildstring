@@ -317,9 +317,9 @@ class NativePlaybackTest {
             }
             server.start()
             stage("login begin")
-            compose.onNodeWithText("服务器地址").performTextReplacement(server.url("/").toString())
+            compose.onNodeWithText(uiString(R.string.server_address)).performTextReplacement(server.url("/").toString())
             compose.onAllNodes(hasSetTextAction())[1].performTextReplacement("admin")
-            compose.onNodeWithText("密码", useUnmergedTree = true).assertExists()
+            compose.onNodeWithText(uiString(R.string.password), useUnmergedTree = true).assertExists()
             compose.onAllNodes(hasSetTextAction())[2].performTextInput("test-only-password")
             compose.activityRule.scenario.onActivity { activity ->
                 WindowCompat.getInsetsController(activity.window, activity.window.decorView).hide(WindowInsetsCompat.Type.ime())
@@ -330,7 +330,7 @@ class NativePlaybackTest {
                     performSemanticsAction(SemanticsActions.OnClick) { it() }
                 assertIsOn()
             }
-            compose.onNodeWithText("连接并登录").performSemanticsAction(SemanticsActions.OnClick) { it() }
+            compose.onNodeWithText(uiString(R.string.connect_sign_in)).performSemanticsAction(SemanticsActions.OnClick) { it() }
             compose.waitUntil(30_000) { compose.onAllNodesWithText("接口测试专辑").fetchSemanticsNodes().isNotEmpty() }
             stage("login complete")
             compose.onNodeWithText("接口测试专辑").performClick()
@@ -391,14 +391,14 @@ class NativePlaybackTest {
                 stage("style begin $key")
                 val playerBack = if (compose.onAllNodesWithContentDescription("返回封面").fetchSemanticsNodes().isNotEmpty()) "返回封面" else "收起播放器"
                 compose.onNodeWithContentDescription(playerBack).performClick()
-                compose.waitUntil(5_000) { compose.onAllNodesWithContentDescription("设置").fetchSemanticsNodes().isNotEmpty() || compose.onAllNodesWithTag("mini-player-open").fetchSemanticsNodes().isNotEmpty() || compose.onAllNodesWithTag("player-phone").fetchSemanticsNodes().isNotEmpty() }
-                if (compose.onAllNodesWithContentDescription("设置").fetchSemanticsNodes().isEmpty() && compose.onAllNodesWithTag("mini-player-open").fetchSemanticsNodes().isNotEmpty()) {
+                compose.waitUntil(5_000) { compose.onAllNodesWithContentDescription(uiString(R.string.settings_title)).fetchSemanticsNodes().isNotEmpty() || compose.onAllNodesWithTag("mini-player-open").fetchSemanticsNodes().isNotEmpty() || compose.onAllNodesWithTag("player-phone").fetchSemanticsNodes().isNotEmpty() }
+                if (compose.onAllNodesWithContentDescription(uiString(R.string.settings_title)).fetchSemanticsNodes().isEmpty() && compose.onAllNodesWithTag("mini-player-open").fetchSemanticsNodes().isNotEmpty()) {
                     compose.onNodeWithTag("mini-player-open").performClick()
-                } else if (compose.onAllNodesWithContentDescription("设置").fetchSemanticsNodes().isEmpty() && compose.onAllNodesWithTag("player-visual-stage").fetchSemanticsNodes().isNotEmpty()) {
+                } else if (compose.onAllNodesWithContentDescription(uiString(R.string.settings_title)).fetchSemanticsNodes().isEmpty() && compose.onAllNodesWithTag("player-visual-stage").fetchSemanticsNodes().isNotEmpty()) {
                     compose.onNodeWithTag("player-visual-stage").performTouchInput { swipeDown(startY = 120f, endY = 680f, durationMillis = 500) }
                 }
-                compose.waitUntil(15_000) { compose.onAllNodesWithContentDescription("设置").fetchSemanticsNodes().isNotEmpty() }
-                compose.onNodeWithContentDescription("设置").performClick()
+                compose.waitUntil(15_000) { compose.onAllNodesWithContentDescription(uiString(R.string.settings_title)).fetchSemanticsNodes().isNotEmpty() }
+                compose.onNodeWithContentDescription(uiString(R.string.settings_title)).performClick()
                 compose.onNodeWithTag("setting-playback-style").performScrollTo().performClick()
                 waitForDialogWindow("style choice $key")
                 compose.onNode(hasText(label) and hasAnyAncestor(isDialog()), useUnmergedTree = true).performClick()
@@ -412,7 +412,7 @@ class NativePlaybackTest {
                     runCatching { compose.onNodeWithTag("playback-visual-$key").assertIsDisplayed() }.isSuccess
                 }
                 compose.onNodeWithTag("playback-visual-$key").assertIsDisplayed()
-                compose.onNodeWithContentDescription("播放样式").assertDoesNotExist()
+                compose.onNodeWithContentDescription(uiString(R.string.settings_playback_style)).assertDoesNotExist()
                 assertEquals(key, vm.settings.state.value.playbackStyle)
                 assertEquals(styleEntry, compose.runOnIdle { player.currentMediaItem!!.mediaId })
                 assertFalse(compose.runOnIdle { player.playWhenReady })
@@ -475,10 +475,10 @@ class NativePlaybackTest {
             compose.runOnIdle { vm.notify("播放队列操作反馈") }
             compose.waitUntil(5_000) { compose.onAllNodesWithText("播放队列操作反馈").fetchSemanticsNodes().isNotEmpty() }
             val feedbackBounds = compose.onNodeWithTag("mutation-feedback").fetchSemanticsNode().boundsInRoot
-            val queueButtonBounds = compose.onNodeWithContentDescription("播放队列").fetchSemanticsNode().boundsInRoot
+            val queueButtonBounds = compose.onNodeWithContentDescription(uiString(R.string.play_queue)).fetchSemanticsNode().boundsInRoot
             assertFalse("Feedback must leave playback controls reachable", feedbackBounds.overlaps(queueButtonBounds))
             capture("phone-player-before-queue.png")
-            compose.onNodeWithContentDescription("播放队列").performClick()
+            compose.onNodeWithContentDescription(uiString(R.string.play_queue)).performClick()
             try { compose.waitUntil(10_000) { compose.onAllNodesWithTag("playback-queue").fetchSemanticsNodes().isNotEmpty() } }
             catch (failure: Throwable) {
                 runCatching { captureFailure("phone-queue-failure.png") }
@@ -500,7 +500,7 @@ class NativePlaybackTest {
                 shellForTest("wm size 1600x1000"); shellForTest("wm density 160")
                 waitForConfigurationTag("player-tablet")
                 capture("tablet-player-before-queue.png", resized = true)
-                compose.onNodeWithContentDescription("播放队列").performClick()
+                compose.onNodeWithContentDescription(uiString(R.string.play_queue)).performClick()
                 compose.waitUntil(10_000) { compose.onAllNodesWithTag("playback-queue").fetchSemanticsNodes().isNotEmpty() }
                 // wm size and wm density recreate the activity separately. Wait for the new
                 // SurfaceFlinger buffer as well as semantics before injecting coordinates.
@@ -509,7 +509,7 @@ class NativePlaybackTest {
                 compose.waitUntil(10_000) { vm.state.value.queue.first().entryId == playingEntry }
                 assertEquals(playingEntry, compose.runOnIdle { player.currentMediaItem!!.mediaId })
                 capture("tablet-queue.png", resized = true)
-                compose.onNodeWithContentDescription("播放队列").performClick()
+                compose.onNodeWithContentDescription(uiString(R.string.play_queue)).performClick()
             } catch (failure: Throwable) {
                 runCatching { captureFailure("tablet-queue-failure.png") }
                 throw failure
@@ -520,10 +520,10 @@ class NativePlaybackTest {
             // Exercise actual controls during playback and inspect both appearance options.
             val appearanceBack = if (compose.onAllNodesWithContentDescription("返回封面").fetchSemanticsNodes().isNotEmpty()) "返回封面" else "收起播放器"
             compose.onNodeWithContentDescription(appearanceBack).performClick()
-            if (compose.onAllNodesWithContentDescription("设置").fetchSemanticsNodes().isEmpty() && compose.onAllNodesWithContentDescription("收起播放器").fetchSemanticsNodes().isNotEmpty())
-                compose.onNodeWithContentDescription("收起播放器").performClick()
-            compose.waitUntil(15_000) { compose.onAllNodesWithContentDescription("设置").fetchSemanticsNodes().isNotEmpty() }
-            compose.onNodeWithContentDescription("设置").performClick()
+            if (compose.onAllNodesWithContentDescription(uiString(R.string.settings_title)).fetchSemanticsNodes().isEmpty() && compose.onAllNodesWithContentDescription(uiString(R.string.player_collapse)).fetchSemanticsNodes().isNotEmpty())
+                compose.onNodeWithContentDescription(uiString(R.string.player_collapse)).performClick()
+            compose.waitUntil(15_000) { compose.onAllNodesWithContentDescription(uiString(R.string.settings_title)).fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithContentDescription(uiString(R.string.settings_title)).performClick()
             compose.onNodeWithTag("setting-day-night").performScrollTo().performClick()
             waitForDialogWindow("dark choice")
             compose.onNode(hasText(compose.activity.getString(R.string.appearance_dark)) and hasAnyAncestor(isDialog())).performClick()

@@ -34,6 +34,11 @@ class AgentApiException(val status: Int, val code: String, val traceId: String?)
 internal fun diagnosticId(value: String?): String? = value?.takeIf { it.matches(Regex("[a-fA-F0-9]{16,64}")) }
 internal fun agentError(status: Int, code: String, traceId: String?): String {
     val description = when {
+        code == "podcast_subscriptions_disabled" -> "管理员尚未开放添加节目。"
+        code == "podcast_search_upstream_rate_limited" -> "播客目录暂时限制了请求，请稍后重试。"
+        code == "podcast_search_rate_limited" -> "探索或搜索较频繁，请稍后重试。"
+        code in listOf("podcast_search_timeout", "podcast_search_upstream_failed") -> "播客目录暂时不可用，请稍后重试。"
+        code in listOf("podcast_feed_fetch_failed", "podcast_feed_parse_failed") -> "无法读取这个节目的 RSS，请稍后重试。"
         code == "invalid_avatar" -> "请选择有效的 JPG、PNG 或 WebP 图片，分辨率不超过 2500 万像素。"
         code == "avatar_too_large" -> "头像图片超过 5 MiB，请压缩后重试。"
         code == "source_plugin_invalid_zip" -> "插件 ZIP 不符合格式，请检查包结构与 API 版本。"

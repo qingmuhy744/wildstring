@@ -119,7 +119,7 @@ class AppSettings @Inject constructor(@param:ApplicationContext private val cont
     fun haptics(enabled: Boolean) { prefs.edit().putBoolean("haptics", enabled).apply(); mutable.value = mutable.value.copy(haptics = enabled) }
     fun theme(red: Boolean) { prefs.edit().putBoolean("red_cloth", red).apply(); mutable.value = mutable.value.copy(redCloth = red) }
     fun limits(metadata: Int, artwork: Int, audio: Int) {
-        require(metadata in listOf(0, 8, 32, 64) && artwork in listOf(0, 32, 64, 128) && audio in listOf(0, 128, 256, 512, 1024))
+        require(metadata in CacheLimits.metadataMb && artwork in CacheLimits.artworkMb && audio in CacheLimits.audioMb)
         prefs.edit().putInt("metadata_mb", metadata).putInt("artwork_mb", artwork).putInt("audio_mb", audio).apply()
         mutable.value = mutable.value.copy(metadataMb = metadata, artworkMb = artwork, audioMb = audio)
     }

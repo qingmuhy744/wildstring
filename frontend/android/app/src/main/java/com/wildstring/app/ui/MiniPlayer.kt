@@ -1,5 +1,7 @@
 package com.wildstring.app.ui
 
+import com.wildstring.app.R
+import androidx.compose.ui.res.stringResource
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
@@ -161,10 +163,10 @@ import androidx.compose.ui.unit.dp
                         ),
                         modifier = Modifier.size(38.dp),
                     ) {
-                        Icon(if (state.playing) Icons.Default.Pause else Icons.Default.PlayArrow, if (state.playing) "暂停" else "播放", Modifier.size(22.dp))
+                        Icon(if (state.playing) Icons.Default.Pause else Icons.Default.PlayArrow, if (state.playing) stringResource(R.string.pause) else stringResource(R.string.play), Modifier.size(22.dp))
                     }
                     IconButton(tactile(onQueue), Modifier.testTag("mini-player-queue")) {
-                        Icon(Icons.AutoMirrored.Filled.QueueMusic, "播放队列", tint = colors.onSurfaceVariant)
+                        Icon(Icons.AutoMirrored.Filled.QueueMusic, stringResource(R.string.play_queue), tint = colors.onSurfaceVariant)
                     }
                 }
                 MiniPlayerProgress(

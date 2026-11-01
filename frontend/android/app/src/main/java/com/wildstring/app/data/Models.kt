@@ -248,7 +248,24 @@ data class PodcastCatalogPolicy(
     val version: Int = 1,
 )
 
-data class PodcastSubscribeRequest(@SerializedName("feed_url") val feedUrl: String)
+data class PodcastSubscribeRequest(@SerializedName("feed_url") val feedUrl: String,
+    @SerializedName("itunes_id") val itunesId: String? = null)
+
+data class PodcastDirectoryResult(
+    @SerializedName("itunes_id") val itunesId: String?, val title: String, val author: String,
+    @SerializedName("feed_url") val feedUrl: String, @SerializedName("artwork_url") val artworkUrl: String,
+    val genres: List<String>, val explicit: Boolean, val followed: Boolean,
+    @SerializedName("catalog_podcast_id") val catalogPodcastId: String?,
+)
+data class PodcastDirectoryPage(val results: List<PodcastDirectoryResult>, val regions: List<String>,
+    @SerializedName("failed_regions") val failedRegions: List<PodcastDirectoryFailure>,
+    @SerializedName("explicit_hidden") val explicitHidden: Int)
+data class PodcastDirectoryFailure(val region: String, val code: String)
+data class PodcastFeedPreview(val title: String, val author: String, val description: String,
+    @SerializedName("episode_count") val episodeCount: Int,
+    @SerializedName("latest_episodes") val latestEpisodes: List<PodcastPreviewEpisode>,
+    @SerializedName("catalog_podcast_id") val catalogPodcastId: String?, val followed: Boolean)
+data class PodcastPreviewEpisode(val title: String, @SerializedName("pub_date") val pubDate: String?)
 
 data class EpisodeProgress(
     @SerializedName("episode_id") val episodeId: String,

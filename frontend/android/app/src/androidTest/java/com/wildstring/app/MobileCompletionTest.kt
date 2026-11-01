@@ -270,7 +270,8 @@ class MobileCompletionTest {
     @Test fun advancedLibraryGovernanceRemainsWebOnlyOnPhone() {
         Fixture().use { fixture -> val vm = connect(fixture)
             try {
-                compose.onNodeWithContentDescription("设置").performClick()
+                compose.onNodeWithContentDescription(uiString(R.string.settings_title)).performClick()
+                compose.onNodeWithTag("setting-category-account").performScrollTo().performClick()
                 compose.onNodeWithText(compose.activity.getString(R.string.settings_group_server_admin), substring = false).performScrollTo().assertIsDisplayed()
                 compose.onNodeWithText(compose.activity.getString(R.string.settings_server_admin_hint), substring = true)
                     .performScrollTo().assertIsDisplayed()

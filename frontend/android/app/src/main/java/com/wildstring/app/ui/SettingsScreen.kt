@@ -18,6 +18,9 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
+import com.wildstring.app.data.CacheLimits
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
@@ -43,10 +46,22 @@ import kotlinx.coroutines.launch
 
 private val LocalSettingsFeedback = staticCompositionLocalOf<() -> Unit> { {} }
 
+internal enum class SettingsSection(@androidx.annotation.StringRes val title: Int, @androidx.annotation.StringRes val summary: Int, val icon: ImageVector) {
+    Account(R.string.settings_category_account, R.string.settings_account_summary, Icons.Default.AccountCircle),
+    Playback(R.string.settings_category_playback, R.string.settings_playback_summary, Icons.Default.GraphicEq),
+    Podcast(R.string.settings_category_podcast, R.string.settings_podcast_summary, Icons.Default.Podcasts),
+    Appearance(R.string.settings_category_appearance, R.string.settings_appearance_summary, Icons.Default.Palette),
+    Storage(R.string.settings_category_storage, R.string.settings_storage_summary, Icons.Default.Storage),
+    Assistant(R.string.settings_group_assistant, R.string.settings_assistant_summary, Icons.Default.AutoAwesome),
+    About(R.string.settings_group_about, R.string.settings_about_summary, Icons.Default.Info),
+}
+
 @Composable internal fun SettingsScreen(vm: MusicViewModel, bottomBar: @Composable () -> Unit = {}, back: () -> Unit) {
     val preferences by vm.settings.state.collectAsStateWithLifecycle()
     val state by vm.state.collectAsStateWithLifecycle()
     val settingsOwner = vm.repository.session.cacheScope()
+    var section by rememberSaveable(settingsOwner) { mutableStateOf<SettingsSection?>(null) }
+    val pages = rememberSaveableStateHolder()
     val scope = rememberCoroutineScope()
     val feedback = LocalTactileFeedback.current
     var usage by remember(settingsOwner) { mutableStateOf(Triple(0L, 0L, 0L)) }
@@ -56,14 +71,16 @@ private val LocalSettingsFeedback = staticCompositionLocalOf<() -> Unit> { {} }
     var password by remember(settingsOwner) { mutableStateOf(false) }
     var servers by remember(settingsOwner) { mutableStateOf(false) }
     var logout by remember(settingsOwner) { mutableStateOf(false) }
-    var assistant by remember(settingsOwner) { mutableStateOf(false) }
     var diagnostics by remember(settingsOwner) { mutableStateOf(false) }
     var feature by remember(settingsOwner) { mutableStateOf<String?>(null) }
     var podcastPlayback by remember(settingsOwner) { mutableStateOf<com.wildstring.app.data.PodcastPlaybackSettings?>(null) }
     var savingPodcastPlayback by remember(settingsOwner) { mutableStateOf(false) }
     val inbox by vm.agent.inbox.collectAsStateWithLifecycle()
-    LaunchedEffect(preferences, clearing, assistant, feature, servers, state.current?.id) { usage = vm.cacheUsage() }
-    LaunchedEffect(settingsOwner) {
+    LaunchedEffect(section, preferences, clearing, feature, state.current?.id) {
+        if (section == SettingsSection.Storage) usage = vm.cacheUsage()
+    }
+    LaunchedEffect(settingsOwner, section) {
+        if (section != SettingsSection.Podcast) return@LaunchedEffect
         try {
             val loaded = vm.repository.podcastPlaybackSettings()
             if (settingsOwner == vm.repository.session.cacheScope()) podcastPlayback = loaded
@@ -73,163 +90,199 @@ private val LocalSettingsFeedback = staticCompositionLocalOf<() -> Unit> { {} }
     fun mb(bytes: Long) = "%.1f MB".format(bytes / 1048576.0)
     val resources = LocalResources.current
     CompositionLocalProvider(LocalSettingsFeedback provides tactile {}) {
-        SettingsPage(back, bottomBar) {
-            SettingsGroup(stringResource(R.string.settings_group_account)) {
-                val acc = state.account
-                val role = acc?.let { stringResource(roleLabel(it.profile)) }
-                val header = if (acc != null) {
-                    if (!acc.displayName.isNullOrBlank()) "${acc.displayName} (${acc.username}) · $role"
-                    else "${acc.username} · $role"
-                } else stringResource(R.string.settings_connected)
-                ListItem(headlineContent = { Text(header) },
-                    supportingContent = { Text(state.server) }, leadingContent = { Icon(Icons.Default.AccountCircle, null) })
-                SettingsAction(stringResource(R.string.settings_servers), Icons.Default.Dns) { servers = true }
-                if (state.account != null) SettingsAction(stringResource(R.string.settings_profile), Icons.Default.Badge) { profile = true }
-                if (state.account != null) AvatarSettings(vm)
-                if (state.account != null) SettingsAction(stringResource(R.string.settings_change_password), Icons.Default.Lock) { password = true }
-            }
-            SettingsGroup("Last.fm") { LastfmSettings(vm) }
-            SettingsGroup(stringResource(R.string.settings_group_assistant)) {
-                SettingsAction(stringResource(R.string.settings_assistant), Icons.Default.AutoAwesome) { assistant = true }
-                Text(if (inbox.owner == vm.repository.session.cacheScope() && inbox.unread > 0) stringResource(R.string.settings_unread, inbox.unread) else stringResource(R.string.settings_assistant_hint),
-                    Modifier.padding(start = 16.dp, end = 16.dp, bottom = 16.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                SettingsAction(stringResource(R.string.settings_research), Icons.Default.TravelExplore) { feature = "research" }
-                SettingsAction(stringResource(R.string.settings_notifications), Icons.Default.Notifications) { feature = "channels" }
-            }
-            if (state.account?.isOwner == true) SettingsGroup(stringResource(R.string.settings_group_server_admin)) {
-                Text(
-                    stringResource(R.string.settings_server_admin_hint),
-                    Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            SettingsGroup(stringResource(R.string.settings_group_playback)) {
-                val qualityLabel: (Int) -> String = { rate -> if (rate == 0) resources.getString(R.string.quality_original) else resources.getString(R.string.quality_aac, rate) }
-                SettingsChoice(stringResource(R.string.settings_quality), qualityLabel(preferences.aacBitrate), Icons.Default.GraphicEq,
-                    com.wildstring.app.data.PlaybackRequest.bitrates.map { it to qualityLabel(it) }, preferences.aacBitrate,
-                    stringResource(R.string.settings_quality_hint), vm.settings::quality, tag = "quality")
-                SettingsChoice(stringResource(R.string.settings_lyric_follow), stringResource(R.string.seconds_value, preferences.lyricFollowSeconds), Icons.Default.Lyrics,
-                    listOf(1, 2, 3, 5, 10).map { it to resources.getString(R.string.seconds_value, it) }, preferences.lyricFollowSeconds,
-                    stringResource(R.string.settings_lyric_follow_hint), vm.settings::lyricFollowSeconds)
-                SettingsChoice(stringResource(R.string.settings_lyric_size), stringResource(lyricSizeLabel(preferences.lyricSize)), Icons.Default.FormatSize,
-                    com.wildstring.app.data.LyricSize.entries.map { it to resources.getString(lyricSizeLabel(it)) }, preferences.lyricSize,
-                    stringResource(R.string.settings_lyric_size_hint), vm.settings::lyricSize)
-                SettingsAction(stringResource(R.string.settings_diagnostics), Icons.Default.Troubleshoot, subtitle = stringResource(R.string.settings_diagnostics_hint)) { diagnostics = true }
-            }
-            SettingsGroup(stringResource(R.string.settings_group_handoff)) {
-                val syncMode by vm.sharing.mode.collectAsStateWithLifecycle()
-                val syncSubtitle = stringResource(when (syncMode) {
-                    "off" -> R.string.handoff_off
-                    "auto" -> R.string.handoff_auto
-                    else -> R.string.handoff_hint
-                })
-                SettingsAction(stringResource(R.string.settings_music_handoff), Icons.Default.Devices, subtitle = syncSubtitle) { feature = "devices" }
-                val podcastMode by vm.podcastProgress.mode.collectAsStateWithLifecycle()
-                SettingsChoice(stringResource(R.string.settings_podcast_resume), stringResource(when(podcastMode) { "auto" -> R.string.podcast_resume_auto_value; "restart" -> R.string.podcast_resume_restart_value; else -> R.string.podcast_resume_ask_value }), Icons.Default.Podcasts,
-                    listOf("ask" to stringResource(R.string.podcast_resume_ask), "auto" to stringResource(R.string.podcast_resume_auto), "restart" to stringResource(R.string.podcast_resume_restart)), podcastMode,
-                    stringResource(R.string.podcast_resume_hint), vm.podcastProgress::mode)
-            }
-            podcastPlayback?.let { playback ->
-                SettingsGroup(stringResource(R.string.settings_group_podcast_cache)) {
-                    val savePodcastPlayback: (com.wildstring.app.data.PodcastPlaybackSettings) -> Unit = save@{ next ->
-                        if (savingPodcastPlayback || settingsOwner != vm.repository.session.cacheScope()) return@save
-                        podcastPlayback = next; savingPodcastPlayback = true
-                        scope.launch {
-                            try {
-                                val saved = vm.repository.updatePodcastPlaybackSettings(next, settingsOwner)
-                                if (settingsOwner == vm.repository.session.cacheScope()) {
-                                    podcastPlayback = saved; message = resources.getString(R.string.podcast_cache_saved)
-                                }
-                            } catch (e: kotlinx.coroutines.CancellationException) { throw e }
-                            catch (_: Exception) {
-                                if (settingsOwner == vm.repository.session.cacheScope()) {
-                                    podcastPlayback = playback; message = resources.getString(R.string.podcast_cache_failed)
-                                }
-                            } finally { if (settingsOwner == vm.repository.session.cacheScope()) savingPodcastPlayback = false }
+        pages.SaveableStateProvider("$settingsOwner:${section?.name ?: "home"}") {
+            SettingsPage(back = { if (section == null) back() else { section = null; message = null } }, bottomBar = bottomBar,
+                title = stringResource(section?.title ?: R.string.settings_title)) {
+            when (section) {
+                null -> Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surface) {
+                    Column {
+                        SettingsSection.entries.forEach { item ->
+                            SettingsAction(stringResource(item.title), item.icon,
+                                subtitle = if (item == SettingsSection.Account) state.account?.let {
+                                    "${it.displayName?.takeIf(String::isNotBlank) ?: it.username} · ${stringResource(roleLabel(it.profile))}"
+                                } ?: stringResource(item.summary) else stringResource(item.summary),
+                                tag = "category-${item.name.lowercase()}") { section = item }
                         }
                     }
-                    ListItem(
-                        headlineContent = { Text(stringResource(R.string.podcast_cache_current)) },
-                        supportingContent = { Text(stringResource(R.string.podcast_cache_current_hint)) },
-                        leadingContent = { Icon(Icons.Default.Podcasts, null) },
-                        trailingContent = { Switch(playback.autoCacheCurrent, { enabled -> savePodcastPlayback(playback.copy(autoCacheCurrent = enabled)) }, enabled = !savingPodcastPlayback) },
-                    )
-                    ListItem(
-                        headlineContent = { Text(stringResource(R.string.podcast_prefetch)) },
-                        supportingContent = { Text(stringResource(R.string.podcast_prefetch_hint)) },
-                        leadingContent = { Icon(Icons.Default.SkipNext, null) },
-                        trailingContent = { Switch(playback.prefetchNext, { enabled -> savePodcastPlayback(playback.copy(prefetchNext = enabled)) }, enabled = !savingPodcastPlayback) },
-                    )
-                    SettingsChoice(
-                        stringResource(R.string.podcast_cache_network),
-                        stringResource(when (playback.networkPolicy) { "off" -> R.string.network_off; "any" -> R.string.network_any; else -> R.string.network_wifi }),
-                        Icons.Default.NetworkCheck,
-                        listOf("off" to stringResource(R.string.network_off), "wifi" to stringResource(R.string.network_wifi_recommended), "any" to stringResource(R.string.network_any)),
-                        playback.networkPolicy,
-                        stringResource(R.string.podcast_cache_network_hint),
-                        change = { policy -> savePodcastPlayback(playback.copy(networkPolicy = policy)) },
-                    )
                 }
-            }
-            SettingsGroup(stringResource(R.string.settings_group_appearance)) {
-                state.account?.let { account -> LanguageChoice(vm, account.language) { message = it } }
-                Text(
-                    stringResource(R.string.settings_appearance_note),
-                    Modifier.padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 4.dp),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                SettingsSection.Account -> {
+                    SettingsGroup(stringResource(R.string.settings_group_account)) {
+                        val acc = state.account
+                        val role = acc?.let { stringResource(roleLabel(it.profile)) }
+                        val header = if (acc != null) {
+                            if (!acc.displayName.isNullOrBlank()) "${acc.displayName} (${acc.username}) · $role"
+                            else "${acc.username} · $role"
+                        } else stringResource(R.string.settings_connected)
+                        ListItem(headlineContent = { Text(header) },
+                            supportingContent = { Text(state.server) }, leadingContent = { Icon(Icons.Default.AccountCircle, null) })
+                        SettingsAction(stringResource(R.string.settings_servers), Icons.Default.Dns) { servers = true }
+                        if (state.account != null) SettingsAction(stringResource(R.string.settings_profile), Icons.Default.Badge) { profile = true }
+                        if (state.account != null) AvatarSettings(vm)
+                        if (state.account != null) SettingsAction(stringResource(R.string.settings_change_password), Icons.Default.Lock) { password = true }
+                        SettingsAction(stringResource(R.string.logout), Icons.AutoMirrored.Filled.Logout) { logout = true }
+                    }
+                    SettingsGroup("Last.fm") { LastfmSettings(vm) }
+                    if (state.account?.isOwner == true) SettingsGroup(stringResource(R.string.settings_group_server_admin)) {
+                        Text(
+                            stringResource(R.string.settings_server_admin_hint),
+                            Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+                SettingsSection.Playback -> {
+                    SettingsGroup(stringResource(R.string.settings_group_playback)) {
+                        val qualityLabel: (Int) -> String = { rate -> if (rate == 0) resources.getString(R.string.quality_original) else resources.getString(R.string.quality_aac, rate) }
+                        SettingsChoice(stringResource(R.string.settings_quality), qualityLabel(preferences.aacBitrate), Icons.Default.GraphicEq,
+                            com.wildstring.app.data.PlaybackRequest.bitrates.map { it to qualityLabel(it) }, preferences.aacBitrate,
+                            stringResource(R.string.settings_quality_hint), vm.settings::quality, tag = "quality")
+                        SettingsChoice(stringResource(R.string.settings_lyric_follow), stringResource(R.string.seconds_value, preferences.lyricFollowSeconds), Icons.Default.Lyrics,
+                            listOf(1, 2, 3, 5, 10).map { it to resources.getString(R.string.seconds_value, it) }, preferences.lyricFollowSeconds,
+                            stringResource(R.string.settings_lyric_follow_hint), vm.settings::lyricFollowSeconds)
+                        SettingsChoice(stringResource(R.string.settings_lyric_size), stringResource(lyricSizeLabel(preferences.lyricSize)), Icons.Default.FormatSize,
+                            com.wildstring.app.data.LyricSize.entries.map { it to resources.getString(lyricSizeLabel(it)) }, preferences.lyricSize,
+                            stringResource(R.string.settings_lyric_size_hint), vm.settings::lyricSize)
+                        SettingsAction(stringResource(R.string.settings_diagnostics), Icons.Default.Troubleshoot, subtitle = stringResource(R.string.settings_diagnostics_hint)) { diagnostics = true }
+                    }
+                    SettingsGroup(stringResource(R.string.settings_group_handoff)) {
+                        val syncMode by vm.sharing.mode.collectAsStateWithLifecycle()
+                        val syncSubtitle = stringResource(when (syncMode) {
+                            "off" -> R.string.handoff_off
+                            "auto" -> R.string.handoff_auto
+                            else -> R.string.handoff_hint
+                        })
+                        SettingsAction(stringResource(R.string.settings_music_handoff), Icons.Default.Devices, subtitle = syncSubtitle) { feature = "devices" }
+                    }
+                }
+                SettingsSection.Podcast -> {
+                    SettingsGroup(stringResource(R.string.settings_podcast_resume)) {
+                        val podcastMode by vm.podcastProgress.mode.collectAsStateWithLifecycle()
+                        SettingsChoice(stringResource(R.string.settings_podcast_resume), stringResource(when(podcastMode) { "auto" -> R.string.podcast_resume_auto_value; "restart" -> R.string.podcast_resume_restart_value; else -> R.string.podcast_resume_ask_value }), Icons.Default.Podcasts,
+                            listOf("ask" to stringResource(R.string.podcast_resume_ask), "auto" to stringResource(R.string.podcast_resume_auto), "restart" to stringResource(R.string.podcast_resume_restart)), podcastMode,
+                            stringResource(R.string.podcast_resume_hint), vm.podcastProgress::mode)
+                    }
+                    podcastPlayback?.let { playback ->
+                        SettingsGroup(stringResource(R.string.settings_group_podcast_cache)) {
+                            val savePodcastPlayback: (com.wildstring.app.data.PodcastPlaybackSettings) -> Unit = save@{ next ->
+                                if (savingPodcastPlayback || settingsOwner != vm.repository.session.cacheScope()) return@save
+                                podcastPlayback = next; savingPodcastPlayback = true
+                                scope.launch {
+                                    try {
+                                        val saved = vm.repository.updatePodcastPlaybackSettings(next, settingsOwner)
+                                        if (settingsOwner == vm.repository.session.cacheScope()) {
+                                            podcastPlayback = saved; message = resources.getString(R.string.podcast_cache_saved)
+                                        }
+                                    } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+                                    catch (_: Exception) {
+                                        if (settingsOwner == vm.repository.session.cacheScope()) {
+                                            podcastPlayback = playback; message = resources.getString(R.string.podcast_cache_failed)
+                                        }
+                                    } finally { if (settingsOwner == vm.repository.session.cacheScope()) savingPodcastPlayback = false }
+                                }
+                            }
+                            ListItem(
+                                headlineContent = { Text(stringResource(R.string.podcast_cache_current)) },
+                                supportingContent = { Text(stringResource(R.string.podcast_cache_current_hint)) },
+                                leadingContent = { Icon(Icons.Default.Podcasts, null) },
+                                trailingContent = { Switch(playback.autoCacheCurrent, { enabled -> savePodcastPlayback(playback.copy(autoCacheCurrent = enabled)) }, enabled = !savingPodcastPlayback) },
+                            )
+                            ListItem(
+                                headlineContent = { Text(stringResource(R.string.podcast_prefetch)) },
+                                supportingContent = { Text(stringResource(R.string.podcast_prefetch_hint)) },
+                                leadingContent = { Icon(Icons.Default.SkipNext, null) },
+                                trailingContent = { Switch(playback.prefetchNext, { enabled -> savePodcastPlayback(playback.copy(prefetchNext = enabled)) }, enabled = !savingPodcastPlayback) },
+                            )
+                            SettingsChoice(
+                                stringResource(R.string.podcast_cache_network),
+                                stringResource(when (playback.networkPolicy) { "off" -> R.string.network_off; "any" -> R.string.network_any; else -> R.string.network_wifi }),
+                                Icons.Default.NetworkCheck,
+                                listOf("off" to stringResource(R.string.network_off), "wifi" to stringResource(R.string.network_wifi_recommended), "any" to stringResource(R.string.network_any)),
+                                playback.networkPolicy,
+                                stringResource(R.string.podcast_cache_network_hint),
+                                change = { policy -> savePodcastPlayback(playback.copy(networkPolicy = policy)) },
+                            )
+                        }
+                    }
+                }
+                SettingsSection.Appearance -> {
+                    SettingsGroup(stringResource(R.string.settings_group_appearance)) {
+                        state.account?.let { account -> LanguageChoice(vm, account.language) { message = it } }
+                        Text(
+                            stringResource(R.string.settings_appearance_note),
+                            Modifier.padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 4.dp),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
 
-                SettingsChoice(stringResource(R.string.settings_song_list_size), stringResource(songListSizeLabel(preferences.songListSize)), Icons.Default.FormatSize,
-                    com.wildstring.app.data.SongListSize.entries.map { it to resources.getString(songListSizeLabel(it)) }, preferences.songListSize,
-                    stringResource(R.string.settings_song_list_size_hint), vm.settings::songListSize, tag = "song-list-size")
-                val styles = playbackStyles.map { (id, _) -> id to resources.getString(playbackStyleLabel(id)) }
-                SettingsChoice(stringResource(R.string.settings_playback_style), styles.first { it.first == preferences.playbackStyle }.second, Icons.Default.Style,
-                    styles, preferences.playbackStyle, change = vm.settings::playbackStyle, tag = "playback-style")
-                SettingsChoice(stringResource(R.string.settings_theme), stringResource(if (preferences.redCloth) R.string.theme_red_cloth else R.string.theme_classic), Icons.Default.Palette,
-                    listOf(false to stringResource(R.string.theme_classic), true to stringResource(R.string.theme_red_cloth)), preferences.redCloth, change = { vm.settings.theme(it) }, tag = "theme")
-                if (!preferences.redCloth) SettingsChoice(stringResource(R.string.settings_day_night), stringResource(when (preferences.appearance) { "light" -> R.string.appearance_light; "dark" -> R.string.appearance_dark; else -> R.string.appearance_system }), Icons.Default.BrightnessAuto,
-                    listOf("system" to stringResource(R.string.appearance_system), "light" to stringResource(R.string.appearance_light), "dark" to stringResource(R.string.appearance_dark)), preferences.appearance, change = vm.settings::appearance, tag = "day-night")
-                SettingsChoice(stringResource(R.string.settings_icon), stringResource(if (preferences.redIcon) R.string.icon_red else R.string.icon_classic), Icons.Default.Apps,
-                    listOf(false to stringResource(R.string.icon_classic), true to stringResource(R.string.icon_red)), preferences.redIcon, stringResource(R.string.settings_icon_hint), change = {
-                        runCatching { vm.settings.icon(it) }.onFailure { message = resources.getString(R.string.settings_icon_failed) }
-                    }, tag = "app-icon")
-                SettingsChoice(stringResource(R.string.settings_orientation), stringResource(when (preferences.orientation) { "portrait" -> R.string.orientation_portrait; "sensor" -> R.string.orientation_sensor; else -> R.string.orientation_auto }), Icons.Default.ScreenRotation,
-                    listOf("auto" to stringResource(R.string.orientation_auto_option), "portrait" to stringResource(R.string.orientation_portrait), "sensor" to stringResource(R.string.orientation_sensor_option)), preferences.orientation,
-                    stringResource(R.string.settings_orientation_hint), change = vm.settings::orientation)
-                ListItem(headlineContent = { Text(stringResource(R.string.settings_haptics)) }, supportingContent = { Text(stringResource(R.string.settings_haptics_hint)) },
-                    leadingContent = { Icon(Icons.Default.Vibration, null) },
-                    trailingContent = { Switch(preferences.haptics, { enabled -> vm.settings.haptics(enabled); if (enabled) feedback(TactileKind.Tap) }) },
-                    modifier = Modifier.clickable {
-                        val enabled = !preferences.haptics
-                        vm.settings.haptics(enabled)
-                        if (enabled) feedback(TactileKind.Tap)
-                    })
-            }
-            SettingsGroup(stringResource(R.string.settings_group_cache)) {
-                CacheLimit(stringResource(R.string.cache_metadata), usage.first, preferences.metadataMb, listOf(0, 8, 32, 64)) { vm.settings.limits(it, preferences.artworkMb, preferences.audioMb) }
-                CacheLimit(stringResource(R.string.cache_artwork), usage.second, preferences.artworkMb, listOf(0, 32, 64, 128)) { vm.settings.limits(preferences.metadataMb, it, preferences.audioMb) }
-                CacheLimit(stringResource(R.string.cache_audio), usage.third, preferences.audioMb, listOf(0, 128, 256, 512, 1024), tag = "audio-cache") { vm.settings.limits(preferences.metadataMb, preferences.artworkMb, it) }
-                SettingsAction(stringResource(if (clearing) R.string.cache_clearing else R.string.cache_clear), Icons.Default.DeleteOutline, enabled = !clearing) {
-                    clearing = true
-                    scope.launch { vm.clearCache().join(); clearing = false; message = resources.getString(R.string.cache_cleared) }
+                        SettingsChoice(stringResource(R.string.settings_song_list_size), stringResource(songListSizeLabel(preferences.songListSize)), Icons.Default.FormatSize,
+                            com.wildstring.app.data.SongListSize.entries.map { it to resources.getString(songListSizeLabel(it)) }, preferences.songListSize,
+                            stringResource(R.string.settings_song_list_size_hint), vm.settings::songListSize, tag = "song-list-size")
+                        val styles = playbackStyles.map { (id, _) -> id to resources.getString(playbackStyleLabel(id)) }
+                        SettingsChoice(stringResource(R.string.settings_playback_style), styles.first { it.first == preferences.playbackStyle }.second, Icons.Default.Style,
+                            styles, preferences.playbackStyle, change = vm.settings::playbackStyle, tag = "playback-style")
+                        SettingsChoice(stringResource(R.string.settings_theme), stringResource(if (preferences.redCloth) R.string.theme_red_cloth else R.string.theme_classic), Icons.Default.Palette,
+                            listOf(false to stringResource(R.string.theme_classic), true to stringResource(R.string.theme_red_cloth)), preferences.redCloth, change = { vm.settings.theme(it) }, tag = "theme")
+                        if (!preferences.redCloth) SettingsChoice(stringResource(R.string.settings_day_night), stringResource(when (preferences.appearance) { "light" -> R.string.appearance_light; "dark" -> R.string.appearance_dark; else -> R.string.appearance_system }), Icons.Default.BrightnessAuto,
+                            listOf("system" to stringResource(R.string.appearance_system), "light" to stringResource(R.string.appearance_light), "dark" to stringResource(R.string.appearance_dark)), preferences.appearance, change = vm.settings::appearance, tag = "day-night")
+                        SettingsChoice(stringResource(R.string.settings_icon), stringResource(if (preferences.redIcon) R.string.icon_red else R.string.icon_classic), Icons.Default.Apps,
+                            listOf(false to stringResource(R.string.icon_classic), true to stringResource(R.string.icon_red)), preferences.redIcon, stringResource(R.string.settings_icon_hint), change = {
+                                runCatching { vm.settings.icon(it) }.onFailure { message = resources.getString(R.string.settings_icon_failed) }
+                            }, tag = "app-icon")
+                        SettingsChoice(stringResource(R.string.settings_orientation), stringResource(when (preferences.orientation) { "portrait" -> R.string.orientation_portrait; "sensor" -> R.string.orientation_sensor; else -> R.string.orientation_auto }), Icons.Default.ScreenRotation,
+                            listOf("auto" to stringResource(R.string.orientation_auto_option), "portrait" to stringResource(R.string.orientation_portrait), "sensor" to stringResource(R.string.orientation_sensor_option)), preferences.orientation,
+                            stringResource(R.string.settings_orientation_hint), change = vm.settings::orientation)
+                        ListItem(headlineContent = { Text(stringResource(R.string.settings_haptics)) }, supportingContent = { Text(stringResource(R.string.settings_haptics_hint)) },
+                            leadingContent = { Icon(Icons.Default.Vibration, null) },
+                            trailingContent = { Switch(preferences.haptics, { enabled -> vm.settings.haptics(enabled); if (enabled) feedback(TactileKind.Tap) }) },
+                            modifier = Modifier.clickable {
+                                val enabled = !preferences.haptics
+                                vm.settings.haptics(enabled)
+                                if (enabled) feedback(TactileKind.Tap)
+                            })
+                    }
                 }
-                Text(stringResource(R.string.cache_summary, mb(usage.first + usage.second + usage.third)),
-                    Modifier.padding(start = 16.dp, end = 16.dp, bottom = 16.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                SettingsSection.Storage -> {
+                    SettingsGroup(stringResource(R.string.settings_group_cache)) {
+                        CacheLimit(stringResource(R.string.cache_metadata), usage.first, preferences.metadataMb, CacheLimits.metadataMb) { vm.settings.limits(it, preferences.artworkMb, preferences.audioMb) }
+                        CacheLimit(stringResource(R.string.cache_artwork), usage.second, preferences.artworkMb, CacheLimits.artworkMb) { vm.settings.limits(preferences.metadataMb, it, preferences.audioMb) }
+                        CacheLimit(stringResource(R.string.cache_audio), usage.third, preferences.audioMb, CacheLimits.audioMb, tag = "audio-cache") { vm.settings.limits(preferences.metadataMb, preferences.artworkMb, it) }
+                        SettingsAction(stringResource(if (clearing) R.string.cache_clearing else R.string.cache_clear), Icons.Default.DeleteOutline, enabled = !clearing) {
+                            clearing = true
+                            scope.launch { vm.clearCache().join(); clearing = false; message = resources.getString(R.string.cache_cleared) }
+                        }
+                        Text(stringResource(R.string.cache_summary, mb(usage.first + usage.second + usage.third)),
+                            Modifier.padding(start = 16.dp, end = 16.dp, bottom = 16.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    SettingsGroup(stringResource(R.string.settings_downloads)) {
+                        SettingsAction(stringResource(R.string.offline_music), Icons.Default.Download,
+                            subtitle = stringResource(R.string.settings_downloads_summary), tag = "downloads") { feature = "offline" }
+                    }
+                }
+                SettingsSection.Assistant -> {
+                    SettingsGroup(stringResource(R.string.settings_group_assistant)) {
+                        SettingsAction(stringResource(R.string.notifications), Icons.Default.Notifications,
+                            tag = "inbox") { feature = "notifications" }
+                        Text(if (inbox.owner == vm.repository.session.cacheScope() && inbox.unread > 0) stringResource(R.string.settings_unread, inbox.unread) else stringResource(R.string.settings_assistant_hint),
+                            Modifier.padding(start = 16.dp, end = 16.dp, bottom = 16.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        SettingsAction(stringResource(R.string.settings_research), Icons.Default.TravelExplore) { feature = "research" }
+                        SettingsAction(stringResource(R.string.settings_notifications), Icons.Default.Notifications) { feature = "channels" }
+                    }
+                }
+                SettingsSection.About -> {
+                    SettingsGroup(stringResource(R.string.settings_group_about)) {
+                        com.wildstring.app.update.UpdateSettings()
+                        ListItem(headlineContent = { Text(stringResource(R.string.brand_name)) }, supportingContent = { Text(stringResource(R.string.about_version, BuildConfig.VERSION_NAME) + (state.serverVersion?.let { stringResource(R.string.about_server_version, it) } ?: "")) },
+                            leadingContent = { Icon(painterResource(R.drawable.ic_wildstring), null, Modifier.size(36.dp), tint = Color.Unspecified) })
+                    }
+                }
             }
             message?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
-            SettingsGroup(stringResource(R.string.settings_group_about)) {
-                com.wildstring.app.update.UpdateSettings()
-                ListItem(headlineContent = { Text(stringResource(R.string.brand_name)) }, supportingContent = { Text(stringResource(R.string.about_version, BuildConfig.VERSION_NAME) + (state.serverVersion?.let { stringResource(R.string.about_server_version, it) } ?: "")) },
-                    leadingContent = { Icon(painterResource(R.drawable.ic_wildstring), null, Modifier.size(36.dp), tint = Color.Unspecified) })
-                SettingsAction(stringResource(R.string.logout), Icons.AutoMirrored.Filled.Logout) { logout = true }
-            }
             Spacer(Modifier.height(8.dp))
+            }
         }
     }
     if (servers) ServersScreen(vm) { servers = false }
-    if (assistant) FeatureDialog(vm, "assistant") { assistant = false }
     if (diagnostics) PlaybackDiagnosticsDialog(vm) { diagnostics = false }
     feature?.let { route -> FeatureDialog(vm, route) { feature = null } }
     if (logout) AlertDialog(onDismissRequest = { logout = false }, title = { Text(stringResource(R.string.logout_title)) }, text = { Text(stringResource(R.string.logout_message)) }, confirmButton = { TextButton({ logout = false; back(); vm.logout() }) { Text(stringResource(R.string.logout)) } }, dismissButton = { TextButton({ logout = false }) { Text(stringResource(R.string.cancel)) } })
@@ -258,15 +311,15 @@ private val LocalSettingsFeedback = staticCompositionLocalOf<() -> Unit> { {} }
 
 @Composable private fun <T> SettingsChoice(title: String, value: String, icon: ImageVector, choices: List<Pair<T, String>>, selected: T,
     description: String? = null, change: (T) -> Unit, tag: String = title) {
-    var open by remember { mutableStateOf(false) }
+    var open by rememberSaveable { mutableStateOf(false) }
     val feedback = LocalSettingsFeedback.current
     ListItem(headlineContent = { Text(title) }, supportingContent = { Text(value) }, leadingContent = { Icon(icon, null) },
         trailingContent = { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null) }, modifier = Modifier.testTag("setting-$tag").clickable { open = true })
     if (open) AlertDialog(onDismissRequest = { open = false }, title = { Text(title) }, text = {
-        Column(Modifier.heightIn(max = 480.dp).verticalScroll(rememberScrollState())) {
+        Column(Modifier.heightIn(max = 480.dp).verticalScroll(rememberScrollState()).testTag("setting-choices-$tag")) {
             description?.let { Text(it, Modifier.padding(bottom = 12.dp), style = MaterialTheme.typography.bodySmall) }
             choices.forEach { (id, label) ->
-                Row(Modifier.fillMaxWidth().selectable(selected == id, role = Role.RadioButton, onClick = { feedback(); change(id); open = false })
+                Row(Modifier.fillMaxWidth().testTag("setting-option-$tag-$id").selectable(selected == id, role = Role.RadioButton, onClick = { feedback(); change(id); open = false })
                     .padding(vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
                     RadioButton(selected == id, onClick = null)
                     Text(label, Modifier.padding(start = 16.dp))
@@ -350,7 +403,11 @@ private val LocalSettingsFeedback = staticCompositionLocalOf<() -> Unit> { {} }
 
 @Composable private fun CacheLimit(label: String, used: Long, value: Int, options: List<Int>, tag: String = label, change: (Int) -> Unit) {
     val resources = LocalResources.current
-    val limit: (Int) -> String = { mb -> if (mb == 0) resources.getString(R.string.cache_off) else resources.getString(R.string.cache_mb, mb) }
+    val limit: (Int) -> String = { mb -> when {
+        mb == 0 -> resources.getString(R.string.cache_off)
+        mb >= 1024 -> resources.getString(R.string.cache_gb, mb / 1024)
+        else -> resources.getString(R.string.cache_mb, mb)
+    } }
     SettingsChoice(label, stringResource(R.string.cache_limit_value, limit(value), "%.1f".format(used / 1048576.0)), Icons.Default.Storage,
         options.map { it to limit(it) }, value, change = change, tag = tag)
 }

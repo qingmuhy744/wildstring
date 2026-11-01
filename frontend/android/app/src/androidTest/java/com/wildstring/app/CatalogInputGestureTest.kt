@@ -59,7 +59,7 @@ class CatalogInputGestureTest {
         compose.runOnIdle { assertEquals(listOf("许嵩"), searches); connection.commitText("好", 1) }
         compose.onNodeWithTag("catalog-search").assertTextEquals("许好嵩").assertIsFocused()
         compose.runOnIdle { assertEquals(listOf("许嵩", "许好嵩"), searches) }
-        compose.onNodeWithContentDescription("清空搜索").performClick()
+        compose.onNodeWithContentDescription(uiString(R.string.clear_search)).performClick()
         compose.onNodeWithTag("catalog-search").assert(SemanticsMatcher.expectValue(SemanticsProperties.EditableText, AnnotatedString(""))).assertIsFocused()
         compose.runOnIdle { assertEquals("", query) }
     }
@@ -84,7 +84,7 @@ class CatalogInputGestureTest {
         compose.runOnIdle { connection.setComposingText("许嵩", 1) }
         compose.onNodeWithTag("catalog-search").performImeAction()
         compose.runOnIdle { assertEquals("许嵩", query) }
-        compose.onNodeWithContentDescription("清空搜索").performClick()
+        compose.onNodeWithContentDescription(uiString(R.string.clear_search)).performClick()
         compose.onNodeWithTag("catalog-search").performTextInput("Rock")
         compose.runOnIdle { assertEquals("Rock", query) }
     }

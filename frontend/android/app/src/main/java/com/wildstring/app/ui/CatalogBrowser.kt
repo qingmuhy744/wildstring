@@ -1,6 +1,8 @@
 @file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 package com.wildstring.app.ui
 
+import com.wildstring.app.R
+import androidx.compose.ui.res.stringResource
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -84,7 +86,7 @@ import kotlin.math.roundToInt
                 else Column(Modifier.testTag("catalog-item-$index").combinedClickable(
                     onClick = { vm.openAlbum(album) },
                     hapticFeedbackEnabled = false,
-                    onLongClickLabel = "专辑操作",
+                    onLongClickLabel = stringResource(R.string.album_actions),
                     onLongClick = { playlistFeedback(TactileKind.DragStart); albumActions(album) },
                 )) {
                     Cover(vm, album.coverTrackId, album.title, Modifier.fillMaxWidth().aspectRatio(1f))
@@ -100,19 +102,19 @@ import kotlin.math.roundToInt
                 when (state.kind) {
                     "artists" -> state.window.artistAt(index)?.let { artist ->
                         ListItem(headlineContent = { Text(artist.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                            supportingContent = { Text("${artist.trackCount} 首") },
+                            supportingContent = { Text(stringResource(R.string.track_count, artist.trackCount)) },
                             leadingContent = { Cover(vm, artist.coverTrackId, artist.name, Modifier.size(44.dp)) },
                             modifier = Modifier.testTag("catalog-item-$index").clickable { vm.openArtist(artist) })
                     } ?: CatalogPlaceholder(vm, state, index)
                     "playlists" -> state.window.playlistAt(index)?.let { cached ->
                         val playlist = playlistsById[cached.id] ?: cached
                         ListItem(headlineContent = { Text(playlist.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                            supportingContent = { Text("${playlist.trackCount} 首${if (playlist.kind == "smart") " · 规则歌单" else ""}") },
+                            supportingContent = { Text(stringResource(R.string.track_count, playlist.trackCount) + if (playlist.kind == "smart") stringResource(R.string.smart_playlist_suffix) else "") },
                             leadingContent = { Cover(vm, playlist.coverTrackId, playlist.name, Modifier.size(44.dp)) },
                             modifier = Modifier.testTag("catalog-item-$index").combinedClickable(
                                 onClick = { vm.openPlaylist(playlist) },
                                 hapticFeedbackEnabled = false,
-                                onLongClickLabel = "歌单操作",
+                                onLongClickLabel = stringResource(R.string.playlist_actions),
                                 onLongClick = { playlistFeedback(TactileKind.DragStart); playlistActions(playlist) }))
                     } ?: CatalogPlaceholder(vm, state, index)
                     else -> state.window.trackAt(index)?.let { track ->
@@ -137,7 +139,7 @@ import kotlin.math.roundToInt
             }
         }
         if (!state.loading && state.total == 0 && state.error == null) Text(
-            if (state.query.isNotBlank()) "没有找到匹配的音乐" else if (state.kind == "playlists") "还没有歌单" else "这里还没有音乐，请先在网页端导入曲库。",
+            if (state.query.isNotBlank()) stringResource(R.string.catalog_no_matches) else if (state.kind == "playlists") stringResource(R.string.catalog_no_playlists) else stringResource(R.string.catalog_empty),
             Modifier.align(Alignment.Center).padding(24.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
         if (state.loading && !state.hasContent) CatalogSkeleton(state.kind)
     }
@@ -149,7 +151,7 @@ import kotlin.math.roundToInt
         .testTag("catalog-placeholder-$index").then(if (error != null) Modifier.clickable { vm.ensureRange(index, retry = true) } else Modifier)
         .padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.Center) {
         if (error != null) {
-            Text("加载失败，点击重试", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+            Text(stringResource(R.string.load_failed_retry), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
             Text(error, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall)
         } else {
             Box(Modifier.fillMaxWidth(.6f).height(12.dp).background(MaterialTheme.colorScheme.surfaceContainerHigh, RoundedCornerShape(4.dp)))
@@ -161,6 +163,7 @@ import kotlin.math.roundToInt
 
 /** Crossing a populated letter jumps immediately; empty/repeated letters never buzz. */
 @Composable internal fun AlphabetRail(groups: List<BrowseGroup>, activeKey: String?, modifier: Modifier, jump: (Int) -> Unit) {
+    val resources = androidx.compose.ui.platform.LocalResources.current
     var height by remember { mutableIntStateOf(1) }
     var preview by remember { mutableStateOf<String?>(null) }
     var previewY by remember { mutableFloatStateOf(0f) }
@@ -194,7 +197,7 @@ import kotlin.math.roundToInt
                     modifier = Modifier.fillMaxWidth().weight(1f)
                         .background(if (group.key == activeKey) MaterialTheme.colorScheme.primaryContainer else androidx.compose.ui.graphics.Color.Transparent, RoundedCornerShape(8.dp))
                         .wrapContentSize(Alignment.Center).testTag("alphabet-${group.key}")
-                        .semantics { contentDescription = "跳至 ${group.key}"; selected = group.key == activeKey }
+                        .semantics { contentDescription = resources.getString(R.string.jump_to, group.key); selected = group.key == activeKey }
                         .clickable(enabled = enabled) { feedback(TactileKind.Tap); group.offset?.let(currentJump) })
             }
         }
@@ -209,12 +212,13 @@ import kotlin.math.roundToInt
 
 /** A restrained divider, leaving song positions and paging indices unchanged. */
 @Composable private fun DiscHeading(disc: DiscSummary) {
+    val resources = androidx.compose.ui.platform.LocalResources.current
     Row(Modifier.fillMaxWidth().padding(start = 18.dp, end = 20.dp, top = 14.dp, bottom = 4.dp).heightIn(min = 24.dp)
-        .testTag("disc-heading-${disc.number}").semantics { contentDescription = "Disc ${disc.number}，${disc.trackCount} 首" },
+        .testTag("disc-heading-${disc.number}").semantics { contentDescription = resources.getString(R.string.disc_summary, disc.number, disc.trackCount) },
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         Text("DISC ${disc.number.toString().padStart(2, '0')}", color = MaterialTheme.colorScheme.onSurfaceVariant,
             style = MaterialTheme.typography.labelSmall, fontSize = 11.sp, letterSpacing = 1.sp, fontWeight = FontWeight.SemiBold)
-        Text("${disc.trackCount} 首", color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .7f), fontSize = 10.sp)
+        Text(stringResource(R.string.track_count, disc.trackCount), color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .7f), fontSize = 10.sp)
         HorizontalDivider(Modifier.weight(1f), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .5f))
     }
 }

@@ -35,6 +35,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -42,6 +43,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.google.gson.JsonObject
+import com.wildstring.app.R
 import com.wildstring.app.data.*
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
@@ -171,7 +173,7 @@ internal fun SimpleNotificationsSheet(
     }
 }
 
-@Composable private fun AgentDrafts(vm: MusicViewModel, selectedId: String?) {
+@Composable internal fun AgentDrafts(vm: MusicViewModel, selectedId: String?) {
     var drafts by remember { mutableStateOf<List<JsonObject>>(emptyList()) }
     var selected by remember { mutableStateOf<JsonObject?>(null) }
     var filter by rememberSaveable { mutableStateOf("pending") }
@@ -211,6 +213,13 @@ internal fun SimpleNotificationsSheet(
 internal fun fieldName(key: String) = mapOf("title" to "歌名", "artists" to "艺人", "album" to "专辑", "album_artists" to "专辑艺人", "track_number" to "曲号", "disc_number" to "碟号", "genre" to "流派", "date" to "日期", "lyricists" to "作词", "composers" to "作曲", "arrangers" to "编曲", "name" to "歌单名", "track_ids" to "歌曲")[key] ?: key
 internal fun displayValue(value: com.google.gson.JsonElement?): String = when { value == null || value.isJsonNull -> "未设置"; value.isJsonPrimitive -> value.asString; value.isJsonArray -> value.asJsonArray.joinToString(" / ") { displayValue(it) }; else -> value.toString() }
 @Composable private fun AgentDraftDetail(vm: MusicViewModel, initial: JsonObject, dismiss: () -> Unit, updated: (JsonObject) -> Unit) {
+    if (initial.text("kind") in setOf("metadata", "metadata_batch", "cover", "lyrics", "intake")) {
+        AlertDialog(onDismissRequest = dismiss,
+            title = { Text(initial.text("title")) },
+            text = { Text(stringResource(R.string.metadata_review_on_web)) },
+            confirmButton = { TextButton(dismiss) { Text(stringResource(R.string.close)) } })
+        return
+    }
     var draft by remember(initial.text("id"), initial.number("version")) { mutableStateOf(initial) }
     var coverReady by remember(draft.text("id"), draft.number("version")) { mutableStateOf(false) }
     var confirm by remember { mutableStateOf<String?>(null) }
@@ -339,6 +348,7 @@ internal fun summarizeConversationTitle(userText: String): String {
     onNotifications: (() -> Unit)? = null,
     onSettings: (() -> Unit)? = null,
     unread: Int = 0,
+    onPlayer: (() -> Unit)? = null,
     openDraft: (String) -> Unit,
 ) {
     val links = LocalUriHandler.current
@@ -418,6 +428,11 @@ internal fun summarizeConversationTitle(userText: String): String {
                 IconButton({ deleting = conversation; action.message = null }, enabled = !action.busy) { Icon(Icons.Default.DeleteOutline, "删除当前对话") }
             }
             if (pageChrome) {
+                onPlayer?.let { open ->
+                    IconButton(open, Modifier.testTag("assistant-paused-player")) {
+                        Icon(Icons.Default.PlayArrow, "打开暂停的播放器")
+                    }
+                }
                 onSettings?.let { open -> IconButton(open) { Icon(Icons.Default.Settings, "设置") } }
                 Box {
                     IconButton({ conversationMenu = true }, enabled = !action.busy) {

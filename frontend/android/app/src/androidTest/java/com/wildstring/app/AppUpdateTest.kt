@@ -46,11 +46,11 @@ class AppUpdateTest {
         val state = mutableStateOf(UpdateState(UpdatePhase.Checking)); var checks = 0; var detail = 0; var cancels = 0; var installs = 0; var repository = 0
         compose.setContent { MaterialTheme { Column { UpdateSettingsContent(state.value, { checks++ }, { detail++ }, { cancels++ }, { installs++ }, { repository++ }) } } }
         compose.onNodeWithTag("app-check-update").performClick(); compose.runOnIdle { assertEquals(0, checks); state.value = UpdateState(UpdatePhase.Available, release("0.3.2")) }
-        compose.onNodeWithText("发现 0.3.2 · 当前 ${BuildConfig.VERSION_NAME}").assertIsDisplayed()
+        compose.onNodeWithText(uiString(R.string.update_available_version, "0.3.2", BuildConfig.VERSION_NAME)).assertIsDisplayed()
         compose.onNodeWithTag("app-update-action").performClick(); compose.onNodeWithTag("app-repository").performClick()
         compose.runOnIdle { assertEquals(1, detail); assertEquals(1, repository); state.value = state.value.copy(phase = UpdatePhase.Downloading, downloaded = 512, total = 1024) }
         compose.onNodeWithTag("app-cancel-update").performClick(); compose.runOnIdle { assertEquals(1, cancels); state.value = state.value.copy(phase = UpdatePhase.Ready) }
-        compose.onNodeWithText("安装更新").assertIsDisplayed(); compose.onNodeWithTag("app-update-action").performClick()
+        compose.onNodeWithText(uiString(R.string.update_install)).assertIsDisplayed(); compose.onNodeWithTag("app-update-action").performClick()
         compose.runOnIdle { assertEquals(1, installs) }
     }
 }

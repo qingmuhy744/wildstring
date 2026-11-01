@@ -1,5 +1,7 @@
 package com.wildstring.app.ui
 
+import com.wildstring.app.R
+import androidx.compose.ui.res.stringResource
 import androidx.compose.animation.core.withInfiniteAnimationFrameNanos
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.size
@@ -23,7 +25,8 @@ import kotlin.math.sin
     modifier: Modifier = Modifier, color: Color = MaterialTheme.colorScheme.primary) {
     val allowed = playbackMotionAllowed()
     val moving = playing && !buffering && allowed
-    val status = if (buffering) "缓冲中" else if (playing) "正在播放" else "已暂停"
+    val resources = androidx.compose.ui.platform.LocalResources.current
+    val status = if (buffering) resources.getString(R.string.playback_buffering) else if (playing) resources.getString(R.string.playback_playing) else resources.getString(R.string.playback_paused)
     var phase by remember { mutableFloatStateOf(0f) }
     LaunchedEffect(moving) {
         if (!moving) return@LaunchedEffect
@@ -34,7 +37,7 @@ import kotlin.math.sin
         }
     }
     Canvas(modifier.size(18.dp).testTag("playback-indicator").semantics {
-        contentDescription = "当前歌曲"; stateDescription = status
+        contentDescription = resources.getString(R.string.current_song); stateDescription = status
     }) {
         val bar = size.width / 6f
         val gap = bar * .7f
