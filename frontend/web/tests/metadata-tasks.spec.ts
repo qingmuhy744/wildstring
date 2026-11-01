@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { login } from './helpers';
+import { login, manageTab } from './helpers';
 
 test('任务完成自动退出进行中，建议保留，忽略和清理可恢复且历史默认折叠', async ({ page }, info) => {
   await login(page);
@@ -55,11 +55,8 @@ test('任务完成自动退出进行中，建议保留，忽略和清理可恢�
     });
   });
   if (info.project.name === 'mobile') await page.getByLabel('浏览方式').selectOption('manage');
-  else await page.getByRole('button', { name: '管理', exact: true }).click();
-  await page
-    .getByRole('navigation', { name: '管理分类' })
-    .getByRole('button', { name: '任务记录', exact: true })
-    .click();
+  else await page.getByRole('button', { name: '管理中心', exact: true }).click();
+  await manageTab(page, '任务记录');
   const panel = page.getByRole('region', { name: '元数据更新任务', exact: true });
   await expect(panel.getByRole('list', { name: '进行中的元数据任务' })).toContainText(track.title);
   completed = true;

@@ -1,11 +1,12 @@
 import { expect, test, type Page } from '@playwright/test';
-import { audio, login } from './helpers';
+import { audio, login, manageTab, leaveSettings } from './helpers';
 
 const headers = { 'X-Wildstring-Client': 'web' };
 async function manage(page: Page, mobile: boolean) {
   if (mobile) await page.getByLabel('浏览方式').selectOption('manage');
-  else await page.getByRole('button', { name: '管理', exact: true }).click();
-  await expect(page.getByRole('heading', { name: '曲库管理', exact: true })).toBeVisible();
+  else await page.getByRole('button', { name: '管理中心', exact: true }).click();
+  await expect(page.getByRole('heading', { name: '管理中心', exact: true })).toBeVisible();
+  await manageTab(page, '概览');
   await expect(page.getByLabel('曲库概览')).toBeVisible();
 }
 async function tracks(page: Page) {
@@ -26,14 +27,15 @@ test('管理导航、播放持续、曲库命名持久化与部署设置', async
   expect((await audio(page)).paused).toBe(false);
   expect((await audio(page)).time).toBeGreaterThanOrEqual(before.time);
   await page.screenshot({ path: `../../artifacts/manage-overview-${info.project.name}.png` });
-  await page.getByRole('button', { name: '设置', exact: true }).click();
+  await manageTab(page, '当前音乐库设置');
   const original = (await (await page.request.get('/api/v1/manage/overview')).json()).preferences;
   try {
     await page.getByLabel('曲库名称', { exact: true }).fill(`摇滚收藏 ${info.project.name}`);
     await page.getByRole('button', { name: '保存设置', exact: true }).click();
     await expect(page.getByRole('button', { name: '保存设置', exact: true })).toBeDisabled();
+    await manageTab(page, '服务状态');
     await expect(page.getByText('媒体标签写回', { exact: true })).toBeVisible();
-    await page.getByRole('button', { name: '← 返回音乐', exact: true }).click();
+    await leaveSettings(page);
     expect((await audio(page)).source).toBe(before.source);
     await page.reload();
     await expect(page.getByRole('table')).toBeVisible();
@@ -104,7 +106,7 @@ test('元数据预览、版本冲突、重扫保留、撤销与当前音频连�
     expect(after.effective.title).toBe(edited);
     expect(after.observed.title).toBe('夜晚测试曲');
     expect(await audio(page)).toEqual(before);
-    await page.getByRole('button', { name: '歌曲信息', exact: true }).click();
+    await manageTab(page, '歌曲信息');
     await page.getByLabel('搜索待编辑歌曲').fill(edited);
     await page.getByRole('button', { name: '搜索歌曲', exact: true }).click();
     await page.getByRole('button', { name: `编辑 ${edited}`, exact: true }).click();
@@ -134,7 +136,7 @@ test('导入任务关闭页面继续处理、持久历史与逐文件错误', as
   await page.reload();
   await expect(page.getByRole('table')).toBeVisible();
   await manage(page, info.project.name === 'mobile');
-  await page.getByRole('button', { name: '任务记录', exact: true }).click();
+  await manageTab(page, '任务记录');
   const job = page.locator('.management-job').first();
   await expect(job.locator('.job-status')).toHaveText('部分失败');
   await job.locator('summary').click();
@@ -161,7 +163,7 @@ test('自动导入设置、待整理快照、冲突反馈与手机布局', async
   await page.getByRole('button', { name: '暂停', exact: true }).click();
   const before = await audio(page);
   await manage(page, info.project.name === 'mobile');
-  await page.getByRole('button', { name: '导入与整理', exact: true }).click();
+  await manageTab(page, '导入与整理');
   const original = await (await page.request.get('/api/v1/manage/intake/settings')).json();
   try {
     await page.getByLabel('自动发现并导入新音乐', { exact: true }).check();
@@ -215,7 +217,7 @@ test('自动导入设置、待整理快照、冲突反馈与手机布局', async
 test('AI 服务保存、密钥不回显、连接测试与清除密钥', async ({ page }, info) => {
   await login(page);
   await manage(page, info.project.name === 'mobile');
-  await page.getByRole('button', { name: '设置', exact: true }).click();
+  await manageTab(page, '模型连接');
   await page.getByRole('button', { name: '管理统一模型连接', exact: true }).click();
   await page.getByText('原有实例连接（兼容配置）', { exact: true }).click();
   const panel = page.getByLabel('AI 服务配置', { exact: true });

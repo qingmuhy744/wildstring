@@ -1,17 +1,14 @@
 import { expect, test, type Page } from '@playwright/test';
-import { login } from './helpers';
+import { login, manageTab } from './helpers';
 
 async function management(page: Page) {
   if (await page.getByLabel('浏览方式', { exact: true }).isVisible())
     await page.getByLabel('浏览方式', { exact: true }).selectOption('manage');
-  else await page.getByRole('button', { name: '管理', exact: true }).click();
+  else await page.getByRole('button', { name: '管理中心', exact: true }).click();
 }
 async function settings(page: Page) {
   await management(page);
-  await page
-    .getByRole('navigation', { name: '管理分类' })
-    .getByRole('button', { name: '设置', exact: true })
-    .click();
+  await manageTab(page, '数据源');
 }
 async function refreshTrack(page: Page) {
   await page.getByRole('button', { name: '歌曲操作 晴天测试曲', exact: true }).click();
@@ -341,10 +338,7 @@ test('处理中可以关窗，任务记录和核对结果说明具体失败原�
     }),
   );
   await management(page);
-  await page
-    .getByRole('navigation', { name: '管理分类' })
-    .getByRole('button', { name: '任务记录', exact: true })
-    .click();
+  await manageTab(page, '任务记录');
   const jobs = page.getByRole('region', { name: '元数据更新任务', exact: true });
   await expect(jobs).toContainText('服务端无法解析目标域名');
   await expect(jobs).toContainText('TLS 连接提前断开');

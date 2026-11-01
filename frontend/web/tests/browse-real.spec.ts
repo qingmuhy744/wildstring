@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { audio } from './helpers';
+import { audio, personalCategory, leaveSettings } from './helpers';
 
 test.skip(process.env.WILDSTRING_TEST_BROWSE_LIBRARY !== '1', '独立的连续浏览曲库夹具');
 
@@ -218,8 +218,9 @@ test('加载第二批歌曲后切换小大中，保留首个完整可见歌曲�
   await expect.poll(() => page.locator('.track-row').count()).toBeGreaterThanOrEqual(100);
   const navigation = page.getByLabel('浏览方式', { exact: true });
   if (await navigation.isVisible()) await navigation.selectOption('account');
-  else await page.getByRole('button', { name: '账号设置', exact: true }).click();
-  const settings = page.getByRole('dialog', { name: '账号设置', exact: true });
+  else await page.getByRole('button', { name: '个人设置', exact: true }).click();
+  await personalCategory(page, 'appearance');
+  const settings = page.getByRole('region', { name: '个人设置', exact: true });
   await page
     .locator('.track-row')
     .nth(72)
@@ -242,7 +243,7 @@ test('加载第二批歌曲后切换小大中，保留首个完整可见歌曲�
     await expect(page.locator('.track-list')).toHaveAttribute('data-list-size', size);
     await expect.poll(firstVisible).toEqual(before);
   }
-  await settings.getByRole('button', { name: '关闭账号设置', exact: true }).click();
+  await leaveSettings(page);
   await expect.poll(firstVisible).toEqual(before);
   expect(await page.locator('.track-row').count()).toBeGreaterThanOrEqual(100);
 });

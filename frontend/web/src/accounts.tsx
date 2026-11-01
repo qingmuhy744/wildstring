@@ -3,9 +3,6 @@ import { useTranslation } from 'react-i18next';
 import { api, type User } from './api';
 import { applyLanguagePreference, languagePreferences, type LanguagePreference } from './i18n';
 import { LastfmAccount } from './providers';
-import { ThemeControl } from './theme';
-import { PlaybackStyleControl } from './playback-style';
-import { TrackListSizeControl } from './track-list-size';
 import { AvatarEditor } from './avatar';
 import { DialogCloseButton } from './dialog-close';
 import type { MusicLibrary } from './music-libraries';
@@ -13,7 +10,7 @@ import { UserLibraryAccessDialog } from './user-library-access';
 
 type Profile = User['profile'];
 /** Account-wide language; saved on the server so every device follows it. */
-function LanguageControl({
+export function LanguageControl({
   user,
   disabled,
   onUserChange,
@@ -73,17 +70,15 @@ function LanguageControl({
 }
 const userProfile = (user: User): Profile => user.profile;
 
-export function AccountDialog({
+export function AccountSettings({
   user,
-  onClose,
   onUserChange,
 }: {
   user: User;
-  onClose: () => void;
   onUserChange?: (user: User) => void;
 }) {
   const { t } = useTranslation();
-  const dialog = useRef<HTMLDialogElement>(null);
+  const [tab, setTab] = useState('profile');
   const [current, setCurrent] = useState(''),
     [password, setPassword] = useState(''),
     [confirm, setConfirm] = useState('');
@@ -94,19 +89,6 @@ export function AccountDialog({
   const [email, setEmail] = useState(user.email || '');
   const [profileError, setProfileError] = useState('');
   const [profileSuccess, setProfileSuccess] = useState('');
-  const [serverVersion, setServerVersion] = useState('');
-  useEffect(() => {
-    api<{ version?: string }>('/auth/status')
-      .then((res) => {
-        if (res.version) setServerVersion(res.version);
-      })
-      .catch(() => {});
-  }, []);
-  useEffect(() => {
-    const node = dialog.current;
-    node?.showModal();
-    return () => node?.close();
-  }, []);
   async function submit(event: FormEvent) {
     event.preventDefault();
     setError('');
@@ -159,146 +141,124 @@ export function AccountDialog({
     }
   }
   return (
-    <dialog
-      ref={dialog}
-      className="playlist-editor account-dialog"
-      aria-label={t('account.title')}
-      onCancel={(event) => {
-        event.preventDefault();
-        if (!busy) onClose();
-      }}
-    >
-      <div className="editor-heading">
-        <div>
-          <span className="eyebrow">{t('account.eyebrow')}</span>
-          <h2>{t('account.title')}</h2>
-          <p className="muted">
-            {user.username} · {t(`roles.${userProfile(user)}`)}
-          </p>
-        </div>
-        <DialogCloseButton aria-label={t('account.close')} disabled={busy} onClick={onClose} />
-      </div>
-      <AvatarEditor user={user} disabled={busy} onBusy={setBusy} />
-      <form className="account-form" onSubmit={saveProfile} aria-label={t('account.profile')}>
-        <h3>{t('account.profile')}</h3>
-        <label>
-          {t('account.loginId')}
-          <input
-            value={username}
-            onChange={(event) => setUsername(event.target.value)}
-            pattern="[A-Za-z0-9][A-Za-z0-9_.-]{0,31}"
-            maxLength={32}
-            required
-            autoComplete="username"
-          />
-        </label>
-        <label>
-          {t('account.displayName')}
-          <input
-            value={displayName}
-            onChange={(event) => setDisplayName(event.target.value)}
-            maxLength={80}
-            placeholder={t('account.displayNamePlaceholder')}
-          />
-        </label>
-        <label>
-          {t('account.email')}
-          <input
-            type="email"
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
-            maxLength={254}
-            placeholder={t('account.emailPlaceholder')}
-            autoComplete="email"
-          />
-        </label>
-        <p className="muted">{t('account.emailNote')}</p>
-        {profileError && (
-          <p className="error" role="alert">
-            {profileError}
-          </p>
-        )}
-        {profileSuccess && (
-          <p className="notice" role="status">
-            {profileSuccess}
-          </p>
-        )}
-        <div className="editor-footer">
-          <span />
-          <button className="primary" disabled={busy}>
-            {busy ? t('account.saving') : t('account.saveProfile')}
+    <div className="account-settings">
+      <nav className="settings-tabs" aria-label={t('settings.account')}>
+        {(['profile', 'security', 'lastfm'] as const).map((key) => (
+          <button key={key} aria-pressed={tab === key} disabled={busy} onClick={() => setTab(key)}>
+            {key === 'lastfm' ? 'Last.fm' : t(`settings.${key}`)}
           </button>
-        </div>
-      </form>
-      <section className="account-preferences-section" aria-label={t('account.preferences')}>
-        <h3>{t('account.preferences')}</h3>
-        <p className="muted">{t('account.preferencesNote')}</p>
-        <div className="account-preferences-list">
-          <LanguageControl user={user} disabled={busy} onUserChange={onUserChange} />
-          <ThemeControl />
-          <PlaybackStyleControl />
-          <TrackListSizeControl />
-        </div>
-      </section>
-      <LastfmAccount />
-      <form className="account-form" onSubmit={submit}>
-        <label>
-          {t('account.currentPassword')}
-          <input
-            type="password"
-            autoComplete="current-password"
-            required
-            maxLength={128}
-            value={current}
-            onChange={(e) => setCurrent(e.target.value)}
-          />
-        </label>
-        <label>
-          {t('account.newPassword')}
-          <input
-            type="password"
-            autoComplete="new-password"
-            required
-            minLength={12}
-            maxLength={128}
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-          />
-        </label>
-        <label>
-          {t('account.confirmPassword')}
-          <input
-            type="password"
-            autoComplete="new-password"
-            required
-            minLength={12}
-            maxLength={128}
-            value={confirm}
-            onChange={(e) => setConfirm(e.target.value)}
-          />
-        </label>
-        <p className="muted">{t('account.passwordNote')}</p>
-        {error && (
-          <p className="error" role="alert">
-            {error}
-          </p>
-        )}
-        <div className="editor-footer">
-          <button type="button" disabled={busy} onClick={onClose}>
-            {t('common.cancel')}
-          </button>
-          <button className="primary" disabled={busy}>
-            {busy ? t('account.changing') : t('account.changePassword')}
-          </button>
-        </div>
-      </form>
-      <div className="account-version-info">
-        <small className="muted">
-          {t('account.versionWeb', { version: '0.8.1' })}
-          {serverVersion ? t('account.versionServer', { version: serverVersion }) : ''}
-        </small>
-      </div>
-    </dialog>
+        ))}
+      </nav>
+      {tab === 'profile' && (
+        <>
+          <AvatarEditor user={user} disabled={busy} onBusy={setBusy} />
+          <form className="account-form" onSubmit={saveProfile} aria-label={t('account.profile')}>
+            <h3>{t('account.profile')}</h3>
+            <label>
+              {t('account.loginId')}
+              <input
+                value={username}
+                onChange={(event) => setUsername(event.target.value)}
+                pattern="[A-Za-z0-9][A-Za-z0-9_.-]{0,31}"
+                maxLength={32}
+                required
+                autoComplete="username"
+              />
+            </label>
+            <label>
+              {t('account.displayName')}
+              <input
+                value={displayName}
+                onChange={(event) => setDisplayName(event.target.value)}
+                maxLength={80}
+                placeholder={t('account.displayNamePlaceholder')}
+              />
+            </label>
+            <label>
+              {t('account.email')}
+              <input
+                type="email"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                maxLength={254}
+                placeholder={t('account.emailPlaceholder')}
+                autoComplete="email"
+              />
+            </label>
+            <p className="muted">{t('account.emailNote')}</p>
+            {profileError && (
+              <p className="error" role="alert">
+                {profileError}
+              </p>
+            )}
+            {profileSuccess && (
+              <p className="notice" role="status">
+                {profileSuccess}
+              </p>
+            )}
+            <div className="editor-footer">
+              <span />
+              <button className="primary" disabled={busy}>
+                {busy ? t('account.saving') : t('account.saveProfile')}
+              </button>
+            </div>
+          </form>
+        </>
+      )}
+      {tab === 'security' && (
+        <>
+          <form className="account-form" onSubmit={submit}>
+            <label>
+              {t('account.currentPassword')}
+              <input
+                type="password"
+                autoComplete="current-password"
+                required
+                maxLength={128}
+                value={current}
+                onChange={(e) => setCurrent(e.target.value)}
+              />
+            </label>
+            <label>
+              {t('account.newPassword')}
+              <input
+                type="password"
+                autoComplete="new-password"
+                required
+                minLength={12}
+                maxLength={128}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+              />
+            </label>
+            <label>
+              {t('account.confirmPassword')}
+              <input
+                type="password"
+                autoComplete="new-password"
+                required
+                minLength={12}
+                maxLength={128}
+                value={confirm}
+                onChange={(e) => setConfirm(e.target.value)}
+              />
+            </label>
+            <p className="muted">{t('account.passwordNote')}</p>
+            {error && (
+              <p className="error" role="alert">
+                {error}
+              </p>
+            )}
+            <div className="editor-footer">
+              <button className="primary" disabled={busy}>
+                {busy ? t('account.changing') : t('account.changePassword')}
+              </button>
+            </div>
+          </form>
+        </>
+      )}
+      {tab === 'lastfm' && <LastfmAccount />}
+    </div>
   );
 }
 

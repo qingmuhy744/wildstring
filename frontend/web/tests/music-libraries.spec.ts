@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { section, podcastCatalog } from './helpers';
+import { section, podcastCatalog, manageTab, leaveSettings } from './helpers';
 
 test.skip(process.env.WILDSTRING_TEST_LIBRARIES !== '1', 'Run make test-libraries-web.');
 const headers = { 'X-Wildstring-Client': 'web' };
@@ -24,9 +24,9 @@ async function owner(page: Page) {
 async function manage(page: Page) {
   if (await page.getByLabel('浏览方式', { exact: true }).isVisible()) {
     await page.getByLabel('浏览方式', { exact: true }).selectOption('manage');
-  } else await page.getByRole('button', { name: '管理', exact: true }).click();
-  await expect(page.getByRole('heading', { name: '曲库管理', exact: true })).toBeVisible();
-  await page.getByRole('button', { name: '设置', exact: true }).click();
+  } else await page.getByRole('button', { name: '管理中心', exact: true }).click();
+  await expect(page.getByRole('heading', { name: '管理中心', exact: true })).toBeVisible();
+  await manageTab(page, '音乐库');
   return page.getByRole('region', { name: '音乐库配置', exact: true });
 }
 
@@ -123,16 +123,16 @@ test('资料编辑员只看到可执行的管理动作', async ({ page }, info) 
   ).toBe(200);
   await page.reload();
   await section(page, '管理');
-  await expect(page.getByRole('heading', { name: '曲库管理', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '管理中心', exact: true })).toBeVisible();
   for (const name of ['导入音乐', '扫描曲库', '更新曲库元数据', '批量核对资料']) {
     await expect(page.getByRole('button', { name, exact: true })).toHaveCount(0);
   }
   for (const name of ['导入与整理', '设置', '用户', '诊断']) {
     await expect(page.getByRole('button', { name, exact: true })).toHaveCount(0);
   }
-  await page.getByRole('button', { name: '任务记录', exact: true }).click();
+  await manageTab(page, '任务记录');
   await expect(page.getByText('元数据候选中心', { exact: true })).toHaveCount(0);
-  await page.getByRole('button', { name: '歌曲信息', exact: true }).click();
+  await manageTab(page, '歌曲信息');
   await expect(page.getByRole('button', { name: '查询本页资料', exact: true })).toHaveCount(0);
   await expect(page.getByText('编辑信息', { exact: true }).first()).toBeVisible();
 });
@@ -149,11 +149,10 @@ test('所有者创建多来源库、分配权限、停用时保留配置', async
   const panel = await manage(page);
   const name = `书房音乐-${info.project.name}`;
   await panel.getByLabel('库名称', { exact: true }).fill(name);
-  const currentLibrary = page.getByRole('region', { name: '当前音乐库设置', exact: true });
-  await currentLibrary
-    .getByLabel('选择音乐库', { exact: true })
-    .selectOption(libraries.find((library) => !library.is_default)!.id);
-  await expect(panel.getByLabel('库名称', { exact: true })).toHaveValue(name);
+  // Instance-wide configuration no longer shares a page with current-library controls.
+  await expect(page.locator('.management').getByLabel('选择音乐库', { exact: true })).toHaveCount(
+    0,
+  );
   await panel
     .getByLabel('源文件夹，每行一个', { exact: true })
     .fill(libraries.flatMap((item) => item.sources.map((source) => source.root)).join('\n'));
@@ -162,7 +161,7 @@ test('所有者创建多来源库、分配权限、停用时保留配置', async
   const saved = (await (await page.request.get('/api/v1/libraries')).json()).find(
     (item: Library) => item.name === name,
   );
-  await page.getByRole('button', { name: '用户', exact: true }).click();
+  await manageTab(page, '用户');
   const accounts = page.getByRole('region', { name: '用户管理', exact: true });
   await expect(
     accounts.getByRole('button', { name: 'admin 的库权限', exact: true }),
@@ -193,7 +192,7 @@ test('所有者创建多来源库、分配权限、停用时保留配置', async
   expect(
     (await (await page.request.get(`/api/v1/libraries/access/${user.id}`)).json()).library_ids,
   ).toEqual([saved.id]);
-  await page.getByRole('button', { name: '设置', exact: true }).click();
+  await manageTab(page, '音乐库');
   for (const theme of ['light', 'dark']) {
     await page.evaluate((value) => {
       localStorage.setItem('wildstring-theme', value);
@@ -403,7 +402,7 @@ test('个人保存复用共享音频，管理员预览后清理零引用', async
   await page.getByRole('button', { name: '我的下载', exact: false }).click();
   await expect(page.locator('.podcast-episode-row')).toHaveCount(1);
   await page.getByRole('button', { name: '共享音频管理', exact: true }).click();
-  const manager = page.getByRole('dialog', { name: '共享音频管理', exact: true });
+  const manager = page.getByRole('region', { name: '共享音频管理', exact: true });
   await expect(manager).toContainText('1 份引用');
   for (const theme of ['light', 'dark']) {
     await page.evaluate((value) => {
@@ -443,7 +442,7 @@ test('个人保存复用共享音频，管理员预览后清理零引用', async
       .download_status,
   ).toBe('none');
   await page.screenshot({ path: `../../artifacts/podcast-resources-${info.project.name}.png` });
-  await manager.getByRole('button', { name: '关闭', exact: true }).click();
+  await leaveSettings(page);
 });
 
 test('默认授权、服务器目录选择和账号授权行保持清晰', async ({ page }, info) => {
@@ -480,7 +479,7 @@ test('默认授权、服务器目录选择和账号授权行保持清晰', async
   await panel.getByRole('checkbox', { name: '新用户默认可访问此库', exact: true }).check();
   await panel.getByRole('button', { name: '保存音乐库', exact: true }).click();
   await expect(panel.getByRole('status')).toContainText('音乐库已保存');
-  await page.getByRole('button', { name: '用户', exact: true }).click();
+  await manageTab(page, '用户');
   const accounts = page.getByRole('region', { name: '用户管理', exact: true });
   await expect(accounts.getByRole('checkbox', { name: second.name, exact: true })).toBeChecked();
   const label = accounts.getByRole('checkbox', { name: second.name, exact: true }).locator('..');
@@ -564,7 +563,7 @@ test('目录选择器新建文件夹、拒绝重名并直接选用新目录', as
 test('管理员可切换普通用户添加 RSS，普通用户只添加并关注', async ({ page }, info) => {
   await owner(page);
   await manage(page);
-  await page.getByRole('button', { name: '设置', exact: true }).click();
+  await manageTab(page, '节目准入');
   const policy = page.getByRole('region', { name: '播客添加权限', exact: true });
   await policy.getByRole('checkbox', { name: '允许普通用户添加 RSS 并关注', exact: true }).check();
   await policy.getByRole('button', { name: '保存播客添加权限', exact: true }).click();
@@ -585,7 +584,7 @@ test('管理员可切换普通用户添加 RSS，普通用户只添加并关注'
   await section(page, '电台 · 播客');
   await expect(page.getByRole('button', { name: '本服节目', exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: '+ 添加节目', exact: true }).click();
-  const search = page.getByRole('dialog', { name: '搜索或添加节目', exact: true });
+  const search = page.getByRole('region', { name: '搜索或添加节目', exact: true });
   await search.getByLabel('节目名称或 RSS 地址', { exact: true }).fill(detail.podcast.feed_url);
   await search.getByRole('button', { name: '添加并关注', exact: true }).click();
   await expect(page.getByRole('button', { name: '取消关注', exact: true })).toBeVisible();

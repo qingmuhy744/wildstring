@@ -1,3 +1,6 @@
+import { SettingsLayout, type SettingsCategory } from './settings-layout';
+import { PodcastResourceManager } from './podcast-resources';
+import { PodcastDownloadManager } from './podcast-downloads';
 import { HelpText } from './desktop-help';
 import { importCounterHelp } from './help-content';
 import { SystemDiagnostics } from './system-diagnostics';
@@ -138,7 +141,25 @@ function RunDetail({ title, run }: { title: string; run: Run | null }) {
 }
 
 export type ManagementTab =
-  'overview' | 'tracks' | 'jobs' | 'intake' | 'settings' | 'users' | 'diagnostics';
+  | 'home'
+  | 'overview'
+  | 'tracks'
+  | 'jobs'
+  | 'intake'
+  | 'libraries'
+  | 'library-settings'
+  | 'users'
+  | 'diagnostics'
+  | 'catalog'
+  | 'search'
+  | 'identity'
+  | 'resources'
+  | 'downloads'
+  | 'providers'
+  | 'models'
+  | 'transcoding'
+  | 'access'
+  | 'status';
 
 export function Management({
   revision,
@@ -149,7 +170,7 @@ export function Management({
   onOpenConnections,
   profile,
   initialAction,
-  initialTab = 'overview',
+  initialTab = 'home',
   onTabChanged,
 }: {
   revision: number;
@@ -165,13 +186,15 @@ export function Management({
 }) {
   const canOwner = profile === 'owner';
   const canImport = profile === 'owner' || profile === 'librarian';
-  // Library admins (曲库管理员) open 设置 for podcast search and duplicate management only.
   const canPodcastAdmin = canImport;
   const [tab, updateTab] = useState<ManagementTab>(initialTab);
   function setTab(value: ManagementTab) {
     updateTab(value);
     onTabChanged?.(value);
   }
+  useEffect(() => {
+    updateTab(initialTab);
+  }, [initialTab]);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [metadataBatchId, setMetadataBatchId] = useState<string | undefined>(
     initialAction?.batchId,
@@ -227,11 +250,12 @@ export function Management({
     if (overview) setName(overview.preferences.name);
   }, [overview?.preferences.name]);
   useEffect(() => {
+    if (!['overview', 'jobs', 'intake'].includes(tab)) return;
     const timer = setInterval(() => {
       if (!document.hidden) setTick((v) => v + 1);
     }, 2000);
     return () => clearInterval(timer);
-  }, []);
+  }, [tab]);
   useEffect(() => {
     const controller = new AbortController();
     if (tab === 'tracks') {
@@ -280,392 +304,465 @@ export function Management({
       setBusy(false);
     }
   }
+  const groups: (SettingsCategory & { tabs: { id: ManagementTab; label: string }[] })[] = [
+    {
+      id: 'library',
+      label: '音乐库与导入',
+      description: '浏览库状态、导入音乐与整理资料',
+      icon: 'album',
+      tabs: [
+        { id: 'overview', label: '概览' },
+        { id: 'tracks', label: '歌曲信息' },
+        ...(canImport ? [{ id: 'intake' as const, label: '导入与整理' }] : []),
+        ...(canOwner
+          ? [
+              { id: 'libraries' as const, label: '音乐库' },
+              { id: 'library-settings' as const, label: '当前音乐库设置' },
+            ]
+          : []),
+      ],
+    },
+    ...(canPodcastAdmin
+      ? [
+          {
+            id: 'podcasts',
+            label: '播客',
+            description: '目录搜索、节目准入、下载与共享音频',
+            icon: 'podcast' as const,
+            tabs: [
+              { id: 'search' as const, label: '目录搜索' },
+              { id: 'identity' as const, label: '重复节目' },
+              { id: 'downloads' as const, label: '下载管理' },
+              ...(canOwner
+                ? [
+                    { id: 'catalog' as const, label: '节目准入' },
+                    { id: 'resources' as const, label: '共享音频管理' },
+                  ]
+                : []),
+            ],
+          },
+        ]
+      : []),
+    ...(canOwner
+      ? [
+          {
+            id: 'sources',
+            label: '数据源与模型',
+            description: '联网资料、来源插件与模型连接',
+            icon: 'assistant' as const,
+            tabs: [
+              { id: 'providers' as const, label: '数据源' },
+              { id: 'models' as const, label: '模型连接' },
+            ],
+          },
+          {
+            id: 'users',
+            label: '用户与权限',
+            description: '账号档案、音乐库授权与密码重置',
+            icon: 'artist' as const,
+            tabs: [{ id: 'users' as const, label: '用户' }],
+          },
+        ]
+      : []),
+    {
+      id: 'operations',
+      label: '任务与诊断',
+      description: '后台任务、处理记录与服务状态',
+      icon: 'task',
+      tabs: [
+        { id: 'jobs', label: '任务记录' },
+        ...(canOwner
+          ? [
+              { id: 'diagnostics' as const, label: '诊断' },
+              { id: 'status' as const, label: '服务状态' },
+            ]
+          : []),
+      ],
+    },
+    ...(canOwner
+      ? [
+          {
+            id: 'server',
+            label: '服务器',
+            description: '播放转码、缓存与访问域名',
+            icon: 'settings' as const,
+            tabs: [
+              { id: 'transcoding' as const, label: '转码与缓存' },
+              { id: 'access' as const, label: '访问设置' },
+            ],
+          },
+        ]
+      : []),
+  ];
+  const group = groups.find((item) => item.tabs.some((item) => item.id === tab));
   const active = !!overview?.active_job;
   return (
     <main className="library management">
       {reviewOpen && (
         <MetadataReviewDialog onClose={() => setReviewOpen(false)} onApplied={onChanged} />
       )}
-      <header className="management-header">
-        <div>
-          <span className="eyebrow">BEHIND THE MUSIC</span>
-          <h1>曲库管理</h1>
-          <p className="muted">让收藏井井有条，让音乐继续。</p>
-        </div>
-        <button
-          onClick={() => {
-            onChanged();
-            onBack();
-          }}
-        >
-          ← 返回音乐
-        </button>
-      </header>
-      <nav className="management-tabs" aria-label="管理分类">
-        {(
-          [
-            ['overview', '概览'],
-            ['tracks', '歌曲信息'],
-            ['jobs', '任务记录'],
-            ['intake', '导入与整理'],
-            ['settings', '设置'],
-            ['users', '用户'],
-            ['diagnostics', '诊断'],
-          ] as const
-        )
-          .filter(
-            ([key]) =>
-              canOwner ||
-              (key === 'settings' ? canPodcastAdmin : key !== 'users' && key !== 'diagnostics'),
-          )
-          .filter(([key]) => canImport || key !== 'intake')
-          .map(([key, label]) => (
-            <button key={key} aria-pressed={tab === key} onClick={() => setTab(key)}>
-              {label}
+      <SettingsLayout
+        title="管理中心"
+        description="集中管理音乐库、播客与服务器。"
+        categories={groups}
+        selected={group?.id ?? null}
+        onSelect={(id) => setTab(id ? groups.find((item) => item.id === id)!.tabs[0].id : 'home')}
+        onBack={onBack}
+      >
+        {group && (
+          <nav className="settings-tabs" aria-label="管理分类">
+            {group.tabs.map((item) => (
+              <button key={item.id} aria-pressed={tab === item.id} onClick={() => setTab(item.id)}>
+                {item.label}
+              </button>
+            ))}
+          </nav>
+        )}
+        {['overview', 'tracks', 'intake', 'jobs'].includes(tab) && (
+          <LibrarySwitcher onChanged={onChanged} management />
+        )}
+        {error && (
+          <p role="alert" className="error">
+            {error}
+            <button className="text-button" onClick={() => setTick((v) => v + 1)}>
+              重新读取
             </button>
-          ))}
-      </nav>
-      {tab !== 'users' && tab !== 'settings' && tab !== 'diagnostics' && (
-        <LibrarySwitcher onChanged={onChanged} management />
-      )}
-      {error && (
-        <p role="alert" className="error">
-          {error}
-          <button className="text-button" onClick={() => setTick((v) => v + 1)}>
-            重新读取
-          </button>
-        </p>
-      )}
-      {loading ? (
-        <p role="status">读取管理信息…</p>
-      ) : (
-        overview && (
-          <>
-            {tab === 'diagnostics' && <SystemDiagnostics />}
-            {tab === 'settings' && (
-              <>
-                {canOwner && (
-                  <>
-                    <MusicLibraryManager />
-                    <PodcastCatalogSettings />
-                  </>
-                )}
-                <PodcastSearchSettings />
-                <PodcastIdentityAdmin />
-              </>
-            )}
-            {tab === 'intake' && (
-              <>
-                <LibrarySources
-                  canImport={canImport}
-                  canDelete={canImport}
-                  canPurge={canOwner}
-                  onChanged={onChanged}
-                />
-                <IntakePanel />
-              </>
-            )}
-            {tab === 'users' && <UsersPanel />}
-            {tab === 'overview' && (
-              <>
-                <section className="management-metrics" aria-label="曲库概览">
-                  {[
-                    [overview.counts.tracks, '首歌曲'],
-                    [overview.albums, '张专辑'],
-                    [overview.artists, '位艺人'],
-                    [bytes(overview.counts.size_bytes), '音乐大小'],
-                  ].map(([n, label]) => (
-                    <div key={label}>
-                      <strong>{n}</strong>
-                      <span>{label}</span>
-                    </div>
-                  ))}
-                </section>
-                <section className="management-card">
-                  <span className="eyebrow">YOUR LIBRARY</span>
-                  <h2>{overview.preferences.name}</h2>
-                  {canOwner && (
-                    <>
-                      <button onClick={onRefresh}>更新曲库元数据</button>
-                      <button onClick={() => setReviewOpen(true)}>批量核对资料</button>
-                    </>
-                  )}
-                  <div className="library-locations">
-                    {(
-                      [
-                        ['导入源', overview.source],
-                        ['托管曲库', overview.library],
-                      ] as const
-                    ).map(([label, item]) => (
+          </p>
+        )}
+        {loading ? (
+          <p role="status">读取管理信息…</p>
+        ) : (
+          overview && (
+            <>
+              {tab === 'diagnostics' && <SystemDiagnostics />}
+              {tab === 'intake' && (
+                <>
+                  <LibrarySources
+                    canImport={canImport}
+                    canDelete={canImport}
+                    canPurge={canOwner}
+                    onChanged={onChanged}
+                  />
+                  <IntakePanel />
+                </>
+              )}
+              {tab === 'users' && <UsersPanel />}
+              {tab === 'overview' && (
+                <>
+                  <section className="management-metrics" aria-label="曲库概览">
+                    {[
+                      [overview.counts.tracks, '首歌曲'],
+                      [overview.albums, '张专辑'],
+                      [overview.artists, '位艺人'],
+                      [bytes(overview.counts.size_bytes), '音乐大小'],
+                    ].map(([n, label]) => (
                       <div key={label}>
-                        <strong>
-                          {label}
-                          <span className={`availability ${item.available ? '' : 'unavailable'}`}>
-                            {item.available ? '可访问' : '不可访问'}
-                          </span>
-                        </strong>
-                        <code>{item.path}</code>
-                        <small>可用空间 {bytes(item.free_bytes)}</small>
+                        <strong>{n}</strong>
+                        <span>{label}</span>
                       </div>
                     ))}
-                  </div>
-                  {canImport && (
-                    <div className="management-task-actions">
-                      <div>
-                        <h3>导入新音乐</h3>
-                        <p className="muted">从导入源复制新歌曲到曲库，已有副本保留。</p>
-                        <button
-                          className="primary"
-                          disabled={busy || active || !overview.source.available}
-                          onClick={() => void start('import')}
-                        >
-                          导入音乐
-                        </button>
-                      </div>
-                      <div>
-                        <h3>更新曲库信息</h3>
-                        <p className="muted">检查库内文件变化，保留人工编辑的信息。</p>
-                        <label className="management-checkbox">
-                          <input
-                            type="checkbox"
-                            checked={full}
-                            onChange={(e) => setFull(e.target.checked)}
-                          />
-                          重新读取全部标签
-                        </label>
-                        <button
-                          disabled={busy || active || !overview.library.available}
-                          onClick={() => void start('scan')}
-                        >
-                          扫描曲库
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                  {active && (
-                    <p role="status" className="muted">
-                      曲库任务正在排队或执行，可在任务记录中查看进展。
-                    </p>
-                  )}
-                  {!!overview.counts.unavailable && (
-                    <p className="muted">
-                      有 {overview.counts.unavailable} 首歌曲暂不可用。扫描任务会记录具体原因。
-                    </p>
-                  )}
-                </section>
-                <section className="management-card">
-                  <h2>最近一次扫描</h2>
-                  {overview.last_scan ? (
-                    <RunDetail title="扫描" run={overview.last_scan} />
-                  ) : (
-                    <p className="muted">还没有扫描记录。</p>
-                  )}
-                </section>
-                <FolderMetadataEditor onChanged={onChanged} />
-              </>
-            )}
-            {tab === 'tracks' && (
-              <section className="management-card">
-                <div className="management-section-heading">
-                  <div>
-                    <h2>整理歌曲信息</h2>
-                    <p className="muted">修改歌名、艺人与专辑，让每首歌回到它的位置。</p>
-                  </div>
-                  <form
-                    className="manage-search"
-                    onSubmit={(e) => {
-                      e.preventDefault();
-                      setQuery(draft);
-                      setOffset(0);
-                    }}
-                  >
-                    <input
-                      aria-label="搜索待编辑歌曲"
-                      value={draft}
-                      onChange={(e) => setDraft(e.target.value)}
-                      placeholder="搜索歌曲、艺人、专辑"
-                      maxLength={256}
-                    />
-                    <button>搜索歌曲</button>
-                  </form>
-                </div>
-                {tracks ? (
-                  <>
+                  </section>
+                  <section className="management-card">
+                    <span className="eyebrow">YOUR LIBRARY</span>
+                    <h2>{overview.preferences.name}</h2>
                     {canOwner && (
-                      <button
-                        disabled={busy || !tracks.items.length}
-                        onClick={() => {
-                          setBusy(true);
-                          setError('正在提交查询…');
-                          void api('/manage/providers/query', {
-                            method: 'POST',
-                            body: JSON.stringify({ track_ids: tracks.items.map((t) => t.id) }),
-                          })
-                            .then(() =>
-                              setError('已提交本页资料查询，可在歌曲编辑的联网建议中查看。'),
-                            )
-                            .catch(() => setError('查询未提交，请先启用联网资料或稍后重试。'))
-                            .finally(() => setBusy(false));
-                        }}
-                      >
-                        查询本页资料
-                      </button>
+                      <>
+                        <button onClick={onRefresh}>更新曲库元数据</button>
+                        <button onClick={() => setReviewOpen(true)}>批量核对资料</button>
+                      </>
                     )}
-                    <ul className="manage-track-list">
-                      {tracks.items.map((track) => (
-                        <li key={track.id}>
-                          <div>
-                            <strong>{track.title}</strong>
-                            <span>
-                              {track.artists.join(' / ') || '未知艺人'} ·{' '}
-                              {track.album || '未知专辑'}
+                    <div className="library-locations">
+                      {(
+                        [
+                          ['导入源', overview.source],
+                          ['托管曲库', overview.library],
+                        ] as const
+                      ).map(([label, item]) => (
+                        <div key={label}>
+                          <strong>
+                            {label}
+                            <span className={`availability ${item.available ? '' : 'unavailable'}`}>
+                              {item.available ? '可访问' : '不可访问'}
                             </span>
-                          </div>
-                          <button aria-label={`编辑 ${track.title}`} onClick={() => onEdit(track)}>
-                            编辑信息
-                          </button>
-                        </li>
+                          </strong>
+                          <code>{item.path}</code>
+                          <small>可用空间 {bytes(item.free_bytes)}</small>
+                        </div>
                       ))}
-                    </ul>
-                    {!tracks.total && <p className="muted">没有找到歌曲。</p>}
-                    <Pagination page={tracks} onOffset={setOffset} unit="首" />
-                  </>
-                ) : (
-                  <p role="status">读取歌曲…</p>
-                )}
-              </section>
-            )}
-            {tab === 'jobs' && (
-              <section className="management-card">
-                {canOwner && (
-                  <MetadataJobs
-                    batchId={metadataBatchId}
-                    onInspect={(id) => {
-                      void api<Track>(`/tracks/${id}`)
-                        .then(onEdit)
-                        .catch(() => setError('无法读取歌曲，请刷新后重试。'));
-                    }}
-                  />
-                )}
-                <div className="management-section-heading">
-                  <h2>任务记录</h2>
-                  <button onClick={() => setTick((v) => v + 1)}>刷新任务</button>
-                </div>
-                <p className="muted">任务在服务端继续执行，关闭页面不影响处理。</p>
-                {!jobs?.total && (
-                  <p className="management-empty">
-                    {canImport
-                      ? '还没有网页任务。从概览开始导入或扫描。'
-                      : '还没有可查看的曲库任务。'}
-                  </p>
-                )}
-                {jobs?.items.map((job) => (
-                  <details className="management-job" key={job.id}>
-                    <summary>
-                      <div>
-                        <strong>
-                          {job.kind === 'import' ? '导入音乐' : '扫描曲库'}
-                          {job.full ? ' · 全量标签' : ''}
-                        </strong>
-                        <small>{timestamp(job.created_at)}</small>
-                      </div>
-                      <span className={`job-status ${job.status}`}>{statuses[job.status]}</span>
-                    </summary>
-                    <div className="management-job-body">
-                      <p className="muted">
-                        开始 {timestamp(job.started_at)} · 结束 {timestamp(job.finished_at)}
-                      </p>
-                      {job.error && (
-                        <p role="status">
-                          {job.error === 'waiting_for_library'
-                            ? '等待其他曲库操作结束'
-                            : job.error === 'worker_interrupted'
-                              ? '服务中断，任务未完成。可从概览重新提交。'
-                              : '执行未完成，请检查服务端日志后重新提交。'}
-                        </p>
-                      )}
-                      <RunDetail title="导入" run={job.import} />
-                      <RunDetail title="扫描" run={job.scan} />
-                      {job.status === 'queued' && !job.error && (
-                        <p className="muted">等待服务端开始处理。</p>
-                      )}
                     </div>
-                  </details>
-                ))}
-                {jobs && jobs.total > 10 && (
-                  <Pagination page={jobs} onOffset={setJobOffset} unit="项" />
-                )}
-              </section>
-            )}
-            {tab === 'settings' && canOwner && (
-              <>
-                <ProviderSettings />
+                    {canImport && (
+                      <div className="management-task-actions">
+                        <div>
+                          <h3>导入新音乐</h3>
+                          <p className="muted">从导入源复制新歌曲到曲库，已有副本保留。</p>
+                          <button
+                            className="primary"
+                            disabled={busy || active || !overview.source.available}
+                            onClick={() => void start('import')}
+                          >
+                            导入音乐
+                          </button>
+                        </div>
+                        <div>
+                          <h3>更新曲库信息</h3>
+                          <p className="muted">检查库内文件变化，保留人工编辑的信息。</p>
+                          <label className="management-checkbox">
+                            <input
+                              type="checkbox"
+                              checked={full}
+                              onChange={(e) => setFull(e.target.checked)}
+                            />
+                            重新读取全部标签
+                          </label>
+                          <button
+                            disabled={busy || active || !overview.library.available}
+                            onClick={() => void start('scan')}
+                          >
+                            扫描曲库
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                    {active && (
+                      <p role="status" className="muted">
+                        曲库任务正在排队或执行，可在任务记录中查看进展。
+                      </p>
+                    )}
+                    {!!overview.counts.unavailable && (
+                      <p className="muted">
+                        有 {overview.counts.unavailable} 首歌曲暂不可用。扫描任务会记录具体原因。
+                      </p>
+                    )}
+                  </section>
+                  <section className="management-card">
+                    <h2>最近一次扫描</h2>
+                    {overview.last_scan ? (
+                      <RunDetail title="扫描" run={overview.last_scan} />
+                    ) : (
+                      <p className="muted">还没有扫描记录。</p>
+                    )}
+                  </section>
+                  <FolderMetadataEditor onChanged={onChanged} />
+                </>
+              )}
+              {tab === 'tracks' && (
                 <section className="management-card">
-                  <h2>AI 模型连接</h2>
+                  <div className="management-section-heading">
+                    <div>
+                      <h2>整理歌曲信息</h2>
+                      <p className="muted">修改歌名、艺人与专辑，让每首歌回到它的位置。</p>
+                    </div>
+                    <form
+                      className="manage-search"
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        setQuery(draft);
+                        setOffset(0);
+                      }}
+                    >
+                      <input
+                        aria-label="搜索待编辑歌曲"
+                        value={draft}
+                        onChange={(e) => setDraft(e.target.value)}
+                        placeholder="搜索歌曲、艺人、专辑"
+                        maxLength={256}
+                      />
+                      <button>搜索歌曲</button>
+                    </form>
+                  </div>
+                  {tracks ? (
+                    <>
+                      {canOwner && (
+                        <button
+                          disabled={busy || !tracks.items.length}
+                          onClick={() => {
+                            setBusy(true);
+                            setError('正在提交查询…');
+                            void api('/manage/providers/query', {
+                              method: 'POST',
+                              body: JSON.stringify({ track_ids: tracks.items.map((t) => t.id) }),
+                            })
+                              .then(() =>
+                                setError('已提交本页资料查询，可在歌曲编辑的联网建议中查看。'),
+                              )
+                              .catch(() => setError('查询未提交，请先启用联网资料或稍后重试。'))
+                              .finally(() => setBusy(false));
+                          }}
+                        >
+                          查询本页资料
+                        </button>
+                      )}
+                      <ul className="manage-track-list">
+                        {tracks.items.map((track) => (
+                          <li key={track.id}>
+                            <div>
+                              <strong>{track.title}</strong>
+                              <span>
+                                {track.artists.join(' / ') || '未知艺人'} ·{' '}
+                                {track.album || '未知专辑'}
+                              </span>
+                            </div>
+                            <button
+                              aria-label={`编辑 ${track.title}`}
+                              onClick={() => onEdit(track)}
+                            >
+                              编辑信息
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                      {!tracks.total && <p className="muted">没有找到歌曲。</p>}
+                      <Pagination page={tracks} onOffset={setOffset} unit="首" />
+                    </>
+                  ) : (
+                    <p role="status">读取歌曲…</p>
+                  )}
+                </section>
+              )}
+              {tab === 'jobs' && (
+                <section className="management-card">
+                  {canOwner && (
+                    <MetadataJobs
+                      batchId={metadataBatchId}
+                      onInspect={(id) => {
+                        void api<Track>(`/tracks/${id}`)
+                          .then(onEdit)
+                          .catch(() => setError('无法读取歌曲，请刷新后重试。'));
+                      }}
+                    />
+                  )}
+                  <div className="management-section-heading">
+                    <h2>任务记录</h2>
+                    <button onClick={() => setTick((v) => v + 1)}>刷新任务</button>
+                  </div>
+                  <p className="muted">任务在服务端继续执行，关闭页面不影响处理。</p>
+                  {!jobs?.total && (
+                    <p className="management-empty">
+                      {canImport
+                        ? '还没有网页任务。从概览开始导入或扫描。'
+                        : '还没有可查看的曲库任务。'}
+                    </p>
+                  )}
+                  {jobs?.items.map((job) => (
+                    <details className="management-job" key={job.id}>
+                      <summary>
+                        <div>
+                          <strong>
+                            {job.kind === 'import' ? '导入音乐' : '扫描曲库'}
+                            {job.full ? ' · 全量标签' : ''}
+                          </strong>
+                          <small>{timestamp(job.created_at)}</small>
+                        </div>
+                        <span className={`job-status ${job.status}`}>{statuses[job.status]}</span>
+                      </summary>
+                      <div className="management-job-body">
+                        <p className="muted">
+                          开始 {timestamp(job.started_at)} · 结束 {timestamp(job.finished_at)}
+                        </p>
+                        {job.error && (
+                          <p role="status">
+                            {job.error === 'waiting_for_library'
+                              ? '等待其他曲库操作结束'
+                              : job.error === 'worker_interrupted'
+                                ? '服务中断，任务未完成。可从概览重新提交。'
+                                : '执行未完成，请检查服务端日志后重新提交。'}
+                          </p>
+                        )}
+                        <RunDetail title="导入" run={job.import} />
+                        <RunDetail title="扫描" run={job.scan} />
+                        {job.status === 'queued' && !job.error && (
+                          <p className="muted">等待服务端开始处理。</p>
+                        )}
+                      </div>
+                    </details>
+                  ))}
+                  {jobs && jobs.total > 10 && (
+                    <Pagination page={jobs} onOffset={setJobOffset} unit="项" />
+                  )}
+                </section>
+              )}
+              {tab === 'libraries' && canOwner && <MusicLibraryManager />}
+              {tab === 'catalog' && canOwner && <PodcastCatalogSettings />}
+              {tab === 'search' && canPodcastAdmin && <PodcastSearchSettings />}
+              {tab === 'identity' && canPodcastAdmin && <PodcastIdentityAdmin />}
+              {tab === 'resources' && canOwner && <PodcastResourceManager />}
+              {tab === 'downloads' && canPodcastAdmin && <PodcastDownloadManager />}
+              {tab === 'providers' && canOwner && <ProviderSettings />}
+              {tab === 'models' && canOwner && (
+                <section className="management-card">
+                  <h2>统一模型连接</h2>
                   <p className="muted">
-                    音乐助手、自然语言找歌、每日推荐与收歌建议共用同一组连接和调用额度。个人连接、实例共享与原有兼容连接都在一处管理。
+                    个人连接与实例共享连接使用同一处配置。音乐助手、推荐和资料整理共同使用这些连接。
                   </p>
                   <button onClick={onOpenConnections}>管理统一模型连接</button>
                 </section>
-                <TranscodingSettings />
-                <HostSettings />
-                <section className="management-library-settings" aria-label="当前音乐库设置">
-                  <LibrarySwitcher onChanged={onChanged} management />
-                  <LyricScanEntry />
-                  <section className="management-card">
-                    <h2>曲库设置</h2>
-                    <form
-                      className="library-settings-form"
-                      onSubmit={(e) => {
-                        e.preventDefault();
-                        void saveName();
-                      }}
-                    >
-                      <label>
-                        曲库名称
-                        <input
-                          required
-                          maxLength={100}
-                          value={name}
-                          onChange={(e) => setName(e.target.value)}
-                        />
-                      </label>
-                      <button
-                        className="primary"
-                        disabled={busy || name.trim() === overview.preferences.name}
+              )}
+              {tab === 'transcoding' && canOwner && <TranscodingSettings />}
+              {tab === 'access' && canOwner && <HostSettings />}
+              {tab === 'library-settings' && canOwner && (
+                <>
+                  <section className="management-library-settings" aria-label="当前音乐库设置">
+                    <LibrarySwitcher onChanged={onChanged} management />
+                    <LyricScanEntry />
+                    <section className="management-card">
+                      <h2>曲库设置</h2>
+                      <form
+                        className="library-settings-form"
+                        onSubmit={(e) => {
+                          e.preventDefault();
+                          void saveName();
+                        }}
                       >
-                        {busy ? '保存中…' : '保存设置'}
-                      </button>
-                    </form>
+                        <label>
+                          曲库名称
+                          <input
+                            required
+                            maxLength={100}
+                            value={name}
+                            onChange={(e) => setName(e.target.value)}
+                          />
+                        </label>
+                        <button
+                          className="primary"
+                          disabled={busy || name.trim() === overview.preferences.name}
+                        >
+                          {busy ? '保存中…' : '保存设置'}
+                        </button>
+                      </form>
+                    </section>
                   </section>
-                </section>
-                <section className="management-card">
-                  <h2>服务状态</h2>
-                  <dl className="management-settings">
-                    {[
-                      ['版本', overview.version],
-                      ['数据库版本', String(overview.schema_version)],
-                      ['运行数据', overview.data.path],
-                      ['服务端地址', `${overview.deployment.host}:${overview.deployment.port}`],
-                      ['安全 Cookie', overview.deployment.cookie_secure ? '已启用' : '未启用'],
-                      ['媒体标签写回', '未启用'],
-                    ].map(([key, value]) => (
-                      <div key={key}>
-                        <dt>{key}</dt>
-                        <dd>{value}</dd>
-                      </div>
-                    ))}
-                  </dl>
-                  <p className="muted">
-                    路径与网络设置由服务端部署配置管理，修改后需重启服务。首次设置或重置密码使用{' '}
-                    <code>make docker-admin</code>。
-                  </p>
-                </section>
-              </>
-            )}
-          </>
-        )
-      )}
+                </>
+              )}
+              {tab === 'status' && canOwner && (
+                <>
+                  <section className="management-card">
+                    <h2>服务状态</h2>
+                    <dl className="management-settings">
+                      {[
+                        ['版本', overview.version],
+                        ['数据库版本', String(overview.schema_version)],
+                        ['运行数据', overview.data.path],
+                        ['服务端地址', `${overview.deployment.host}:${overview.deployment.port}`],
+                        ['安全 Cookie', overview.deployment.cookie_secure ? '已启用' : '未启用'],
+                        ['媒体标签写回', '未启用'],
+                      ].map(([key, value]) => (
+                        <div key={key}>
+                          <dt>{key}</dt>
+                          <dd>{value}</dd>
+                        </div>
+                      ))}
+                    </dl>
+                    <p className="muted">
+                      路径与网络设置由服务端部署配置管理，修改后需重启服务。首次设置或重置密码使用{' '}
+                      <code>make docker-admin</code>。
+                    </p>
+                  </section>
+                </>
+              )}
+            </>
+          )
+        )}
+      </SettingsLayout>
     </main>
   );
 }

@@ -1,4 +1,4 @@
-import { readPreference, writePreference } from './user-preferences';
+import { useLyricPreferences } from './lyric-preferences';
 import { useEffect, useRef, useState, type CSSProperties, type PointerEvent } from 'react';
 import { api, time, type Lyrics } from './api';
 import { Cover, coverUrl } from './cover';
@@ -507,16 +507,10 @@ function LyricsPanel({ player, onTogglePanel }: { player: Player; onTogglePanel:
   const [follow, setFollow] = useState(true);
   const [coarse, setCoarse] = useState(() => matchMedia('(pointer: coarse)').matches);
   const [preview, setPreview] = useState<number | null>(null);
-  const [showTranslation, setShowTranslation] = useState(true);
-  const [showRomanization, setShowRomanization] = useState(false);
-  const [lyricSize, setLyricSize] = useState<LyricSize>(() => {
-    try {
-      const value = readPreference('wildstring-lyric-size');
-      return value === 'small' || value === 'large' ? value : 'medium';
-    } catch {
-      return 'medium';
-    }
-  });
+  const [
+    { translation: showTranslation, romanization: showRomanization, size: lyricSize },
+    setLyricPreferences,
+  ] = useLyricPreferences();
   const scroll = useRef<HTMLDivElement>(null);
   const lines = useRef<(HTMLButtonElement | null)[]>([]);
   const drag = useRef<{ pointer: number; y: number; scrollTop: number; moved: boolean } | null>(
@@ -681,7 +675,7 @@ function LyricsPanel({ player, onTogglePanel }: { player: Player; onTogglePanel:
           <button
             className="text-button"
             aria-pressed={showTranslation}
-            onClick={() => setShowTranslation((value) => !value)}
+            onClick={() => setLyricPreferences({ translation: !showTranslation })}
           >
             译文
           </button>
@@ -690,7 +684,7 @@ function LyricsPanel({ player, onTogglePanel }: { player: Player; onTogglePanel:
           <button
             className="text-button"
             aria-pressed={showRomanization}
-            onClick={() => setShowRomanization((value) => !value)}
+            onClick={() => setLyricPreferences({ romanization: !showRomanization })}
           >
             音译
           </button>
@@ -703,8 +697,7 @@ function LyricsPanel({ player, onTogglePanel }: { player: Player; onTogglePanel:
               aria-label={`歌词大小：${size === 'small' ? '小' : size === 'medium' ? '中' : '大'}`}
               aria-pressed={lyricSize === size}
               onClick={() => {
-                setLyricSize(size);
-                writePreference('wildstring-lyric-size', size);
+                setLyricPreferences({ size });
               }}
             >
               {size === 'small' ? '小' : size === 'medium' ? '中' : '大'}
@@ -836,7 +829,6 @@ function LyricsPanel({ player, onTogglePanel }: { player: Player; onTogglePanel:
         {!follow && preview !== null && lyrics?.lines[preview]?.time_ms != null && (
           <div className="lyric-seek-preview" role="group" aria-label="歌词跳转预览">
             <span>{time(lyrics.lines[preview].time_ms! / 1000)}</span>
-            <hr />
             <button
               aria-label={`确认跳转到 ${time(lyrics.lines[preview].time_ms! / 1000)}`}
               onClick={() => {

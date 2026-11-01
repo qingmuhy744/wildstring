@@ -1,0 +1,391 @@
+.settings-center {
+  max-width: 1160px;
+  margin: 0 auto;
+  width: 100%;
+  min-width: 0;
+}
+.settings-page-header {
+  margin-bottom: 32px;
+}
+.settings-back {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  margin: 0 0 24px;
+  padding-left: 0;
+}
+.settings-page-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+}
+.settings-page-heading h1 {
+  margin: 8px 0 12px;
+  font-family: 'Songti SC', 'Noto Serif CJK SC', serif;
+  font-size: clamp(28px, 3.2vw, 40px);
+  letter-spacing: -0.025em;
+  line-height: 1.25;
+}
+.settings-page-heading h1:focus {
+  outline: none;
+}
+.settings-page-heading p {
+  margin: 0;
+  line-height: 1.7;
+}
+.settings-heading-icon {
+  display: grid;
+  place-items: center;
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  color: var(--accent);
+  background: rgba(var(--accent-rgb), 0.08);
+  flex-shrink: 0;
+}
+.settings-heading-icon svg {
+  width: 30px;
+  height: 30px;
+}
+.settings-directory {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  border-top: 1px solid var(--border);
+}
+.settings-directory > button {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr) 18px;
+  align-items: center;
+  gap: 16px;
+  padding: 26px 18px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  text-align: left;
+}
+.settings-directory > button:nth-child(odd) {
+  border-right: 1px solid var(--border);
+}
+.settings-directory strong {
+  display: block;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 6px;
+}
+.settings-directory small {
+  display: block;
+  color: var(--muted);
+  line-height: 1.65;
+  font-size: 12px;
+}
+.settings-category-icon {
+  color: var(--accent);
+  display: grid;
+  place-items: center;
+}
+.settings-category-icon svg {
+  width: 25px;
+  height: 25px;
+}
+.settings-directory > button > svg {
+  width: 16px;
+  height: 16px;
+  color: var(--muted);
+}
+.settings-columns {
+  display: grid;
+  grid-template-columns: 180px minmax(0, 1fr);
+  gap: 32px;
+  align-items: start;
+}
+.settings-category-nav {
+  position: sticky;
+  top: 24px;
+  display: grid;
+  gap: 5px;
+  padding-right: 14px;
+  border-right: 1px solid var(--border);
+}
+.settings-category-nav button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 0;
+  padding: 12px 10px;
+  text-align: left;
+  color: var(--muted);
+}
+.settings-category-nav button[aria-current='page'] {
+  background: rgba(var(--accent-rgb), 0.1);
+  color: var(--accent-text);
+  font-weight: 600;
+}
+.settings-category-nav svg {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+}
+.settings-content {
+  min-width: 0;
+}
+.settings-content-heading {
+  margin-bottom: 22px;
+}
+.settings-content-heading h2 {
+  font-size: 22px;
+  margin: 0 0 8px;
+}
+.settings-content-heading p {
+  margin: 0;
+  line-height: 1.7;
+  font-size: 13px;
+}
+.settings-content .management-card {
+  margin: 0 0 20px;
+  padding: 24px;
+  background: var(--surface);
+  border-color: var(--border);
+}
+.settings-content :is(form, fieldset, .management-card, .completion-page, .workspace-page) {
+  min-width: 0;
+  max-width: 100%;
+}
+.settings-content .account-form:not(.management-card) {
+  margin: 0;
+  border: 0;
+  padding: 0;
+}
+.settings-content .account-form + .account-form {
+  margin-top: 28px;
+}
+.settings-content .account-form .editor-footer {
+  justify-content: flex-end;
+}
+.transcoding-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr));
+  gap: 18px;
+}
+.transcoding-fields > label {
+  display: grid;
+  gap: 9px;
+  align-content: start;
+  min-width: 0;
+  font-size: 13px;
+}
+.settings-content .account-form :is(input, textarea, select) {
+  background: var(--surface-input);
+  border-color: var(--border);
+  min-width: 0;
+}
+.settings-content .theme-control {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin: 0;
+  padding: 16px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 14px;
+}
+.settings-content select {
+  color: var(--text);
+  background: var(--surface-input);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 10px 12px;
+  font: inherit;
+  max-width: 100%;
+}
+.settings-content .settings-check {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 0;
+}
+.settings-content input[type='checkbox'] {
+  accent-color: var(--accent);
+  width: 17px;
+  height: 17px;
+}
+.settings-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0 0 18px;
+  margin-bottom: 22px;
+  border-bottom: 1px solid var(--border);
+}
+.settings-tabs button {
+  min-height: 38px;
+  border: 0;
+  color: var(--muted);
+}
+.settings-tabs button[aria-pressed='true'] {
+  color: var(--accent-text);
+  background: rgba(var(--accent-rgb), 0.1);
+}
+.settings-tabs button:disabled {
+  opacity: 1;
+}
+.settings-content .podcast-resource-manager {
+  padding: 0;
+}
+.settings-content .podcast-resource-list {
+  max-height: none;
+}
+.settings-content .podcast-download-content {
+  padding: 0;
+}
+.settings-content .queue-list-container {
+  max-height: none;
+  overflow: visible;
+}
+.settings-content .completion-page {
+  padding: 0;
+  margin-top: 28px;
+}
+.settings-content .completion-page > .eyebrow {
+  display: none;
+}
+.settings-content .completion-page > h1 {
+  font-size: 20px;
+  margin-bottom: 12px;
+}
+.settings-content .workspace-header {
+  display: none;
+}
+.settings-content .workspace-page {
+  max-width: none;
+  padding: 0;
+}
+.settings-content .account-version-info {
+  border-top: 0;
+  margin: 0;
+  padding: 0;
+}
+.settings-content .avatar-editor {
+  margin-bottom: 24px;
+}
+.settings-content .offline-options {
+  display: grid;
+  gap: 18px;
+}
+.settings-content .offline-options > label:not(.check-label) {
+  display: grid;
+  gap: 8px;
+}
+.settings-content .offline-options p {
+  margin: 0;
+}
+.settings-scope {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.7;
+  margin: 0 0 24px;
+}
+.settings-content .podcast-resource-heading {
+  margin-bottom: 16px;
+}
+.settings-content .podcast-resource-heading h2 {
+  font-size: 19px;
+}
+.sidebar-navigation .sidebar-group-label {
+  margin: 18px 10px 7px;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+}
+.sidebar-navigation .sidebar-group-label:first-child {
+  margin-top: 5px;
+}
+.sidebar-navigation .nav-button {
+  min-height: 36px;
+  margin-bottom: 2px;
+  padding: 7px 10px;
+}
+.sidebar-bottom-actions {
+  padding-top: 8px;
+}
+.sidebar-bottom .manage-entry,
+.sidebar-bottom .account-entry {
+  margin-bottom: 4px;
+}
+@media (max-width: 1100px) {
+  .settings-columns {
+    grid-template-columns: 155px minmax(0, 1fr);
+    gap: 22px;
+  }
+  .settings-directory > button {
+    padding: 22px 12px;
+    gap: 12px;
+  }
+}
+@media (max-width: 760px) {
+  .has-category .settings-page-heading .eyebrow,
+  .has-category .settings-page-heading p.muted {
+    display: none;
+  }
+  .has-category .settings-page-heading h1 {
+    font-size: 24px;
+    margin: 0;
+  }
+  .has-category .settings-page-heading {
+    align-items: center;
+  }
+  .settings-page-header {
+    margin-bottom: 24px;
+  }
+  .settings-heading-icon {
+    width: 48px;
+    height: 48px;
+  }
+  .settings-heading-icon svg {
+    width: 23px;
+    height: 23px;
+  }
+  .settings-page-heading {
+    align-items: flex-start;
+    gap: 16px;
+  }
+  .settings-page-heading p.muted {
+    font-size: 13px;
+  }
+  .settings-directory {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .settings-directory > button {
+    padding: 22px 4px;
+    grid-template-columns: 32px minmax(0, 1fr) 16px;
+  }
+  .settings-directory > button:nth-child(odd) {
+    border-right: 0;
+  }
+  .settings-columns {
+    display: block;
+  }
+  .settings-category-nav {
+    display: none;
+  }
+  .settings-content-heading h2 {
+    font-size: 20px;
+  }
+  .settings-back {
+    min-height: 40px;
+    margin-bottom: 18px;
+  }
+  .settings-tabs {
+    gap: 4px;
+  }
+  .settings-tabs button {
+    padding: 9px 10px;
+  }
+  .settings-content .management-card {
+    padding: 16px;
+  }
+  .settings-content :is(.music-library-configuration, .management-settings) {
+    overflow-wrap: anywhere;
+  }
+}

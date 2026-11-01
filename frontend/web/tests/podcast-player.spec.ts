@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { audio, login, section, podcastCatalog } from './helpers';
+import { audio, login, section, podcastCatalog, leaveSettings } from './helpers';
 
 test.skip(
   process.env.WILDSTRING_TEST_PODCAST !== '1',
@@ -197,6 +197,9 @@ test('单集右键和更多菜单可以立即播放、插入下一集、追加�
   await expect(page.locator('.programme-track').first()).toContainText('第 2 集');
   await expect(page.locator('.programme-track').nth(1)).toContainText('第 3 集');
   await expect(page.locator('.programme-track').first()).toContainText('手动添加');
+  await expect(page.locator('.programme-track')).toHaveCount(5);
+  await page.locator('.programme-track').last().scrollIntoViewIfNeeded();
+  await expect(page.locator('.programme-track').last()).toBeInViewport();
   await page.getByRole('button', { name: '收起全屏播放' }).click();
   await row(1)
     .getByRole('button', { name: /更多操作/ })
@@ -215,7 +218,7 @@ test('下载管理可切换状态，昼夜配色可读且窄屏不溢出', async
       window.dispatchEvent(new CustomEvent('wildstring:theme-changed', { detail: value }));
     }, theme);
     await page.getByRole('button', { name: '下载管理', exact: true }).click();
-    const dialog = page.getByRole('dialog', { name: '下载管理', exact: true });
+    const dialog = page.getByRole('region', { name: '下载管理', exact: true });
     await expect(dialog).toBeVisible();
     await expect(dialog.getByText('当前没有下载任务', { exact: true })).toBeVisible();
     await dialog.getByRole('button', { name: '需重试 0', exact: true }).click();
@@ -225,7 +228,9 @@ test('下载管理可切换状态，昼夜配色可读且窄屏不溢出', async
     const box = await dialog.boundingBox();
     expect(box!.x).toBeGreaterThanOrEqual(0);
     expect(box!.x + box!.width).toBeLessThanOrEqual(page.viewportSize()!.width);
-    expect(box!.y + box!.height).toBeLessThanOrEqual(page.viewportSize()!.height);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+      true,
+    );
     expect(await dialog.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
     const contrast = await dialog.evaluate((el) => {
       const luminance = (color: string) => {
@@ -239,7 +244,7 @@ test('下载管理可切换状态，昼夜配色可读且窄屏不溢出', async
           });
         return rgb[0] * 0.2126 + rgb[1] * 0.7152 + rgb[2] * 0.0722;
       };
-      const background = luminance(getComputedStyle(el).backgroundColor);
+      const background = luminance(getComputedStyle(document.documentElement).backgroundColor);
       const text = luminance(getComputedStyle(el.querySelector('p')!).color);
       return (Math.max(background, text) + 0.05) / (Math.min(background, text) + 0.05);
     });
@@ -247,7 +252,7 @@ test('下载管理可切换状态，昼夜配色可读且窄屏不溢出', async
     await page.screenshot({
       path: `../../artifacts/podcast-download-${theme}-${info.project.name}.png`,
     });
-    await dialog.getByRole('button', { name: '关闭下载管理' }).press('Escape');
+    await leaveSettings(page);
     await expect(dialog).toHaveCount(0);
   }
 });
@@ -328,6 +333,27 @@ test('昼夜主题、真实调谐和音量、时间码跳转、断点进度与�
     const radio = await page.locator('.retro-radio').boundingBox();
     const paper = await page.locator('.radio-newspaper').boundingBox();
     if (info.project.name === 'desktop') expect(Math.abs(radio!.y - paper!.y)).toBeLessThan(1);
+    const leftScrew = (await page.locator('.screw-left').boundingBox())!;
+    const rightScrew = (await page.locator('.screw-right').boundingBox())!;
+    expect(Math.abs(leftScrew.y - rightScrew.y)).toBeLessThan(0.5);
+    expect(
+      Math.abs(
+        leftScrew.x - radio!.x - (radio!.x + radio!.width - rightScrew.x - rightScrew.width),
+      ),
+    ).toBeLessThan(0.5);
+    const footnote = page.locator('.retro-footnote');
+    const model = (await footnote.getByText('MEMPHIS PORTABLE / WS-56').boundingBox())!;
+    expect(model.x - leftScrew.x - leftScrew.width).toBeGreaterThanOrEqual(8);
+    const programme = page.getByRole('complementary', { name: '接下来播放', exact: true });
+    const order = programme.getByLabel('播客续播顺序');
+    await order.focus();
+    const toolbar = (await programme.locator('.programme-heading').boundingBox())!;
+    const select = (await order.boundingBox())!;
+    expect(select.x - toolbar.x).toBeGreaterThanOrEqual(3);
+    expect(toolbar.x + toolbar.width - select.x - select.width).toBeGreaterThanOrEqual(3);
+    const list = (await programme.locator('.programme-list').boundingBox())!;
+    expect(list.y).toBeGreaterThanOrEqual(toolbar.y + toolbar.height - 1);
+    expect(list.height).toBeGreaterThan(60);
     expect(await page.evaluate(() => document.body.scrollWidth <= innerWidth)).toBeTruthy();
     await page.locator('.podcast-stage').evaluate((el) => el.scrollTo(0, 0));
     await page.screenshot({ path: `../../artifacts/radio-${theme}-${info.project.name}.png` });

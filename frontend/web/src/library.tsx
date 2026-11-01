@@ -43,11 +43,12 @@ import { AlbumMenu } from './album-menu';
 import { PlaybackSync } from './playback-sync';
 import { PodcastProgressDialog } from './podcast-progress-dialog';
 import { QueuePanel } from './queue-panel';
-import { Management } from './management';
+import { Management, type ManagementTab } from './management';
+import { PersonalSettings, type PersonalSection } from './personal-settings';
+import type { AssistantSettingsTab } from './assistant-settings';
 import { MetadataEditor } from './metadata-editor';
 import { MetadataRefreshDialog, type RefreshTarget } from './metadata-refresh';
 import { LyricScanDialog } from './lyric-scans';
-import { AccountDialog } from './accounts';
 import { TrackFileInfoDialog } from './track-file-info-dialog';
 import { PodcastsPage } from './podcasts';
 import { ThemeToggleCompact } from './theme';
@@ -60,7 +61,7 @@ import {
 } from './continuous-browse';
 import { Icon } from './icons';
 import type { TrackOperations } from './track-actions';
-import { Discover, Devices } from './discover';
+import { Discover } from './discover';
 import { OfflinePanel } from './offline-panel';
 import { Notifications, useNotifications } from './notifications';
 import type { NotificationAction } from './agent-api';
@@ -77,9 +78,6 @@ const AgentTasks = lazy(() =>
 );
 const Drafts = lazy(() =>
   import('./agent-workbench').then((module) => ({ default: module.Drafts })),
-);
-const AssistantSettings = lazy(() =>
-  import('./assistant-settings').then((module) => ({ default: module.AssistantSettings })),
 );
 
 type View =
@@ -189,17 +187,47 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
   const profile = currentUser.profile;
   const canManage = profile !== 'listener';
   const canImport = profile === 'owner' || profile === 'librarian';
-  const [accountOpen, setAccountOpen] = useState(false);
+  const [accountOpen, setAccountOpen] = useState(() =>
+    ['devices', 'assistant-settings'].includes(readPreference('wildstring:active_view') || ''),
+  );
+  const [settingsLocation, setSettingsLocation] = useState<{
+    section: PersonalSection | null;
+    assistantTab?: AssistantSettingsTab;
+  }>(() => ({
+    section:
+      readPreference('wildstring:active_view') === 'devices'
+        ? 'downloads'
+        : readPreference('wildstring:active_view') === 'assistant-settings'
+          ? 'assistant'
+          : null,
+  }));
   const [connectionSettingsRevision, setConnectionSettingsRevision] = useState(0);
-  function openModelConnections() {
+  function openPersonalSettings(
+    section: PersonalSection | null = null,
+    assistantTab: AssistantSettingsTab = 'connections',
+  ) {
+    setSettingsLocation({ section, assistantTab });
     setConnectionSettingsRevision((value) => value + 1);
-    switchView('assistant-settings');
+    setAccountOpen(true);
+    setManageOpen(false);
+    setQueueOpen(false);
+    window.scrollTo(0, 0);
+  }
+  function openModelConnections() {
+    openPersonalSettings('assistant', 'connections');
+  }
+  function openManagement(tab: ManagementTab = 'home') {
+    setAccountOpen(false);
+    setManageOpen(true);
+    setManagementTab(tab);
+    setQueueOpen(false);
+    window.scrollTo(0, 0);
   }
   const [view, setView] = useState<View>(() => {
     try {
       const saved = readPreference('wildstring:active_view');
       if (saved && Object.hasOwn(labels, saved)) {
-        return saved as View;
+        return saved === 'devices' || saved === 'assistant-settings' ? 'tracks' : (saved as View);
       }
     } catch {
       // 忽略
@@ -236,7 +264,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
     if (action.target === 'task' && id) return openAgentItem('tasks', id);
     if (action.target === 'metadata-center' || action.target === 'metadata-review') {
       setManagementAction({ type: 'metadata-center', batchId: action.params?.batch_id });
-      setManageOpen(true);
+      openManagement('jobs');
       return;
     }
     if (action.target === 'lyric-scan') {
@@ -254,8 +282,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
     [],
   );
   const [manageOpen, setManageOpen] = useState(false);
-  const [managementTab, setManagementTab] =
-    useState<import('./management').ManagementTab>('overview');
+  const [managementTab, setManagementTab] = useState<ManagementTab>('home');
   const [editingTrack, setEditingTrack] = useState<Track | null>(null);
   const [metadataRefresh, setMetadataRefresh] = useState<RefreshTarget | null>(null);
   useEffect(() => {
@@ -655,7 +682,10 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
     setError('');
   }
   function switchView(target: View, resetHistory = true) {
+    if (target === 'assistant-settings') return openPersonalSettings('assistant');
+    if (target === 'devices') return openPersonalSettings('downloads');
     if (!Object.hasOwn(labels, target)) return;
+    setAccountOpen(false);
     try {
       writePreference('wildstring:active_view', target);
     } catch {
@@ -1015,7 +1045,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
   const nav = (target: View) => (
     <button
       key={target}
-      className={`nav-button ${view === target && !manageOpen ? 'nav-current' : ''}`}
+      className={`nav-button ${view === target && !manageOpen && !accountOpen ? 'nav-current' : ''}`}
       onClick={() => switchView(target)}
     >
       <span className="nav-icon" aria-hidden="true">
@@ -1041,47 +1071,33 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
         <aside className="sidebar">
           <Brand />
           <nav aria-label={t('nav.main')} className="sidebar-navigation">
-            <p className="sidebar-group-label">{t('nav.library')}</p>
-            {(['tracks', 'albums', 'artists', 'playlists', 'favorites'] as View[]).map(nav)}
             <p className="sidebar-group-label">{t('nav.discoverGroup')}</p>
             {(['discover', 'podcasts', 'assistant'] as View[]).map(nav)}
-            <button
-              className={`nav-button ${queueOpen ? 'selected' : ''}`}
-              onClick={() => {
-                setQueueOpen(!queueOpen);
-                setLyricsOpen(false);
-              }}
-              aria-expanded={queueOpen}
-            >
-              <span className="nav-icon" aria-hidden="true">
-                <Icon name="queue" />
-              </span>
-              <span className="nav-label">{t('nav.queue')}</span>
-              <small>{player.queue.length}</small>
-            </button>
+            <p className="sidebar-group-label">{t('nav.library')}</p>
+            {(
+              [
+                'tracks',
+                'albums',
+                'artists',
+                'playlists',
+                'favorites',
+                'listening',
+                'offline',
+              ] as View[]
+            ).map(nav)}
             <details
               className="sidebar-group"
-              open={['listening', 'offline', 'devices'].includes(view) || undefined}
-            >
-              <summary>{t('nav.moreMusic')}</summary>
-              {(['listening', 'offline', 'devices'] as View[]).map(nav)}
-            </details>
-            <details
-              className="sidebar-group"
-              open={['drafts', 'tasks', 'assistant-settings'].includes(view) || undefined}
+              open={['drafts', 'tasks'].includes(view) || undefined}
             >
               <summary>{t('nav.assistantTools')}</summary>
-              {(['drafts', 'tasks', 'assistant-settings'] as View[]).map(nav)}
+              {(['drafts', 'tasks'] as View[]).map(nav)}
             </details>
           </nav>
           <div className="sidebar-bottom">
             {canManage && (
               <button
                 className={`nav-button manage-entry ${manageOpen ? 'nav-current' : ''}`}
-                onClick={() => {
-                  setManageOpen(true);
-                  setQueueOpen(false);
-                }}
+                onClick={() => openManagement()}
               >
                 <span className="nav-icon" aria-hidden="true">
                   <Icon name="settings" />
@@ -1089,7 +1105,10 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
                 <span className="nav-label">{t('nav.manage')}</span>
               </button>
             )}
-            <button className="nav-button account-entry" onClick={() => setAccountOpen(true)}>
+            <button
+              className={`nav-button account-entry ${accountOpen ? 'nav-current' : ''}`}
+              onClick={() => openPersonalSettings()}
+            >
               <span className="nav-icon" aria-hidden="true">
                 <AccountAvatar user={currentUser} />
               </span>
@@ -1106,12 +1125,15 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
         {manageOpen && (
           <Management
             key={
-              ['settings', 'users', 'diagnostics'].includes(managementTab)
-                ? 'instance-management'
-                : selectedLibrary()
+              ['overview', 'tracks', 'intake', 'jobs', 'library-settings'].includes(managementTab)
+                ? selectedLibrary()
+                : 'instance-management'
             }
             initialTab={managementTab}
-            onTabChanged={setManagementTab}
+            onTabChanged={(tab) => {
+              setManagementTab(tab);
+              setManagementAction(null);
+            }}
             revision={revision}
             onBack={() => {
               setManageOpen(false);
@@ -1125,7 +1147,19 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
             initialAction={managementAction}
           />
         )}
-        <main className={`library ${album ? 'is-album' : ''}`} hidden={manageOpen}>
+        {accountOpen && (
+          <PersonalSettings
+            key={connectionSettingsRevision}
+            user={currentUser}
+            player={player}
+            initialSection={settingsLocation.section}
+            initialAssistantTab={settingsLocation.assistantTab}
+            onUserChange={setCurrentUser}
+            onBack={() => setAccountOpen(false)}
+            onPodcasts={() => switchView('podcasts')}
+          />
+        )}
+        <main className={`library ${album ? 'is-album' : ''}`} hidden={manageOpen || accountOpen}>
           <header className={`topbar ${specialView ? 'topbar-context' : ''}`}>
             <div>
               <span className="mobile-brand">{t('nav.mobileBrand')}</span>
@@ -1139,17 +1173,19 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
               value={view}
               onChange={(event) =>
                 event.target.value === 'manage'
-                  ? setManageOpen(true)
+                  ? openManagement()
                   : event.target.value === 'account'
-                    ? setAccountOpen(true)
+                    ? openPersonalSettings()
                     : switchView(event.target.value as View)
               }
             >
-              {(Object.keys(labels) as View[]).map((target) => (
-                <option key={target} value={target}>
-                  {t(`views.${target}`)}
-                </option>
-              ))}
+              {(Object.keys(labels) as View[])
+                .filter((target) => target !== 'devices' && target !== 'assistant-settings')
+                .map((target) => (
+                  <option key={target} value={target}>
+                    {t(`views.${target}`)}
+                  </option>
+                ))}
               {canManage && <option value="manage">{t('nav.manage')}</option>}
               <option value="account">{t('nav.account')}</option>
             </select>
@@ -1215,8 +1251,9 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
               }}
             />
           )}
-          {view === 'offline' && <OfflinePanel player={player} userId={currentUser.id} />}
-          {view === 'devices' && <Devices player={player} user={currentUser} />}
+          {view === 'offline' && (
+            <OfflinePanel player={player} onSettings={() => openPersonalSettings('downloads')} />
+          )}
           <Suspense
             fallback={
               <p role="status" className="workspace-empty">
@@ -1230,6 +1267,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
                 canEditPublishers={canManage}
                 canManageSources={canImport}
                 canManageResources={currentUser.profile === 'owner'}
+                onManage={openManagement}
                 onQueueTrack={(track, next) => {
                   if (next) player.playNext(track);
                   else if (!player.current) player.start([track], 0, undefined, false);
@@ -1266,9 +1304,6 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
             )}
             {view === 'notifications' && (
               <Notifications inbox={inbox} onOpen={openNotificationAction} />
-            )}
-            {view === 'assistant-settings' && (
-              <AssistantSettings key={connectionSettingsRevision} user={currentUser} />
             )}
           </Suspense>
           <div hidden={specialView}>
@@ -1960,13 +1995,6 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
           initial={editor.initial}
           onClose={() => setEditor(null)}
           onSaved={saveEditor}
-        />
-      )}
-      {accountOpen && (
-        <AccountDialog
-          user={currentUser}
-          onUserChange={setCurrentUser}
-          onClose={() => setAccountOpen(false)}
         />
       )}
       {viewingFileTrack && (

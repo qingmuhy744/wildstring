@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
-import { login, section } from './helpers';
+import { login, section, leaveSettings } from './helpers';
 
 const photo = execFileSync(
   'backend/.venv/bin/python',
@@ -28,7 +28,7 @@ test('头像预览、上传、重新打开与恢复默认使用真实账号接�
     await expect
       .poll(() => editor.locator('img').evaluate((img: HTMLImageElement) => img.naturalWidth))
       .toBe(256);
-    await page.getByRole('button', { name: '关闭账号设置', exact: true }).click();
+    await leaveSettings(page);
     await page.reload();
     await section(page, '账号设置');
     await expect(editor.locator('img')).toBeVisible();

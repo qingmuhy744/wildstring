@@ -99,11 +99,7 @@ test('接续可关闭或自动恢复，同一版本不重复弹窗', async ({ pa
   await dialog.getByRole('button', { name: '暂不', exact: true }).click();
   await page.evaluate(() => window.dispatchEvent(new Event('focus')));
   await expect(dialog).toHaveCount(0);
-  if (info.project.name === 'mobile') await page.getByLabel('浏览方式').selectOption('devices');
-  else {
-    await page.locator('.sidebar').getByText('更多音乐', { exact: true }).click();
-    await page.getByRole('button', { name: '跨设备继续', exact: true }).click();
-  }
+  await section(page, '跨设备继续');
   const mode = page.getByLabel('跨设备接续方式', { exact: true });
   await expect(mode).toHaveValue('ask');
   await mode.selectOption('off');

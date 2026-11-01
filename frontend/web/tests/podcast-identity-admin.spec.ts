@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { login, section } from './helpers';
+import { login, section, manageTab } from './helpers';
 
 test.skip(
   process.env.WILDSTRING_TEST_PODCAST !== '1',
@@ -99,7 +99,7 @@ test('所有者回填 Apple 编号，只合并已核实的重复节目', async (
 
   await login(page);
   await section(page, '管理');
-  await page.getByRole('button', { name: '设置', exact: true }).click();
+  await manageTab(page, '重复节目');
   const card = page.getByRole('region', { name: '播客去重与回填', exact: true });
   await expect(card).toContainText('共 4 个节目，已有 Apple 编号 0 个，待检查 4 个。');
   const list = card.getByRole('list', { name: '重复节目' });
@@ -168,7 +168,7 @@ test('启动后自动回填的结果标注来源，重复节目等待确认', as
   );
   await login(page);
   await section(page, '管理');
-  await page.getByRole('button', { name: '设置', exact: true }).click();
+  await manageTab(page, '重复节目');
   const card = page.getByRole('region', { name: '播客去重与回填', exact: true });
   await expect(card.getByRole('status', { name: '回填进度' })).toContainText(
     '上次回填（启动后自动）：检查 4 个，匹配 2',

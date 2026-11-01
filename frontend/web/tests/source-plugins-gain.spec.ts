@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
-import { login, audio } from './helpers';
+import { login, audio, manageTab } from './helpers';
 
 const zip = execFileSync(
   'backend/.venv/bin/python',
@@ -21,11 +21,8 @@ sys.stdout.buffer.write(b.getvalue())
 test('ZIP 导入、配置、测试、升级及导出使用真实后端', async ({ page }, info) => {
   await login(page);
   if (info.project.name === 'mobile') await page.getByLabel('浏览方式').selectOption('manage');
-  else await page.getByRole('button', { name: '管理', exact: true }).click();
-  await page
-    .getByRole('navigation', { name: '管理分类' })
-    .getByRole('button', { name: '设置', exact: true })
-    .click();
+  else await page.getByRole('button', { name: '管理中心', exact: true }).click();
+  await manageTab(page, '数据源');
   const panel = page.locator('.source-plugins');
   await panel
     .getByLabel('数据源插件 ZIP', { exact: true })
@@ -139,11 +136,8 @@ async function pluginFixture(page: import('@playwright/test').Page, project: str
   await page.addInitScript(() => localStorage.setItem('wildstring:theme', 'light'));
   await login(page);
   if (project === 'mobile') await page.getByLabel('浏览方式').selectOption('manage');
-  else await page.getByRole('button', { name: '管理', exact: true }).click();
-  await page
-    .getByRole('navigation', { name: '管理分类' })
-    .getByRole('button', { name: '设置', exact: true })
-    .click();
+  else await page.getByRole('button', { name: '管理中心', exact: true }).click();
+  await manageTab(page, '数据源');
   const panel = page.locator('.source-plugins');
   await expect(panel.locator('.source-plugin-card')).toHaveCount(3);
   return {

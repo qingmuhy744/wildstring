@@ -1,4 +1,4 @@
-import { useState, type CSSProperties } from 'react';
+import type { CSSProperties } from 'react';
 import { time } from './api';
 import { Cover } from './cover';
 import { PodcastSkipButton, type Player } from './player';
@@ -165,17 +165,16 @@ function Radio({ player, onPreview }: { player: Player; onPreview: () => void })
         </label>
       </div>
       <div className="retro-footnote" aria-hidden="true">
+        <span className="retro-screw screw-left" />
         <span>MEMPHIS PORTABLE / WS-56</span>
         <span>让声音，慢下来。</span>
+        <span className="retro-screw screw-right" />
       </div>
-      <span className="retro-screw screw-left" aria-hidden="true" />
-      <span className="retro-screw screw-right" aria-hidden="true" />
     </section>
   );
 }
 
 function Upcoming({ player }: { player: Player }) {
-  const [expanded, setExpanded] = useState(false);
   const entries = player.queue.slice(player.index + 1);
   const preference = player.podcastPreference;
   const direction =
@@ -184,47 +183,46 @@ function Upcoming({ player }: { player: Player }) {
     <aside className="radio-programme" aria-label="接下来播放">
       <header className="programme-heading">
         <div className="programme-heading-main">
-          <span className="print-kicker">UP NEXT</span>
           <h2>
             接下来播放 <small>{entries.length}</small>
           </h2>
+          <span className="programme-status">
+            {direction === 'off' ? '自动续播关闭' : direction === 'asc' ? '从旧到新' : '从新到旧'}
+          </span>
         </div>
-        <span className="programme-status">
-          {direction === 'off' ? '自动续播关闭' : direction === 'asc' ? '从旧到新' : '从新到旧'}
-        </span>
+        <div className="programme-settings">
+          <label>
+            <span className="sr-only">播客续播顺序</span>
+            <select
+              aria-label="播客续播顺序"
+              value={preference.order}
+              onChange={(event) =>
+                player.setPodcastPreference({
+                  ...preference,
+                  order: event.target.value as PodcastOrder,
+                })
+              }
+            >
+              <option value="follow">跟随列表顺序</option>
+              <option value="asc">从旧到新</option>
+              <option value="desc">从新到旧</option>
+              <option value="off">关闭自动续播</option>
+            </select>
+          </label>
+          <label className="programme-unplayed">
+            <input
+              type="checkbox"
+              checked={preference.skipCompleted}
+              onChange={(event) =>
+                player.setPodcastPreference({ ...preference, skipCompleted: event.target.checked })
+              }
+            />
+            跳过已听完
+          </label>
+        </div>
       </header>
-      <div className="programme-settings">
-        <label>
-          <span className="sr-only">播客续播顺序</span>
-          <select
-            aria-label="播客续播顺序"
-            value={preference.order}
-            onChange={(event) =>
-              player.setPodcastPreference({
-                ...preference,
-                order: event.target.value as PodcastOrder,
-              })
-            }
-          >
-            <option value="follow">跟随列表顺序</option>
-            <option value="asc">从旧到新</option>
-            <option value="desc">从新到旧</option>
-            <option value="off">关闭自动续播</option>
-          </select>
-        </label>
-        <label className="programme-unplayed">
-          <input
-            type="checkbox"
-            checked={preference.skipCompleted}
-            onChange={(event) =>
-              player.setPodcastPreference({ ...preference, skipCompleted: event.target.checked })
-            }
-          />
-          跳过已听完
-        </label>
-      </div>
       <ol className="programme-list">
-        {(expanded ? entries : entries.slice(0, 3)).map((track, i) => (
+        {entries.map((track, i) => (
           <li key={`${track.id}-${i}`}>
             <span className="programme-number">{String(i + 1).padStart(2, '0')}</span>
             <button
@@ -263,11 +261,6 @@ function Upcoming({ player }: { player: Player }) {
       )}
       <footer>
         <span>手动添加优先 · 每个节目记住偏好</span>
-        {entries.length > 3 && (
-          <button onClick={() => setExpanded(!expanded)}>
-            {expanded ? '收起' : `查看全部 ${entries.length} 集`}
-          </button>
-        )}
       </footer>
     </aside>
   );

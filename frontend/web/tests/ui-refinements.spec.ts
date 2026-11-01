@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { login, section } from './helpers';
+import { login, section, personalCategory, leaveSettings } from './helpers';
 
 test('主题表单可读，默认连接参数与折叠导航一致', async ({ page }, info) => {
   await login(page);
@@ -102,11 +102,12 @@ test('迟到的设置回读不会覆盖已输入的保留天数', async ({ page 
 test('用户可以在账号设置中修改个人资料（登录 ID、昵称和邮箱）', async ({ page }, info) => {
   await login(page);
   if (info.project.name === 'mobile') {
-    await page.getByLabel('浏览方式', { exact: true }).selectOption({ label: '账号设置' });
+    await page.getByLabel('浏览方式', { exact: true }).selectOption({ label: '个人设置' });
   } else {
-    await page.getByRole('button', { name: '账号设置', exact: true }).click();
+    await page.getByRole('button', { name: '个人设置', exact: true }).click();
   }
-  const dialog = page.getByRole('dialog', { name: '账号设置', exact: true });
+  await personalCategory(page, 'account');
+  const dialog = page.getByRole('region', { name: '个人设置', exact: true });
   await expect(dialog).toBeVisible();
   const form = dialog.getByRole('form', { name: '个人资料', exact: true });
   await expect(form).toBeVisible();
@@ -118,6 +119,6 @@ test('用户可以在账号设置中修改个人资料（登录 ID、昵称和�
   await emailInput.fill('admin@example.com');
   await form.getByRole('button', { name: '保存个人资料', exact: true }).click();
   await expect(form.getByRole('status')).toHaveText('个人资料已保存。');
-  await dialog.getByRole('button', { name: '关闭账号设置', exact: true }).click();
+  await leaveSettings(page);
   await expect(dialog).toBeHidden();
 });

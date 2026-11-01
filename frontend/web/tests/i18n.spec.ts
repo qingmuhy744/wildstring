@@ -19,8 +19,9 @@ async function openAccount(page: Page, name: string) {
   const mobile = page.locator('select.mobile-section');
   if (await mobile.isVisible()) await mobile.selectOption('account');
   else await page.locator('.sidebar .account-entry').click();
-  const dialog = page.getByRole('dialog', { name });
+  const dialog = page.getByRole('region', { name });
   await expect(dialog).toBeVisible();
+  await dialog.getByRole('button', { name: /^Appearance & language/ }).click();
   return dialog;
 }
 
@@ -30,7 +31,7 @@ test('interface language follows the browser, then the account setting', async (
 }, info) => {
   await signIn(page);
   try {
-    let dialog = await openAccount(page, 'Account settings');
+    let dialog = await openAccount(page, 'Personal settings');
     const language = dialog.getByLabel('Interface language');
     await expect(language).toHaveValue('auto');
     if (shots) {
@@ -40,8 +41,8 @@ test('interface language follows the browser, then the account setting', async (
 
     await language.selectOption('zh');
     await expect(page.locator('html')).toHaveAttribute('lang', 'zh-CN');
-    dialog = page.getByRole('dialog', { name: '账号设置' });
-    await expect(dialog.getByRole('heading', { name: '账号设置' })).toBeVisible();
+    dialog = page.getByRole('region', { name: '个人设置' });
+    await expect(dialog.getByRole('heading', { name: '外观与语言' })).toBeVisible();
     await expect
       .poll(
         async () => (await (await page.request.get('/api/v1/auth/status')).json()).user.language,
@@ -68,7 +69,9 @@ test('interface language follows the browser, then the account setting', async (
 
     await dialog.getByLabel('界面语言').selectOption('auto');
     await expect(page.locator('html')).toHaveAttribute('lang', 'en');
-    await expect(page.getByRole('dialog', { name: 'Account settings' })).toBeVisible();
+    await expect(
+      page.getByRole('region', { name: 'Personal settings', exact: true }),
+    ).toBeVisible();
   } finally {
     await page.request.put('/api/v1/auth/preferences', { headers, data: { language: 'auto' } });
   }

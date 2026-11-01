@@ -1,17 +1,18 @@
 import { expect, test, type Page } from '@playwright/test';
-import { audio, login } from './helpers';
+import { audio, login, personalCategory, leaveSettings } from './helpers';
 
 const KEY = 'wildstring:user-preferences:admin:wildstring:track-list-size';
 async function settings(page: Page) {
   const navigation = page.getByLabel('浏览方式', { exact: true });
   if (await navigation.isVisible()) await navigation.selectOption('account');
-  else await page.getByRole('button', { name: '账号设置', exact: true }).click();
-  return page.getByRole('dialog', { name: '账号设置', exact: true });
+  else await page.getByRole('button', { name: '个人设置', exact: true }).click();
+  await personalCategory(page, 'appearance');
+  return page.getByRole('region', { name: '个人设置', exact: true });
 }
 async function choose(page: Page, value: string) {
   const dialog = await settings(page);
   await dialog.getByLabel('歌曲列表大小', { exact: true }).selectOption(value);
-  await dialog.getByRole('button', { name: '关闭账号设置', exact: true }).click();
+  await leaveSettings(page);
 }
 async function tab(page: Page, name: string) {
   await page
@@ -263,7 +264,7 @@ test('存储不可用时仍即时切换，改变大小不会将滚动位置重�
   await expect(page.locator('.track-list')).toHaveAttribute('data-list-size', 'small');
   expect(await page.evaluate(() => scrollY)).toBe(scroll);
   await dialog.getByLabel('歌曲列表大小', { exact: true }).selectOption('large');
-  await dialog.getByRole('button', { name: '关闭账号设置', exact: true }).click();
+  await leaveSettings(page);
   await expect(page.getByRole('table')).toHaveAttribute('data-list-size', 'large');
   const again = await settings(page);
   await expect(again.getByLabel('歌曲列表大小', { exact: true })).toHaveValue('large');

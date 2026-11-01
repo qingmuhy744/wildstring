@@ -1,21 +1,15 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { api } from './api';
 import { MusicUploader } from './music-uploader';
 
-type SourceItem = {
-  name: string;
-  path: string;
-  kind: 'folder' | 'file';
-  importable?: boolean;
-  pending?: boolean;
-};
-type SourceListing = { source_id: string; path: string; items: SourceItem[] };
-type Preview = {
-  path: string;
-  files: string[];
-  count: number;
-  pending_markers: string[];
-};
+import { Icon } from './icons';
+import {
+  ImportFolderDialog,
+  type ImportPreview,
+  type ImportSelection,
+  type ImportSource,
+} from './import-folder-dialog';
+
 type TrashEntry = {
   id: string;
   album_id: string;
@@ -40,85 +34,56 @@ export function LibrarySources({
   canPurge: boolean;
   onChanged: () => void;
 }) {
-  const [path, setPath] = useState('.');
-  const [sources, setSources] = useState<{ id: string; name: string; path?: string }[]>([]);
-  const [source, setSource] = useState('import');
-  const [listing, setListing] = useState<SourceListing | null>(null);
-  const [preview, setPreview] = useState<Preview | null>(null);
+  const [sources, setSources] = useState<ImportSource[]>([]);
+  const [selection, setSelection] = useState<ImportSelection | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [preview, setPreview] = useState<ImportPreview | null>(null);
   const [trash, setTrash] = useState<TrashEntry[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [sourceError, setSourceError] = useState('');
   const [notice, setNotice] = useState('');
 
-  async function load(folder = path, sourceId = source) {
-    const [current, removed] = await Promise.all([
-      api<SourceListing>(
-        `/manage/library/folders?source_id=${encodeURIComponent(sourceId)}&path=${encodeURIComponent(folder)}`,
-      ),
-      api<{ items: TrashEntry[] }>('/manage/library/trash'),
-    ]);
-    setListing(current);
+  async function loadTrash() {
+    const removed = await api<{ items: TrashEntry[] }>('/manage/library/trash');
     setTrash(removed.items);
   }
+  async function loadSources(signal?: AbortSignal) {
+    setSourceError('');
+    try {
+      const value = await api<{ items: ImportSource[] }>('/manage/library/sources', { signal });
+      if (signal?.aborted) return;
+      setSources(value.items);
+      setSelection(value.items[0] ? { source_id: value.items[0].id, path: '.' } : null);
+    } catch (reason) {
+      if (!signal?.aborted)
+        setSourceError(reason instanceof Error ? reason.message : '来源暂时无法读取。');
+    }
+  }
   useEffect(() => {
-    void api<{ items: { id: string; name: string; path?: string }[] }>('/manage/library/sources')
+    const controller = new AbortController();
+    void loadSources(controller.signal);
+    void api<{ items: TrashEntry[] }>('/manage/library/trash', { signal: controller.signal })
       .then((value) => {
-        setSources(value.items);
-        if (value.items[0]) setSource(value.items[0].id);
+        if (!controller.signal.aborted) setTrash(value.items);
       })
-      .catch(() => {});
-    void load('.').catch((reason) =>
-      setError(reason instanceof Error ? reason.message : '来源目录暂时无法读取。'),
-    );
+      .catch((reason) => {
+        if (!controller.signal.aborted)
+          setError(reason instanceof Error ? reason.message : '回收区暂时无法读取。');
+      });
+    return () => controller.abort();
   }, []);
-
-  const breadcrumbs = useMemo(() => {
-    if (path === '.') return [{ label: '导入目录', value: '.' }];
-    const parts = path.split('/');
-    return [
-      { label: '导入目录', value: '.' },
-      ...parts.map((part, index) => ({ label: part, value: parts.slice(0, index + 1).join('/') })),
-    ];
-  }, [path]);
-
-  async function openFolder(next: string) {
-    setError('');
-    try {
-      await load(next);
-      setPath(next);
-      setPreview(null);
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '目录暂时无法读取。');
-    }
-  }
-
-  async function inspect() {
-    setBusy(true);
-    setError('');
-    setNotice('');
-    try {
-      setPreview(
-        await api<Preview>('/manage/library/import/preview', {
-          method: 'POST',
-          body: JSON.stringify({ source_id: source, path }),
-        }),
-      );
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '预览未完成。');
-    } finally {
-      setBusy(false);
-    }
-  }
+  const source = sources.find((item) => item.id === selection?.source_id);
 
   async function importFolder() {
-    if (!canImport) return;
+    if (!canImport || !selection) return;
     setBusy(true);
     setError('');
     setNotice('');
     try {
       await api('/manage/library/import', {
         method: 'POST',
-        body: JSON.stringify({ source_id: source, path }),
+        body: JSON.stringify(selection),
       });
       setNotice('已提交导入任务，可在任务记录查看进度。');
       onChanged();
@@ -136,7 +101,7 @@ export function LibrarySources({
     try {
       await api(`/manage/library/trash/${id}/restore`, { method: 'POST' });
       setNotice('回收项已恢复到原位置。');
-      await load();
+      await loadTrash();
       onChanged();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '恢复未完成。');
@@ -152,7 +117,7 @@ export function LibrarySources({
     try {
       await api(`/manage/library/trash/${id}`, { method: 'DELETE' });
       setNotice('回收项已永久清理。');
-      await load();
+      await loadTrash();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '永久清理未完成。');
     } finally {
@@ -166,90 +131,69 @@ export function LibrarySources({
       <section className="management-card" aria-label="导入来源工作台">
         <span className="eyebrow">SOURCE WORKSPACE</span>
         <h2>来源浏览与导入</h2>
-        <label className="source-root-select">
-          源文件夹
-          <select
-            aria-label="选择源文件夹"
-            value={source}
-            disabled={busy}
-            onChange={(event) => {
-              const next = event.target.value;
-              setSource(next);
-              setPath('.');
-              setPreview(null);
-              void load('.', next).catch((reason: Error) => setError(reason.message));
-            }}
-          >
-            {sources.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.name}
-                {item.path ? ` · ${item.path}` : ''}
-              </option>
-            ))}
-          </select>
-        </label>
-        {sources.find((item) => item.id === source)?.path && (
-          <p className="storage-path source-absolute-path">
-            服务器来源：{sources.find((item) => item.id === source)?.path}
+        <p className="muted">
+          选择本次导入的文件夹，包含其下所有子目录。已入库且未变化的音频会跳过复制。
+        </p>
+        <div className="source-folder-selection">
+          <Icon name="folder" />
+          <div>
+            <strong>
+              {selection
+                ? selection.path === '.'
+                  ? source?.name || '来源根目录'
+                  : selection.path.split('/').at(-1)
+                : '尚未选择来源'}
+            </strong>
+            <small>
+              {source?.path}
+              {selection && selection.path !== '.' ? `/${selection.path}` : ''}
+            </small>
+          </div>
+          <button type="button" disabled={busy || !selection} onClick={() => setPickerOpen(true)}>
+            浏览文件夹
+          </button>
+        </div>
+        {sourceError && (
+          <p className="error" role="alert">
+            {sourceError}{' '}
+            <button type="button" onClick={() => void loadSources()}>
+              重新读取来源
+            </button>
           </p>
         )}
         <p className="muted">
-          导入源始终只读。先浏览和预览，再提交导入；带有 .part 等标记的文件会等待下载完成。
+          导入源始终只读，文件复制到当前音乐库；带有 .part 等标记的文件会等待下载完成。
         </p>
-        <nav className="source-breadcrumbs" aria-label="来源路径">
-          {breadcrumbs.map((crumb, index) => (
-            <span key={crumb.value}>
-              {index > 0 && <span aria-hidden="true"> / </span>}
-              <button type="button" onClick={() => void openFolder(crumb.value)}>
-                {crumb.label}
-              </button>
-            </span>
-          ))}
-        </nav>
-        {listing && (
-          <div className="source-browser" aria-live="polite">
-            {listing.items.length === 0 ? (
-              <p className="muted">这个目录是空的。</p>
-            ) : (
-              listing.items.map((item) => (
-                <div className="source-row" key={item.path}>
-                  <div>
-                    <strong>
-                      {item.kind === 'folder' ? '▰ ' : '♫ '}
-                      {item.name}
-                    </strong>
-                    {item.pending && <small className="source-pending">等待下载完成</small>}
-                    {item.kind === 'file' && !item.pending && (
-                      <small>{item.importable ? '可导入音频' : '附属文件或暂不支持'}</small>
-                    )}
-                  </div>
-                  {item.kind === 'folder' && (
-                    <button type="button" onClick={() => void openFolder(item.path)}>
-                      打开
-                    </button>
-                  )}
-                </div>
-              ))
-            )}
-          </div>
-        )}
         <div className="source-actions">
-          <button type="button" disabled={busy} onClick={() => void inspect()}>
-            预览当前目录
-          </button>
           <button
             type="button"
             className="primary"
-            disabled={busy || !canImport}
+            disabled={busy || !canImport || !selection}
             onClick={() => void importFolder()}
           >
-            提交导入任务
+            {busy ? '正在提交…' : '导入所选文件夹'}
           </button>
+          <small className="muted">
+            {selection ? displayPath(selection.path) : '请先选择导入文件夹'}
+          </small>
         </div>
+        {pickerOpen && selection && (
+          <ImportFolderDialog
+            sources={sources}
+            initial={selection}
+            onClose={() => setPickerOpen(false)}
+            onSelect={(next, result) => {
+              setSelection(next);
+              setPreview(result);
+              setNotice('');
+              setPickerOpen(false);
+            }}
+          />
+        )}
         {preview && (
           <div className="source-preview">
             <strong>{displayPath(preview.path)}</strong>
-            <span>{preview.count} 个可导入文件</span>
+            <span>{preview.count} 个音频文件（含子目录）</span>
             {preview.pending_markers.length > 0 && (
               <span className="source-pending">
                 {preview.pending_markers.length} 个文件仍在等待下载

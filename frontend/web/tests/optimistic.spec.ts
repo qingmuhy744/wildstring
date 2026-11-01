@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { login } from './helpers';
+import { login, manageTab, personalCategory } from './helpers';
 const headers = { 'X-Wildstring-Client': 'web' };
 
 test('收藏在响应前反馈，失败回退，阻止重复提交并可重试', async ({ page }) => {
@@ -126,7 +126,9 @@ test('Last.fm 同步开关响应前更新，失败恢复', async ({ page }, info
   });
   try {
     if (info.project.name === 'mobile') await page.getByLabel('浏览方式').selectOption('account');
-    else await page.getByRole('button', { name: '账号设置', exact: true }).click();
+    else await page.getByRole('button', { name: '个人设置', exact: true }).click();
+    await personalCategory(page, 'account');
+    await page.getByRole('button', { name: 'Last.fm', exact: true }).click();
     const checkbox = page.getByLabel('同步已听记录', { exact: true });
     await checkbox.check();
     await expect(checkbox).toBeChecked();
@@ -152,11 +154,8 @@ test('管理员网页可保存代理模式，认证地址不回显', async ({ pa
   } = original;
   try {
     if (info.project.name === 'mobile') await page.getByLabel('浏览方式').selectOption('manage');
-    else await page.getByRole('button', { name: '管理', exact: true }).click();
-    await page
-      .getByRole('navigation', { name: '管理分类' })
-      .getByRole('button', { name: '设置', exact: true })
-      .click();
+    else await page.getByRole('button', { name: '管理中心', exact: true }).click();
+    await manageTab(page, '数据源');
     await page.getByLabel('联网代理', { exact: true }).selectOption('custom');
     await page
       .getByLabel('HTTP 代理地址', { exact: true })

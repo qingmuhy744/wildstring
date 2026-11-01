@@ -1973,14 +1973,8 @@ a {
   font-size: 11px;
   pointer-events: none;
 }
-.lyric-seek-preview hr {
-  flex: 1;
-  margin: 0;
-  border: 0;
-  border-top: 1px solid currentColor;
-  opacity: 0.18;
-}
 .lyric-seek-preview button {
+  margin-left: auto;
   display: grid;
   place-items: center;
   width: 44px;
