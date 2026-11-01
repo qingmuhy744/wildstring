@@ -2232,22 +2232,18 @@ class PodcastManager:
 
 
 def podcast_router(
-    manager: PodcastManager, auth: Auth, *, search_regions: str = "us,tw,cn"
+    manager: PodcastManager, auth: Auth, *, search: Any, identity_backfill: Any
 ) -> APIRouter:
     from wildstring import podcast_opml
-    from wildstring.podcast_identity_backfill import IdentityBackfill
-    from wildstring.podcast_search import PodcastSearch
 
     router = APIRouter(prefix="/api/v1/podcasts", tags=["podcasts"])
     publishers = PodcastPublishers(manager.database)
     catalog_policy = PodcastCatalogPolicy(manager.database)
     catalog_policy.routes(router, auth)
-    search = PodcastSearch(manager, regions=search_regions)
     search.routes(router, auth)
-    backfill = IdentityBackfill(manager, search)
-    backfill.routes(router, auth)
+    identity_backfill.routes(router, auth)
     # The application lifespan schedules the automatic start-up run on this instance.
-    manager.identity_backfill = backfill
+    manager.identity_backfill = identity_backfill
     podcast_opml.routes(
         router,
         auth,

@@ -29,6 +29,8 @@ from wildstring.library.transcoding import Transcoding
 from wildstring.management import Management, management_router
 from wildstring.mcp_http import HTTPMCP
 from wildstring.mobile_experience import experience_router
+from wildstring.podcast_identity_backfill import IdentityBackfill
+from wildstring.podcast_search import PodcastSearch
 from wildstring.podcasts import PodcastManager, podcast_router
 from wildstring.providers import Providers
 from wildstring.request_privacy import CallbackPrivacy, install_callback_filter
@@ -66,6 +68,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         storage_dir=current.podcasts_dir,
         allow_fake_ip=current.podcast_allow_fake_ip,
     )
+    podcast_search = PodcastSearch(podcasts, regions=current.podcast_search_regions)
+    podcast_identity_backfill = IdentityBackfill(podcasts, podcast_search)
     mcp = HTTPMCP(platform)
 
     @asynccontextmanager
@@ -171,7 +175,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(experience_router(repository, auth, providers, platform))
     app.include_router(podcasts.resources.router(auth))
     app.include_router(
-        podcast_router(podcasts, auth, search_regions=current.podcast_search_regions)
+        podcast_router(
+            podcasts,
+            auth,
+            search=podcast_search,
+            identity_backfill=podcast_identity_backfill,
+        )
     )
     app.include_router(catalog_gaps_router(database, auth))
 

@@ -239,7 +239,12 @@ test('加载第二批歌曲后跨标签页切换小大中，保留首个完整�
     await page.evaluate((value) => {
       const key = 'wildstring:user-preferences:admin:wildstring:track-list-size';
       localStorage.setItem(key, value);
-      window.dispatchEvent(new StorageEvent('storage', { key, newValue: value }));
+      const event = new StorageEvent('storage');
+      Object.defineProperties(event, {
+        key: { value: key },
+        newValue: { value },
+      });
+      window.dispatchEvent(event);
     }, size);
     await expect(page.locator('.track-list')).toHaveAttribute('data-list-size', size);
     await expect.poll(firstVisible).toEqual(before);
