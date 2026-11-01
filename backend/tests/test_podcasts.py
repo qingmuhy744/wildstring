@@ -477,6 +477,38 @@ def test_server_side_auto_update_scheduler(settings: Settings, authenticated_cli
             updated_count2 = manager.run_scheduled_updates()
             assert updated_count2 == 0
 
+            # Unfollowed shows retain metadata and settings, but stop periodic RSS work.
+            with db.connect(write=True) as conn:
+                conn.execute(
+                    "UPDATE podcasts SET last_updated_at = '2026-01-01T00:00:00+00:00' WHERE id=?",
+                    (podcast_id,),
+                )
+            client.put(
+                f"/api/v1/podcasts/{podcast_id}/follow",
+                headers=CLIENT_HEADERS,
+                json={"followed": False},
+            ).raise_for_status()
+            assert manager.run_scheduled_updates() == 0
+            with db.connect() as conn:
+                assert (
+                    conn.execute(
+                        "SELECT auto_update FROM podcasts WHERE id=?", (podcast_id,)
+                    ).fetchone()[0]
+                    == 1
+                )
+                assert (
+                    conn.execute(
+                        "SELECT count(*) FROM podcast_episodes WHERE podcast_id=?", (podcast_id,)
+                    ).fetchone()[0]
+                    > 0
+                )
+            client.put(
+                f"/api/v1/podcasts/{podcast_id}/follow",
+                headers=CLIENT_HEADERS,
+                json={"followed": True},
+            ).raise_for_status()
+            assert manager.run_scheduled_updates() == 1
+
 
 def test_podcast_stream_security_and_content_type(tmp_path):
     settings = Settings(data_dir=tmp_path / "data", music_dir=tmp_path / "music")

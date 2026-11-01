@@ -20,7 +20,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from threading import Event, RLock, Thread
 from typing import Annotated, Any, Literal
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -309,6 +309,30 @@ def sanitize_filename(name: str, max_len: int = 120) -> str:
     cleaned = re.sub(r'[\\/*?:"<>|]', "_", name).strip()
     cleaned = re.sub(r"\s+", " ", cleaned).strip(". ")
     return cleaned[:max_len] if cleaned else "untitled"
+
+
+def podcast_audio_filename(title: str, audio_url: str, content_type: str = "") -> str:
+    extensions = {
+        "audio/mpeg": ".mp3",
+        "audio/mp3": ".mp3",
+        "audio/mp4": ".m4a",
+        "audio/mp4a-latm": ".m4a",
+        "audio/x-m4a": ".m4a",
+        "audio/aac": ".aac",
+        "audio/ogg": ".ogg",
+        "audio/opus": ".opus",
+        "audio/flac": ".flac",
+        "audio/x-flac": ".flac",
+        "audio/wav": ".wav",
+        "audio/x-wav": ".wav",
+        "audio/webm": ".webm",
+    }
+    suffix = extensions.get(content_type.split(";")[0].strip().lower())
+    if not suffix:
+        suffix = Path(urlsplit(audio_url).path).suffix.lower()
+        if suffix not in extensions.values():
+            suffix = ".audio"
+    return f"{sanitize_filename(title)}{suffix}"
 
 
 def format_speed(bytes_per_sec: float) -> str:
@@ -1009,6 +1033,7 @@ class PodcastManager:
                        COALESCE(retention_policy, 'keep') as retention_policy
                 FROM podcasts
                 WHERE auto_update = 1
+                  AND EXISTS (SELECT 1 FROM podcast_follows f WHERE f.podcast_id = podcasts.id)
                 """
             ).fetchall()
 
@@ -1860,7 +1885,13 @@ class PodcastManager:
     def clear_recent_completed(self) -> None:
         self._recent_completed.clear()
 
-    def stream_remote_audio(self, audio_url: str, client_range: str | None = None):
+    def stream_remote_audio(
+        self,
+        audio_url: str,
+        client_range: str | None = None,
+        *,
+        download_title: str | None = None,
+    ):
         try:
             audio_url = validate_remote_url(audio_url)
         except PodcastURLRejected as exc:
@@ -1902,7 +1933,9 @@ class PodcastManager:
             ) from e
 
         status_code = resp.status if hasattr(resp, "status") else 200
-        raw_content_type = resp.headers.get("Content-Type") or "audio/mpeg"
+        raw_content_type = resp.headers.get("Content-Type") or (
+            "application/octet-stream" if download_title is not None else "audio/mpeg"
+        )
         mime_main = raw_content_type.split(";")[0].strip().lower()
         if not mime_main.startswith("audio/"):
             content_type = "application/octet-stream"
@@ -1918,6 +1951,11 @@ class PodcastManager:
             "X-Content-Type-Options": "nosniff",
             "Content-Security-Policy": "sandbox; default-src 'none'",
         }
+        if download_title is not None:
+            filename = podcast_audio_filename(download_title, audio_url, content_type)
+            response_headers["Content-Disposition"] = (
+                f"attachment; filename*=utf-8''{quote(filename, safe='')}"
+            )
         for h in ("Content-Length", "Content-Range"):
             val = resp.headers.get(h)
             if val:
@@ -2541,17 +2579,25 @@ def podcast_router(
         ep = manager.get_episode(episode_id, user["id"], include_local_path=True)
         if not ep or not ep.get("audio_url"):
             raise HTTPException(status_code=404, detail="音频不可用")
-        if request.query_params.get("cache") == "1":
+        download = request.query_params.get("download") == "1"
+        if not download and request.query_params.get("cache") == "1":
             manager.queue_playback_cache(
                 episode_id,
                 user["id"],
                 request.query_params.get("network", "unknown"),
             )
-        local_response = manager.resources.local_response(episode_id)
+        local_response = manager.resources.local_response(
+            episode_id,
+            filename=podcast_audio_filename(ep["title"], ep["audio_url"]) if download else None,
+        )
         if local_response is not None:
             return local_response
-        if request.query_params.get("proxy") == "1":
-            return manager.stream_remote_audio(ep["audio_url"], request.headers.get("range"))
+        if download or request.query_params.get("proxy") == "1":
+            return manager.stream_remote_audio(
+                ep["audio_url"],
+                request.headers.get("range"),
+                download_title=ep["title"] if download else None,
+            )
         return RedirectResponse(url=ep["audio_url"], status_code=status.HTTP_307_TEMPORARY_REDIRECT)
 
     @router.post(

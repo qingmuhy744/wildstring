@@ -1,6 +1,7 @@
 """Personal saves and conservative collection of shared podcast audio."""
 
 import json
+import mimetypes
 import time
 from typing import Annotated
 from uuid import uuid4
@@ -178,7 +179,7 @@ class PodcastResources:
         with self.database.connect(write=True) as db:
             db.execute("DELETE FROM podcast_resource_leases WHERE id=?", (token,))
 
-    def local_response(self, identity):
+    def local_response(self, identity, *, filename: str | None = None):
         # Lease acquisition and collection use the same SQLite writer lock.
         with self.database.connect(write=True) as db:
             db.execute("BEGIN IMMEDIATE")
@@ -189,7 +190,8 @@ class PodcastResources:
             lease = self.acquire(db, identity)
         return FileResponse(
             path,
-            media_type="audio/mpeg",
+            media_type=mimetypes.guess_type(filename)[0] if filename else "audio/mpeg",
+            filename=filename,
             background=BackgroundTask(self.release_lease, lease),
             headers={
                 "X-Content-Type-Options": "nosniff",

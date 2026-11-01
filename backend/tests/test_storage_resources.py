@@ -1,8 +1,11 @@
 """Storage migrations preserve identity and explicit saves fence shared cache collection."""
 
+import asyncio
 import shutil
 import time
+from io import BytesIO
 from pathlib import Path
+from urllib.parse import unquote
 
 import pytest
 from fastapi import HTTPException
@@ -85,6 +88,76 @@ def test_personal_saves_reuse_and_release_independently(resources):
         "/api/v1/podcasts/resources/cleanup", headers=HEADERS, json={"dry_run": False}
     )
     assert mutation.status_code == 403
+
+
+def test_episode_file_download_keeps_access_ranges_and_stream_leases(resources):
+    owner, listener, store, path, db, _ = resources
+    with db.connect(write=True) as conn:
+        conn.execute(
+            "UPDATE podcast_episodes SET title=?,audio_url=? WHERE id='ep-east'",
+            ("声音 / 午后", "https://example.com/audio.m4a?token=synthetic"),
+        )
+    endpoint = "/api/v1/podcasts/episodes/ep-east/stream?download=1&cache=1"
+    leased = store.local_response("ep-east", filename="声音.m4a")
+    assert store.cleanup(dry_run=False)["deleted_count"] == 0
+    asyncio.run(leased.background())
+    for client in (owner, listener):
+        response = client.get(endpoint, headers={"Range": "bytes=1-5"})
+        assert response.status_code == 206
+        assert response.content == path.read_bytes()[1:6]
+        assert response.headers["content-range"] == f"bytes 1-5/{path.stat().st_size}"
+        assert response.headers["content-type"].startswith("audio/mp4")
+        assert unquote(response.headers["content-disposition"]) == (
+            "attachment; filename*=utf-8''声音 _ 午后.m4a"
+        )
+    assert listener.get("/api/v1/podcasts/episodes/ep-coffee/stream?download=1").status_code == 404
+    guest = TestClient(owner.app)
+    try:
+        assert guest.get(endpoint).status_code == 401
+    finally:
+        guest.close()
+    with db.connect() as conn:
+        for table in ("podcast_resource_leases", "podcast_resource_refs", "podcast_playback_cache"):
+            assert conn.execute(f"SELECT count(*) FROM {table}").fetchone()[0] == 0
+
+
+def test_remote_episode_file_download_uses_proxy_and_actual_mime(resources, monkeypatch):
+    _, listener, _, path, db, _ = resources
+    with db.connect(write=True) as conn:
+        conn.execute("UPDATE podcast_episodes SET local_path=NULL WHERE id='ep-east'")
+    body = b"synthetic AAC audio"
+    upstream = BytesIO(body)
+    upstream.headers = {
+        "Content-Type": "audio/mp4",
+        "Content-Length": str(len(body)),
+        "Content-Range": "bytes 2-19/20",
+    }
+    upstream.status = 206
+    seen = []
+
+    class Opener:
+        def open(self, request, timeout):
+            seen.append((request.full_url, request.get_header("Range")))
+            return upstream
+
+    monkeypatch.setattr("wildstring.podcasts.podcast_opener", lambda *_: Opener())
+    response = listener.get(
+        "/api/v1/podcasts/episodes/ep-east/stream?download=1",
+        headers={"Range": "bytes=2-19"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 206
+    assert response.content == body
+    assert response.headers["content-type"] == "audio/mp4"
+    assert response.headers["content-range"] == "bytes 2-19/20"
+    assert (
+        unquote(response.headers["content-disposition"]) == "attachment; filename*=utf-8''east.m4a"
+    )
+    assert seen == [("https://example.com/audio.mp3", "bytes=2-19")]
+    assert upstream.closed
+    assert path.exists()
+    with db.connect() as conn:
+        assert conn.execute("SELECT count(*) FROM podcast_resource_refs").fetchone()[0] == 0
 
 
 def test_collector_respects_manual_pins_streams_aliases_and_grace(resources):

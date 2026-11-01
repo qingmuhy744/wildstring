@@ -1,6 +1,6 @@
 # 库存储、迁移与播客共享资源
 
-本轮契约，当前 schema 43；验证状态单独记录在 0.8.0 发布说明。重管理只在网页开放，Android 保留消费、库选择和有权限的轻量资料修改。
+存储契约起于 schema 43；当前开发库 schema 47，登录防护兼容迁移不改变存储与资源结构。历史验证记录见 0.8.0 发布说明，本轮见[客户端与播客探索改进](../docs/product/client-and-podcast-explore.md)。重管理只在网页开放，Android 保留消费、库选择和有权限的轻量资料修改。
 
 ## 库配置
 
@@ -28,6 +28,8 @@ DNS 答案落在 `198.18.0.0/15`（Clash/mihomo/Surge fake-ip 模式）时单独
 
 `GET /api/v1/podcasts/episodes/{id}/stream` 优先返回服务器已有音频。带 `proxy=1` 时由服务端串流远程音频并转发 Range：上游连接失败或返回错误时返回 502 `podcast_audio_upstream_failed`，上游 416 原样返回 416 `podcast_audio_range_not_satisfiable`，地址被拒绝返回 422 `invalid_podcast_audio_url` 或 `remote_url_fake_ip`；不再回退为跨源 307，因为 Android 不跟随重定向、网页也会把它当成含糊的播放失败。网页与 Android 都使用 `proxy=1`。不带 `proxy=1` 的旧调用保持 307 到源站，由客户端自行访问。
 
+同一接口带 `download=1` 时以附件下载到用户设备，保留会话认证、个人节目权限、Range 和本地文件传输租约。服务器已有音频直接复用，否则沿用相同的远程代理及错误处理，不跳转跨源地址。文件名使用单集标题与音频格式（远程响应 MIME 优先，其次源地址扩展名，未知使用 `.audio`），不转码。此操作不建立个人保存引用、不触发服务器缓存；「保存到服务器」仍使用独立的 POST／DELETE download 接口。Web 单集详情分别展示播放／待播操作、下载到设备与服务器保存。
+
 ## 共享音频管理
 
 仅所有者通过 `/api/v1/podcasts/resources` 分页查看资源、引用数、磁盘占用和保护状态；`GET/PUT /resources/settings` 采用版本校验，配置是否自动清理和零引用保留天数。`PUT /resources/{id}/protection` 显式设置或取消手动保护。
@@ -43,6 +45,8 @@ schema 41 增加按账号记录的 `podcast_playback_cache`。通过 `stream?cac
 本地接口回归另保留 [Postman 集合](checks/storage-resources.postman_collection.json)，仅允许访问本机隔离服务，并在执行写入前校验 `Storage Resource Fixture` 标记；需要预置 `storage-resource-shared` 与明确手动保护（版本大于 1）的 `storage-resource-legacy` 测试音频。该夹具 ID 保留兼容，不代表自动添加历史保护。检查同时验证两个用户的播放缓存偏好互不覆盖。使用临时测试凭据、`--no-report-events` 执行，不绑定或发布云端工作区。
 
 ## 用户自动下载与个人访问（schema 40）
+
+无人关注的节目暂停定时 RSS 更新，重新关注后恢复原策略；不会改写节目 `auto_update`，也不会删除节目、单集或个人收听记录。自动下载仍要求本人的有效关注，手动保存引用独立保留。无引用音频按前述资源清理规则处理。
 
 `GET/PUT /api/v1/podcasts/{id}/download-settings` 读写当前账号的节目策略：`{version,download_policy,retention_policy}`。支持关闭、最新 3/5/10 集、本人未听完、全部；保留规则支持保留策略范围内音频、听完释放自动引用。自动下载需要本人关注且账号启用。节目 RSS 更新频率、下载传输与重试参数、共享文件清理由管理员管理。
 
