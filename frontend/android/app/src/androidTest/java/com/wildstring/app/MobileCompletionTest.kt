@@ -375,7 +375,7 @@ class MobileCompletionTest {
                 compose.waitUntil(10_000) { compose.onAllNodesWithContentDescription(uiString(R.string.track_actions_named, "手机测试歌曲 0")).fetchSemanticsNodes().isNotEmpty() }
                 compose.onNodeWithContentDescription(uiString(R.string.track_actions_named, "手机测试歌曲 0")).performClick()
                 compose.onNodeWithText(uiString(R.string.track_edit)).assertIsDisplayed()
-                compose.onNodeWithText(uiString(R.string.lyrics_edit_timing)).assertIsDisplayed()
+                compose.onNodeWithText(uiString(R.string.lyrics_edit_timing)).performScrollTo().assertIsDisplayed()
                 compose.onNodeWithText(uiString(R.string.metadata_suggestions)).assertDoesNotExist()
             } finally { cleanup(vm) }
         }
