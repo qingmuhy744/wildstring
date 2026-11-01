@@ -180,11 +180,11 @@ class LibraryRepository:
             ).fetchone()
             return dict(row) if row else None
 
-    def touch(self, track_id: str, run_id: str) -> None:
+    def touch_many(self, track_ids: list[str], run_id: str) -> None:
         with self.database.connect(write=True) as connection:
-            connection.execute(
+            connection.executemany(
                 "UPDATE tracks SET seen_run = ?, status = 'available' WHERE id = ?",
-                (run_id, track_id),
+                ((run_id, track_id) for track_id in track_ids),
             )
 
     def save(self, path: str, metadata: Metadata, size: int, mtime: int, run_id: str) -> None:

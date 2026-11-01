@@ -1,6 +1,8 @@
 @file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 package com.wildstring.app.ui
 
+import com.wildstring.app.R
+import androidx.compose.ui.res.stringResource
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -31,19 +33,19 @@ import kotlinx.coroutines.launch
 @Composable
 internal fun MobileShortcuts(discovery: Boolean = false, open: (String) -> Unit) {
     val entries = if (discovery) listOf(
-        Triple("daily", "每日推荐", Icons.Default.AutoAwesome),
-        Triple("rankings", "收听排行", Icons.Default.BarChart),
-        Triple("external", "发现新音乐", Icons.Default.Explore)
+        Triple("daily", stringResource(R.string.daily_recommendations), Icons.Default.AutoAwesome),
+        Triple("rankings", stringResource(R.string.listening_rankings), Icons.Default.BarChart),
+        Triple("external", stringResource(R.string.discover_new_music), Icons.Default.Explore)
     ) else listOf(
-        Triple("offline", "离线保存", Icons.Default.Download),
-        Triple("statistics", "收听统计", Icons.Default.BarChart)
+        Triple("offline", stringResource(R.string.offline_save), Icons.Default.Download),
+        Triple("statistics", stringResource(R.string.listening_statistics), Icons.Default.BarChart)
     )
     Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp).testTag(if (discovery) "discovery-shortcuts" else "personal-shortcuts"), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         entries.forEach { (route, title, icon) ->
-            FilledTonalButton({ open(route) }, Modifier.weight(1f), shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp), contentPadding = PaddingValues(vertical = 12.dp, horizontal = 4.dp)) {
+            FilledTonalButton({ open(route) }, Modifier.weight(1f).heightIn(min = 78.dp), shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp), contentPadding = PaddingValues(vertical = 12.dp, horizontal = 4.dp)) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Icon(icon, null, Modifier.size(22.dp))
-                    Text(title, style = MaterialTheme.typography.labelMedium, maxLines = 1)
+                    Text(title, style = MaterialTheme.typography.labelMedium, maxLines = 2, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                 }
             }
         }
@@ -54,12 +56,13 @@ internal fun MobileShortcuts(discovery: Boolean = false, open: (String) -> Unit)
 internal fun FeatureDialog(vm: MusicViewModel, route: String, track: Track? = null, playlist: Playlist? = null, albumId: String? = null, initialBatchId: String? = null, onOpenAction: (String, JsonObject?) -> Unit = { _, _ -> }, dismiss: () -> Unit) {
     val account by vm.state.collectAsStateWithLifecycle()
     val title = when (route) {
-        "assistant" -> "野弦助手"; "notifications" -> "通知"
-        "connections" -> "模型连接"; "research" -> "联网与记忆"; "channels" -> "通知设置"
-        "external" -> "发现新音乐"; "rankings" -> "收听排行"; "daily" -> "每日推荐"; "ai" -> "AI 找歌与歌单"; "offline" -> "离线保存"; "statistics" -> "收听统计"; "devices" -> "音乐跨设备接续"
-        "playlist" -> if (playlist == null) "新建歌单" else "编辑歌单"; "order" -> "歌单排序"; "multi" -> "多选加入歌单"
-        "lyric-scans" -> "歌词补全与洗版"; "gain" -> "响度均衡与手动调整"; "source-plugins" -> "数据源 ZIP 插件"; "management" -> "曲库管理"; "album-edit" -> "编辑专辑信息"
-        "metadata" -> "编辑歌曲信息"; "lyrics" -> "编辑歌词"; "suggestions" -> "更新元数据与建议"; else -> "曲库管理"
+        "assistant" -> stringResource(R.string.assistant_name); "notifications" -> stringResource(R.string.notifications)
+        "drafts" -> stringResource(R.string.playlist_drafts)
+        "connections" -> stringResource(R.string.model_connections); "research" -> stringResource(R.string.settings_research); "channels" -> stringResource(R.string.settings_notifications)
+        "external" -> stringResource(R.string.discover_new_music); "rankings" -> stringResource(R.string.listening_rankings); "daily" -> stringResource(R.string.daily_recommendations); "ai" -> stringResource(R.string.ai_music_playlists); "offline" -> stringResource(R.string.offline_save); "statistics" -> stringResource(R.string.listening_statistics); "devices" -> stringResource(R.string.settings_music_handoff)
+        "playlist" -> if (playlist == null) stringResource(R.string.playlist_new) else stringResource(R.string.playlist_edit); "order" -> stringResource(R.string.playlist_order); "multi" -> stringResource(R.string.playlist_multi_add)
+        "lyric-scans" -> stringResource(R.string.lyrics_scan); "gain" -> stringResource(R.string.playback_gain); "source-plugins" -> stringResource(R.string.source_zip_plugins); "management" -> stringResource(R.string.library_management); "album-edit" -> stringResource(R.string.album_edit)
+        "metadata" -> stringResource(R.string.track_edit); "lyrics" -> stringResource(R.string.lyrics_edit); "suggestions" -> stringResource(R.string.metadata_suggestions); else -> stringResource(R.string.library_management)
     }
     Dialog(onDismissRequest = dismiss, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         val view = androidx.compose.ui.platform.LocalView.current
@@ -77,12 +80,14 @@ internal fun FeatureDialog(vm: MusicViewModel, route: String, track: Track? = nu
         }
         Surface(Modifier.fillMaxSize().testTag("feature-$route")) {
             Column(Modifier.fillMaxSize().safeDrawingPadding().imePadding()) {
-                TopAppBar(title = { Text(title) }, navigationIcon = { IconButton(dismiss) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回") } })
+                TopAppBar(title = { Text(title) }, navigationIcon = { IconButton(dismiss) { Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.back)) } })
                 Box(Modifier.weight(1f).fillMaxWidth()) {
                     when (route) {
                         "assistant" -> AgentWorkspace(vm, "chat", onOpenAction)
                         "notifications" -> SimpleNotificationsSheet(vm, onOpenAction)
-                        "connections", "management", "source-plugins", "lyric-scans" -> Text("此项服务端管理请在网页端进行。", Modifier.padding(24.dp))
+                        "drafts" -> AgentDrafts(vm, initialBatchId)
+                        "connections", "management", "source-plugins", "lyric-scans" -> Text(stringResource(R.string.manage_on_web), Modifier.padding(24.dp))
+                        "suggestions" -> Text(stringResource(R.string.metadata_review_on_web), Modifier.padding(24.dp))
                         "research" -> AgentResearch(vm)
                         "channels" -> AgentChannels(vm)
                         "daily" -> DailyPanel(vm)
@@ -99,10 +104,9 @@ internal fun FeatureDialog(vm: MusicViewModel, route: String, track: Track? = nu
                         else -> if (account.account?.profile in listOf("owner", "librarian", "editor")) when (route) {
                             "metadata" -> track?.let { MetadataPanel(vm, it) }
                             "lyrics" -> track?.let { LyricsEditorPanel(vm, it) }
-                            "suggestions" -> track?.let { SuggestionsPanel(vm, it) }
                             "album-edit" -> albumId?.let { AlbumMetadataPanel(vm, it, dismiss) }
-                            else -> Text("此项服务端管理请在网页端进行。", Modifier.padding(24.dp))
-                        } else Text("需要资料编辑权限。", Modifier.padding(24.dp))
+                            else -> Text(stringResource(R.string.manage_on_web), Modifier.padding(24.dp))
+                        } else Text(stringResource(R.string.metadata_permission_needed), Modifier.padding(24.dp))
                     }
                 }
             }
@@ -116,26 +120,28 @@ internal fun SleepDialog(vm: MusicViewModel, dismiss: () -> Unit) {
     val player by vm.state.collectAsStateWithLifecycle()
     var now by remember { mutableLongStateOf(android.os.SystemClock.elapsedRealtime()) }
     LaunchedEffect(timer.deadline) { while (timer.deadline != null) { now = android.os.SystemClock.elapsedRealtime(); kotlinx.coroutines.delay(1000) } }
-    AlertDialog(onDismissRequest = dismiss, title = { Text("睡眠定时") }, text = {
+    AlertDialog(onDismissRequest = dismiss, title = { Text(stringResource(R.string.sleep_timer)) }, text = {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(when { timer.entryId != null -> "播完本曲后暂停"; timer.deadline != null -> "剩余约 ${((timer.deadline!! - now).coerceAtLeast(0) + 59_999) / 60_000} 分钟"; else -> "未开启" })
-            Row { listOf(15, 30, 60).forEach { minutes -> TextButton({ vm.sleep.minutes(minutes); dismiss() }) { Text("$minutes 分钟") } } }
+            Text(when { timer.entryId != null -> stringResource(R.string.sleep_end_pause); timer.deadline != null -> stringResource(R.string.sleep_remaining, ((timer.deadline!! - now).coerceAtLeast(0) + 59_999) / 60_000); else -> stringResource(R.string.not_enabled) })
+            Row { listOf(15, 30, 60).forEach { minutes -> TextButton({ vm.sleep.minutes(minutes); dismiss() }) { Text(stringResource(R.string.minutes_value, minutes)) } } }
             var custom by remember { mutableStateOf("45") }
-            OutlinedTextField(custom, { custom = it.filter(Char::isDigit).take(3) }, label = { Text("自定义分钟（1–240）") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true)
-            TextButton({ custom.toIntOrNull()?.takeIf { it in 1..240 }?.let { vm.sleep.minutes(it); dismiss() } }, enabled = custom.toIntOrNull() in 1..240) { Text("按此时间暂停") }
-            TextButton({ vm.state.value.entryId?.let { vm.sleep.endOfTrack(it) }; dismiss() }, enabled = player.current != null) { Text("播完本曲停止") }
+            OutlinedTextField(custom, { custom = it.filter(Char::isDigit).take(3) }, label = { Text(stringResource(R.string.sleep_custom_minutes)) }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true)
+            TextButton({ custom.toIntOrNull()?.takeIf { it in 1..240 }?.let { vm.sleep.minutes(it); dismiss() } }, enabled = custom.toIntOrNull() in 1..240) { Text(stringResource(R.string.sleep_pause_after)) }
+            TextButton({ vm.state.value.entryId?.let { vm.sleep.endOfTrack(it) }; dismiss() }, enabled = player.current != null) { Text(stringResource(R.string.sleep_end_stop)) }
         }
-    }, confirmButton = { TextButton({ vm.sleep.cancel(); dismiss() }) { Text("取消定时") } }, dismissButton = { TextButton(dismiss) { Text("关闭") } })
+    }, confirmButton = { TextButton({ vm.sleep.cancel(); dismiss() }) { Text(stringResource(R.string.sleep_cancel)) } }, dismissButton = { TextButton(dismiss) { Text(stringResource(R.string.close)) } })
 }
 
 /** A local pending flag gives instant feedback and prevents duplicate mutations. */
+private const val PROCESSING_STATUS = "正在处理…"
+private const val DONE_STATUS = "已完成"
 internal class FeatureAction {
     var busy by mutableStateOf(false)
     var message by mutableStateOf<String?>(null)
     suspend fun run(block: suspend () -> Unit) {
         if (busy) return
-        busy = true; message = "正在处理…"
-        try { block(); if (message == "正在处理…") message = "已完成" }
+        busy = true; message = PROCESSING_STATUS
+        try { block(); if (message == PROCESSING_STATUS) message = DONE_STATUS }
         catch (e: CancellationException) { throw e }
         catch (e: Exception) { message = friendlyError(e) }
         finally { busy = false }
@@ -148,7 +154,7 @@ internal class FeatureAction {
     // final messages and errors remain visible after the operation settles.
     action.message?.takeIf { !action.busy }?.let {
         androidx.compose.foundation.text.selection.SelectionContainer {
-            Text(it, Modifier.padding(vertical = 8.dp), style = MaterialTheme.typography.bodySmall)
+            Text(if (it == DONE_STATUS) stringResource(R.string.completed) else it, Modifier.padding(vertical = 8.dp), style = MaterialTheme.typography.bodySmall)
         }
     }
 }
@@ -164,38 +170,38 @@ private fun OfflinePanel(vm: MusicViewModel) {
     var confirm by remember { mutableStateOf<OfflineEntry?>(null) }
     var downloadOptions by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
-        Text("${items.count { it.state == "complete" }} 首已完成 · ${items.sumOf { it.bytes } / 1024 / 1024} MiB", style = MaterialTheme.typography.titleMedium)
+        Text(stringResource(R.string.download_summary, items.count { it.state == "complete" }, items.sumOf { it.bytes } / 1024 / 1024), style = MaterialTheme.typography.titleMedium)
         Row {
-            TextButton({ vm.repository.downloads.pauseAll() }, enabled = items.any { it.state in listOf("queued", "downloading") }) { Text("暂停全部") }
-            TextButton({ vm.repository.downloads.resumeAll(); vm.startDownloads() }, enabled = items.any { it.state in listOf("paused", "failed") }) { Text("继续全部") }
+            TextButton({ vm.repository.downloads.pauseAll() }, enabled = items.any { it.state in listOf("queued", "downloading") }) { Text(stringResource(R.string.download_pause_all)) }
+            TextButton({ vm.repository.downloads.resumeAll(); vm.startDownloads() }, enabled = items.any { it.state in listOf("paused", "failed") }) { Text(stringResource(R.string.download_resume_all)) }
         }
-        TextButton({ downloadOptions = !downloadOptions }) { Text(if (downloadOptions) "收起下载设置" else "下载设置 · 音质、网络与歌单") }
+        TextButton({ downloadOptions = !downloadOptions }) { Text(if (downloadOptions) stringResource(R.string.download_settings_collapse) else stringResource(R.string.download_settings_expand)) }
         if (downloadOptions) Column(Modifier.fillMaxWidth().heightIn(max = 300.dp).verticalScroll(rememberScrollState())) { OfflineSettings(vm) }
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("总容量限额 $capacity GiB", Modifier.weight(1f))
-            TextButton({ capacity = (capacity / 2).coerceAtLeast(1); vm.repository.downloads.capacityGb = capacity }) { Text("减少") }
-            TextButton({ capacity = (capacity * 2).coerceAtMost(64); vm.repository.downloads.capacityGb = capacity }) { Text("增加") }
+            Text(stringResource(R.string.download_capacity, capacity), Modifier.weight(1f))
+            TextButton({ capacity = (capacity / 2).coerceAtLeast(1); vm.repository.downloads.capacityGb = capacity }) { Text(stringResource(R.string.decrease)) }
+            TextButton({ capacity = (capacity * 2).coerceAtMost(64); vm.repository.downloads.capacityGb = capacity }) { Text(stringResource(R.string.increase)) }
         }
-        if (android.os.Build.VERSION.SDK_INT >= 33 && !notificationsGranted) TextButton({ requestNotifications.launch(android.Manifest.permission.POST_NOTIFICATIONS) }) { Text("允许显示下载通知") }
-        Text("已完成音乐断网可播放；切换服务器保留各自副本，退出账号会清除该账号的离线音乐。", style = MaterialTheme.typography.bodySmall)
+        if (android.os.Build.VERSION.SDK_INT >= 33 && !notificationsGranted) TextButton({ requestNotifications.launch(android.Manifest.permission.POST_NOTIFICATIONS) }) { Text(stringResource(R.string.download_allow_notifications)) }
+        Text(stringResource(R.string.offline_keep_hint), style = MaterialTheme.typography.bodySmall)
         LazyColumn(Modifier.weight(1f)) { items(items, key = { it.track.id }) { item ->
             Column(Modifier.fillMaxWidth().padding(vertical = 12.dp)) {
                 Text(item.track.title)
-                Text(if (item.audioFormat == "m4a" && item.bitrate > 0) downloadQualityLabel(item.bitrate) else "原音 · ${item.track.format.uppercase()}", style = MaterialTheme.typography.labelSmall)
-                Text(when(item.state) { "complete" -> "已完成"; "paused" -> "已暂停"; "failed" -> "下载失败"; "downloading" -> "正在保存"; else -> "等待下载" } + " · ${item.bytes / 1024 / 1024} MiB", style = MaterialTheme.typography.bodySmall)
+                Text(if (item.audioFormat == "m4a" && item.bitrate > 0) downloadQualityLabel(item.bitrate) else stringResource(R.string.download_original_format, item.track.format.uppercase()), style = MaterialTheme.typography.labelSmall)
+                Text(when(item.state) { "complete" -> stringResource(R.string.completed); "paused" -> stringResource(R.string.playback_paused); "failed" -> stringResource(R.string.download_failed); "downloading" -> stringResource(R.string.favorite_saving); else -> stringResource(R.string.download_waiting) } + " · ${item.bytes / 1024 / 1024} MiB", style = MaterialTheme.typography.bodySmall)
                 item.error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
                 if (item.state == "downloading" && item.total > 0) LinearProgressIndicator(progress = { (item.bytes.toFloat() / item.total).coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
                 Row {
-                    if (item.state == "complete") TextButton({ vm.play(listOf(item.track)) }) { Text("播放") }
-                    else if (item.state in listOf("queued", "downloading")) TextButton({ vm.repository.downloads.pause(item.track.id) }) { Text("暂停") }
-                    else TextButton({ vm.repository.downloads.resume(item.track.id); vm.startDownloads() }) { Text("继续 / 重试") }
-                    TextButton({ confirm = item }) { Text("删除") }
+                    if (item.state == "complete") TextButton({ vm.play(listOf(item.track)) }) { Text(stringResource(R.string.play)) }
+                    else if (item.state in listOf("queued", "downloading")) TextButton({ vm.repository.downloads.pause(item.track.id) }) { Text(stringResource(R.string.pause)) }
+                    else TextButton({ vm.repository.downloads.resume(item.track.id); vm.startDownloads() }) { Text(stringResource(R.string.resume_retry)) }
+                    TextButton({ confirm = item }) { Text(stringResource(R.string.delete)) }
                 }
             }
         } }
-        if (items.isEmpty()) Text("从歌曲操作或专辑、歌单页面选择“离线保存”。", Modifier.padding(vertical = 24.dp))
+        if (items.isEmpty()) Text(stringResource(R.string.offline_empty_hint), Modifier.padding(vertical = 24.dp))
     }
-    confirm?.let { item -> AlertDialog(onDismissRequest = { confirm = null }, title = { Text("删除离线副本？") }, text = { Text(item.track.title) }, confirmButton = { TextButton({ vm.repository.downloads.remove(item.track.id); confirm = null }) { Text("删除") } }, dismissButton = { TextButton({ confirm = null }) { Text("取消") } }) }
+    confirm?.let { item -> AlertDialog(onDismissRequest = { confirm = null }, title = { Text(stringResource(R.string.offline_delete_title)) }, text = { Text(item.track.title) }, confirmButton = { TextButton({ vm.repository.downloads.remove(item.track.id); confirm = null }) { Text(stringResource(R.string.delete)) } }, dismissButton = { TextButton({ confirm = null }) { Text(stringResource(R.string.cancel)) } }) }
 }
 
 @Composable
@@ -205,13 +211,14 @@ private fun StatisticsPanel(vm: MusicViewModel) {
     LaunchedEffect(Unit) { action.run { value = vm.repository.api().listeningSummary() } }
     Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         ActionStatus(action)
-        value?.let { Text("已播放 ${it.playCount} 次"); Text("累计收听 ${it.listenedMs / 1000 / 60} 分钟"); Text("听过 ${it.playedTracks} 首 · 收藏 ${it.lovedTracks} 首") }
-        Text("歌曲列表中可按播放次数、收听时长、最近播放排序。", style = MaterialTheme.typography.bodySmall)
+        value?.let { Text(stringResource(R.string.play_count_value, it.playCount)); Text(stringResource(R.string.statistics_minutes, it.listenedMs / 1000 / 60)); Text(stringResource(R.string.statistics_tracks, it.playedTracks, it.lovedTracks)) }
+        Text(stringResource(R.string.statistics_sort_hint), style = MaterialTheme.typography.bodySmall)
     }
 }
 
 @Composable
 private fun DevicesPanel(vm: MusicViewModel) {
+    val resources = androidx.compose.ui.platform.LocalResources.current
     val player by vm.state.collectAsStateWithLifecycle()
     val syncMode by vm.sharing.mode.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope(); val action = remember { FeatureAction() }
@@ -219,17 +226,17 @@ private fun DevicesPanel(vm: MusicViewModel) {
     val device = remember { vm.deviceId() }
     LaunchedEffect(Unit) { action.run { remote = vm.repository.api().sharedPlayback() } }
     Column(Modifier.padding(24.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        Text("自动接续方式", style = MaterialTheme.typography.titleMedium)
+        Text(stringResource(R.string.handoff_mode), style = MaterialTheme.typography.titleMedium)
         Text(
-            "暂停时自动保存进度。仅提示其他设备最近 30 分钟内的暂停，每次暂停只提示一次；载入后保持暂停。",
+            stringResource(R.string.handoff_behavior_hint),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Column {
             listOf(
-                "ask" to "轻提示（默认）· 发现其他设备暂停时提示接续",
-                "auto" to "自动恢复 · 打开应用时自动载入并保持暂停",
-                "off" to "关闭自动提示 · 仅在下方手动载入",
+                "ask" to stringResource(R.string.handoff_ask_option),
+                "auto" to stringResource(R.string.handoff_auto_option),
+                "off" to stringResource(R.string.handoff_off_option),
             ).forEach { (id, label) ->
                 Row(
                     Modifier
@@ -244,9 +251,9 @@ private fun DevicesPanel(vm: MusicViewModel) {
             }
         }
         HorizontalDivider()
-        Text("手动同步播放队列", style = MaterialTheme.typography.titleMedium)
+        Text(stringResource(R.string.handoff_manual), style = MaterialTheme.typography.titleMedium)
         Text(
-            "超过 30 分钟的旧记录或需要立即切换设备时，可在此手动载入或上传当前播放队列。",
+            stringResource(R.string.handoff_manual_hint),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -259,27 +266,27 @@ private fun DevicesPanel(vm: MusicViewModel) {
             ) {
                 Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(
-                        if (saved.trackIds.isEmpty()) "还没有共享播放记录"
-                        else "云端记录：${saved.trackIds.size} 首队列 · 第 ${saved.index + 1} 首 · ${formatTime(saved.positionMs)}",
+                        if (saved.trackIds.isEmpty()) stringResource(R.string.handoff_empty)
+                        else stringResource(R.string.handoff_position, saved.index + 1, saved.trackIds.size, formatTime(saved.positionMs)),
                         style = MaterialTheme.typography.bodyMedium,
                     )
                     if (saved.deviceId == device && saved.trackIds.isNotEmpty()) {
-                        Text("这是本机最近同步的记录", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(stringResource(R.string.handoff_this_device), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Button(
-                    onClick = { scope.launch { action.run { vm.resumeShared(saved); action.message = "已载入进度，保持暂停" } } },
+                    onClick = { scope.launch { action.run { vm.resumeShared(saved); action.message = resources.getString(R.string.handoff_loaded) } } },
                     enabled = !action.busy && saved.trackIds.isNotEmpty(),
-                ) { Text("从这条记录继续") }
+                ) { Text(stringResource(R.string.handoff_continue)) }
                 OutlinedButton(
-                    onClick = { scope.launch { action.run { remote = vm.sharePlayback(); action.message = "当前队列与进度已同步" } } },
+                    onClick = { scope.launch { action.run { remote = vm.sharePlayback(); action.message = resources.getString(R.string.handoff_synced) } } },
                     enabled = !action.busy && player.queue.isNotEmpty(),
-                ) { Text("同步本机当前播放") }
+                ) { Text(stringResource(R.string.handoff_upload)) }
             }
         }
-        TextButton({ scope.launch { action.run { remote = vm.repository.api().sharedPlayback() } } }, enabled = !action.busy) { Text("刷新云端记录") }
+        TextButton({ scope.launch { action.run { remote = vm.repository.api().sharedPlayback() } } }, enabled = !action.busy) { Text(stringResource(R.string.handoff_refresh)) }
     }
 }
 

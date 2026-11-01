@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { api } from './api';
 
 type Resource = {
@@ -22,8 +22,7 @@ type Cleanup = {
 };
 const size = (bytes: number) => `${(bytes / 1048576).toFixed(1)} MB`;
 
-export function PodcastResourceManager({ onClose }: { onClose: () => void }) {
-  const dialog = useRef<HTMLDialogElement>(null);
+export function PodcastResourceManager() {
   const [page, setPage] = useState<ResourcePage | null>(null);
   const [settings, setSettings] = useState<Settings | null>(null);
   const [offset, setOffset] = useState(0);
@@ -38,9 +37,6 @@ export function PodcastResourceManager({ onClose }: { onClose: () => void }) {
     setPage(items);
     setSettings(policy);
   }
-  useEffect(() => {
-    dialog.current?.showModal();
-  }, []);
   useEffect(() => {
     void load(offset).catch((error: Error) => setMessage(error.message));
   }, [offset]);
@@ -70,20 +66,15 @@ export function PodcastResourceManager({ onClose }: { onClose: () => void }) {
     }
   }
   return (
-    <dialog
-      ref={dialog}
-      className="podcasts-modal podcast-resource-modal"
-      aria-labelledby="podcast-resources-title"
-      onCancel={onClose}
-    >
+    <section aria-labelledby="podcast-resources-title">
       <div className="podcast-resource-manager">
         <div className="podcast-resource-heading">
           <h2 id="podcast-resources-title">共享音频管理</h2>
-          <button type="button" onClick={onClose}>
-            关闭
-          </button>
         </div>
         <p>保存单集会建立个人引用。清理仅处理零引用音频；正在播放、下载和手动保护的资源会保留。</p>
+        <p className="muted">
+          自动清理会等待保留期结束；节目资料与收听记录保留。以下手动清理会立即回收符合条件的零引用文件。
+        </p>
         {message && <p role="status">{message}</p>}
         {settings && (
           <form
@@ -199,6 +190,6 @@ export function PodcastResourceManager({ onClose }: { onClose: () => void }) {
           </button>
         </div>
       </div>
-    </dialog>
+    </section>
   );
 }

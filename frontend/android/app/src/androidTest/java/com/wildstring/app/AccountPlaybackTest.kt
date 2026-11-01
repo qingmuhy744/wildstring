@@ -54,7 +54,7 @@ class AccountPlaybackTest {
                 performSemanticsAction(SemanticsActions.OnClick) { it() }
             assertIsOn()
         }
-        compose.onNodeWithText("连接并登录").performSemanticsAction(SemanticsActions.OnClick) { it() }
+        compose.onNodeWithText(uiString(R.string.connect_sign_in)).performSemanticsAction(SemanticsActions.OnClick) { it() }
         compose.waitUntil(15_000) { compose.onAllNodesWithText("同步测试专辑").fetchSemanticsNodes().isNotEmpty() }
     }
     @Test fun aacAbsoluteTimelineEditedLyricsAndAccountIsolation() {
@@ -143,14 +143,15 @@ class AccountPlaybackTest {
             compose.runOnIdle { vm.controller!!.pause(); vm.seek(0); vm.controller!!.repeatMode = Player.REPEAT_MODE_ONE }
             val originalPosition = compose.runOnIdle { vm.controller!!.currentPosition }
             repeat(3) {
-                if (compose.onAllNodesWithContentDescription("设置").fetchSemanticsNodes().isEmpty()) {
-                    val back = if (compose.onAllNodesWithContentDescription("返回封面").fetchSemanticsNodes().isNotEmpty()) "返回封面" else "收起播放器"
+                if (compose.onAllNodesWithContentDescription(uiString(R.string.settings_title)).fetchSemanticsNodes().isEmpty()) {
+                    val back = if (compose.onAllNodesWithContentDescription("返回封面").fetchSemanticsNodes().isNotEmpty()) "返回封面" else uiString(R.string.player_collapse)
                     compose.onNodeWithContentDescription(back).performClick()
                 }
             }
-            compose.waitUntil(5_000) { compose.onAllNodesWithContentDescription("设置").fetchSemanticsNodes().isNotEmpty() }
-            compose.onNodeWithContentDescription("设置").performClick()
+            compose.waitUntil(5_000) { compose.onAllNodesWithContentDescription(uiString(R.string.settings_title)).fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithContentDescription(uiString(R.string.settings_title)).performClick()
             compose.onNodeWithText("alice · ${compose.activity.getString(R.string.role_listener)}").assertExists()
+            compose.onNodeWithTag("setting-category-playback").performClick()
             compose.onNodeWithTag("setting-quality").performScrollTo().performClick()
             compose.onNodeWithText("AAC · 192 kbps").performClick()
             try {
@@ -160,6 +161,7 @@ class AccountPlaybackTest {
             }
             assertFalse(compose.runOnIdle { vm.controller!!.playWhenReady })
             assertTrue(kotlin.math.abs(compose.runOnIdle { vm.controller!!.currentPosition } - originalPosition) < 200)
+            compose.onNodeWithTag("settings-back").performClick()
             compose.onNodeWithTag("settings-back").performClick()
             compose.onNodeWithTag("mini-player-open").performClick()
             compose.runOnIdle { vm.seek(6000) }
@@ -192,8 +194,8 @@ class AccountPlaybackTest {
             val positionBeforeRefresh = compose.runOnIdle { vm.controller!!.currentPosition }
             val streamsBeforeRefresh = requests.count { it.contains("/stream") }
             lyric.set("网页修改后的人工歌词")
-            compose.onNodeWithContentDescription("当前歌曲操作").performClick()
-            compose.onNodeWithText("刷新歌词").performClick()
+            compose.onNodeWithContentDescription(uiString(R.string.current_track_actions)).performClick()
+            compose.onNodeWithText(uiString(R.string.lyrics_refresh)).performClick()
             try {
                 compose.waitUntil(10_000) { vm.state.value.lyrics.lines.first().text == "网页修改后的人工歌词" }
             } catch (failure: Throwable) {
@@ -216,9 +218,10 @@ class AccountPlaybackTest {
             assertNotEquals(firstProfile, vm.repository.session.cacheScope())
             assertTrue(vm.state.value.queue.isEmpty())
             assertTrue(runBlocking { vm.repository.database.queue().entries().isEmpty() })
-            compose.onNodeWithContentDescription("设置").performClick()
+            compose.onNodeWithContentDescription(uiString(R.string.settings_title)).performClick()
             compose.onNodeWithText("bob · ${compose.activity.getString(R.string.role_listener)}").assertExists()
             capture("account-settings.png")
+            compose.onNodeWithTag("setting-category-account").performClick()
             compose.onNodeWithText(compose.activity.getString(R.string.settings_change_password)).performClick()
             compose.onNodeWithText(compose.activity.getString(R.string.current_password)).performTextInput("wrong-password")
             compose.onNodeWithText(compose.activity.getString(R.string.new_password), substring = false).performTextInput("test-password-updated")

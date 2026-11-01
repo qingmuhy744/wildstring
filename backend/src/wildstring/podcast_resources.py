@@ -2,6 +2,7 @@
 
 import json
 import time
+from pathlib import Path
 from typing import Annotated
 from uuid import uuid4
 
@@ -178,7 +179,7 @@ class PodcastResources:
         with self.database.connect(write=True) as db:
             db.execute("DELETE FROM podcast_resource_leases WHERE id=?", (token,))
 
-    def local_response(self, identity):
+    def local_response(self, identity, *, filename: str | None = None):
         # Lease acquisition and collection use the same SQLite writer lock.
         with self.database.connect(write=True) as db:
             db.execute("BEGIN IMMEDIATE")
@@ -187,9 +188,23 @@ class PodcastResources:
             if path is None:
                 return None
             lease = self.acquire(db, identity)
+        media_type = "audio/mpeg"
+        if filename:
+            # Minimal container images may have no system MIME database.
+            media_type = {
+                ".mp3": "audio/mpeg",
+                ".m4a": "audio/mp4",
+                ".aac": "audio/aac",
+                ".ogg": "audio/ogg",
+                ".opus": "audio/opus",
+                ".flac": "audio/flac",
+                ".wav": "audio/wav",
+                ".webm": "audio/webm",
+            }.get(Path(filename).suffix.lower(), "application/octet-stream")
         return FileResponse(
             path,
-            media_type="audio/mpeg",
+            media_type=media_type,
+            filename=filename,
             background=BackgroundTask(self.release_lease, lease),
             headers={
                 "X-Content-Type-Options": "nosniff",

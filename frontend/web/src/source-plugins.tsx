@@ -153,7 +153,8 @@ export function SourcePlugins() {
       <section className="plugin-import" aria-labelledby="plugin-import-heading">
         <h4 id="plugin-import-heading">导入新插件</h4>
         <p className="muted">
-          插件会运行代码，请选择你信任的 WildString 插件包。导入后需配置并启用。
+          默认不预装数据源插件，请手动导入 ZIP，配置后启用。服务升级会保留已安装的插件和配置。
+          插件会运行代码，请选择你信任的 WildString 插件包。
         </p>
         <PluginZipUpload
           inputLabel="数据源插件 ZIP"

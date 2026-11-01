@@ -98,6 +98,7 @@ fun PodcastChannelPage(
     val detailLoading = browser.owner != owner || (selectedId != null &&
         (selectedId !in browser.loadedDetails || selectedId in browser.loadingDetails))
     var showSubscribeDialog by remember(owner) { mutableStateOf(false) }
+    var exploring by remember(owner) { mutableStateOf(false) }
     var autoDownloadPodcast by remember(owner) { mutableStateOf<PodcastSummary?>(null) }
     var statusMessage by remember { mutableStateOf<String?>(null) }
     var followingOnly by rememberSaveable { mutableStateOf(true) }
@@ -193,6 +194,7 @@ fun PodcastChannelPage(
                     loading = loading,
                     onSelect = { vm.openPodcast(it.id) },
                     onAddClick = { showSubscribeDialog = true },
+                    onExplore = { exploring = true },
                     onRefreshAll = { vm.podcastBrowser.reloadList(synchronize = false) },
                     onDelete = { p ->
                         scope.launch {
@@ -215,6 +217,13 @@ fun PodcastChannelPage(
                 vm.podcastBrowser.refresh(podcast.id, synchronize = false)
                 statusMessage = "已保存你的自动下载设置"
             })
+        }
+        if (exploring) key(owner) {
+            PodcastExploreDialog(vm, canAddPodcast, onDismiss = { exploring = false }) { id ->
+                exploring = false
+                vm.podcastBrowser.reloadList(synchronize = false)
+                vm.openPodcast(id)
+            }
         }
         if (showSubscribeDialog) {
             SubscribePodcastDialog(
@@ -285,16 +294,17 @@ private fun PodcastListView(
     loading: Boolean,
     onSelect: (PodcastSummary) -> Unit,
     onAddClick: () -> Unit,
+    onExplore: () -> Unit,
     onRefreshAll: () -> Unit,
     onDelete: (PodcastSummary) -> Unit,
 ) {
     Column(Modifier.fillMaxSize()) {
-        Row(
+        FlowRow(
             Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp, vertical = 4.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -303,8 +313,10 @@ private fun PodcastListView(
                 FilterChip(followingOnly, { onScope(true) }, label = { Text("我的关注") })
                 if (canBrowseCatalog) FilterChip(!followingOnly, { onScope(false) }, label = { Text("本服节目") })
             }
+            TextButton(onExplore, Modifier.align(Alignment.CenterVertically).testTag("podcast-open-explore")) { Text("探索") }
             if (canAdd) FilledTonalButton(
                 onClick = onAddClick,
+                modifier = Modifier.align(Alignment.CenterVertically),
                 contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
                 shape = RoundedCornerShape(20.dp),
             ) {

@@ -36,6 +36,7 @@ logger = logging.getLogger(__name__)
 
 ITUNES_SEARCH_URL = "https://itunes.apple.com/search"
 ITUNES_LOOKUP_URL = "https://itunes.apple.com/lookup"
+APPLE_CHART_URL = "https://rss.marketingtools.apple.com/api/v2"
 DEFAULT_REGIONS = ("us", "tw", "cn")
 # Apple storefront codes accepted for podcast search. Unknown codes are rejected
 # instead of silently falling back to the US store.
@@ -190,7 +191,16 @@ def fetch_itunes_json(url: str, proxy_mode: str, proxy_url: str | None) -> dict[
         payload = json.loads(body)
     except ValueError:
         raise UpstreamFailure("upstream_invalid_response") from None
-    if not isinstance(payload, dict) or not isinstance(payload.get("results"), list):
+    records = (
+        payload.get("feed", {}).get("results")
+        if isinstance(payload, dict)
+        and url.startswith(APPLE_CHART_URL + "/")
+        and isinstance(payload.get("feed"), dict)
+        else payload.get("results")
+        if isinstance(payload, dict)
+        else None
+    )
+    if not isinstance(records, list):
         raise UpstreamFailure("upstream_invalid_response")
     return payload
 
@@ -540,6 +550,70 @@ class PodcastSearch:
         return {"in_catalog": False, "catalog_podcast_id": None, "followed": False}
 
     # Public operations ------------------------------------------------------------------
+    def discover(self, user: dict, region: str | None, limit: int) -> dict[str, Any]:
+        settings = self.settings()
+        try:
+            region = parse_regions([region or settings["regions"][0]])[0]
+        except ValueError:
+            raise HTTPException(422, "podcast_search_region_invalid") from None
+        self.gate.admit_user(f"search:{user['id']}")
+        key = (f"chart:{region}", "", limit)
+        items = self._cached(key)
+        cached = items is not None
+        if items is None:
+            self.gate.reserve_upstream(2)
+            proxy_mode, proxy_url = self.manager.get_network_policy()
+            try:
+                chart = fetch_itunes_json(
+                    f"{APPLE_CHART_URL}/{region}/podcasts/top/{limit}/podcasts.json",
+                    proxy_mode,
+                    proxy_url,
+                )
+                ids = list(
+                    dict.fromkeys(
+                        value
+                        for raw in chart["feed"]["results"]
+                        if isinstance(raw, dict) and (value := valid_itunes_id(raw.get("id")))
+                    )
+                )[:limit]
+                results = []
+                if ids:
+                    query = urlencode({"id": ",".join(ids), "country": region, "entity": "podcast"})
+                    payload = fetch_itunes_json(
+                        f"{ITUNES_LOOKUP_URL}?{query}", proxy_mode, proxy_url
+                    )
+                    by_id = {
+                        item["itunes_id"]: item
+                        for raw in payload["results"]
+                        if (item := clean_result(raw))
+                    }
+                    results = [by_id[value] for value in ids if value in by_id]
+                items = merge_regions([(region, results)])
+                self._store(key, items)
+            except UpstreamFailure as exc:
+                if exc.code == "upstream_rate_limited":
+                    retry = max(THROTTLE_COOLDOWN_SECONDS, exc.retry_after or 0)
+                    self.gate.cool_down(retry)
+                    raise SearchRateLimited(retry, upstream=True) from None
+                raise HTTPException(
+                    504 if exc.code == "timeout" else 502,
+                    "podcast_search_timeout"
+                    if exc.code == "timeout"
+                    else "podcast_search_upstream_failed",
+                ) from None
+        hidden = sum(item["explicit"] for item in items) if settings["filter_explicit"] else 0
+        return {
+            "provider": "itunes",
+            "regions": [region],
+            "failed_regions": [],
+            "cached": cached,
+            "explicit_hidden": hidden,
+            "results": self.annotate(
+                user["id"],
+                [item for item in items if not (settings["filter_explicit"] and item["explicit"])],
+            ),
+        }
+
     def search(self, user: dict, q: str, limit: int) -> dict[str, Any]:
         term = " ".join(q.split())
         if not 1 <= len(term) <= 100:
@@ -635,6 +709,17 @@ class PodcastSearch:
         ):
             try:
                 return self.search(user, q, limit)
+            except SearchRateLimited as exc:
+                raise rate_limited(exc) from None
+
+        @router.get("/discover")
+        def discover_directory(
+            user: Annotated[dict, Depends(auth.require_session)],
+            region: Annotated[str | None, Query(max_length=2)] = None,
+            limit: Annotated[int, Query(ge=1, le=50)] = 25,
+        ):
+            try:
+                return self.discover(user, region, limit)
             except SearchRateLimited as exc:
                 raise rate_limited(exc) from None
 

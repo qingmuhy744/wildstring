@@ -1,15 +1,16 @@
 import { expect, test, type Page } from '@playwright/test';
-import { audio, login } from './helpers';
+import { audio, login, personalCategory, leaveSettings } from './helpers';
 
 async function chooseStyle(page: Page, value: string) {
   const player = page.getByRole('dialog', { name: '全屏播放', exact: true });
   if (await player.isVisible()) await player.getByRole('button', { name: '收起全屏播放' }).click();
   const navigation = page.getByLabel('浏览方式', { exact: true });
   if (await navigation.isVisible()) await navigation.selectOption('account');
-  else await page.getByRole('button', { name: '账号设置', exact: true }).click();
-  const settings = page.getByRole('dialog', { name: '账号设置', exact: true });
+  else await page.getByRole('button', { name: '个人设置', exact: true }).click();
+  await personalCategory(page, 'playback');
+  const settings = page.getByRole('region', { name: '个人设置', exact: true });
   await settings.getByLabel('播放样式', { exact: true }).selectOption(value);
-  await settings.getByRole('button', { name: '关闭账号设置' }).click();
+  await leaveSettings(page);
   await page.getByRole('button', { name: '全屏播放', exact: true }).click();
   await expect(player.getByLabel('播放样式', { exact: true })).toHaveCount(0);
 }
@@ -68,8 +69,9 @@ test('三种样式共用音频，暂停保留进度，开关歌词不重开串�
   await page.reload();
   await expect(page.getByRole('table', { name: '歌曲列表' })).toBeVisible();
   if (info.project.name === 'mobile') await page.getByLabel('浏览方式').selectOption('account');
-  else await page.getByRole('button', { name: '账号设置', exact: true }).click();
-  const account = page.getByRole('dialog', { name: '账号设置', exact: true });
+  else await page.getByRole('button', { name: '个人设置', exact: true }).click();
+  await personalCategory(page, 'playback');
+  const account = page.getByRole('region', { name: '个人设置', exact: true });
   await expect(account.getByLabel('播放样式', { exact: true })).toHaveValue('cassette');
   await account.getByLabel('播放样式', { exact: true }).selectOption('cover');
 });

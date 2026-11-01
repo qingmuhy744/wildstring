@@ -137,6 +137,7 @@ def test_subscribe_api_follows_fake_ip_setting(
     settings, authenticated_client, tun_feed, monkeypatch, allowed
 ):
     monkeypatch.setenv("NO_PROXY", "*")
+    monkeypatch.setenv("no_proxy", "*")
     settings.podcast_allow_fake_ip = allowed
     with authenticated_client(settings) as client:
         response = client.post("/api/v1/podcasts", headers=HEADERS, json={"feed_url": tun_feed})

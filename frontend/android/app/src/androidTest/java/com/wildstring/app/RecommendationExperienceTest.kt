@@ -17,11 +17,15 @@ import java.util.concurrent.ConcurrentLinkedQueue
 
 class RecommendationExperienceTest {
     @get:Rule val compose = createAndroidComposeRule<MainActivity>()
-    private class Fixture : java.io.Closeable {
+    private class Fixture(val canAddPodcasts: Boolean = true, val profile: String = "owner") : java.io.Closeable {
         val server = MockWebServer(); val requests = ConcurrentLinkedQueue<Pair<String, String>>()
         val track = """{"id":"local-a","title":"真实本库歌曲","artists":["合成艺人"],"album":"合成专辑","duration_ms":12000,"format":"mp3","status":"available","has_cover":false,"loved":false}"""
         var preferences = """{"version":1,"use_ai":false,"use_lastfm":false,"count":20,"connection_id":"local","sources":["personal","community","discovery","revisit"],"lastfm_tags":[],"external_enabled":true,"external_refresh_days":7,"external_sources":["lastfm_charts"],"external_use_ai":false,"external_call_limit":6}"""
         var wanted = false
+        @Volatile var podcastAdded = false
+        @Volatile var directoryThrottled = false
+        val podcast = """{"id":"explore-show","title":"探索测试节目","author":"合成工作室","description":"公开节目简介","feed_url":"https://podcast.example/feed.xml","cover_url":"","total_episodes":1,"followed":true}"""
+        val episode = """{"id":"explore-episode","podcast_id":"explore-show","guid":"episode-1","title":"探索后的第一集","audio_url":"https://podcast.example/episode.mp3","duration_seconds":1800,"pub_date":"2026-11-01T00:00:00Z"}"""
         val warnings = """[{"source":"ai","code":"budget_exhausted"}]"""
         val sources = """[{"id":"personal","status":"ok","matched":1},{"id":"lastfm_charts","status":"unavailable","matched":0,"error_code":"source_unavailable"}]"""
         fun daily() = """{"id":"daily","date":"2026-10-17","engine":"local","connection_id":"local","source_status":$sources,"warnings":$warnings,"degraded":true,"items":[{"track":$track,"reason":"很久没听的收藏","source_ids":["revisit"]}]}"""
@@ -33,9 +37,20 @@ class RecommendationExperienceTest {
                     val path = request.requestUrl!!.encodedPath; val query = request.requestUrl!!.encodedQuery.orEmpty()
                     val body = request.body.readUtf8(); requests += "${request.method} $path?$query" to body
                     fun json(value: String) = MockResponse().setHeader("Content-Type", "application/json").setBody(value)
-                    val user = """{"id":"experience-user","username":"alice","profile":"owner","enabled":true,"version":1}"""
+                    val user = """{"id":"experience-user","username":"alice","profile":"$profile","enabled":true,"version":1}"""
                     if (path.endsWith("/auth/login")) return@synchronized json(user).setHeader("Set-Cookie", "wildstring_session=experience; Path=/; Max-Age=3600; HttpOnly")
                     if (path.endsWith("/auth/status")) { val connected = request.getHeader("Cookie")?.contains("experience") == true; return@synchronized json("""{"configured":true,"authenticated":$connected,"user":${if (connected) user else "null"}}""") }
+                    if (path.endsWith("/podcasts/catalog-settings")) return@synchronized json("""{"can_add":$canAddPodcasts,"allow_user_subscriptions":$canAddPodcasts,"version":1}""")
+                    if (path.endsWith("/podcasts/discover") || path.endsWith("/podcasts/search")) {
+                        if (directoryThrottled) return@synchronized json("""{"detail":{"code":"podcast_search_upstream_rate_limited","retry_after":60}}""").setResponseCode(429)
+                        return@synchronized json("""{"results":[{"itunes_id":"12345","title":"探索测试节目","author":"合成工作室","feed_url":"https://podcast.example/feed.xml","artwork_url":"","genres":["社会与文化"],"explicit":false,"catalog_podcast_id":null,"followed":false}],"regions":["${request.requestUrl!!.queryParameter("region") ?: "tw"}"],"explicit_hidden":0,"failed_regions":[]}""")
+                    }
+                    if (path.endsWith("/podcasts/preview")) return@synchronized json("""{"title":"探索测试节目","author":"合成工作室","description":"<p>公开节目简介</p>","episode_count":1,"latest_episodes":[{"title":"探索后的第一集","pub_date":"2026-11-01"}],"catalog_podcast_id":null,"followed":false}""")
+                    if (path.endsWith("/podcasts/explore-show")) return@synchronized json("""{"podcast":$podcast,"episodes":[$episode]}""")
+                    if (path.endsWith("/podcasts")) {
+                        if (request.method == "POST") { podcastAdded = true; return@synchronized json("""{"podcast":$podcast,"episodes":[$episode]}""") }
+                        return@synchronized json(if (podcastAdded) "[$podcast]" else "[]")
+                    }
                     if (path.endsWith("/agent/connections")) return@synchronized json("""{"items":[{"id":"personal-one","name":"我的模型","model":"synthetic-one","scope":"personal","enabled":true,"daily_call_budget":20,"daily_calls_used":20},{"id":"shared-one","name":"共享模型","model":"synthetic-two","scope":"instance","enabled":true,"daily_call_budget":30,"daily_calls_used":4}],"total":2}""")
                     if (path.endsWith("/agent/notifications")) return@synchronized json("""{"items":[],"total":0,"unread_count":0,"high_watermark":0,"next_cursor":"test-cursor"}""")
                     if (path.endsWith("/recommendations/preferences")) {
@@ -89,7 +104,7 @@ class RecommendationExperienceTest {
     @Test fun dailyPreferencesShareConnectionsAndRankingsOnlyExposePlayableAggregate() {
         Fixture().use { fixture -> val vm = connect(fixture)
             try {
-                open("每日推荐")
+                open(uiString(R.string.daily_recommendations))
                 compose.waitUntil(10_000) { compose.onAllNodesWithText("1 首 · 今日的临时歌单").fetchSemanticsNodes().isNotEmpty() }
                 compose.onNodeWithTag("daily-recommendations").performScrollToNode(hasTestTag("daily-track-local-a"))
                 val more = hasTestTag("daily-more-local-a") and hasClickAction()
@@ -129,7 +144,7 @@ class RecommendationExperienceTest {
     @Test fun dailySelectionAndLyricsKeepTheCurrentQueueAndPauseState() {
         Fixture().use { fixture -> val vm = connect(fixture)
             try {
-                open("每日推荐")
+                open(uiString(R.string.daily_recommendations))
                 compose.waitUntil(10_000) { compose.onAllNodesWithTag("daily-track-local-a").fetchSemanticsNodes().isNotEmpty() }
                 compose.onNodeWithText("播放推荐", substring = false).performClick()
                 compose.waitUntil(10_000) { vm.state.value.current?.id == "local-a" }
@@ -170,12 +185,96 @@ class RecommendationExperienceTest {
             } finally { cleanup(vm) }
         }
     }
+
+    @Test fun pausedAssistantPlayerCollapsesAndCanBeReopenedWithoutLosingTheQueue() {
+        Fixture().use { fixture -> val vm = connect(fixture)
+            try {
+                compose.runOnIdle { vm.play(vm.state.value.tracks) }
+                compose.waitUntil(10_000) { vm.state.value.playing }
+                compose.runOnIdle { vm.controller?.pause() }
+                compose.waitUntil(5_000) { !vm.state.value.playing }
+                val entry = vm.state.value.entryId
+                compose.onNodeWithTag("mini-player").assertExists()
+                compose.onNodeWithTag("nav-assistant").performClick()
+                compose.onNodeWithTag("mini-player").assertDoesNotExist()
+                compose.onNodeWithTag("assistant-paused-player").assertIsDisplayed().performClick()
+                assertEquals(entry, vm.state.value.entryId)
+                assertFalse(vm.state.value.playing)
+                compose.onNodeWithContentDescription(uiString(R.string.play), useUnmergedTree = true).performClick()
+                compose.waitUntil(5_000) { vm.state.value.playing }
+                InstrumentationRegistry.getInstrumentation().uiAutomation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK)
+                compose.waitUntil(5_000) { compose.onAllNodesWithTag("mini-player").fetchSemanticsNodes().isNotEmpty() }
+                compose.onNodeWithTag("assistant-paused-player").assertDoesNotExist()
+                assertEquals(entry, vm.state.value.entryId)
+            } finally { cleanup(vm) }
+        }
+    }
+
+    @Test fun podcastExplorePreviewsWithoutAddingAndOnlyFollowsOnConfirmation() {
+        Fixture().use { fixture -> val vm = connect(fixture)
+            try {
+                compose.onNodeWithTag("nav-podcast").performClick()
+                compose.onNodeWithTag("podcast-open-explore").assertIsDisplayed()
+                capture("podcast-explore-entry-phone.png")
+                compose.onNodeWithTag("podcast-open-explore").performClick()
+                compose.waitUntil(10_000) { compose.onAllNodesWithTag("podcast-explore-12345").fetchSemanticsNodes().isNotEmpty() }
+                compose.onNodeWithText("服务器默认", substring = false).performClick()
+                compose.onNodeWithText("台湾", substring = false).performClick()
+                compose.waitUntil(10_000) { fixture.requests.any { it.first == "GET /api/v1/podcasts/discover?region=tw" } }
+                compose.waitUntil(10_000) { compose.onAllNodesWithTag("podcast-explore-12345").fetchSemanticsNodes().isNotEmpty() }
+                capture("podcast-explore-list-phone.png")
+                compose.onNodeWithTag("podcast-explore-12345").performClick()
+                compose.waitUntil(10_000) { compose.onAllNodesWithText("公开节目简介").fetchSemanticsNodes().isNotEmpty() }
+                compose.onNodeWithText("探索后的第一集").assertIsDisplayed()
+                assertFalse(fixture.podcastAdded)
+                assertTrue(fixture.requests.none { it.first.startsWith("POST /api/v1/podcasts?") })
+                capture("podcast-explore-preview-phone.png")
+                compose.onNodeWithContentDescription("返回探索列表").performClick()
+                compose.onNodeWithTag("podcast-explore-search").performTextInput("声音")
+                compose.waitUntil(10_000) { fixture.requests.any { it.first.startsWith("GET /api/v1/podcasts/search?q=") } }
+                compose.waitUntil(10_000) { compose.onAllNodesWithTag("podcast-explore-12345").fetchSemanticsNodes().isNotEmpty() }
+                compose.onNodeWithTag("podcast-explore-12345").performClick()
+                compose.waitUntil(10_000) { compose.onAllNodesWithTag("podcast-explore-follow").fetchSemanticsNodes().isNotEmpty() }
+                compose.onNodeWithTag("podcast-explore-follow").performClick()
+                compose.waitUntil(10_000) { vm.state.value.podcastId == "explore-show" }
+                compose.onNodeWithTag("podcast-explore").assertDoesNotExist()
+                compose.waitUntil(10_000) { compose.onAllNodesWithTag("podcast-episode-explore-episode").fetchSemanticsNodes().isNotEmpty() }
+                val additions = fixture.requests.filter { it.first.startsWith("POST /api/v1/podcasts?") }
+                assertEquals(1, additions.size)
+                val added = JsonParser.parseString(additions.single().second).asJsonObject
+                assertEquals("https://podcast.example/feed.xml", added.text("feed_url"))
+                assertEquals("12345", added.text("itunes_id"))
+                assertNull(vm.state.value.current)
+            } finally { cleanup(vm) }
+        }
+    }
+
+    @Test fun podcastExploreCanRetryThrottlingButCannotBypassAddPermissions() {
+        Fixture(canAddPodcasts = false, profile = "listener").use { fixture ->
+            fixture.directoryThrottled = true
+            val vm = connect(fixture)
+            try {
+                compose.onNodeWithTag("nav-podcast").performClick()
+                compose.onNodeWithTag("podcast-open-explore").performClick()
+                compose.waitUntil(10_000) { compose.onAllNodesWithText("播客目录暂时限制了请求，请稍后重试。").fetchSemanticsNodes().isNotEmpty() }
+                fixture.directoryThrottled = false
+                compose.onNodeWithText(uiString(R.string.retry), substring = false).performClick()
+                compose.waitUntil(10_000) { compose.onAllNodesWithTag("podcast-explore-12345").fetchSemanticsNodes().isNotEmpty() }
+                compose.onNodeWithTag("podcast-explore-12345").performClick()
+                compose.waitUntil(10_000) { compose.onAllNodesWithTag("podcast-explore-follow").fetchSemanticsNodes().isNotEmpty() }
+                compose.onNodeWithTag("podcast-explore-follow").assertIsNotEnabled()
+                compose.onNodeWithText("管理员尚未开放添加节目").assertIsDisplayed()
+                assertFalse(fixture.podcastAdded)
+                assertTrue(fixture.requests.none { it.first.startsWith("POST /api/v1/podcasts?") })
+            } finally { cleanup(vm) }
+        }
+    }
     @Test fun externalMusicHasNoFakePlaybackSupportsWantAndManualRefreshFrequency() {
         Fixture().use { fixture -> val vm = connect(fixture)
             try {
-                open("发现新音乐")
+                open(uiString(R.string.discover_new_music))
                 compose.waitUntil(10_000) { compose.onAllNodesWithText("想去寻找的新声音").fetchSemanticsNodes().isNotEmpty() }
-                compose.onAllNodes(hasText("播放", substring = false) and hasAnyAncestor(hasTestTag("external-item-outside"))).assertCountEquals(0)
+                compose.onAllNodes(hasText(uiString(R.string.play), substring = false) and hasAnyAncestor(hasTestTag("external-item-outside"))).assertCountEquals(0)
                 compose.onNodeWithText("库外音乐 · 需自行获取后导入").assertExists()
                 capture("recommendation-external-phone.png")
                 compose.onAllNodesWithText("复制歌名").onFirst().performClick()

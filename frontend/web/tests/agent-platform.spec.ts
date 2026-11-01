@@ -1,4 +1,4 @@
-import { section } from './helpers';
+import { section, manageTab } from './helpers';
 import { expect, test, type Page } from '@playwright/test';
 import { login } from './helpers';
 const now = '2026-10-17T09:00:00Z';
@@ -629,11 +629,8 @@ test('受控诊断按编号筛选，时间线带错误码，临时调试最长15
   await login(page);
   if (await page.getByLabel('浏览方式', { exact: true }).isVisible())
     await page.getByLabel('浏览方式', { exact: true }).selectOption('manage');
-  else await page.getByRole('button', { name: '管理', exact: true }).click();
-  await page
-    .getByRole('navigation', { name: '管理分类' })
-    .getByRole('button', { name: '诊断', exact: true })
-    .click();
+  else await page.getByRole('button', { name: '管理中心', exact: true }).click();
+  await manageTab(page, '诊断');
   const panel = page.getByRole('region', { name: '系统诊断' });
   await expect(panel).toContainText('outbound.failed');
   await panel.getByLabel('筛选诊断编号', { exact: true }).fill('trace-log-040');

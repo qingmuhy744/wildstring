@@ -27,6 +27,9 @@ enum MacErrorText {
         case "conversation_busy": return "这段对话仍在处理上一条消息"
         case "ai_daily_budget_exhausted", "ai_budget_exhausted": return "所选模型今天的调用额度已用完"
         case "connection_not_found", "ai_connection_not_found": return "所选模型连接已不可用，请重新选择"
+        case "podcast_subscriptions_disabled": return "管理员尚未开放添加节目"
+        case "podcast_search_timeout", "podcast_search_upstream_failed": return "播客目录暂时不可用，请稍后重试"
+        case "podcast_feed_fetch_failed", "podcast_feed_parse_failed": return "无法读取这个节目的 RSS，请稍后重试"
         default: break
         }
         switch api.statusCode {
@@ -35,6 +38,7 @@ enum MacErrorText {
         case 404: return "内容不存在"
         case 409: return "内容和服务器上的版本不一致，请刷新后再试"
         case 422: return "请求没有被接受（\(api.code)）"
+        case 429: return "请求较频繁，请稍后重试"
         default: return "服务器返回 \(api.statusCode) \(api.code)"
         }
     }

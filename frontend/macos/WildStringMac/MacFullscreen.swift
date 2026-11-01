@@ -94,15 +94,15 @@ struct MacFullscreenPlayer: View {
 
     private func stage(_ item: PlaybackService.Item) -> some View {
         GeometryReader { geo in
-            let side = min(390, min(geo.size.width * 0.34, max(180, geo.size.height - 118)))
-            HStack(alignment: .center, spacing: 64) {
+            let side = min(340, min(geo.size.width * 0.30, max(180, geo.size.height - 140)))
+            HStack(alignment: .center, spacing: 48) {
                 VStack(alignment: .leading, spacing: 20) {
                     MacCover(client: client, trackID: item.hasCover ? item.trackID : nil,
                         side: side, cornerRadius: 12)
                         .shadow(color: .black.opacity(dark ? 0.45 : 0.16), radius: 28, y: 16)
                     HStack(alignment: .top, spacing: 12) {
                         VStack(alignment: .leading, spacing: 7) {
-                            Text(item.title).font(.system(size: 26, weight: .semibold))
+                            Text(item.title).font(.system(size: 22, weight: .semibold))
                                 .foregroundStyle(ink).lineLimit(2)
                             Text([item.artist, item.album ?? ""].filter { !$0.isEmpty }.joined(separator: " · "))
                                 .font(.callout).foregroundStyle(ink.opacity(0.6)).lineLimit(2)

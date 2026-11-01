@@ -1,5 +1,7 @@
 package com.wildstring.app.ui
 
+import com.wildstring.app.R
+import androidx.compose.ui.res.stringResource
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.layout.Column
@@ -15,6 +17,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
 @Composable internal fun LastfmSettings(vm: MusicViewModel) {
+    val resources = androidx.compose.ui.platform.LocalResources.current
     var status by remember { mutableStateOf<LastfmStatus?>(null) }
     var busy by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
@@ -24,7 +27,7 @@ import kotlinx.coroutines.launch
         busy = true
         try { status = vm.repository.api().lastfm(); message = null }
         catch (e: CancellationException) { throw e }
-        catch (_: Exception) { message = "暂时无法读取 Last.fm，请检查服务器版本与连接。" }
+        catch (_: Exception) { message = resources.getString(R.string.lastfm_load_failed) }
         finally { busy = false }
     } }
     LaunchedEffect(Unit) { refresh() }
@@ -36,35 +39,35 @@ import kotlinx.coroutines.launch
         scope.launch {
             try { status = vm.repository.api().updateLastfm(LastfmPreferences(before.version, scrobble, playing)); message = null }
             catch (e: CancellationException) { throw e }
-            catch (_: Exception) { status = before; message = "同步设置未保存，已恢复。请刷新后重试。" }
+            catch (_: Exception) { status = before; message = resources.getString(R.string.lastfm_save_failed) }
             finally { busy = false }
         }
     }
     Column(Modifier.padding(16.dp)) {
         val current = status
-        Text(if (current?.connected == true) "已连接：${current.username}" else "连接后可同步正在播放与已听记录。")
+        Text(if (current?.connected == true) stringResource(R.string.lastfm_connected, current.username.orEmpty()) else stringResource(R.string.lastfm_hint))
         if (current?.connected == true) {
-            ListItem(headlineContent = { Text("同步已听记录") }, trailingContent = { Switch(current.scrobble, { update(it, current.nowPlaying) }, enabled = !busy) })
-            ListItem(headlineContent = { Text("同步正在播放") }, trailingContent = { Switch(current.nowPlaying, { update(current.scrobble, it) }, enabled = !busy) })
+            ListItem(headlineContent = { Text(stringResource(R.string.lastfm_scrobble)) }, trailingContent = { Switch(current.scrobble, { update(it, current.nowPlaying) }, enabled = !busy) })
+            ListItem(headlineContent = { Text(stringResource(R.string.lastfm_now_playing)) }, trailingContent = { Switch(current.nowPlaying, { update(current.scrobble, it) }, enabled = !busy) })
             TextButton(enabled = !busy, onClick = { busy = true; scope.launch {
                 try { vm.repository.api().disconnectLastfm().let { if (!it.isSuccessful) throw retrofit2.HttpException(it) }; status = vm.repository.api().lastfm() }
                 catch (e: CancellationException) { throw e }
-                catch (_: Exception) { message = "断开失败，请重试。" }
+                catch (_: Exception) { message = resources.getString(R.string.lastfm_disconnect_failed) }
                 finally { busy = false }
-            } }) { Text("断开 Last.fm") }
+            } }) { Text(stringResource(R.string.lastfm_disconnect)) }
         }
         if (current?.connected != true || current.needsAuth) TextButton(enabled = !busy, onClick = { busy = true; scope.launch {
             try {
                 val target = Uri.parse(vm.repository.api().authorizeLastfm().url)
                 require(target.scheme == "https" && target.host == "www.last.fm")
                 context.startActivity(Intent(Intent.ACTION_VIEW, target))
-                message = "授权完成后返回，点击刷新连接，再选择同步开关。"
+                message = resources.getString(R.string.lastfm_authorized_hint)
             }
             catch (e: CancellationException) { throw e }
-            catch (_: Exception) { message = "请由管理员配置 Last.fm 密钥和公开访问地址后再试。" }
+            catch (_: Exception) { message = resources.getString(R.string.lastfm_configure_hint) }
             finally { busy = false }
-        } }) { Text(if (current?.needsAuth == true) "重新授权" else "连接 Last.fm") }
-        TextButton(enabled = !busy, onClick = ::refresh) { Text(if (busy) "正在连接…" else "刷新连接") }
+        } }) { Text(if (current?.needsAuth == true) stringResource(R.string.lastfm_authorize_again) else stringResource(R.string.lastfm_connect)) }
+        TextButton(enabled = !busy, onClick = ::refresh) { Text(if (busy) stringResource(R.string.connecting) else stringResource(R.string.lastfm_refresh)) }
         message?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
     }
 }

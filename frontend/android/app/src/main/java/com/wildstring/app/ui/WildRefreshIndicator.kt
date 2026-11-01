@@ -1,5 +1,7 @@
 package com.wildstring.app.ui
 
+import com.wildstring.app.R
+import androidx.compose.ui.res.stringResource
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.*
@@ -20,6 +22,7 @@ import kotlin.math.sin
 
 /** Three strings respond to the pull, then gently oscillate while the real request runs. */
 @Composable internal fun WildRefreshIndicator(refreshing: Boolean, state: PullToRefreshState, modifier: Modifier = Modifier) {
+    val resources = androidx.compose.ui.platform.LocalResources.current
     val pull = state.distanceFraction.coerceIn(0f, 1f)
     if (!refreshing && pull <= 0f) return
     val transition = rememberInfiniteTransition(label = "wildstring-refresh")
@@ -29,7 +32,7 @@ import kotlin.math.sin
     Surface(modifier.padding(top = 12.dp).size(48.dp).graphicsLayer {
         alpha = if (refreshing) 1f else pull
         scaleX = .75f + .25f * pull; scaleY = scaleX
-    }.testTag("wildstring-refresh").semantics { contentDescription = if (refreshing) "正在刷新" else "松开刷新" },
+    }.testTag("wildstring-refresh").semantics { contentDescription = if (refreshing) resources.getString(R.string.refreshing) else resources.getString(R.string.release_to_refresh) },
         shape = CircleShape, color = MaterialTheme.colorScheme.surfaceContainerHigh, shadowElevation = 3.dp) {
         Canvas(Modifier.fillMaxSize().padding(10.dp)) {
             for (row in 0..2) {

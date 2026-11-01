@@ -1,12 +1,12 @@
 import { expect, test, type Page } from '@playwright/test';
-import { audio, login } from './helpers';
+import { audio, login, manageTab, personalCategory } from './helpers';
 
 const headers = { 'X-Wildstring-Client': 'web' };
 test.use({ actionTimeout: 7000 });
 async function manage(page: Page, mobile: boolean) {
   if (mobile) await page.getByLabel('浏览方式').selectOption('manage');
-  else await page.getByRole('button', { name: '管理', exact: true }).click();
-  await expect(page.getByRole('heading', { name: '曲库管理', exact: true })).toBeVisible();
+  else await page.getByRole('button', { name: '管理中心', exact: true }).click();
+  await expect(page.getByRole('heading', { name: '管理中心', exact: true })).toBeVisible();
 }
 async function signIn(page: Page, username: string, password: string) {
   await page.goto('/');
@@ -95,7 +95,7 @@ test('歌词编辑、播放打点、撤销、毫秒修正、导出与全屏生�
 test('管理员建号和重置、普通用户权限与自行改密', async ({ page }, info) => {
   await login(page);
   await manage(page, info.project.name === 'mobile');
-  await page.getByRole('button', { name: '用户', exact: true }).click();
+  await manageTab(page, '用户');
   const username = `listener-${info.project.name}`;
   const create = page.getByRole('form', { name: '创建账号', exact: true });
   await create.getByLabel('用户名', { exact: true }).fill(username);
@@ -117,14 +117,16 @@ test('管理员建号和重置、普通用户权限与自行改密', async ({ pa
   await page.screenshot({ path: `../../artifacts/users-${info.project.name}.png` });
   await page.request.post('/api/v1/auth/logout', { headers });
   await signIn(page, username, 'reset-test-password');
-  await expect(page.getByRole('button', { name: '管理', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: '管理中心', exact: true })).toHaveCount(0);
   expect((await page.request.get('/api/v1/manage/users')).status()).toBe(403);
   await page.getByRole('button', { name: '歌曲操作 夜晚测试曲', exact: true }).click();
   await expect(page.getByRole('button', { name: '编辑歌曲信息', exact: true })).toHaveCount(0);
   await page.keyboard.press('Escape');
   if (info.project.name === 'mobile') await page.getByLabel('浏览方式').selectOption('account');
-  else await page.getByRole('button', { name: '账号设置', exact: true }).click();
-  const account = page.getByRole('dialog', { name: '账号设置', exact: true });
+  else await page.getByRole('button', { name: '个人设置', exact: true }).click();
+  await personalCategory(page, 'account');
+  await page.getByRole('button', { name: '密码与安全', exact: true }).click();
+  const account = page.getByRole('region', { name: '个人设置', exact: true });
   await account.getByLabel('当前密码', { exact: true }).fill('reset-test-password');
   await account.getByLabel('新密码', { exact: true }).fill('self-test-password');
   await account.getByLabel('确认新密码', { exact: true }).fill('self-test-password');
@@ -137,7 +139,7 @@ test('管理员建号和重置、普通用户权限与自行改密', async ({ pa
 test('域名白名单提醒、启用、拦截与关闭', async ({ page }, info) => {
   await login(page);
   await manage(page, info.project.name === 'mobile');
-  await page.getByRole('button', { name: '设置', exact: true }).click();
+  await manageTab(page, '访问设置');
   const form = page.getByRole('form', { name: '域名白名单设置', exact: true });
   await expect(form).toContainText('只能直接修改数据库关闭白名单');
   const original = await (await page.request.get('/api/v1/manage/access')).json();
@@ -176,6 +178,7 @@ test('系统明暗实时切换、手动优先和记忆', async ({ page }, info) 
   await page.screenshot({ path: `../../artifacts/theme-dark-${info.project.name}.png` });
   if (info.project.name === 'mobile') {
     await page.getByLabel('浏览方式').selectOption('account');
+    await personalCategory(page, 'appearance');
     const theme = page.getByLabel('外观模式', { exact: true }).last();
     await theme.selectOption('light');
     await expect(root).toHaveAttribute('data-theme', 'light');
@@ -184,6 +187,7 @@ test('系统明暗实时切换、手动优先和记忆', async ({ page }, info) 
     await page.reload();
     await expect(root).toHaveAttribute('data-theme', 'light');
     await page.getByLabel('浏览方式').selectOption('account');
+    await personalCategory(page, 'appearance');
     await page.getByLabel('外观模式', { exact: true }).last().selectOption('system');
   } else {
     const theme = page.getByRole('button', { name: '外观：跟随系统', exact: true });
@@ -240,7 +244,7 @@ test('全屏毛玻璃来自封面颜色、切歌更新及无封面回退', async
 test('转码设置可保存、刷新和清理，旧版本不会覆盖', async ({ page }, info) => {
   await login(page);
   await manage(page, info.project.name === 'mobile');
-  await page.getByRole('button', { name: '设置', exact: true }).click();
+  await manageTab(page, '转码与缓存');
   const endpoint = '/api/v1/manage/transcoding';
   const original = await (await page.request.get(endpoint)).json();
   const form = page.getByRole('form', { name: 'AAC 转码设置', exact: true });

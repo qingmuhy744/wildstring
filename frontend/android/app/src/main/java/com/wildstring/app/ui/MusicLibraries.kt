@@ -1,5 +1,7 @@
 package com.wildstring.app.ui
 
+import com.wildstring.app.R
+import androidx.compose.ui.res.stringResource
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -14,13 +16,13 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
     var expanded by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp).testTag("music-library-choice")) {
         if (state.libraries.isEmpty()) {
-            Text("暂无可播放的音乐，可联系管理员分配访问权限。", style = MaterialTheme.typography.bodySmall)
+            Text(stringResource(R.string.library_no_access), style = MaterialTheme.typography.bodySmall)
         } else Box {
             TextButton(onClick = { expanded = true }) {
-                Text((state.libraries.find { it.id == state.selectedLibraryId }?.name ?: "全部音乐") + " ▾")
+                Text((state.libraries.find { it.id == state.selectedLibraryId }?.name ?: stringResource(R.string.all_music)) + " ▾")
             }
             DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                DropdownMenuItem(text = { Text("全部音乐") }, onClick = { expanded = false; vm.selectLibrary("all") })
+                DropdownMenuItem(text = { Text(stringResource(R.string.all_music)) }, onClick = { expanded = false; vm.selectLibrary("all") })
                 state.libraries.forEach { library ->
                     DropdownMenuItem(text = { Text(library.name) }, onClick = { expanded = false; vm.selectLibrary(library.id) })
                 }

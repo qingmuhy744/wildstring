@@ -88,6 +88,33 @@ def test_repeat_import_preserves_managed_edits_and_source_change_is_reported(set
     assert target.read_bytes() == edited
 
 
+def test_folder_import_only_visits_selected_source_and_published_targets(settings, monkeypatch):
+    settings.music_dir.mkdir()
+    (settings.music_dir / "selected").mkdir()
+    (settings.music_dir / "other").mkdir()
+    source(settings, "selected/new.flac")
+    (settings.music_dir / "other/broken.flac").write_bytes(b"invalid")
+    shutil.copyfile(FIXTURES / "silence.flac", settings.library_dir / "existing.flac")
+    scan_library(settings)
+    before = store(settings).tracks()["items"][0]
+    walked = []
+    walk = importer.os.walk
+
+    def recorded(root, **kwargs):
+        walked.append(Path(root))
+        yield from walk(root, **kwargs)
+
+    monkeypatch.setattr(importer.os, "walk", recorded)
+    report = import_music(settings, relative_root="selected")
+    assert report["status"] == "completed"
+    assert report["counts"]["copied"] == 1
+    assert report["scan"]["counts"]["visited"] == 1
+    assert settings.library_dir not in walked
+    assert settings.music_dir / "other" not in walked
+    assert store(settings).track(before["id"])["status"] == "available"
+    assert store(settings).tracks()["total"] == 2
+
+
 def test_collisions_require_review_and_identical_sources_deduplicate(settings):
     first = source(settings, "a.flac")
     second = source(settings, "b.flac")

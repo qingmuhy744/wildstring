@@ -1,8 +1,8 @@
 import { PodcastDownloadDialog } from './podcast-download-settings';
 import { useCanAddPodcast } from './podcast-catalog-settings';
 import { OPML_EXPORT_URL, PodcastOpmlImportDialog } from './podcast-opml';
-import { PodcastSearchDialog } from './podcast-search';
-import { PodcastResourceManager } from './podcast-resources';
+import { PodcastSearchPage } from './podcast-search';
+import { PodcastEpisodeDialog } from './podcast-episode-dialog';
 import { DialogCloseButton } from './dialog-close';
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import type { EpisodeProgress } from './podcast-progress';
@@ -160,6 +160,7 @@ interface PodcastsProps {
   canEditPublishers?: boolean;
   canManageSources?: boolean;
   canManageResources?: boolean;
+  onManage: (tab: 'resources' | 'downloads') => void;
   onPlayTrack: (track: Track) => void;
   onQueueTrack: (track: Track, next: boolean) => void;
 }
@@ -187,10 +188,10 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
   canEditPublishers = false,
   canManageSources = false,
   canManageResources = false,
+  onManage,
   onPlayTrack,
   onQueueTrack,
 }) => {
-  const [showResources, setShowResources] = useState(false);
   const [podcasts, setPodcasts] = useState<PodcastSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedPodcast, setSelectedPodcast] = useState<PodcastSummary | null>(null);
@@ -205,7 +206,8 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
     : overviewPodcasts;
   const [selectedEpisode, setSelectedEpisode] = useState<PodcastEpisode | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
-  const [showSubscribeModal, setShowSubscribeModal] = useState(false);
+  const [showSearch, setShowSearch] = useState(false);
+  const [exploring, setExploring] = useState(false);
   const [showOpmlImport, setShowOpmlImport] = useState(false);
   const canAddPodcast = useCanAddPodcast(userId, canManageSources);
   const [modalFeedUrl, setModalFeedUrl] = useState('');
@@ -217,10 +219,7 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
   const [playbackSettingsError, setPlaybackSettingsError] = useState<string | null>(null);
 
   // Download queue state
-  const [showQueueModal, setShowQueueModal] = useState(false);
   const [queueInfo, setQueueInfo] = useState<DownloadQueueInfo | null>(null);
-  const [retryingFailed, setRetryingFailed] = useState(false);
-  const [queueView, setQueueView] = useState<DownloadQueueView | null>(null);
   const [queueError, setQueueError] = useState<string | null>(null);
 
   // Context menu state
@@ -249,20 +248,12 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
 
   const menuRef = useRef<HTMLDivElement | null>(null);
-  const downloadDialog = useRef<HTMLDialogElement | null>(null);
   const settingsDialog = useRef<HTMLDialogElement | null>(null);
   const previousCompleted = useRef<string | null>(null);
   const completedRevision =
     queueInfo?.recent_completed
       .map((task) => `${task.episode_id}:${task.completed_at}`)
       .join('|') || '';
-
-  useEffect(() => {
-    const dialog = downloadDialog.current;
-    if (!showQueueModal || !dialog) return;
-    dialog.showModal();
-    return () => dialog.close();
-  }, [showQueueModal]);
 
   useEffect(() => setEpisodeScope(readEpisodeScope(userId)), [userId]);
   useEffect(() => {
@@ -351,16 +342,6 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
       (episode) =>
         episode.resource_saved || episode.resource_automatic || episode.resource_playback_cached,
     ).length || 0;
-  const activeQueueView: DownloadQueueView =
-    queueView ||
-    (queueInfo?.total_pending
-      ? 'active'
-      : queueInfo?.failed_count
-        ? 'failed'
-        : queueInfo?.recent_completed.length
-          ? 'completed'
-          : 'active');
-
   const sortOrderLabels: Record<typeof sortField, { asc: string; desc: string }> = {
     pub_date: { asc: '最早发布在前', desc: '最新发布在前' },
     episode_number: { asc: '期号从低到高', desc: '期号从高到低' },
@@ -728,57 +709,15 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
     }
   };
 
-  const handleRetryFailed = async () => {
-    try {
-      setRetryingFailed(true);
-      const res = await api<{ retried_count: number }>('/podcasts/downloads/retry-failed', {
-        method: 'POST',
-      });
-      showNotice(`已将 ${res.retried_count} 个失败任务重新加入下载队列`);
-      await fetchQueue();
-      if (res.retried_count > 0) setQueueView('active');
-    } catch (err) {
-      setQueueError(err instanceof Error ? err.message : '重试任务失败');
-    } finally {
-      setRetryingFailed(false);
-    }
-  };
-
-  const handleClearCompleted = async () => {
-    try {
-      await api('/podcasts/downloads/clear-completed', { method: 'POST' });
-      await fetchQueue();
-      showNotice('已清除完成记录，下载的音频仍保留');
-    } catch (err) {
-      setQueueError(err instanceof Error ? err.message : '清除记录失败，请重试');
-    }
-  };
-
-  const handleRetryDownload = async (task: DownloadTaskItem) => {
-    try {
-      await api(`/podcasts/episodes/${encodeURIComponent(task.episode_id)}/download`, {
-        method: 'POST',
-      });
-      await fetchQueue();
-      setQueueView('active');
-    } catch (err) {
-      setQueueError(err instanceof Error ? err.message : '重新下载失败，请重试');
-    }
-  };
-
   useEffect(() => {
     if (!canManageSources) return;
     void fetchQueue();
-    const intervalTime = showQueueModal
-      ? 2000
-      : queueInfo && queueInfo.total_pending > 0
-        ? 5000
-        : 12000;
+    const intervalTime = queueInfo && queueInfo.total_pending > 0 ? 5000 : 12000;
     const timer = setInterval(() => {
       void fetchQueue();
     }, intervalTime);
     return () => clearInterval(timer);
-  }, [showQueueModal, queueInfo?.total_pending, canManageSources]);
+  }, [queueInfo?.total_pending, canManageSources]);
 
   const handleDownloadAll = async (p: PodcastSummary) => {
     setContextMenu(null);
@@ -848,7 +787,6 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         setContextMenu(null);
-        setShowSubscribeModal(false);
         setSettingsPodcast(null);
       }
     };
@@ -861,7 +799,8 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
   }, []);
 
   const closeSubscribe = () => {
-    setShowSubscribeModal(false);
+    setExploring(false);
+    setShowSearch(false);
     setModalFeedUrl('');
   };
 
@@ -905,6 +844,19 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
     void loadPodcasts();
     void loadPlaybackSettings();
   }, []);
+
+  if (showSearch) {
+    return (
+      <PodcastSearchPage
+        canAdd={canAddPodcast}
+        initialQuery={modalFeedUrl}
+        initialExplore={exploring}
+        onClose={closeSubscribe}
+        onSubscribed={handleSubscribed}
+        onOpen={openFromSearch}
+      />
+    );
+  }
 
   return (
     <div
@@ -951,7 +903,7 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
             <button
               type="button"
               className="podcasts-action-btn"
-              onClick={() => setShowResources(true)}
+              onClick={() => onManage('resources')}
             >
               共享音频管理
             </button>
@@ -971,12 +923,8 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
             <button
               type="button"
               className={`podcasts-action-btn ${queueInfo && queueInfo.total_pending > 0 ? 'highlight-pulse' : ''}`}
-              onClick={() => {
-                setQueueView(null);
-                setShowQueueModal(true);
-                void fetchQueue();
-              }}
-              title="查看播客音频下载队列与传输状态"
+              onClick={() => onManage('downloads')}
+              title={queueError || '查看播客音频下载队列与传输状态'}
             >
               <Icon name="download" /> 下载管理
               {queueInfo && queueInfo.total_pending > 0 && (
@@ -1022,7 +970,7 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
             <button
               type="button"
               className="podcasts-action-btn primary"
-              onClick={() => setShowSubscribeModal(true)}
+              onClick={() => setShowSearch(true)}
             >
               {canAddPodcast ? '+ 添加节目' : '搜索节目'}
             </button>
@@ -1034,6 +982,15 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
         <div className="podcast-catalog-tabs" role="group" aria-label="节目范围">
           <button type="button" aria-pressed={personalOnly} onClick={() => setFollowingOnly(true)}>
             我的关注
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setExploring(true);
+              setShowSearch(true);
+            }}
+          >
+            探索播客
           </button>
           {canManageSources && (
             <button
@@ -1366,7 +1323,7 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
                   ? '添加感兴趣的 RSS，你的关注与收听进度会单独保存。'
                   : '这里仅显示你关注的节目。管理员尚未开放添加 RSS。'}
               </p>
-              <button type="button" onClick={() => setShowSubscribeModal(true)}>
+              <button type="button" onClick={() => setShowSearch(true)}>
                 {canAddPodcast ? '搜索或添加节目' : '搜索节目'}
               </button>
               {canManageSources && (
@@ -1396,7 +1353,7 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
                       className="preset-chip-btn"
                       onClick={() => {
                         setModalFeedUrl(item.url);
-                        setShowSubscribeModal(true);
+                        setShowSearch(true);
                       }}
                     >
                       + {item.name}
@@ -1863,86 +1820,29 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
         </dialog>
       )}
       {selectedEpisode && selectedPodcast && (
-        <div className="podcasts-modal-backdrop" onClick={() => setSelectedEpisode(null)}>
-          <article
-            className="podcasts-modal podcast-episode-detail"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="podcasts-modal-header">
-              <div>
-                <span className="podcast-detail-kicker">{selectedPodcast.title}</span>
-                <h3>{selectedEpisode.title}</h3>
-              </div>
-              <DialogCloseButton
-                className="modal-close-btn"
-                onClick={() => setSelectedEpisode(null)}
-                aria-label="关闭详情"
-              />
-            </div>
-            <div className="podcast-episode-detail-body">
-              <div className="podcast-episode-detail-meta">
-                {selectedEpisode.pub_date && <span>{selectedEpisode.pub_date.slice(0, 16)}</span>}
-                {selectedEpisode.duration_seconds > 0 && (
-                  <span>{formatDuration(selectedEpisode.duration_seconds)}</span>
-                )}
-                {selectedEpisode.download_status === 'downloaded' ? (
-                  <span className="ep-download-badge">✓ 已下载</span>
-                ) : (
-                  <span>在线串流</span>
-                )}
-              </div>
-              <div className="podcast-episode-detail-description">
-                {renderPodcastDescription(selectedEpisode.description) || '暂无单集简介。'}
-              </div>
-              <div className="podcast-episode-detail-actions">
-                <button
-                  type="button"
-                  className="podcasts-action-btn primary"
-                  onClick={() => {
-                    setSelectedEpisode(null);
-                    playEpisode(selectedEpisode, selectedPodcast);
-                  }}
-                >
-                  ▶ 播放单集
-                </button>
-                {[true, false].map((next) => (
-                  <button
-                    key={String(next)}
-                    type="button"
-                    className="podcasts-action-btn"
-                    onClick={() => {
-                      queueEpisode(selectedEpisode, selectedPodcast, next);
-                      setSelectedEpisode(null);
-                    }}
-                  >
-                    {next ? '下一集播放' : '加入待播'}
-                  </button>
-                ))}
-                {
-                  <button
-                    type="button"
-                    className="podcasts-action-btn"
-                    onClick={(event) => {
-                      void handleDownloadSingleEpisode(selectedEpisode, event);
-                    }}
-                  >
-                    {selectedEpisode.resource_saved ? '取消个人保存' : '保存到服务器'}
-                  </button>
-                }
-              </div>
-            </div>
-          </article>
-        </div>
-      )}
-
-      {/* Subscribe / search dialog */}
-      {showSubscribeModal && (
-        <PodcastSearchDialog
-          canAdd={canAddPodcast}
-          initialQuery={modalFeedUrl}
-          onClose={closeSubscribe}
-          onSubscribed={handleSubscribed}
-          onOpen={openFromSearch}
+        <PodcastEpisodeDialog
+          episode={selectedEpisode}
+          podcast={selectedPodcast}
+          date={
+            safeParseDate(selectedEpisode.pub_date)
+              ? new Intl.DateTimeFormat(document.documentElement.lang, {
+                  dateStyle: 'long',
+                }).format(safeParseDate(selectedEpisode.pub_date))
+              : ''
+          }
+          duration={formatDuration(selectedEpisode.duration_seconds)}
+          onClose={() => setSelectedEpisode(null)}
+          onPlay={() => {
+            setSelectedEpisode(null);
+            playEpisode(selectedEpisode, selectedPodcast);
+          }}
+          onQueue={(next) => {
+            queueEpisode(selectedEpisode, selectedPodcast, next);
+            setSelectedEpisode(null);
+          }}
+          onSave={() => {
+            void handleDownloadSingleEpisode(selectedEpisode);
+          }}
         />
       )}
 
@@ -1951,230 +1851,6 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
           onClose={() => setShowOpmlImport(false)}
           onImported={() => void loadPodcasts()}
         />
-      )}
-
-      {/* Download Queue Modal */}
-      {showQueueModal && (
-        <dialog
-          ref={downloadDialog}
-          className="podcasts-modal podcast-download-modal"
-          aria-labelledby="podcast-download-title"
-          onCancel={() => setShowQueueModal(false)}
-          onClick={() => setShowQueueModal(false)}
-        >
-          <div className="podcast-download-content" onClick={(e) => e.stopPropagation()}>
-            <div className="podcasts-modal-header">
-              <div>
-                <h3 id="podcast-download-title">下载管理</h3>
-                <p>保存在服务器，随时回来接着听。</p>
-              </div>
-              <DialogCloseButton
-                className="modal-close-btn"
-                aria-label="关闭下载管理"
-                onClick={() => setShowQueueModal(false)}
-              />
-            </div>
-
-            <div className="download-views" role="group" aria-label="下载状态">
-              {(
-                [
-                  { value: 'active', label: '进行中', count: queueInfo?.total_pending || 0 },
-                  { value: 'failed', label: '需重试', count: queueInfo?.failed_count || 0 },
-                  {
-                    value: 'completed',
-                    label: '已完成',
-                    count: queueInfo?.recent_completed.length || 0,
-                  },
-                ] as const
-              ).map((view) => (
-                <button
-                  key={view.value}
-                  type="button"
-                  aria-pressed={activeQueueView === view.value}
-                  onClick={() => setQueueView(view.value)}
-                >
-                  {view.label} <span>{view.count}</span>
-                </button>
-              ))}
-            </div>
-
-            {queueError && (
-              <div className="download-error" role="alert">
-                <span>{queueError}</span>
-                <button type="button" onClick={() => void fetchQueue()}>
-                  重新加载
-                </button>
-              </div>
-            )}
-            <div className="queue-list-container">
-              {/* Failed Items Section */}
-              {activeQueueView === 'failed' && queueInfo && queueInfo.failed.length > 0 && (
-                <div className="queue-block">
-                  <h4>
-                    <span>下载失败 ({queueInfo.failed.length})</span>
-                    <button
-                      type="button"
-                      className="podcast-toolbar-btn"
-                      disabled={retryingFailed}
-                      onClick={handleRetryFailed}
-                    >
-                      <Icon name="refresh" /> {retryingFailed ? '重试中…' : '全部重试'}
-                    </button>
-                  </h4>
-                  <div className="queue-cards-group">
-                    {queueInfo.failed.map((task) => (
-                      <div className="queue-task-card failed" key={task.episode_id}>
-                        <div className="queue-task-main">
-                          <div className="queue-task-title">{task.episode_title}</div>
-                          <div className="queue-task-sub">{task.podcast_title}</div>
-                          <div className="queue-task-error">
-                            {task.error || '源站下载未成功，请检查网络或重试'}
-                          </div>
-                        </div>
-                        <button
-                          type="button"
-                          className="queue-retry-single-btn"
-                          onClick={() => void handleRetryDownload(task)}
-                        >
-                          重试
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Downloading & Queued Items Section */}
-              {activeQueueView === 'active' && queueInfo && queueInfo.total_pending > 0 && (
-                <div className="queue-block">
-                  <h4>
-                    <span>
-                      {queueInfo.active_count} 集正在下载 · {queueInfo.queued_count} 集等待中
-                    </span>
-                  </h4>
-                  <div className="queue-cards-group">
-                    {queueInfo.downloading.map((task) => {
-                      const pct =
-                        task.progress_pct != null
-                          ? Math.min(Math.max(task.progress_pct, 0), 100)
-                          : null;
-                      return (
-                        <div className="queue-task-card downloading" key={task.episode_id}>
-                          <div className="queue-task-main">
-                            <div className="queue-task-title">{task.episode_title}</div>
-                            <div className="queue-task-sub">{task.podcast_title}</div>
-                            <div className="queue-task-progress-box">
-                              <div
-                                className="queue-progress-bar-bg"
-                                role="progressbar"
-                                aria-label={`${task.episode_title}下载进度`}
-                                aria-valuemin={0}
-                                aria-valuemax={100}
-                                aria-valuenow={pct ?? undefined}
-                              >
-                                <div
-                                  className={`queue-progress-bar-fill ${pct == null ? 'indeterminate' : ''}`}
-                                  style={{ width: pct != null ? `${pct}%` : undefined }}
-                                />
-                              </div>
-                              <div className="queue-task-metrics">
-                                <span className="queue-task-speed">
-                                  {task.slow_mode ? '平缓下载 · ' : ''}
-                                  {task.speed_human || '正在拉取数据…'}
-                                </span>
-                                <span>
-                                  {task.downloaded_human
-                                    ? `${task.downloaded_human} / ${task.total_human || '未知'}`
-                                    : '连接中…'}
-                                </span>
-                              </div>
-                            </div>
-                          </div>
-                          <span
-                            className={`queue-task-status ${task.status === 'retrying' ? 'queued' : 'downloading'}`}
-                          >
-                            {task.status === 'retrying'
-                              ? `重试等待 (${task.attempt || 1}/${task.max_retries || 3})`
-                              : pct != null
-                                ? `${pct}%`
-                                : '下载中'}
-                          </span>
-                        </div>
-                      );
-                    })}
-                    {queueInfo.queued.map((task, idx) => (
-                      <div className="queue-task-card" key={task.episode_id}>
-                        <div className="queue-task-main">
-                          <div className="queue-task-title">{task.episode_title}</div>
-                          <div className="queue-task-sub">{task.podcast_title}</div>
-                        </div>
-                        <span className="queue-task-status queued">排队 #{idx + 1}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Recent Completed Section */}
-              {activeQueueView === 'completed' &&
-                queueInfo &&
-                queueInfo.recent_completed.length > 0 && (
-                  <div className="queue-block">
-                    <h4>
-                      <span>近期已完成 ({queueInfo.recent_completed.length})</span>
-                      <button
-                        type="button"
-                        className="queue-clear-btn"
-                        onClick={handleClearCompleted}
-                      >
-                        清除记录
-                      </button>
-                    </h4>
-                    <div className="queue-cards-group">
-                      {queueInfo.recent_completed.map((task) => (
-                        <div className="queue-task-card" key={task.episode_id}>
-                          <div className="queue-task-main">
-                            <div className="queue-task-title">{task.episode_title}</div>
-                            <div className="queue-task-sub">{task.podcast_title}</div>
-                          </div>
-                          <span className="queue-task-status downloaded">✓ 已下载</span>
-                        </div>
-                      ))}
-                    </div>
-                    <p className="download-records-note">清除记录不会删除已下载的音频。</p>
-                  </div>
-                )}
-
-              {/* Empty State */}
-              {!queueInfo && !queueError && <p className="queue-empty-state">正在加载下载状态…</p>}
-              {queueInfo &&
-                ((activeQueueView === 'active' && queueInfo.total_pending === 0) ||
-                  (activeQueueView === 'failed' && queueInfo.failed.length === 0) ||
-                  (activeQueueView === 'completed' && queueInfo.recent_completed.length === 0)) && (
-                  <div className="queue-empty-state">
-                    <Icon name={activeQueueView === 'completed' ? 'history' : 'download'} />
-                    <strong>
-                      {activeQueueView === 'active'
-                        ? '当前没有下载任务'
-                        : activeQueueView === 'failed'
-                          ? '没有需要重试的单集'
-                          : '暂无已完成记录'}
-                    </strong>
-                    <p>
-                      {activeQueueView === 'active'
-                        ? '播放时自动缓存，或从单集列表选择保存到服务器。'
-                        : activeQueueView === 'failed'
-                          ? '下载遇到问题时，可以在这里查看原因并重试。'
-                          : '后续完成的下载会出现在这里。'}
-                    </p>
-                  </div>
-                )}
-            </div>
-          </div>
-        </dialog>
-      )}
-      {showResources && canManageResources && (
-        <PodcastResourceManager onClose={() => setShowResources(false)} />
       )}
     </div>
   );

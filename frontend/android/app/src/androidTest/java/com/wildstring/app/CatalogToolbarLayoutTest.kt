@@ -103,7 +103,7 @@ class CatalogToolbarLayoutTest {
         capture("catalog-toolbar-phone.png")
         compose.onNodeWithTag("catalog-play-all").performClick(); assertEquals(1, played)
         compose.onNodeWithTag("catalog-sort").performClick()
-        compose.onNodeWithText("最近听过").performClick()
+        compose.onNodeWithText(uiString(R.string.recently_played)).performClick()
         compose.runOnIdle { assertEquals("last_played_at", state.value.sort) }
         compose.onNodeWithTag("catalog-sort").performClick()
         compose.onNodeWithTag("catalog-sort-order-desc").performClick()
@@ -112,7 +112,7 @@ class CatalogToolbarLayoutTest {
         compose.onNodeWithTag("catalog-sort-order-desc").performClick()
         compose.runOnIdle { assertEquals("Selecting the current direction must not toggle it", "desc", state.value.order) }
         compose.onNodeWithTag("catalog-more").performClick()
-        compose.onNodeWithText("多选加入").performClick(); assertTrue(selected)
+        compose.onNodeWithText(uiString(R.string.multi_select_add)).performClick(); assertTrue(selected)
     }
 
     @Test fun veryNarrowViewportUsesSecondRowRatherThanClippingCount() {
@@ -155,7 +155,7 @@ class CatalogToolbarLayoutTest {
         assertCountIsComplete()
         compose.onNodeWithTag("catalog-sort").assertDoesNotExist()
         compose.onNodeWithTag("catalog-more").performClick()
-        compose.onNodeWithText("多选加入").assertIsDisplayed()
+        compose.onNodeWithText(uiString(R.string.multi_select_add)).assertIsDisplayed()
     }
 
     @Test fun emptyAndCollectingListsStillDisablePlayback() {
@@ -164,7 +164,7 @@ class CatalogToolbarLayoutTest {
         assertCountIsComplete(); assertControlsInsideToolbar()
         compose.onNodeWithTag("catalog-play-all").assertIsNotEnabled()
         compose.runOnIdle { state.value = state.value.copy(total = 28, collecting = true) }
-        compose.onNodeWithText("准备中…").assertIsDisplayed()
+        compose.onNodeWithText(uiString(R.string.preparing)).assertIsDisplayed()
         compose.onNodeWithTag("catalog-play-all").assertIsNotEnabled()
         assertCountIsComplete(); assertControlsInsideToolbar()
     }

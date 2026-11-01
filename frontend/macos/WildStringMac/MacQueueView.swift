@@ -66,7 +66,7 @@ struct MacQueueView: View {
                 .help("拖动调整顺序")
             Button { play(item) } label: {
                 ZStack {
-                    MacCover(client: client, trackID: item.hasCover ? item.trackID : nil, side: 34,
+                    MacCover(client: client, trackID: item.hasCover || item.trackID.hasPrefix("podcast_ep_") ? item.trackID : nil, side: 34,
                         placeholder: item.trackID.hasPrefix("podcast_ep_") ? "antenna.radiowaves.left.and.right" : "music.note")
                     if current {
                         RoundedRectangle(cornerRadius: 6).fill(.black.opacity(0.45))

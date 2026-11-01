@@ -1,0 +1,270 @@
+.podcast-episode-dialog {
+  width: min(760px, calc(100vw - 32px));
+  max-width: none;
+  max-height: min(820px, calc(100dvh - 40px));
+  padding: 0;
+  border: 1px solid var(--podcast-line);
+  border-radius: 20px;
+  background: var(--podcast-panel);
+  color: var(--podcast-ink);
+  box-shadow: 0 24px 80px rgb(15 17 13 / 24%);
+  overflow: hidden;
+}
+
+.podcast-episode-dialog[open] {
+  display: flex;
+  flex-direction: column;
+}
+
+.podcast-episode-dialog::backdrop {
+  background: rgb(20 22 17 / 48%);
+  backdrop-filter: blur(6px);
+}
+
+.episode-dialog-header {
+  position: relative;
+  flex-shrink: 0;
+  padding: 28px 28px 22px;
+  border-bottom: 1px solid var(--podcast-line);
+}
+
+.episode-dialog-header > .dialog-close {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+}
+
+.episode-dialog-identity {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  padding-right: 28px;
+}
+
+.episode-dialog-cover {
+  display: grid;
+  place-items: center;
+  flex: 0 0 64px;
+  height: 64px;
+  border: 1px solid var(--podcast-line);
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--podcast-panel-raised);
+  color: var(--accent);
+}
+
+.episode-dialog-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.episode-dialog-cover .ui-icon {
+  width: 28px;
+  height: 28px;
+}
+
+.episode-dialog-footer .ui-icon {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+.episode-dialog-heading {
+  min-width: 0;
+}
+
+.episode-dialog-programme {
+  display: block;
+  color: var(--podcast-subtle);
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+
+.episode-dialog-heading h2 {
+  margin: 6px 0 0;
+  font-size: clamp(1.15rem, 2.2vw, 1.55rem);
+  font-weight: 650;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  text-wrap: pretty;
+}
+
+.episode-dialog-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  margin-top: 18px;
+  color: var(--podcast-subtle);
+  font-size: 0.78rem;
+}
+
+.episode-dialog-availability {
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: var(--podcast-panel-raised);
+}
+
+.episode-dialog-description {
+  min-height: 80px;
+  overflow: auto;
+  padding: 22px 28px 28px;
+  color: var(--podcast-subtle);
+  font-size: 0.92rem;
+  line-height: 1.8;
+  overflow-wrap: anywhere;
+  scrollbar-gutter: stable;
+}
+
+.episode-dialog-description h3 {
+  margin: 0 0 12px;
+  color: var(--podcast-ink);
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.episode-dialog-description p {
+  margin: 0 0 0.75em;
+}
+
+.episode-dialog-description :last-child {
+  margin-bottom: 0;
+}
+
+.episode-dialog-description a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.episode-dialog-footer {
+  display: grid;
+  gap: 16px;
+  flex-shrink: 0;
+  padding: 18px 28px 22px;
+  border-top: 1px solid var(--podcast-line);
+  background: var(--podcast-panel-raised);
+}
+
+.episode-dialog-playback,
+.episode-dialog-files {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.episode-dialog-footer :is(button, a) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 40px;
+  padding: 8px 12px;
+  border: 1px solid var(--podcast-line);
+  border-radius: 8px;
+  background: var(--podcast-panel);
+  color: var(--podcast-ink);
+  font-size: 0.82rem;
+  font-weight: 500;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.episode-dialog-footer :is(button, a):hover {
+  background: var(--podcast-panel-hover);
+  border-color: var(--accent);
+}
+
+.episode-dialog-footer .primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+}
+
+.episode-dialog-footer .primary:hover {
+  background: color-mix(in srgb, var(--accent) 88%, var(--podcast-ink));
+}
+
+.episode-dialog-files > span {
+  color: var(--podcast-subtle);
+  font-size: 0.75rem;
+}
+
+.episode-dialog-files > button {
+  margin-left: auto;
+  border-color: transparent;
+  background: transparent;
+  color: var(--podcast-subtle);
+}
+
+@media (max-width: 600px) {
+  .episode-dialog-header {
+    padding: 22px 18px 18px;
+  }
+
+  .episode-dialog-identity {
+    display: grid;
+    grid-template-columns: 48px minmax(0, 1fr);
+    align-items: center;
+    gap: 12px;
+    padding-right: 0;
+  }
+
+  .episode-dialog-heading {
+    display: contents;
+  }
+
+  .episode-dialog-programme {
+    padding-right: 32px;
+  }
+
+  .episode-dialog-heading h2 {
+    grid-column: 1 / -1;
+    margin-top: 0;
+  }
+
+  .episode-dialog-cover {
+    flex-basis: 48px;
+    height: 48px;
+    border-radius: 9px;
+  }
+
+  .episode-dialog-description {
+    padding: 18px;
+  }
+
+  .episode-dialog-footer {
+    gap: 12px;
+    padding: 16px 14px;
+  }
+
+  .episode-dialog-playback {
+    flex-wrap: nowrap;
+    gap: 6px;
+  }
+
+  .episode-dialog-playback button {
+    flex: 1;
+    gap: 5px;
+    padding: 8px 6px;
+    font-size: 0.76rem;
+    white-space: nowrap;
+  }
+
+  .episode-dialog-files > span {
+    display: none;
+  }
+}
+
+@media (max-width: 380px) {
+  .episode-dialog-playback {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .episode-dialog-playback .primary {
+    grid-column: 1 / -1;
+  }
+}

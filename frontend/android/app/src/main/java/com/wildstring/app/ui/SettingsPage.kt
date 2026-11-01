@@ -4,7 +4,6 @@ package com.wildstring.app.ui
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -13,6 +12,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
+import com.wildstring.app.R
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 
@@ -21,6 +22,7 @@ import androidx.compose.ui.unit.dp
     back: () -> Unit,
     bottomBar: @Composable () -> Unit = {},
     scrollState: ScrollState = rememberSaveable(saver = ScrollState.Saver) { ScrollState(0) },
+    title: String = stringResource(R.string.settings_title),
     content: @Composable ColumnScope.() -> Unit,
 ) {
     BackHandler(onBack = back)
@@ -31,8 +33,8 @@ import androidx.compose.ui.unit.dp
             bottomBar()
         },
         topBar = {
-            TopAppBar(title = { Text("设置") }, navigationIcon = {
-                IconButton(back, Modifier.testTag("settings-back")) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回") }
+            TopAppBar(title = { Text(title) }, navigationIcon = {
+                IconButton(back, Modifier.testTag("settings-back")) { Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.back)) }
             }, windowInsets = WindowInsets(0, 0, 0, 0),
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow))
         }) { padding ->
@@ -45,7 +47,8 @@ import androidx.compose.ui.unit.dp
             Column(
                 Modifier.widthIn(max = 720.dp).fillMaxWidth()
                     .testTag("settings-scroll")
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                    .padding(horizontal = 16.dp, vertical = 12.dp)
+                    .windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Bottom)),
                 verticalArrangement = Arrangement.spacedBy(20.dp),
                 content = content,
             )

@@ -39,19 +39,22 @@ test('歌单右击和更多菜单可编辑删除，自动下载受网络设置�
     await editor.getByRole('button', { name: '保存歌单', exact: true }).click();
     await expect(editor).toHaveCount(0);
     await view('offline', '离线音乐');
-    const panel = page.getByRole('region', { name: '离线音乐', exact: true });
-    await panel.locator('summary').click();
+    await page.getByRole('button', { name: '下载设置与自动下载歌单' }).click();
+    const panel = page.getByRole('region', { name: '下载设置', exact: true });
     await panel.getByLabel('默认下载音质', { exact: true }).selectOption('192');
     await panel.getByRole('button', { name: '选择自动下载歌单', exact: true }).click();
     await panel.getByLabel('自动离线改名', { exact: true }).check();
     await expect(panel).toContainText('已选 1 个歌单');
     expect(requests).toHaveLength(0);
     await panel.getByLabel('允许在移动数据或未知网络自动下载').check();
-    await expect(panel).toContainText('已离线保存');
+    await view('offline', '离线音乐');
+    await expect(page.getByRole('region', { name: '离线音乐', exact: true })).toContainText(
+      '已离线保存',
+    );
     expect(new URL(requests[0]).searchParams.get('bitrate_kbps')).toBe('192');
     await page.reload();
     await view('offline', '离线音乐');
-    await page.getByRole('region', { name: '离线音乐', exact: true }).locator('summary').click();
+    await page.getByRole('button', { name: '下载设置与自动下载歌单' }).click();
     await expect(page.getByLabel('默认下载音质', { exact: true })).toHaveValue('192');
     await view('playlists', '歌单');
     await page.getByRole('button', { name: '自动离线改名的歌单操作', exact: true }).click();

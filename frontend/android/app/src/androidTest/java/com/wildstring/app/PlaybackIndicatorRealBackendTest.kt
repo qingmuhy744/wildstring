@@ -67,16 +67,16 @@ class PlaybackIndicatorRealBackendTest {
             InstrumentationRegistry.getInstrumentation().uiAutomation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK)
             compose.waitUntil(10_000) { compose.onAllNodesWithTag("catalog-item-0").fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithTag("catalog-item-0").assertIsSelected()
-            status("catalog-item-0", "正在播放")
+            status("catalog-item-0", uiString(R.string.playback_playing))
             compose.runOnIdle { vm.controller!!.pause() }
-            status("catalog-item-0", "已暂停")
+            status("catalog-item-0", uiString(R.string.playback_paused))
             capture("now-playing-playlist-android.png")
             compose.runOnIdle { vm.playQueue(1) }
             compose.waitUntil(10_000) { vm.state.value.current?.id == tracks[1].id && vm.state.value.playing && !vm.state.value.buffering }
             compose.onNodeWithTag("catalog-item-0").assertIsNotSelected()
             compose.onNodeWithTag("catalog-item-1").assertIsSelected()
             marker("catalog-item-0").assertDoesNotExist()
-            status("catalog-item-1", "正在播放")
+            status("catalog-item-1", uiString(R.string.playback_playing))
             compose.runOnIdle { vm.controller!!.pause() }
             val favorites = runBlocking {
                 tracks.forEach { vm.repository.api().favorite(vm.repository.url("api", "v1", "tracks", it.id, "favorite"), FavoriteRequest(true)).close() }
@@ -87,12 +87,12 @@ class PlaybackIndicatorRealBackendTest {
             compose.waitUntil(10_000) { vm.state.value.activePlaylist?.id == favorites.id && !vm.state.value.loading }
             val index = (0 until vm.state.value.total).first { vm.state.value.window.trackAt(it)?.id == tracks[1].id }
             compose.onNodeWithTag("catalog-item-$index").assertIsSelected()
-            status("catalog-item-$index", "已暂停")
+            status("catalog-item-$index", uiString(R.string.playback_paused))
             capture("now-playing-favorites-android.png")
             val daily = runBlocking { vm.repository.agentApi().daily().items.first().track }
             compose.runOnIdle { vm.navigate("search") }
             compose.waitUntil(10_000) { vm.state.value.tab == "search" && vm.state.value.kind == "discover" && !vm.state.value.loading }
-            val entry = hasText("每日推荐", substring = false) and hasClickAction()
+            val entry = hasText(uiString(R.string.daily_recommendations), substring = false) and hasClickAction()
             compose.waitUntil(10_000) { compose.onAllNodes(entry).fetchSemanticsNodes().isNotEmpty() }
             compose.onNode(entry).performSemanticsAction(SemanticsActions.OnClick) { it() }
             compose.waitUntil(10_000) { compose.onAllNodes(hasText("播放推荐") and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
@@ -101,9 +101,9 @@ class PlaybackIndicatorRealBackendTest {
             compose.onNodeWithTag(dailyTag).performClick()
             compose.waitUntil(10_000) { vm.state.value.current?.id == daily.id && vm.state.value.playing && !vm.state.value.buffering }
             compose.onNodeWithTag(dailyTag).assertIsSelected()
-            status(dailyTag, "正在播放")
+            status(dailyTag, uiString(R.string.playback_playing))
             compose.runOnIdle { vm.controller!!.pause() }
-            status(dailyTag, "已暂停")
+            status(dailyTag, uiString(R.string.playback_paused))
             capture("now-playing-daily-android.png")
             InstrumentationRegistry.getInstrumentation().uiAutomation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK)
             compose.waitUntil(10_000) { compose.onAllNodesWithTag("daily-recommendations").fetchSemanticsNodes().isEmpty() && compose.runOnIdle { compose.activity.hasWindowFocus() } }
@@ -117,7 +117,7 @@ class PlaybackIndicatorRealBackendTest {
             val queueTag = "queue-row-${duplicate.entryId}"
             compose.onNodeWithTag("playback-queue").performScrollToNode(hasTestTag(queueTag))
             compose.onNodeWithTag(queueTag).assertIsSelected()
-            status(queueTag, "正在播放")
+            status(queueTag, uiString(R.string.playback_playing))
             compose.onAllNodes(hasTestTag("playback-indicator") and hasAnyAncestor(hasTestTag("playback-queue")), useUnmergedTree = true).assertCountEquals(1)
             capture("now-playing-queue-android.png")
         } catch (error: Throwable) {

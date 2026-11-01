@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
-import { login } from './helpers';
+import { login, manageTab } from './helpers';
 
 const headers = { 'X-Wildstring-Client': 'web' };
 let cleanupAction: (() => Promise<void>) | null = null;
@@ -101,11 +101,8 @@ sys.stdout.buffer.write(b.getvalue())
   };
 
   if (info.project.name === 'mobile') await page.getByLabel('浏览方式').selectOption('manage');
-  else await page.getByRole('button', { name: '管理', exact: true }).click();
-  await page
-    .getByRole('navigation', { name: '管理分类' })
-    .getByRole('button', { name: '设置', exact: true })
-    .click();
+  else await page.getByRole('button', { name: '管理中心', exact: true }).click();
+  await manageTab(page, '当前音乐库设置');
   await page.getByRole('button', { name: '打开歌词补全与洗版', exact: true }).click();
   const panel = page.getByRole('region', { name: '歌词补全与洗版', exact: true });
   const rate = panel.getByRole('combobox', { name: '请求频率', exact: true });

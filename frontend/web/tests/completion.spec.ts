@@ -346,7 +346,10 @@ test('离线暂停、Range续传、容量失败与重试', async ({ page }) => {
   release();
   await expect(page.getByLabel('离线音乐', { exact: true })).toContainText('已暂停');
   await page.unroute(`**/api/v1/tracks/${source.id}/stream`);
+  await page.getByRole('button', { name: '下载设置与自动下载歌单' }).click();
   await page.getByLabel('离线容量上限', { exact: true }).fill('100');
+  await page.getByLabel('离线容量上限', { exact: true }).blur();
+  await section(page, '离线音乐');
   await page.route(`**/api/v1/tracks/${source.id}/stream`, (route) =>
     route.fulfill({
       status: 200,

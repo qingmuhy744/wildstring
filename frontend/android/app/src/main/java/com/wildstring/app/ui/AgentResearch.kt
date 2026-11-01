@@ -1,5 +1,7 @@
 package com.wildstring.app.ui
 
+import com.wildstring.app.R
+import androidx.compose.ui.res.stringResource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -25,6 +27,7 @@ import kotlinx.coroutines.launch
 }
 
 @Composable internal fun AgentResearch(vm: MusicViewModel) {
+    val resources = androidx.compose.ui.platform.LocalResources.current
     val focus = LocalFocusManager.current; val keyboard = LocalSoftwareKeyboardController.current
     val action = remember { FeatureAction() }; val scope = rememberCoroutineScope()
     var settings by remember { mutableStateOf<JsonObject?>(null) }; var preferences by remember { mutableStateOf<JsonObject?>(null) }
@@ -39,35 +42,35 @@ import kotlinx.coroutines.launch
     LaunchedEffect(Unit) { action.run { load() }; if (action.message == "已完成") action.message = null }
     LazyColumn(Modifier.fillMaxSize().testTag("agent-research"), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
-            Text("聊天联网搜索", style = MaterialTheme.typography.titleLarge)
-            Text("实时核对库外最新发行与历史资料。搜索服务需要独立密钥，按服务商规则计费；不上传音频或整份曲库。", style = MaterialTheme.typography.bodySmall)
+            Text(stringResource(R.string.research_chat_search), style = MaterialTheme.typography.titleLarge)
+            Text(stringResource(R.string.research_search_hint), style = MaterialTheme.typography.bodySmall)
             ActionStatus(action)
         }
         if (action.busy && settings == null) item { AgentSkeleton(Modifier.height(420.dp)) }
         item {
-            ResearchChoice("搜索服务", provider, listOf("deepseek" to "DeepSeek 官方", "tavily" to "Tavily")) { provider = it; secret = "" }
-            OutlinedTextField(secret, { secret = it }, label = { Text(if (settings?.flag("has_api_key") == true) "搜索 API Key（留空保留）" else "搜索 API Key") }, visualTransformation = PasswordVisualTransformation(), singleLine = true)
-            OutlinedTextField(budget, { budget = it.filter(Char::isDigit) }, label = { Text("每日搜索与读取请求上限") }, singleLine = true)
-            Row(verticalAlignment = Alignment.CenterVertically) { Text("启用聊天联网", Modifier.weight(1f)); Switch(enabled, { enabled = it }, enabled = !action.busy) }
-            Row(verticalAlignment = Alignment.CenterVertically) { Text("清除搜索密钥", Modifier.weight(1f)); Switch(clearKey, { clearKey = it }, enabled = !action.busy) }
-            Text("今日已请求 ${settings?.number("requests_today") ?: 0} 次。每轮最多 4 次；失败请求预留额度，同一结果缓存 15 分钟。", style = MaterialTheme.typography.bodySmall)
+            ResearchChoice(stringResource(R.string.research_service), provider, listOf("deepseek" to stringResource(R.string.research_deepseek), "tavily" to "Tavily")) { provider = it; secret = "" }
+            OutlinedTextField(secret, { secret = it }, label = { Text(if (settings?.flag("has_api_key") == true) stringResource(R.string.research_key_keep) else stringResource(R.string.research_key)) }, visualTransformation = PasswordVisualTransformation(), singleLine = true)
+            OutlinedTextField(budget, { budget = it.filter(Char::isDigit) }, label = { Text(stringResource(R.string.research_daily_limit)) }, singleLine = true)
+            Row(verticalAlignment = Alignment.CenterVertically) { Text(stringResource(R.string.research_enable), Modifier.weight(1f)); Switch(enabled, { enabled = it }, enabled = !action.busy) }
+            Row(verticalAlignment = Alignment.CenterVertically) { Text(stringResource(R.string.research_clear_key), Modifier.weight(1f)); Switch(clearKey, { clearKey = it }, enabled = !action.busy) }
+            Text(stringResource(R.string.research_requests_today, settings?.number("requests_today") ?: 0), style = MaterialTheme.typography.bodySmall)
             TextButton({ scope.launch { action.run {
                 val body = jsonBody("provider" to provider, "enabled" to enabled, "daily_budget" to (budget.toIntOrNull() ?: -1), "version" to (settings?.number("version") ?: 0), "clear_api_key" to clearKey)
                 if (secret.isNotBlank()) body.addProperty("api_key", secret)
                 vm.agent.request("search-settings", "PUT", body); load(); runCatching { focus.clearFocus(force = true); keyboard?.hide() }; secret = ""; clearKey = false
-            } } }, enabled = !action.busy && settings != null) { Text("保存搜索设置") }
-            TextButton({ scope.launch { action.run { val result = vm.agent.request("search-settings/test", "POST"); load(); action.message = "搜索服务已响应，取得 ${result.objects("sources").size} 个可用来源。" } } }, enabled = !action.busy && settings?.flag("enabled") == true) { Text("测试搜索（计入额度）") }
+            } } }, enabled = !action.busy && settings != null) { Text(stringResource(R.string.research_save)) }
+            TextButton({ scope.launch { action.run { val result = vm.agent.request("search-settings/test", "POST"); load(); action.message = resources.getString(R.string.research_test_result, result.objects("sources").size) } } }, enabled = !action.busy && settings?.flag("enabled") == true) { Text(stringResource(R.string.research_test)) }
         }
         item {
-            HorizontalDivider(); Text("上下文与长期记忆", style = MaterialTheme.typography.titleLarge)
-            Text("长对话摘要可能有遗漏，可在聊天中查看或清除；摘要占用本轮一次模型调用。记忆只保存你明确提交的偏好，最多 50 条，删除对话不会删除记忆。", style = MaterialTheme.typography.bodySmall)
-            listOf("context_summary" to "长对话自动摘要", "long_term_memory" to "在聊天中使用已保存记忆").forEach { (field, label) ->
+            HorizontalDivider(); Text(stringResource(R.string.research_context_memory), style = MaterialTheme.typography.titleLarge)
+            Text(stringResource(R.string.research_memory_hint), style = MaterialTheme.typography.bodySmall)
+            listOf("context_summary" to stringResource(R.string.research_summary_auto), "long_term_memory" to stringResource(R.string.research_memory_use)).forEach { (field, label) ->
                 Row(verticalAlignment = Alignment.CenterVertically) { Text(label, Modifier.weight(1f)); Switch(preferences?.flag(field) ?: true, { checked -> scope.launch { action.run {
                     val value = preferences ?: return@run
                     preferences = vm.agent.request("assistant-preferences", "PUT", jsonBody("retention_days" to value.number("retention_days", 30), "context_summary" to if (field == "context_summary") checked else value.flag("context_summary"), "long_term_memory" to if (field == "long_term_memory") checked else value.flag("long_term_memory")))
                 } } }, enabled = !action.busy && preferences != null) }
             }
-            OutlinedTextField(content, { content = it.take(1000) }, label = { Text(if (editing == null) "明确保存的音乐偏好" else "编辑长期记忆") }, modifier = Modifier.fillMaxWidth().testTag("agent-memory-input"), minLines = 2)
+            OutlinedTextField(content, { content = it.take(1000) }, label = { Text(if (editing == null) stringResource(R.string.research_memory_input) else stringResource(R.string.research_memory_edit)) }, modifier = Modifier.fillMaxWidth().testTag("agent-memory-input"), minLines = 2)
             Row {
                 TextButton({ scope.launch { action.run {
                     val current = editing
@@ -75,20 +78,20 @@ import kotlinx.coroutines.launch
                     if (current != null) body.addProperty("version", current.number("version"))
                     vm.agent.request(if (current == null) "memories" else "memories/${current.text("id")}", if (current == null) "POST" else "PATCH", body)
                     memories = vm.agent.all("memories"); runCatching { focus.clearFocus(force = true); keyboard?.hide() }; content = ""; editing = null
-                } } }, enabled = !action.busy && content.isNotBlank(), modifier = Modifier.testTag("agent-memory-save")) { Text(if (editing == null) "保存长期记忆" else "更新记忆") }
-                if (editing != null) TextButton({ editing = null; content = "" }) { Text("取消编辑") }
+                } } }, enabled = !action.busy && content.isNotBlank(), modifier = Modifier.testTag("agent-memory-save")) { Text(if (editing == null) stringResource(R.string.research_memory_save) else stringResource(R.string.research_memory_update)) }
+                if (editing != null) TextButton({ editing = null; content = "" }) { Text(stringResource(R.string.cancel_edit)) }
             }
         }
         items(memories, key = { it.text("id") }) { memory ->
             Surface(shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.surfaceContainerLow) {
                 Column(Modifier.fillMaxWidth().padding(12.dp)) {
                     Text(memory.text("content")); Row {
-                        TextButton({ editing = memory; content = memory.text("content") }, enabled = !action.busy) { Text("编辑记忆") }
-                        TextButton({ deleting = memory }, enabled = !action.busy) { Text("删除记忆") }
+                        TextButton({ editing = memory; content = memory.text("content") }, enabled = !action.busy) { Text(stringResource(R.string.research_memory_edit_action)) }
+                        TextButton({ deleting = memory }, enabled = !action.busy) { Text(stringResource(R.string.research_memory_delete)) }
                     }
                 }
             }
         }
     }
-    deleting?.let { memory -> AlertDialog(onDismissRequest = { deleting = null }, title = { Text("删除长期记忆？") }, text = { Text(memory.text("content")) }, confirmButton = { TextButton({ scope.launch { action.run { vm.agent.request("memories/${memory.text("id")}", "DELETE"); if (editing?.text("id") == memory.text("id")) { editing = null; content = "" }; deleting = null; memories = vm.agent.all("memories") } } }, enabled = !action.busy, modifier = Modifier.testTag("agent-memory-delete-confirm")) { Text("删除") } }, dismissButton = { TextButton({ deleting = null }) { Text("取消") } }) }
+    deleting?.let { memory -> AlertDialog(onDismissRequest = { deleting = null }, title = { Text(stringResource(R.string.research_memory_delete_title)) }, text = { Text(memory.text("content")) }, confirmButton = { TextButton({ scope.launch { action.run { vm.agent.request("memories/${memory.text("id")}", "DELETE"); if (editing?.text("id") == memory.text("id")) { editing = null; content = "" }; deleting = null; memories = vm.agent.all("memories") } } }, enabled = !action.busy, modifier = Modifier.testTag("agent-memory-delete-confirm")) { Text(stringResource(R.string.delete)) } }, dismissButton = { TextButton({ deleting = null }) { Text(stringResource(R.string.cancel)) } }) }
 }

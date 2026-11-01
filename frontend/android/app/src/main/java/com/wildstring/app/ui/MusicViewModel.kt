@@ -30,6 +30,7 @@ data class MusicState(
     val query: String = "", val offset: Int = 0, val total: Int = 0,
     val collection: String? = null, val collectionId: String? = null, val activePlaylist: Playlist? = null,
     val tracks: List<Track> = emptyList(), val albums: List<Album> = emptyList(),
+    val addedTracks: List<Track> = emptyList(),
     val artists: List<Artist> = emptyList(), val playlists: List<Playlist> = emptyList(),
     val current: Track? = null, val playing: Boolean = false, val buffering: Boolean = false,
     val position: Long = 0, val duration: Long = 0, val queue: List<QueueRow> = emptyList(),
@@ -100,11 +101,11 @@ class MusicViewModel @Inject constructor(
     }
     private fun query() = mutable.value.let { CatalogQuery(it.tab, it.kind, it.title, it.query, it.offset, it.collection, it.collectionId, it.activePlaylist, it.role, it.sort, it.albumFilter, it.order, repository.selectedLibraryId) }
     private fun MusicState.withPage(page: CatalogPage) = copy(tracks = page.tracks.map { track -> track.copy(loved = optimisticFavorites[track.id] ?: repository.knownTracks[track.id]?.loved ?: track.loved) }, albums = page.albums, artists = page.artists,
-        playlists = page.playlists, total = page.total, discs = page.discs.orEmpty(), hasContent = true)
+        addedTracks = page.addedTracks.orEmpty(), playlists = page.playlists, total = page.total, discs = page.discs.orEmpty(), hasContent = true)
     private fun MusicState.withWindow(value: CatalogWindow): MusicState {
         val ordered = value.pages.toSortedMap().values
         return withPage(CatalogPage(tracks = ordered.flatMap { it.tracks }, albums = ordered.flatMap { it.albums },
-            artists = ordered.flatMap { it.artists }, playlists = ordered.flatMap { it.playlists }, total = value.total, discs = ordered.firstOrNull()?.discs)).copy(window = value)
+            artists = ordered.flatMap { it.artists }, playlists = ordered.flatMap { it.playlists }, addedTracks = ordered.flatMap { it.addedTracks.orEmpty() }, total = value.total, discs = ordered.firstOrNull()?.discs)).copy(window = value)
     }
     private fun cancelRanges() { rangeJobs.values.forEach { it.cancel() }; rangeJobs.clear() }
     suspend fun cacheUsage(): Triple<Long, Long, Long> = withContext(Dispatchers.IO) { val (metadata, art) = repository.cache.usage(); Triple(metadata, art, audioCache.bytes()) }
@@ -583,6 +584,12 @@ class MusicViewModel @Inject constructor(
     fun openPlaylist(playlist: Playlist) = open(query().copy(kind = "tracks", collection = "playlists", collectionId = playlist.id, playlist = playlist, title = playlist.name, query = "", offset = 0))
     fun recent() = open(query().copy(kind = "recent", title = "最近听过", collection = null, collectionId = null, offset = 0, query = "",
         sort = "last_played_at", playlist = null, albumFilter = null))
+
+    fun recentlyAdded(kind: String) {
+        settings.catalogSort(repository.session.cacheScope(), kind, CatalogSort("added_at", "desc"))
+        open(query().copy(kind = kind, title = if (kind == "albums") "最近添加的专辑" else "最近添加的歌曲",
+            collection = null, collectionId = null, query = "", playlist = null, albumFilter = null, sort = "added_at", order = "desc"))
+    }
 
     fun load(delayMs: Long = 0, preserveWindow: Boolean = false) {
         loadJob?.cancel(); cancelRanges()

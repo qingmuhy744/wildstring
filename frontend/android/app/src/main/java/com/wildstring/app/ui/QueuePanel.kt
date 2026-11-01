@@ -1,5 +1,7 @@
 package com.wildstring.app.ui
 
+import com.wildstring.app.R
+import androidx.compose.ui.res.stringResource
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -70,11 +72,12 @@ internal fun QueuePanel(
 internal fun QueueList(
     rows: List<QueueRow>, currentEntry: String?, modifier: Modifier = Modifier,
     onPlay: (QueueRow) -> Unit, onRemove: (QueueRow) -> Unit,
-    onMove: (String, Int) -> Unit, onHaptic: (TactileKind) -> Unit, allowRemove: Boolean = true, title: String = "播放队列 · ${rows.size}",
+    onMove: (String, Int) -> Unit, onHaptic: (TactileKind) -> Unit, allowRemove: Boolean = true, title: String = stringResource(R.string.queue_title_count, rows.size),
     playing: Boolean = false, buffering: Boolean = false, onClear: (() -> Unit)? = null,
     headerModifier: Modifier = Modifier,
     onClose: (() -> Unit)? = null,
 ) {
+    val resources = androidx.compose.ui.platform.LocalResources.current
     val list = rememberLazyListState()
     val scope = rememberCoroutineScope()
     val drag = remember(list) { QueueDragState(list) }
@@ -125,21 +128,21 @@ internal fun QueueList(
         Row(headerModifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text(title, style = MaterialTheme.typography.titleMedium)
-                Text("长按右侧手柄拖动排序", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
+                Text(stringResource(R.string.queue_drag_hint), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
             }
             if (currentOffscreen) {
                 TextButton({
                     val idx = rows.indexOfFirst { it.entryId == currentEntry }
                     if (idx >= 0) scope.launch { list.animateScrollToItem((idx - 1).coerceAtLeast(0)) }
-                }, contentPadding = PaddingValues(horizontal = 8.dp)) { Text("定位当前", fontSize = 12.sp) }
+                }, contentPadding = PaddingValues(horizontal = 8.dp)) { Text(stringResource(R.string.queue_locate_current), fontSize = 12.sp) }
             }
             if (onClear != null && rows.isNotEmpty()) {
                 TextButton(onClear, contentPadding = PaddingValues(horizontal = 8.dp), modifier = Modifier.testTag("queue-clear")) {
-                    Text("清空", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(stringResource(R.string.clear), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
             if (onClose != null) {
-                IconButton(onClose) { Icon(Icons.Default.Close, "关闭播放队列") }
+                IconButton(onClose) { Icon(Icons.Default.Close, stringResource(R.string.queue_close)) }
             }
         }
         LazyColumn(
@@ -208,16 +211,16 @@ internal fun QueueList(
                     Box(Modifier.size(48.dp).testTag("queue-handle-${row.entryId}")
                         .onGloballyPositioned { handle -> coordinates?.takeIf { it.isAttached && handle.isAttached }?.let { handles[row.entryId] = it.localBoundingBoxOf(handle, clipBounds = false) } }
                         .semantics {
-                            contentDescription = "拖动排序：${row.title}"
-                            stateDescription = "第 ${index + 1} 首，共 ${rows.size} 首"
+                            contentDescription = resources.getString(R.string.queue_drag_named, row.title)
+                            stateDescription = resources.getString(R.string.queue_position, index + 1, rows.size)
                             customActions = buildList {
-                                if (index > 0) add(CustomAccessibilityAction("向前移动") { haptic(TactileKind.Tap); move(row.entryId, index - 1); true })
-                                if (index < rows.lastIndex) add(CustomAccessibilityAction("向后移动") { haptic(TactileKind.Tap); move(row.entryId, index + 1); true })
+                                if (index > 0) add(CustomAccessibilityAction(resources.getString(R.string.queue_move_up)) { haptic(TactileKind.Tap); move(row.entryId, index - 1); true })
+                                if (index < rows.lastIndex) add(CustomAccessibilityAction(resources.getString(R.string.queue_move_down)) { haptic(TactileKind.Tap); move(row.entryId, index + 1); true })
                             }
                         }, contentAlignment = Alignment.Center) {
                         Icon(Icons.Default.Menu, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
-                    if (allowRemove) IconButton({ onRemove(row) }, enabled = drag.entryId == null) { Icon(Icons.Default.Close, "移除${row.title}") }
+                    if (allowRemove) IconButton({ onRemove(row) }, enabled = drag.entryId == null) { Icon(Icons.Default.Close, stringResource(R.string.remove_named, row.title)) }
                 }
             }
         }

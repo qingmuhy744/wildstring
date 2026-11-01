@@ -83,7 +83,9 @@ jobs:
         uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2
         with:
           api-level: 35
-          target: google_apis
+          # The app has no Play Services dependency; avoid Pixel Launcher's
+          # background ANR dialogs stealing focus during window-resize tests.
+          target: default
           arch: x86_64
           profile: pixel_2
           ram-size: 2048M

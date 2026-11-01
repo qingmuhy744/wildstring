@@ -5,16 +5,28 @@ import { AgentConnections, AssistantPreferences, ToolCredentials } from './agent
 import { TelegramSettings } from './telegram-settings';
 import { WorkspaceHeader } from './workspace-ui';
 import { ResearchSettings } from './assistant-research';
-export function AssistantSettings({ user }: { user: User }) {
-  const [tab, setTab] = useState('connections');
+export type AssistantSettingsTab =
+  'connections' | 'application' | 'telegram' | 'credentials' | 'history' | 'research';
+export function AssistantSettings({
+  user,
+  initialTab = 'connections',
+  embedded = false,
+}: {
+  user: User;
+  initialTab?: AssistantSettingsTab;
+  embedded?: boolean;
+}) {
+  const [tab, setTab] = useState(initialTab);
   return (
     <section className="workspace-page" aria-label="助手与通知设置">
-      <WorkspaceHeader
-        eyebrow="YOUR CHOICES, YOUR CONTROL"
-        title="让助手，按你的方式工作。"
-        description="选择模型、授权范围和结果通知；关闭外部服务后，音乐仍照常播放。"
-      />
-      <nav className="workspace-tabs" aria-label="助手设置分类">
+      {!embedded && (
+        <WorkspaceHeader
+          eyebrow="YOUR CHOICES, YOUR CONTROL"
+          title="让助手，按你的方式工作。"
+          description="选择模型、授权范围和结果通知；关闭外部服务后，音乐仍照常播放。"
+        />
+      )}
+      <nav className="settings-tabs" aria-label="助手设置分类">
         {[
           ['connections', '模型连接'],
           ['application', '整理方式'],
@@ -23,7 +35,11 @@ export function AssistantSettings({ user }: { user: User }) {
           ['history', '对话历史'],
           ['research', '联网与记忆'],
         ].map(([key, label]) => (
-          <button key={key} aria-pressed={tab === key} onClick={() => setTab(key)}>
+          <button
+            key={key}
+            aria-pressed={tab === key}
+            onClick={() => setTab(key as AssistantSettingsTab)}
+          >
             {label}
           </button>
         ))}

@@ -60,6 +60,42 @@ def listener(client, library_ids, profile="listener"):
     return other, response.json()["id"]
 
 
+def test_folder_preview_only_walks_the_selected_subdirectory(
+    settings, authenticated_client, monkeypatch
+):
+    from wildstring.library import intake
+
+    selected = settings.music_dir / "selected"
+    selected.mkdir(parents=True)
+    (settings.music_dir / "other").mkdir()
+    shutil.copyfile(FIXTURE, selected / "one.mp3")
+    shutil.copyfile(FIXTURE, settings.music_dir / "other" / "two.mp3")
+    walked = []
+    walk = intake.os.walk
+
+    def recorded(root, **kwargs):
+        walked.append(Path(root))
+        yield from walk(root, **kwargs)
+
+    with authenticated_client(settings) as client:
+        source_id = client.get("/api/v1/manage/library/sources").json()["items"][0]["id"]
+        monkeypatch.setattr(intake.os, "walk", recorded)
+        response = client.post(
+            "/api/v1/manage/library/import/preview",
+            headers=HEADERS,
+            json={"source_id": source_id, "path": "selected"},
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["files"] == ["selected/one.mp3"]
+        assert walked == [selected]
+        assert (
+            client.get(
+                "/api/v1/manage/library/folders", params={"source_id": "unknown"}
+            ).status_code
+            == 404
+        )
+
+
 def test_grants_filter_catalog_and_block_direct_objects_and_assets(catalog):
     client, first, second, tracks, _ = catalog
     other, _ = listener(client, [second["id"]])
@@ -148,11 +184,21 @@ def test_two_sources_import_to_one_managed_library_without_changing_sources(
     roots = client.get("/api/v1/manage/library/sources", headers=scoped).json()["items"]
     assert len(roots) == 2
     for root in roots:
-        assert (
-            client.get(
-                f"/api/v1/manage/library/folders?source_id={root['id']}", headers=scoped
-            ).status_code
-            == 200
+        response = client.get(
+            f"/api/v1/manage/library/folders?source_id={root['id']}", headers=scoped
+        )
+        assert response.status_code == 200
+        assert {entry["name"] for entry in response.json()["items"]} == (
+            {"one.mp3"} if root["path"] == str(source) else {"duplicate.mp3"}
+        )
+        preview = client.post(
+            "/api/v1/manage/library/import/preview",
+            headers=scoped,
+            json={"source_id": root["id"], "path": "."},
+        )
+        assert preview.status_code == 200
+        assert preview.json()["files"] == (
+            ["one.mp3"] if root["path"] == str(source) else ["duplicate.mp3"]
         )
     queued = client.post("/api/v1/manage/jobs", headers=scoped, json={"kind": "import"})
     assert queued.status_code == 202, queued.text

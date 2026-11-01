@@ -12,13 +12,6 @@ struct WildStringMacApp: App {
         }
         .commands { MacMenus(session: session) }
 
-        Window("桌面歌词", id: "desktop-lyrics") {
-            DesktopLyricsView(session: session)
-        }
-        .windowStyle(.hiddenTitleBar)
-        .windowResizability(.contentSize)
-        .defaultSize(width: 540, height: 72)
-
         MenuBarExtra(isInserted: $menuBarPlayerEnabled) {
             MenuBarPlayer(session: session)
         } label: {
@@ -51,6 +44,7 @@ private struct MacMenus: Commands {
         }
         CommandMenu("前往") {
             Group {
+            Button("首页") { navigate(.home) }.keyboardShortcut("0", modifiers: .command)
             Button("全部歌曲") { navigate(.tracks) }.keyboardShortcut("1", modifiers: .command)
             Button("专辑") { navigate(.albums) }.keyboardShortcut("2", modifiers: .command)
             Button("艺人") { navigate(.artists) }.keyboardShortcut("3", modifiers: .command)

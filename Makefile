@@ -32,7 +32,7 @@ sync: ## Install locked Python and Web dependencies
 	$(UV) sync --locked --project backend --extra community-sources
 	npm --prefix frontend/web ci
 
-.PHONY: source-plugins source-providers-check
+.PHONY: source-plugins source-providers-check test-native-plugin
 source-providers-check: ## Verify provider subsets against integrity-pinned upstream archives
 	$(RUN) python scripts/vendor_source_providers.py --check
 
@@ -41,6 +41,10 @@ source-plugins: ## Package independently importable community source ZIPs
 	npm --prefix plugins/node-runtime test
 	node scripts/build_source_runtimes.mjs
 	$(RUN) python scripts/package_source_plugins.py
+
+test-native-plugin: ## Compile a synthetic Nuitka module and test ZIP installation, invocation and upgrade
+	$(UV) run --no-project --python 3.12 --with Nuitka==2.8.10 python -m nuitka --module --output-dir=.cache/plugin-native --remove-output --no-pyi-file tests/fixtures/plugins/native_core.py
+	WILDSTRING_NATIVE_PLUGIN_DIR="$(CURDIR)/.cache/plugin-native" $(RUN) pytest -c backend/pyproject.toml backend/tests/test_source_plugins.py -k native_module -q
 
 setup: env sync ## Set up dependencies and install the local Git hook
 	$(RUN) pre-commit install --install-hooks
@@ -88,7 +92,9 @@ android-test-api: ## Start a disposable synthetic API for local Android regressi
 	WILDSTRING_WEB_TEST_PORT=19885 WILDSTRING_TEST_LARGE_LIBRARY=1 WILDSTRING_TEST_API_ONLY=1 $(RUN) python scripts/serve_web_tests.py
 
 android-connected-test: ## Run native UI/playback tests on a connected emulator/device
+	rm -rf frontend/android/app/build/outputs/androidTest-results/connected/debug
 	$(ANDROID) :app:connectedDebugAndroidTest $(ANDROID_TEST_ARGS)
+	$(PYTHON) scripts/check_android_test_results.py
 
 android-locks: ## Refresh Android dependency locks and SHA-256 verification metadata
 	$(ANDROID) :app:assembleDebug :app:testDebugUnitTest :app:lintDebug :app:assembleDebugAndroidTest --write-locks --write-verification-metadata sha256
@@ -182,8 +188,8 @@ test-multiple-libraries: ## Verify grants, cross-library playlists, personal fol
 test-libraries-web: build-web ## Verify library selection, owner configuration, grants and personal podcast follows
 	WILDSTRING_TEST_LIBRARIES=1 WILDSTRING_TEST_PODCAST=1 npm --prefix frontend/web run test -- music-libraries.spec.ts
 
-test-podcast-web: build-web ## Verify radio playback, progress, directory search, OPML and identity management
-	WILDSTRING_TEST_PODCAST=1 npm --prefix frontend/web run test -- podcast-continuation.spec.ts podcast-player.spec.ts podcast-progress.spec.ts personal-settings.spec.ts podcast-search.spec.ts podcast-search-settings.spec.ts podcast-opml.spec.ts podcast-identity-admin.spec.ts
+test-podcast-web: build-web ## Verify radio playback, episode downloads, directory search, OPML and identity management
+	WILDSTRING_TEST_PODCAST=1 npm --prefix frontend/web run test -- podcast-continuation.spec.ts podcast-player.spec.ts podcast-episode.spec.ts podcast-progress.spec.ts personal-settings.spec.ts podcast-search.spec.ts podcast-search-settings.spec.ts podcast-opml.spec.ts podcast-identity-admin.spec.ts
 
 test-large-web: build-web ## Verify real API pagination and continuous playback with 257 album tracks
 	WILDSTRING_TEST_LARGE_LIBRARY=1 npm --prefix frontend/web run test -- multipage-real.spec.ts

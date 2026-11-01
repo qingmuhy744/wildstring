@@ -43,7 +43,11 @@ class FakeItunes:
         parts = urlsplit(url)
         query = {key: values[0] for key, values in parse_qs(parts.query).items()}
         self.calls.append((parts.path, query))
+        if parts.netloc == "rss.marketingtools.apple.com":
+            return {"feed": {"results": [{"id": "1183662640"}, {"id": "1590000001"}]}}
         if parts.path == "/lookup":
+            if "," in query["id"]:
+                return fixture("shengdongjixi_us")
             path = FIXTURES / f"lookup_{query['id']}.json"
             return json.loads(path.read_text()) if path.exists() else {"results": []}
         region = query["country"]
@@ -192,6 +196,67 @@ def test_search_api_merges_regions_and_caches(settings, authenticated_client, it
 
         empty = search(client, "没有这个节目").json()
         assert empty["results"] == [] and empty["failed_regions"] == []
+
+
+def test_discovery_preserves_chart_order_and_never_creates_catalog_data(
+    settings, authenticated_client, itunes, feeds
+):
+    with authenticated_client(settings) as client:
+        database = Database(settings.data_dir)
+        with database.connect() as db:
+            before = db.execute("SELECT count(*) FROM podcasts").fetchone()[0]
+        response = client.get("/api/v1/podcasts/discover", params={"region": "tw"})
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["regions"] == ["tw"] and not body["cached"]
+        assert body["results"][0]["itunes_id"] == "1183662640"
+        assert all(not item["in_catalog"] for item in body["results"])
+        assert len(itunes.calls) == 2
+        assert itunes.calls[1][1]["country"] == "tw"
+        cached = client.get("/api/v1/podcasts/discover?region=tw").json()
+        assert cached["cached"] and cached["results"] == body["results"]
+        assert len(itunes.calls) == 2
+        preview = client.post(
+            "/api/v1/podcasts/preview",
+            headers=HEADERS,
+            json={"feed_url": body["results"][0]["feed_url"]},
+        )
+        assert preview.status_code == 200
+        with database.connect() as db:
+            assert db.execute("SELECT count(*) FROM podcasts").fetchone()[0] == before
+        assert client.get("/api/v1/podcasts/discover?region=zz").status_code == 422
+        assert client.get("/api/v1/podcasts/discover?limit=51").status_code == 422
+        assert client.get("/api/v1/podcasts/discover?limit=0").status_code == 422
+
+
+def test_discovery_filters_cached_adult_results_and_surfaces_upstream_errors(
+    settings, authenticated_client, itunes, monkeypatch
+):
+    def explicit(url, mode, proxy):
+        body = itunes(url, mode, proxy)
+        for item in body.get("results", []):
+            item["collectionExplicitness"] = "explicit"
+        return body
+
+    monkeypatch.setattr(podcast_search, "fetch_itunes_json", explicit)
+    with authenticated_client(settings) as client:
+        assert client.get("/api/v1/podcasts/discover?region=tw").json()["results"]
+        saved = client.get("/api/v1/podcasts/search-settings").json()
+        client.put(
+            "/api/v1/podcasts/search-settings",
+            headers=HEADERS,
+            json={"version": saved["version"], "filter_explicit": True, "regions": ["tw"]},
+        ).raise_for_status()
+        body = client.get("/api/v1/podcasts/discover?region=tw").json()
+        assert body["cached"] and body["results"] == [] and body["explicit_hidden"] > 0
+        assert len(itunes.calls) == 2
+
+        def failed(*args):
+            raise UpstreamFailure("upstream_rate_limited", 90)
+
+        monkeypatch.setattr(podcast_search, "fetch_itunes_json", failed)
+        response = client.get("/api/v1/podcasts/discover?region=us")
+        assert response.status_code == 429 and int(response.headers["Retry-After"]) >= 90
 
 
 def test_search_rejects_invalid_queries(settings, authenticated_client, itunes):

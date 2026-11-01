@@ -97,7 +97,7 @@ public final class PlaybackService {
 
     /// Sampled by visible lyric views; keeps animation separate from persistence ticks.
     public var lyricTime: Double {
-        guard isPlaying, player.currentItem != nil else { return currentTime }
+        guard pendingSeek == nil, isPlaying, player.currentItem != nil else { return currentTime }
         let seconds = player.currentTime().seconds
         return seconds.isFinite ? transcodeBaseSeconds + seconds : currentTime
     }
@@ -118,7 +118,10 @@ public final class PlaybackService {
     @ObservationIgnored private var currentIsTranscode = false
     @ObservationIgnored private var sleepTask: Task<Void, Never>?
     @ObservationIgnored private var didStreamFallback = false
-    @ObservationIgnored private var intendedPlaying = false
+    @ObservationIgnored var intendedPlaying = false
+    @ObservationIgnored private var pendingSeek: Double?
+    @ObservationIgnored private var seekInFlight = false
+    @ObservationIgnored var activateAudioSession: () throws -> Void = activateSystemAudioSession
     /// AAC 档位（kbps）；nil 表示原音。
     @ObservationIgnored public var preferredBitrateKbps: Int?
     @ObservationIgnored private var listening = ListeningTracker()
@@ -162,6 +165,7 @@ public final class PlaybackService {
         self.store = store
         self.persistence = PersistenceQueue(store: store)
         self.player = AVPlayer()
+        self.player.automaticallyWaitsToMinimizeStalling = true
         self.cookieHeader = cookieHeader
         self.fragmentCache = fragmentCache
         self.offlineLookup = offlineLookup
@@ -192,7 +196,7 @@ public final class PlaybackService {
     }
 
     public func togglePlayPause() {
-        if isPlaying {
+        if intendedPlaying || isPlaying {
             pause()
         } else {
             resume()
@@ -202,17 +206,19 @@ public final class PlaybackService {
     public func resume() {
         guard currentItem != nil else { return }
         intendedPlaying = true
+        errorMessage = nil
+        if assetLoadTask != nil { return }
         if player.currentItem == nil {
             startCurrent(autoplay: true, startAt: currentTime)
         } else {
-            player.playImmediately(atRate: playbackRate)
+            beginPlayback()
         }
     }
 
     public func setPodcastPlaybackRate(_ rate: Float) {
         guard (0.5...3).contains(rate) else { return }
         podcastPlaybackRate = rate
-        if intendedPlaying { player.playImmediately(atRate: playbackRate) }
+        if intendedPlaying { beginPlayback() }
         updateSystemNowPlaying()
     }
 
@@ -220,9 +226,12 @@ public final class PlaybackService {
         intendedPlaying = false
         didFinishQueue = false
         player.pause()
-        persistProgress()
+        isPlaying = false
+        isBuffering = false
+        if pendingSeek == nil { persistProgress() }
         checkpointListening(state: "paused")
         checkpointPodcast(event: "pause", force: true)
+        updateSystemNowPlaying()
     }
 
     public func next() {
@@ -281,31 +290,95 @@ public final class PlaybackService {
     }
 
     public func seek(to seconds: Double) {
+        guard currentItem != nil else { return }
         let upper = duration > 0 ? duration : seconds
         let target = min(max(0, seconds), upper)
-        if currentIsTranscode {
+        if currentIsTranscode || assetLoadTask != nil {
             // Transcode streams are not byte-seekable: reload the plan from the
             // target position instead (start_ms semantics).
             currentTime = target
             persistProgress()
-            startCurrent(autoplay: isPlaying, startAt: target)
+            startCurrent(autoplay: intendedPlaying, startAt: target)
             return
         }
-        player.seek(to: CMTime(seconds: target, preferredTimescale: 600))
         currentTime = target
+        errorMessage = nil
+        guard player.currentItem != nil else {
+            persistProgress()
+            updateSystemNowPlaying()
+            return
+        }
+        pendingSeek = target
+        player.pause()
+        isPlaying = false
+        isBuffering = intendedPlaying
+        seekPendingPosition()
+    }
+
+    private func seekPendingPosition() {
+        guard !seekInFlight, let target = pendingSeek,
+            let item = player.currentItem, item.status == .readyToPlay
+        else { return }
+        seekInFlight = true
+        // Preserve millisecond lyric boundaries, and wait for completion before
+        // issuing the latest requested position or restarting playback.
+        player.seek(
+            to: CMTime(value: Self.milliseconds(target), timescale: 1000),
+            toleranceBefore: .zero, toleranceAfter: .zero,
+            completionHandler: seekCompletion(
+                CallbackRef(value: item), target: target, box: PlaybackServiceBox(self)
+            )
+        )
+    }
+
+    fileprivate func seekCompleted(target: Double, finished: Bool) {
+        seekInFlight = false
+        guard let latest = pendingSeek else { return }
+        if latest != target {
+            seekPendingPosition()
+            return
+        }
+        pendingSeek = nil
+        let actual = player.currentTime().seconds
+        if actual.isFinite { currentTime = transcodeBaseSeconds + actual }
         persistProgress()
         listening.reanchor(
             nowMs: Self.monotonicMs(),
-            positionMs: Self.milliseconds(target),
-            playing: isPlaying
+            positionMs: Self.milliseconds(currentTime),
+            playing: intendedPlaying
         )
-        checkpointPodcast(event: "seek", force: true)
+        if finished { checkpointPodcast(event: "seek", force: true) }
+        beginPlayback()
+        if !finished { errorMessage = "跳转未完成，请重试" }
+        updateSystemNowPlaying()
+    }
+
+    private func beginPlayback() {
+        guard intendedPlaying, pendingSeek == nil, assetLoadTask == nil,
+            player.currentItem != nil
+        else { return }
+        do {
+            try activateAudioSession()
+            player.defaultRate = playbackRate
+            player.play()
+            timeControlChanged(status: player.timeControlStatus)
+        } catch {
+            intendedPlaying = false
+            player.pause()
+            isPlaying = false
+            isBuffering = false
+            errorMessage = "无法启用音频播放，请重试：\(error.localizedDescription)"
+            updateSystemNowPlaying()
+        }
     }
 
     public func stopAndClear() {
         assetLoadTask?.cancel()
         assetLoadTask = nil
         cancelSleepTimer()
+        intendedPlaying = false
+        pendingSeek = nil
+        seekInFlight = false
         player.replaceCurrentItem(with: nil)
         queue = PlaybackQueue()
         currentTime = 0
@@ -394,6 +467,11 @@ public final class PlaybackService {
         case "repeat_all", "shuffle": queue.setRepeatMode(.all)
         default: queue.setRepeatMode(.off)
         }
+        assetLoadTask?.cancel()
+        assetLoadTask = nil
+        intendedPlaying = false
+        pendingSeek = nil
+        seekInFlight = false
         player.replaceCurrentItem(with: nil)
         currentTime = max(0, position)
         duration = 0
@@ -457,7 +535,7 @@ public final class PlaybackService {
     private func move(by delta: Int) {
         let result = delta >= 0 ? queue.advance() : queue.rewind()
         guard result != nil else { return }
-        startCurrent(autoplay: isPlaying, startAt: 0)
+        startCurrent(autoplay: intendedPlaying, startAt: 0)
         persistProgress()
     }
 
@@ -466,6 +544,12 @@ public final class PlaybackService {
     }
 
     private func startCurrent(autoplay: Bool, startAt: Double) {
+        assetLoadTask?.cancel()
+        assetLoadTask = nil
+        intendedPlaying = autoplay
+        pendingSeek = nil
+        seekInFlight = false
+        player.pause()
         guard let item = currentItem else {
             adoptMedia(autoplay: false, startAt: 0)
             player.replaceCurrentItem(with: nil)
@@ -475,7 +559,6 @@ public final class PlaybackService {
         adoptMedia(autoplay: autoplay, startAt: startAt)
         didFinishQueue = false
         configureSystemPlaybackIfNeeded()
-        assetLoadTask?.cancel()
         if let offline = offlineLookup(item.trackID),
             FileManager.default.fileExists(atPath: offline.path)
         {
@@ -491,8 +574,12 @@ public final class PlaybackService {
             return
         }
         if planProvider != nil, preferredBitrateKbps != nil {
+            player.replaceCurrentItem(with: nil)
+            currentTime = startAt
+            isPlaying = false
+            isBuffering = autoplay
             assetLoadTask = Task {
-                await self.resolveTranscodeAndStart(autoplay: autoplay, startAt: startAt)
+                await self.resolveTranscodeAndStart(startAt: startAt)
             }
             return
         }
@@ -511,14 +598,17 @@ public final class PlaybackService {
     /// Fetches the playback decision first: AAC transcodes carry their own start
     /// offset and duration, and fall back to the original stream when the server
     /// cannot transcode (base playback never depends on FFmpeg).
-    private func resolveTranscodeAndStart(autoplay: Bool, startAt: Double) async {
+    private func resolveTranscodeAndStart(startAt: Double) async {
+        guard !Task.isCancelled else { return }
         guard let item = currentItem, let planProvider, let bitrate = preferredBitrateKbps else {
+            assetLoadTask = nil
             return
         }
         do {
             let plan = try await planProvider(item.trackID, bitrate, Int64(startAt * 1000))
             try Task.checkCancellation()
             guard currentItem?.id == item.id else { return }
+            assetLoadTask = nil
             if plan.isTranscode, let path = Self.relativePath(from: plan.streamUrl) {
                 let baseMs = plan.startMs ?? 0
                 buildAsset(
@@ -527,7 +617,7 @@ public final class PlaybackService {
                     transcodeBaseSeconds: Double(baseMs) / 1000,
                     durationOverride: plan.durationMs.map { Double($0) / 1000 },
                     outputLabel: Self.outputLabel(for: plan),
-                    autoplay: autoplay,
+                    autoplay: intendedPlaying,
                     startAt: 0
                 )
             } else {
@@ -541,14 +631,15 @@ public final class PlaybackService {
                     transcodeBaseSeconds: 0,
                     durationOverride: plan.durationMs.map { Double($0) / 1000 },
                     outputLabel: Self.outputLabel(for: plan),
-                    autoplay: autoplay,
+                    autoplay: intendedPlaying,
                     startAt: startAt
                 )
             }
         } catch is CancellationError {
             return
         } catch {
-            guard currentItem?.id == item.id else { return }
+            guard !Task.isCancelled, currentItem?.id == item.id else { return }
+            assetLoadTask = nil
             errorMessage = "转码暂不可用，已回退原音"
             prefetchLeadingBytes(of: item)
             buildAsset(
@@ -557,7 +648,7 @@ public final class PlaybackService {
                 transcodeBaseSeconds: 0,
                 durationOverride: nil,
                 outputLabel: "原音",
-                autoplay: autoplay,
+                autoplay: intendedPlaying,
                 startAt: startAt
             )
         }
@@ -578,8 +669,9 @@ public final class PlaybackService {
         }
         let playerItem = AVPlayerItem(asset: asset)
         playerItem.audioTimePitchAlgorithm = .timeDomain
-        player.replaceCurrentItem(with: playerItem)
-        observe(playerItem: playerItem)
+        player.pause()
+        pendingSeek = !isTranscode && startAt > 0 ? startAt : nil
+        seekInFlight = false
         if isTranscode {
             didStreamFallback = false
         }
@@ -591,14 +683,15 @@ public final class PlaybackService {
         currentTime = isTranscode ? transcodeBaseSeconds : startAt
         duration = durationOverride ?? 0
         errorMessage = nil
-        if startAt > 0, !isTranscode {
-            player.seek(to: CMTime(seconds: startAt, preferredTimescale: 600))
-        }
-        if autoplay {
-            player.playImmediately(atRate: playbackRate)
-            isPlaying = true
+        isPlaying = false
+        isBuffering = autoplay
+        // Observe before association, which starts preparing the item.
+        observe(playerItem: playerItem)
+        player.replaceCurrentItem(with: playerItem)
+        if pendingSeek != nil {
+            seekPendingPosition()
         } else {
-            isPlaying = false
+            beginPlayback()
         }
         updateSystemNowPlaying()
     }
@@ -648,6 +741,9 @@ public final class PlaybackService {
         switch status {
         case .failed:
             isPlaying = false
+            isBuffering = false
+            pendingSeek = nil
+            seekInFlight = false
             if currentIsTranscode, !didStreamFallback, let item = currentItem {
                 // The transcode stream failed mid-flight (e.g. no FFmpeg on the
                 // server): fall back to the original file once, keeping position.
@@ -668,6 +764,7 @@ public final class PlaybackService {
                 errorMessage = "转码流失败，已回退原音"
                 return
             }
+            intendedPlaying = false
             if let error = error as? APIError {
                 errorMessage = Self.message(for: error)
             } else if let error {
@@ -689,6 +786,7 @@ public final class PlaybackService {
                     duration = itemDuration
                 }
             }
+            seekPendingPosition()
             updateSystemNowPlaying()
         default:
             break
@@ -697,15 +795,16 @@ public final class PlaybackService {
 
     fileprivate func timeControlChanged(status: AVPlayer.TimeControlStatus) {
         isPlaying = status == .playing
-        isBuffering = status == .waitingToPlayAtSpecifiedRate
-        if status == .paused {
+        isBuffering = intendedPlaying && (status == .waitingToPlayAtSpecifiedRate
+            || pendingSeek != nil || assetLoadTask != nil)
+        if status == .paused, pendingSeek == nil {
             persistProgress()
         }
         updateSystemNowPlaying()
     }
 
     fileprivate func handleTick(seconds: Double) {
-        guard seconds.isFinite else { return }
+        guard pendingSeek == nil, player.currentItem != nil, seconds.isFinite else { return }
         currentTime = transcodeBaseSeconds + seconds
         secondsSinceCheckpoint += 1
         if secondsSinceCheckpoint >= 5 {
@@ -727,6 +826,7 @@ public final class PlaybackService {
     fileprivate func handleItemEnded() {
         if pauseAfterCurrentTrack {
             pauseAfterCurrentTrack = false
+            intendedPlaying = false
             isPlaying = false
             currentTime = duration
             persistProgress()
@@ -734,13 +834,8 @@ public final class PlaybackService {
             return
         }
         if queue.repeatMode == .one {
-            listening.reanchor(nowMs: Self.monotonicMs(), positionMs: 0, playing: true)
-            player.seek(to: .zero)
-            currentTime = 0
-            player.playImmediately(atRate: playbackRate)
-            isPlaying = true
-            persistProgress()
-            updateSystemNowPlaying()
+            intendedPlaying = true
+            seek(to: 0)
             return
         }
         if let report = listening.flush(
@@ -755,6 +850,7 @@ public final class PlaybackService {
             startCurrent(autoplay: true, startAt: 0)
             persistProgress()
         } else {
+            intendedPlaying = false
             isPlaying = false
             didFinishQueue = true
             currentTime = duration
@@ -901,12 +997,11 @@ private func observeItemStatus(
     _ item: CallbackRef<AVPlayerItem>,
     box: PlaybackServiceBox
 ) -> NSKeyValueObservation {
-    item.value.observe(\.status, options: [.new]) { item, _ in
-        let status = item.status
-        let failure = item.error.map(CallbackRef.init(value:))
+    item.value.observe(\.status, options: [.initial, .new]) { _, _ in
         let service = box.service
         Task { @MainActor in
-            service?.itemStatusChanged(status: status, error: failure?.value)
+            guard let service, service.player.currentItem === item.value else { return }
+            service.itemStatusChanged(status: item.value.status, error: item.value.error)
         }
     }
 }
@@ -915,11 +1010,10 @@ private func observeTimeControl(
     _ player: CallbackRef<AVPlayer>,
     box: PlaybackServiceBox
 ) -> NSKeyValueObservation {
-    player.value.observe(\.timeControlStatus, options: [.new]) { player, _ in
-        let status = player.timeControlStatus
+    player.value.observe(\.timeControlStatus, options: [.initial, .new]) { _, _ in
         let service = box.service
         Task { @MainActor in
-            service?.timeControlChanged(status: status)
+            service?.timeControlChanged(status: player.value.timeControlStatus)
         }
     }
 }
@@ -935,7 +1029,8 @@ private func observeItemEnded(
     ) { _ in
         let service = box.service
         Task { @MainActor in
-            service?.handleItemEnded()
+            guard let service, service.player.currentItem === item.value else { return }
+            service.handleItemEnded()
         }
     }
 }
@@ -947,11 +1042,22 @@ private func observePlaybackTicks(
     player.value.addPeriodicTimeObserver(
         forInterval: CMTime(seconds: 1, preferredTimescale: 1),
         queue: .main
-    ) { time in
-        let seconds = time.seconds
+    ) { _ in
         let service = box.service
         Task { @MainActor in
-            service?.handleTick(seconds: seconds)
+            service?.handleTick(seconds: player.value.currentTime().seconds)
+        }
+    }
+}
+
+private func seekCompletion(
+    _ item: CallbackRef<AVPlayerItem>, target: Double, box: PlaybackServiceBox
+) -> @Sendable (Bool) -> Void {
+    { finished in
+        let service = box.service
+        Task { @MainActor in
+            guard let service, service.player.currentItem === item.value else { return }
+            service.seekCompleted(target: target, finished: finished)
         }
     }
 }

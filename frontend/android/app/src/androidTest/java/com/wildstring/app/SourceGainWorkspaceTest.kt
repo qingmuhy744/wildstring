@@ -92,7 +92,7 @@ class SourceGainWorkspaceTest {
         Fixture().use { fixture ->
             val vm = connect(fixture)
             compose.runOnUiThread { compose.activity.setContent { MaterialTheme { Surface { FeatureDialog(vm, "source-plugins") {} } } } }
-            compose.onNodeWithText("此项服务端管理请在网页端进行。").assertIsDisplayed()
+            compose.onNodeWithText(uiString(R.string.manage_on_web)).assertIsDisplayed()
             compose.onNodeWithText("合成来源插件").assertDoesNotExist()
             assertFalse(fixture.paths.any { it.contains("/manage/source-plugins") })
             capture("source-plugins-web-guidance.png")
@@ -166,7 +166,7 @@ class SourceGainWorkspaceTest {
         Fixture().use { fixture ->
             val vm = connect(fixture)
             compose.runOnUiThread { compose.activity.setContent { MaterialTheme { Surface { FeatureDialog(vm, "lyric-scans", albumId = "album-one") {} } } } }
-            compose.onNodeWithText("此项服务端管理请在网页端进行。").assertIsDisplayed()
+            compose.onNodeWithText(uiString(R.string.manage_on_web)).assertIsDisplayed()
             compose.onNodeWithTag("lyric-scans-panel").assertDoesNotExist()
             compose.onNodeWithText("开始后台扫描").assertDoesNotExist()
             assertFalse(fixture.paths.any { it.contains("/manage/lyric-scan") })
@@ -181,13 +181,13 @@ class SourceGainWorkspaceTest {
             val bytes = output.toByteArray()
             runBlocking { vm.repository.saveAvatar(bytes, vm.repository.session.cacheScope()!!) }
             compose.runOnUiThread { vm.settings.avatarChanged(); compose.activity.setContent { MaterialTheme { Surface { AvatarSettings(vm) } } } }
-            compose.waitUntil(10_000) { compose.onAllNodesWithContentDescription("用户头像").fetchSemanticsNodes().isNotEmpty() }
-            compose.onNodeWithText("选择头像").assertIsDisplayed()
+            compose.waitUntil(10_000) { compose.onAllNodesWithContentDescription(uiString(R.string.user_avatar)).fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithText(uiString(R.string.avatar_choose)).assertIsDisplayed()
             capture("avatar-native.png")
-            compose.onNodeWithContentDescription("用户头像").assertIsDisplayed()
-            compose.onNodeWithText("恢复默认头像").performClick()
-            compose.waitUntil(10_000) { fixture.avatar == null && compose.onAllNodesWithText("已恢复默认头像。").fetchSemanticsNodes().isNotEmpty() }
-            compose.onNodeWithContentDescription("用户头像").assertDoesNotExist()
+            compose.onNodeWithContentDescription(uiString(R.string.user_avatar)).assertIsDisplayed()
+            compose.onNodeWithText(uiString(R.string.avatar_reset)).performClick()
+            compose.waitUntil(10_000) { fixture.avatar == null && compose.onAllNodesWithText(uiString(R.string.avatar_reset_done)).fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithContentDescription(uiString(R.string.user_avatar)).assertDoesNotExist()
             val calls = fixture.paths.count { it == "POST /api/v1/auth/avatar" }
             runBlocking {
                 try { vm.repository.saveAvatar(bytes, "old-owner"); fail("A stale account owner must not upload") }

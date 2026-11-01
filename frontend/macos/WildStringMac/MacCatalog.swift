@@ -483,7 +483,7 @@ struct MacArtistsView: View {
   @State private var total = 0
   @State private var message: String?
   @State private var loading = true
-  @AppStorage("macArtistRole") private var role = "artist"
+    @AppStorage("macArtistRole") private var role = "album_artist"
 
   private var columns: [GridItem] {
     [GridItem(.adaptive(minimum: 168, maximum: 210), spacing: 18)]

@@ -98,42 +98,44 @@ export function TranscodingSettings() {
           FFmpeg 不可用，AAC 转码暂不可用。官方 Docker 镜像已内置。
         </p>
       )}
-      <label>
-        <HelpLabel hint="cacheDays">保留天数（自上次使用）</HelpLabel>
-        <input
-          type="number"
-          disabled={!record || busy}
-          min={1}
-          max={365}
-          required
-          value={days}
-          onChange={(e) => setDays(e.target.value)}
-        />
-      </label>
-      <label>
-        <HelpLabel hint="cacheSize">缓存上限（MiB）</HelpLabel>
-        <input
-          type="number"
-          disabled={!record || busy}
-          min={16}
-          max={1048576}
-          required
-          value={size}
-          onChange={(e) => setSize(e.target.value)}
-        />
-      </label>
-      <label>
-        <HelpLabel hint="transcodeJobs">同时转码任务数</HelpLabel>
-        <input
-          type="number"
-          disabled={!record || busy}
-          min={1}
-          max={8}
-          required
-          value={jobs}
-          onChange={(e) => setJobs(e.target.value)}
-        />
-      </label>
+      <div className="transcoding-fields">
+        <label>
+          <HelpLabel hint="cacheDays">保留天数（自上次使用）</HelpLabel>
+          <input
+            type="number"
+            disabled={!record || busy}
+            min={1}
+            max={365}
+            required
+            value={days}
+            onChange={(e) => setDays(e.target.value)}
+          />
+        </label>
+        <label>
+          <HelpLabel hint="cacheSize">缓存上限（MiB）</HelpLabel>
+          <input
+            type="number"
+            disabled={!record || busy}
+            min={16}
+            max={1048576}
+            required
+            value={size}
+            onChange={(e) => setSize(e.target.value)}
+          />
+        </label>
+        <label>
+          <HelpLabel hint="transcodeJobs">同时转码任务数</HelpLabel>
+          <input
+            type="number"
+            disabled={!record || busy}
+            min={1}
+            max={8}
+            required
+            value={jobs}
+            onChange={(e) => setJobs(e.target.value)}
+          />
+        </label>
+      </div>
       {error && (
         <p className="error" role="alert">
           {error}

@@ -58,7 +58,7 @@ def test_upgrade_keeps_language_records_and_directory_settings(
     database.initialize()
     database.initialize()
     with database.connect() as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION == 46
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION
         user = connection.execute(
             "SELECT display_name,language FROM users WHERE id='admin'"
         ).fetchone()

@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { login, section } from './helpers';
+import { login, section, manageTab } from './helpers';
 
 async function gain(page: Page) {
   await login(page);
@@ -13,10 +13,7 @@ async function gain(page: Page) {
 async function settings(page: Page) {
   await login(page);
   await section(page, '管理');
-  await page
-    .getByRole('navigation', { name: '管理分类' })
-    .getByRole('button', { name: '设置', exact: true })
-    .click();
+  await manageTab(page, '数据源');
 }
 
 test('图标提示延迟出现，可悬停阅读和 Esc 关闭，原操作保持可用', async ({ page }, info) => {

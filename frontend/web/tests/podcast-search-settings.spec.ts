@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { login, section } from './helpers';
+import { login, section, manageTab } from './helpers';
 
 const headers = { 'X-Wildstring-Client': 'web' };
 
@@ -32,7 +32,7 @@ test.skip(
 test('所有者可调整播客搜索区域与成人内容过滤', async ({ page }) => {
   await login(page);
   await section(page, '管理');
-  await page.getByRole('button', { name: '设置', exact: true }).click();
+  await manageTab(page, '目录搜索');
   const card = page.getByRole('region', { name: '播客目录搜索', exact: true });
   const regions = card.getByRole('list', { name: '搜索区域' });
   await expect(regions.getByRole('listitem')).toHaveText([/美国/, /台湾/, /中国大陆/]);
@@ -71,12 +71,13 @@ test('曲库管理员可管理播客搜索设置与去重，其他实例设置�
   await login(page);
   await signInAs(page, `curator-${info.project.name}`, 'librarian');
   await section(page, '管理');
-  await page.getByRole('button', { name: '设置', exact: true }).click();
+  await manageTab(page, '重复节目');
   await expect(page.getByRole('region', { name: '播客去重与回填', exact: true })).toBeVisible();
+  await manageTab(page, '目录搜索');
   await expect(page.getByRole('region', { name: '播客添加权限', exact: true })).toHaveCount(0);
   await expect(page.getByRole('heading', { name: 'AI 模型连接', exact: true })).toHaveCount(0);
   await expect(page.getByRole('heading', { name: '服务状态', exact: true })).toHaveCount(0);
-  for (const name of ['用户', '诊断']) {
+  for (const name of ['用户', '诊断', '共享音频管理', '节目准入']) {
     await expect(page.getByRole('button', { name, exact: true })).toHaveCount(0);
   }
 
@@ -103,8 +104,9 @@ test('编辑者看不到设置页，也不能修改播客搜索设置', async ({
   await login(page);
   await signInAs(page, `writer-${info.project.name}`, 'editor');
   await section(page, '管理');
-  await expect(page.getByRole('heading', { name: '曲库管理', exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: '设置', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: '管理中心', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: '播客', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: '共享音频管理', exact: true })).toHaveCount(0);
   const current = await (await page.request.get('/api/v1/podcasts/search-settings')).json();
   expect(current.can_manage).toBe(false);
   const denied = await page.request.put('/api/v1/podcasts/search-settings', {

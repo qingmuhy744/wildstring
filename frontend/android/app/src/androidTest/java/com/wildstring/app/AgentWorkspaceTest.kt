@@ -109,13 +109,22 @@ class AgentWorkspaceTest {
         val login = compose.runOnIdle { vm.connect(address, "alice", "synthetic-password", true) }
         compose.waitUntil(20_000) { login.isCompleted && vm.state.value.connected && !vm.state.value.connecting }
     }
+    private fun openPreferences() {
+        compose.onNodeWithContentDescription(uiString(R.string.settings_title)).performClick()
+        compose.onNodeWithTag("setting-category-assistant").performScrollTo().performClick()
+    }
+    private fun openNotifications() {
+        openPreferences()
+        compose.onNodeWithTag("setting-inbox").performScrollTo().performClick()
+    }
     @Test fun heavyApplicationPolicyAndConnectionsAreNotExposedOnPhone() {
         val vm = vm()
         Fixture().use { fixture -> try {
             connect(vm, fixture)
-            compose.onNodeWithContentDescription("设置").performClick()
+            openPreferences()
             compose.onNodeWithText("模型连接", substring = false).assertDoesNotExist()
-            compose.onNodeWithText(compose.activity.getString(R.string.settings_assistant)).performScrollTo().performClick()
+            compose.onNodeWithText(uiString(R.string.settings_assistant)).assertDoesNotExist()
+            compose.onNodeWithTag("agent-chat-input").assertDoesNotExist()
             compose.onNodeWithTag("agent-tab-connections").assertDoesNotExist()
             compose.onNodeWithText("整理方式", substring = false).assertDoesNotExist()
             assertFalse(fixture.requests.any { it.first.contains("/application-settings") })
@@ -125,10 +134,9 @@ class AgentWorkspaceTest {
         val vm = vm()
         Fixture().use { fixture -> try {
             connect(vm, fixture)
-            compose.onNodeWithContentDescription("设置").performClick()
-            compose.onNodeWithText(compose.activity.getString(R.string.settings_assistant)).performScrollTo().performClick()
-            compose.onNodeWithTag("agent-tab-research").performScrollTo().performClick()
-            compose.waitUntil(15_000) { fixture.requests.any { it.first == "GET /api/v1/agent/search-settings" } }
+            openPreferences()
+            compose.onNodeWithText(uiString(R.string.settings_research)).performScrollTo().performClick()
+            compose.waitUntil(15_000) { compose.onAllNodesWithTag("agent-memory-input").fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithTag("agent-memory-input").performScrollTo().performTextInput("优先录音室版本")
             compose.waitForIdle()
             InstrumentationRegistry.getInstrumentation().uiAutomation.waitForIdle(500, 5_000)
@@ -138,9 +146,10 @@ class AgentWorkspaceTest {
             compose.waitForIdle()
             compose.waitUntil(15_000) { fixture.requests.count { it.first == "GET /api/v1/agent/memories" } >= 2 }
             compose.waitForIdle()
-            compose.onNodeWithTag("agent-research").performScrollToNode(hasText("编辑记忆"))
-            compose.waitUntil(10_000) { compose.onAllNodes(hasText("编辑记忆") and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
-            compose.onNodeWithText("编辑记忆", substring = false).performScrollTo().performClick()
+            val editMemory = uiString(R.string.research_memory_edit_action)
+            compose.onNodeWithTag("agent-research").performScrollToNode(hasText(editMemory))
+            compose.waitUntil(10_000) { compose.onAllNodes(hasText(editMemory) and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithText(editMemory, substring = false).performScrollTo().performClick()
             compose.onNodeWithTag("agent-memory-input").performScrollTo()
             compose.waitForIdle()
             compose.onNodeWithTag("agent-memory-input").performClick()
@@ -152,12 +161,13 @@ class AgentWorkspaceTest {
             compose.waitUntil(15_000) { fixture.memoryContent.contains("保留发行年份") }
             compose.waitForIdle()
             InstrumentationRegistry.getInstrumentation().uiAutomation.waitForIdle(500, 5_000)
-            compose.onNodeWithTag("agent-research").performScrollToNode(hasText("删除记忆"))
+            val deleteMemory = uiString(R.string.research_memory_delete)
+            compose.onNodeWithTag("agent-research").performScrollToNode(hasText(deleteMemory))
             compose.waitUntil(15_000) { compose.onAllNodes(hasText("优先原版专辑，保留发行年份") and !hasSetTextAction()).fetchSemanticsNodes().isNotEmpty() }
-            compose.waitUntil(10_000) { compose.onAllNodes(hasText("删除记忆") and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
+            compose.waitUntil(10_000) { compose.onAllNodes(hasText(deleteMemory) and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
             compose.onNode(hasText("优先原版专辑，保留发行年份") and !hasSetTextAction()).assertExists()
             capture("research-memory-phone.png")
-            compose.onNodeWithText("删除记忆", substring = false).performScrollTo().assertIsEnabled().performClick()
+            compose.onNodeWithText(deleteMemory, substring = false).performScrollTo().assertIsEnabled().performClick()
             compose.waitUntil(5_000) { compose.onAllNodesWithTag("agent-memory-delete-confirm").fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithTag("agent-memory-delete-confirm").performClick()
             compose.waitUntil(15_000) { fixture.memoryContent.isEmpty() }
@@ -180,8 +190,7 @@ class AgentWorkspaceTest {
             }
             fixture.rejectHistoryDelete = true
             connect(vm, fixture)
-            compose.onNodeWithContentDescription("设置").performClick()
-            compose.onNodeWithText(compose.activity.getString(R.string.settings_assistant)).performScrollTo().performClick()
+            compose.onNodeWithTag("nav-assistant").performClick()
             compose.waitUntil(15_000) { compose.onAllNodes(hasText("历史") and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithText("历史", substring = false).performClick()
             compose.waitUntil(15_000) { compose.onAllNodesWithTag("history-open-history-b").fetchSemanticsNodes().isNotEmpty() }
@@ -211,7 +220,8 @@ class AgentWorkspaceTest {
             compose.waitUntil(15_000) { compose.onAllNodesWithTag("history-open-history-a").fetchSemanticsNodes().isEmpty() }
             compose.onNode(hasText("关闭", substring = false) and hasAnyAncestor(hasTestTag("agent-history-dialog"))).performClick()
             compose.onNodeWithText("保留内容 b", substring = false).assertExists()
-            compose.onNodeWithContentDescription("删除当前对话").performClick()
+            compose.onNodeWithContentDescription("更多").performClick()
+            compose.onNodeWithText("删除", substring = false).performClick()
             compose.onNodeWithText("删除", substring = false).performClick()
             compose.waitUntil(15_000) { compose.onAllNodesWithText("保留内容 b").fetchSemanticsNodes().isEmpty() }
             assertEquals(3, fixture.requests.count { it.first.startsWith("DELETE /api/v1/agent/conversations/") })
@@ -221,8 +231,7 @@ class AgentWorkspaceTest {
         val vm = vm()
         Fixture().use { fixture -> try {
             connect(vm, fixture)
-            compose.onNodeWithContentDescription("设置").performClick()
-            compose.onNodeWithText(compose.activity.getString(R.string.settings_assistant)).performScrollTo().performClick()
+            openPreferences()
             compose.onNodeWithTag("agent-tab-tasks").assertDoesNotExist()
             compose.onNodeWithText("开始巡检", substring = false).assertDoesNotExist()
             compose.onNodeWithText("新建计划", substring = false).assertDoesNotExist()
@@ -234,10 +243,8 @@ class AgentWorkspaceTest {
         Fixture().use { fixture -> try {
             fixture.draftActionResponseDelayMs = 350
             connect(vm, fixture)
-            compose.onNodeWithContentDescription("设置").performClick()
-            compose.onNodeWithText(compose.activity.getString(R.string.settings_assistant)).performScrollTo().performClick()
-            compose.onNodeWithTag("agent-workspace").assertIsDisplayed()
-            compose.onNodeWithTag("agent-tab-notifications").performClick()
+            openNotifications()
+            compose.onNodeWithTag("agent-chat-input").assertDoesNotExist()
             compose.waitUntil(15_000) { compose.onAllNodesWithText("新草案待确认").fetchSemanticsNodes().isNotEmpty() }
             assertEquals("Opening the list is read-only", 0, fixture.writes.get())
             compose.onNodeWithText("1 条未读").assertExists()
@@ -249,7 +256,10 @@ class AgentWorkspaceTest {
             compose.onNodeWithTag("notice-filter-read").performClick()
             compose.onNodeWithText("新草案待确认").assertExists()
             assertEquals("History filtering must not write", 1, fixture.writes.get())
-            compose.onNodeWithTag("agent-tab-chat").performClick()
+            compose.onNode(hasContentDescription(uiString(R.string.back)) and hasAnyAncestor(hasTestTag("feature-notifications"))).performClick()
+            compose.onNodeWithTag("settings-back").performClick()
+            compose.onNodeWithTag("settings-back").performClick()
+            compose.onNodeWithTag("nav-assistant").performClick()
             // The chat tab independently loads connection permissions and history.
             // Wait for the actual editor to leave its loading/disabled state.
             compose.waitUntil(15_000) { compose.onAllNodes(hasTestTag("agent-chat-input") and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
@@ -266,7 +276,6 @@ class AgentWorkspaceTest {
             compose.runOnIdle { vm.settings.appearance("system") }
             compose.onNodeWithText("已生成歌单/整理草案 · 点击查看并一键应用").performScrollTo().performClick()
             compose.waitUntil(15_000) { compose.onAllNodesWithText("久未听的收藏").fetchSemanticsNodes().isNotEmpty() }
-            compose.onNodeWithTag("draft-open-draft-one").performClick()
             compose.waitUntil(15_000) { compose.onAllNodesWithText("1. 合成歌曲甲").fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithText("原歌单 → 重新听见").assertExists()
             compose.onNodeWithText("从本人收藏挑选", substring = true).assertExists()
@@ -284,57 +293,27 @@ class AgentWorkspaceTest {
             capture("agent-processed-history-phone.png")
         } finally { compose.runOnIdle { vm.settings.appearance("system"); vm.repository.session.invalidate() } } }
     }
-    @Test fun lyricProposalShowsQualityAndExcerptsBeforeHumanApproval() {
+    @Test fun metadataArtworkAndLyricCandidatesAreHandledOnWebOnly() {
         val vm = vm()
-        Fixture().use { fixture -> try {
-            fixture.replacementDraft = JsonParser.parseString("""{"id":"draft-one","kind":"lyrics","title":"选用双语逐字歌词","payload":{"candidate_id":"candidate-one","version":1,"file_version":"${"a".repeat(64)}","offset_ms":250},"before":{"track_id":"song-a","title":"合成歌曲甲","provider":"合成来源","current_quality":{"label":"静态歌词"},"candidate_quality":{"label":"双语逐字动态"},"match":{"score":0.99},"current_lines":[{"text":"原歌词预览"}],"candidate_lines":[{"text":"Synthetic lyric","translation":"合成译文"}]},"evidence":[],"status":"pending","version":1,"trace_id":"${fixture.trace}"}""").asJsonObject.apply { add("result", com.google.gson.JsonNull.INSTANCE) }
-            connect(vm, fixture)
-            compose.onNodeWithContentDescription("设置").performClick()
-            compose.onNodeWithText(compose.activity.getString(R.string.settings_assistant)).performScrollTo().performClick()
-            compose.onNodeWithTag("agent-tab-drafts").performClick()
-            compose.waitUntil(15_000) { compose.onAllNodesWithTag("draft-open-draft-one").fetchSemanticsNodes().isNotEmpty() }
-            compose.onNodeWithTag("draft-open-draft-one").performClick()
-            compose.waitUntil(15_000) { compose.onAllNodesWithText("静态歌词 → 双语逐字动态").fetchSemanticsNodes().isNotEmpty() }
-            compose.onNodeWithText("Synthetic lyric / 合成译文").assertExists()
-            compose.onNodeWithText("同步偏移：250 ms").assertExists()
-            assertEquals("pending", fixture.status)
-            assertEquals(0, fixture.requests.count { it.first.endsWith("/draft-one/accept") })
-            capture("mcp-lyric-proposal-phone.png")
-        } finally { compose.runOnIdle { vm.repository.session.invalidate() } } }
-    }
-    @Test fun albumBatchShowsPerTrackDifferencesBeforeConfirmation() {
-        val vm = vm()
-        Fixture().use { fixture -> try {
-            fixture.replacementDraft = JsonParser.parseString("""{"id":"draft-one","kind":"metadata_batch","title":"专辑批量核对","payload":{"items":[{"track_id":"song-a","metadata_version":2,"overrides":{"track_number":9}},{"track_id":"song-b","metadata_version":3,"overrides":{"track_number":10}}]},"before":{"items":[{"track_id":"song-a","title":"合成歌曲甲","effective":{"track_number":8}},{"track_id":"song-b","title":"合成歌曲乙","effective":{"track_number":9}}]},"evidence":[],"status":"pending","version":1,"trace_id":"${fixture.trace}"}""").asJsonObject
-            connect(vm, fixture)
-            compose.onNodeWithContentDescription("设置").performClick()
-            compose.onNodeWithText(compose.activity.getString(R.string.settings_assistant)).performScrollTo().performClick()
-            compose.onNodeWithTag("agent-tab-drafts").performClick()
-            compose.waitUntil(15_000) { compose.onAllNodesWithTag("draft-open-draft-one").fetchSemanticsNodes().isNotEmpty() }
-            compose.onNodeWithTag("draft-open-draft-one").performClick()
-            compose.waitUntil(15_000) { compose.onAllNodesWithText("2 首歌曲 · 整批应用", substring = true).fetchSemanticsNodes().isNotEmpty() }
-            compose.onNodeWithText("曲号：8 → 9").assertExists()
-            compose.onNodeWithText("曲号：9 → 10").assertExists()
-            assertEquals("pending", fixture.status)
-            assertEquals(0, fixture.requests.count { it.first.endsWith("/draft-one/accept") })
-            capture("mcp-batch-proposal-phone.png")
-        } finally { compose.runOnIdle { vm.repository.session.invalidate() } } }
-    }
-    @Test fun coverWithoutVisibleSnapshotCannotBeApproved() {
-        val vm = vm()
-        Fixture().use { fixture -> try {
-            fixture.replacementDraft = JsonParser.parseString("""{"id":"draft-one","kind":"cover","title":"封面核对","payload":{"suggestion_id":"candidate","metadata_version":1,"image_sha256":"${"a".repeat(64)}"},"before":{"title":"合成歌曲甲","provider":"合成来源"},"evidence":[],"status":"pending","version":1,"trace_id":"${fixture.trace}"}""").asJsonObject
-            connect(vm, fixture)
-            compose.onNodeWithContentDescription("设置").performClick()
-            compose.onNodeWithText(compose.activity.getString(R.string.settings_assistant)).performScrollTo().performClick()
-            compose.onNodeWithTag("agent-tab-drafts").performClick()
-            compose.waitUntil(15_000) { compose.onAllNodesWithTag("draft-open-draft-one").fetchSemanticsNodes().isNotEmpty() }
-            compose.onNodeWithTag("draft-open-draft-one").performClick()
-            compose.waitUntil(15_000) { fixture.requests.any { it.first.endsWith("/draft-one/cover-preview") } }
-            compose.onNodeWithContentDescription("草案封面快照").assertExists()
-            compose.onNodeWithTag("draft-confirm").assertIsNotEnabled()
-            assertEquals(0, fixture.requests.count { it.first.endsWith("/draft-one/approve") })
-        } finally { compose.runOnIdle { vm.repository.session.invalidate() } } }
+        for (kind in listOf("metadata", "metadata_batch", "lyrics", "cover", "intake")) {
+            Fixture().use { fixture -> try {
+                fixture.replacementDraft = JsonParser.parseString("""{"id":"draft-one","kind":"$kind","title":"资料候选","payload":{},"before":{},"evidence":[],"status":"pending","version":1}""").asJsonObject
+                connect(vm, fixture)
+                openNotifications()
+                compose.waitUntil(15_000) { compose.onAllNodesWithText("查看草案").fetchSemanticsNodes().isNotEmpty() }
+                compose.onNodeWithText("查看草案").performClick()
+                compose.waitUntil(15_000) { compose.onAllNodesWithText(uiString(R.string.metadata_review_on_web)).fetchSemanticsNodes().isNotEmpty() }
+                compose.onNodeWithTag("draft-confirm").assertDoesNotExist()
+                compose.onNodeWithText("拒绝", substring = false).assertDoesNotExist()
+                assertEquals("pending", fixture.status)
+                assertFalse(fixture.requests.any { it.first.endsWith("/draft-one/accept") || it.first.endsWith("/draft-one/reject") || it.first.endsWith("/draft-one/cover-preview") })
+                if (kind == "lyrics") capture("candidate-web-only-phone.png")
+                compose.onNodeWithText(uiString(R.string.close), substring = false).performClick()
+                compose.onNode(hasContentDescription(uiString(R.string.back)) and hasAnyAncestor(hasTestTag("feature-notifications"))).performClick()
+                compose.onNodeWithTag("settings-back").performClick()
+                compose.onNodeWithTag("settings-back").performClick()
+            } finally { compose.runOnIdle { vm.repository.session.invalidate() } } }
+        }
     }
     private fun capture(name: String, dark: Boolean = false) {
         compose.waitForIdle()
@@ -369,7 +348,8 @@ class AgentWorkspaceTest {
         val vm = vm()
         Fixture().use { fixture -> try {
             connect(vm, fixture)
-            compose.onNodeWithContentDescription("设置").performClick()
+            compose.onNodeWithContentDescription(uiString(R.string.settings_title)).performClick()
+            compose.onNodeWithTag("setting-category-playback").performScrollTo().performClick()
             compose.onNodeWithText(compose.activity.getString(R.string.settings_diagnostics)).performScrollTo().performClick()
             compose.onNodeWithTag("playback-diagnostics").assertExists()
             compose.onNodeWithTag("copy-playback-diagnostics").performClick()

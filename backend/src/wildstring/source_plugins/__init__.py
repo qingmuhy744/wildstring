@@ -4,6 +4,7 @@ import importlib.util
 import json
 import shutil
 from dataclasses import asdict, dataclass, field
+from importlib.machinery import PathFinder
 
 
 @dataclass(frozen=True)
@@ -48,10 +49,10 @@ class InstalledPlugin:
         self.manifest, self.path, self.sha256 = manifest, path, sha256
 
     def available(self):
+        paths = [str(self.path / "lib"), str(self.path)]
         return all(
-            importlib.util.find_spec(name) is not None
-            or (self.path / "lib" / name).is_dir()
-            or (self.path / "lib" / (name + ".py")).is_file()
+            PathFinder.find_spec(name, paths) is not None
+            or importlib.util.find_spec(name) is not None
             for name in self.manifest.requires_modules
         ) and all(shutil.which(name) is not None for name in self.manifest.requires_programs)
 

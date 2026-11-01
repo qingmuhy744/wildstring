@@ -4,8 +4,6 @@ import SwiftUI
 
 struct MacRootView: View {
     let session: MacSession
-    @Environment(\.openWindow) private var openWindow
-    @Environment(\.dismissWindow) private var dismissWindow
     @AppStorage("macAppearance") private var appearance = "system"
 
     var body: some View {
@@ -28,13 +26,7 @@ struct MacRootView: View {
         .tint(MacTheme.accent)
         .preferredColorScheme(appearance == "light" ? .light : appearance == "dark" ? .dark : nil)
         .onReceive(NotificationCenter.default.publisher(for: .wildstringShowDesktopLyrics)) { _ in
-            if session.desktopLyricsVisible {
-                dismissWindow(id: "desktop-lyrics")
-                session.desktopLyricsVisible = false
-            } else {
-                openWindow(id: "desktop-lyrics")
-                session.desktopLyricsVisible = true
-            }
+            session.desktopLyrics.toggle(session: session)
         }
         .task { await session.restore() }
     }
@@ -134,7 +126,7 @@ private struct MacShellView: View {
                 if session.showLyrics || session.showQueue {
                     Divider()
                     MacPlayerInspector(session: session, client: client, playback: playback)
-                        .frame(width: 400)
+                        .frame(width: 320)
                 }
             }
             Divider()
@@ -180,6 +172,8 @@ private struct MacShellView: View {
     @ViewBuilder
     private var page: some View {
         switch session.page {
+        case .home:
+            MacHomeView(session: session, client: client, playback: playback)
         case .tracks:
             MacMusicView(client: client, playback: playback, favorites: session.favorites,
                 canManage: session.canManage, focusSearch: Bindable(session).focusLibrarySearch)
@@ -227,6 +221,7 @@ private struct MacShellView: View {
             .padding(.bottom, 8)
             ScrollView {
                 VStack(alignment: .leading, spacing: 2) {
+                    sidebarRow(.home, badge: nil)
                     group("曲库", pages: MacPage.library)
                     group("发现与电台", pages: MacPage.explore)
                     sidebarToggle(

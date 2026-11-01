@@ -1,5 +1,12 @@
 import { expect, test, type Page } from '@playwright/test';
-import { login, section, podcastCatalog } from './helpers';
+import {
+  login,
+  section,
+  podcastCatalog,
+  leaveSettings,
+  personalSettings,
+  personalCategory,
+} from './helpers';
 
 const headers = { 'X-Wildstring-Client': 'web' };
 test.skip(process.env.WILDSTRING_TEST_PODCAST !== '1', 'Requires the local podcast fixture.');
@@ -191,39 +198,35 @@ test('同一浏览器切换账号时，界面和离线偏好各自恢复，旧�
       data: { username: name, password: 'personal-test-password' },
     })
   ).json();
-  await section(page, '账号设置');
-  let settings = page.getByRole('dialog', { name: '账号设置', exact: true });
+  let settings = await personalSettings(page, 'appearance');
   await expect(settings.getByLabel('外观模式')).toHaveValue('dark');
-  await expect(settings.getByLabel('播放样式')).toHaveValue('vinyl');
   await expect(settings.getByLabel('歌曲列表大小')).toHaveValue('large');
-  await settings.getByRole('button', { name: '关闭账号设置', exact: true }).click();
-  await section(page, '离线音乐');
-  await page.getByRole('region', { name: '离线音乐', exact: true }).locator('summary').click();
+  await personalCategory(page, 'playback');
+  await expect(settings.getByLabel('播放样式')).toHaveValue('vinyl');
+  await personalCategory(page, 'downloads');
   await expect(page.getByLabel('默认下载音质', { exact: true })).toHaveValue('192');
+  await leaveSettings(page);
   await signOut(page);
   await signIn(page, name, 'personal-test-password');
-  await section(page, '账号设置');
-  settings = page.getByRole('dialog', { name: '账号设置', exact: true });
+  settings = await personalSettings(page, 'appearance');
   await expect(settings.getByLabel('外观模式')).toHaveValue('system');
-  await expect(settings.getByLabel('播放样式')).toHaveValue('cover');
   await expect(settings.getByLabel('歌曲列表大小')).toHaveValue('medium');
   await settings.getByLabel('外观模式').selectOption('light');
+  await personalCategory(page, 'playback');
+  await expect(settings.getByLabel('播放样式')).toHaveValue('cover');
   await settings.getByLabel('播放样式').selectOption('cassette');
-  await settings.getByRole('button', { name: '关闭账号设置', exact: true }).click();
-  await section(page, '离线音乐');
-  await page.getByRole('region', { name: '离线音乐', exact: true }).locator('summary').click();
+  await personalCategory(page, 'downloads');
   await expect(page.getByLabel('默认下载音质', { exact: true })).toHaveValue('0');
   await page.getByLabel('默认下载音质', { exact: true }).selectOption('320');
+  await leaveSettings(page);
   await signOut(page);
   await signIn(page, 'admin', 'disposable-browser-test-password');
-  await section(page, '账号设置');
-  settings = page.getByRole('dialog', { name: '账号设置', exact: true });
+  settings = await personalSettings(page, 'appearance');
   await expect(settings.getByLabel('外观模式')).toHaveValue('dark');
-  await expect(settings.getByLabel('播放样式')).toHaveValue('vinyl');
   await expect(settings.getByLabel('歌曲列表大小')).toHaveValue('large');
-  await settings.getByRole('button', { name: '关闭账号设置', exact: true }).click();
-  await section(page, '离线音乐');
-  await page.getByRole('region', { name: '离线音乐', exact: true }).locator('summary').click();
+  await personalCategory(page, 'playback');
+  await expect(settings.getByLabel('播放样式')).toHaveValue('vinyl');
+  await personalCategory(page, 'downloads');
   await expect(page.getByLabel('默认下载音质', { exact: true })).toHaveValue('192');
   await page.request.delete(`/api/v1/manage/users/${created.id}`, { headers });
 });

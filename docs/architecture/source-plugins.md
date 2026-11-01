@@ -1,6 +1,6 @@
 # 数据源 ZIP 插件（API v1）
 
-管理员在 Web「管理 → 设置 → 数据源插件」或 Android「管理 → 数据源 ZIP 插件」导入 ZIP，配置后启用。Release 分别提供 QQ、酷狗、网易云三个包。导出得到原始 ZIP，配置、Cookie、查询历史不在导出包内。没有插件时基本播放、MusicBrainz 和 Last.fm 保持可用。
+所有者在 Web「管理中心 → 服务设置 → 数据源插件」手动导入 ZIP，配置后启用。新安装默认没有数据源插件，启动或服务升级不自动导入、启用或删除插件；已安装的包、启用状态、配置与密钥保留。Release 分别提供 QQ、酷狗、网易云三个可选包，源码暂留本仓库。导出得到原始 ZIP，配置、Cookie、查询历史不在导出包内。没有插件时基本播放、MusicBrainz 和 Last.fm 保持可用。Android 不提供插件或资料候选管理。
 
 平台请求、认证差异、字段映射、专辑版本选择及 QRC／KRC／YRC 解码与格式处理位于插件内，由插件维护者更新。核心不识别这些平台的响应字段。核心负责权限、统一结构校验、候选排序、确认应用、数据库和客户端播放格式。元数据与歌词可以选择不同来源，所有候选都需要核对版本、艺人和时长。
 
@@ -46,6 +46,24 @@ ID 为 2–41 个小写字母、数字、下划线或连字符，以字母开头
 ZIP 最大16 MiB、展开32 MiB、300个条目，拒绝路径穿越、链接、加密、重复路径和文件／目录冲突。导入只注册并停用，不执行插件代码。升级须提交原配置版本及预期插件 ID，配置保留、版本递增且停用，管理员重新确认启用。历史已选歌词不因插件停用／卸载而消失；旧包文件保留用于恢复，卸载清除活动注册和该插件凭据。
 
 插件是管理员信任的服务端 Python 代码，有服务进程账号所能访问的权限。独立子进程用于限制生命周期和故障影响，**不构成操作系统安全沙箱**。普通账号、模型和 MCP 凭据不能导入或启用插件。官方镜像提供固定 Python 3.12、Node 22 及 QQ SDK 运行依赖；维护者可用 `lib/` 携带兼容依赖并覆盖同名模块，无需修改核心。含本机二进制的依赖需匹配服务端架构。
+
+### 编译模块与闭源分发
+
+源码插件继续使用原来的入口，无需修改 manifest 或重新打包。编译插件也保留薄入口 `adapter.py`，例如 `from plugin_core import Plugin`，将业务实现编译成 CPython 扩展并放在 ZIP 根目录或 `lib/`：
+
+```text
+manifest.json                          entrypoint 仍为 adapter:Plugin
+adapter.py                             from plugin_core import Plugin
+lib/plugin_core.cpython-312-…so         Nuitka --module 产物
+```
+
+`requires_modules: ["plugin_core"]` 会使用当前解释器的模块查找器识别源码、包以及兼容的 `.so`／`.pyd` 后缀，不在主进程执行插件。不同 CPython ABI 标记的产物不会被当成可用依赖。加载和调用沿用现有 worker；不支持用二进制文件直接取代 `adapter.py`。
+
+构建示例：`python -m nuitka --module plugin_core.py --output-dir=dist --no-pyi-file`。使用与服务器相同的 CPython 3.12、操作系统、CPU 架构和动态库环境；Linux 官方镜像基于 Debian Bookworm，多架构分别构建，macOS 产物不能放入 Linux 镜像。产物保留原文件名及模块名。随包文档标明目标平台、架构、Python 版本和动态库要求；编译不保证无法逆向。
+
+`make test-native-plugin` 在当前平台编译合成模块，验证真实 ZIP 导入、停用默认值、依赖识别、worker 的 search／metadata／lyrics 调用、升级与导出；常规 `make test` 继续覆盖原有源码插件，并验证新库为空、重启保留已有安装与密钥。测试只使用合成内容。
+
+2026-11-01 本地验证：macOS ARM64／CPython 3.12 的真实 Nuitka 编译模块回归通过；插件聚焦回归 18 项通过，包含实际服务重启、源码文件／包和扩展后缀识别。Linux 与 Windows 编译产物尚未验证。
 
 ## 入口契约
 

@@ -1,10 +1,10 @@
 import { expect, test, type Page } from '@playwright/test';
-import { audio, login } from './helpers';
+import { audio, login, manageTab } from './helpers';
 
 const headers = { 'X-Wildstring-Client': 'web' };
 async function management(page: Page, mobile: boolean) {
   if (mobile) await page.getByLabel('浏览方式').selectOption('manage');
-  else await page.getByRole('button', { name: '管理', exact: true }).click();
+  else await page.getByRole('button', { name: '管理中心', exact: true }).click();
 }
 
 test('元数据来源可拖动或用键盘排序，保存后保留且密钥不回显', async ({ page }, info) => {
@@ -20,10 +20,7 @@ test('元数据来源可拖动或用键盘排序，保存后保留且密钥不�
   } = original;
   try {
     await management(page, info.project.name === 'mobile');
-    await page
-      .getByRole('navigation', { name: '管理分类' })
-      .getByRole('button', { name: '设置', exact: true })
-      .click();
+    await manageTab(page, '数据源');
     const list = page.getByRole('list', { name: '元数据来源优先级' });
     const grip = page.getByRole('button', { name: '拖动 Last.fm 优先级', exact: true });
     await grip.focus();
@@ -67,10 +64,7 @@ test('元数据来源可拖动或用键盘排序，保存后保留且密钥不�
     expect(saved.acoustid_api_key).toBeUndefined();
     await page.reload();
     await management(page, info.project.name === 'mobile');
-    await page
-      .getByRole('navigation', { name: '管理分类' })
-      .getByRole('button', { name: '设置', exact: true })
-      .click();
+    await manageTab(page, '数据源');
     await expect(list.locator('li').first()).toContainText('Last.fm');
     await page.screenshot({
       path: `../../artifacts/metadata-provider-settings-${info.project.name}.png`,
@@ -138,6 +132,7 @@ test('歌曲、专辑、曲库手动更新先反馈再入队，保持当前音�
   await dialog.getByRole('button', { name: '完成', exact: true }).click();
 
   await management(page, info.project.name === 'mobile');
+  await manageTab(page, '概览');
   await page.getByRole('button', { name: '更新曲库元数据', exact: true }).click();
   await dialog.getByRole('button', { name: '开始更新', exact: true }).click();
   await expect.poll(() => submitted.length).toBe(3);
@@ -145,10 +140,7 @@ test('歌曲、专辑、曲库手动更新先反馈再入队，保持当前音�
   release!();
   await expect(dialog.getByRole('status')).toContainText('已加入 1 首');
   await dialog.getByRole('button', { name: '完成', exact: true }).click();
-  await page
-    .getByRole('navigation', { name: '管理分类' })
-    .getByRole('button', { name: '任务记录', exact: true })
-    .click();
+  await manageTab(page, '任务记录');
   await expect(page.getByRole('region', { name: '元数据更新任务' })).toContainText('等待 0 首');
   expect(await audio(page)).toEqual(before);
 });

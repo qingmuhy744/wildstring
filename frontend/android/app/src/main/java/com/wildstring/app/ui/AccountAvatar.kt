@@ -1,5 +1,7 @@
 package com.wildstring.app.ui
 
+import com.wildstring.app.R
+import androidx.compose.ui.res.stringResource
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
@@ -42,7 +44,7 @@ import okhttp3.HttpUrl.Companion.toHttpUrl
     Surface(modifier.clip(CircleShape), shape = CircleShape, color = MaterialTheme.colorScheme.secondaryContainer) {
         if (version != null && accountId != null && !failed) AsyncImage(
             model = ImageRequest.Builder(LocalContext.current).data(vm.repository.url("api", "v1", "auth", "avatar").toHttpUrl().newBuilder().addQueryParameter("v", version).addQueryParameter("account", accountId).build()).memoryCacheKey("$owner:avatar:$version").build(),
-            imageLoader = vm.imageLoader, contentDescription = "用户头像", contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize(), onError = { failed = true })
+            imageLoader = vm.imageLoader, contentDescription = stringResource(R.string.user_avatar), contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize(), onError = { failed = true })
         else Icon(Icons.Default.Person, null, Modifier.padding(12.dp).fillMaxSize(), tint = MaterialTheme.colorScheme.onSecondaryContainer)
     }
 }
@@ -50,6 +52,7 @@ import okhttp3.HttpUrl.Companion.toHttpUrl
 private data class AvatarDraft(val owner: String, val bytes: ByteArray)
 
 @Composable internal fun AvatarSettings(vm: MusicViewModel) {
+    val resources = androidx.compose.ui.platform.LocalResources.current
     val context = LocalContext.current
     val profiles by vm.repository.session.profiles.collectAsStateWithLifecycle()
     val owner = remember(profiles) { vm.repository.session.cacheScope() }
@@ -60,32 +63,32 @@ private data class AvatarDraft(val owner: String, val bytes: ByteArray)
     val chooser = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         val captured = pickerOwner
         if (uri != null && captured != null) scope.launch { action.run {
-            require(captured == vm.repository.session.cacheScope()) { "账号已变化，请重新选择头像。" }
+            require(captured == vm.repository.session.cacheScope()) { resources.getString(R.string.avatar_account_changed) }
             val bytes = withContext(Dispatchers.IO) { context.contentResolver.openInputStream(uri)!!.use { input ->
                 val output = ByteArrayOutputStream(); val buffer = ByteArray(8192)
-                while (true) { val n = input.read(buffer); if (n < 0) break; require(output.size() + n <= 5 * 1024 * 1024) { "头像图片超过 5 MiB，请压缩后重试。" }; output.write(buffer, 0, n) }
+                while (true) { val n = input.read(buffer); if (n < 0) break; require(output.size() + n <= 5 * 1024 * 1024) { resources.getString(R.string.avatar_too_large) }; output.write(buffer, 0, n) }
                 output.toByteArray()
             } }
-            require(captured == vm.repository.session.cacheScope()) { "账号已变化，请重新选择头像。" }
-            pending = AvatarDraft(captured, bytes); action.message = "请预览后上传头像。"
+            require(captured == vm.repository.session.cacheScope()) { resources.getString(R.string.avatar_account_changed) }
+            pending = AvatarDraft(captured, bytes); action.message = resources.getString(R.string.avatar_preview_hint)
         } }
     }
     Column(Modifier.padding(horizontal = 16.dp).testTag("avatar-settings")) {
-        ListItem(headlineContent = { Text("自定义头像") }, supportingContent = { Text("JPG / PNG / WebP，最多 5 MiB；居中裁成方形并移除附带信息。") }, leadingContent = { AccountAvatar(vm, Modifier.size(48.dp)) })
+        ListItem(headlineContent = { Text(stringResource(R.string.avatar_custom)) }, supportingContent = { Text(stringResource(R.string.avatar_format_hint)) }, leadingContent = { AccountAvatar(vm, Modifier.size(48.dp)) })
         Row {
-            TextButton({ pickerOwner = owner; chooser.launch(arrayOf("image/jpeg", "image/png", "image/webp")) }, enabled = !action.busy && owner != null) { Text("选择头像") }
+            TextButton({ pickerOwner = owner; chooser.launch(arrayOf("image/jpeg", "image/png", "image/webp")) }, enabled = !action.busy && owner != null) { Text(stringResource(R.string.avatar_choose)) }
             TextButton({ scope.launch { action.run {
-                vm.repository.feature("auth/avatar", "DELETE"); vm.settings.avatarChanged(); action.message = "已恢复默认头像。"
-            } } }, enabled = !action.busy) { Text("恢复默认头像") }
+                vm.repository.feature("auth/avatar", "DELETE"); vm.settings.avatarChanged(); action.message = resources.getString(R.string.avatar_reset_done)
+            } } }, enabled = !action.busy) { Text(stringResource(R.string.avatar_reset)) }
         }
         ActionStatus(action)
     }
-    pending?.let { draft -> AlertDialog(onDismissRequest = { if (!action.busy) pending = null }, title = { Text("头像预览") }, text = {
+    pending?.let { draft -> AlertDialog(onDismissRequest = { if (!action.busy) pending = null }, title = { Text(stringResource(R.string.avatar_preview)) }, text = {
         Column {
-            AsyncImage(draft.bytes, "头像预览", Modifier.size(160.dp).clip(CircleShape), contentScale = ContentScale.Crop)
+            AsyncImage(draft.bytes, stringResource(R.string.avatar_preview), Modifier.size(160.dp).clip(CircleShape), contentScale = ContentScale.Crop)
             ActionStatus(action)
         }
     }, confirmButton = { TextButton({ scope.launch { action.run {
-        vm.repository.saveAvatar(draft.bytes, draft.owner); vm.settings.avatarChanged(); pending = null; action.message = "头像已保存。"
-    } } }, enabled = !action.busy) { Text("上传头像") } }, dismissButton = { TextButton({ pending = null }, enabled = !action.busy) { Text("取消") } }) }
+        vm.repository.saveAvatar(draft.bytes, draft.owner); vm.settings.avatarChanged(); pending = null; action.message = resources.getString(R.string.avatar_saved)
+    } } }, enabled = !action.busy) { Text(stringResource(R.string.avatar_upload)) } }, dismissButton = { TextButton({ pending = null }, enabled = !action.busy) { Text(stringResource(R.string.cancel)) } }) }
 }
