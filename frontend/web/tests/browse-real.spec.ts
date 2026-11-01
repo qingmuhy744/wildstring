@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { audio, personalCategory, leaveSettings } from './helpers';
+import { audio } from './helpers';
 
 test.skip(process.env.WILDSTRING_TEST_BROWSE_LIBRARY !== '1', '独立的连续浏览曲库夹具');
 
@@ -212,15 +212,10 @@ test('远跳失败重试替换窗口，快速搜索不会回填过期结果', as
   await expect(page.getByRole('table')).not.toContainText('北京歌曲');
 });
 
-test('加载第二批歌曲后切换小大中，保留首个完整可见歌曲及其位置', async ({ page }) => {
+test('加载第二批歌曲后跨标签页切换小大中，保留首个完整可见歌曲及其位置', async ({ page }) => {
   await login(page);
   await page.locator('.browse-boundary').last().scrollIntoViewIfNeeded();
   await expect.poll(() => page.locator('.track-row').count()).toBeGreaterThanOrEqual(100);
-  const navigation = page.getByLabel('浏览方式', { exact: true });
-  if (await navigation.isVisible()) await navigation.selectOption('account');
-  else await page.getByRole('button', { name: '个人设置', exact: true }).click();
-  await personalCategory(page, 'appearance');
-  const settings = page.getByRole('region', { name: '个人设置', exact: true });
   await page
     .locator('.track-row')
     .nth(72)
@@ -239,11 +234,15 @@ test('加载第二批歌曲后切换小大中，保留首个完整可见歌曲�
   }
   const before = await firstVisible();
   for (const size of ['small', 'large', 'medium']) {
-    await settings.getByLabel('歌曲列表大小', { exact: true }).selectOption(size);
+    // Settings now occupies its own page. Simulate another tab changing the
+    // shared preference so the reading anchor is measured on a visible list.
+    await page.evaluate((value) => {
+      const key = 'wildstring:user-preferences:admin:wildstring:track-list-size';
+      localStorage.setItem(key, value);
+      window.dispatchEvent(new StorageEvent('storage', { key, newValue: value }));
+    }, size);
     await expect(page.locator('.track-list')).toHaveAttribute('data-list-size', size);
     await expect.poll(firstVisible).toEqual(before);
   }
-  await leaveSettings(page);
-  await expect.poll(firstVisible).toEqual(before);
   expect(await page.locator('.track-row').count()).toBeGreaterThanOrEqual(100);
 });
