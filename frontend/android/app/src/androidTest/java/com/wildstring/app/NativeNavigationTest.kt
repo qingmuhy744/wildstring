@@ -182,6 +182,9 @@ class NativeNavigationTest {
                 assertEquals("added_at", vm.state.value.sort)
                 assertEquals("desc", vm.state.value.order)
                 assertTrue("Recent additions retain the route back to discovery", vm.state.value.canGoBack)
+                // This is a new query, with its own viewport. Establish its
+                // scrolled position before checking settings preserve it.
+                compose.onNodeWithTag("album-grid").performScrollToIndex(16)
                 compose.onNodeWithText("布局测试专辑 17").assertIsDisplayed()
                 val count = requests.get()
                 compose.onNodeWithContentDescription(uiString(R.string.settings_title)).performClick()
@@ -226,6 +229,9 @@ class NativeNavigationTest {
                 compose.onNodeWithContentDescription(uiString(R.string.back_previous)).performClick()
                 compose.waitUntil(15_000) { vm.state.value.kind == "playlists" }
                 compose.onNodeWithTag("nav-library").performClick()
+                compose.waitUntil(15_000) { vm.state.value.collection == "albums" && !vm.state.value.loading }
+                compose.onNodeWithContentDescription(uiString(R.string.back_previous)).performClick()
+                compose.waitUntil(15_000) { vm.state.value.kind == "albums" && vm.state.value.collection == null && !vm.state.value.loading }
                 compose.onNodeWithText("布局测试专辑 17").assertIsDisplayed()
                 compose.onNodeWithTag("catalog-tracks").performClick()
                 compose.waitUntil(15_000) { vm.state.value.tracks.isNotEmpty() }
@@ -237,7 +243,8 @@ class NativeNavigationTest {
                 compose.runOnIdle { compose.activity.onBackPressedDispatcher.onBackPressed() }
                 // The floating capsule works in the catalog and settings without resetting audio.
                 compose.waitUntil(15_000) { vm.state.value.kind == "discover" && !vm.state.value.loading }
-                compose.onNodeWithContentDescription("播放布局测试歌曲").performClick()
+                compose.onNodeWithTag("discovery-page").performScrollToNode(hasTestTag("discovery-added-navigation-track"))
+                compose.onNodeWithTag("discovery-added-navigation-track").performClick()
                 compose.waitUntil(15_000) { compose.runOnIdle { vm.controller!!.playbackState == Player.STATE_READY && vm.controller!!.currentPosition > 250 } }
                 compose.waitUntil(15_000) { vm.audioCache.bytes() >= audio.size }
                 val context = InstrumentationRegistry.getInstrumentation().targetContext

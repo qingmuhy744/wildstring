@@ -14,11 +14,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
+import com.wildstring.app.R
 import com.wildstring.app.data.*
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
@@ -77,7 +79,7 @@ import kotlinx.coroutines.launch
                 if (selected == null) {
                     Text(if (query.isBlank()) "Apple Podcasts 区域热门榜 · ${page?.regions.orEmpty().joinToString().uppercase()}" else "搜索 Apple Podcasts 公开目录", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
-                    error?.let { Text(it, color = MaterialTheme.colorScheme.error); TextButton({ retry++ }) { Text("重试") } }
+                    error?.let { Text(it, color = MaterialTheme.colorScheme.error); TextButton({ retry++ }) { Text(stringResource(R.string.retry)) } }
                     if (page?.failedRegions?.isNotEmpty() == true) Text("部分区域暂时不可用，已保留可用结果。", style = MaterialTheme.typography.bodySmall)
                     if ((page?.explicitHidden ?: 0) > 0) Text("已按管理员设置隐藏成人内容", style = MaterialTheme.typography.bodySmall)
                     LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {

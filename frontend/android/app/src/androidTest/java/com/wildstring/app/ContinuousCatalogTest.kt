@@ -182,7 +182,7 @@ class ContinuousCatalogTest {
                 compose.onNodeWithTag("alphabet-M").assertIsSelected()
                 compose.onNodeWithTag("alphabet-Z").performClick()
                 compose.onNodeWithContentDescription(uiString(R.string.track_actions_named, "Z 旋律 160")).performClick()
-                compose.onNodeWithText("查看所属专辑").performClick()
+                compose.onNodeWithText(uiString(R.string.open_album)).performClick()
                 compose.waitUntil(10_000) { vm.state.value.collectionId == "album-v" && !vm.state.value.loading }
                 compose.onNodeWithTag("alphabet-rail").assertDoesNotExist()
                 compose.onNodeWithContentDescription(uiString(R.string.back_previous)).performClick()
@@ -319,7 +319,7 @@ class ContinuousCatalogTest {
                 compose.onNodeWithTag("player-phone").assertDoesNotExist()
                 compose.onNodeWithContentDescription(uiString(R.string.back_previous)).performClick()
                 compose.onNodeWithTag("player-phone").assertIsDisplayed()
-                val playerBack = if (compose.onAllNodesWithContentDescription("返回封面").fetchSemanticsNodes().isNotEmpty()) "返回封面" else "收起播放器"
+                val playerBack = if (compose.onAllNodesWithContentDescription("返回封面").fetchSemanticsNodes().isNotEmpty()) "返回封面" else uiString(R.string.player_collapse)
                 compose.onNodeWithContentDescription(playerBack).assertIsDisplayed()
                 assertEquals(queue, vm.state.value.queue.map { it.entryId })
                 failAlbum.set(true)

@@ -144,6 +144,8 @@ class MultiServerUiTest {
                 compose.waitUntil(10000) { vm.repository.session.servers.value.none { it.id == aId } }
                 assertTrue(vm.repository.session.hasSession(bId))
                 compose.onNodeWithTag("servers-back").performClick()
+                compose.onNodeWithTag("settings-back").performClick()
+                compose.onNodeWithTag("setting-category-about").performScrollTo().performClick()
                 compose.onNodeWithTag("app-repository").performScrollTo().assertIsDisplayed()
                 compose.onNodeWithTag("app-check-update").assertIsDisplayed()
                 val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
