@@ -136,7 +136,7 @@ class AgentWorkspaceTest {
             connect(vm, fixture)
             openPreferences()
             compose.onNodeWithText(uiString(R.string.settings_research)).performScrollTo().performClick()
-            compose.waitUntil(15_000) { fixture.requests.any { it.first == "GET /api/v1/agent/search-settings" } }
+            compose.waitUntil(15_000) { compose.onAllNodesWithTag("agent-memory-input").fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithTag("agent-memory-input").performScrollTo().performTextInput("优先录音室版本")
             compose.waitForIdle()
             InstrumentationRegistry.getInstrumentation().uiAutomation.waitForIdle(500, 5_000)
