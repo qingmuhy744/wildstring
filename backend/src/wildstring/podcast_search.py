@@ -146,7 +146,9 @@ class SearchGate:
             self.cooldown_until = max(self.cooldown_until, self.clock() + seconds)
 
 
-def fetch_itunes_json(url: str, proxy_mode: str, proxy_url: str | None) -> dict[str, Any]:
+def fetch_itunes_json(
+    url: str, proxy_mode: str, proxy_url: str | None, *, allow_fake_ip: bool = False
+) -> dict[str, Any]:
     """Request one fixed Apple endpoint without redirects or private-network access."""
     try:
         proxies = outbound_proxies(proxy_mode, proxy_url)
@@ -157,8 +159,8 @@ def fetch_itunes_json(url: str, proxy_mode: str, proxy_url: str | None) -> dict[
     def opener(*handlers):
         return urllib.request.build_opener(
             *handlers,
-            podcast_module.SafeHTTPHandler(trusted),
-            podcast_module.SafeHTTPSHandler(trusted),
+            podcast_module.SafeHTTPHandler(trusted, allow_fake_ip=allow_fake_ip),
+            podcast_module.SafeHTTPSHandler(trusted, allow_fake_ip=allow_fake_ip),
         )
 
     request = urllib.request.Request(
@@ -401,7 +403,12 @@ class PodcastSearch:
             }
         )
         proxy_mode, proxy_url = self.manager.get_network_policy()
-        payload = fetch_itunes_json(f"{ITUNES_SEARCH_URL}?{query}", proxy_mode, proxy_url)
+        payload = fetch_itunes_json(
+            f"{ITUNES_SEARCH_URL}?{query}",
+            proxy_mode,
+            proxy_url,
+            allow_fake_ip=self.manager.allow_fake_ip,
+        )
         return [item for raw in payload["results"] if (item := clean_result(raw))]
 
     def lookup(self, itunes_id: str) -> list[dict[str, Any]]:
@@ -410,7 +417,12 @@ class PodcastSearch:
         proxy_mode, proxy_url = self.manager.get_network_policy()
         query = urlencode({"id": itunes_id, "entity": "podcast"})
         try:
-            payload = fetch_itunes_json(f"{ITUNES_LOOKUP_URL}?{query}", proxy_mode, proxy_url)
+            payload = fetch_itunes_json(
+                f"{ITUNES_LOOKUP_URL}?{query}",
+                proxy_mode,
+                proxy_url,
+                allow_fake_ip=self.manager.allow_fake_ip,
+            )
         except UpstreamFailure as exc:
             if exc.code == "upstream_rate_limited":
                 self.gate.cool_down(max(THROTTLE_COOLDOWN_SECONDS, exc.retry_after or 0))
@@ -569,6 +581,7 @@ class PodcastSearch:
                     f"{APPLE_CHART_URL}/{region}/podcasts/top/{limit}/podcasts.json",
                     proxy_mode,
                     proxy_url,
+                    allow_fake_ip=self.manager.allow_fake_ip,
                 )
                 ids = list(
                     dict.fromkeys(
@@ -581,7 +594,10 @@ class PodcastSearch:
                 if ids:
                     query = urlencode({"id": ",".join(ids), "country": region, "entity": "podcast"})
                     payload = fetch_itunes_json(
-                        f"{ITUNES_LOOKUP_URL}?{query}", proxy_mode, proxy_url
+                        f"{ITUNES_LOOKUP_URL}?{query}",
+                        proxy_mode,
+                        proxy_url,
+                        allow_fake_ip=self.manager.allow_fake_ip,
                     )
                     by_id = {
                         item["itunes_id"]: item
