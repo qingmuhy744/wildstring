@@ -15,7 +15,22 @@ IOS_DEVELOPMENT_TEAM ?=
 export UV_CACHE_DIR ?= $(CURDIR)/.cache/uv
 export PRE_COMMIT_HOME ?= $(CURDIR)/.cache/pre-commit
 RUN = $(UV) run --frozen --project backend --extra community-sources
-ANDROID = ./frontend/android/gradlew -p frontend/android --console=plain
+ANDROID_JAVA_HOME ?= $(shell \
+	if [ -n "$${JAVA_HOME:-}" ] && [ -x "$${JAVA_HOME}/bin/java" ] && "$${JAVA_HOME}/bin/java" -version 2>&1 | grep -q 'version "21\.'; then \
+		printf '%s' "$${JAVA_HOME}"; \
+	elif [ -x /opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home/bin/java ]; then \
+		printf '%s' /opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home; \
+	elif [ -x /usr/local/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home/bin/java ]; then \
+		printf '%s' /usr/local/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home; \
+	else \
+		candidate=$$(/usr/libexec/java_home -v 21 2>/dev/null || true); \
+		if [ -n "$$candidate" ] && [ -x "$$candidate/bin/java" ] && "$$candidate/bin/java" -version 2>&1 | grep -q 'version "21\.'; then \
+			printf '%s' "$$candidate"; \
+		elif command -v java >/dev/null 2>&1 && java -version 2>&1 | grep -q 'version "21\.'; then \
+			java -XshowSettings:properties -version 2>&1 | sed -n 's/^[[:space:]]*java\.home = //p' | head -n 1; \
+		fi; \
+	fi)
+ANDROID = test -x "$(ANDROID_JAVA_HOME)/bin/java" && "$(ANDROID_JAVA_HOME)/bin/java" -version 2>&1 | grep -q 'version "21\.' || { echo "Android Gradle requires JDK 21; install JDK 21 or set ANDROID_JAVA_HOME" >&2; exit 1; }; JAVA_HOME="$(ANDROID_JAVA_HOME)" PATH="$(ANDROID_JAVA_HOME)/bin:$$PATH" ./frontend/android/gradlew -p frontend/android --console=plain
 ANDROID_TEST_ARGS ?=
 DEV_WEB_HOST ?= 127.0.0.1
 DOCKER = $(COMPOSE) --project-directory "$(CURDIR)" --env-file .env -p "$(PROJECT)" -f deploy/compose.yaml
