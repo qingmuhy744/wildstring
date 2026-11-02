@@ -190,7 +190,8 @@ test('管理中心播客下载管理近期已完成配色温润且高对比度',
       localStorage.setItem('wildstring-theme', val);
       window.dispatchEvent(new CustomEvent('wildstring:theme-changed', { detail: val }));
     }, theme);
-    await page.waitForTimeout(100);
+    // Allow CSS transition (0.15s ease) on queue-task-card background to settle
+    await page.waitForTimeout(350);
 
     const card = sectionEl.locator('.queue-task-card').first();
     await expect(card).toBeVisible();
