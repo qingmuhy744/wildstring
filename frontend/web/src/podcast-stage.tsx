@@ -33,15 +33,8 @@ function Radio({ player, onPreview }: { player: Player; onPreview: () => void })
       }
     >
       <header className="retro-brand">
-        <div>
-          <strong>WILDSTRING</strong>
-          <span>野弦 · 随身电台</span>
-        </div>
-        <span className="retro-model">
-          MEMPHIS FM · '56
-          <br />
-          STEREO RECEIVER
-        </span>
+        <strong>WILDSTRING</strong>
+        <span className="retro-lamp" aria-hidden="true" />
       </header>
       <div className="retro-main">
         <button className="retro-screen" onClick={onPreview} aria-label="查看播客封面大图">
@@ -63,12 +56,10 @@ function Radio({ player, onPreview }: { player: Player; onPreview: () => void })
             </span>
           </span>
         </button>
-        <div className="retro-speaker" aria-hidden="true">
-          <span>HI-FI SOUND</span>
-        </div>
+        <div className="retro-speaker" aria-hidden="true" />
       </div>
       <div className="retro-tuner">
-        <div className="retro-tuner-label">
+        <div className="retro-tuner-label" aria-hidden="true">
           <span>FM</span>
           <span>88</span>
           <span>92</span>
@@ -89,63 +80,34 @@ function Radio({ player, onPreview }: { player: Player; onPreview: () => void })
             step="1"
             disabled={!player.duration}
             value={Math.min(player.position, player.duration || 0)}
+            aria-valuetext={`${time(player.position)} / ${time(player.duration)}`}
             onChange={(event) => player.seek(Number(event.target.value))}
           />
         </div>
-        <div className="retro-am-scale" aria-hidden="true">
-          <span>AM</span>
-          <span>530</span>
-          <span>800</span>
-          <span>1000</span>
-          <span>1400</span>
-          <span>1600 kHz</span>
-        </div>
+        <span className="retro-tuner-hint" aria-hidden="true">
+          拖动刻度跳转
+        </span>
       </div>
       <div className="retro-deck">
         <div className="retro-keys">
-          <span className="retro-caption">TRANSPORT</span>
-          <div className="retro-key-grid">
-            <div className="retro-key">
-              <PodcastSkipButton
-                player={player}
-                seconds={15}
-                direction="backward"
-                variant="retro"
-              />
-              <span className="retro-key-caption" aria-hidden="true">
-                后退 15s
-              </span>
-            </div>
-            <div className="retro-key">
-              <button
-                className="retro-power"
-                onClick={player.toggle}
-                aria-label={player.playing ? '收音机暂停' : '收音机播放'}
-                aria-pressed={player.playing}
-              >
-                <span aria-hidden="true">{player.playing ? 'Ⅱ' : '▶'}</span>
-              </button>
-              <span className="retro-key-caption" aria-hidden="true">
-                {player.playing ? '暂停' : '播放'}
-              </span>
-            </div>
-            <div className="retro-key">
-              <PodcastSkipButton player={player} seconds={30} direction="forward" variant="retro" />
-              <span className="retro-key-caption" aria-hidden="true">
-                前进 30s
-              </span>
-            </div>
-          </div>
+          <PodcastSkipButton player={player} seconds={15} direction="backward" variant="retro" />
+          <button
+            className="retro-power"
+            onClick={player.toggle}
+            aria-label={player.playing ? '收音机暂停' : '收音机播放'}
+            aria-pressed={player.playing}
+          >
+            <span aria-hidden="true">{player.playing ? 'Ⅱ' : '▶'}</span>
+          </button>
+          <PodcastSkipButton player={player} seconds={30} direction="forward" variant="retro" />
         </div>
         <div className="retro-vu" aria-hidden="true">
-          <span className="retro-caption">STEREO · LEVEL</span>
           <div className="retro-vu-window">
             <span>L</span>
             <i />
             <span>R</span>
             <i />
           </div>
-          <span className="retro-caption">WILDSTRING FM</span>
         </div>
         <label className="retro-volume">
           <span className="retro-caption">VOLUME</span>
@@ -161,13 +123,12 @@ function Radio({ player, onPreview }: { player: Player; onPreview: () => void })
               onChange={(event) => player.setVolume(Number(event.target.value))}
             />
           </span>
-          <span className="retro-caption">− &nbsp; {Math.round(player.volume * 100)} &nbsp; +</span>
+          <span className="retro-caption">{Math.round(player.volume * 100)}%</span>
         </label>
       </div>
       <div className="retro-footnote" aria-hidden="true">
         <span className="retro-screw screw-left" />
-        <span>MEMPHIS PORTABLE / WS-56</span>
-        <span>让声音，慢下来。</span>
+        <span>WS-56 · PORTABLE</span>
         <span className="retro-screw screw-right" />
       </div>
     </section>
@@ -304,7 +265,7 @@ export function PodcastStage({
             <div className="newspaper-byline">
               <span>{track.album || '播客节目'}</span>
               <span>
-                {Math.round(track.duration_ms / 60000)} 分钟 · {track.format.toUpperCase()}
+                {time(track.duration_ms / 1000)} · {track.format.toUpperCase()}
               </span>
             </div>
           </header>

@@ -31,7 +31,7 @@ function Login({
   onLogin: (user: User) => void | Promise<void>;
   notice: string;
 }) {
-  const [username, setUsername] = useState('admin');
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -97,6 +97,8 @@ function Login({
                   required
                   maxLength={32}
                   autoComplete="username"
+                  placeholder={t('login.usernamePlaceholder')}
+                  autoFocus
                 />
               </label>
               <label>

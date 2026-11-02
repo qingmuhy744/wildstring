@@ -6,6 +6,7 @@ test('分碟仅作标题：连续跨碟、完整排序队列和偏好保存', as
   test.setTimeout(60_000);
   await page.addInitScript(() => localStorage.setItem('wildstring:playback-sync:admin', 'off'));
   await page.goto('/');
+  await page.getByLabel('账号', { exact: true }).fill('admin');
   await page.getByLabel('密码', { exact: true }).fill('disposable-browser-test-password');
   await page.getByRole('button', { name: '进入曲库' }).click();
   await page

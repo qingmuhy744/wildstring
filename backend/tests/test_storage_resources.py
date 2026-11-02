@@ -78,6 +78,10 @@ def test_personal_saves_reuse_and_release_independently(resources):
     assert response.status_code == 200
     preview = store.cleanup()
     assert preview["candidate_count"] == 1 and path.is_file()
+    assert len(preview["candidates"]) == 1
+    assert preview["candidates"][0]["id"] == "ep-east"
+    assert preview["candidates"][0]["size_bytes"] == len(b"shared audio")
+    assert preview["candidates"][0]["title"] == "east"
     collection = store.cleanup(dry_run=False)
     assert collection["freed_bytes"] == len(b"shared audio")
     assert not path.exists()

@@ -14,7 +14,7 @@ export function AlbumEditor({
   albumId: string;
   initialTitle?: string;
   onClose: () => void;
-  onSaved: () => Promise<void> | void;
+  onSaved: (savedAlbumId?: string) => Promise<void> | void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -143,7 +143,7 @@ export function AlbumEditor({
       // 1. 提交元数据更改
       const overrides: Record<string, unknown> = {
         album: title.trim(),
-        album_artists: parsedArtists.length > 0 ? parsedArtists : ['未知艺人'],
+        album_artists: parsedArtists,
         genres: parsedGenres && parsedGenres.length > 0 ? parsedGenres : [],
         description: description.trim(),
         label: label.trim() || null,
@@ -153,17 +153,21 @@ export function AlbumEditor({
         original_date: originalDate.trim() || null,
       };
 
-      await api('/manage/metadata/albums', {
+      let targetAlbumId = albumId;
+      const res = await api<{ album_id: string; updated: number }>('/manage/metadata/albums', {
         method: 'PUT',
         body: JSON.stringify({
           album_id: albumId,
           overrides,
         }),
       });
+      if (res?.album_id) {
+        targetAlbumId = res.album_id;
+      }
 
       // 2. 如果标记清除自定义封面
       if (coverDeleted && record?.has_custom_cover) {
-        await api(`/manage/albums/${encodeURIComponent(albumId)}/cover`, {
+        await api(`/manage/albums/${encodeURIComponent(targetAlbumId)}/cover`, {
           method: 'DELETE',
         });
       }
@@ -173,13 +177,13 @@ export function AlbumEditor({
         const formData = new FormData();
         formData.append('file', newCoverFile);
         formData.append('save_sidecar', saveSidecar ? 'true' : 'false');
-        await api(`/manage/albums/${encodeURIComponent(albumId)}/cover`, {
+        await api(`/manage/albums/${encodeURIComponent(targetAlbumId)}/cover`, {
           method: 'POST',
           body: formData,
         });
       }
 
-      await onSaved();
+      await onSaved(targetAlbumId);
       onClose();
     } catch (err: unknown) {
       const errorObj = err as { message?: string };

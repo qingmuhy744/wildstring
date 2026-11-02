@@ -26,7 +26,7 @@
     "module/register_checktoken_v2.js": "4c27747a01963e0cf63cb31a7bd2a3497d5aa8a4e3397fc01d36645b1b96fd94",
     "module/register_checktoken_v3.js": "4c27747a01963e0cf63cb31a7bd2a3497d5aa8a4e3397fc01d36645b1b96fd94",
     "module/song_detail.js": "a85e79d888667b645301597a8c755fc468d62be0506fa94ca98e551bf4ee58a9",
-    "package.json": "d12df3c3d5d701a5ef4ef6e745981a9e19e8848579bc7ea72199597a29fcd74b",
+    "package.json": "7f283fb353544e49d66803ddf822c8ae689bf487b2b9772343bdcb3a2747a9da",
     "util/config.json": "25c30bd41a877b9992e870a457dedd02ac033041adcfb3ca3f9bdc7fdc288665",
     "util/crypto.js": "f817642825970eabb8203042733c385faa586a71ce5d538bf78b68c5195536a9",
     "util/index.js": "296e985bc54c1f3756e2c0a5de7d08638c59bb9b72870bb6a4c3443162e6fa8d",

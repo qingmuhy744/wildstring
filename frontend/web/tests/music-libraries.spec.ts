@@ -8,6 +8,7 @@ type Library = { id: string; name: string; sources: { root: string }[]; is_defau
 async function owner(page: Page) {
   await page.addInitScript(() => localStorage.setItem('wildstring:playback-sync:admin', 'off'));
   await page.goto('/');
+  await page.getByLabel('账号', { exact: true }).fill('admin');
   await page.getByLabel('密码', { exact: true }).fill('disposable-browser-test-password');
   await page.getByRole('button', { name: '进入曲库' }).click();
   await expect(page.getByRole('table', { name: '歌曲列表' }).getByRole('row')).toHaveCount(4);

@@ -48,6 +48,7 @@
     "setupTitle": "Let's get the music ready",
     "subtitle": "Sign in to your private music space.",
     "username": "Username",
+    "usernamePlaceholder": "Enter username",
     "password": "Password",
     "passwordPlaceholder": "Enter password",
     "submitting": "Signing in…",

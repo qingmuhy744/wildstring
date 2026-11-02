@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from './api';
+import { DialogCloseButton } from './dialog-close';
 
 type Resource = {
   id: string;
@@ -13,20 +14,145 @@ type Resource = {
 };
 type ResourcePage = { items: Resource[]; total: number; total_bytes: number };
 type Settings = { version: number; enabled: boolean; retention_days: number };
-type Cleanup = {
+export type CleanupCandidate = {
+  id: string;
+  podcast_id: string;
+  podcast_title: string;
+  title: string;
+  size_bytes: number;
+  local_path: string;
+};
+export type Cleanup = {
   candidate_count: number;
   candidate_bytes: number;
   deleted_count: number;
   freed_bytes: number;
   failed_count: number;
+  candidates?: CleanupCandidate[];
 };
 const size = (bytes: number) => `${(bytes / 1048576).toFixed(1)} MB`;
+
+export function PodcastCleanupCandidatesDialog({
+  preview,
+  busy,
+  onClose,
+  onConfirmCleanup,
+}: {
+  preview: Cleanup;
+  busy: boolean;
+  onClose: () => void;
+  onConfirmCleanup: () => void;
+}) {
+  const dialog = useRef<HTMLDialogElement>(null);
+
+  useEffect(() => {
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const node = dialog.current;
+    node?.showModal();
+    return () => {
+      node?.close();
+      previous?.focus({ preventScroll: true });
+    };
+  }, []);
+
+  const candidates = preview.candidates ?? [];
+
+  return (
+    <dialog
+      ref={dialog}
+      className="podcast-cleanup-dialog"
+      aria-labelledby="podcast-cleanup-dialog-title"
+      onCancel={(e) => {
+        e.preventDefault();
+        if (!busy) onClose();
+      }}
+      onClick={(e) => {
+        if (e.target === e.currentTarget && !busy) {
+          const bounds = e.currentTarget.getBoundingClientRect();
+          if (
+            e.clientX < bounds.left ||
+            e.clientX > bounds.right ||
+            e.clientY < bounds.top ||
+            e.clientY > bounds.bottom
+          ) {
+            onClose();
+          }
+        }
+      }}
+    >
+      <header className="podcast-cleanup-dialog-header">
+        <div className="podcast-cleanup-dialog-title-wrap">
+          <h2 id="podcast-cleanup-dialog-title">待清理零引用音频</h2>
+          <span className="podcast-cleanup-dialog-badge">
+            {preview.candidate_count} 个文件 · {size(preview.candidate_bytes)}
+          </span>
+        </div>
+        <DialogCloseButton aria-label="关闭待清理清单" disabled={busy} onClick={onClose} />
+      </header>
+
+      <div className="podcast-cleanup-dialog-body">
+        <p className="podcast-cleanup-dialog-desc">
+          以下音频文件无任何用户保存或个人引用、未被标记保护，且不在活跃播放或下载中。执行手动清理将物理回收磁盘空间，单集元数据与收听历史仍会保留。
+        </p>
+
+        {candidates.length > 0 ? (
+          <div className="podcast-cleanup-candidates-list" role="list">
+            {candidates.map((item) => (
+              <article key={item.id} className="podcast-cleanup-candidate-item" role="listitem">
+                <div className="candidate-info">
+                  <strong className="candidate-title">{item.title}</strong>
+                  <span className="candidate-podcast">{item.podcast_title}</span>
+                  {item.local_path && (
+                    <span className="candidate-path" title={item.local_path}>
+                      {item.local_path.split('/').pop()}
+                    </span>
+                  )}
+                </div>
+                <div className="candidate-meta">
+                  <span className="candidate-size">{size(item.size_bytes)}</span>
+                  <span className="candidate-pill">0 份引用</span>
+                </div>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <div className="podcast-cleanup-empty-state">
+            <p className="empty-title">当前暂无待清理音频</p>
+            <p className="empty-desc">
+              所有本地音频均有账号引用、处于保护状态或正在播放/下载中，无需清理。
+            </p>
+          </div>
+        )}
+      </div>
+
+      <footer className="podcast-cleanup-dialog-footer">
+        <span className="podcast-cleanup-dialog-hint">
+          {candidates.length > 0 ? '清理后无法撤销，仅删除音频本地缓存文件' : ''}
+        </span>
+        <div className="podcast-cleanup-dialog-actions">
+          <button type="button" className="btn-secondary" disabled={busy} onClick={onClose}>
+            关闭
+          </button>
+          <button
+            type="button"
+            className="btn-danger"
+            disabled={busy || !preview.candidate_count}
+            onClick={onConfirmCleanup}
+          >
+            {busy ? '正在清理…' : `确认清理 (${preview.candidate_count})`}
+          </button>
+        </div>
+      </footer>
+    </dialog>
+  );
+}
 
 export function PodcastResourceManager() {
   const [page, setPage] = useState<ResourcePage | null>(null);
   const [settings, setSettings] = useState<Settings | null>(null);
   const [offset, setOffset] = useState(0);
   const [preview, setPreview] = useState<Cleanup | null>(null);
+  const [candidateDialogOpen, setCandidateDialogOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   async function load(start = offset) {
@@ -40,7 +166,7 @@ export function PodcastResourceManager() {
   useEffect(() => {
     void load(offset).catch((error: Error) => setMessage(error.message));
   }, [offset]);
-  async function run(action: () => Promise<void>) {
+  async function run(action: () => Promise<unknown>) {
     setBusy(true);
     setMessage('');
     try {
@@ -56,15 +182,29 @@ export function PodcastResourceManager() {
       method: 'POST',
       body: JSON.stringify({ dry_run }),
     });
-    if (dry_run) setPreview(result);
-    else {
+    if (dry_run) {
+      setPreview(result);
+      return result;
+    } else {
       setPreview(null);
+      setCandidateDialogOpen(false);
       setMessage(
         `已清理 ${result.deleted_count} 个文件，释放 ${size(result.freed_bytes)}${result.failed_count ? `，${result.failed_count} 个文件未能删除，登记已保留` : ''}。`,
       );
       await load();
+      return result;
     }
   }
+
+  async function openCandidateDialog() {
+    if (!preview) {
+      await run(async () => {
+        await cleanup(true);
+      });
+    }
+    setCandidateDialogOpen(true);
+  }
+
   return (
     <section aria-labelledby="podcast-resources-title">
       <div className="podcast-resource-manager">
@@ -120,25 +260,53 @@ export function PodcastResourceManager() {
         )}
         <div className="podcast-resource-cleanup">
           <p>{page ? `${page.total} 份共享音频 · ${size(page.total_bytes)}` : '正在读取资源…'}</p>
-          <button type="button" disabled={busy} onClick={() => void run(() => cleanup(true))}>
-            预览零引用清理
-          </button>
+          <div className="podcast-cleanup-action-row">
+            <button type="button" disabled={busy} onClick={() => void run(() => cleanup(true))}>
+              预览零引用清理
+            </button>
+            <button
+              type="button"
+              className="podcast-cleanup-view-btn"
+              disabled={busy}
+              onClick={() => void openCandidateDialog()}
+            >
+              {preview ? `查看待清理清单 (${preview.candidate_count})` : '查看待清理清单'}
+            </button>
+          </div>
           {preview && (
-            <div role="status">
+            <div role="status" className="podcast-cleanup-preview-box">
               <p>
                 当前可清理 {preview.candidate_count} 个文件，共 {size(preview.candidate_bytes)}
                 。手动清理会立即回收这些零引用文件。
               </p>
-              <button
-                type="button"
-                disabled={busy || !preview.candidate_count}
-                onClick={() => void run(() => cleanup(false))}
-              >
-                确认清理零引用文件
-              </button>
+              <div className="podcast-cleanup-preview-actions">
+                <button
+                  type="button"
+                  disabled={busy || !preview.candidate_count}
+                  onClick={() => void run(() => cleanup(false))}
+                >
+                  确认清理零引用文件
+                </button>
+                <button
+                  type="button"
+                  className="podcast-cleanup-view-btn"
+                  disabled={busy}
+                  onClick={() => setCandidateDialogOpen(true)}
+                >
+                  查看待清理清单 ({preview.candidate_count})
+                </button>
+              </div>
             </div>
           )}
         </div>
+        {candidateDialogOpen && preview && (
+          <PodcastCleanupCandidatesDialog
+            preview={preview}
+            busy={busy}
+            onClose={() => setCandidateDialogOpen(false)}
+            onConfirmCleanup={() => void run(() => cleanup(false))}
+          />
+        )}
         <div className="podcast-resource-list">
           {page?.items.map((item) => (
             <article key={item.id}>
