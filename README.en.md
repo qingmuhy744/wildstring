@@ -91,6 +91,7 @@ The Chinese name **野弦** (Yě Xián) stems from a deep reverence for Chinese 
 
 ## Recent Highlights
 
+- **v0.8.5**: Deep fix for album metadata modification & cover upload pipeline; podcast zero-reference cleanup preview modal & breakdown; Apple playback dynamic duration sync; management center & download cards dual-theme refinement; complete wiki overhaul with fresh web captures; dependency & CI/CD upgrades. See [v0.8.5 Release Notes](docs/releases/v0.8.5.md).
 - **v0.8.4**: Unified cross-platform versioning to 0.8.4; reinforced bilingual release automation and resilient test gates. See [v0.8.4 Release Notes](docs/releases/v0.8.4.md).
 - **v0.8.3**: Podcast regional top charts discovery and preview-before-follow across Web, Android, and Mac; direct raw audio downloads; content vs. settings sidebar re-organization; wide folder picker. See [v0.8.3 Release Notes](docs/releases/v0.8.3.md).
 - **v0.8.2**: All-new Native macOS Client (desktop floating lyrics, menu bar mini-player, AI assistant); Apple Podcasts multi-region parallel search & deduplication; OPML import/export. See [v0.8.2 Release Notes](docs/releases/v0.8.2.md).
