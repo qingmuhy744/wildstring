@@ -56,8 +56,8 @@ During the full-stack engineering, architectural refactoring, and performance tu
 
 ### ⚡ Noise & Distortion
 
-- **OpenAI · Brain Fog & Drooling Fallbacks**:
-  From day-one magic degraded into a low-tier lottery. Paying full price for an official subscription only to be greeted daily by `Selected model is at capacity. Please try a different model.` — while whatever fallback gets dynamically routed to my account feels like it's literally drooling and suffering severe brain damage. Gatekeeping tiers and turning AI into a rigged lottery. If official channels won't respect paying users, fine: I'm switching straight to reverse proxy relays to win back that breathtaking "first love" magic!
+- **OpenAI · Disheartened Degraded Routing**:
+  Honestly feeling a bit disheartened and wronged here. As an independent open-source author faithfully paying for an official subscription month after month, running into `Selected model is at capacity. Please try a different model.` all the time is disheartening enough — but what truly stings is getting dynamically rerouted to incoherent, baffling model fallbacks that feel completely lost. I've formally submitted an open-source author appeal to support, hoping it's just a routing misconfiguration or temporary hiccup. Until they reply, I have to sheepishly lean on proxy relays to recapture that original magic... But if support continues to ghost me, the gloves are definitely coming off.
 - **Anthropic · Pulling the Plug & Stealing the Gate**:
   > <p align="left">
   >   <strong><em>“Anthropic has been one of the worst companies we have ever dealt with. Banning developers' accounts and pocketing prepaid credits without refund? So, Anthropic: FUCK YOU! 🖕”</em></strong>

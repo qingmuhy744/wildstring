@@ -56,8 +56,8 @@
 
 ### ⚡ 噪点与破音 (Noise & Feedback)
 
-- **OpenAI · 脑雾与淌口水路由**：
-  从初代封神一路暗削成低保盲盒。明明真金白银买着官方订阅，却天天演我 `Selected model is at capacity. Please try a different model.`，动态分流路由过来的模型简直像当场脑干缺失、边淌口水边吐胡话。权限捂着不给，把大模型硬生生整成了摇号现场。既然正规官方此处不留爷，那就果断去用 API 中转，找回曾经那个惊艳的“初恋”！
+- **OpenAI · 委屈的降智与迷惑分流**：
+  说实话心里挺委屈的。作为一个老老实实真金白银订阅官方支持的独立开源作者，体验却常常令人难过：日常高频遭遇 `Selected model is at capacity. Please try a different model.`，更困惑的是，动态分流路由到账号上的模型有时逻辑断层、语无伦次，一度以为自己的账号被特殊对待了。目前已经向官方客服提交了开源作者申诉，希望只是偶发故障或路由误会；在收到明确回复前，只能先卑微地用用中转找回初恋般的体验了……要是客服还是已读不回，那我可真要继续跳起来开麦了。
 - **Anthropic · 拔电源与吞子弹**：
   > <p align="left">
   >   <strong><em>“Anthropic has been one of the worst companies we have ever dealt with. Banning developers' accounts and pocketing prepaid credits without refund? So, Anthropic: FUCK YOU! 🖕”</em></strong>

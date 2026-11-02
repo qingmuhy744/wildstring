@@ -48,6 +48,7 @@
     "setupTitle": "让音乐就位",
     "subtitle": "登录你的私人音乐空间。",
     "username": "账号",
+    "usernamePlaceholder": "输入账号",
     "password": "密码",
     "passwordPlaceholder": "输入密码",
     "submitting": "正在登录…",
