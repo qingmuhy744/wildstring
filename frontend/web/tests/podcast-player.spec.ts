@@ -342,7 +342,7 @@ test('昼夜主题、真实调谐和音量、时间码跳转、断点进度与�
       ),
     ).toBeLessThan(0.5);
     const footnote = page.locator('.retro-footnote');
-    const model = (await footnote.getByText('MEMPHIS PORTABLE / WS-56').boundingBox())!;
+    const model = (await footnote.getByText('WS-56 · PORTABLE').boundingBox())!;
     expect(model.x - leftScrew.x - leftScrew.width).toBeGreaterThanOrEqual(8);
     const programme = page.getByRole('complementary', { name: '接下来播放', exact: true });
     const order = programme.getByLabel('播客续播顺序');
