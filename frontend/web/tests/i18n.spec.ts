@@ -10,6 +10,7 @@ async function signIn(page: Page) {
   await page.goto('/');
   await expect(page.locator('html')).toHaveAttribute('lang', 'en');
   await expect(page.getByRole('heading', { name: 'Welcome back' })).toBeVisible();
+  await page.getByLabel('Username', { exact: true }).fill('admin');
   await page.getByLabel('Password', { exact: true }).fill('disposable-browser-test-password');
   await page.getByRole('button', { name: /Open library/ }).click();
   await expect(page.locator('.app-shell')).toBeVisible();
@@ -59,6 +60,7 @@ test('interface language follows the browser, then the account setting', async (
       const second = await other.newPage();
       await second.goto('/');
       await expect(second.getByRole('heading', { name: 'Welcome back' })).toBeVisible();
+      await second.getByLabel('Username', { exact: true }).fill('admin');
       await second.getByLabel('Password', { exact: true }).fill('disposable-browser-test-password');
       await second.getByRole('button', { name: /Open library/ }).click();
       await expect(second.locator('html')).toHaveAttribute('lang', 'zh-CN');
@@ -91,6 +93,7 @@ test('unsupported browser languages fall back to English', async ({ browser }) =
 
 test('error codes are translated for English', async ({ page }) => {
   await page.goto('/');
+  await page.getByLabel('Username', { exact: true }).fill('admin');
   await page.getByLabel('Password', { exact: true }).fill('wrong-password-for-i18n-test');
   await page.getByRole('button', { name: /Open library/ }).click();
   await expect(page.locator('.error, [role="alert"]').first()).toBeVisible();
