@@ -292,8 +292,10 @@ class PodcastResources:
                 "candidate_bytes": 0,
                 "failed_count": 0,
                 "dry_run": dry_run,
+                "candidates": [],
             }
         candidate_count = candidate_bytes = deleted_count = freed_bytes = failed_count = 0
+        candidates = []
         # Do not retain one database write transaction for the full directory traversal.
         with self.database.connect(write=True) as db:
             self.synchronize(db)
@@ -334,6 +336,17 @@ class PodcastResources:
                     size = path.stat().st_size if path.is_file() else 0
                     candidate_count += 1
                     candidate_bytes += size
+                    primary = aliases[0]
+                    candidates.append(
+                        {
+                            "id": primary["id"],
+                            "podcast_id": primary["podcast_id"],
+                            "podcast_title": primary["podcast_title"],
+                            "title": primary["title"],
+                            "size_bytes": size,
+                            "local_path": primary["local_path"],
+                        }
+                    )
                     if not dry_run:
                         path.unlink(missing_ok=True)
                         for alias in aliases:
@@ -356,6 +369,7 @@ class PodcastResources:
             "deleted_count": deleted_count,
             "freed_bytes": freed_bytes,
             "failed_count": failed_count,
+            "candidates": candidates,
         }
 
     def router(self, auth):

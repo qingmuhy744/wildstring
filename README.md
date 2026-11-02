@@ -1,36 +1,83 @@
+<div align="center">
+
+<p>
+  <strong><a href="README.md">中文</a></strong> | <a href="README.en.md">English</a>
+</p>
+
+[![野弦 WildString Banner](assets/banner.svg)](https://github.com/qingmuhy744/wildstring)
+
 # 野弦 WildString
 
-0.6.1 更新：移动端支持自托管 HTTP 实例（按服务器单点授权）；播放页封面与歌词切换优化为即时直切；歌词行点击切换面板、滑动后显式跳转防误触；支持修改个人资料与每日推荐定时生成。见[发布说明](docs/releases/v0.6.1.md)。
+**AI-native 的自托管私人音乐播放器。**
+从自己的音乐收藏出发，用自然语言找歌、生成歌单，让收藏的音乐有新的回响。
 
-0.6.0 更新：账号档案统一为所有者、曲库管理员、资料编辑员与听众并移除旧角色兼容；新增导入源浏览、专辑回收区和元数据任务清理，Web 曲库入口与队列操作同步改进。见[发布说明](docs/releases/v0.6.0.md)。
-
-0.5.4 更新：维护依赖安全版本，精简数据源插件依赖；助手回答支持 Markdown 排版、逐步显示和中断后的部分结果恢复。见[发布说明](docs/releases/v0.5.4.md)。
-
-0.5.2 更新：自定义头像、推荐临时歌单、紧凑对话菜单、角落通知与跨设备轻提示，整理导航并修复主题配色和面板滚动；新 AI 连接默认 8192 Token / low / 90 秒，Android 歌词默认 2 秒恢复跟随并可调整。见[发布说明](docs/releases/v0.5.2.md)。
+> *“音乐不设限，自由有回响。”*
 
 [![Latest Release](https://img.shields.io/github/v/release/qingmuhy744/wildstring?logo=github&color=5865F2)](https://github.com/qingmuhy744/wildstring/releases/latest)
 [![CI](https://img.shields.io/github/actions/workflow/status/qingmuhy744/wildstring/ci.yml?branch=main&label=CI&logo=githubactions&logoColor=white)](https://github.com/qingmuhy744/wildstring/actions)
 [![CodeQL](https://img.shields.io/github/actions/workflow/status/qingmuhy744/wildstring/codeql.yml?branch=main&label=CodeQL&logo=github&logoColor=white)](https://github.com/qingmuhy744/wildstring/security/code-scanning)
 [![Architecture](https://img.shields.io/badge/Architecture-Self--Hosted%20%7C%20AI--Native-E25A24.svg)](docs/product/scope.md)
-[![AI Engine](https://img.shields.io/badge/AI-NL%20Search%20%26%20Curation-9C27B0.svg?logo=openai&logoColor=white)](docs/product/scope.md)
 [![Audio Engine](https://img.shields.io/badge/Audio-Lossless%20%2F%20Hi--Res-00BCD4.svg)](docs/product/scope.md)
 [![Web](https://img.shields.io/badge/Web-React%20%7C%20TypeScript-61DAFB.svg?logo=react&logoColor=black)](frontend/web)
-[![Android](https://img.shields.io/badge/Android-Kotlin%20%7C%20Compose-3DDC84.svg?logo=android&logoColor=white)](frontend/android)
+[![macOS](https://img.shields.io/badge/macOS-SwiftUI-000000.svg?logo=apple&logoColor=white)](frontend/macos)
 [![iOS](https://img.shields.io/badge/iOS-SwiftUI-000000.svg?logo=apple&logoColor=white)](frontend/ios)
+[![Android](https://img.shields.io/badge/Android-Kotlin%20%7C%20Compose-3DDC84.svg?logo=android&logoColor=white)](frontend/android)
+[![Desktop](https://img.shields.io/badge/Desktop-Tauri%20%7C%20Rust%20(Roadmap)-FFC107.svg?logo=tauri&logoColor=white)](#路线图-roadmap)
 [![Backend](https://img.shields.io/badge/Backend-Python%203.12%20%7C%20FastAPI-3776AB.svg?logo=python&logoColor=white)](backend)
 [![Database](https://img.shields.io/badge/Database-SQLite%20WAL-003B57.svg?logo=sqlite&logoColor=white)](backend/src/wildstring/database.py)
-[![Metadata](https://img.shields.io/badge/Metadata-MusicBrainz%20%7C%20AcoustID-EB743B.svg)](contracts/metadata-providers.md)
-[![Docker](https://img.shields.io/badge/Docker-Ready-2496ED.svg?logo=docker&logoColor=white)](deploy/Dockerfile)
-[![Vibe](https://img.shields.io/badge/Vibe-Rock%20%26%20Wild-ff69b4.svg)](#名字的来处)
 [![License](https://img.shields.io/badge/License-GPLv3-green.svg)](LICENSE)
 
-**AI native 的私人音乐播放器。** 从自己的音乐收藏出发，用自然语言找歌、生成歌单，让收藏的音乐有新的回响。
+</div>
 
-> 音乐不设限，自由有回响。
+---
+
+## 致谢与态度
+
+在野弦的全栈代码实现、架构重构与调优迭代中，我们深度依赖了前沿的大模型能力，特此表达诚挚的致谢与态度：
+
+### 🌟 特别致谢
+
+<p align="center">
+  <a href="https://gemini.google.com/" target="_blank" rel="noopener noreferrer">
+    <img src="assets/gemini.svg" width="32" height="32" alt="Google Gemini" style="vertical-align: middle;" />
+    <strong>Google Gemini</strong>
+  </a>
+  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+  <a href="https://www.deepseek.com/" target="_blank" rel="noopener noreferrer">
+    <img src="assets/deepseek.svg" width="32" height="32" alt="DeepSeek" style="vertical-align: middle;" />
+    <strong>DeepSeek 深度求索</strong>
+  </a>
+</p>
+
+- 感谢 **[Google Gemini](https://gemini.google.com/)**：强大的长上下文理解、跨模块架构推理以及高质量的代码生成能力，支撑了整个复杂系统从底层存储模型到现代 Web 前端的流畅构建。感谢 Gemini，Google Don't Be Evil！Google Cool！Geek Google！
+- 感谢 **[DeepSeek](https://www.deepseek.com/)**：惊艳的代码逻辑推理、高一致性与稳健表现，在诸多关键算法和疑难问题上提供了极具价值的帮助。
+
+---
+
+### ⚡ 噪点与破音 (Noise & Feedback)
+
+- **OpenAI · 脑雾与淌口水路由**：
+  从初代封神一路暗削成低保盲盒。天天演我 `Selected model is at capacity. Please try a different model.`，分流动态路由过来的模型简直像当场脑干缺失、边淌口水边吐胡话。权限捂着不给，把大模型硬生生整成了摇号现场。
+- **Anthropic · 拔电源与吞子弹**：
+  > <p align="left">
+  >   <strong><em>“Anthropic has been one of the worst companies we have ever dealt with. Banning developers' accounts and pocketing prepaid credits without refund? So, Anthropic: FUCK YOU! 🖕”</em></strong>
+  > </p>
+  >
+  > 演出还没开场，保安先把电闸拔了，顺便把口袋里的门票钱全给摸走。钱不退，琴给砸了，直接把安全对齐演成了合法抢劫。
+
+---
+
+## 界面预览
+
+<div align="center">
 
 ![野弦主页预览](assets/主页.jpg)
 
 ![野弦全屏播放与滚动歌词](assets/全屏播放.png)
+
+</div>
+
+---
 
 ## 名字的来处
 
@@ -40,42 +87,55 @@
 
 我们希望野弦让用户保有自己的曲库、整理方式和选择，让 AI 帮助发现与理解音乐。这个名字表达个人喜好与致意，不代表与相关音乐人或乐队存在合作关系。
 
-## 现在做什么
+---
 
-第一阶段使用 **Python 3.12 / FastAPI + React / TypeScript**，提供自托管服务与网页端。MVP 主线：导入本地曲库 → 浏览与播放 → 查看本地歌词 → 自然语言找歌 → 预览、保存并播放 AI 歌单。
+## 近期更新亮点
 
-当前已有工程基座、SQLite 托管曲库、只读源导入与目录整理、本地用户登录、管理员/普通用户、歌曲/专辑/艺人视图、封面与本地滚动歌词，以及原音串流和网页队列。支持全屏播放、下一首播放、队列排序、♥ 收藏、普通/规则歌单与收听次数/时长记录。已增加管理入口、网页导入/扫描、任务历史和单曲元数据覆盖编辑；AI API 配置与连接测试已接入设置。现已接入自动发现、导入预检、待整理，以及 WAV/CUE 到逐曲 FLAC 的校验转换，见 [自动导入](contracts/automatic-import.md)。**已有文件标签写回、文件移动和无人值守应用仍待实现。** 详见 [MVP 范围](docs/product/scope.md)。
+- **0.8.4**：各端版本统一为 0.8.4，中英双语发布与自动化测试流水线弹性加固。详见[0.8.4 发布说明](docs/releases/v0.8.4.md)。
+- **0.8.3**：Web、Android、Mac 播客区域热门探索与预览后关注；单集详情支持下载原始音频；侧栏重排区分内容与配置；宽版目录选择器直向索引文件。详见[0.8.3 发布说明](docs/releases/v0.8.3.md)。
+- **0.8.2**：全新发布原生 Mac 客户端（桌面逐字歌词、菜单栏常驻、音乐助手）；Apple Podcasts 目录三区并行搜索与智能去重；OPML 订阅批量导入导出。详见[0.8.2 发布说明](docs/releases/v0.8.2.md)。
+- **0.8.1**：播客流代理沙箱安全加固（防 XSS）；AI 助手单次调用轮数设置与自动会话命名；多设备跨平台体验调优。详见[0.8.1 发布说明](docs/releases/v0.8.1.md)。
+- **0.8.0**：全新多音乐库支持与按用户库授权隔离；播客个人化订阅与「我的下载」；独立播客播放信息层；安全配置集中管理。详见[0.8.0 发布说明](docs/releases/v0.8.0.md)。
+- **交互与视觉持续打磨**：
+  - 播客共享音频清理新增“查看待清理清单”宽框弹窗，在物理回收空间前清晰预览零引用文件明细与体积；
+  - 下载管理与近期完成任务卡片采用全新温润高对比度配色体系，全面适配深浅双色主题；
+  - 歌词行点击首次跳转进度（Seek）精准直达；Brand Logo 点击采用客户端无刷新平滑路由，防止音乐播放意外中断。
 
-0.2.2 增加多创作人编辑与角色筛选、MusicBrainz / Last.fm 资料建议、CAA 封面候选和按用户授权的 Last.fm 收听同步；Web 与 Android 收藏先反馈、失败恢复。管理员在网页设置联网来源和代理，代理可跟随 Docker 的 `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` / `NO_PROXY`。功能入口、真实账号验证边界见 [联网资料与 Last.fm](contracts/metadata-providers.md)。
+---
 
-0.3.0 包含原未发布 0.2.3 的 Android / Web 封面、黑胶和磁带播放样式，默认封面并记住本机选择；同步改善 Android 系统栏衔接与播放进度条配色。切换样式复用当前音频，拟物动画随播放、可见性和系统减少动态效果设置启停。范围与验证状态见 [播放页样式](docs/product/player-styles-0.2.3.md)，正式可下载版本以 Releases 为准。
+## 核心特性
 
-本版同时接入可选的 AcoustID 指纹识别，并提供单曲、专辑和整库的「更新元数据」。网页可拖动设置 MusicBrainz / Last.fm 的推荐优先级；更新先生成建议，确认后应用。AcoustID 应用 Key 在管理设置中填写，只保存于服务端私有配置。入口、缺失／全部更新方式和验证边界见 [元数据更新](docs/product/metadata-refresh-0.2.3.md)。
+- **🎧 原汁原味的声音**：支持 FLAC、WAV、APE、Apple Lossless、MP3、AAC、OGG、Opus 等格式直放与精确流式缓冲；支持可配置的 ReplayGain 响度均衡。
+- **🧠 AI Native 体验**：基于本地曲库真实元数据与收听记录，通过自然语言查找歌曲、生成情绪歌单或推荐，支持 MCP 与外挂 Agent 扩展。
+- **🏠 100% 本地与自托管**：导入源严格保持只读，应用独立管理托管副本；所有元数据、向量记忆与收听偏好保存在本地 SQLite，绝不外泄您的本地原音频。
+- **📻 播客与网络电台**：支持订阅 RSS 播客源、后台下载队列与智能零引用垃圾回收，统一跨端播放进度记忆。
+- **📜 极致歌词与沉浸播放**：支持逐行 LRC 滚动歌词、双语歌词对照、动态封面拾色全屏背景，以及拟物化黑胶与磁带播放界面。
+- **📱 全平台覆盖**：除了纯粹高质的 React Web 客户端，还提供了采用 Kotlin / Jetpack Compose 构建的原生 Android 客户端及 iOS 客户端。
 
-0.3.0 补齐 Android 普通／规则歌单编辑、多选、创作角色和收听统计，以及管理员元数据、歌词打点、待整理与任务入口。两端加入整集合跨页播放、睡眠定时、完整原音离线下载、每日推荐、自然语言找歌／歌单预览和显式跨设备接续；网页按账号恢复队列与进度，恢复时暂停，支持循环与随机。入口、容量和断网限制见 [手机使用闭环](docs/product/mobile-completion-0.3.0.md)。
+---
 
-0.3.1 增加网页联网检测与元数据任务进度，Android 可保存多个服务端，独立切换与退出登录，并提供 GitHub Release 更新检查及仓库入口。使用方式、升级与验证边界见 [0.3.1 更新说明](docs/releases/v0.3.1.md)。
+## 路线图 (Roadmap)
 
-0.3.2 支持从歌曲菜单和播放页直接查看所属专辑，统一两端歌曲操作图标、间距与视觉对齐，跳转时保持当前播放和队列。见 [0.3.2 更新说明](docs/releases/v0.3.2.md)。
+野弦致力于打造真正自由、极致轻快且无拘无束的跨平台音乐体验。接下来的核心演进计划：
 
-0.3.3 将 Android 与 Web 曲库改为连续滚动，加入数字／拼音首字母定位，优化专辑与歌曲列表空间；歌曲列表可在设置中选择小、中（推荐）、大，默认中档并记住本机选择。修复播放页进入专辑后的返回路径及统计排序。见 [0.3.3 更新说明](docs/releases/v0.3.3.md)。
+- [ ] **Tauri + Rust 原生桌面客户端**：
+  - **Ubuntu (Linux) 与 Windows 首发**：优先推出官方适配的 Linux (.deb / AppImage) 与 Windows (.msi / 便携版) 客户端；
+  - **极致轻量与极低占用**：彻底告别庞大臃肿的传统 Electron 方案，拥抱 Tauri v2 与 Rust，实现极致精巧的打包体积与毫秒级即时冷启动；
+  - **系统级媒体集成**：深度原生对接 Linux MPRIS 与 Windows SMTC，支持全局多媒体按键、任务栏/托盘常驻控制、锁屏媒体信息与原生通知；
+  - **低延迟音频与硬件直出**：结合 Rust 现代音频技术栈（cpal / rodio），探索 PipeWire / ALSA 及 WASAPI 独占输出管道，保障发烧级无损原音回放。
+- [ ] **本地局域网智能同步与 P2P 预热**：支持手机端与桌面端在同一局域网内免流量高速同步离线音频。
+- [ ] **多模态与更深层次的音乐语义理解**：进一步结合大模型能力深化音色、编曲元素与歌词隐喻的联想探索。
 
-每日推荐默认仅使用本地收藏、收听记录与真实元数据，当天保持稳定，可主动换批并反馈偏好。AI 与 Last.fm 增强默认关闭；显式 AI 查询仅发送有界候选元数据，结果须对应本地真实曲目，预览后确认保存；模型不可用会明确回退为本地检索。推荐不分析或上传原音频。
+---
 
-服务端元数据整理将支持手动/批量编辑、差异预览和显式写回，减少使用 mp3tag 前后下载与上传整首音频的重复传输，见 [整理设计](docs/architecture/metadata-repair.md)。
-
-0.4.0 统一助手、发现和每日推荐的模型连接与额度，按账号结合个人偏好、本服热门和本地探索；另提供可选 Last.fm 库外新音乐建议，便于手动下载与收藏，见[推荐与发现](docs/architecture/recommendations.md)。同时加入内置多轮助手、MCP、站内批准的草案、持久巡检与定时计划、站内通知及可选 Telegram；统一模型／来源网络策略和脱敏日志诊断。同步增加歌单自动离线、下载音质与网络设置、三种跨设备接续模式、任务自动归档和播放器改进。新功能需要同步升级服务端；使用、验证及真机边界见 [0.4.0 发布说明](docs/releases/v0.4.0.md) 与 [Agent / MCP 配置](docs/architecture/agent-platform.md)。
-
-0.5.0 增加聊天联网检索、可点击来源、长对话摘要与可管理的长期记忆，支持 Chat Completions / Responses 及供应商差异适配。同步包含原 0.4.1 的手动 AI 巡检、历史管理修复。请同时升级服务端与 App；搜索需在“联网与记忆”中配置并启用，详见 [0.5.0 发布说明](docs/releases/v0.5.0.md)。
-
-## 本地开发
+## 本地开发与运行
 
 准备 Git、[uv 0.13.1+](https://docs.astral.sh/uv/)、Node 22.12+ 和 Make；容器运行需要 Docker Compose。
 
 ```sh
 make setup         # 安装锁定依赖、创建 .env、安装 Git hook
-make dev           # 终端一：API http://127.0.0.1:18780
-make dev-web       # 终端二：React http://127.0.0.1:18781
+make dev           # 启动后端 API: http://127.0.0.1:18780
+make dev-web       # 启动 Web 前端: http://127.0.0.1:18781
 make import-music  # 从只读源复制到托管库，整理目录并入库
 make scan          # 重扫托管副本
 make admin         # 首次交互设置 admin 密码；修改密码会撤销会话
@@ -85,11 +145,11 @@ make ci            # 提交检查、后端测试、Web 构建、锁文件核验
 
 `make setup` 保留已有 `.env`。通过 `WILDSTRING_MUSIC_DIR` 指向自己的音乐目录；个人曲库、运行数据与模型密钥不入库。
 
-原生 macOS／Linux 后端使用指纹识别时需安装 [Chromaprint 的 fpcalc](https://acoustid.org/chromaprint)，运行 `make fingerprint-check` 核对。Docker 镜像已包含该工具，不需要额外容器；未启用指纹识别时，普通资料查询与播放仍可使用。
+原生 macOS／Linux 后端使用指纹识别时需安装 [Chromaprint 的 fpcalc](https://acoustid.org/chromaprint)，运行 `make fingerprint-check` 核对。Docker 镜像已包含该工具；未启用指纹识别时，普通资料查询与播放仍可正常使用。
 
-仓库根目录 `data/` 已从 Git 和 Docker 构建上下文排除，可存放本地测试音乐。导入使用 `make import-music`；托管副本默认位于 `runtime/library/`。全量重扫使用 `make scan SCAN_ARGS=--full`。按“专辑艺人/专辑/CD01/01 - 歌名”整理副本，保留原件；重复导入不覆盖已有修改，见 [托管规则](contracts/managed-library.md)。
+---
 
-## Docker
+## Docker 容器部署
 
 ```sh
 make docker-up       # 构建、启动并等待健康检查
@@ -98,73 +158,46 @@ make docker-smoke    # 实测 API、Web、FFmpeg、非 root 与只读音乐目�
 make docker-import   # 从只读源导入到持久卷 /data/library
 make docker-scan     # 重扫托管副本
 make docker-admin    # 首次设置容器的 admin 密码
-make docker-status
+make docker-status   # 查看容器健康与运行状态
 make docker-down     # 停止服务，保留数据卷
 ```
 
-容器内包含 Web，访问 [本地野弦](http://127.0.0.1:18780)。默认仅绑定回环地址，导入源只读挂载，托管曲库和运行数据放在持久卷。首次设置管理员后登录；可选在未跟踪的 `.env` 提供 `WILDSTRING_ADMIN_PASSWORD` 仅初始化首次密码，重置使用 Make 命令。HTTPS 部署设置 `WILDSTRING_COOKIE_SECURE=true`。
+容器启动后，在浏览器访问 [本地野弦](http://127.0.0.1:18780)。默认仅绑定宿主机回环地址，导入源只读挂载，托管曲库和数据库保存在持久卷中。HTTPS 生产部署请配置 `WILDSTRING_COOKIE_SECURE=true`。
 
-原音播放遵循浏览器的编码支持；不能解码时有错误提示，可明确选择 AAC 对无损音源转码，MP3/AAC 等有损音源保持直放，见 [AAC 播放](contracts/playback-transcoding.md)。封面优先内嵌正面图片，再读同名图片或目录 cover/folder/front；人工编辑优先于文件歌词，同名 LRC 优先于内嵌歌词，点击底栏封面可展开全屏播放，支持逐行滚动与点击跳转；点击收起或按 Esc 返回，播放继续。见 [封面、专辑和歌词](contracts/local-library-assets.md)。收藏与歌单会持久保存，规则歌单支持按艺人、收藏、播放次数和累计收听等条件自动筛选；见 [个人曲库功能](contracts/personal-library.md)。网页队列、进度和播放模式按账号保存在当前浏览器；跨设备可选择关闭、询问或自动暂停恢复，仍保留手动共享与继续入口。见 [播放与认证接口](contracts/playback-auth-api.md)。管理功能与 AI 连接设置见 [曲库管理](contracts/library-management.md)。
+---
 
-网页支持浅色、深色和跟随系统；全屏背景按专辑封面取色。管理员可编辑歌词、跟随播放逐行打点并导出 LRC，见 [歌词制作](contracts/lyrics-editing.md)。管理员创建/停用用户、重置密码，所有用户可改自己的密码，收藏与歌单按用户隔离。Host 白名单默认关闭，启用前请核对访问主机；误配置后只能直接修改数据库关闭，见 [账号、权限与恢复](contracts/users-and-access.md)。
-
-## 分支与提交规范
-
-`main` 为默认集成分支，日常开发从最新 `main` 创建短期分支，通过 PR 合并；暂不设长期 `develop` 分支。
-
-| 前缀 | 用途 | 示例 |
-| --- | --- | --- |
-| `feat/` | 新功能 | `feat/ai-playlists` |
-| `fix/` | 缺陷修复 | `fix/audio-range` |
-| `docs/` | 文档 | `docs/provider-research` |
-| `chore/` | 工程、依赖、CI | `chore/update-python-deps` |
-| `refactor/` | 保持行为的重构 | `refactor/library-scanner` |
-| `test/` | 测试与测试样本 | `test/chinese-track-matching` |
-
-主题使用简短英文小写与连字符；需要关联 Issue 时可用 `feat/123-ai-playlists`。一个分支聚焦一项工作，合并后删除。只有需要版本稳定维护时才使用 `release/0.1`，不为每次发布强制建立发布分支。
-
-提交建议采用 `type(scope): description`，例如 `feat(ai): add playlist preview`、`docs: explain project naming`。PR 前运行 `make ci`；修改运行或部署行为时同时验证 Docker。
-
-发布使用 `v0.1.0`、`v0.1.0-rc.1` 等 **Git 标签与 GitHub Release**，与开发分支分别管理。这些是协作约定，仓库级分支保护另行配置。
-
-## CI/CD
-
-- `main` 提交和 PR：检查、测试、Web 构建与容器实测。
-- [Security and quality](https://github.com/qingmuhy744/wildstring/security)：CodeQL 安全与质量扫描、PR 依赖审查、Dependabot 更新、Android 依赖图及密钥保护；范围与套餐限制见 [GitHub 安全配置](docs/architecture/github-security.md)，漏洞请按 [安全政策](SECURITY.md) 私密报告。
-- 推送 `vX.Y.Z` 标签：完整检查、Android 功能测试与正式包安装检查通过后，发布 amd64/arm64 镜像到 `ghcr.io/qingmuhy744/wildstring`，自动创建包含签名 APK、Web ZIP、QQ／酷狗／网易云数据源插件 ZIP、公开签名指纹与 `SHA256SUMS` 的 GitHub Release。
-- 正式 Release 更新 `latest`；预发布保留独立版本标签。
-- Android [Kotlin/Compose/Media3 原生客户端](frontend/android/README.md) 已接入真实曲库、后台播放与手机/平板歌词布局。显示名称「野弦」，正式包名 `com.wildstring.app`；签名 APK 从 [Releases](https://github.com/qingmuhy744/wildstring/releases) 直接下载。`make android-ci` 和独立 **Android APK** 工作流继续提供开发用 debug 包。IPA 和桌面安装包后续交付。
-
-见 [开发与部署](docs/development.md)、[发布流程](docs/releasing.md) 和 [更新记录](CHANGELOG.md)。功能批次先写入「未发布」，核对后由用户确定版本号再更新 App。
-
-## 目录
+## 目录结构
 
 ```text
-backend/          Python 项目、src/wildstring、测试与 uv.lock
-frontend/web/     React + TypeScript + Vite 与 package-lock.json
-contracts/        后续 API 契约与结构化 AI 工具定义
-docs/             产品、架构、调研、技术决策与工程说明
-deploy/           Dockerfile 与 Compose
-scripts/          初始化、全量 hooks 检查与发布打包
-tests/fixtures/   后续使用的合法测试样本
+backend/          Python 3.12 项目、FastAPI 后端、测试与 uv.lock
+frontend/web/     React 19 + TypeScript + Vite 网页端
+frontend/macos/   SwiftUI + AppKit 原生 Mac 客户端
+frontend/android/ Kotlin + Jetpack Compose + Media3 原生客户端
+frontend/ios/     SwiftUI 原生客户端
+contracts/        API 契约、元数据与结构化工具规范
+docs/             产品范围、架构设计、技术决策与开发说明
+deploy/           生产 Dockerfile 与 Compose 配置
+scripts/          工程初始化、代码审查与发布打包脚本
 ```
 
-[组件分工](docs/architecture/components.md) · [技术决策](docs/decisions/0001-python-web-foundation.md) · [AI／MCP／日志与通知开发计划](docs/product/agent-mcp-observability-notifications-plan.md)（待分阶段开发） · [原始讨论](docs/research/README.md)
+---
 
-## 致谢
+## 开源社区致谢
 
-感谢以下项目的作者、贡献者和维护者。野弦的数据源插件与歌词处理建立在这些社区工作的基础上：
+野弦的数据源插件与歌词处理建立在以下开源项目与社区贡献者的辛勤付出之上：
 
 | 项目 | 在野弦中的用途 |
 | --- | --- |
 | [QQMusicApi](https://github.com/L-1124/QQMusicApi) | QQ 音乐插件使用的歌曲、专辑、封面与歌词接口 |
 | [KuGouMusicApi](https://github.com/MakcRe/KuGouMusicApi) | 酷狗插件内置的元数据与歌词接口模块 |
-| [NeteaseCloudMusicApiEnhanced](https://github.com/NeteaseCloudMusicApiEnhanced/api-enhanced) | 网易云插件内置的元数据与歌词接口模块，亦感谢其上游 NeteaseCloudMusicApi 的贡献者 |
+| [NeteaseCloudMusicApiEnhanced](https://github.com/NeteaseCloudMusicApiEnhanced/api-enhanced) | 网易云插件内置的元数据与歌词接口模块，亦感谢其上游贡献者 |
 | [LDDC](https://github.com/chenmozhijin/LDDC) | QRC／KRC／YRC 歌词格式解析与逐字时间轴处理的参考 |
-| [commonmark-java](https://github.com/commonmark/commonmark-java)／[react-markdown](https://github.com/remarkjs/react-markdown) | Android 与网页助手回答的 Markdown 解析及渲染 |
+| [commonmark-java](https://github.com/commonmark/commonmark-java)／[react-markdown](https://github.com/remarkjs/react-markdown) | Android 与网页端助手回答的 Markdown 解析与渲染 |
 
-也感谢 [MusicBrainz](https://musicbrainz.org/)、[Cover Art Archive](https://coverartarchive.org/)、[AcoustID／Chromaprint](https://acoustid.org/)、[Last.fm](https://www.last.fm/api) 提供音乐资料、封面、音频指纹及收听记录服务，以及 [FFmpeg](https://ffmpeg.org/) 提供音频转换与响度分析能力。响度均衡与专辑／单曲调整的使用体验参考了 [foobar2000](https://www.foobar2000.org/) 的 ReplayGain 功能。
+同时衷心感谢 [MusicBrainz](https://musicbrainz.org/)、[Cover Art Archive](https://coverartarchive.org/)、[AcoustID](https://acoustid.org/)、[Last.fm](https://www.last.fm/api) 及 [FFmpeg](https://ffmpeg.org/) 提供的音频与元数据能力支持。
 
-第三方项目保留各自的许可证与版权声明；插件中的上游来源、许可证及依赖说明见随包文件和[插件文档](docs/architecture/source-plugins.md)。
+---
 
-许可证沿用仓库已有的 [GPLv3](LICENSE)。
+## 许可证
+
+本项目沿用 [GNU General Public License v3.0 (GPLv3)](LICENSE)。

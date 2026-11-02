@@ -1069,7 +1069,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
     <>
       <div className="app-shell" inert={lyricsOpen} aria-hidden={lyricsOpen || undefined}>
         <aside className="sidebar">
-          <Brand />
+          <Brand onClick={() => switchView('discover')} />
           <nav aria-label={t('nav.main')} className="sidebar-navigation">
             <p className="sidebar-group-label">{t('nav.discoverGroup')}</p>
             {(['discover', 'podcasts', 'assistant'] as View[]).map(nav)}
