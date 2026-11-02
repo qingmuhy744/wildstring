@@ -663,7 +663,8 @@ public final class PlaybackService {
         autoplay: Bool,
         startAt: Double
     ) {
-        let asset = AVURLAsset(url: url)
+        let options = [AVURLAssetPreferPreciseDurationAndTimingKey: true]
+        let asset = AVURLAsset(url: url, options: options)
         if !url.isFileURL {
             asset.resourceLoader.setDelegate(resourceLoader, queue: resourceLoader.callbackQueue)
         }
@@ -724,7 +725,10 @@ public final class PlaybackService {
         // own queue, which traps in `_dispatch_assert_queue_fail`.
         let box = PlaybackServiceBox(self)
         let item = CallbackRef(value: playerItem)
-        itemObservations = [observeItemStatus(item, box: box)]
+        itemObservations = [
+            observeItemStatus(item, box: box),
+            observeItemDuration(item, box: box),
+        ]
         if timeControlObservation == nil {
             timeControlObservation = observeTimeControl(CallbackRef(value: player), box: box)
         }
@@ -734,6 +738,15 @@ public final class PlaybackService {
         endObserver = observeItemEnded(item, box: box)
         if timeObserverToken == nil {
             timeObserverToken = observePlaybackTicks(CallbackRef(value: player), box: box)
+        }
+    }
+
+    fileprivate func itemDurationChanged() {
+        guard durationOverrideSeconds == nil || durationOverrideSeconds == 0 else { return }
+        let itemDuration = player.currentItem?.duration.seconds ?? 0
+        if itemDuration.isFinite, itemDuration > 0, itemDuration != duration {
+            duration = itemDuration
+            updateSystemNowPlaying()
         }
     }
 
@@ -806,6 +819,13 @@ public final class PlaybackService {
     fileprivate func handleTick(seconds: Double) {
         guard pendingSeek == nil, player.currentItem != nil, seconds.isFinite else { return }
         currentTime = transcodeBaseSeconds + seconds
+        if duration <= 0, durationOverrideSeconds == nil,
+            let itemDuration = player.currentItem?.duration.seconds,
+            itemDuration.isFinite, itemDuration > 0
+        {
+            duration = itemDuration
+            updateSystemNowPlaying()
+        }
         secondsSinceCheckpoint += 1
         if secondsSinceCheckpoint >= 5 {
             secondsSinceCheckpoint = 0
@@ -1002,6 +1022,19 @@ private func observeItemStatus(
         Task { @MainActor in
             guard let service, service.player.currentItem === item.value else { return }
             service.itemStatusChanged(status: item.value.status, error: item.value.error)
+        }
+    }
+}
+
+private func observeItemDuration(
+    _ item: CallbackRef<AVPlayerItem>,
+    box: PlaybackServiceBox
+) -> NSKeyValueObservation {
+    item.value.observe(\.duration, options: [.initial, .new]) { _, _ in
+        let service = box.service
+        Task { @MainActor in
+            guard let service, service.player.currentItem === item.value else { return }
+            service.itemDurationChanged()
         }
     }
 }
