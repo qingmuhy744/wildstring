@@ -65,7 +65,7 @@ struct MacHomeView: View {
                         }
                         Spacer()
                         Button("搜索曲库", systemImage: "magnifyingglass") {
-                            session.page = .tracks
+                            session.page = .search
                             session.focusLibrarySearch = true
                         }.controlSize(.large)
                     }

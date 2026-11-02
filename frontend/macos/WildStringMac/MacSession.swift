@@ -39,6 +39,7 @@ private final class MacDebugSessionStore: SessionStore, @unchecked Sendable {
 
 enum MacPage: String, Identifiable, Hashable {
     case home
+    case search
     case tracks
     case albums
     case artists
@@ -64,6 +65,7 @@ enum MacPage: String, Identifiable, Hashable {
     var title: String {
         switch self {
         case .home: return "首页"
+        case .search: return "搜索"
         case .tracks: return "全部歌曲"
         case .albums: return "专辑"
         case .artists: return "艺人"
@@ -84,6 +86,7 @@ enum MacPage: String, Identifiable, Hashable {
     var symbol: String {
         switch self {
         case .home: return "house"
+        case .search: return "magnifyingglass"
         case .tracks: return "music.note"
         case .albums: return "square.stack"
         case .artists: return "person.2"

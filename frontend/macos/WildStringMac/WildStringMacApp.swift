@@ -38,13 +38,14 @@ private struct MacMenus: Commands {
         CommandGroup(after: .textEditing) {
             Divider()
             Button("搜索曲库") {
-                navigate(.tracks)
+                navigate(.search)
                 session.focusLibrarySearch = true
             }.keyboardShortcut("f", modifiers: .command).disabled(session.client == nil)
         }
         CommandMenu("前往") {
             Group {
             Button("首页") { navigate(.home) }.keyboardShortcut("0", modifiers: .command)
+            Button("搜索") { navigate(.search) }.keyboardShortcut("f", modifiers: [.command, .shift])
             Button("全部歌曲") { navigate(.tracks) }.keyboardShortcut("1", modifiers: .command)
             Button("专辑") { navigate(.albums) }.keyboardShortcut("2", modifiers: .command)
             Button("艺人") { navigate(.artists) }.keyboardShortcut("3", modifiers: .command)

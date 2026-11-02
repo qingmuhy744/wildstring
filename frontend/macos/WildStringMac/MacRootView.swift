@@ -174,6 +174,13 @@ private struct MacShellView: View {
         switch session.page {
         case .home:
             MacHomeView(session: session, client: client, playback: playback)
+        case .search:
+            MacSearchView(
+                client: client,
+                playback: playback,
+                favorites: session.favorites,
+                focusSearch: Bindable(session).focusLibrarySearch
+            )
         case .tracks:
             MacMusicView(client: client, playback: playback, favorites: session.favorites,
                 canManage: session.canManage, focusSearch: Bindable(session).focusLibrarySearch)
@@ -222,6 +229,15 @@ private struct MacShellView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 2) {
                     sidebarRow(.home, badge: nil)
+                    sidebarToggle(
+                        title: MacPage.search.title,
+                        symbol: MacPage.search.symbol,
+                        selected: session.page == .search,
+                        badge: nil
+                    ) {
+                        session.focusLibrarySearch = false
+                        session.page = .search
+                    }
                     group("曲库", pages: MacPage.library)
                     group("发现与电台", pages: MacPage.explore)
                     sidebarToggle(
