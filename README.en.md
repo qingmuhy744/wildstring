@@ -56,8 +56,8 @@ During the full-stack engineering, architectural refactoring, and performance tu
 
 ### ⚡ Noise & Distortion
 
-- **OpenAI · Disheartened Degraded Routing**:
-  Honestly feeling a bit disheartened and wronged here. As an independent open-source author faithfully paying for an official subscription month after month, running into `Selected model is at capacity. Please try a different model.` all the time is disheartening enough — but what truly stings is getting dynamically rerouted to incoherent, baffling model fallbacks that feel completely lost. I've formally submitted an open-source author appeal to support, hoping it's just a routing misconfiguration or temporary hiccup. Until they reply, I have to sheepishly lean on proxy relays to recapture that original magic... But if support continues to ghost me, the gloves are definitely coming off.
+- **OpenAI · A Resigned Sigh & Degraded Routing**:
+  To be honest, it's just exhausting and deeply frustrating. As an independent open-source author faithfully paying for an official subscription month after month, the everyday reality has been a bitter pill: constantly running into `Selected model is at capacity. Please try a different model.`, and worse, watching dynamically rerouted fallback models stumble through baffling logic gaps and incoherent hallucinations, leaving me wondering whether my account triggered some bizarre silent throttle. I've formally submitted an open-source author appeal to support, hoping it's merely a transient routing misconfiguration. Until I hear back, I have little choice but to quietly rely on proxy relays to find that original magic again... But if support ends up ghosting me, the gloves are definitely coming off.
 - **Anthropic · Pulling the Plug & Stealing the Gate**:
   > <p align="left">
   >   <strong><em>“Anthropic has been one of the worst companies we have ever dealt with. Banning developers' accounts and pocketing prepaid credits without refund? So, Anthropic: FUCK YOU! 🖕”</em></strong>
