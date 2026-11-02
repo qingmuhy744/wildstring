@@ -21,7 +21,7 @@
     "module/lyric.js": "ee5061626604cdc8d30202bb3c07f013da3228331b9b57e48206bcaf011525c8",
     "module/search.js": "9f196d05ee8b99fceccba855665f20f159db24ef35e8874e8fcac340b86be2c6",
     "module/search_lyric.js": "816568dce64dd3cc8c52657ddcd12d30e3c0a59dd78049bb29bb707b531607e3",
-    "package.json": "967b83d0f3f3476ec162e04a9208be34ec0d74433c2f8a136919873624c8e019",
+    "package.json": "7065fd30d6e527cb71dc02d000dbdaa781eec4623ecf56bcff444a510787e5b9",
     "util/config.json": "727849283405bdd29ac57159f1c48e36c258386cbb20f37c7afe5d51e5c955d1",
     "util/crypto.js": "46a1ed53b72456612982351424c189cb1282172ec944672a5a6bbba4d7081edb",
     "util/helper.js": "0983e1e1bff119d5412bf696a46f99f36d9591a1fd3c49c8fa3123e25540545a",
@@ -31,6 +31,6 @@
     "util/util.js": "d9e56bc04072fff7c07c75d80737b267df5245742c3aa0484e2ac50282bbab5d"
   },
   "dependency_overrides": {
-    "pako": "^3.0.2"
+    "pako": "^3.0.3"
   }
 }
