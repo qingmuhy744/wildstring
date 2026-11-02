@@ -57,7 +57,7 @@ During the full-stack engineering, architectural refactoring, and performance tu
 ### ⚡ Noise & Distortion
 
 - **OpenAI · Brain Fog & Drooling Fallbacks**:
-  From day-one magic degraded into a low-tier lottery. Everyday greets you with `Selected model is at capacity. Please try a different model.` — and whatever gets routed to my account feels like it's literally drooling and suffering severe brain freeze. Gatekeeping tiers while delivering incoherent babble.
+  From day-one magic degraded into a low-tier lottery. Paying full price for an official subscription only to be greeted daily by `Selected model is at capacity. Please try a different model.` — while whatever fallback gets dynamically routed to my account feels like it's literally drooling and suffering severe brain damage. Gatekeeping tiers and turning AI into a rigged lottery. If official channels won't respect paying users, fine: I'm switching straight to reverse proxy relays to win back that breathtaking "first love" magic!
 - **Anthropic · Pulling the Plug & Stealing the Gate**:
   > <p align="left">
   >   <strong><em>“Anthropic has been one of the worst companies we have ever dealt with. Banning developers' accounts and pocketing prepaid credits without refund? So, Anthropic: FUCK YOU! 🖕”</em></strong>
