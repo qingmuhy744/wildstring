@@ -50,7 +50,7 @@
 </p>
 
 - 感谢 **[Google Gemini](https://gemini.google.com/)**：强大的长上下文理解、跨模块架构推理以及高质量的代码生成能力，支撑了整个复杂系统从底层存储模型到现代 Web 前端的流畅构建。感谢 Gemini，Google Don't Be Evil！Google Cool！Geek Google！
-- 感谢 **[DeepSeek](https://www.deepseek.com/)**：惊艳的代码逻辑推理、高一致性与稳健表现，在诸多关键算法和疑难问题上提供了极具价值的帮助。
+- 感谢 **[DeepSeek](https://www.deepseek.com/)**：惊艳的代码逻辑推理、高一致性与稳健表现。在 Claude 账号被封禁、OpenAI 疯狂暗削并把我动态路由到莫名其妙的模型之后，是 DeepSeek 带来了闪电般的极速体验与始终如一的稳定输出，在诸多关键算法和疑难问题上提供了极具价值的突破。再也不用写一会儿代码就得测一下模型有没有在演我、陷入无休止的“模型狼人杀”了！
 
 ---
 

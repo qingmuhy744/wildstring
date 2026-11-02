@@ -50,7 +50,7 @@ During the full-stack engineering, architectural refactoring, and performance tu
 </p>
 
 - Thanks to **[Google Gemini](https://gemini.google.com/)**: Exceptional long-context comprehension, holistic cross-module reasoning, and rock-solid code generation capabilities that powered the seamless development of our distributed audio system and modern web interface. Huge thanks to Gemini — Google Don't Be Evil! Google Cool! Geek Google!
-- Thanks to **[DeepSeek](https://www.deepseek.com/)**: Mind-blowing algorithmic reasoning, razor-sharp consistency, and unwavering performance in tackling tricky edge cases and complex state transitions.
+- Thanks to **[DeepSeek](https://www.deepseek.com/)**: Mind-blowing algorithmic reasoning, razor-sharp consistency, and rock-solid stability. After Claude suspended my account and OpenAI relentlessly nerfed and routed me to whatever degraded models they felt like, DeepSeek stepped in with lightning-fast inference and rock-steady intelligence. Invaluable in cracking complex algorithms and architectural edge cases — no more writing code for five minutes only to stop and play a paranoid game of "AI Werewolf" just to verify whether the model is secretly playing dumb!
 
 ---
 
