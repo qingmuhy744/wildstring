@@ -2,9 +2,14 @@
 
 import subprocess
 import time
+import xml.etree.ElementTree as ElementTree
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+CONNECTION_COPY = (
+    ("连接自己的音乐收藏", "连接并登录"),
+    ("Connect to your music collection", "Connect & sign in"),
+)
 
 
 def adb(*arguments: str) -> bytes:
@@ -26,9 +31,11 @@ def main() -> None:
         adb("shell", "uiautomator", "dump", "/sdcard/wildstring-release-smoke.xml")
         xml = adb("exec-out", "cat", "/sdcard/wildstring-release-smoke.xml")
         (output / "connection.xml").write_bytes(xml)
-        text = xml.decode("utf-8")
-        if "连接自己的音乐收藏" in text and "连接并登录" in text:
-            if "允许本机调试 HTTP" in text:
+        # The hierarchy is produced locally by adb, not received from the app or network.
+        root = ElementTree.fromstring(xml)  # nosec B314
+        texts = {node.get("text") for node in root.iter() if node.get("text")}
+        if any(set(labels).issubset(texts) for labels in CONNECTION_COPY):
+            if {"允许本机调试 HTTP", "Allow local debug HTTP"} & texts:
                 raise RuntimeError("Debug-only HTTP control leaked into the release")
             (output / "connection.png").write_bytes(adb("exec-out", "screencap", "-p"))
             print("Signed release installed and rendered the real connection UI")
