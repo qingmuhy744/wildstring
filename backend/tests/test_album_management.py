@@ -53,9 +53,10 @@ def test_album_management_metadata_and_cover(settings, authenticated_client):
         assert update_res.status_code == 200
         assert update_res.json()["updated"] == 2
 
-        # 重新获取新 album_id 下的元数据
+        # 重新获取新 album_id 下的元数据，并核验 update 接口返回的 album_id 已同步更新
         new_albums = client.get("/api/v1/albums").json()["items"]
         new_album_id = new_albums[0]["id"]
+        assert update_res.json()["album_id"] == new_album_id
         updated_data = client.get(f"/api/v1/manage/metadata/albums?album_id={new_album_id}").json()
         assert updated_data["primary_title"] == "新长征路上的摇滚 (特别版)"
         assert updated_data["label"] == "中国旅游声像出版社"
@@ -123,4 +124,18 @@ def test_album_update_with_null_and_empty_fields(settings, authenticated_client)
             },
         )
         assert res.status_code == 200
+        assert res.json()["album_id"] != album_id
+
+        # 验证返回的新 album_id 可以直接用于上传封面，且不会报错 404 album_not_found
+        new_album_id = res.json()["album_id"]
+        cover_bytes = _sample_cover()
+        upload_res = client.post(
+            f"/api/v1/manage/albums/{new_album_id}/cover",
+            headers=HEADERS,
+            files={"file": ("new_cover.jpg", cover_bytes, "image/jpeg")},
+            data={"save_sidecar": "true"},
+        )
+        assert upload_res.status_code == 200
+        assert upload_res.json()["album_id"] == new_album_id
+        assert upload_res.json()["tracks_updated"] == 1
         assert res.json()["updated"] == 1

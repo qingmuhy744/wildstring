@@ -1974,12 +1974,13 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
           albumId={editingAlbum.id}
           initialTitle={editingAlbum.title}
           onClose={() => setEditingAlbum(null)}
-          onSaved={async () => {
+          onSaved={async (savedAlbumId?: string) => {
             refreshLibrary();
             setRevision((v) => v + 1);
-            if (album && album.id === editingAlbum.id) {
+            const targetId = savedAlbumId || editingAlbum.id;
+            if (album && (album.id === editingAlbum.id || album.id === targetId)) {
               try {
-                const updated = await api<Album>(`/albums/${encodeURIComponent(editingAlbum.id)}`);
+                const updated = await api<Album>(`/albums/${encodeURIComponent(targetId)}`);
                 setAlbum(updated);
               } catch {
                 // ignore

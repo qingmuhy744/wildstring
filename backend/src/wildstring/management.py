@@ -747,7 +747,12 @@ class Management:
                     user_id=user_id,
                     source="album-batch",
                 )
-        return {"album_id": body.album_id, "updated": len(requested)}
+            first_track_id = next(iter(requested.keys()))
+            new_album_row = connection.execute(
+                "SELECT album_id FROM tracks WHERE id=?", (first_track_id,)
+            ).fetchone()
+            new_album_id = new_album_row["album_id"] if new_album_row else body.album_id
+        return {"album_id": new_album_id, "updated": len(requested)}
 
     def link(self, job_id, *, import_id=None, scan_id=None):
         with self.database.connect(write=True) as connection:
