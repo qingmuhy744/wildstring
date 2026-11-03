@@ -16,10 +16,11 @@ struct MacAssistantView: View {
     var body: some View {
         VStack(spacing: 0) {
             conversationHeader
-            Divider()
+            Rectangle().fill(MacTheme.border).frame(height: 1)
             messages
             composer
         }
+        .background(MacTheme.canvas)
         .navigationTitle("音乐助手")
         .toolbar {
             Button {
@@ -120,6 +121,7 @@ struct MacAssistantView: View {
         }
         .padding(.horizontal, 24)
         .padding(.vertical, 16)
+        .background(MacTheme.panel)
     }
 
     private var messages: some View {
@@ -182,14 +184,19 @@ struct MacAssistantView: View {
     private var welcome: some View {
         VStack(alignment: .leading, spacing: 18) {
             Image(systemName: "sparkles")
-                .font(.system(size: 32)).foregroundStyle(MacTheme.accentDeep)
-            Text("今天想听什么？").font(.largeTitle.bold())
+                .font(.system(size: 22, weight: .medium))
+                .foregroundStyle(MacTheme.accentDeep)
+                .frame(width: 44, height: 44)
+                .background(MacTheme.accentSoft, in: Circle())
+            Text("今天想听什么？")
+                .font(MacTheme.display(32))
+                .foregroundStyle(MacTheme.ink)
             Text(
                 model.connectionID == "local"
                     ? "输入歌名、艺人或专辑，直接检索当前曲库。选择上方的模型连接后，可以用自然语言描述心情、场景或歌单要求。"
                     : "描述你的想法，助手会查找真实曲目并说明依据。生成的歌单可先试听，再确认保存。"
             )
-            .font(.callout).foregroundStyle(.secondary).lineSpacing(5)
+            .font(MacTheme.caption).foregroundStyle(MacTheme.muted).lineSpacing(5)
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: 10) { suggestions }
                 VStack(alignment: .leading, spacing: 10) { suggestions }
@@ -240,7 +247,7 @@ struct MacAssistantView: View {
             .padding(message.isUser ? 16 : 0)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
-                message.isUser ? MacTheme.accent.opacity(0.12) : .clear,
+                message.isUser ? MacTheme.accentSoft : .clear,
                 in: RoundedRectangle(cornerRadius: 14))
             if !message.isUser { Spacer(minLength: 30) }
         }
@@ -267,8 +274,8 @@ struct MacAssistantView: View {
                 .focused($inputFocused)
                 .disabled(model.isSending || model.running)
                 .padding(13)
-                .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 12))
-                .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.separator.opacity(0.5)))
+                .background(MacTheme.raised, in: RoundedRectangle(cornerRadius: 12))
+                .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(MacTheme.border))
                 Button {
                     Task { await model.send() }
                 } label: {
@@ -294,7 +301,10 @@ struct MacAssistantView: View {
         .padding(.horizontal, 28)
         .padding(.vertical, 16)
         .frame(maxWidth: .infinity)
-        .background(.bar)
+        .background(MacTheme.panel)
+        .overlay(alignment: .top) {
+            Rectangle().fill(MacTheme.border).frame(height: 1)
+        }
     }
 
     private var history: some View {

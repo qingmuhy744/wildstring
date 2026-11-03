@@ -117,6 +117,7 @@ private struct MacShellView: View {
     @State private var libraries: [MusicLibrary] = []
     @State private var navigationPath = NavigationPath()
     @Environment(\.colorScheme) private var colorScheme
+    @AppStorage("macAppearance") private var appearance = "system"
 
     private var sidebarBackground: Color {
         colorScheme == .dark
@@ -338,6 +339,7 @@ private struct MacShellView: View {
             }
             Rectangle().fill(sidebarBorder).frame(height: 1)
             VStack(alignment: .leading, spacing: 2) {
+                appearancePicker
                 if session.canManage {
                     sidebarRow(.manage, badge: nil)
                 }
@@ -358,6 +360,24 @@ private struct MacShellView: View {
         }
         .frame(width: 228)
         .background(sidebarBackground)
+    }
+
+    private var appearancePicker: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("外观")
+                .font(MacTheme.micro)
+                .foregroundStyle(sidebarFaint)
+                .padding(.horizontal, 10)
+            Picker("外观", selection: $appearance) {
+                Text("自动").tag("system")
+                Text("浅色").tag("light")
+                Text("深色").tag("dark")
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .padding(.horizontal, 10)
+        }
+        .padding(.bottom, 4)
     }
 
     private func group(_ title: String, pages: [MacPage]) -> some View {
