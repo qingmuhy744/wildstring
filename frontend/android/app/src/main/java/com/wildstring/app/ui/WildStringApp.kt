@@ -810,9 +810,9 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
             "metadata-center", "metadata-review" -> { feature = "management"; featureBatchId = batchId }
             "lyric-scan" -> { feature = "lyric-scans"; featureBatchId = batchId }
             // Features are dialogs above the shell, so close the dialog before expanding the player.
-            "player" -> {
+            "player", "queue" -> {
                 playerReturnFeature = feature; feature = null
-                playerReturnDepth = -1; playerFromSettings = false; expanded = true; lyrics = false; queue = false
+                playerReturnDepth = -1; playerFromSettings = false; expanded = true; lyrics = false; queue = target == "queue"
             }
         }
     }

@@ -297,7 +297,7 @@ class MobileCompletionTest {
                 compose.onNodeWithText(uiString(R.string.daily_recommendations), substring = false).performClick()
                 compose.waitUntil(10_000) { compose.onAllNodesWithTag("daily-track-completion-0").fetchSemanticsNodes().isNotEmpty() }
                 capture("mobile-daily.png")
-                compose.onNodeWithText("保存歌单").performClick()
+                compose.onNodeWithTag("daily-save").performClick()
                 compose.waitUntil(10_000) { fixture.mutations.any { it.first.endsWith("/playlists/manual/tracks") } }
                 compose.onAllNodesWithContentDescription(uiString(R.string.back)).onLast().performClick()
                 compose.waitUntil(10_000) { compose.onAllNodesWithTag("feature-daily").fetchSemanticsNodes().isEmpty() }

@@ -90,7 +90,7 @@ internal fun FeatureDialog(vm: MusicViewModel, route: String, track: Track? = nu
                         "suggestions" -> Text(stringResource(R.string.metadata_review_on_web), Modifier.padding(24.dp))
                         "research" -> AgentResearch(vm)
                         "channels" -> AgentChannels(vm)
-                        "daily" -> DailyPanel(vm) { onOpenAction("player", null) }
+                        "daily" -> DailyPanel(vm, openPlayer = { onOpenAction("player", null) }, openQueue = { onOpenAction("queue", null) })
                         "rankings" -> RankingsPanel(vm)
                         "external" -> ExternalMusicPanel(vm)
                         "ai" -> AiPanel(vm)

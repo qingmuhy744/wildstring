@@ -1,6 +1,8 @@
 @file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 package com.wildstring.app.ui
 
+import android.text.format.DateFormat
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
@@ -12,6 +14,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material.icons.automirrored.filled.PlaylistPlay
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material3.*
@@ -19,21 +23,29 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.google.gson.JsonObject
+import com.wildstring.app.R
 import com.wildstring.app.data.*
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
 
-internal val recommendationSourceLabels = linkedMapOf("personal" to "我常听", "community" to "大家常听", "discovery" to "本地探索", "revisit" to "很久没听",
-    "lastfm_similar" to "Last.fm 相似", "lastfm_charts" to "Last.fm 公共榜单", "lastfm_tags" to "Last.fm 公共标签")
-internal fun recommendationSource(id: String): String = recommendationSourceLabels[id] ?: if (id == "ai") "AI" else id
+internal val recommendationSourceLabels = linkedMapOf("personal" to R.string.recommendation_source_personal, "community" to R.string.recommendation_source_community,
+    "discovery" to R.string.recommendation_source_discovery, "revisit" to R.string.recommendation_source_revisit,
+    "lastfm_similar" to R.string.recommendation_source_lastfm_similar, "lastfm_charts" to R.string.recommendation_source_lastfm_charts, "lastfm_tags" to R.string.recommendation_source_lastfm_tags)
+@Composable internal fun recommendationSource(id: String): String = recommendationSourceLabels[id]?.let { stringResource(it) } ?: if (id == "ai") "AI" else id
 internal fun recommendationIssue(code: String): String = when {
     code.contains("budget") -> "AI 预算不足，保留本地结果"
     code.contains("connection") || code.contains("not_found") -> "所选连接不可用，保留本地结果"
@@ -55,8 +67,9 @@ internal fun recommendationIssue(code: String): String = when {
     }
 }
 
-@Composable internal fun DailyPanel(vm: MusicViewModel, openPlayer: () -> Unit) {
+@Composable internal fun DailyPanel(vm: MusicViewModel, openPlayer: () -> Unit, openQueue: () -> Unit) {
     val current by vm.state.collectAsStateWithLifecycle()
+    val resources = LocalResources.current
     val scope = rememberCoroutineScope(); val action = remember { FeatureAction() }
     var daily by remember { mutableStateOf<DailyRecommendations?>(null) }
     var preferences by remember { mutableStateOf<RecommendationPreferences?>(null) }
@@ -65,6 +78,7 @@ internal fun recommendationIssue(code: String): String = when {
     var settings by remember { mutableStateOf(false) }; var rankings by remember { mutableStateOf(false) }; var external by remember { mutableStateOf(false) }
     var rejected by remember { mutableStateOf(setOf<String>()) }
     var evidence by remember { mutableStateOf(false) }
+    var panelMenu by remember { mutableStateOf(false) }
     var trackMenu by remember { mutableStateOf<String?>(null) }
     var selecting by remember { mutableStateOf(false) }
     var selectedIds by remember { mutableStateOf(setOf<String>()) }
@@ -97,112 +111,158 @@ internal fun recommendationIssue(code: String): String = when {
     }; return }
     val entries = daily?.items.orEmpty().filter { it.track.id !in rejected }
     val selectedTracks = entries.map { it.track }.filter { it.id in selectedIds }
-    fun selectTrack(id: String) { selectedIds = if (id in selectedIds) selectedIds - id else selectedIds + id }
-    fun enqueue(tracks: List<Track>, next: Boolean = false) {
-        if (vm.addToQueue(tracks, next)) {
-            action.message = "已将 ${tracks.size} 首${if (next) "安排为接下来播放" else "加入播放队列"}"
-            selecting = false; selectedIds = emptySet()
-        } else action.message = "未能加入播放队列，请检查播放器或队列容量。"
+    fun endSelection() { selecting = false; selectedIds = emptySet() }
+    // Long press starts a selection; clearing the last pick leaves it.
+    fun selectTrack(id: String) {
+        selectedIds = if (id in selectedIds) selectedIds - id else selectedIds + id
+        selecting = selectedIds.isNotEmpty()
     }
+    fun enqueue(tracks: List<Track>, next: Boolean = false) {
+        action.message = if (vm.addToQueue(tracks, next)) {
+            endSelection(); resources.getString(if (next) R.string.daily_queued_next else R.string.daily_queued, tracks.size)
+        } else resources.getString(R.string.daily_queue_failed)
+    }
+    BackHandler(enabled = selecting) { endSelection() }
     Column(Modifier.fillMaxSize()) {
-    LazyColumn(Modifier.weight(1f).fillMaxWidth().testTag("daily-recommendations"), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    LazyColumn(Modifier.weight(1f).fillMaxWidth().testTag("daily-recommendations"), contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         item {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text("属于你的每日推荐", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
-                IconButton({ action.message = null; settings = true }, enabled = preferences != null, modifier = Modifier.testTag("recommendation-settings")) { Icon(Icons.Default.Tune, "推荐设置") }
-            }
-            Text("${entries.size} 首 · 今日的临时歌单", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Row {
-                TextButton({ scope.launch { action.run { batch++; daily = vm.repository.daily(refresh = true); rejected = emptySet(); selectedIds = emptySet(); selecting = false } } }, enabled = !action.busy) { Text(if (action.busy) "正在生成…" else "换一批") }
-                TextButton({ rankings = true }) { Text("收听排行") }
-                TextButton({ external = true }) { Text("发现新音乐") }
-            }
-            ActionStatus(action)
-            TextButton({ evidence = !evidence }) { Text(if (evidence) "收起推荐依据" else "推荐依据") }
-            if (evidence) daily?.let { RecommendationEvidence(it.sourceStatus, it.warnings, it.degraded, it.engine) }
-        }
-        item { Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button({ vm.play(entries.map { it.track }); entries.firstOrNull()?.let { first -> scope.launch { runCatching { vm.repository.feedback(RecommendationFeedback(trackId = first.track.id, action = "accept")).close() } } } }, enabled = entries.isNotEmpty()) { Text("播放推荐") }
-            TextButton({ scope.launch { action.run { saveRecommendations(vm, "每日推荐 ${daily?.date.orEmpty()}", entries); action.message = "已保存为歌单" } } }, enabled = !action.busy && entries.isNotEmpty()) { Text("保存歌单") }
-        } }
-        item {
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(if (selecting) "已选 ${selectedTracks.size} 首" else "挑几首，放进自己的播放队列", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
-                    TextButton({ selecting = !selecting; selectedIds = emptySet() }, enabled = entries.isNotEmpty() || selecting) { Text(if (selecting) "完成挑选" else "挑选歌曲") }
-                }
-                if (selecting) {
-                    Row {
-                        TextButton({ selectedIds = if (selectedTracks.size == entries.size) emptySet() else entries.map { it.track.id }.toSet() }) { Text(if (selectedTracks.size == entries.size) "取消全选" else "全选") }
-                        TextButton({ enqueue(selectedTracks, true) }, enabled = selectedTracks.isNotEmpty()) { Text("下一首播放所选") }
+            Surface(Modifier.fillMaxWidth().padding(bottom = 12.dp), shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surfaceContainerLow) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                        DailyCoverMosaic(vm, entries.take(4).map { it.track })
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(dailyDate(daily?.date), style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            val sources = daily?.sourceStatus.orEmpty().filter { it.status == "ok" && it.matched > 0 }.take(2).map { recommendationSource(it.id) }
+                            Text((listOf(stringResource(R.string.daily_summary, entries.size)) + sources).joinToString(" · "),
+                                Modifier.testTag("daily-summary"), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        }
+                        Box {
+                            IconButton({ panelMenu = true }, Modifier.testTag("daily-more-actions")) { Icon(Icons.Default.MoreVert, stringResource(R.string.daily_more)) }
+                            DropdownMenu(panelMenu, { panelMenu = false }) {
+                                DropdownMenuItem(text = { Text(stringResource(R.string.recommendation_settings)) }, leadingIcon = { Icon(Icons.Default.Tune, null) }, enabled = preferences != null,
+                                    onClick = { panelMenu = false; action.message = null; settings = true }, modifier = Modifier.testTag("recommendation-settings"))
+                                DropdownMenuItem(text = { Text(stringResource(if (evidence) R.string.recommendation_evidence_hide else R.string.recommendation_evidence)) }, leadingIcon = { Icon(Icons.Outlined.Info, null) },
+                                    onClick = { panelMenu = false; evidence = !evidence }, modifier = Modifier.testTag("recommendation-evidence"))
+                                HorizontalDivider()
+                                DropdownMenuItem(text = { Text(stringResource(R.string.listening_rankings)) }, leadingIcon = { Icon(Icons.Default.Leaderboard, null) }, onClick = { panelMenu = false; rankings = true }, modifier = Modifier.testTag("daily-rankings"))
+                                DropdownMenuItem(text = { Text(stringResource(R.string.discover_new_music)) }, leadingIcon = { Icon(Icons.Default.Explore, null) }, onClick = { panelMenu = false; external = true }, modifier = Modifier.testTag("daily-external"))
+                            }
+                        }
                     }
-                    Row {
-                        OutlinedButton({ enqueue(selectedTracks) }, enabled = selectedTracks.isNotEmpty()) { Text("加入播放队列") }
-                        TextButton({ playlistTracks = selectedTracks }, enabled = selectedTracks.isNotEmpty()) { Text("加入歌单") }
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button({
+                            vm.play(entries.map { it.track })
+                            entries.firstOrNull()?.let { first -> scope.launch { runCatching { vm.repository.feedback(RecommendationFeedback(trackId = first.track.id, action = "accept")).close() } } }
+                        }, Modifier.weight(1f).testTag("daily-play"), enabled = entries.isNotEmpty()) {
+                            Icon(Icons.Default.PlayArrow, null, Modifier.size(20.dp)); Spacer(Modifier.width(8.dp)); Text(stringResource(R.string.play_all))
+                        }
+                        FilledTonalIconButton({ scope.launch { action.run { batch++; daily = vm.repository.daily(refresh = true); rejected = emptySet(); endSelection() } } },
+                            Modifier.testTag("daily-refresh"), enabled = !action.busy) { Icon(Icons.Default.Refresh, stringResource(R.string.daily_refresh)) }
+                        FilledTonalIconButton({ scope.launch { action.run {
+                            saveRecommendations(vm, resources.getString(R.string.daily_playlist_name, daily?.date.orEmpty()), entries); action.message = resources.getString(R.string.daily_saved)
+                        } } }, Modifier.testTag("daily-save"), enabled = !action.busy && entries.isNotEmpty()) { Icon(Icons.AutoMirrored.Filled.PlaylistAdd, stringResource(R.string.daily_save)) }
                     }
+                    ActionStatus(action)
+                    if (evidence) daily?.let { RecommendationEvidence(it.sourceStatus, it.warnings, it.degraded, it.engine) }
                 }
             }
         }
         items(entries, key = { it.track.id }) { item ->
-            val active = current.current?.id == item.track.id
-            Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).testTag("daily-track-${item.track.id}")
-                .clip(RoundedCornerShape(10.dp))
-                .background(if (active) MaterialTheme.colorScheme.primary.copy(alpha = .08f) else androidx.compose.ui.graphics.Color.Transparent)
-                .semantics { selected = if (selecting) item.track.id in selectedIds else active }
-                .combinedClickable(onClick = { if (selecting) selectTrack(item.track.id) else vm.play(entries.map { it.track }, entries.indexOf(item)) }, onLongClick = { trackMenu = item.track.id }),
+            val track = item.track
+            val active = current.current?.id == track.id
+            val chosen = track.id in selectedIds
+            Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).testTag("daily-track-${track.id}")
+                .clip(RoundedCornerShape(12.dp))
+                .background(when { chosen -> MaterialTheme.colorScheme.secondaryContainer; active -> MaterialTheme.colorScheme.primary.copy(alpha = .08f); else -> Color.Transparent })
+                .semantics { selected = if (selecting) chosen else active }
+                .combinedClickable(onClick = { if (selecting) selectTrack(track.id) else vm.play(entries.map { it.track }, entries.indexOf(item)) },
+                    onLongClick = { if (selecting) selectTrack(track.id) else { selecting = true; selectedIds = setOf(track.id) } })
+                .padding(start = 4.dp, top = 6.dp, bottom = 6.dp),
                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Box(Modifier.width(if (selecting) 40.dp else 24.dp), contentAlignment = Alignment.Center) {
-                    if (selecting) Checkbox(item.track.id in selectedIds, { selectTrack(item.track.id) }, Modifier.testTag("daily-select-${item.track.id}"))
+                Box(Modifier.width(if (selecting) 40.dp else 28.dp), contentAlignment = Alignment.Center) {
+                    if (selecting) Checkbox(chosen, { selectTrack(track.id) }, Modifier.testTag("daily-select-${track.id}"))
                     else if (active) PlaybackIndicator(current.playing, current.buffering)
                     else Text((entries.indexOf(item) + 1).toString().padStart(2, '0'), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                Cover(vm, item.track.id.takeIf { item.track.hasCover }, item.track.title, Modifier.size(44.dp).clip(RoundedCornerShape(8.dp)))
+                Cover(vm, track.id.takeIf { track.hasCover }, track.title, Modifier.size(48.dp).clip(RoundedCornerShape(8.dp)))
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(item.track.title, color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyLarge)
-                    Text(listOfNotNull(item.track.artist, item.track.album?.takeIf(String::isNotBlank)).joinToString(" · "),
+                    Text(track.title, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyLarge)
+                    // The source label says why the song is here; the album fills in when no source is known.
+                    val source = item.sourceIds.orEmpty().firstNotNullOfOrNull { recommendationSourceLabels[it] }?.let { stringResource(it) }
+                    Text(listOfNotNull(track.artist, source ?: track.album?.takeIf(String::isNotBlank)).joinToString(" · "),
                         maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                Box {
-                    IconButton({ trackMenu = item.track.id }, Modifier.testTag("daily-more-${item.track.id}")) { Icon(Icons.Default.MoreVert, "${item.track.title}的更多操作") }
-                    DropdownMenu(trackMenu == item.track.id, { trackMenu = null }) {
-                    DropdownMenuItem(text = { Text("下一首播放") }, leadingIcon = { Icon(Icons.AutoMirrored.Filled.PlaylistPlay, null) }, onClick = { trackMenu = null; enqueue(listOf(item.track), true) })
-                    DropdownMenuItem(text = { Text("加入播放队列") }, leadingIcon = { Icon(Icons.AutoMirrored.Filled.QueueMusic, null) }, onClick = { trackMenu = null; enqueue(listOf(item.track)) })
-                    DropdownMenuItem(text = { Text("加入歌单") }, leadingIcon = { Icon(Icons.Default.LibraryMusic, null) }, onClick = { trackMenu = null; playlistTracks = listOf(item.track) })
-                    DropdownMenuItem(text = { Text("查看歌词") }, leadingIcon = { Icon(Icons.Default.Lyrics, null) }, onClick = { trackMenu = null; lyricTrack = item.track })
-                    HorizontalDivider()
-                    DropdownMenuItem(text = { Text(if (vm.repository.knownTracks[item.track.id]?.loved ?: item.track.loved) "取消收藏" else "收藏") },
-                        leadingIcon = { Icon(Icons.Default.FavoriteBorder, null) }, enabled = item.track.id !in current.pendingFavorites,
-                        onClick = { trackMenu = null; vm.favorite(item.track) })
-                    listOf("dismiss_track" to "不感兴趣", "less_artist" to "少推荐此艺人").forEach { (key, name) ->
-                        DropdownMenuItem(text = { Text(name) }, leadingIcon = { Icon(if (key == "dismiss_track") Icons.Default.DoNotDisturb else Icons.Default.PersonOff, null) },
-                            onClick = { trackMenu = null; scope.launch { action.run { vm.repository.feedback(RecommendationFeedback(trackId = item.track.id, action = key)).close(); rejected = rejected + item.track.id } } }, enabled = !action.busy)
-                    }
+                if (!selecting) Box {
+                    IconButton({ trackMenu = track.id }, Modifier.testTag("daily-more-${track.id}")) { Icon(Icons.Default.MoreVert, stringResource(R.string.track_actions_named, track.title)) }
+                    DropdownMenu(trackMenu == track.id, { trackMenu = null }) {
+                        DropdownMenuItem(text = { Text(stringResource(R.string.play_next)) }, leadingIcon = { Icon(Icons.AutoMirrored.Filled.PlaylistPlay, null) }, onClick = { trackMenu = null; enqueue(listOf(track), true) })
+                        DropdownMenuItem(text = { Text(stringResource(R.string.queue_add)) }, leadingIcon = { Icon(Icons.AutoMirrored.Filled.QueueMusic, null) }, onClick = { trackMenu = null; enqueue(listOf(track)) })
+                        DropdownMenuItem(text = { Text(stringResource(R.string.playlist_add)) }, leadingIcon = { Icon(Icons.Default.LibraryMusic, null) }, onClick = { trackMenu = null; playlistTracks = listOf(track) })
+                        DropdownMenuItem(text = { Text(stringResource(R.string.lyrics_view)) }, leadingIcon = { Icon(Icons.Default.Lyrics, null) }, onClick = { trackMenu = null; lyricTrack = track })
+                        HorizontalDivider()
+                        DropdownMenuItem(text = { Text(stringResource(if (vm.repository.knownTracks[track.id]?.loved ?: track.loved) R.string.favorite_remove else R.string.favorite_add)) },
+                            leadingIcon = { Icon(Icons.Default.FavoriteBorder, null) }, enabled = track.id !in current.pendingFavorites,
+                            onClick = { trackMenu = null; vm.favorite(track) })
+                        listOf("dismiss_track" to R.string.recommendation_not_interested, "less_artist" to R.string.recommendation_less_artist).forEach { (key, name) ->
+                            DropdownMenuItem(text = { Text(stringResource(name)) }, leadingIcon = { Icon(if (key == "dismiss_track") Icons.Default.DoNotDisturb else Icons.Default.PersonOff, null) },
+                                onClick = { trackMenu = null; scope.launch { action.run { vm.repository.feedback(RecommendationFeedback(trackId = track.id, action = key)).close(); rejected = rejected + track.id } } }, enabled = !action.busy)
+                        }
                     }
                 }
             }
         }
-        if (entries.isEmpty() && !action.busy) item { Text("暂无推荐，可增加曲库或调整偏好后换一批。") }
+        if (entries.isEmpty() && !action.busy) item { Text(stringResource(R.string.daily_empty), Modifier.padding(vertical = 16.dp), color = MaterialTheme.colorScheme.onSurfaceVariant) }
     }
-    current.current?.let { playing ->
-        HorizontalDivider()
-        Row(Modifier.fillMaxWidth().testTag("daily-now-playing").clickable(onClickLabel = "打开播放器", onClick = openPlayer).padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Cover(vm, playing.id.takeIf { playing.hasCover }, playing.title, Modifier.size(40.dp).clip(RoundedCornerShape(8.dp)))
-            Column(Modifier.weight(1f)) {
-                Text(playing.title, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium)
-                Text(if (playing.isPodcast) "${playing.artist} · 播客" else playing.artist, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            IconButton({ vm.toggle() }) { Icon(if (current.playing) Icons.Default.Pause else Icons.Default.PlayArrow, if (current.playing) "暂停" else "播放") }
-            IconButton({ vm.next() }) { Icon(Icons.Default.SkipNext, "下一首") }
-        }
-    }
+    if (selecting) DailySelectionBar(selectedTracks.size, allSelected = selectedTracks.size == entries.size,
+        close = ::endSelection, toggleAll = { if (selectedTracks.size == entries.size) endSelection() else selectedIds = entries.map { it.track.id }.toSet() },
+        playNext = { enqueue(selectedTracks, true) }, enqueue = { enqueue(selectedTracks) }, addToPlaylist = { playlistTracks = selectedTracks })
+    // The dialog covers the app shell, so it carries the same mini player instead of a lookalike.
+    else Box(Modifier.testTag("daily-mini-player")) { MiniPlayer(vm, current, onQueue = openQueue, expand = openPlayer) }
     }
     playlistTracks?.let { tracks -> RecommendationPlaylistDialog(vm, tracks, { playlistTracks = null }) {
-        playlistTracks = null; selectedIds = emptySet(); selecting = false; action.message = it
+        playlistTracks = null; endSelection(); action.message = it
     } }
     lyricTrack?.let { track -> RecommendationLyricsDialog(vm, track) { lyricTrack = null } }
     if (settings) preferences?.let { original -> RecommendationSettings(original, connections, connectionsError, action.busy, action.message, { settings = false }) { updated ->
         scope.launch { action.run { preferences = vm.repository.api().saveRecommendationPreferences(updated); settings = false; action.message = "偏好已保存，下次换一批生效" } }
     } }
+}
+
+@Composable private fun dailyDate(date: String?): String {
+    val locale = LocalConfiguration.current.locales[0]
+    return remember(date, locale) {
+        runCatching { LocalDate.parse(date).format(DateTimeFormatter.ofPattern(DateFormat.getBestDateTimePattern(locale, "MMMMd"), locale)) }.getOrNull()
+    } ?: stringResource(R.string.daily_recommendations)
+}
+
+/** A 2×2 grid of the first covers gives each day's batch its own face; fewer songs show one cover. */
+@Composable private fun DailyCoverMosaic(vm: MusicViewModel, tracks: List<Track>) {
+    Surface(Modifier.size(76.dp), shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surfaceContainerHighest) {
+        if (tracks.size < 4) tracks.firstOrNull()?.let { Cover(vm, it.id.takeIf { _ -> it.hasCover }, it.title, Modifier.fillMaxSize()) }
+        else Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            tracks.chunked(2).forEach { row ->
+                Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                    row.forEach { Cover(vm, it.id.takeIf { _ -> it.hasCover }, it.title, Modifier.weight(1f).fillMaxHeight()) }
+                }
+            }
+        }
+    }
+}
+
+@Composable private fun DailySelectionBar(count: Int, allSelected: Boolean, close: () -> Unit, toggleAll: () -> Unit, playNext: () -> Unit, enqueue: () -> Unit, addToPlaylist: () -> Unit) {
+    Surface(Modifier.fillMaxWidth().testTag("daily-selection"), color = MaterialTheme.colorScheme.surfaceContainer) {
+        Column {
+            HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
+            Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                IconButton(close) { Icon(Icons.Default.Close, stringResource(R.string.done)) }
+                Text(stringResource(R.string.daily_selected, count), Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
+                IconButton(toggleAll) { Icon(if (allSelected) Icons.Default.Deselect else Icons.Default.SelectAll, stringResource(if (allSelected) R.string.select_none else R.string.select_all)) }
+                IconButton(playNext, Modifier.testTag("daily-selection-play-next")) { Icon(Icons.AutoMirrored.Filled.PlaylistPlay, stringResource(R.string.play_next)) }
+                IconButton(enqueue, Modifier.testTag("daily-selection-queue")) { Icon(Icons.AutoMirrored.Filled.QueueMusic, stringResource(R.string.queue_add)) }
+                IconButton(addToPlaylist, Modifier.testTag("daily-selection-playlist")) { Icon(Icons.Default.LibraryAdd, stringResource(R.string.playlist_add)) }
+            }
+        }
+    }
 }
 
 @Composable private fun RecommendationSettings(original: RecommendationPreferences, connections: List<JsonObject>, error: String?, busy: Boolean, message: String?, dismiss: () -> Unit, save: (RecommendationPreferences) -> Unit) {
@@ -223,7 +283,7 @@ internal fun recommendationIssue(code: String): String = when {
                 val toggle = { next: Boolean -> value = value.copy(sources = if (next) (value.sources + id).distinct() else value.sources - id) }
                 Row(Modifier.fillMaxWidth().clickable { toggle(!checked) }, verticalAlignment = Alignment.CenterVertically) {
                     Checkbox(checked, toggle, modifier = Modifier.testTag("recommendation-source-$id"))
-                    Text(name, Modifier.weight(1f))
+                    Text(stringResource(name), Modifier.weight(1f))
                 }
             }
             if ("lastfm_tags" in value.sources) OutlinedTextField(tags, { tags = it.take(200) }, label = { Text("公共标签（逗号分隔，最多 3 个）") }, modifier = Modifier.fillMaxWidth())
