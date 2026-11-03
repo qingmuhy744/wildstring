@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { api, type Track } from './api';
 
 export function useFavorites(revision: number, onError: (message: string) => void) {
+  const { t } = useTranslation();
   const [ids, setIds] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState<Set<string>>(new Set());
   const [change, setChange] = useState(0);
@@ -37,7 +39,7 @@ export function useFavorites(revision: number, onError: (message: string) => voi
         }
       })
       .catch(() => {
-        if (!controller.signal.aborted) onError('暂时无法读取收藏，请刷新重试。');
+        if (!controller.signal.aborted) onError(t('favorites.loadError'));
       });
     return () => controller.abort();
   }, [revision, onError]);
@@ -65,7 +67,7 @@ export function useFavorites(revision: number, onError: (message: string) => voi
     } catch {
       if (!mounted.current) return;
       apply(!loved);
-      onError('收藏未保存，请重试。');
+      onError(t('favorites.saveError'));
     } finally {
       pending.current.delete(track.id);
       if (mounted.current)
@@ -80,16 +82,17 @@ export function useFavorites(revision: number, onError: (message: string) => voi
 }
 export type Favorites = ReturnType<typeof useFavorites>;
 export function FavoriteButton({ track, favorites }: { track: Track; favorites: Favorites }) {
+  const { t } = useTranslation();
   const loved = favorites.ids.has(track.id);
   return (
     <button
       className={`favorite-button icon-button ${loved ? 'is-loved' : ''}`}
-      aria-label={`${loved ? '取消喜欢' : '喜欢'} ${track.title}`}
+      aria-label={`${loved ? t('common.unfavorite') : t('common.favorite')} ${track.title}`}
       aria-pressed={loved}
       aria-busy={favorites.busy.has(track.id)}
       disabled={!favorites.ready || favorites.busy.has(track.id)}
       onClick={() => void favorites.toggle(track)}
-      data-help={loved ? '取消喜欢' : '喜欢'}
+      data-help={loved ? t('common.unfavorite') : t('common.favorite')}
     >
       <svg viewBox="0 0 24 24" aria-hidden="true">
         <path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1.1-1.1a5.5 5.5 0 0 0-7.8 7.8L12 21l8.8-8.6a5.5 5.5 0 0 0 0-7.8Z" />

@@ -122,7 +122,7 @@ const labels: Record<View, string> = {
   playlists: '歌单',
   favorites: '我喜欢',
   listening: '收听记录',
-  discover: '每日推荐 · AI',
+  discover: '推荐',
   podcasts: '电台 · 播客',
   offline: '离线音乐',
   devices: '跨设备继续',
@@ -141,6 +141,7 @@ const viewIcons: Record<
   | 'heart'
   | 'history'
   | 'assistant'
+  | 'compass'
   | 'podcast'
   | 'download'
   | 'refresh'
@@ -155,7 +156,7 @@ const viewIcons: Record<
   playlists: 'playlist',
   favorites: 'heart',
   listening: 'history',
-  discover: 'assistant',
+  discover: 'compass',
   podcasts: 'podcast',
   offline: 'download',
   devices: 'refresh',
@@ -340,7 +341,6 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
     [lyricsOpen, setLyricsOpen] = useState(false);
   const [notice, setNotice] = useState('');
   const [navigation, setNavigation] = useState<CatalogLocation[]>([]);
-  const [counts, setCounts] = useState<ReadonlyMap<View, number>>(() => new Map());
   const [editor, setEditor] = useState<{ initial: Playlist | null; track: Track | null } | null>(
     null,
   );
@@ -532,12 +532,6 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
       });
     return () => controller.abort();
   }, [browseIdentity, indexEnabled, indexRevision]);
-  useEffect(() => {
-    if (visible && !query && !album && !selectedArtist && !activePlaylist)
-      setCounts((current) =>
-        current.get(view) === visible.total ? current : new Map(current).set(view, visible.total),
-      );
-  }, [visible?.total, view, query, album?.id, selectedArtist?.id, activePlaylist?.id]);
   const listRoot = useRef<HTMLDivElement>(null);
   const listEnd = useRef<HTMLDivElement>(null);
   const listStart = useRef<HTMLDivElement>(null);
@@ -1056,10 +1050,6 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
         <small className="notification-count" aria-label={t('nav.unread', { count: inbox.unread })}>
           {inbox.unread > 99 ? '99+' : inbox.unread}
         </small>
-      ) : target === 'favorites' ? (
-        <small>{favorites.ids.size}</small>
-      ) : counts.has(target) ? (
-        <small>{counts.get(target)}</small>
       ) : null}
     </button>
   );

@@ -289,9 +289,17 @@ export function DesktopHelpProvider({ children }: { children: ReactNode }) {
   );
 }
 
-export function HelpLabel({ hint, children }: { hint: HelpKey; children: ReactNode }) {
+export function HelpLabel({
+  hint,
+  text,
+  children,
+}: {
+  hint?: HelpKey;
+  text?: string;
+  children: ReactNode;
+}) {
   return (
-    <span className="desktop-help-label" data-help={hints[hint]}>
+    <span className="desktop-help-label" data-help={text || (hint ? hints[hint] : undefined)}>
       {children}
       <span className="desktop-help-marker" aria-hidden="true" />
     </span>

@@ -1,10 +1,15 @@
-.music-discovery > .muted {
+.music-discovery .discovery-hero h1 {
+  margin: 0 0 6px;
+  font-size: clamp(1.8rem, 3vw, 2.6rem);
+}
+.music-discovery .discovery-hero .muted {
+  margin: 0;
   line-height: 1.75;
   max-width: 65ch;
 }
 .music-discovery .ai-discover {
-  margin: 30px 0;
-  padding: 24px 28px;
+  margin: 20px 0 0;
+  padding: 12px 18px;
   border: 1px solid var(--border);
   border-radius: 18px;
   background: var(--workspace-panel);
@@ -53,7 +58,7 @@
   line-height: 1.7;
 }
 .discovery-sections {
-  margin-top: 28px;
+  margin-top: 20px;
 }
 .music-discovery .discovery-heading {
   margin-top: 26px;
@@ -420,21 +425,25 @@
     flex-basis: calc(100% - 54px);
   }
 }
+/* Collapsed, the prompt is one line so the day's songs stay near the top. */
 .music-discovery .ai-discover > summary {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 8px 18px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px 12px;
   cursor: pointer;
   list-style: none;
+}
+.music-discovery .ai-discover > summary > .ui-icon {
+  width: 18px;
+  height: 18px;
+  color: var(--accent-text);
 }
 .music-discovery .ai-discover > summary::-webkit-details-marker {
   display: none;
 }
-.music-discovery .ai-discover > summary > .eyebrow {
-  grid-column: 1/-1;
-}
 .discovery-prompt-title {
-  font-size: 22px;
+  font-size: 16px;
   font-weight: 600;
 }
 .music-discovery .ai-discover > summary > .muted {
@@ -442,11 +451,14 @@
   font-size: 12px;
 }
 .music-discovery .ai-discover[open] > summary {
-  margin-bottom: 20px;
+  margin-bottom: 16px;
 }
 @media (max-width: 600px) {
   .music-discovery .ai-discover > summary {
-    grid-template-columns: minmax(0, 1fr);
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+  .music-discovery .ai-discover > summary > .muted {
+    grid-column: 2;
   }
 }
 .music-discovery .daily-track {
@@ -480,8 +492,10 @@
 .daily-track.is-current .track-title strong {
   color: var(--accent);
 }
-.daily-track:hover {
-  background: var(--workspace-selected);
+@media (hover: hover) {
+  .daily-track:hover {
+    background: var(--workspace-selected);
+  }
 }
 @media (max-width: 600px) {
   .music-discovery .daily-track {
@@ -497,20 +511,22 @@
   }
 }
 
+/* Selection actions float above the list while picking, then leave with the selection. */
 .daily-selection {
+  position: sticky;
+  bottom: 16px;
+  z-index: 2;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  margin: 18px 0;
-  padding: 16px 18px;
-  border-block: 1px solid var(--border);
-}
-.daily-selection p {
-  margin: 6px 0 0;
-  font-size: 12px;
-  line-height: 1.6;
+  gap: 12px 16px;
+  margin: 12px 0;
+  padding: 12px 16px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--workspace-panel);
+  box-shadow: 0 10px 30px -18px rgb(0 0 0 / 45%);
 }
 .daily-selection .toolbar-actions {
   flex-wrap: wrap;
@@ -569,5 +585,100 @@
   }
   .daily-selection .toolbar-actions {
     gap: 8px;
+  }
+}
+
+/* One card carries the day's identity and every daily action, so the list starts within the first screen. */
+.daily-hero {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px 20px;
+  margin-top: 20px;
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: var(--workspace-panel);
+}
+.daily-hero-copy h2 {
+  margin: 0;
+  font-size: clamp(22px, 2.4vw, 28px);
+}
+.daily-hero-copy .muted {
+  margin: 4px 0 0;
+  line-height: 1.6;
+}
+.daily-hero > .recommendation-provenance {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.daily-mosaic {
+  display: grid;
+  width: 84px;
+  height: 84px;
+  overflow: hidden;
+  border-radius: 14px;
+  background: var(--workspace-selected);
+}
+.daily-mosaic.is-grid {
+  grid-template-columns: repeat(2, 1fr);
+  gap: 2px;
+}
+.daily-mosaic .cover {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  border-radius: 0;
+}
+.daily-hero-actions {
+  gap: 8px;
+}
+.daily-hero-actions .primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 42px;
+  padding-inline: 20px;
+  border-radius: 999px;
+}
+.daily-hero-actions .primary .ui-icon {
+  width: 14px;
+  height: 14px;
+}
+.daily-icon-action {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  padding: 0;
+  border-radius: 50%;
+}
+.daily-icon-action .ui-icon {
+  width: 19px;
+  height: 19px;
+}
+.daily-icon-action[aria-pressed='true'] {
+  border-color: var(--accent);
+  color: var(--accent-text);
+  background: rgb(var(--accent-rgb) / 12%);
+}
+@media (max-width: 600px) {
+  .daily-hero {
+    grid-template-columns: auto minmax(0, 1fr);
+    padding: 14px;
+  }
+  .daily-mosaic {
+    width: 64px;
+    height: 64px;
+    border-radius: 12px;
+  }
+  .daily-hero-actions {
+    grid-column: 1 / -1;
+  }
+  .daily-hero-actions .primary {
+    flex: 1;
+    justify-content: center;
   }
 }

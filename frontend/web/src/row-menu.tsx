@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
+import { useTranslation } from 'react-i18next';
 import { Icon } from './icons';
 
 type Action = {
@@ -24,6 +25,7 @@ export function RowMenu({
   className?: string;
   disabled?: boolean;
 }) {
+  const { t } = useTranslation();
   const [position, setPosition] = useState<{ x: number; y: number } | null>(null);
   const menu = useRef<HTMLDivElement>(null),
     trigger = useRef<HTMLButtonElement>(null),
@@ -118,7 +120,7 @@ export function RowMenu({
         ref={trigger}
         type="button"
         className="row-menu-trigger icon-button"
-        aria-label={`${label}的更多操作`}
+        aria-label={t('common.moreActions', { label })}
         aria-haspopup="menu"
         aria-expanded={!!position}
         disabled={disabled}
@@ -134,7 +136,7 @@ export function RowMenu({
           <div
             ref={menu}
             role="menu"
-            aria-label={`${label}的操作`}
+            aria-label={t('common.actions', { label })}
             className="row-action-menu"
             style={{
               left: Math.max(8, Math.min(position.x, window.innerWidth - 224)),

@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { section } from './helpers';
 
 test.use({ locale: 'en-US' });
 
@@ -98,4 +99,38 @@ test('error codes are translated for English', async ({ page }) => {
   await page.getByRole('button', { name: /Open library/ }).click();
   await expect(page.locator('.error, [role="alert"]').first()).toBeVisible();
   await expect(page.locator('.error, [role="alert"]').first()).not.toContainText(/[\u4e00-\u9fff]/);
+});
+
+test('recommendation page, preferences and charts are translated', async ({ page }, info) => {
+  await signIn(page);
+  await section(page, 'For you');
+  const panel = page.getByRole('region', { name: 'Music discovery', exact: true });
+  await expect(
+    panel.getByRole('heading', { name: 'What are we listening to today?' }),
+  ).toBeVisible();
+  await expect(panel.getByRole('button', { name: 'Play picks', exact: true })).toBeVisible();
+  await expect(panel.getByRole('button', { name: 'New batch', exact: true })).toBeVisible();
+  await expect(panel.getByRole('button', { name: 'Select tracks', exact: true })).toBeVisible();
+  await expect(panel.locator('.daily-hero-copy h2')).not.toHaveText(/[\u4e00-\u9fff]/);
+  await expect(panel.locator('.daily-hero-copy .muted')).not.toHaveText(/[\u4e00-\u9fff]/);
+  await expect(panel.locator('.daily-track')).toHaveCount(2);
+  if (shots) await page.screenshot({ path: `${shots}/${info.project.name}-discover-en.png` });
+
+  await panel.getByText('Recommendation preferences', { exact: true }).click();
+  await expect(panel.getByText('Library pick sources', { exact: true })).toBeVisible();
+  await expect(panel.getByLabel('Tracks per day')).toBeVisible();
+  await expect(panel.getByRole('button', { name: 'Save preferences', exact: true })).toBeVisible();
+
+  await panel.getByRole('button', { name: 'Listening charts', exact: true }).click();
+  const charts = page.getByRole('region', { name: 'Listening charts', exact: true });
+  await expect(charts.getByRole('heading', { name: 'The ones on repeat.' })).toBeVisible();
+  await expect(charts.getByRole('button', { name: 'Play chart', exact: true })).toBeVisible();
+  await expect(
+    charts.getByRole('button', { name: 'Community repeats', exact: true }),
+  ).toBeVisible();
+
+  await panel.getByRole('button', { name: 'New finds', exact: true }).click();
+  await expect(page.getByRole('region', { name: 'New finds', exact: true })).toContainText(
+    'Sounds not on your shelves yet.',
+  );
 });

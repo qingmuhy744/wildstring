@@ -53,7 +53,7 @@ test('推荐用临时歌单展示，更多菜单支持右键与偏好反馈', as
     dismissed = route.request().postDataJSON().action === 'dismiss_track';
     return route.fulfill({ status: 204 });
   });
-  await section(page, '每日推荐 · AI');
+  await section(page, '推荐');
   const panel = page.getByRole('region', { name: '音乐发现', exact: true });
   const row = panel.locator('.daily-track').first();
   await expect(row).toBeVisible();
@@ -139,7 +139,7 @@ test('点击侧边栏野弦品牌进入发现页且不触发整页刷新', async
     await expect(brand).toBeVisible();
     await brand.click();
 
-    const discoverButton = mainNav.getByRole('button', { name: /^每日推荐 · AI(?: |$)/ });
+    const discoverButton = mainNav.getByRole('button', { name: /^推荐(?: |$)/ });
     await expect(discoverButton).toHaveClass(/nav-current/);
 
     const isRetained = await page.evaluate(

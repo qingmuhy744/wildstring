@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import './playback-indicator.css';
 
 /** A playback-state indicator; the bars do not represent measured audio levels. */
@@ -9,6 +10,7 @@ export function PlaybackIndicator({
   playing: boolean;
   buffering: boolean;
 }) {
+  const { t } = useTranslation();
   const [visible, setVisible] = useState(() => !document.hidden);
   useEffect(() => {
     const update = () => setVisible(!document.hidden);
@@ -16,7 +18,7 @@ export function PlaybackIndicator({
     return () => document.removeEventListener('visibilitychange', update);
   }, []);
   const state = buffering ? 'buffering' : playing ? 'playing' : 'paused';
-  const label = buffering ? '缓冲中' : playing ? '正在播放' : '已暂停';
+  const label = t(`playback.${state}`);
   return (
     <span
       className="playback-indicator"

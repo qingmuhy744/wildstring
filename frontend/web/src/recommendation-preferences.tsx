@@ -1,9 +1,10 @@
 import { HelpLabel } from './desktop-help';
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import type { AgentConnection } from './agent-api';
 import { ModelConnectionChoice } from './model-connection';
 import {
-  recommendationSources,
+  recommendationSourceName,
   type RecommendationPreferences,
   type SourceStatus,
   type RecommendationWarning,
@@ -28,6 +29,7 @@ export function RecommendationPreferencesForm({
   connectionsBusy: boolean;
   onConnections: () => void;
 }) {
+  const { t } = useTranslation();
   const [tagsInput, setTagsInput] = useState((value.lastfm_tags || []).join(', '));
   useEffect(() => {
     setTagsInput((value.lastfm_tags || []).join(', '));
@@ -52,16 +54,14 @@ export function RecommendationPreferencesForm({
       id="recommendation-preferences"
       className="discovery-preferences recommendation-preferences"
     >
-      <summary>推荐偏好</summary>
+      <summary>{t('recommendations.preferences.summary')}</summary>
       <form
         onSubmit={(event) => {
           event.preventDefault();
           onSave();
         }}
       >
-        <p className="muted">
-          这些设置属于当前账号。保存只更新偏好；点击“换一批”或“获取收歌建议”后才会处理新结果。
-        </p>
+        <p className="muted">{t('recommendations.preferences.intro')}</p>
         {unified ? (
           <>
             <ModelConnectionChoice
@@ -75,17 +75,17 @@ export function RecommendationPreferencesForm({
                   ...(id === 'local' ? { external_use_ai: false } : {}),
                 })
               }
-              label="找歌与推荐模型连接"
+              label={t('recommendations.preferences.connection')}
               disabled={busy || connectionsBusy}
               onManage={onConnections}
             />
             <fieldset className="recommendation-source-group">
               <legend>
-                <HelpLabel hint="recommendations">本库推荐来源</HelpLabel>
+                <HelpLabel text={t('recommendations.preferences.help')}>
+                  {t('recommendations.preferences.sourcesLegend')}
+                </HelpLabel>
               </legend>
-              <p className="muted">
-                混合自己的收听、全站汇总热度和未充分听过的收藏。全站排行不展示其他账号的个人记录。
-              </p>
+              <p className="muted">{t('recommendations.preferences.sourcesHint')}</p>
               <div className="workspace-check-grid">
                 {['personal', 'community', 'discovery', 'revisit'].map((id) => (
                   <label className="workspace-check" key={id}>
@@ -94,13 +94,13 @@ export function RecommendationPreferencesForm({
                       checked={sources.includes(id)}
                       onChange={(event) => toggle(id, event.target.checked)}
                     />
-                    {recommendationSources[id]}
+                    {recommendationSourceName(t, id)}
                   </label>
                 ))}
               </div>
             </fieldset>
             <fieldset className="recommendation-source-group">
-              <legend>每日推荐自动生成</legend>
+              <legend>{t('recommendations.preferences.dailyLegend')}</legend>
               <div className="recommendation-settings-grid">
                 <label className="workspace-check">
                   <input
@@ -110,25 +110,22 @@ export function RecommendationPreferencesForm({
                       onChange({ ...value, daily_enabled: event.target.checked })
                     }
                   />
-                  按时自动生成新的每日推荐
+                  {t('recommendations.preferences.dailyCheck')}
                 </label>
                 <label>
-                  生成时间
+                  {t('recommendations.preferences.timeLabel')}
                   <input
-                    aria-label="每日推荐生成时间"
+                    aria-label={t('recommendations.preferences.timeAria')}
                     type="time"
                     value={value.daily_time || '00:00'}
                     onChange={(event) => onChange({ ...value, daily_time: event.target.value })}
                   />
                 </label>
               </div>
-              <p className="muted">
-                服务端按 Asia/Shanghai
-                时间检查；错过设定时间后会在下一次后台检查补生成，每天最多一份。
-              </p>
+              <p className="muted">{t('recommendations.preferences.timeHint')}</p>
             </fieldset>
             <fieldset className="recommendation-source-group">
-              <legend>可选 Last.fm 资料</legend>
+              <legend>{t('recommendations.preferences.lastfmLegend')}</legend>
               <div className="workspace-check-grid">
                 {['lastfm_similar', 'lastfm_charts', 'lastfm_tags'].map((id) => (
                   <label className="workspace-check" key={id}>
@@ -137,17 +134,15 @@ export function RecommendationPreferencesForm({
                       checked={sources.includes(id)}
                       onChange={(event) => toggle(id, event.target.checked)}
                     />
-                    {recommendationSources[id]}
+                    {recommendationSourceName(t, id)}
                   </label>
                 ))}
               </div>
-              <p className="muted">
-                公共榜单和标签提供流行度线索，不代表你的个人喜好。本库每日推荐仍只播放已导入的歌曲。
-              </p>
+              <p className="muted">{t('recommendations.preferences.lastfmHint')}</p>
               <label>
-                Last.fm 标签（最多 3 项，逗号分隔）
+                {t('recommendations.preferences.tagsLabel')}
                 <input
-                  aria-label="Last.fm 推荐标签"
+                  aria-label={t('recommendations.preferences.tagsAria')}
                   maxLength={200}
                   value={tagsInput}
                   onChange={(event) => {
@@ -165,7 +160,7 @@ export function RecommendationPreferencesForm({
               </label>
             </fieldset>
             <fieldset className="recommendation-source-group">
-              <legend>发现新音乐，留给自己慢慢收</legend>
+              <legend>{t('recommendations.preferences.externalLegend')}</legend>
               <label className="workspace-check">
                 <input
                   type="checkbox"
@@ -174,11 +169,9 @@ export function RecommendationPreferencesForm({
                     onChange({ ...value, external_enabled: event.target.checked })
                   }
                 />
-                启用库外收歌建议
+                {t('recommendations.preferences.externalEnable')}
               </label>
-              <p className="muted">
-                “新”指你的曲库中可能还没有，可能是老歌。这里只给名称、理由和资料来源；歌曲由你自行下载并放入导入文件夹。
-              </p>
+              <p className="muted">{t('recommendations.preferences.externalHint')}</p>
               {value.external_enabled && (
                 <>
                   <div className="workspace-check-grid">
@@ -196,28 +189,28 @@ export function RecommendationPreferencesForm({
                             ).includes(id)}
                             onChange={(event) => toggle(id, event.target.checked, true)}
                           />
-                          {recommendationSources[id]}
+                          {recommendationSourceName(t, id)}
                         </label>
                       ),
                     )}
                   </div>
                   <div className="recommendation-settings-grid">
                     <label>
-                      收歌建议更新频率
+                      {t('recommendations.preferences.refreshLabel')}
                       <select
-                        aria-label="收歌建议更新频率"
+                        aria-label={t('recommendations.preferences.refreshAria')}
                         value={value.external_refresh_days ?? 7}
                         onChange={(event) =>
                           onChange({ ...value, external_refresh_days: Number(event.target.value) })
                         }
                       >
                         {[
-                          [0, '仅手动更新'],
-                          [1, '每天'],
-                          [3, '每 3 天'],
-                          [7, '每 7 天'],
-                          [14, '每 14 天'],
-                          [30, '每 30 天'],
+                          [0, t('recommendations.preferences.manual')],
+                          [1, t('recommendations.preferences.daily')],
+                          [3, t('recommendations.preferences.every3')],
+                          [7, t('recommendations.preferences.every7')],
+                          [14, t('recommendations.preferences.every14')],
+                          [30, t('recommendations.preferences.every30')],
                         ].map(([days, label]) => (
                           <option value={days} key={days}>
                             {label}
@@ -234,29 +227,27 @@ export function RecommendationPreferencesForm({
                           onChange({ ...value, external_use_ai: event.target.checked })
                         }
                       />
-                      使用已选模型整理收歌建议
+                      {t('recommendations.preferences.useAi')}
                     </label>
                   </div>
                   <p className="muted">
                     {value.external_use_ai
-                      ? '更新收歌建议会使用上方连接与同一份每日额度。'
-                      : '使用真实来源与本地规则，不调用模型。'}
-                    自动更新在你打开发现页且建议到期时进行；选择“仅手动更新”可完全由自己触发。
+                      ? t('recommendations.preferences.useAiHintOn')
+                      : t('recommendations.preferences.useAiHintOff')}{' '}
+                    {t('recommendations.preferences.autoHint')}
                   </p>
                 </>
               )}
             </fieldset>
           </>
         ) : (
-          <p className="workspace-notice">
-            当前服务端尚未提供统一连接与推荐来源设置。找歌仅使用本地检索，请升级服务端后配置新能力。
-          </p>
+          <p className="workspace-notice">{t('recommendations.preferences.legacy')}</p>
         )}
         <div className="recommendation-settings-grid">
           <label>
-            每日首数
+            {t('recommendations.preferences.count')}
             <input
-              aria-label="每日首数"
+              aria-label={t('recommendations.preferences.countAria')}
               type="number"
               required
               min={1}
@@ -270,7 +261,9 @@ export function RecommendationPreferencesForm({
               disabled={busy || !sources.length || JSON.stringify(value) === JSON.stringify(saved)}
               className="primary"
             >
-              {busy ? '正在保存…' : '保存推荐偏好'}
+              {busy
+                ? t('recommendations.preferences.saving')
+                : t('recommendations.preferences.save')}
             </button>
           </div>
         </div>
@@ -278,12 +271,6 @@ export function RecommendationPreferencesForm({
     </details>
   );
 }
-const sourceState: Record<string, string> = {
-  ok: '已使用',
-  disabled: '未启用',
-  empty: '没有可用候选',
-  unavailable: '暂不可用',
-};
 export function RecommendationSources({
   items,
   warnings,
@@ -293,43 +280,53 @@ export function RecommendationSources({
   warnings?: RecommendationWarning[];
   degraded?: boolean;
 }) {
+  const { t } = useTranslation();
   if (!items?.length && !warnings?.length && !degraded) return null;
   return (
     <details className="recommendation-provenance">
-      <summary>{degraded ? '部分来源不可用，查看推荐依据' : '推荐来自哪里'}</summary>
-      {degraded && (
-        <p className="muted">这次部分步骤未完成，展示已经验证的结果；不会自动改用其他付费连接。</p>
-      )}
+      <summary>
+        {degraded
+          ? t('recommendations.provenance.degradedSummary')
+          : t('recommendations.provenance.summary')}
+      </summary>
+      {degraded && <p className="muted">{t('recommendations.provenance.degradedNote')}</p>}
       <ul>
         {items?.map((item) => (
           <li key={item.id}>
-            <strong>{recommendationSources[item.id] || item.id}</strong>
+            <strong>{recommendationSourceName(t, item.id)}</strong>
             <span>
-              {sourceState[item.status] || item.status}
-              {item.matched > 0 ? ` · ${item.matched} 首本库匹配` : ''}
-              {item.candidate_count != null ? ` · 来源候选 ${item.candidate_count} 首` : ''}
-              {item.unmatched != null && item.unmatched > 0 ? ` · 未匹配 ${item.unmatched} 首` : ''}
-              {item.cached ? ' · 使用缓存' : ''}
+              {t(`recommendations.states.${item.status}`, { defaultValue: item.status })}
+              {item.matched > 0
+                ? t('recommendations.provenance.matched', { count: item.matched })
+                : ''}
+              {item.candidate_count != null
+                ? t('recommendations.provenance.candidates', { count: item.candidate_count })
+                : ''}
+              {item.unmatched != null && item.unmatched > 0
+                ? t('recommendations.provenance.unmatched', { count: item.unmatched })
+                : ''}
+              {item.cached ? t('recommendations.provenance.cached') : ''}
             </span>
           </li>
         ))}
       </ul>
       {warnings?.map((warning, index) => (
         <p className="muted" key={index}>
-          {recommendationSources[warning.source] || warning.source}：
-          {recommendationWarning(warning.code)}
+          {t('recommendations.provenance.warning', {
+            source: recommendationSourceName(t, warning.source),
+            message: t(`recommendations.warnings.${recommendationWarningKey(warning.code)}`),
+          })}
         </p>
       ))}
     </details>
   );
 }
-export function recommendationWarning(code: string) {
-  if (code.includes('budget')) return '模型额度不足，已保留可用的本地结果。';
-  if (code.includes('disabled') || code.includes('not_configured')) return '服务未启用或尚未配置。';
-  if (code.includes('no_match') || code.includes('empty'))
-    return '来源有资料，但这批候选尚未匹配到本库。';
-  if (code.includes('rate') || code.includes('429')) return '来源暂时限流，请稍后重试。';
+export function recommendationWarningKey(code: string) {
+  if (code.includes('budget')) return 'budget';
+  if (code.includes('disabled') || code.includes('not_configured')) return 'disabled';
+  if (code.includes('no_match') || code.includes('empty')) return 'noMatch';
+  if (code.includes('rate') || code.includes('429')) return 'rate';
   if (code.includes('connection') || code.includes('model') || code.startsWith('ai_'))
-    return '模型步骤未完成，可查看连接状态后重试。';
-  return '本次来源查询未完成，已保留其他可用结果。';
+    return 'model';
+  return 'other';
 }

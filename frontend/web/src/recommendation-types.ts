@@ -1,3 +1,4 @@
+import type { TFunction } from 'i18next';
 import type { Track } from './api';
 export type RecommendationChoice = { track: Track; reason: string; source_ids?: string[] };
 export interface SourceStatus {
@@ -50,3 +51,7 @@ export const recommendationSources: Record<string, string> = {
   lastfm_tags: 'Last.fm 公共标签',
   lastfm_artists: 'Last.fm 相关艺人',
 };
+/** Source ids are stable API values; Chinese labels remain the fallback for unknown ids. */
+export function recommendationSourceName(t: TFunction, id: string): string {
+  return t(`recommendations.sources.${id}`, { defaultValue: recommendationSources[id] || id });
+}

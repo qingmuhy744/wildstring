@@ -104,7 +104,7 @@ async function fixture(page: Page) {
       },
     });
   });
-  await section(page, '每日推荐 · AI');
+  await section(page, '推荐');
   return {
     tracks,
     calls,
@@ -237,7 +237,7 @@ test('库外收歌建议只给线索，想收跨批保留，失败回滚与库�
   const { tracks, getPreferences, setPreferences } = await fixture(page);
   setPreferences({ ...getPreferences(), external_enabled: true, external_refresh_days: 0 });
   await section(page, '全部歌曲');
-  await section(page, '每日推荐 · AI');
+  await section(page, '推荐');
   const outside = {
     external_id: 'lastfm:outside',
     name: '晚风里的新线索',
@@ -399,7 +399,7 @@ test('真实后端：账号推荐设置、本地请求和收听排行可回读',
     },
   });
   expect(saved.ok()).toBe(true);
-  await section(page, '每日推荐 · AI');
+  await section(page, '推荐');
   const panel = page.getByRole('region', { name: '音乐发现', exact: true });
   await panel.locator('.ai-discover > summary').click();
   await expect(panel.getByLabel('这次找歌使用的连接', { exact: true })).toHaveValue('local');
@@ -456,7 +456,7 @@ test('旧服务端只本地回退，不会默用全局付费模型', async ({ pa
       modelCalls++;
   });
   await section(page, '全部歌曲');
-  await section(page, '每日推荐 · AI');
+  await section(page, '推荐');
   const panel = page.getByRole('region', { name: '音乐发现', exact: true });
   await panel.getByText('推荐偏好', { exact: true }).click();
   await expect(panel).toContainText('尚未提供统一连接');
@@ -504,7 +504,7 @@ test('真实后端：切换账号后推荐偏好与私人连接隔离', async ({
       })
     ).ok(),
   ).toBe(true);
-  await section(page, '每日推荐 · AI');
+  await section(page, '推荐');
   const panel = page.getByRole('region', { name: '音乐发现', exact: true });
   await panel.getByText('推荐偏好', { exact: true }).click();
   await expect(panel.getByLabel('每日首数', { exact: true })).toHaveValue('11');
@@ -521,7 +521,7 @@ test('真实后端：切换账号后推荐偏好与私人连接隔离', async ({
   await page.getByLabel('账号', { exact: true }).fill(username);
   await page.getByLabel('密码', { exact: true }).fill(password);
   await page.getByRole('button', { name: '进入曲库' }).click();
-  await section(page, '每日推荐 · AI');
+  await section(page, '推荐');
   await page.getByText('推荐偏好', { exact: true }).click();
   await expect(panel.getByLabel('每日首数', { exact: true })).toHaveValue('20');
   await expect(panel.getByLabel('Last.fm 推荐标签', { exact: true })).toHaveValue('');
