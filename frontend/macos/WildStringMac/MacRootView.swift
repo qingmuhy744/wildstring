@@ -182,7 +182,7 @@ private struct MacShellView: View {
                 .onChange(of: session.page) { _, _ in navigationPath = NavigationPath() }
                 .onChange(of: session.selectedLibraryID) { _, _ in navigationPath = NavigationPath() }
                 if session.showLyrics || session.showQueue {
-                    Divider()
+                    Rectangle().fill(MacTheme.border).frame(width: 1)
                     MacPlayerInspector(session: session, client: client, playback: playback)
                         .frame(width: 336)
                 }

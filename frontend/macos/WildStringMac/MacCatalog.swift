@@ -1083,43 +1083,96 @@ struct MacNotificationsView: View {
   @State private var message: String?
 
   var body: some View {
-    List {
+    Group {
       if let page {
-        Section {
-          Button("全部标为已读") {
-            Task { await markAll(page.highWatermark) }
+        VStack(spacing: 0) {
+          HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Text("通知")
+              .font(MacTheme.section(18))
+              .foregroundStyle(MacTheme.ink)
+            Text(
+              page.unreadCount > 0
+                ? "\(page.unreadCount) 条未读 · 共 \(page.items.count) 条"
+                : "共 \(page.items.count) 条 · 都已读完"
+            )
+            .font(MacTheme.caption)
+            .foregroundStyle(MacTheme.muted)
+            Spacer()
+            Button("全部标为已读") {
+              Task { await markAll(page.highWatermark) }
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .disabled(page.unreadCount == 0)
           }
-          .disabled(page.unreadCount == 0)
-        }
-        ForEach(page.items) { item in
-          VStack(alignment: .leading, spacing: 4) {
-            HStack {
-              Text(item.title).font(.headline)
-              if item.isUnread {
-                Text("未读").font(.caption).foregroundStyle(.orange)
+          .padding(.horizontal, 24)
+          .padding(.top, 20)
+          .padding(.bottom, 12)
+          Rectangle().fill(MacTheme.border).frame(height: 1)
+          ScrollView {
+            LazyVStack(spacing: 0) {
+              ForEach(page.items) { item in
+                notificationRow(item)
               }
             }
-            Text(item.summary)
-              .font(.callout)
-              .foregroundStyle(.secondary)
-          }
-          .task {
-            if item.isUnread {
-              try? await client.markNotificationsRead(ids: [item.id])
-            }
           }
         }
+      } else if let message {
+        ContentUnavailableView("无法加载通知", systemImage: "bell", description: Text(message))
+      } else {
+        ProgressView()
       }
     }
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
+    .background(MacTheme.canvas)
     .navigationTitle("通知")
     .overlay {
-      if page == nil, let message {
-        ContentUnavailableView("无法加载通知", systemImage: "bell", description: Text(message))
-      } else if page?.items.isEmpty == true {
+      if page?.items.isEmpty == true {
         ContentUnavailableView("没有通知", systemImage: "bell")
       }
     }
     .task { await load() }
+  }
+
+  private func notificationRow(_ item: AppNotification) -> some View {
+    HStack(alignment: .top, spacing: 12) {
+      Circle()
+        .fill(item.isUnread ? MacTheme.accent : MacTheme.border.opacity(0.6))
+        .frame(width: 7, height: 7)
+        .padding(.top, 5)
+      VStack(alignment: .leading, spacing: 4) {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+          Text(item.title)
+            .font(.system(size: 13, weight: item.isUnread ? .semibold : .regular))
+            .foregroundStyle(item.isUnread ? MacTheme.ink : MacTheme.muted)
+            .lineLimit(1)
+          Spacer(minLength: 12)
+          Text(macRelativeTime(item.createdAt) ?? "")
+            .font(MacTheme.micro)
+            .foregroundStyle(MacTheme.faint)
+        }
+        if !item.summary.isEmpty {
+          Text(item.summary)
+            .font(MacTheme.caption)
+            .foregroundStyle(MacTheme.muted)
+            .lineLimit(2)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+      }
+    }
+    .padding(.horizontal, 24)
+    .padding(.vertical, 12)
+    .overlay(alignment: .bottom) {
+      Rectangle()
+        .fill(MacTheme.border.opacity(0.55))
+        .frame(height: 1)
+        .padding(.horizontal, 24)
+    }
+    .task {
+      if item.isUnread {
+        try? await client.markNotificationsRead(ids: [item.id])
+      }
+    }
   }
 
   private func load() async {

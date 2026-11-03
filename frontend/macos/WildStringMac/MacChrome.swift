@@ -231,6 +231,18 @@ func macTotalDurationText(_ tracks: [Track]) -> String {
   return "\(max(minutes, 1)) 分钟"
 }
 
+/// "3 分钟前"-style stamp for notification rows; nil when unparsable.
+func macRelativeTime(_ iso: String) -> String? {
+  let plain = ISO8601DateFormatter()
+  let fractional = ISO8601DateFormatter()
+  fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+  guard let date = fractional.date(from: iso) ?? plain.date(from: iso) else { return nil }
+  let relative = RelativeDateTimeFormatter()
+  relative.locale = Locale(identifier: "zh_CN")
+  relative.unitsStyle = .full
+  return relative.localizedString(for: date, relativeTo: Date())
+}
+
 struct MacCollectionHeading: View {
     let title: String
     var subtitle: String

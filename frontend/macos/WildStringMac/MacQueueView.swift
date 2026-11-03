@@ -43,7 +43,8 @@ struct MacQueueView: View {
                             .contentShape(Rectangle())
                             .onTapGesture(count: 2) { play(item) }
                             .contextMenu { actions(item, position: position) }
-                            .listRowInsets(EdgeInsets(top: 5, leading: 4, bottom: 5, trailing: 4))
+                            .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+                            .listRowBackground(Color.clear)
                             .listRowSeparator(.hidden)
                     }
                     .onMove { offsets, destination in
@@ -97,15 +98,20 @@ struct MacQueueView: View {
             .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
             .accessibilityLabel("\(item.title)的队列操作")
         }
-        .padding(.horizontal, 8).padding(.vertical, 6)
-        .background(
-            current ? MacTheme.accentSoft : MacTheme.panel,
-            in: RoundedRectangle(cornerRadius: 8, style: .continuous)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .strokeBorder(current ? MacTheme.accent.opacity(0.4) : MacTheme.border, lineWidth: 1)
-        )
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(current ? MacTheme.accent.opacity(0.10) : Color.clear)
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(MacTheme.border.opacity(0.55)).frame(height: 1)
+        }
+        .overlay(alignment: .leading) {
+            if current {
+                Capsule()
+                    .fill(MacTheme.accent)
+                    .frame(width: 3)
+                    .padding(.vertical, 10)
+            }
+        }
     }
 
     @ViewBuilder
