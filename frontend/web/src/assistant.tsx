@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { api } from './api';
 import type { AgentPage, Conversation } from './agent-api';
 import { ModelConnectionChoice, useModelConnections } from './model-connection';
@@ -22,6 +23,7 @@ export function Assistant({
   onDraft: (id: string) => void;
   onConnections?: () => void;
 }) {
+  const { t, i18n } = useTranslation();
   const sessions = useWorkspaceResource<AgentPage<Conversation>>('/agent/conversations?limit=100'),
     connections = useModelConnections();
   const [selected, setSelected] = useState<string | null>(null),
@@ -127,7 +129,7 @@ export function Assistant({
       epoch = ++sequence.current;
     setBusy(true);
     setError('');
-    setNotice('正在查找依据，歌曲会继续播放。');
+    setNotice(t('assistant.searchingNotice'));
     const controller = new AbortController();
     request.current = controller;
     try {
@@ -145,7 +147,11 @@ export function Assistant({
       // A new conversation changes selection; use a separate controller for this run.
       const result = await api<Conversation>(`/agent/conversations/${session.id}/messages`, {
         method: 'POST',
-        body: JSON.stringify({ content: text, connection_id: connection }),
+        body: JSON.stringify({
+          content: text,
+          connection_id: connection,
+          locale: i18n.language.startsWith('zh') ? 'zh' : 'en',
+        }),
       });
       if (epoch !== sequence.current) return;
       setConversation(result);
@@ -155,7 +161,7 @@ export function Assistant({
     } catch (reason) {
       if (epoch === sequence.current) {
         setError(errorText(reason));
-        setNotice('连接中断时，服务端可能仍在处理。刷新对话可恢复已保存结果。');
+        setNotice(t('assistant.interruptedNotice'));
       }
     } finally {
       if (epoch === sequence.current) {
@@ -178,14 +184,14 @@ export function Assistant({
         setConversation((current) =>
           current?.id === session.id ? { ...current, title: changed.title } : current,
         );
-        setNotice('对话已改名。');
+        setNotice(t('assistant.renamed'));
       } else {
         await api(`/agent/conversations/${session.id}`, { method: 'DELETE' });
         if (selected === session.id) {
           setSelected(null);
           setConversation(null);
         }
-        setNotice('对话已删除，已有草案和歌单保留。');
+        setNotice(t('assistant.deleted'));
       }
       setHistoryAction(null);
       await sessions.reload();
@@ -195,11 +201,11 @@ export function Assistant({
   }
   const activeConnection = connections.items.find((item) => item.id === connection);
   return (
-    <section className="workspace-page" aria-label="AI 音乐助手">
+    <section className="workspace-page" aria-label={t('assistant.aria')}>
       <WorkspaceHeader
         eyebrow="A LITTLE HELP FINDING YOUR SOUND"
-        title="聊聊，想听什么。"
-        description="从真实曲库找歌、调整候选、生成草案。保存和修改前，你始终有最后一次确认。"
+        title={t('assistant.title')}
+        description={t('assistant.description')}
       >
         <button
           disabled={busy}
@@ -210,7 +216,7 @@ export function Assistant({
             setNotice('');
           }}
         >
-          新对话
+          {t('assistant.newChat')}
         </button>
         <RefreshWorkspace
           busy={sessions.loading || busy}
@@ -234,7 +240,7 @@ export function Assistant({
         >
           {!!sessions.value?.items.length && (
             <aside className="workspace-card">
-              <h2>最近对话</h2>
+              <h2>{t('assistant.recent')}</h2>
               <div className="workspace-session-list">
                 {sessions.value?.items.map((session) => (
                   <RowMenu
@@ -244,12 +250,12 @@ export function Assistant({
                     disabled={busy}
                     actions={[
                       {
-                        label: '改名',
+                        label: t('assistant.rename'),
                         icon: 'edit',
                         run: () => setHistoryAction({ kind: 'rename', session }),
                       },
                       {
-                        label: '删除',
+                        label: t('assistant.delete'),
                         icon: 'remove',
                         danger: true,
                         run: () => setHistoryAction({ kind: 'delete', session }),
@@ -266,7 +272,9 @@ export function Assistant({
                     </button>
                   </RowMenu>
                 ))}
-                {!sessions.value?.items.length && <p className="muted">从一首歌、一种心情开始。</p>}
+                {!sessions.value?.items.length && (
+                  <p className="muted">{t('assistant.emptySessions')}</p>
+                )}
               </div>
             </aside>
           )}
@@ -277,16 +285,16 @@ export function Assistant({
                   items={connections.items}
                   value={connection}
                   onChange={setConnection}
-                  label="助手模型"
+                  label={t('assistant.connection')}
                   disabled={busy || connections.loading}
                   onManage={onConnections}
                 />
                 <span className="connection-subtle-hint">
                   {activeConnection
-                    ? `已连接 ${activeConnection.model}`
+                    ? t('assistant.connected', { model: activeConnection.model })
                     : connection === 'local'
-                      ? '本地检索模式 · 保护隐私且不消耗额度'
-                      : '模型连接不可用'}
+                      ? t('assistant.localMode')
+                      : t('assistant.connectionUnavailable')}
                 </span>
               </div>
               {conversation && (
@@ -295,19 +303,19 @@ export function Assistant({
                   className="text-button"
                   onClick={() => setHistoryAction({ kind: 'delete', session: conversation })}
                 >
-                  删除对话
+                  {t('assistant.deleteConversation')}
                 </button>
               )}
             </div>
             <div ref={messages} aria-busy={running}>
               {conversation?.context_summary && (
                 <details className="workspace-notice">
-                  <summary>已压缩较早对话 · 查看上下文摘要</summary>
+                  <summary>{t('assistant.summaryOpen')}</summary>
                   <p>{conversation.context_summary.summary}</p>
                   <button
                     disabled={busy}
                     onClick={() => {
-                      if (confirm('清除本对话摘要？聊天记录保留，下次长对话可能重新摘要。'))
+                      if (confirm(t('assistant.clearSummaryConfirm')))
                         void api(`/agent/conversations/${conversation.id}/summary`, {
                           method: 'DELETE',
                         })
@@ -315,23 +323,21 @@ export function Assistant({
                           .catch((reason) => setError(errorText(reason)));
                     }}
                   >
-                    清除摘要
+                    {t('assistant.clearSummary')}
                   </button>
                 </details>
               )}
               {!conversation?.messages?.length && (
                 <div className="workspace-empty-guide">
                   <div className="workspace-empty-icon">✦</div>
-                  <h3>聊聊想听的音乐</h3>
-                  <p className="muted">
-                    从本地曲库找歌、生成智能歌单或整理曲目。点击下方示例快速开始：
-                  </p>
+                  <h3>{t('assistant.emptyTitle')}</h3>
+                  <p className="muted">{t('assistant.emptyDescription')}</p>
                   <div className="workspace-prompts">
                     {[
-                      '来几首节奏舒缓的歌，适合现在听',
-                      '帮我整理一份摇滚风格的歌单草案',
-                      '推荐几首曲库里常听的好歌',
-                      '找出今天适合单曲循环的旋律',
+                      t('assistant.prompt1'),
+                      t('assistant.prompt2'),
+                      t('assistant.prompt3'),
+                      t('assistant.prompt4'),
                     ].map((prompt) => (
                       <button
                         key={prompt}
@@ -351,10 +357,11 @@ export function Assistant({
               {conversation?.messages?.map((message) => (
                 <article className={`workspace-message ${message.role}`} key={message.id}>
                   <small>
-                    {message.role === 'user' ? '你' : '野弦'} · {localDate(message.created_at)}
+                    {message.role === 'user' ? t('assistant.you') : t('assistant.brand')} ·{' '}
+                    {localDate(message.created_at)}
                   </small>
                   {message.partial && (
-                    <small className="assistant-generating">正在生成 · 内容尚未完成</small>
+                    <small className="assistant-generating">{t('assistant.generating')}</small>
                   )}
                   {message.role === 'assistant' ? (
                     <AssistantMarkdown content={message.content} />
@@ -362,13 +369,18 @@ export function Assistant({
                     <p>{message.content}</p>
                   )}
                   {!!message.sources?.length && (
-                    <ul aria-label="联网来源">
+                    <ul aria-label={t('assistant.sourcesAria')}>
                       {message.sources.map((source) => (
                         <li key={source.id}>
                           <a href={source.url} target="_blank" rel="noopener noreferrer">
                             {source.title}
                           </a>
-                          {source.published_at && <small> · 来源日期 {source.published_at}</small>}
+                          {source.published_at && (
+                            <small>
+                              {' '}
+                              · {t('assistant.sourceDate', { date: source.published_at })}
+                            </small>
+                          )}
                         </li>
                       ))}
                     </ul>
@@ -378,7 +390,7 @@ export function Assistant({
               {conversation?.runs?.map((run) => (
                 <div className="workspace-run" key={run.id}>
                   {run.status === 'local_fallback' ? (
-                    <p className="workspace-notice">本地关键词检索 · 未调用模型</p>
+                    <p className="workspace-notice">{t('assistant.localFallback')}</p>
                   ) : (
                     <StateBadge state={run.status} />
                   )}
@@ -389,7 +401,7 @@ export function Assistant({
                   <div className="workspace-actions">
                     {run.draft_ids.map((id) => (
                       <button key={id} onClick={() => onDraft(id)}>
-                        查看草案与应用结果
+                        {t('assistant.viewDraft')}
                       </button>
                     ))}
                   </div>
@@ -401,10 +413,10 @@ export function Assistant({
                 {
                   (
                     {
-                      model: '正在分析已有资料…',
-                      search: '正在检索联网来源…',
-                      tools: '正在查询曲库与处理工具结果…',
-                      writing: '正在生成回答…',
+                      model: t('assistant.stageModel'),
+                      search: t('assistant.stageSearch'),
+                      tools: t('assistant.stageTools'),
+                      writing: t('assistant.stageWriting'),
                     } as Record<string, string>
                   )[conversation?.runs?.find((run) => run.status === 'running')?.stage || 'model']
                 }
@@ -418,10 +430,10 @@ export function Assistant({
               }}
             >
               <label>
-                <span className="sr-only">给助手的消息</span>
+                <span className="sr-only">{t('assistant.messageLabel')}</span>
                 <textarea
-                  aria-label="给助手的消息"
-                  placeholder="想听什么，或想如何整理候选？"
+                  aria-label={t('assistant.messageLabel')}
+                  placeholder={t('assistant.placeholder')}
                   required
                   maxLength={8000}
                   value={content}
@@ -444,10 +456,10 @@ export function Assistant({
                 />
               </label>
               <button className="primary" disabled={busy || running || !content.trim()}>
-                {busy ? '正在处理…' : '发送'}
+                {busy ? t('assistant.processing') : t('assistant.send')}
               </button>
             </form>
-            <p className="muted">Ctrl / ⌘ + Enter 发送。聊天不会自行启动定时巡检。</p>
+            <p className="muted">{t('assistant.keyboardHint')}</p>
           </div>
         </div>
       )}
@@ -471,6 +483,7 @@ function ConversationActionDialog({
   onClose: () => void;
   onSubmit: (title: string) => Promise<void>;
 }) {
+  const { t } = useTranslation();
   const dialog = useRef<HTMLDialogElement>(null);
   const [title, setTitle] = useState(action.session.title);
   const [busy, setBusy] = useState(false),
@@ -485,13 +498,13 @@ function ConversationActionDialog({
     <dialog
       ref={dialog}
       className="playlist-editor"
-      aria-label={rename ? '对话改名' : '删除对话'}
+      aria-label={rename ? t('assistant.dialogRename') : t('assistant.dialogDelete')}
       onCancel={(event) => {
         event.preventDefault();
         if (!busy) onClose();
       }}
     >
-      <h2>{rename ? '对话改名' : '删除对话？'}</h2>
+      <h2>{rename ? t('assistant.dialogRename') : t('assistant.dialogDeleteQuestion')}</h2>
       <form
         className="account-form"
         onSubmit={(event) => {
@@ -506,7 +519,7 @@ function ConversationActionDialog({
       >
         {rename ? (
           <label>
-            对话名称
+            {t('assistant.dialogName')}
             <input
               autoFocus
               required
@@ -517,15 +530,19 @@ function ConversationActionDialog({
             />
           </label>
         ) : (
-          <p>删除「{action.session.title}」的对话历史，已有草案和歌单会保留。</p>
+          <p>{t('assistant.dialogDeleteBody', { title: action.session.title })}</p>
         )}
         {error && <p role="alert">{error}</p>}
         <div className="workspace-actions">
           <button type="button" disabled={busy} onClick={onClose}>
-            取消
+            {t('assistant.cancel')}
           </button>
           <button className="primary" disabled={busy || (rename && !title.trim())}>
-            {busy ? '正在处理…' : rename ? '保存' : '删除'}
+            {busy
+              ? t('assistant.processing')
+              : rename
+                ? t('assistant.save')
+                : t('assistant.delete')}
           </button>
         </div>
       </form>

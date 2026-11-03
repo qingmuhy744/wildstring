@@ -659,7 +659,11 @@ class Recommendations(ExternalRecommendations):
 
     def discover(self, repository, body):
         limit = body.limit
-        match = re.search(r"(\d{1,2}|一|两|二|三|四|五|六|七|八|九|十)首", body.prompt)
+        match = re.search(
+            r"(\d{1,2}|[一两二三四五六七八九十])\s*(?:首|songs?|tracks?)",
+            body.prompt,
+            re.IGNORECASE,
+        )
         if match:
             digits = {
                 "一": 1,

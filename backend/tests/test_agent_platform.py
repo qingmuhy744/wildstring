@@ -917,6 +917,15 @@ def test_assistant_never_silently_chooses_paid_connection_and_can_switch_local(a
     assert result["runs"][0]["status"] == "local_fallback" and not calls
     assert "本次使用本地关键词检索，未调用模型。" in result["messages"][-1]["content"]
     assert "AI 未配置" not in result["messages"][-1]["content"]
+    english = post(
+        client,
+        f"/conversations/{local['id']}/messages",
+        {"content": "calm music for tonight", "locale": "en"},
+    )
+    assert english["messages"][-1]["content"].startswith(
+        "Local keyword search. No model was called."
+    )
+    assert not calls
     result = post(
         client,
         f"/conversations/{local['id']}/messages",

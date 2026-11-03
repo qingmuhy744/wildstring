@@ -89,6 +89,15 @@ function DailyMosaic({ tracks }: { tracks: Track[] }) {
     </div>
   );
 }
+const discoveryTitleKeys: Record<string, string> = {
+  曲库里的发现: 'discover.ai.localTitle',
+  为你选的歌: 'discover.ai.defaultTitle',
+  曲库中没有可推荐的歌曲: 'discover.ai.noTitle',
+};
+function discoveryTitle(title: string, t: TFunction): string {
+  const key = discoveryTitleKeys[title];
+  return key ? t(key) : title;
+}
 function dailySource(ids: string[] | undefined, t: TFunction): string | undefined {
   return ids?.map((id) => recommendationSourceName(t, id)).find(Boolean);
 }
@@ -536,7 +545,7 @@ export function Discover({
         </form>
         {discovery && (
           <div aria-label={t('discover.ai.previewAria')}>
-            <h3>{discovery.title}</h3>
+            <h3>{discoveryTitle(discovery.title, t)}</h3>
             <p role="status">
               {discovery.mode === 'local'
                 ? t('discover.ai.localFallback')

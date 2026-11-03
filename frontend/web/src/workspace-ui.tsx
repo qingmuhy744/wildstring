@@ -1,4 +1,6 @@
 import { HelpText } from './desktop-help';
+import { useTranslation } from 'react-i18next';
+import i18n from './i18n';
 import { hints, stateHelp } from './help-content';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { ApiError, api } from './api';
@@ -10,7 +12,7 @@ export const localDate = (value: string | number | null | undefined) => {
   return Number.isNaN(date.valueOf()) ? '—' : date.toLocaleString();
 };
 export const errorText = (reason: unknown) =>
-  reason instanceof Error ? reason.message : '操作未完成，请重试。';
+  reason instanceof Error ? reason.message : i18n.t('common.actionError');
 
 export function useWorkspaceResource<T>(path: string | null, pollMs = 0) {
   const [value, setValue] = useState<T | null>(null);
@@ -104,11 +106,12 @@ export function WorkspaceNotice({
   notice?: string;
   unavailable?: boolean;
 }) {
+  const { t } = useTranslation();
   return (
     <>
       {unavailable && (
         <p className="workspace-empty" role="status">
-          当前服务端尚未提供这项功能，请升级服务端后重试。
+          {t('common.unsupportedServer')}
         </p>
       )}
       {error && (
@@ -124,7 +127,8 @@ export function WorkspaceNotice({
     </>
   );
 }
-export function DiagnosticId({ id, label = '诊断编号' }: { id?: string | null; label?: string }) {
+export function DiagnosticId({ id, label }: { id?: string | null; label?: string }) {
+  const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
   if (!id) return null;
   return (
@@ -139,17 +143,18 @@ export function DiagnosticId({ id, label = '诊断编号' }: { id?: string | nul
       }
     >
       <code>
-        {label} {id}
+        {label || t('common.diagnostic')} {id}
       </code>
-      {copied ? ' 已复制' : ' 复制'}
+      {copied ? ` ${t('common.copied')}` : ` ${t('common.copy')}`}
     </button>
   );
 }
 export function RefreshWorkspace({ busy, onClick }: { busy: boolean; onClick: () => void }) {
+  const { t } = useTranslation();
   return (
     <button className="workspace-refresh" disabled={busy} onClick={onClick}>
       <Icon name="refresh" />
-      {busy ? '正在刷新…' : '刷新'}
+      {busy ? t('common.refreshing') : t('common.refresh')}
     </button>
   );
 }
@@ -188,9 +193,10 @@ export const stateNames: Record<string, string> = {
   error: '检测失败',
 };
 export function StateBadge({ state }: { state: string }) {
+  const { t } = useTranslation();
   return (
     <HelpText className={`workspace-badge state-${state}`} text={stateHelp[state]}>
-      {stateNames[state] || state}
+      {t(`state.${state}`, { defaultValue: stateNames[state] || state })}
     </HelpText>
   );
 }
