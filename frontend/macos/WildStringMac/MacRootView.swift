@@ -176,7 +176,7 @@ private struct MacShellView: View {
                 if session.showLyrics || session.showQueue {
                     Divider()
                     MacPlayerInspector(session: session, client: client, playback: playback)
-                        .frame(width: 320)
+                        .frame(width: 336)
                 }
             }
             Divider()

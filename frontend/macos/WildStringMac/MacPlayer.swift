@@ -195,7 +195,15 @@ struct MacPlayerInspector: View {
                     Image(systemName: "xmark").frame(width: 24, height: 24)
                 }.buttonStyle(.plain).help("关闭侧栏").accessibilityLabel("关闭侧栏")
                 Text(focus == .queue && session.showQueue || !session.showLyrics ? "播放队列" : "歌词")
-                    .font(.headline)
+                    .font(MacTheme.section(15))
+                if focus == .queue && session.showQueue {
+                    Text(
+                        "\(playback.playbackItems.count) " +
+                        (playback.currentItem?.trackID.hasPrefix("podcast_ep_") == true ? "集" : "项")
+                    )
+                    .font(MacTheme.micro)
+                    .foregroundStyle(MacTheme.muted)
+                }
                 Spacer()
             }
             if session.showLyrics && session.showQueue {
@@ -215,7 +223,10 @@ struct MacPlayerInspector: View {
         }
         .padding(16)
         .frame(maxHeight: .infinity, alignment: .top)
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(MacTheme.sidebar)
+        .overlay(alignment: .leading) {
+            Rectangle().fill(MacTheme.border).frame(width: 1)
+        }
         .task(id: playback.currentItem?.trackID) { await loadLyrics() }
         .onChange(of: session.showLyrics) { _, showing in
             if showing { focus = .lyrics }
@@ -254,7 +265,7 @@ struct MacPlayerInspector: View {
     }
 
     private var queue: some View {
-        MacQueueView(client: client, playback: playback)
+        MacQueueView(client: client, playback: playback, showsHeader: false)
     }
 
     private func loadLyrics() async {

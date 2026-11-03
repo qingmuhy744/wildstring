@@ -84,104 +84,15 @@ struct MacPlayableTracks: View {
   @State private var notice: String?
 
   var body: some View {
-    GeometryReader { geometry in
-      let wide = geometry.size.width >= 820
-      let artistWidth = (geometry.size.width - 32) * 0.22
-      let albumWidth = (geometry.size.width - 32) * 0.25
-      VStack(spacing: 0) {
-        if wide {
-          HStack(spacing: 16) {
-            if selecting { Color.clear.frame(width: 20, height: 1) }
-            Text("歌曲").padding(.leading, 50).frame(maxWidth: .infinity, alignment: .leading)
-            Text("艺人").frame(width: artistWidth, alignment: .leading)
-            Text("专辑").frame(width: albumWidth, alignment: .leading)
-            Color.clear.frame(width: 36, height: 1)
-            Text("时长").frame(width: 48, alignment: .trailing)
-            Color.clear.frame(width: 28, height: 1)
-          }
-          .font(MacTheme.micro)
-          .foregroundStyle(MacTheme.muted)
-          .padding(.horizontal, 18).padding(.vertical, 10)
-          .background(MacTheme.panel)
-          Divider().overlay(MacTheme.border)
-        }
-        List(tracks) { track in
-          HStack(spacing: 16) {
-            if selecting {
-              Toggle("选择 \(track.title)", isOn: Binding(
-                get: { selected.contains(track.id) },
-                set: { if $0 { selected.insert(track.id) } else { selected.remove(track.id) } }
-              )).toggleStyle(.checkbox).labelsHidden().frame(width: 20)
-            }
-            HStack(spacing: 10) {
-              Button {
-                if selecting {
-                  if selected.contains(track.id) { selected.remove(track.id) }
-                  else { selected.insert(track.id) }
-                } else {
-                  MacPlayback.play(tracks, startingAt: track, playback: playback)
-                }
-              } label: {
-                MacCover(client: client, trackID: track.hasCover ? track.id : nil, side: 40)
-              }.buttonStyle(.plain).help("播放 \(track.title)")
-              VStack(alignment: .leading, spacing: 4) {
-                Button {
-                  if selecting {
-                    if selected.contains(track.id) { selected.remove(track.id) }
-                    else { selected.insert(track.id) }
-                  } else {
-                    MacPlayback.play(tracks, startingAt: track, playback: playback)
-                  }
-                } label: {
-                  Text(track.title)
-                    .font(.system(size: 13, weight: playback.currentItem?.trackID == track.id ? .semibold : .regular))
-                    .foregroundStyle(playback.currentItem?.trackID == track.id ? MacTheme.accentDeep : MacTheme.ink)
-                    .lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
-                }.buttonStyle(.plain)
-                if !wide {
-                  HStack(spacing: 5) {
-                    artistLink(track)
-                    if track.albumId != nil {
-                      Text("·").foregroundStyle(.tertiary)
-                      albumLink(track)
-                    }
-                  }.font(MacTheme.caption).foregroundStyle(MacTheme.muted)
-                }
-              }.frame(maxWidth: .infinity, alignment: .leading)
-            }.frame(maxWidth: .infinity, alignment: .leading)
-            if wide {
-              artistLink(track).frame(width: artistWidth, alignment: .leading)
-              albumLink(track).frame(width: albumWidth, alignment: .leading)
-            }
-            HStack(spacing: 5) {
-              if favorites?.isFavorite(track.id) == true { Image(systemName: "heart.fill") }
-              if playback.currentItem?.trackID == track.id {
-                Image(systemName: playback.isPlaying ? "speaker.wave.2.fill" : "pause.fill")
-              }
-            }.font(.caption).foregroundStyle(MacTheme.accentDeep).frame(width: 36)
-            Text(macClock(milliseconds: track.durationMs))
-              .font(MacTheme.mono())
-              .foregroundStyle(MacTheme.faint)
-              .frame(width: 48, alignment: .trailing)
-            Menu { trackMenu(track) } label: {
-              Image(systemName: "ellipsis").frame(width: 28, height: 28).contentShape(Rectangle())
-            }
-            .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
-            .accessibilityLabel("\(track.title)的更多操作").help("\(track.title)的更多操作")
-          }
-          .contextMenu { trackMenu(track) }
-          .listRowInsets(EdgeInsets(top: 6, leading: 18, bottom: 6, trailing: 18))
-          .listRowBackground(
-            playback.currentItem?.trackID == track.id ? MacTheme.accentSoft : MacTheme.canvas
-          )
-          .listRowSeparatorTint(MacTheme.border)
-        }
-        .listStyle(.plain)
-        .scrollContentBackground(.hidden)
-        .background(MacTheme.canvas)
-      }
+    List(tracks) { track in
+      trackRow(track)
+        .listRowInsets(EdgeInsets(top: 3, leading: 18, bottom: 3, trailing: 18))
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
     }
+    .listStyle(.plain)
+    .scrollContentBackground(.hidden)
+    .background(MacTheme.canvas)
     .overlay {
       if tracks.isEmpty {
         if isLoading {
@@ -244,6 +155,106 @@ struct MacPlayableTracks: View {
       }
     }
     .onChange(of: tracks.map(\.id)) { _, ids in selected.formIntersection(Set(ids)) }
+  }
+
+  private func trackRow(_ track: Track) -> some View {
+    let current = playback.currentItem?.trackID == track.id
+    return HStack(spacing: 12) {
+      if selecting {
+        Toggle("选择 \(track.title)", isOn: Binding(
+          get: { selected.contains(track.id) },
+          set: { if $0 { selected.insert(track.id) } else { selected.remove(track.id) } }
+        )).toggleStyle(.checkbox).labelsHidden().frame(width: 18)
+      }
+      Button {
+        if selecting {
+          if selected.contains(track.id) { selected.remove(track.id) }
+          else { selected.insert(track.id) }
+        } else {
+          MacPlayback.play(tracks, startingAt: track, playback: playback)
+        }
+      } label: {
+        MacCover(client: client, trackID: track.hasCover ? track.id : nil, side: 42)
+      }
+      .buttonStyle(.plain)
+      .help("播放 \(track.title)")
+
+      VStack(alignment: .leading, spacing: 3) {
+        Button {
+          if selecting {
+            if selected.contains(track.id) { selected.remove(track.id) }
+            else { selected.insert(track.id) }
+          } else {
+            MacPlayback.play(tracks, startingAt: track, playback: playback)
+          }
+        } label: {
+          Text(track.title)
+            .font(.system(size: 13, weight: current ? .semibold : .regular))
+            .foregroundStyle(current ? MacTheme.accentDeep : MacTheme.ink)
+            .lineLimit(1)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+
+        HStack(spacing: 4) {
+          artistLink(track)
+          if track.albumId != nil {
+            Text("·").foregroundStyle(MacTheme.faint)
+            albumLink(track)
+          }
+        }
+        .font(MacTheme.caption)
+        .foregroundStyle(MacTheme.muted)
+        .lineLimit(1)
+      }
+      .frame(maxWidth: .infinity, alignment: .leading)
+
+      HStack(spacing: 5) {
+        if favorites?.isFavorite(track.id) == true {
+          Image(systemName: "heart.fill")
+        }
+        if current {
+          Image(systemName: playback.isPlaying ? "speaker.wave.2.fill" : "pause.fill")
+        }
+      }
+      .font(.caption)
+      .foregroundStyle(MacTheme.accentDeep)
+      .frame(width: 30, alignment: .trailing)
+
+      Text(macClock(milliseconds: track.durationMs))
+        .font(MacTheme.mono())
+        .foregroundStyle(MacTheme.faint)
+        .frame(width: 44, alignment: .trailing)
+
+      Menu { trackMenu(track) } label: {
+        Image(systemName: "ellipsis").frame(width: 26, height: 28).contentShape(Rectangle())
+      }
+      .menuStyle(.borderlessButton)
+      .menuIndicator(.hidden)
+      .fixedSize()
+      .accessibilityLabel("\(track.title)的更多操作")
+      .help("\(track.title)的更多操作")
+    }
+    .padding(.horizontal, 12)
+    .padding(.vertical, 8)
+    .background(
+      current ? MacTheme.accentSoft : MacTheme.panel,
+      in: RoundedRectangle(cornerRadius: MacTheme.rowRadius, style: .continuous)
+    )
+    .overlay(
+      RoundedRectangle(cornerRadius: MacTheme.rowRadius, style: .continuous)
+        .strokeBorder(current ? MacTheme.accent.opacity(0.45) : MacTheme.border, lineWidth: 1)
+    )
+    .overlay(alignment: .leading) {
+      if current {
+        Capsule()
+          .fill(MacTheme.accent)
+          .frame(width: 3)
+          .padding(.vertical, 8)
+      }
+    }
+    .contextMenu { trackMenu(track) }
   }
 
   @ViewBuilder
