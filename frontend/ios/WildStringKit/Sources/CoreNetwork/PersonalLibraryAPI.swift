@@ -38,6 +38,8 @@ public struct DailyRecommendations: Decodable, Equatable, Sendable {
     public let id: String
     public let date: String
     public let items: [RecommendationItem]
+    public let engine: String?
+    public let sources: [String: Int]?
     public let degraded: Bool?
 }
 

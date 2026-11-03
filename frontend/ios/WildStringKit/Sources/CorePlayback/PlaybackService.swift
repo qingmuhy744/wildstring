@@ -82,6 +82,10 @@ public final class PlaybackService {
     public private(set) var isBuffering = false
     public private(set) var currentTime: Double = 0
     public private(set) var duration: Double = 0
+    public private(set) var bufferedTime: Double = 0
+    public var volume: Float = 1 {
+        didSet { player.volume = volume }
+    }
     public private(set) var errorMessage: String?
 
     public var items: [Item] { queue.items }
@@ -683,6 +687,7 @@ public final class PlaybackService {
         intendedPlaying = autoplay
         currentTime = isTranscode ? transcodeBaseSeconds : startAt
         duration = durationOverride ?? 0
+        bufferedTime = 0
         errorMessage = nil
         isPlaying = false
         isBuffering = autoplay

@@ -59,6 +59,7 @@ public struct PodcastSummary: Decodable, Equatable, Sendable, Identifiable {
     public let unplayedEpisodes: Int
     public let followed: Bool
     public let coverURL: URL?
+    public let feedURL: URL?
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -69,7 +70,12 @@ public struct PodcastSummary: Decodable, Equatable, Sendable, Identifiable {
         totalEpisodes = try container.decodeIfPresent(Int.self, forKey: .totalEpisodes) ?? 0
         unplayedEpisodes = try container.decodeIfPresent(Int.self, forKey: .unplayedEpisodes) ?? 0
         followed = try container.decodeIfPresent(Bool.self, forKey: .followed) ?? false
-        coverURL = try container.decodeIfPresent(String.self, forKey: .coverURL).flatMap { value in
+        coverURL = Self.remoteURL(from: container, key: .coverURL)
+        feedURL = Self.remoteURL(from: container, key: .feedURL)
+    }
+
+    private static func remoteURL(from container: KeyedDecodingContainer<CodingKeys>, key: CodingKeys) -> URL? {
+        try? container.decodeIfPresent(String.self, forKey: key).flatMap { value in
             guard let url = URL(string: value), ["http", "https"].contains(url.scheme?.lowercased() ?? "") else { return nil }
             return url
         }
@@ -80,6 +86,7 @@ public struct PodcastSummary: Decodable, Equatable, Sendable, Identifiable {
         case totalEpisodes = "total_episodes"
         case unplayedEpisodes = "unplayed_episodes"
         case coverURL = "cover_url"
+        case feedURL = "feed_url"
     }
 }
 
