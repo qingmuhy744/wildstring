@@ -405,6 +405,7 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
     var queue by rememberSaveable { mutableStateOf(false) }
     var settings by rememberSaveable { mutableStateOf(false) }
     var feature by remember { mutableStateOf<String?>(null) }
+    var playerReturnFeature by remember { mutableStateOf<String?>(null) }
     var featureTrack by remember { mutableStateOf<Track?>(null) }
     var featurePlaylist by remember { mutableStateOf<Playlist?>(null) }
     var featureBatchId by remember { mutableStateOf<String?>(null) }
@@ -432,6 +433,8 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
             playerFromSettings = false
             vm.openPlayingPodcast()
         } else if (playerFromSettings) settings = true
+        // A player opened from a full-screen feature returns to that feature, not the catalog.
+        playerReturnFeature?.let { feature = it; playerReturnFeature = null }
     }
     fun openTrackAlbum(track: Track) {
         actions = null
@@ -518,6 +521,7 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
             rawPlayerDragY = 0f
             playerPullingUp = false
             playerFromSettings = false
+            playerReturnFeature = null
         } else settlePlayerDrag()
     }
     val baseIsSettings = settings || (destination == "player" && playerFromSettings)
@@ -805,6 +809,11 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
         when (target) {
             "metadata-center", "metadata-review" -> { feature = "management"; featureBatchId = batchId }
             "lyric-scan" -> { feature = "lyric-scans"; featureBatchId = batchId }
+            // Features are dialogs above the shell, so close the dialog before expanding the player.
+            "player" -> {
+                playerReturnFeature = feature; feature = null
+                playerReturnDepth = -1; playerFromSettings = false; expanded = true; lyrics = false; queue = false
+            }
         }
     }
     feature?.let { route -> FeatureDialog(vm, route, featureTrack, featurePlaylist, albumId = featureAlbumId, dismiss = { feature = null; featureTrack = null; featurePlaylist = null; featureBatchId = null; featureAlbumId = null }, initialBatchId = featureBatchId, onOpenAction = ::openFeatureAction) }

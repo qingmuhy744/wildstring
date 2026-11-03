@@ -171,6 +171,13 @@ class RecommendationExperienceTest {
                 assertFalse(vm.state.value.playing)
                 assertEquals(listOf("local-a", "local-a"), vm.state.value.queue.map { it.trackId })
                 capture("recommendation-selection-queue.png")
+                compose.onNodeWithTag("daily-now-playing").performClick()
+                compose.waitUntil(5_000) { compose.onAllNodesWithTag("player-visual-stage").fetchSemanticsNodes().isNotEmpty() }
+                compose.onNodeWithTag("feature-daily").assertDoesNotExist()
+                compose.onNodeWithTag("recommendation-lyrics").assertDoesNotExist()
+                compose.runOnIdle { compose.activity.onBackPressedDispatcher.onBackPressed() }
+                compose.waitUntil(5_000) { compose.onAllNodesWithTag("feature-daily").fetchSemanticsNodes().isNotEmpty() }
+                assertEquals(entry, vm.state.value.entryId)
             } finally { cleanup(vm) }
         }
     }

@@ -55,7 +55,7 @@ internal fun recommendationIssue(code: String): String = when {
     }
 }
 
-@Composable internal fun DailyPanel(vm: MusicViewModel) {
+@Composable internal fun DailyPanel(vm: MusicViewModel, openPlayer: () -> Unit) {
     val current by vm.state.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope(); val action = remember { FeatureAction() }
     var daily by remember { mutableStateOf<DailyRecommendations?>(null) }
@@ -70,12 +70,19 @@ internal fun recommendationIssue(code: String): String = when {
     var selectedIds by remember { mutableStateOf(setOf<String>()) }
     var playlistTracks by remember { mutableStateOf<List<Track>?>(null) }
     var lyricTrack by remember { mutableStateOf<Track?>(null) }
+    // Bumped by 换一批 so a slower background load cannot replace the batch the user just asked for.
+    var batch by remember { mutableIntStateOf(0) }
     LaunchedEffect(Unit) {
-        action.run {
+        val cached = vm.repository.cachedDaily()?.also { daily = it }
+        val started = batch
+        suspend fun load() {
+            vm.repository.daily().let { if (batch == started) daily = it }
             preferences = vm.repository.api().recommendationPreferences()
             try { connections = vm.agent.all("connections") } catch (cancel: CancellationException) { throw cancel } catch (error: Exception) { connectionsError = friendlyError(error) }
-            daily = vm.repository.agentApi().daily()
         }
+        // Reopening shows the last batch at once and refreshes it quietly; only a cold start shows progress.
+        if (cached == null) action.run { load() }
+        else try { load() } catch (cancel: CancellationException) { throw cancel } catch (error: Exception) { action.message = friendlyError(error) }
         if (action.message == "已完成") action.message = null
     }
     if (rankings) { RankingsPanel(vm) { rankings = false }; return }
@@ -106,7 +113,7 @@ internal fun recommendationIssue(code: String): String = when {
             }
             Text("${entries.size} 首 · 今日的临时歌单", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Row {
-                TextButton({ scope.launch { action.run { daily = vm.repository.agentApi().refreshDaily(); rejected = emptySet(); selectedIds = emptySet(); selecting = false } } }, enabled = !action.busy) { Text(if (action.busy) "正在生成…" else "换一批") }
+                TextButton({ scope.launch { action.run { batch++; daily = vm.repository.daily(refresh = true); rejected = emptySet(); selectedIds = emptySet(); selecting = false } } }, enabled = !action.busy) { Text(if (action.busy) "正在生成…" else "换一批") }
                 TextButton({ rankings = true }) { Text("收听排行") }
                 TextButton({ external = true }) { Text("发现新音乐") }
             }
@@ -178,11 +185,11 @@ internal fun recommendationIssue(code: String): String = when {
     }
     current.current?.let { playing ->
         HorizontalDivider()
-        Row(Modifier.fillMaxWidth().clickable(enabled = !playing.isPodcast) { lyricTrack = playing }.padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(Modifier.fillMaxWidth().testTag("daily-now-playing").clickable(onClickLabel = "打开播放器", onClick = openPlayer).padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Cover(vm, playing.id.takeIf { playing.hasCover }, playing.title, Modifier.size(40.dp).clip(RoundedCornerShape(8.dp)))
             Column(Modifier.weight(1f)) {
                 Text(playing.title, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium)
-                Text(if (playing.isPodcast) "${playing.artist} · 播客" else "${playing.artist} · 点击查看歌词", maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(if (playing.isPodcast) "${playing.artist} · 播客" else playing.artist, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             IconButton({ vm.toggle() }) { Icon(if (current.playing) Icons.Default.Pause else Icons.Default.PlayArrow, if (current.playing) "暂停" else "播放") }
             IconButton({ vm.next() }) { Icon(Icons.Default.SkipNext, "下一首") }

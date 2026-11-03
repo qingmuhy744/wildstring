@@ -217,6 +217,15 @@ class Repository @Inject constructor(@param:ApplicationContext private val conte
     }
     suspend fun cachedPodcastDetail(id: String): PodcastDetail? = saved("podcast:$id", PodcastDetail::class.java)
     suspend fun cachedPodcastEpisode(id: String): PodcastEpisode? = saved("podcast-episode:$id", PodcastEpisode::class.java)
+    /** Daily picks depend on the selected library, so each library keeps its own cached batch. */
+    suspend fun daily(refresh: Boolean = false): DailyRecommendations {
+        val owner = session.cacheScope(); requireProfile(owner)
+        val key = "recommendations:daily:$selectedLibraryId"
+        return agentApi().run { if (refresh) refreshDaily() else daily() }.also { daily ->
+            requireProfile(owner); save(key, daily, owner)
+        }
+    }
+    suspend fun cachedDaily(): DailyRecommendations? = saved("recommendations:daily:$selectedLibraryId", DailyRecommendations::class.java)
     suspend fun podcastEpisode(id: String): PodcastEpisode {
         val owner = session.cacheScope(); requireProfile(owner)
         return api().podcastEpisode(id).also { episode ->
