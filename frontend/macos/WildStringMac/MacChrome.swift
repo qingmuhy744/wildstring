@@ -218,8 +218,17 @@ enum MacPages {
 }
 
 func macClock(milliseconds: Int64) -> String {
-    let total = max(0, Int(milliseconds / 1000))
-    return String(format: "%d:%02d", total / 60, total % 60)
+  let total = max(0, Int(milliseconds) / 1000)
+  return String(format: "%d:%02d", total / 60, total % 60)
+}
+
+/// Human total-length line for collection headings, e.g. "2 小时 38 分钟".
+func macTotalDurationText(_ tracks: [Track]) -> String {
+  let minutes = Int(tracks.reduce(Int64(0)) { $0 + $1.durationMs } / 60_000)
+  if minutes >= 60 {
+    return "\(minutes / 60) 小时 \(minutes % 60) 分钟"
+  }
+  return "\(max(minutes, 1)) 分钟"
 }
 
 struct MacCollectionHeading: View {
@@ -227,34 +236,69 @@ struct MacCollectionHeading: View {
     var subtitle: String
     var symbol: String
     var canPlay: Bool
+    var tileSymbol: String? = nil
+    var badge: String? = nil
+    var onShuffle: (() -> Void)? = nil
     var play: () -> Void
 
     var body: some View {
         HStack(spacing: 16) {
-            Image(systemName: symbol)
-                .font(.system(size: 19, weight: .medium))
-                .foregroundStyle(MacTheme.accentDeep)
-                .frame(width: 44, height: 44)
-                .background(
-                    MacTheme.accentSoft,
-                    in: RoundedRectangle(cornerRadius: 12, style: .continuous)
-                )
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title).font(MacTheme.display(26)).foregroundStyle(MacTheme.ink)
+            if let tileSymbol {
+                Image(systemName: tileSymbol)
+                    .font(.system(size: 26, weight: .medium))
+                    .foregroundStyle(MacTheme.onAccent)
+                    .frame(width: 64, height: 64)
+                    .background(
+                        LinearGradient(
+                            colors: [MacTheme.accent, MacTheme.accentDeep],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        in: RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    )
+            } else {
+                Image(systemName: symbol)
+                    .font(.system(size: 19, weight: .medium))
+                    .foregroundStyle(MacTheme.accentDeep)
+                    .frame(width: 44, height: 44)
+                    .background(
+                        MacTheme.accentSoft,
+                        in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    )
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                if let badge {
+                    Text(badge)
+                        .font(MacTheme.micro)
+                        .foregroundStyle(MacTheme.accentDeep)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(MacTheme.accentSoft, in: Capsule())
+                }
+                Text(title).font(MacTheme.display(28)).foregroundStyle(MacTheme.ink)
                 Text(subtitle).font(MacTheme.caption).foregroundStyle(MacTheme.muted)
             }
             Spacer()
             Button(action: play) {
-                Label("播放", systemImage: "play.fill")
+                Label("播放全部", systemImage: "play.fill")
                     .font(MacTheme.section(13))
             }
             .buttonStyle(.borderedProminent)
             .tint(MacTheme.accentDeep)
             .controlSize(.large)
             .disabled(!canPlay)
+            if let onShuffle {
+                Button(action: onShuffle) {
+                    Label("随机", systemImage: "shuffle")
+                        .font(MacTheme.section(13))
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.large)
+                .disabled(!canPlay)
+            }
         }
         .padding(.horizontal, 24)
-        .padding(.vertical, 18)
+        .padding(.vertical, 20)
         .background(MacTheme.canvas)
         .overlay(alignment: .bottom) {
             Rectangle().fill(MacTheme.border).frame(height: 1)

@@ -85,6 +85,7 @@ struct MacPlayableTracks: View {
   @State private var lyricTrack: Track?
   @State private var editing: Track?
   @State private var notice: String?
+  @State private var hoveredTrackID: String?
 
   private var isSelecting: Bool {
     externalSelecting?.wrappedValue ?? selecting
@@ -95,22 +96,19 @@ struct MacPlayableTracks: View {
     externalSelecting?.wrappedValue = value
   }
 
-  private var hasBadges: Bool {
-    guard let trackBadge, let first = tracks.first else { return false }
-    return trackBadge(first) != nil
-  }
-
   var body: some View {
     GeometryReader { geometry in
       let wide = geometry.size.width >= 680
-      let artistWidth = (geometry.size.width - 60) * 0.21
-      let albumWidth = (geometry.size.width - 60) * 0.24
+      let artistWidth = (geometry.size.width - 36) * 0.21
+      let albumWidth = (geometry.size.width - 36) * 0.24
       VStack(spacing: 0) {
         if wide {
           HStack(spacing: 16) {
             if isSelecting { Color.clear.frame(width: 18, height: 1) }
-            if hasBadges { Text("#").frame(width: 26, alignment: .trailing) }
-            Text("歌曲").padding(.leading, 52).frame(maxWidth: .infinity, alignment: .leading)
+            Text("#").frame(width: 28, alignment: .trailing)
+            Text("歌曲标题")
+              .padding(.leading, 52)
+              .frame(maxWidth: .infinity, alignment: .leading)
             Text("艺人").frame(width: artistWidth, alignment: .leading)
             Text("专辑").frame(width: albumWidth, alignment: .leading)
             Color.clear.frame(width: 32, height: 1)
@@ -118,17 +116,23 @@ struct MacPlayableTracks: View {
             Color.clear.frame(width: 26, height: 1)
           }
           .font(MacTheme.micro)
-          .foregroundStyle(MacTheme.muted)
-          .padding(.horizontal, 30)
+          .foregroundStyle(MacTheme.faint)
+          .padding(.horizontal, 18)
           .padding(.vertical, 10)
-          .background(MacTheme.panel)
-          Divider().overlay(MacTheme.border)
+          .overlay(alignment: .bottom) {
+            Rectangle().fill(MacTheme.border).frame(height: 1)
+          }
         }
-        List(tracks) { track in
-          trackRow(track, wide: wide, artistWidth: artistWidth, albumWidth: albumWidth)
-            .listRowInsets(EdgeInsets(top: 3, leading: 18, bottom: 3, trailing: 18))
+        List {
+          ForEach(Array(tracks.enumerated()), id: \.element.id) { index, track in
+            trackRow(
+              track, number: index + 1, wide: wide,
+              artistWidth: artistWidth, albumWidth: albumWidth
+            )
+            .listRowInsets(EdgeInsets(top: 0, leading: 18, bottom: 0, trailing: 18))
             .listRowBackground(Color.clear)
             .listRowSeparator(.hidden)
+          }
         }
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
@@ -209,13 +213,15 @@ struct MacPlayableTracks: View {
 
   private func trackRow(
     _ track: Track,
+    number: Int,
     wide: Bool,
     artistWidth: CGFloat,
     albumWidth: CGFloat
   ) -> some View {
     let current = playback.currentItem?.trackID == track.id
-    let badge = trackBadge?(track)
+    let numberText = trackBadge?(track) ?? String(format: "%02d", number)
     let reason = trackReason?(track)?.trimmingCharacters(in: .whitespacesAndNewlines)
+    let isHovered = hoveredTrackID == track.id
     return HStack(spacing: 16) {
       if isSelecting {
         Toggle("选择 \(track.title)", isOn: Binding(
@@ -223,11 +229,16 @@ struct MacPlayableTracks: View {
           set: { if $0 { selected.insert(track.id) } else { selected.remove(track.id) } }
         )).toggleStyle(.checkbox).labelsHidden().frame(width: 18)
       }
-      if let badge {
+      if wide {
+        Text(numberText)
+          .font(MacTheme.mono(12))
+          .foregroundStyle(current ? MacTheme.accentDeep : MacTheme.faint)
+          .frame(width: 28, alignment: .trailing)
+      } else if let badge = trackBadge?(track) {
         Text(badge)
           .font(MacTheme.mono(12))
           .foregroundStyle(current ? MacTheme.accentDeep : MacTheme.faint)
-          .frame(width: 26, alignment: .trailing)
+          .frame(width: 28, alignment: .trailing)
       }
       HStack(spacing: 10) {
         Button {
@@ -253,7 +264,7 @@ struct MacPlayableTracks: View {
             }
           } label: {
             Text(track.title)
-              .font(.system(size: 13, weight: current ? .semibold : .regular))
+              .font(.system(size: 13, weight: current ? .semibold : .medium))
               .foregroundStyle(current ? MacTheme.accentDeep : MacTheme.ink)
               .lineLimit(1)
               .frame(maxWidth: .infinity, alignment: .leading)
@@ -261,7 +272,12 @@ struct MacPlayableTracks: View {
           }
           .buttonStyle(.plain)
 
-          if !wide {
+          if current {
+            Text(playback.isPlaying ? "正在播放" : "已暂停")
+              .font(.system(size: 11))
+              .foregroundStyle(MacTheme.accentDeep)
+              .lineLimit(1)
+          } else if !wide {
             HStack(spacing: 4) {
               artistLink(track)
               if track.albumId != nil || !(track.album ?? "").isEmpty {
@@ -308,7 +324,7 @@ struct MacPlayableTracks: View {
 
       Text(macClock(milliseconds: track.durationMs))
         .font(MacTheme.mono())
-        .foregroundStyle(MacTheme.faint)
+        .foregroundStyle(current ? MacTheme.accentDeep : MacTheme.faint)
         .frame(width: 48, alignment: .trailing)
 
       Menu { trackMenu(track) } label: {
@@ -320,22 +336,29 @@ struct MacPlayableTracks: View {
       .accessibilityLabel("\(track.title)的更多操作")
       .help("\(track.title)的更多操作")
     }
-    .padding(.horizontal, 12)
-    .padding(.vertical, 8)
+    .padding(.vertical, 10)
     .background(
-      current ? MacTheme.accentSoft : MacTheme.panel,
-      in: RoundedRectangle(cornerRadius: MacTheme.rowRadius, style: .continuous)
+      current
+        ? MacTheme.accent.opacity(0.10)
+        : (isHovered ? MacTheme.panel.opacity(0.55) : Color.clear)
     )
-    .overlay(
-      RoundedRectangle(cornerRadius: MacTheme.rowRadius, style: .continuous)
-        .strokeBorder(current ? MacTheme.accent.opacity(0.45) : MacTheme.border, lineWidth: 1)
-    )
+    .overlay(alignment: .bottom) {
+      Rectangle().fill(MacTheme.border.opacity(0.55)).frame(height: 1)
+    }
     .overlay(alignment: .leading) {
       if current {
         Capsule()
           .fill(MacTheme.accent)
           .frame(width: 3)
-          .padding(.vertical, 8)
+          .padding(.vertical, 12)
+      }
+    }
+    .onHover { hovering in
+      guard !isSelecting else { return }
+      if hovering {
+        hoveredTrackID = track.id
+      } else if hoveredTrackID == track.id {
+        hoveredTrackID = nil
       }
     }
     .contextMenu { trackMenu(track) }
@@ -945,9 +968,18 @@ struct MacFavoritesView: View {
     VStack(spacing: 0) {
       MacCollectionHeading(
         title: "我喜欢",
-        subtitle: loading && tracks.isEmpty ? "正在读取" : "\(tracks.count) 首",
+        subtitle: loading && tracks.isEmpty
+          ? "正在读取"
+          : "\(tracks.count) 首歌曲 · 总时长 \(macTotalDurationText(tracks))",
         symbol: "heart.fill",
-        canPlay: !tracks.isEmpty
+        canPlay: !tracks.isEmpty,
+        tileSymbol: "heart",
+        badge: "收藏歌单",
+        onShuffle: {
+          guard let pick = tracks.randomElement() else { return }
+          if !playback.isShuffled { playback.toggleShuffle() }
+          MacPlayback.play(tracks, startingAt: pick, playback: playback)
+        }
       ) {
         guard let first = tracks.first else { return }
         MacPlayback.play(tracks, startingAt: first, playback: playback)
