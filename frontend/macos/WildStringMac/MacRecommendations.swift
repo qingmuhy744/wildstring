@@ -32,20 +32,22 @@ struct MacDiscoverView: View {
         }.pickerStyle(.segmented).frame(width: 260)
         HStack(alignment: .top) {
           VStack(alignment: .leading, spacing: 6) {
-            Text(section == "daily" ? "今天，听点喜欢的" : "常听的声音").font(.title.bold())
+            Text(section == "daily" ? "今天，听点喜欢的" : "常听的声音")
+              .font(MacTheme.display(28))
+              .foregroundStyle(MacTheme.ink)
             Text(
               section == "daily"
                 ? "\(daily?.date ?? "") · \(tracks.count) 首" : "\(tracks.count) 首 · 实际收听排行"
             )
-            .font(.callout).foregroundStyle(.secondary)
+            .font(MacTheme.caption).foregroundStyle(MacTheme.muted)
           }
           Spacer()
           Button("播放推荐", systemImage: "play.fill") {
             if let first = tracks.first {
               MacPlayback.play(tracks, startingAt: first, playback: playback)
             }
-          }.disabled(tracks.isEmpty).buttonStyle(.borderedProminent)
-          Button("保存歌单…") { saving = true }.disabled(tracks.isEmpty)
+          }.disabled(tracks.isEmpty).buttonStyle(.borderedProminent).tint(MacTheme.accentDeep)
+          Button("保存歌单…") { saving = true }.disabled(tracks.isEmpty).buttonStyle(.bordered)
         }
         if section == "rankings" {
           HStack {
@@ -66,8 +68,8 @@ struct MacDiscoverView: View {
         if section == "daily", daily?.degraded == true {
           Text("部分来源暂不可用，已保留可用推荐。").font(.caption).foregroundStyle(.secondary)
         }
-      }.padding(20)
-      Divider()
+      }.padding(.horizontal, 24).padding(.vertical, 20)
+      Rectangle().fill(MacTheme.border).frame(height: 1)
       MacPlayableTracks(
         client: client, playback: playback, favorites: favorites, tracks: tracks,
         emptyTitle: message == nil ? "还没有推荐" : "暂时无法读取推荐",

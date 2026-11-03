@@ -6,6 +6,14 @@ struct WildStringMacApp: App {
     @State private var session = MacSession()
     @AppStorage("menuBarPlayerEnabled") private var menuBarPlayerEnabled = true
 
+    init() {
+        switch UserDefaults.standard.string(forKey: "macAppearance") ?? "system" {
+        case "light": NSApplication.shared.appearance = NSAppearance(named: .aqua)
+        case "dark": NSApplication.shared.appearance = NSAppearance(named: .darkAqua)
+        default: NSApplication.shared.appearance = nil
+        }
+    }
+
     var body: some Scene {
         Window("野弦", id: "main") {
             MacRootView(session: session)

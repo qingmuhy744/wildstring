@@ -2,14 +2,79 @@ import CoreNetwork
 import SwiftUI
 
 enum MacTheme {
-    /// Web light accent `#e98a6d`.
-    static let accent = Color(red: 233 / 255, green: 138 / 255, blue: 109 / 255)
-    /// Keep accent text readable in both window appearances.
-    static let accentDeep = Color(nsColor: NSColor(name: nil) { appearance in
-        appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-            ? NSColor(red: 233 / 255, green: 138 / 255, blue: 109 / 255, alpha: 1)
-            : NSColor(red: 188 / 255, green: 84 / 255, blue: 56 / 255, alpha: 1)
-    })
+    /// Warm editorial palette shared by the shell, cards and rows.
+    private static func adaptive(light: UInt32, dark: UInt32) -> Color {
+        Color(nsColor: NSColor(name: nil) { appearance in
+            let value = appearance.name.rawValue.lowercased().contains("dark") ? dark : light
+            return NSColor(
+                srgbRed: CGFloat((value >> 16) & 0xFF) / 255,
+                green: CGFloat((value >> 8) & 0xFF) / 255,
+                blue: CGFloat(value & 0xFF) / 255,
+                alpha: 1
+            )
+        })
+    }
+
+    static let canvas = adaptive(light: 0xF7F3EA, dark: 0x211C17)
+    static let sidebar = adaptive(light: 0xF1ECE2, dark: 0x29231D)
+    static let panel = adaptive(light: 0xFBF8F1, dark: 0x302820)
+    static let raised = adaptive(light: 0xFFFFFF, dark: 0x3A3128)
+    static let border = adaptive(light: 0xE2D9CC, dark: 0x4B4035)
+    static let ink = adaptive(light: 0x23241F, dark: 0xF3EBDF)
+    static let muted = adaptive(light: 0x6B675C, dark: 0xB9AC9C)
+    static let faint = adaptive(light: 0x8A8175, dark: 0x938575)
+    static let accent = adaptive(light: 0xBC5438, dark: 0xD97757)
+    static let accentDeep = adaptive(light: 0x9F422B, dark: 0xE58B6D)
+    static let accentSoft = adaptive(light: 0xF3E2DA, dark: 0x422D24)
+    static let olive = adaptive(light: 0x5E6B4F, dark: 0xB4C09E)
+    static let oliveSoft = adaptive(light: 0xE7EADF, dark: 0x343B2D)
+    static let onAccent = adaptive(light: 0xFFFFFF, dark: 0x2A1712)
+
+    static let cardRadius: CGFloat = 14
+    static let panelRadius: CGFloat = 16
+    static let rowRadius: CGFloat = 10
+
+    static func display(_ size: CGFloat) -> Font {
+        .system(size: size, weight: .medium, design: .serif)
+    }
+
+    static func section(_ size: CGFloat = 15) -> Font {
+        .system(size: size, weight: .semibold)
+    }
+
+    static let body = Font.system(size: 13)
+    static let caption = Font.system(size: 12)
+    static let micro = Font.system(size: 10, weight: .semibold)
+
+    static func mono(_ size: CGFloat = 11) -> Font {
+        .system(size: size, weight: .medium, design: .monospaced).monospacedDigit()
+    }
+}
+
+private struct MacPanelModifier: ViewModifier {
+    var padding: CGFloat = 16
+    var radius: CGFloat = MacTheme.cardRadius
+    var fill: Color = MacTheme.panel
+
+    func body(content: Content) -> some View {
+        content
+            .padding(padding)
+            .background(fill, in: RoundedRectangle(cornerRadius: radius, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: radius, style: .continuous)
+                    .strokeBorder(MacTheme.border, lineWidth: 1)
+            )
+    }
+}
+
+extension View {
+    func macPanel(
+        padding: CGFloat = 16,
+        radius: CGFloat = MacTheme.cardRadius,
+        fill: Color = MacTheme.panel
+    ) -> some View {
+        modifier(MacPanelModifier(padding: padding, radius: radius, fill: fill))
+    }
 }
 
 enum MacErrorText {
@@ -118,28 +183,35 @@ struct MacCollectionHeading: View {
     var play: () -> Void
 
     var body: some View {
-        HStack(spacing: 14) {
+        HStack(spacing: 16) {
             Image(systemName: symbol)
-                .font(.title2)
+                .font(.system(size: 19, weight: .medium))
                 .foregroundStyle(MacTheme.accentDeep)
-                .frame(width: 48, height: 48)
+                .frame(width: 44, height: 44)
                 .background(
-                    MacTheme.accent.opacity(0.18),
-                    in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    MacTheme.accentSoft,
+                    in: RoundedRectangle(cornerRadius: 12, style: .continuous)
                 )
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.title2.bold())
-                Text(subtitle).font(.subheadline).foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title).font(MacTheme.display(26)).foregroundStyle(MacTheme.ink)
+                Text(subtitle).font(MacTheme.caption).foregroundStyle(MacTheme.muted)
             }
             Spacer()
             Button(action: play) {
                 Label("播放", systemImage: "play.fill")
+                    .font(MacTheme.section(13))
             }
             .buttonStyle(.borderedProminent)
+            .tint(MacTheme.accentDeep)
+            .controlSize(.large)
             .disabled(!canPlay)
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 14)
+        .padding(.horizontal, 24)
+        .padding(.vertical, 18)
+        .background(MacTheme.canvas)
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(MacTheme.border).frame(height: 1)
+        }
     }
 }
 
@@ -153,17 +225,17 @@ struct MacCatalogCard<Destination: Hashable>: View {
     var body: some View {
         NavigationLink(value: value) {
             VStack(alignment: .leading, spacing: 8) {
-                MacCover(client: client, trackID: cover, side: 156)
+                MacCover(client: client, trackID: cover, side: 152)
                 Text(title)
-                    .font(.callout.weight(.semibold))
-                    .foregroundStyle(.primary)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(MacTheme.ink)
                     .lineLimit(1)
                 Text(subtitle)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(MacTheme.caption)
+                    .foregroundStyle(MacTheme.muted)
                     .lineLimit(1)
             }
-            .frame(width: 156, alignment: .leading)
+            .frame(width: 152, alignment: .leading)
         }
         .buttonStyle(.plain)
     }

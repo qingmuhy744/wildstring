@@ -1,3 +1,4 @@
+import AppKit
 import CoreNetwork
 import CorePlayback
 import SwiftUI
@@ -25,10 +26,20 @@ struct MacRootView: View {
         .frame(minWidth: 1100, minHeight: 720)
         .tint(MacTheme.accent)
         .preferredColorScheme(appearance == "light" ? .light : appearance == "dark" ? .dark : nil)
+        .onAppear { applyAppearance() }
+        .onChange(of: appearance) { _, _ in applyAppearance() }
         .onReceive(NotificationCenter.default.publisher(for: .wildstringShowDesktopLyrics)) { _ in
             session.desktopLyrics.toggle(session: session)
         }
         .task { await session.restore() }
+    }
+
+    private func applyAppearance() {
+        switch appearance {
+        case "light": NSApp.appearance = NSAppearance(named: .aqua)
+        case "dark": NSApp.appearance = NSAppearance(named: .darkAqua)
+        default: NSApp.appearance = nil
+        }
     }
 }
 
@@ -105,6 +116,43 @@ private struct MacShellView: View {
 
     @State private var libraries: [MusicLibrary] = []
     @State private var navigationPath = NavigationPath()
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var sidebarBackground: Color {
+        colorScheme == .dark
+            ? Color(red: 0x29 / 255, green: 0x23 / 255, blue: 0x1D / 255)
+            : Color(red: 0xF1 / 255, green: 0xEC / 255, blue: 0xE2 / 255)
+    }
+    private var sidebarInk: Color {
+        colorScheme == .dark
+            ? Color(red: 0xF3 / 255, green: 0xEB / 255, blue: 0xDF / 255)
+            : Color(red: 0x23 / 255, green: 0x24 / 255, blue: 0x1F / 255)
+    }
+    private var sidebarMuted: Color {
+        colorScheme == .dark
+            ? Color(red: 0xB9 / 255, green: 0xAC / 255, blue: 0x9C / 255)
+            : Color(red: 0x6B / 255, green: 0x67 / 255, blue: 0x5C / 255)
+    }
+    private var sidebarFaint: Color {
+        colorScheme == .dark
+            ? Color(red: 0x93 / 255, green: 0x85 / 255, blue: 0x75 / 255)
+            : Color(red: 0x8A / 255, green: 0x81 / 255, blue: 0x75 / 255)
+    }
+    private var sidebarAccent: Color {
+        colorScheme == .dark
+            ? Color(red: 0xE5 / 255, green: 0x8B / 255, blue: 0x6D / 255)
+            : Color(red: 0x9F / 255, green: 0x42 / 255, blue: 0x2B / 255)
+    }
+    private var sidebarAccentSoft: Color {
+        colorScheme == .dark
+            ? Color(red: 0x42 / 255, green: 0x2D / 255, blue: 0x24 / 255)
+            : Color(red: 0xF3 / 255, green: 0xE2 / 255, blue: 0xDA / 255)
+    }
+    private var sidebarBorder: Color {
+        colorScheme == .dark
+            ? Color(red: 0x4B / 255, green: 0x40 / 255, blue: 0x35 / 255)
+            : Color(red: 0xE2 / 255, green: 0xD9 / 255, blue: 0xCC / 255)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -114,6 +162,7 @@ private struct MacShellView: View {
                 NavigationStack(path: $navigationPath) {
                     page
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(MacTheme.canvas)
                         .navigationDestination(for: MacTrackDestination.self) { destination in
                             MacTrackCollectionView(client: client, playback: playback, favorites: session.favorites,
                                 destination: destination, canManage: session.canManage)
@@ -132,7 +181,7 @@ private struct MacShellView: View {
             Divider()
             MacTransportBar(session: session, client: client, playback: playback)
         }
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(MacTheme.canvas)
         .allowsHitTesting(!session.showFullscreen)
         .accessibilityHidden(session.showFullscreen)
         .toolbar(session.showFullscreen ? .hidden : .automatic, for: .windowToolbar)
@@ -217,15 +266,32 @@ private struct MacShellView: View {
 
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 8) {
+            HStack(spacing: 10) {
                 Image(systemName: "waveform")
-                    .foregroundStyle(MacTheme.accentDeep)
-                Text("野弦")
-                    .font(.title3.bold())
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(sidebarAccent)
+                    .frame(width: 32, height: 32)
+                    .background(
+                        sidebarAccentSoft,
+                        in: RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    )
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("野弦")
+                        .font(MacTheme.display(18))
+                        .foregroundStyle(sidebarInk)
+                    Text("个人声音档案")
+                        .font(MacTheme.micro)
+                        .foregroundStyle(sidebarFaint)
+                }
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 16)
-            .padding(.bottom, 8)
+            .padding(.horizontal, 18)
+            .padding(.top, 18)
+            .padding(.bottom, 14)
+            Rectangle()
+                .fill(sidebarBorder)
+                .frame(height: 1)
+                .padding(.horizontal, 14)
+                .padding(.bottom, 6)
             ScrollView {
                 VStack(alignment: .leading, spacing: 2) {
                     sidebarRow(.home, badge: nil)
@@ -270,7 +336,7 @@ private struct MacShellView: View {
                 .padding(.horizontal, 10)
                 .padding(.bottom, 12)
             }
-            Divider()
+            Rectangle().fill(sidebarBorder).frame(height: 1)
             VStack(alignment: .leading, spacing: 2) {
                 if session.canManage {
                     sidebarRow(.manage, badge: nil)
@@ -285,19 +351,21 @@ private struct MacShellView: View {
                         .padding(.vertical, 6)
                 }
                 .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
+                .font(.system(size: 12))
+                .foregroundStyle(sidebarMuted)
             }
             .padding(10)
         }
-        .frame(width: 232)
-        .background(.ultraThinMaterial)
+        .frame(width: 228)
+        .background(sidebarBackground)
     }
 
     private func group(_ title: String, pages: [MacPage]) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(title)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
+                .font(MacTheme.micro)
+                .tracking(0.6)
+                .foregroundStyle(sidebarFaint)
                 .padding(.horizontal, 10)
                 .padding(.top, 14)
                 .padding(.bottom, 4)
@@ -327,22 +395,36 @@ private struct MacShellView: View {
     ) -> some View {
         Button(action: action) {
             HStack(spacing: 8) {
-                Label(title, systemImage: symbol)
-                    .font(.body.weight(selected ? .semibold : .regular))
-                    .foregroundStyle(selected ? MacTheme.accentDeep : Color.primary)
+                HStack(spacing: 8) {
+                    Image(systemName: symbol)
+                        .font(.system(size: 13))
+                        .frame(width: 18)
+                        .foregroundStyle(selected ? sidebarAccent : sidebarMuted)
+                    Text(title)
+                        .font(.system(size: 13, weight: selected ? .semibold : .regular))
+                        .foregroundStyle(selected ? sidebarAccent : sidebarInk)
+                }
                 Spacer(minLength: 4)
                 if let badge {
                     Text(badge)
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(selected ? MacTheme.accentDeep : Color.secondary)
+                        .font(MacTheme.mono(10))
+                        .foregroundStyle(selected ? sidebarAccent : sidebarMuted)
                 }
             }
             .padding(.horizontal, 10)
-            .padding(.vertical, 6)
+            .padding(.vertical, 7)
             .background(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(selected ? MacTheme.accent.opacity(0.18) : Color.clear)
+                    .fill(selected ? sidebarAccentSoft : Color.clear)
             )
+            .overlay(alignment: .leading) {
+                if selected {
+                    Capsule()
+                        .fill(sidebarAccent)
+                        .frame(width: 3)
+                        .padding(.vertical, 7)
+                }
+            }
             .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         }
         .buttonStyle(.plain)
@@ -352,7 +434,7 @@ private struct MacShellView: View {
         Button(action: action) {
             Text(title)
                 .font(.callout.weight(selected ? .semibold : .regular))
-                .foregroundStyle(selected ? MacTheme.accentDeep : Color.primary)
+                .foregroundStyle(selected ? sidebarAccent : sidebarMuted)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 5)

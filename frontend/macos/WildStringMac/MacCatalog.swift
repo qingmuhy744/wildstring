@@ -99,10 +99,11 @@ struct MacPlayableTracks: View {
             Text("时长").frame(width: 48, alignment: .trailing)
             Color.clear.frame(width: 28, height: 1)
           }
-          .font(.caption.weight(.medium)).foregroundStyle(.secondary)
-          .padding(.horizontal, 16).padding(.vertical, 10)
-          .background(.bar)
-          Divider()
+          .font(MacTheme.micro)
+          .foregroundStyle(MacTheme.muted)
+          .padding(.horizontal, 18).padding(.vertical, 10)
+          .background(MacTheme.panel)
+          Divider().overlay(MacTheme.border)
         }
         List(tracks) { track in
           HStack(spacing: 16) {
@@ -133,7 +134,8 @@ struct MacPlayableTracks: View {
                   }
                 } label: {
                   Text(track.title)
-                    .fontWeight(playback.currentItem?.trackID == track.id ? .semibold : .regular)
+                    .font(.system(size: 13, weight: playback.currentItem?.trackID == track.id ? .semibold : .regular))
+                    .foregroundStyle(playback.currentItem?.trackID == track.id ? MacTheme.accentDeep : MacTheme.ink)
                     .lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
                     .contentShape(Rectangle())
                 }.buttonStyle(.plain)
@@ -144,7 +146,7 @@ struct MacPlayableTracks: View {
                       Text("·").foregroundStyle(.tertiary)
                       albumLink(track)
                     }
-                  }.font(.caption)
+                  }.font(MacTheme.caption).foregroundStyle(MacTheme.muted)
                 }
               }.frame(maxWidth: .infinity, alignment: .leading)
             }.frame(maxWidth: .infinity, alignment: .leading)
@@ -159,7 +161,8 @@ struct MacPlayableTracks: View {
               }
             }.font(.caption).foregroundStyle(MacTheme.accentDeep).frame(width: 36)
             Text(macClock(milliseconds: track.durationMs))
-              .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+              .font(MacTheme.mono())
+              .foregroundStyle(MacTheme.faint)
               .frame(width: 48, alignment: .trailing)
             Menu { trackMenu(track) } label: {
               Image(systemName: "ellipsis").frame(width: 28, height: 28).contentShape(Rectangle())
@@ -168,9 +171,15 @@ struct MacPlayableTracks: View {
             .accessibilityLabel("\(track.title)的更多操作").help("\(track.title)的更多操作")
           }
           .contextMenu { trackMenu(track) }
-          .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
-          .listRowBackground(playback.currentItem?.trackID == track.id ? MacTheme.accent.opacity(0.12) : Color.clear)
-        }.listStyle(.plain)
+          .listRowInsets(EdgeInsets(top: 6, leading: 18, bottom: 6, trailing: 18))
+          .listRowBackground(
+            playback.currentItem?.trackID == track.id ? MacTheme.accentSoft : MacTheme.canvas
+          )
+          .listRowSeparatorTint(MacTheme.border)
+        }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .background(MacTheme.canvas)
       }
     }
     .overlay {
@@ -231,7 +240,7 @@ struct MacPlayableTracks: View {
                 .disabled(selectedTracks.isEmpty)
             }.controlSize(.small)
           }
-        }.padding(12).background(.bar)
+        }.padding(12).background(MacTheme.panel)
       }
     }
     .onChange(of: tracks.map(\.id)) { _, ids in selected.formIntersection(Set(ids)) }

@@ -67,11 +67,11 @@ struct MacTransportBar: View {
                     if let item = playback.currentItem {
                         Button { session.showFullscreen = true } label: {
                             HStack(spacing: 12) {
-                                MacCover(client: client, trackID: item.hasCover || isPodcast ? item.trackID : nil, side: 52,
+                                MacCover(client: client, trackID: item.hasCover || isPodcast ? item.trackID : nil, side: 48,
                                     placeholder: isPodcast ? "antenna.radiowaves.left.and.right" : "music.note")
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(item.title).font(.callout.weight(.semibold)).lineLimit(1)
-                                    Text(item.artist).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(item.title).font(.system(size: 13, weight: .semibold)).foregroundStyle(MacTheme.ink).lineLimit(1)
+                                    Text(item.artist).font(MacTheme.caption).foregroundStyle(MacTheme.muted).lineLimit(1)
                                 }.frame(maxWidth: .infinity, alignment: .leading)
                             }
                         }.buttonStyle(.plain).help("全屏播放")
@@ -102,8 +102,8 @@ struct MacTransportBar: View {
                         }
                         Button { playback.togglePlayPause() } label: {
                             Image(systemName: playback.isPlaying ? "pause.fill" : "play.fill")
-                                .font(.system(size: 14, weight: .semibold)).foregroundStyle(.white)
-                                .frame(width: 36, height: 36).background(MacTheme.accentDeep, in: Circle())
+                                .font(.system(size: 14, weight: .semibold)).foregroundStyle(MacTheme.onAccent)
+                                .frame(width: 38, height: 38).background(MacTheme.accent, in: Circle())
                         }.buttonStyle(.plain).help(playback.isPlaying ? "暂停" : "播放").disabled(playback.currentItem == nil)
                         transportButton(isPodcast ? "goforward.30" : "forward.fill", help: isPodcast ? "前进 30 秒" : "下一首") {
                             if isPodcast { playback.seek(to: playback.currentTime + 30) } else { playback.next() }
@@ -120,7 +120,7 @@ struct MacTransportBar: View {
                         PlaybackSlider(playback: playback)
                         Text(playback.duration > 0 ? macPlaybackClock(playback.duration) : "—:—")
                             .frame(width: isPodcast ? 54 : 38, alignment: .leading)
-                    }.font(.caption.monospacedDigit()).foregroundStyle(.secondary).lineLimit(1)
+                    }.font(MacTheme.mono(10)).foregroundStyle(MacTheme.faint).lineLimit(1)
                     if let message = playback.errorMessage ?? playback.podcastProgressMessage {
                         Text(message).font(.caption2).foregroundStyle(.orange).lineLimit(1)
                     }
@@ -146,8 +146,11 @@ struct MacTransportBar: View {
             .padding(.horizontal, 20)
             .frame(width: geo.size.width, height: geo.size.height)
         }
-        .frame(height: playback.errorMessage == nil && playback.podcastProgressMessage == nil ? 94 : 110)
-        .background(.regularMaterial)
+        .frame(height: playback.errorMessage == nil && playback.podcastProgressMessage == nil ? 84 : 100)
+        .background(MacTheme.panel)
+        .overlay(alignment: .top) {
+            Rectangle().fill(MacTheme.border).frame(height: 1)
+        }
     }
 
     private func transportButton(
@@ -159,7 +162,7 @@ struct MacTransportBar: View {
         Button(action: action) {
             Image(systemName: symbol)
                 .font(.system(size: 16))
-                .foregroundStyle(active ? MacTheme.accentDeep : Color.secondary)
+                .foregroundStyle(active ? MacTheme.accentDeep : MacTheme.muted)
                 .frame(width: 28, height: 30)
         }
         .buttonStyle(.borderless)
@@ -370,8 +373,8 @@ struct MenuBarPlayer: View {
                     }.help(isPodcast ? "后退 15 秒" : "上一首")
                     Button { playback.togglePlayPause() } label: {
                         Image(systemName: playback.isPlaying ? "pause.fill" : "play.fill")
-                            .font(.title3).foregroundStyle(.white).frame(width: 42, height: 42)
-                            .background(MacTheme.accentDeep, in: Circle())
+                            .font(.title3).foregroundStyle(MacTheme.onAccent).frame(width: 42, height: 42)
+                            .background(MacTheme.accent, in: Circle())
                     }.help(playback.isPlaying ? "暂停" : "播放")
                     Button {
                         if isPodcast { playback.seek(to: playback.currentTime + 30) }
