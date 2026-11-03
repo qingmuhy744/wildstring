@@ -60,7 +60,9 @@ function Radio({ player, onPreview }: { player: Player; onPreview: () => void })
       </div>
       <div className="retro-tuner">
         <div className="retro-tuner-label" aria-hidden="true">
-          <span>FM</span>
+          <span>
+            FM <small className="retro-tuner-hint">· 拖动跳转</small>
+          </span>
           <span>88</span>
           <span>92</span>
           <span>96</span>
@@ -70,7 +72,7 @@ function Radio({ player, onPreview }: { player: Player; onPreview: () => void })
             108 <small>MHz</small>
           </span>
         </div>
-        <div className="retro-tuner-track">
+        <div className="retro-tuner-track" title="拖动刻度跳转">
           <i />
           <input
             type="range"
@@ -84,9 +86,6 @@ function Radio({ player, onPreview }: { player: Player; onPreview: () => void })
             onChange={(event) => player.seek(Number(event.target.value))}
           />
         </div>
-        <span className="retro-tuner-hint" aria-hidden="true">
-          拖动刻度跳转
-        </span>
       </div>
       <div className="retro-deck">
         <div className="retro-keys">
