@@ -166,6 +166,7 @@ final class MacSession {
     private(set) var favorites: MacFavorites?
     private(set) var sync: MacPlaybackSync?
     private(set) var assistant: MacAssistantModel?
+    private(set) var connection: MacConnectionMonitor?
     private(set) var profile = "listener"
 
     var canManage: Bool { profile != "listener" }
@@ -232,6 +233,8 @@ final class MacSession {
         assistant = nil
         sync?.stop()
         sync = nil
+        connection?.stop()
+        connection = nil
         profile = "listener"
         if page == .manage { page = .tracks }
         if let client { try? await client.logout() }
@@ -315,6 +318,10 @@ final class MacSession {
         }
         await playback.restore()
         self.playback = playback
+        playback.warmConnection()
+        let monitor = MacConnectionMonitor(server: address)
+        monitor.start()
+        connection = monitor
         let favorites = MacFavorites(client: client)
         self.favorites = favorites
         let sync = MacPlaybackSync(client: client, playback: playback, deviceId: Self.deviceID())

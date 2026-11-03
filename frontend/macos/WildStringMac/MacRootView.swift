@@ -347,6 +347,20 @@ private struct MacShellView: View {
             }
             Rectangle().fill(sidebarBorder).frame(height: 1)
             VStack(alignment: .leading, spacing: 2) {
+                if let connection = session.connection {
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(connectionColor(connection.status))
+                            .frame(width: 7, height: 7)
+                        Text(connection.label)
+                            .font(MacTheme.micro)
+                            .foregroundStyle(sidebarMuted)
+                            .lineLimit(1)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 6)
+                    .help("每 10 秒检测一次服务器连通性")
+                }
                 appearancePicker
                 if session.canManage {
                     sidebarRow(.manage, badge: nil)
@@ -368,6 +382,15 @@ private struct MacShellView: View {
         }
         .frame(width: 228)
         .background(sidebarBackground)
+    }
+
+    private func connectionColor(_ status: MacConnectionMonitor.Status) -> Color {
+        switch status {
+        case .online: return MacTheme.olive
+        case .slow: return MacTheme.accentDeep
+        case .offline: return .red.opacity(0.9)
+        case .checking: return sidebarFaint
+        }
     }
 
     private var appearancePicker: some View {

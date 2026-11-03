@@ -233,7 +233,19 @@ public final class WildstringAudioResourceLoader: NSObject, AVAssetResourceLoade
                     contentType: chunk.contentType
                 )
             case .infoOnly:
-                let probe = try await fetcher.probe(path: path)
+                // A warmed prefetch already knows the content type and length;
+                // only fall back to a network HEAD on a cold cache.
+                let probe: AudioRangeFetcher.Probe
+                if let cached = await cache?.cachedChunk(key: path, offset: 0, length: 1),
+                    let total = cached.totalLength, total > 0
+                {
+                    probe = AudioRangeFetcher.Probe(
+                        totalLength: total,
+                        contentType: cached.contentType
+                    )
+                } else {
+                    probe = try await fetcher.probe(path: path)
+                }
                 let totalLength = probe.totalLength
                 let contentType = probe.contentType
                 await onLoaderQueue(boxed, gate: gate) { request in
@@ -318,8 +330,18 @@ public final class WildstringAudioResourceLoader: NSObject, AVAssetResourceLoade
         }
     }
 
-    /// Streams a large range response incrementally so playback can start on
-    /// the first chunks instead of waiting for the whole range.
+    /// Opens a connection to the server so the first playback request reuses
+    /// a warm socket instead of paying DNS/TCP setup while the player waits.
+    /// Failures are intentionally swallowed; the real request retries anyway.
+    public func warm(path: String = "health") {
+        let fetcher = self.fetcher
+        Task { _ = try? await fetcher.probe(path: path) }
+    }
+
+    /// Serves a large range with successive bounded window requests instead of
+    /// one open-ended stream: every window is a buffered `URLSession.data` call
+    /// (no per-byte awaits), cancellation lands between windows, and the small
+    /// first window keeps startup byte latency low on slow links.
     private func serveStream(
         _ loadingRequest: Unchecked<AVAssetResourceLoadingRequest>,
         path: String,
@@ -327,32 +349,33 @@ public final class WildstringAudioResourceLoader: NSObject, AVAssetResourceLoade
         length: Int64,
         gate: RequestGate
     ) async throws {
-        let sent = CounterBox()
-        try await fetcher.stream(
-            path: path,
-            range: start > 0 ? "bytes=\(start)-" : nil,
-            onResponse: { response in
-                let totalLength = AudioRangeFetcher.totalLength(of: response)
-                let contentType = response.value(forHTTPHeaderField: "Content-Type")
-                self.enqueue(loadingRequest, gate: gate) { request in
+        let firstWindow: Int64 = 64 * 1024
+        let window: Int64 = 256 * 1024
+        var sent: Int64 = 0
+        var deliveredInfo = false
+        while sent < length {
+            guard !gate.isCancelled, !Task.isCancelled else { return }
+            let remaining = length - sent
+            let size = sent == 0 ? min(firstWindow, remaining) : min(window, remaining)
+            let chunk = try await fetcher.fetch(path: path, offset: start + sent, length: size)
+            if !deliveredInfo {
+                deliveredInfo = true
+                let totalLength = chunk.totalLength
+                let contentType = chunk.contentType
+                await onLoaderQueue(loadingRequest, gate: gate) { request in
                     if let info = request.contentInformationRequest {
                         Self.fill(info, totalLength: totalLength, contentType: contentType)
                     }
                 }
             }
-        ) { chunk in
-            if Task.isCancelled || gate.isCancelled { return false }
-            var data = chunk
-            if length != Int64.max, sent.value + Int64(data.count) > length {
-                data = data.prefix(Int(length - sent.value))
-            }
-            guard !data.isEmpty else { return false }
-            let payload = Data(data)
-            await self.onLoaderQueue(loadingRequest, gate: gate) { request in
+            var payload = chunk.data
+            if Int64(payload.count) > size { payload = Data(payload.prefix(Int(size))) }
+            guard !payload.isEmpty else { break }
+            await onLoaderQueue(loadingRequest, gate: gate) { request in
                 request.dataRequest?.respond(with: payload)
             }
-            sent.value += Int64(payload.count)
-            return sent.value < length && !gate.isCancelled
+            sent += Int64(payload.count)
+            if chunk.data.count < Int(size) { break }
         }
         await onLoaderQueue(loadingRequest, gate: gate) { $0.finishLoading() }
     }

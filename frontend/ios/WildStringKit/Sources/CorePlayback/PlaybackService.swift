@@ -169,7 +169,7 @@ public final class PlaybackService {
         self.store = store
         self.persistence = PersistenceQueue(store: store)
         self.player = AVPlayer()
-        self.player.automaticallyWaitsToMinimizeStalling = true
+        self.player.automaticallyWaitsToMinimizeStalling = false
         self.cookieHeader = cookieHeader
         self.fragmentCache = fragmentCache
         self.offlineLookup = offlineLookup
@@ -545,6 +545,12 @@ public final class PlaybackService {
 
     private func prefetchLeadingBytes(of item: Item) {
         resourceLoader.prefetch(path: item.streamPath)
+    }
+
+    /// Opens a connection to the server so the first playback request reuses
+    /// a warm socket. Cheap HEAD; failures are ignored by design.
+    public func warmConnection() {
+        resourceLoader.warm()
     }
 
     private func startCurrent(autoplay: Bool, startAt: Double) {
