@@ -55,13 +55,29 @@ struct MacTransportBar: View {
     let client: WildstringClient
     let playback: PlaybackService
 
+    @State private var podcastDuration: Double = 0
+    @State private var previousVolume: Float = 1
+
     private var isPodcast: Bool {
         playback.currentItem?.trackID.hasPrefix("podcast_ep_") == true
     }
 
+    private var effectiveDuration: Double {
+        playback.duration > 0 ? playback.duration : (isPodcast ? podcastDuration : 0)
+    }
+
+    private var trailingTimeText: String {
+        guard effectiveDuration > 0 else { return "—:—" }
+        if isPodcast {
+            let remaining = max(0, effectiveDuration - playback.currentTime)
+            return "-\(macPlaybackClock(remaining))"
+        }
+        return macPlaybackClock(effectiveDuration)
+    }
+
     var body: some View {
         GeometryReader { geo in
-            let sideWidth = min(320, geo.size.width * 0.26)
+            let sideWidth = min(330, geo.size.width * 0.27)
             HStack(spacing: 20) {
                 HStack(spacing: 12) {
                     if let item = playback.currentItem {
@@ -71,7 +87,14 @@ struct MacTransportBar: View {
                                     placeholder: isPodcast ? "antenna.radiowaves.left.and.right" : "music.note")
                                 VStack(alignment: .leading, spacing: 3) {
                                     Text(item.title).font(.system(size: 13, weight: .semibold)).foregroundStyle(MacTheme.ink).lineLimit(1)
-                                    Text(item.artist).font(MacTheme.caption).foregroundStyle(MacTheme.muted).lineLimit(1)
+                                    Text(
+                                        isPodcast && (item.album?.isEmpty == false)
+                                            ? "\(item.artist) · \(item.album ?? "")"
+                                            : item.artist
+                                    )
+                                    .font(MacTheme.caption)
+                                    .foregroundStyle(MacTheme.muted)
+                                    .lineLimit(1)
                                 }.frame(maxWidth: .infinity, alignment: .leading)
                             }
                         }.buttonStyle(.plain).help("全屏播放")
@@ -93,7 +116,7 @@ struct MacTransportBar: View {
                 VStack(spacing: 7) {
                     HStack(spacing: 18) {
                         if isPodcast {
-                            MacPlaybackRateMenu(playback: playback).frame(width: 28)
+                            MacSleepMenu(playback: playback, podcast: true, iconOnly: true)
                         } else {
                             transportButton("shuffle", help: "随机", active: playback.isShuffled) { playback.toggleShuffle() }
                         }
@@ -109,17 +132,17 @@ struct MacTransportBar: View {
                             if isPodcast { playback.seek(to: playback.currentTime + 30) } else { playback.next() }
                         }
                         if isPodcast {
-                            Color.clear.frame(width: 28, height: 1)
+                            MacPlaybackRateMenu(playback: playback)
                         } else {
                             transportButton(playback.repeatMode == .one ? "repeat.1" : "repeat", help: "循环",
                                 active: playback.repeatMode != .off) { playback.cycleRepeatMode() }
                         }
                     }
-                    HStack(spacing: 9) {
+                    HStack(spacing: 10) {
                         Text(macPlaybackClock(playback.currentTime)).frame(width: isPodcast ? 54 : 38, alignment: .trailing)
-                        PlaybackSlider(playback: playback)
-                        Text(playback.duration > 0 ? macPlaybackClock(playback.duration) : "—:—")
-                            .frame(width: isPodcast ? 54 : 38, alignment: .leading)
+                        PlaybackSlider(playback: playback, fallbackDuration: effectiveDuration)
+                        Text(trailingTimeText)
+                            .frame(width: isPodcast ? 58 : 38, alignment: .leading)
                     }.font(MacTheme.mono(10)).foregroundStyle(MacTheme.faint).lineLimit(1)
                     if let message = playback.errorMessage ?? playback.podcastProgressMessage {
                         Text(message).font(.caption2).foregroundStyle(.orange).lineLimit(1)
@@ -128,8 +151,43 @@ struct MacTransportBar: View {
                 .frame(maxWidth: 560)
                 .frame(maxWidth: .infinity)
 
-                HStack(spacing: 10) {
+                HStack(spacing: 8) {
                     Spacer(minLength: 0)
+                    HStack(spacing: 6) {
+                        Button {
+                            if playback.volume > 0.01 {
+                                previousVolume = playback.volume
+                                playback.volume = 0
+                            } else {
+                                playback.volume = previousVolume > 0.05 ? previousVolume : 0.8
+                            }
+                        } label: {
+                            Image(
+                                systemName: playback.volume <= 0.01
+                                    ? "speaker.slash.fill"
+                                    : playback.volume < 0.5 ? "speaker.wave.1.fill" : "speaker.wave.2.fill"
+                            )
+                            .font(.system(size: 13))
+                            .foregroundStyle(MacTheme.muted)
+                            .frame(width: 22, height: 26)
+                        }
+                        .buttonStyle(.plain)
+                        .help(playback.volume <= 0.01 ? "取消静音" : "静音")
+
+                        Slider(
+                            value: Binding(
+                                get: { Double(playback.volume) },
+                                set: { playback.volume = Float($0) }
+                            ),
+                            in: 0...1
+                        )
+                        .controlSize(.mini)
+                        .frame(width: 72)
+                        .tint(MacTheme.muted)
+                        .accessibilityLabel("音量")
+                    }
+                    .padding(.trailing, 4)
+
                     if !isPodcast {
                         transportButton("quote.bubble", help: "歌词", active: session.showLyrics) { session.showLyrics.toggle() }
                     }
@@ -150,6 +208,14 @@ struct MacTransportBar: View {
         .background(MacTheme.panel)
         .overlay(alignment: .top) {
             Rectangle().fill(MacTheme.border).frame(height: 1)
+        }
+        .task(id: playback.currentItem?.trackID) {
+            podcastDuration = 0
+            guard let trackID = playback.currentItem?.trackID, trackID.hasPrefix("podcast_ep_") else { return }
+            let episodeID = String(trackID.dropFirst("podcast_ep_".count))
+            if let episode = try? await client.podcastEpisode(id: episodeID), !Task.isCancelled {
+                podcastDuration = Double(max(0, episode.durationSeconds))
+            }
         }
     }
 
@@ -291,39 +357,91 @@ func macPlaybackClock(_ seconds: Double) -> String {
     return String(format: "%d:%02d", total / 60, total % 60)
 }
 
-/// Ignores slider write-backs that AppKit emits while applying a new playback
-/// time. Those calls used to `seek` during layout (`_NSDetectedLayoutRecursion`).
+/// Scrubbable playback bar with buffered track visualization and a larger hit target.
 struct PlaybackSlider: View {
     let playback: PlaybackService
+    var fallbackDuration: Double = 0
     @State private var isScrubbing = false
     @State private var scrubTime = 0.0
 
+    private var totalDuration: Double {
+        playback.duration > 0 ? playback.duration : fallbackDuration
+    }
+
+    private var displayTime: Double {
+        isScrubbing ? scrubTime : (totalDuration > 0 ? min(playback.currentTime, totalDuration) : 0)
+    }
+
+    private var playedRatio: CGFloat {
+        guard totalDuration > 0 else { return 0 }
+        return CGFloat(min(1, max(0, displayTime / totalDuration)))
+    }
+
+    private var bufferedRatio: CGFloat {
+        guard totalDuration > 0 else { return 0 }
+        return CGFloat(min(1, max(0, playback.bufferedTime / totalDuration)))
+    }
+
     var body: some View {
-        Slider(
-            value: Binding(
-                get: { isScrubbing ? scrubTime : playback.duration > 0 ? playback.currentTime : 0 },
-                set: { newValue in
-                    guard isScrubbing else { return }
-                    scrubTime = newValue
+        GeometryReader { geo in
+            let width = max(1, geo.size.width)
+            let thumbSize: CGFloat = 14
+            let playedWidth = width * playedRatio
+            let bufferedWidth = max(playedWidth, width * bufferedRatio)
+
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(MacTheme.border)
+                    .frame(height: 5)
+
+                if bufferedWidth > 0 {
+                    Capsule()
+                        .fill(MacTheme.accent.opacity(0.28))
+                        .frame(width: bufferedWidth, height: 5)
                 }
-            ),
-            in: 0...max(playback.duration, 1),
-            onEditingChanged: { editing in
-                if editing {
-                    if !isScrubbing {
-                        scrubTime = playback.currentTime
-                    }
-                    isScrubbing = true
-                } else if isScrubbing {
-                    let target = scrubTime
-                    isScrubbing = false
-                    if abs(target - playback.currentTime) > 0.25 {
-                        playback.seek(to: target)
-                    }
+
+                if playedWidth > 0 {
+                    Capsule()
+                        .fill(MacTheme.accentDeep)
+                        .frame(width: playedWidth, height: 5)
+                }
+
+                if totalDuration > 0 {
+                    Circle()
+                        .fill(MacTheme.raised)
+                        .frame(width: thumbSize, height: thumbSize)
+                        .overlay(
+                            Circle()
+                                .strokeBorder(MacTheme.accentDeep, lineWidth: 2)
+                        )
+                        .shadow(color: .black.opacity(0.12), radius: 2, y: 1)
+                        .offset(x: min(max(0, playedWidth - thumbSize / 2), max(0, width - thumbSize)))
                 }
             }
-        )
-        .disabled(playback.duration <= 0)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { value in
+                        guard totalDuration > 0 else { return }
+                        let ratio = min(1, max(0, Double(value.location.x / width)))
+                        scrubTime = ratio * totalDuration
+                        isScrubbing = true
+                    }
+                    .onEnded { value in
+                        guard totalDuration > 0 else { return }
+                        let ratio = min(1, max(0, Double(value.location.x / width)))
+                        let target = ratio * totalDuration
+                        isScrubbing = false
+                        if abs(target - playback.currentTime) > 0.1 {
+                            playback.seek(to: target)
+                        }
+                    }
+            )
+        }
+        .frame(height: 18)
+        .disabled(totalDuration <= 0)
+        .accessibilityLabel("播放进度")
     }
 }
 
@@ -436,7 +554,7 @@ struct MenuBarPlayer: View {
             }
         }
         .padding(18).frame(width: 360).tint(MacTheme.accentDeep)
-        .preferredColorScheme(appearance == "light" ? .light : appearance == "dark" ? .dark : nil)
+        .preferredColorScheme(MacAppearance.resolvedColorScheme(for: appearance))
     }
 
     private func openPlayer() {

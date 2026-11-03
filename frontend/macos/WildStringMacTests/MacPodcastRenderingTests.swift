@@ -96,4 +96,74 @@ extension MacAssistantTests {
         }
     }
 
+    @Test func podcastEpisodeRowsKeepProgressAlignedAndHighlightTheWholeRow() throws {
+        func episode(id: String, position: Int) throws -> PodcastEpisode {
+            let json = #"{"id":""# + id + #"","podcast_id":"show","title":"单集【王局拍案播客】","duration_seconds":3600,"position_seconds":"# + "\(position)" + "}"
+            return try JSONDecoder().decode(PodcastEpisode.self, from: Data(json.utf8))
+        }
+        func render(
+            _ episode: PodcastEpisode, current: Bool = false,
+            width: CGFloat = 900, scheme: ColorScheme = .light
+        ) throws -> NSBitmapImageRep {
+            let host = NSHostingView(rootView: MacPodcastEpisodeRow(
+                episode: episode, showTitle: "王局拍案播客", current: current, playing: false,
+                action: {}, next: {}, append: {}
+            ).frame(width: width).background(Color(nsColor: .windowBackgroundColor)).preferredColorScheme(scheme))
+            host.frame = NSRect(x: 0, y: 0, width: width, height: 90)
+            host.layoutSubtreeIfNeeded()
+            let bitmap = try #require(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+            host.cacheDisplay(in: host.bounds, to: bitmap)
+            return bitmap
+        }
+        func widestOrangeRow(in bitmap: NSBitmapImageRep) throws -> (count: Int, end: Int) {
+            var widestRow = (count: 0, end: -1)
+            for y in 0..<bitmap.pixelsHigh {
+                var count = 0
+                var end = -1
+                for x in 0..<bitmap.pixelsWide {
+                    let color = try #require(bitmap.colorAt(x: x, y: y)?.usingColorSpace(.sRGB))
+                    guard color.redComponent - color.greenComponent > 0.18,
+                          color.greenComponent - color.blueComponent > 0.03 else { continue }
+                    count += 1
+                    end = x
+                }
+                if count > widestRow.count { widestRow = (count, end) }
+            }
+            return widestRow
+        }
+
+        #expect(cleanPodcastEpisodeTitle("责任全在美方【王局拍案播客】", showTitle: "王志安的播客") == "责任全在美方")
+
+        let completed = try episode(id: "completed", position: 3600)
+        let partial = try episode(id: "partial", position: 3599)
+        let selected = try episode(id: "selected", position: 1800)
+        for scheme in [ColorScheme.light, .dark] {
+            for width in [CGFloat(500), 900] {
+                // Completed episodes grey out and omit the full-width orange progress bar.
+                let completedOrange = try widestOrangeRow(in: render(completed, width: width, scheme: scheme))
+                #expect(completedOrange.count < bitmapWidthThreshold(width))
+
+                // In-progress episodes show a proportional orange progress bar.
+                let partialBitmap = try render(partial, width: width, scheme: scheme)
+                let partialOrange = try widestOrangeRow(in: partialBitmap)
+                #expect(partialOrange.count > partialBitmap.pixelsWide / 2)
+
+                let halfBitmap = try render(selected, width: width, scheme: scheme)
+                let halfOrange = try widestOrangeRow(in: halfBitmap)
+                #expect(halfOrange.count > halfBitmap.pixelsWide / 4)
+                #expect(partialOrange.end > halfOrange.end)
+
+                let highlighted = try render(selected, current: true, width: width, scheme: scheme)
+                let trailing = try #require(highlighted.colorAt(x: highlighted.pixelsWide - 4, y: highlighted.pixelsHigh / 2)?
+                    .usingColorSpace(.sRGB))
+                #expect(trailing.redComponent - trailing.greenComponent > 0.015)
+                #expect(trailing.greenComponent - trailing.blueComponent > 0.005)
+            }
+        }
+    }
+
+    private func bitmapWidthThreshold(_ width: CGFloat) -> Int {
+        Int(width / 6)
+    }
+
 }

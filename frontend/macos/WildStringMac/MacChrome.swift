@@ -1,8 +1,55 @@
+import AppKit
 import CoreNetwork
 import SwiftUI
 
+enum MacAppearance {
+    static let notification = Notification.Name("AppleInterfaceThemeChangedNotification")
+
+    static func isSystemDark() -> Bool {
+        if let style = CFPreferencesCopyValue(
+            "AppleInterfaceStyle" as CFString,
+            kCFPreferencesAnyApplication,
+            kCFPreferencesCurrentUser,
+            kCFPreferencesAnyHost
+        ) as? String {
+            return style.lowercased() == "dark"
+        }
+        return false
+    }
+
+    static func resolvedColorScheme(
+        for setting: String,
+        systemDark: Bool = isSystemDark()
+    ) -> ColorScheme {
+        switch setting {
+        case "light": return .light
+        case "dark": return .dark
+        default: return systemDark ? .dark : .light
+        }
+    }
+
+    static func nsAppearance(
+        for setting: String,
+        systemDark: Bool = isSystemDark()
+    ) -> NSAppearance? {
+        let scheme = resolvedColorScheme(for: setting, systemDark: systemDark)
+        return NSAppearance(named: scheme == .dark ? .darkAqua : .aqua)
+    }
+
+    @MainActor
+    static func apply(_ setting: String, systemDark: Bool = isSystemDark()) {
+        let target = nsAppearance(for: setting, systemDark: systemDark)
+        NSApplication.shared.appearance = target
+        for window in NSApplication.shared.windows {
+            window.appearance = target
+            window.contentView?.appearance = target
+            window.contentView?.needsDisplay = true
+        }
+    }
+}
+
 enum MacTheme {
-    /// Warm editorial palette shared by the shell, cards and rows.
+    /// Warm editorial palette aligned with the Web light/dark theme tokens.
     private static func adaptive(light: UInt32, dark: UInt32) -> Color {
         Color(nsColor: NSColor(name: nil) { appearance in
             let value = appearance.name.rawValue.lowercased().contains("dark") ? dark : light
@@ -15,20 +62,20 @@ enum MacTheme {
         })
     }
 
-    static let canvas = adaptive(light: 0xF7F3EA, dark: 0x211C17)
-    static let sidebar = adaptive(light: 0xF1ECE2, dark: 0x29231D)
-    static let panel = adaptive(light: 0xFBF8F1, dark: 0x302820)
-    static let raised = adaptive(light: 0xFFFFFF, dark: 0x3A3128)
-    static let border = adaptive(light: 0xE2D9CC, dark: 0x4B4035)
-    static let ink = adaptive(light: 0x23241F, dark: 0xF3EBDF)
-    static let muted = adaptive(light: 0x6B675C, dark: 0xB9AC9C)
-    static let faint = adaptive(light: 0x8A8175, dark: 0x938575)
-    static let accent = adaptive(light: 0xBC5438, dark: 0xD97757)
-    static let accentDeep = adaptive(light: 0x9F422B, dark: 0xE58B6D)
-    static let accentSoft = adaptive(light: 0xF3E2DA, dark: 0x422D24)
-    static let olive = adaptive(light: 0x5E6B4F, dark: 0xB4C09E)
-    static let oliveSoft = adaptive(light: 0xE7EADF, dark: 0x343B2D)
-    static let onAccent = adaptive(light: 0xFFFFFF, dark: 0x2A1712)
+    static let canvas = adaptive(light: 0xF6F3ED, dark: 0x171716)
+    static let sidebar = adaptive(light: 0xEEEEE5, dark: 0x1C1E18)
+    static let panel = adaptive(light: 0xFAF9F4, dark: 0x22251E)
+    static let raised = adaptive(light: 0xFFFDF8, dark: 0x292C24)
+    static let border = adaptive(light: 0xDEDED2, dark: 0x33342E)
+    static let ink = adaptive(light: 0x2A2B25, dark: 0xEEEAE2)
+    static let muted = adaptive(light: 0x626457, dark: 0xA8A59C)
+    static let faint = adaptive(light: 0x8A8E7D, dark: 0x8E9284)
+    static let accent = adaptive(light: 0xBC5438, dark: 0xE98A6D)
+    static let accentDeep = adaptive(light: 0x9F422B, dark: 0xE98A6D)
+    static let accentSoft = adaptive(light: 0xDDE2D0, dark: 0x262B21)
+    static let olive = adaptive(light: 0x57492F, dark: 0xB4C09E)
+    static let oliveSoft = adaptive(light: 0xE4E7DB, dark: 0x30352A)
+    static let onAccent = adaptive(light: 0xFFFAF3, dark: 0x211B17)
 
     static let cardRadius: CGFloat = 14
     static let panelRadius: CGFloat = 16
@@ -225,17 +272,28 @@ struct MacCatalogCard<Destination: Hashable>: View {
     var body: some View {
         NavigationLink(value: value) {
             VStack(alignment: .leading, spacing: 8) {
-                MacCover(client: client, trackID: cover, side: 152)
-                Text(title)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(MacTheme.ink)
-                    .lineLimit(1)
-                Text(subtitle)
-                    .font(MacTheme.caption)
-                    .foregroundStyle(MacTheme.muted)
-                    .lineLimit(1)
+                MacCover(client: client, trackID: cover, side: 148, cornerRadius: 10)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(MacTheme.ink)
+                        .lineLimit(1)
+                    Text(subtitle.isEmpty ? "—" : subtitle)
+                        .font(MacTheme.caption)
+                        .foregroundStyle(MacTheme.muted)
+                        .lineLimit(1)
+                }
             }
-            .frame(width: 152, alignment: .leading)
+            .frame(width: 148, alignment: .leading)
+            .padding(10)
+            .background(
+                MacTheme.panel,
+                in: RoundedRectangle(cornerRadius: MacTheme.cardRadius, style: .continuous)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: MacTheme.cardRadius, style: .continuous)
+                    .strokeBorder(MacTheme.border, lineWidth: 1)
+            )
         }
         .buttonStyle(.plain)
     }

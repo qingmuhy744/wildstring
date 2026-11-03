@@ -36,16 +36,16 @@ struct MacTrackCollectionView: View {
     @State private var error: String?
 
     var body: some View {
-        MacPlayableTracks(client: client, playback: playback, favorites: favorites, tracks: tracks,
-            emptyTitle: error == nil ? "暂无歌曲" : "暂时无法打开", emptyDetail: error,
-            canManage: canManage, isLoading: loading)
-            .navigationTitle(destination.title)
-            .safeAreaInset(edge: .top, spacing: 0) {
-                MacCollectionHeading(title: destination.title, subtitle: "\(tracks.count) 首",
-                    symbol: symbol, canPlay: !tracks.isEmpty) {
-                    if let first = tracks.first { MacPlayback.play(tracks, startingAt: first, playback: playback) }
-                }
+        VStack(spacing: 0) {
+            MacCollectionHeading(title: destination.title, subtitle: "\(tracks.count) 首",
+                symbol: symbol, canPlay: !tracks.isEmpty) {
+                if let first = tracks.first { MacPlayback.play(tracks, startingAt: first, playback: playback) }
             }
+            MacPlayableTracks(client: client, playback: playback, favorites: favorites, tracks: tracks,
+                emptyTitle: error == nil ? "暂无歌曲" : "暂时无法打开", emptyDetail: error,
+                canManage: canManage, isLoading: loading)
+        }
+            .navigationTitle(destination.title)
             .task(id: destination) {
                 loading = true
                 error = nil

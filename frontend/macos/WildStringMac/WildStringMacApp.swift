@@ -7,11 +7,7 @@ struct WildStringMacApp: App {
     @AppStorage("menuBarPlayerEnabled") private var menuBarPlayerEnabled = true
 
     init() {
-        switch UserDefaults.standard.string(forKey: "macAppearance") ?? "system" {
-        case "light": NSApplication.shared.appearance = NSAppearance(named: .aqua)
-        case "dark": NSApplication.shared.appearance = NSAppearance(named: .darkAqua)
-        default: NSApplication.shared.appearance = nil
-        }
+        MacAppearance.apply(UserDefaults.standard.string(forKey: "macAppearance") ?? "system")
     }
 
     var body: some Scene {

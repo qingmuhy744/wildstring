@@ -6,6 +6,7 @@ import SwiftUI
 struct MacRootView: View {
     let session: MacSession
     @AppStorage("macAppearance") private var appearance = "system"
+    @State private var systemDark = MacAppearance.isSystemDark()
 
     var body: some View {
         Group {
@@ -25,21 +26,23 @@ struct MacRootView: View {
         }
         .frame(minWidth: 1100, minHeight: 720)
         .tint(MacTheme.accent)
-        .preferredColorScheme(appearance == "light" ? .light : appearance == "dark" ? .dark : nil)
-        .onAppear { applyAppearance() }
-        .onChange(of: appearance) { _, _ in applyAppearance() }
+        .preferredColorScheme(MacAppearance.resolvedColorScheme(for: appearance, systemDark: systemDark))
+        .onAppear {
+            systemDark = MacAppearance.isSystemDark()
+            MacAppearance.apply(appearance, systemDark: systemDark)
+        }
+        .onChange(of: appearance) { _, newValue in
+            systemDark = MacAppearance.isSystemDark()
+            MacAppearance.apply(newValue, systemDark: systemDark)
+        }
+        .onReceive(DistributedNotificationCenter.default().publisher(for: MacAppearance.notification)) { _ in
+            systemDark = MacAppearance.isSystemDark()
+            MacAppearance.apply(appearance, systemDark: systemDark)
+        }
         .onReceive(NotificationCenter.default.publisher(for: .wildstringShowDesktopLyrics)) { _ in
             session.desktopLyrics.toggle(session: session)
         }
         .task { await session.restore() }
-    }
-
-    private func applyAppearance() {
-        switch appearance {
-        case "light": NSApp.appearance = NSAppearance(named: .aqua)
-        case "dark": NSApp.appearance = NSAppearance(named: .darkAqua)
-        default: NSApp.appearance = nil
-        }
     }
 }
 
@@ -121,38 +124,38 @@ private struct MacShellView: View {
 
     private var sidebarBackground: Color {
         colorScheme == .dark
-            ? Color(red: 0x29 / 255, green: 0x23 / 255, blue: 0x1D / 255)
-            : Color(red: 0xF1 / 255, green: 0xEC / 255, blue: 0xE2 / 255)
+            ? Color(red: 0x1C / 255, green: 0x1E / 255, blue: 0x18 / 255)
+            : Color(red: 0xEE / 255, green: 0xEE / 255, blue: 0xE5 / 255)
     }
     private var sidebarInk: Color {
         colorScheme == .dark
-            ? Color(red: 0xF3 / 255, green: 0xEB / 255, blue: 0xDF / 255)
-            : Color(red: 0x23 / 255, green: 0x24 / 255, blue: 0x1F / 255)
+            ? Color(red: 0xEE / 255, green: 0xEA / 255, blue: 0xE2 / 255)
+            : Color(red: 0x2A / 255, green: 0x2B / 255, blue: 0x25 / 255)
     }
     private var sidebarMuted: Color {
         colorScheme == .dark
-            ? Color(red: 0xB9 / 255, green: 0xAC / 255, blue: 0x9C / 255)
-            : Color(red: 0x6B / 255, green: 0x67 / 255, blue: 0x5C / 255)
+            ? Color(red: 0xA8 / 255, green: 0xA5 / 255, blue: 0x9C / 255)
+            : Color(red: 0x62 / 255, green: 0x64 / 255, blue: 0x57 / 255)
     }
     private var sidebarFaint: Color {
         colorScheme == .dark
-            ? Color(red: 0x93 / 255, green: 0x85 / 255, blue: 0x75 / 255)
-            : Color(red: 0x8A / 255, green: 0x81 / 255, blue: 0x75 / 255)
+            ? Color(red: 0x8E / 255, green: 0x92 / 255, blue: 0x84 / 255)
+            : Color(red: 0x8A / 255, green: 0x8E / 255, blue: 0x7D / 255)
     }
     private var sidebarAccent: Color {
         colorScheme == .dark
-            ? Color(red: 0xE5 / 255, green: 0x8B / 255, blue: 0x6D / 255)
+            ? Color(red: 0xE9 / 255, green: 0x8A / 255, blue: 0x6D / 255)
             : Color(red: 0x9F / 255, green: 0x42 / 255, blue: 0x2B / 255)
     }
     private var sidebarAccentSoft: Color {
         colorScheme == .dark
-            ? Color(red: 0x42 / 255, green: 0x2D / 255, blue: 0x24 / 255)
-            : Color(red: 0xF3 / 255, green: 0xE2 / 255, blue: 0xDA / 255)
+            ? Color(red: 0x30 / 255, green: 0x35 / 255, blue: 0x2A / 255)
+            : Color(red: 0xDD / 255, green: 0xE2 / 255, blue: 0xD0 / 255)
     }
     private var sidebarBorder: Color {
         colorScheme == .dark
-            ? Color(red: 0x4B / 255, green: 0x40 / 255, blue: 0x35 / 255)
-            : Color(red: 0xE2 / 255, green: 0xD9 / 255, blue: 0xCC / 255)
+            ? Color(red: 0x33 / 255, green: 0x34 / 255, blue: 0x2E / 255)
+            : Color(red: 0xDE / 255, green: 0xDE / 255, blue: 0xD2 / 255)
     }
 
     var body: some View {
@@ -162,15 +165,20 @@ private struct MacShellView: View {
                 Divider()
                 NavigationStack(path: $navigationPath) {
                     page
+                        .id(session.selectedLibraryID ?? "")
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .background(MacTheme.canvas)
+                        .toolbar {
+                            ToolbarItem(placement: .automatic) {
+                                Color.clear.frame(width: 1, height: 1).accessibilityHidden(true)
+                            }
+                        }
                         .navigationDestination(for: MacTrackDestination.self) { destination in
                             MacTrackCollectionView(client: client, playback: playback, favorites: session.favorites,
                                 destination: destination, canManage: session.canManage)
                         }
                 }
                 .environment(\.navigateToTrackCollection) { navigationPath.append($0) }
-                .id("\(session.page.rawValue)|\(session.selectedLibraryID ?? "")")
                 .onChange(of: session.page) { _, _ in navigationPath = NavigationPath() }
                 .onChange(of: session.selectedLibraryID) { _, _ in navigationPath = NavigationPath() }
                 if session.showLyrics || session.showQueue {
