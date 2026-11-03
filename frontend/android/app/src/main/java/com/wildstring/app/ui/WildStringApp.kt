@@ -58,6 +58,8 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.util.VelocityTracker
+import androidx.compose.ui.input.pointer.util.addPointerInputChange
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.CustomAccessibilityAction
@@ -81,6 +83,7 @@ import coil.compose.AsyncImage
 import com.wildstring.app.BuildConfig
 import com.wildstring.app.R
 import com.wildstring.app.data.*
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 
@@ -119,6 +122,8 @@ internal fun Modifier.trackSwipeGestures(
     )
 }
 
+internal val PlayerFlingVelocity = 1100.dp
+
 /** A vertical swipe collapses the player on downward drag or opens the queue on upward drag. */
 internal fun Modifier.dismissPlayerSwipe(
     enabled: Boolean,
@@ -131,14 +136,19 @@ internal fun Modifier.dismissPlayerSwipe(
     var crossedDown = false
     var crossedUp = false
     val threshold = 52.dp.toPx()
+    val flingDistance = 16.dp.toPx()
+    val flingVelocity = PlayerFlingVelocity.toPx()
+    val velocity = VelocityTracker()
     detectVerticalDragGestures(
         onDragStart = {
             distance = 0f
             crossedDown = false
             crossedUp = false
+            velocity.resetTracking()
             onDragOffset(0f, false)
         },
         onVerticalDrag = { change, amount ->
+            velocity.addPointerInputChange(change)
             distance += amount
             if (distance > 0f) {
                 onDragOffset(distance, true)
@@ -158,9 +168,11 @@ internal fun Modifier.dismissPlayerSwipe(
             change.consume()
         },
         onDragEnd = {
+            // A quick flick counts as much as a long pull, so short confident swipes are not ignored.
+            val speed = velocity.calculateVelocity().y
             when {
-                distance >= threshold -> onDismiss()
-                onSwipeUp != null && distance <= -threshold -> {
+                distance >= threshold || (distance >= flingDistance && speed >= flingVelocity) -> onDismiss()
+                onSwipeUp != null && (distance <= -threshold || (distance <= -flingDistance && speed <= -flingVelocity)) -> {
                     onDragOffset(0f, false)
                     onSwipeUp()
                 }
@@ -174,7 +186,9 @@ internal fun Modifier.dismissPlayerSwipe(
     )
 }
 internal val classicDarkColors = darkColorScheme(
-    primary = Color(0xFFE98A6D), onPrimary = Color(0xFF291E17),
+    primary = Color(0xFFE98A6D), onPrimary = Color(0xFF291E17), primaryContainer = Color(0xFF5A2E22), onPrimaryContainer = Color(0xFFFFDBCC),
+    secondary = Color(0xFFBCC6B0), onSecondary = Color(0xFF263020), secondaryContainer = Color(0xFF353A2F), onSecondaryContainer = Color(0xFFDDE5D2),
+    outline = Color(0xFF8D9183), outlineVariant = Color(0xFF43473D),
     background = Color(0xFF191A17), surface = Color(0xFF191A17),
     surfaceVariant = Color(0xFF2B2E25), onSurface = Color(0xFFEEEAE2), onSurfaceVariant = Color(0xFFA8AA9D),
     surfaceContainerLowest = Color(0xFF141512), surfaceContainerLow = Color(0xFF1D1E1A),
@@ -474,20 +488,38 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
         if (savedKeys.size > 32) savedPages.removeState(savedKeys.removeFirst())
     }
     val destination = when { settings -> "settings"; expanded && state.current != null -> "player"; else -> "catalog" }
+    // Upward pulls reveal the queue sheet and stay in composition; the downward offset is read only
+    // while drawing, so following the finger redraws the player without recomposing the app shell.
     var rawPlayerDragY by remember { mutableFloatStateOf(0f) }
-    var playerDraggingDown by remember { mutableStateOf(false) }
+    var playerPullingUp by remember { mutableStateOf(false) }
+    val playerDismissY = remember { mutableFloatStateOf(0f) }
+    val playerSettle = remember { mutableStateOf<Job?>(null) }
+    fun settlePlayerDrag() {
+        playerSettle.value?.cancel()
+        if (playerDismissY.floatValue > 0f) playerSettle.value = scope.launch {
+            animate(playerDismissY.floatValue, 0f, animationSpec = spring(stiffness = Spring.StiffnessMediumLow)) { value, _ ->
+                playerDismissY.floatValue = value
+            }
+        }
+    }
+    fun updatePlayerDrag(offset: Float, active: Boolean) {
+        val pullUp = active && offset < 0f
+        if (pullUp || playerPullingUp) {
+            rawPlayerDragY = if (pullUp) offset else 0f
+            playerPullingUp = pullUp
+        }
+        if (active) {
+            playerSettle.value?.cancel()
+            playerDismissY.floatValue = offset.coerceAtLeast(0f)
+        } else settlePlayerDrag()
+    }
     LaunchedEffect(destination) {
         if (destination != "player") {
             rawPlayerDragY = 0f
-            playerDraggingDown = false
+            playerPullingUp = false
             playerFromSettings = false
-        }
+        } else settlePlayerDrag()
     }
-    val animatedPlayerDragY = animateFloatAsState(
-        targetValue = if (playerDraggingDown) rawPlayerDragY else 0f,
-        animationSpec = if (playerDraggingDown) snap() else spring(stiffness = Spring.StiffnessMediumLow),
-        label = "player-dismiss-drag",
-    )
     val baseIsSettings = settings || (destination == "player" && playerFromSettings)
     val baseSurfaceColor = if (baseIsSettings) MaterialTheme.colorScheme.surfaceContainerLow else Background
     Box(Modifier.fillMaxSize().background(baseSurfaceColor))
@@ -544,12 +576,6 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
                                         }
                                     }
                                     if (!rail) {
-                                        if (showMiniPlayer) {
-                                            HorizontalDivider(
-                                                thickness = 0.5.dp,
-                                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f),
-                                            )
-                                        }
                                         NavigationBar(
                                             windowInsets = WindowInsets(0, 0, 0, 0),
                                             containerColor = Color.Transparent,
@@ -653,31 +679,32 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
             } else if (initialState == "player") {
                 ContentTransform(
                     targetContentEnter = EnterTransition.None,
-                    initialContentExit = fadeOut(tween(180)) + slideOutVertically(tween(220, easing = FastOutSlowInEasing)) { it },
+                    // Starts at full speed so a released swipe carries on instead of pausing first.
+                initialContentExit = fadeOut(tween(200, delayMillis = 60)) + slideOutVertically(tween(260, easing = LinearOutSlowInEasing)) { it },
                     targetContentZIndex = -1f,
                 )
             } else (fadeIn(tween(220)) + slideInVertically(tween(280, easing = FastOutSlowInEasing)) { it / 12 }) togetherWith fadeOut(tween(140))
         }, label = "app-destination") { currentDestination ->
             if (currentDestination == "player") {
                 Box(Modifier.fillMaxSize()) {
+                    // The offset outlives the dismiss so the exit slide continues from the finger.
+                    DisposableEffect(Unit) { onDispose { playerSettle.value?.cancel(); playerDismissY.floatValue = 0f } }
+                    // Composed ahead of the gesture so the first frame of a pull has nothing to build.
                     if (this@AnimatedContent.transition.currentState == EnterExitState.Visible &&
-                        this@AnimatedContent.transition.targetState == EnterExitState.Visible &&
-                        (playerDraggingDown || animatedPlayerDragY.value > 0.5f)) {
+                        this@AnimatedContent.transition.targetState == EnterExitState.Visible) {
                         Box(
                             Modifier.fillMaxSize()
                                 .clearAndSetSemantics {}
                                 .drawWithContent {
-                                    if (animatedPlayerDragY.value > 0.5f) {
-                                        drawContent()
-                                    }
+                                    if (playerDismissY.floatValue > 0.5f) drawContent()
                                 }
                         ) {
                             BaseDestination(if (playerFromSettings) "settings" else "catalog")
                         }
                     }
                     PlayerScreen(vm, state, wide, landscape, lyrics, queue, rotation,
-                        dragOffset = animatedPlayerDragY,
-                        onUpdateDrag = { offset, active -> rawPlayerDragY = offset; playerDraggingDown = active },
+                        dragOffset = playerDismissY,
+                        onUpdateDrag = ::updatePlayerDrag,
                         onBack = ::collapsePlayer,
                         onDismiss = ::collapsePlayer,
                         onLyrics = { lyrics = !lyrics; queue = false }, onQueue = { queue = !queue },
@@ -703,13 +730,13 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
             }
         }
         val isActivelyDraggingQueue = usePhoneQueueSheet && (
-            (!queue && destination == "player" && playerDraggingDown && rawPlayerDragY < 0f) ||
+            (!queue && destination == "player" && playerPullingUp) ||
             (queue && queueDragging)
         )
         val targetQueueRevealPx = when {
             !usePhoneQueueSheet -> 0f
             queue -> (maxQueueSheetPx - rawQueueDragY.coerceAtLeast(0f)).coerceIn(0f, maxQueueSheetPx)
-            destination == "player" && playerDraggingDown && rawPlayerDragY < 0f -> (-rawPlayerDragY).coerceIn(0f, maxQueueSheetPx)
+            destination == "player" && playerPullingUp -> (-rawPlayerDragY).coerceIn(0f, maxQueueSheetPx)
             else -> 0f
         }
         val animatedQueueRevealPx = animateFloatAsState(
@@ -1141,8 +1168,9 @@ private fun PlayerScreen(vm: MusicViewModel, state: MusicState, wide: Boolean, l
     val sleep by vm.sleep.state.collectAsStateWithLifecycle()
     val feedback = LocalTactileFeedback.current
     val track = state.current ?: return
-    // Draw the drag offset without moving pointer hit targets during the gesture.
-    val playerModifier = Modifier.fillMaxSize().drawWithContent {
+    // Draw the drag offset without moving pointer hit targets during the gesture. The empty
+    // pointer handler keeps touches from reaching the catalog composed beneath the player.
+    val playerModifier = Modifier.fillMaxSize().pointerInput(Unit) {}.drawWithContent {
         withTransform({ translate(top = dragOffset.value.coerceAtLeast(0f)) }) {
             this@drawWithContent.drawContent()
         }
