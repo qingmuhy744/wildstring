@@ -1372,7 +1372,7 @@ private fun PlaybackControls(vm: MusicViewModel, state: MusicState, onQueue: () 
                 if (qualityDialog) {
                     val preferences by vm.settings.state.collectAsStateWithLifecycle()
                     val choices = listOf(0 to stringResource(R.string.quality_original), 128 to "AAC · 128 kbps", 192 to "AAC · 192 kbps", 256 to "AAC · 256 kbps", 320 to "AAC · 320 kbps")
-                    val format = (track.format ?: "").uppercase().ifBlank { "MP3" }
+                    val format = track.format.uppercase().ifBlank { "MP3" }
                     AlertDialog(
                         onDismissRequest = { qualityDialog = false },
                         title = { Text(stringResource(R.string.settings_quality)) },
