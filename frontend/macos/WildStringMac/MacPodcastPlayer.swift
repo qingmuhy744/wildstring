@@ -207,14 +207,23 @@ struct MacPlaybackRateMenu: View {
     @AppStorage("podcastPlaybackRate") private var savedRate = 1.0
     var body: some View {
         Menu {
-            ForEach([0.75, 1.0, 1.25, 1.5, 1.75, 2.0], id: \.self) { rate in
-                Button("\(rate.formatted())×") {
+            ForEach([0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0], id: \.self) { rate in
+                Button {
                     savedRate = rate
                     playback.setPodcastPlaybackRate(Float(rate))
+                } label: {
+                    if Float(rate) == playback.podcastPlaybackRate {
+                        Label("\(rate.formatted())×", systemImage: "checkmark")
+                    } else {
+                        Text("\(rate.formatted())×")
+                    }
                 }
             }
         } label: {
-            Text("\(playback.podcastPlaybackRate.formatted())×")
+            HStack(spacing: 4) {
+                Text("倍速 \(playback.podcastPlaybackRate.formatted())×")
+                Image(systemName: "chevron.down").font(.system(size: 8, weight: .semibold))
+            }
                 .font(.system(size: 11, weight: .semibold, design: .rounded).monospacedDigit())
                 .foregroundStyle(MacTheme.accentDeep)
                 .padding(.horizontal, 9)
@@ -229,6 +238,8 @@ struct MacPlaybackRateMenu: View {
                 )
         }
         .buttonStyle(.plain)
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
         .fixedSize()
         .help("播放速度")
         .accessibilityLabel("播放速度")

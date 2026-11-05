@@ -57,13 +57,16 @@ struct MacHomeView: View {
         GeometryReader { geometry in
             ScrollView {
                 VStack(alignment: .leading, spacing: 30) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("今天，想听点什么？")
-                            .font(MacTheme.display(32))
-                            .foregroundStyle(MacTheme.ink)
-                        Text("从熟悉的旋律，到刚加入收藏的新声音。")
-                            .font(MacTheme.caption)
-                            .foregroundStyle(MacTheme.muted)
+                    ViewThatFits(in: .horizontal) {
+                        HStack(alignment: .center, spacing: 24) {
+                            introduction
+                            Spacer(minLength: 0)
+                            actions
+                        }
+                        VStack(alignment: .leading, spacing: 16) {
+                            introduction
+                            actions
+                        }
                     }
 
                     LazyVGrid(
@@ -143,11 +146,46 @@ struct MacHomeView: View {
             }
         }
         .navigationTitle("首页")
-        .toolbar {
-            Button("音乐助手", systemImage: "bubble.left.and.bubble.right") { session.page = .assistant }
-            Button("刷新首页", systemImage: "arrow.clockwise") { Task { await model.load() } }.disabled(model.loading)
-        }
         .task { await model.load() }
+    }
+
+    private var introduction: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("今天，想听点什么？")
+                .font(MacTheme.display(32))
+                .foregroundStyle(MacTheme.ink)
+            Text("从熟悉的旋律，到刚加入收藏的新声音。")
+                .font(MacTheme.caption)
+                .foregroundStyle(MacTheme.muted)
+        }
+    }
+
+    private var actions: some View {
+        HStack(spacing: 8) {
+            Button {
+                session.page = .assistant
+            } label: {
+                Label("音乐助手", systemImage: "bubble.left.and.bubble.right")
+                    .padding(.horizontal, 12)
+                    .frame(height: 34)
+                    .macPanel(padding: 0, radius: 10)
+            }
+            .help("打开音乐助手")
+
+            Button {
+                Task { await model.load() }
+            } label: {
+                Label("刷新首页", systemImage: "arrow.clockwise")
+                    .labelStyle(.iconOnly)
+                    .frame(width: 34, height: 34)
+                    .macPanel(padding: 0, radius: 10)
+            }
+            .disabled(model.loading)
+            .help(model.loading ? "正在刷新首页…" : "刷新首页")
+        }
+        .font(MacTheme.caption)
+        .foregroundStyle(MacTheme.muted)
+        .buttonStyle(.plain)
     }
 
     private var recommendationDetail: String {

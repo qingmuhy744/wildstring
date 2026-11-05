@@ -134,9 +134,21 @@ struct MacSettingsView: View {
                 }
                 Text("账号资料、服务端连接和完整曲库管理可在网页版中设置。")
                     .font(.caption).foregroundStyle(.secondary)
-                Button("退出登录", role: .destructive) {
-                    Task { await session.logout() }
+                ForEach(session.servers) { server in
+                    Button {
+                        Task { await session.switchServer(server) }
+                    } label: {
+                        HStack {
+                            Text("\(server.username) · \(server.address)")
+                            Spacer()
+                            Image(systemName: session.client?.server.description == server.address ? "checkmark.circle.fill" : "arrow.right")
+                        }
+                    }
+                    .disabled(session.isBusy || session.client?.server.description == server.address)
                 }
+                Button("连接其他服务器…", systemImage: "plus") { session.addServer() }
+                Button("退出当前服务器…", role: .destructive) { session.confirmLogout = true }
+                    .disabled(session.isBusy)
             }
         }
         .formStyle(.grouped)

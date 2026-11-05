@@ -251,18 +251,20 @@ struct MacPlayerInspector: View {
         case queue
     }
 
+    private var showingQueue: Bool {
+        session.showQueue && (!session.showLyrics || focus == .queue)
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Button {
-                    session.showLyrics = false
-                    session.showQueue = false
-                } label: {
-                    Image(systemName: "xmark").frame(width: 24, height: 24)
-                }.buttonStyle(.plain).help("关闭侧栏").accessibilityLabel("关闭侧栏")
-                Text(focus == .queue && session.showQueue || !session.showLyrics ? "播放队列" : "歌词")
-                    .font(MacTheme.section(15))
-                if focus == .queue && session.showQueue {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(spacing: 10) {
+                Image(systemName: showingQueue ? "list.number" : "quote.bubble")
+                    .foregroundStyle(MacTheme.accentDeep)
+                    .frame(width: 32, height: 32)
+                    .background(MacTheme.accentSoft, in: RoundedRectangle(cornerRadius: 10))
+                Text(showingQueue ? "播放队列" : "歌词")
+                    .font(MacTheme.display(19)).foregroundStyle(MacTheme.ink)
+                if showingQueue {
                     Text(
                         "\(playback.playbackItems.count) " +
                         (playback.currentItem?.trackID.hasPrefix("podcast_ep_") == true ? "集" : "项")
@@ -271,6 +273,14 @@ struct MacPlayerInspector: View {
                     .foregroundStyle(MacTheme.muted)
                 }
                 Spacer()
+                Button {
+                    session.showLyrics = false
+                    session.showQueue = false
+                } label: {
+                    Image(systemName: "xmark").font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(MacTheme.muted).frame(width: 26, height: 26)
+                        .background(MacTheme.canvas, in: Circle())
+                }.buttonStyle(.plain).help("关闭侧栏").accessibilityLabel("关闭侧栏")
             }
             if session.showLyrics && session.showQueue {
                 Picker("正在看", selection: $focus) {
@@ -289,10 +299,7 @@ struct MacPlayerInspector: View {
         }
         .padding(16)
         .frame(maxHeight: .infinity, alignment: .top)
-        .background(MacTheme.sidebar)
-        .overlay(alignment: .leading) {
-            Rectangle().fill(MacTheme.border).frame(width: 1)
-        }
+        .background(MacTheme.panel)
         .task(id: playback.currentItem?.trackID) { await loadLyrics() }
         .onChange(of: session.showLyrics) { _, showing in
             if showing { focus = .lyrics }

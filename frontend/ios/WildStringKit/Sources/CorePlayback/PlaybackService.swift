@@ -376,7 +376,8 @@ public final class PlaybackService {
         }
     }
 
-    public func stopAndClear() {
+    public func stopAndClear(preservingStoredQueue: Bool = false) {
+        if preservingStoredQueue { persistQueueAndProgress() }
         assetLoadTask?.cancel()
         assetLoadTask = nil
         cancelSleepTimer()
@@ -406,14 +407,16 @@ public final class PlaybackService {
         podcastBoot?.cancel()
         podcast.clear()
         podcastProgressMessage = nil
-        persistence.enqueue { store in try? await store.clear() }
+        if !preservingStoredQueue {
+            persistence.enqueue { store in try? await store.clear() }
+        }
     }
 
     /// Removes observers and playback; used when the session ends.
-    public func shutdown() {
+    public func shutdown(preservingQueue: Bool = false) {
         assetLoadTask?.cancel()
         cancelSleepTimer()
-        stopAndClear()
+        stopAndClear(preservingStoredQueue: preservingQueue)
         if let timeObserverToken {
             player.removeTimeObserver(timeObserverToken)
             self.timeObserverToken = nil

@@ -19,6 +19,7 @@ struct MacRootView: View {
             case .connected:
                 if let client = session.client, let playback = session.playback {
                     MacShellView(session: session, client: client, playback: playback)
+                        .id(client.server.origin)
                 } else {
                     ProgressView()
                 }
@@ -42,12 +43,44 @@ struct MacRootView: View {
         .onReceive(NotificationCenter.default.publisher(for: .wildstringShowDesktopLyrics)) { _ in
             session.desktopLyrics.toggle(session: session)
         }
+        .sheet(isPresented: Bindable(session).showServerLogin) {
+            MacLoginView(session: session, addingServer: true)
+                .frame(width: 520, height: 500)
+                .interactiveDismissDisabled(session.isBusy)
+        }
+        .confirmationDialog("退出当前服务器？", isPresented: Bindable(session).confirmLogout, titleVisibility: .visible) {
+            Button("退出服务器", role: .destructive) { Task { await session.logout() } }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("退出会停止当前播放。其他服务器的登录状态会保留。")
+        }
+        .alert("无法切换服务器", isPresented: Binding(
+            get: { session.serverSwitchError != nil },
+            set: { if !$0 { session.serverSwitchError = nil } }
+        )) {
+            Button("好", role: .cancel) { session.serverSwitchError = nil }
+        } message: {
+            Text(session.serverSwitchError ?? "")
+        }
         .task { await session.restore() }
     }
 }
 
 private struct MacLoginView: View {
     let session: MacSession
+    var addingServer = false
+    @State private var serverText: String
+    @State private var username: String
+    @State private var password = ""
+    @State private var allowInsecureHTTP: Bool
+
+    init(session: MacSession, addingServer: Bool = false) {
+        self.session = session
+        self.addingServer = addingServer
+        _serverText = State(initialValue: addingServer ? session.pendingServer?.address ?? "" : session.serverText)
+        _username = State(initialValue: addingServer ? session.pendingServer?.username ?? "" : session.username)
+        _allowInsecureHTTP = State(initialValue: addingServer ? session.pendingServer?.allowInsecureHTTP ?? false : session.allowInsecureHTTP)
+    }
 
     var body: some View {
         ZStack {
@@ -68,41 +101,57 @@ private struct MacLoginView: View {
                         )
                     VStack(alignment: .leading, spacing: 2) {
                         Text("野弦").font(.title2.bold())
-                        Text("连接到你的曲库").font(.callout).foregroundStyle(.secondary)
+                        Text(addingServer ? "连接另一个服务器" : "连接到你的曲库").font(.callout).foregroundStyle(.secondary)
                     }
                 }
-                TextField("服务器地址", text: Bindable(session).serverText)
+                TextField("服务器地址", text: $serverText)
                     .textFieldStyle(.roundedBorder)
-                TextField("用户名", text: Bindable(session).username)
+                TextField("用户名", text: $username)
                     .textFieldStyle(.roundedBorder)
-                SecureField("密码", text: Bindable(session).password)
+                SecureField("密码", text: $password)
                     .textFieldStyle(.roundedBorder)
-                Toggle("允许未加密的 HTTP", isOn: Bindable(session).allowInsecureHTTP)
+                Toggle("允许未加密的 HTTP", isOn: $allowInsecureHTTP)
                 if let errorMessage = session.errorMessage {
                     Text(errorMessage)
                         .font(.callout)
                         .foregroundStyle(.red)
                 }
-                Button(session.isBusy ? "正在连接…" : "连接") {
-                    Task { await session.login() }
+                HStack {
+                    if addingServer {
+                        Button("取消") { session.showServerLogin = false }
+                            .keyboardShortcut(.cancelAction)
+                            .disabled(session.isBusy)
+                    }
+                    Button(session.isBusy ? "正在连接…" : "连接") {
+                        Task {
+                            await session.login(serverText: serverText, username: username, password: password,
+                                allowInsecureHTTP: allowInsecureHTTP)
+                            if session.errorMessage == nil { password = "" }
+                        }
+                    }
+                    .keyboardShortcut(.defaultAction)
+                    .buttonStyle(.borderedProminent)
+                    .disabled(session.isBusy || serverText.isEmpty || username.isEmpty || password.isEmpty)
                 }
-                .keyboardShortcut(.defaultAction)
-                .buttonStyle(.borderedProminent)
-                .disabled(
-                    session.isBusy || session.serverText.isEmpty || session.username.isEmpty
-                        || session.password.isEmpty
-                )
                 if !session.servers.isEmpty {
                     Text("最近的服务器")
                         .font(.headline)
-                    ForEach(session.servers) { server in
-                        Button("\(server.username) · \(server.address)") {
-                            session.serverText = server.address
-                            session.username = server.username
-                            session.allowInsecureHTTP = server.allowInsecureHTTP
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 10) {
+                            ForEach(session.servers) { server in
+                                Button("\(server.username) · \(server.address)") {
+                                    serverText = server.address
+                                    username = server.username
+                                    password = ""
+                                    allowInsecureHTTP = server.allowInsecureHTTP
+                                    Task { await session.switchServer(server) }
+                                }
+                                .buttonStyle(.plain)
+                                .disabled(session.isBusy || session.client?.server.description == server.address)
+                            }
                         }
-                        .buttonStyle(.plain)
                     }
+                    .frame(maxHeight: 100)
                 }
             }
             .padding(28)
@@ -120,7 +169,6 @@ private struct MacShellView: View {
     @State private var libraries: [MusicLibrary] = []
     @State private var navigationPath = NavigationPath()
     @Environment(\.colorScheme) private var colorScheme
-    @AppStorage("macAppearance") private var appearance = "system"
 
     private var sidebarBackground: Color {
         colorScheme == .dark
@@ -168,11 +216,6 @@ private struct MacShellView: View {
                         .id(session.selectedLibraryID ?? "")
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .background(MacTheme.canvas)
-                        .toolbar {
-                            ToolbarItem(placement: .automatic) {
-                                Color.clear.frame(width: 1, height: 1).accessibilityHidden(true)
-                            }
-                        }
                         .navigationDestination(for: MacTrackDestination.self) { destination in
                             MacTrackCollectionView(client: client, playback: playback, favorites: session.favorites,
                                 destination: destination, canManage: session.canManage)
@@ -182,9 +225,11 @@ private struct MacShellView: View {
                 .onChange(of: session.page) { _, _ in navigationPath = NavigationPath() }
                 .onChange(of: session.selectedLibraryID) { _, _ in navigationPath = NavigationPath() }
                 if session.showLyrics || session.showQueue {
-                    Rectangle().fill(MacTheme.border).frame(width: 1)
                     MacPlayerInspector(session: session, client: client, playback: playback)
                         .frame(width: 336)
+                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(MacTheme.border))
+                        .padding(12)
                 }
             }
             Divider()
@@ -194,6 +239,7 @@ private struct MacShellView: View {
         .allowsHitTesting(!session.showFullscreen)
         .accessibilityHidden(session.showFullscreen)
         .toolbar(session.showFullscreen ? .hidden : .automatic, for: .windowToolbar)
+        .toolbarBackground(.hidden, for: .windowToolbar)
         .task { libraries = (try? await client.libraries()) ?? [] }
         .onChange(of: playback.isPlaying) { _, playing in
             if playing { session.sync?.localPlaybackStarted() }
@@ -313,19 +359,8 @@ private struct MacShellView: View {
                         session.focusLibrarySearch = false
                         session.page = .search
                     }
-                    group("曲库", pages: MacPage.library)
-                    group("发现与电台", pages: MacPage.explore)
-                    sidebarToggle(
-                        title: "播放队列",
-                        symbol: "list.number",
-                        selected: session.showQueue,
-                        badge: playback.items.isEmpty ? nil : "\(playback.items.count)"
-                    ) {
-                        session.showQueue.toggle()
-                    }
-                    .padding(.top, 8)
-                    group("更多音乐", pages: MacPage.more)
-                    group("助手工具", pages: MacPage.tools)
+                    group("我的音乐", pages: MacPage.library + [.listening])
+                    group("发现", pages: MacPage.explore)
                     if libraries.filter(\.enabled).count > 1 {
                         Text("当前曲库")
                             .font(.caption.weight(.semibold))
@@ -346,39 +381,17 @@ private struct MacShellView: View {
                 .padding(.bottom, 12)
             }
             Rectangle().fill(sidebarBorder).frame(height: 1)
-            VStack(alignment: .leading, spacing: 2) {
-                if let connection = session.connection {
-                    HStack(spacing: 6) {
-                        Circle()
-                            .fill(connectionColor(connection.status))
-                            .frame(width: 7, height: 7)
-                        Text(connection.label)
-                            .font(MacTheme.micro)
-                            .foregroundStyle(sidebarMuted)
-                            .lineLimit(1)
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.bottom, 6)
-                    .help("每 10 秒检测一次服务器连通性")
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Text("工作区").font(MacTheme.micro).foregroundStyle(sidebarFaint)
+                    Spacer()
+                    footerButton(.notifications)
+                    footerButton(.settings)
                 }
-                appearancePicker
-                if session.canManage {
-                    sidebarRow(.manage, badge: nil)
-                }
-                sidebarRow(.settings, badge: nil)
-                Button {
-                    Task { await session.logout() }
-                } label: {
-                    Label("退出登录", systemImage: "rectangle.portrait.and.arrow.right")
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                }
-                .buttonStyle(.plain)
-                .font(.system(size: 12))
-                .foregroundStyle(sidebarMuted)
+                .padding(.horizontal, 8)
+                serverMenu
             }
-            .padding(10)
+            .padding(14)
         }
         .frame(width: 228)
         .background(sidebarBackground)
@@ -393,22 +406,69 @@ private struct MacShellView: View {
         }
     }
 
-    private var appearancePicker: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("外观")
-                .font(MacTheme.micro)
-                .foregroundStyle(sidebarFaint)
-                .padding(.horizontal, 10)
-            Picker("外观", selection: $appearance) {
-                Text("自动").tag("system")
-                Text("浅色").tag("light")
-                Text("深色").tag("dark")
+    private var serverMenu: some View {
+        Menu {
+            Section("切换服务器") {
+                ForEach(session.servers) { server in
+                    Button {
+                        Task { await session.switchServer(server) }
+                    } label: {
+                        Label("\(server.username) · \(server.address)",
+                            systemImage: client.server.description == server.address ? "checkmark.circle.fill" : "server.rack")
+                    }
+                    .disabled(client.server.description == server.address)
+                }
+                Button("连接其他服务器…", systemImage: "plus") { session.addServer() }
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .padding(.horizontal, 10)
+            Divider()
+            Button("跨设备继续", systemImage: MacPage.devices.symbol) { session.page = .devices }
+            Button("待确认草案", systemImage: MacPage.drafts.symbol) { session.page = .drafts }
+            if session.canManage {
+                Button("管理", systemImage: MacPage.manage.symbol) { session.page = .manage }
+            }
+            Divider()
+            Button("退出当前服务器…", systemImage: "rectangle.portrait.and.arrow.right", role: .destructive) {
+                session.confirmLogout = true
+            }
+        } label: {
+            HStack(spacing: 9) {
+                Image(systemName: "server.rack")
+                    .font(.system(size: 15)).foregroundStyle(sidebarMuted)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(client.server.url.host ?? "当前服务器")
+                        .font(MacTheme.section(12)).foregroundStyle(sidebarInk).lineLimit(1)
+                    HStack(spacing: 5) {
+                        Circle().fill(session.connection.map { connectionColor($0.status) } ?? sidebarFaint)
+                            .frame(width: 5, height: 5)
+                        Text("\(session.username) · \(session.connection?.label ?? "连接中…")")
+                            .font(MacTheme.micro).foregroundStyle(sidebarMuted).lineLimit(1)
+                    }
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.up.chevron.down").font(.system(size: 9)).foregroundStyle(sidebarFaint)
+            }
+            .padding(10)
+            .background(sidebarAccentSoft.opacity(0.5), in: RoundedRectangle(cornerRadius: 10))
         }
-        .padding(.bottom, 4)
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .disabled(session.isBusy)
+        .help("账号与服务器 · 点击切换服务器")
+        .accessibilityLabel("账号与服务器")
+    }
+
+    private func footerButton(_ page: MacPage) -> some View {
+        Button { session.page = page } label: {
+            Image(systemName: page.symbol)
+                .font(.system(size: 14))
+                .foregroundStyle(session.page == page ? sidebarAccent : sidebarMuted)
+                .frame(width: 28, height: 28)
+                .background(session.page == page ? sidebarAccentSoft : .clear,
+                    in: RoundedRectangle(cornerRadius: 8))
+        }
+        .buttonStyle(.plain)
+        .help(page.title)
+        .accessibilityLabel(page.title)
     }
 
     private func group(_ title: String, pages: [MacPage]) -> some View {

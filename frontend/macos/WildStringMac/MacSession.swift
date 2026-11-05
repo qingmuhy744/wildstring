@@ -57,8 +57,6 @@ enum MacPage: String, Identifiable, Hashable {
 
     static let library: [MacPage] = [.tracks, .albums, .artists, .playlists, .favorites]
     static let explore: [MacPage] = [.discover, .podcasts, .assistant]
-    static let more: [MacPage] = [.listening, .devices, .notifications]
-    static let tools: [MacPage] = [.drafts]
 
     var id: String { rawValue }
 
@@ -116,22 +114,22 @@ struct MacSavedServer: Codable, Equatable, Identifiable {
 enum MacServers {
     private static let key = "mac.savedServers"
 
-    static func load() -> [MacSavedServer] {
-        guard let data = UserDefaults.standard.data(forKey: key),
+    static func load(defaults: UserDefaults = .standard) -> [MacSavedServer] {
+        guard let data = defaults.data(forKey: key),
             let servers = try? JSONDecoder().decode([MacSavedServer].self, from: data)
         else { return [] }
         return servers.sorted { $0.lastUsedAt > $1.lastUsedAt }
     }
 
-    static func upsert(_ server: MacSavedServer) {
-        var servers = load()
+    static func upsert(_ server: MacSavedServer, defaults: UserDefaults = .standard) {
+        var servers = load(defaults: defaults)
         if let index = servers.firstIndex(where: { $0.address == server.address }) {
             servers[index] = server
         } else {
             servers.append(server)
         }
         if let data = try? JSONEncoder().encode(servers) {
-            UserDefaults.standard.set(data, forKey: key)
+            defaults.set(data, forKey: key)
         }
     }
 }
@@ -149,7 +147,6 @@ final class MacSession {
     var phase: Phase = .loading
     var serverText = ""
     var username = ""
-    var password = ""
     var allowInsecureHTTP = false
     var isBusy = false
     var errorMessage: String?
@@ -160,6 +157,10 @@ final class MacSession {
     var showQueue = false
     var showFullscreen = false
     var selectedLibraryID: String?
+    var confirmLogout = false
+    var showServerLogin = false
+    var pendingServer: MacSavedServer?
+    var serverSwitchError: String?
 
     private(set) var client: WildstringClient?
     private(set) var playback: PlaybackService?
@@ -174,15 +175,20 @@ final class MacSession {
 
     private let store: any SessionStore
     private let queueStore: any QueueStore
+    private let defaults: UserDefaults
+    private let configuration: URLSessionConfiguration?
 
-    init() {
+    init(store: (any SessionStore)? = nil, queueStore: (any QueueStore)? = nil,
+        defaults: UserDefaults = .standard, configuration: URLSessionConfiguration? = nil) {
 #if DEBUG
-        store = MacDebugSessionStore()
+        self.store = store ?? MacDebugSessionStore()
 #else
-        store = KeychainSessionStore(service: "com.wildstring.mac.session")
+        self.store = store ?? KeychainSessionStore(service: "com.wildstring.mac.session")
 #endif
-        queueStore = (try? SwiftDataQueueStore.makeDefault()) ?? InMemoryQueueStore()
-        servers = MacServers.load()
+        self.queueStore = queueStore ?? ((try? SwiftDataQueueStore.makeDefault()) ?? InMemoryQueueStore())
+        self.defaults = defaults
+        self.configuration = configuration
+        servers = MacServers.load(defaults: defaults)
     }
 
     func restore() async {
@@ -196,8 +202,7 @@ final class MacSession {
         serverText = last.address
         username = last.username
         allowInsecureHTTP = last.allowInsecureHTTP
-        let client = WildstringClient(server: address, store: store)
-        client.preferClientHeader("macos")
+        let client = makeClient(address)
         if await client.storedSessionExists() {
             if let status = try? await client.authStatus(), status.authenticated, let user = status.user {
                 await activate(client: client, address: address, username: user.username)
@@ -207,18 +212,20 @@ final class MacSession {
         phase = .connect
     }
 
-    func login() async {
+    func login(serverText: String, username: String, password: String, allowInsecureHTTP: Bool) async {
         guard !isBusy else { return }
         isBusy = true
         errorMessage = nil
         defer { isBusy = false }
         do {
             let address = try ServerAddress(input: serverText, allowsInsecureHTTP: allowInsecureHTTP)
-            let client = WildstringClient(server: address, store: store)
-            client.preferClientHeader("macos")
+            let client = makeClient(address)
             let user = try await client.login(username: username, password: password)
-            password = ""
+            self.serverText = serverText
+            self.username = user.username
+            self.allowInsecureHTTP = allowInsecureHTTP
             await activate(client: client, address: address, username: user.username)
+            showServerLogin = false
         } catch let error as ServerAddress.ValidationError where error == .insecureHTTPNotAllowed {
             errorMessage = "这是未加密的 HTTP。确认后再连接。"
         } catch {
@@ -227,19 +234,83 @@ final class MacSession {
     }
 
     func logout() async {
-        playback?.shutdown()
+        guard !isBusy else { return }
+        isBusy = true
+        defer { isBusy = false }
+        let previousClient = client
+        await deactivate(preservingQueue: false)
+        if let previousClient {
+            try? await previousClient.logout()
+            await previousClient.clearSession()
+        }
+        phase = .connect
+    }
+
+    func addServer() {
+        pendingServer = nil
+        errorMessage = nil
+        showServerLogin = true
+    }
+
+    func switchServer(_ server: MacSavedServer) async {
+        guard !isBusy, client?.server.description != server.address else { return }
+        isBusy = true
+        serverSwitchError = nil
+        errorMessage = nil
+        defer { isBusy = false }
+        do {
+            let address = try ServerAddress(input: server.address, allowsInsecureHTTP: server.allowInsecureHTTP)
+            let candidate = makeClient(address)
+            guard await candidate.storedSessionExists() else {
+                pendingServer = server
+                errorMessage = "请登录这个服务器"
+                showServerLogin = client != nil
+                return
+            }
+            let status = try await candidate.authStatus()
+            guard status.authenticated, let user = status.user else {
+                pendingServer = server
+                errorMessage = "登录已过期，请重新登录"
+                showServerLogin = client != nil
+                return
+            }
+            serverText = server.address
+            username = user.username
+            allowInsecureHTTP = server.allowInsecureHTTP
+            await activate(client: candidate, address: address, username: user.username)
+            showServerLogin = false
+        } catch {
+            serverSwitchError = "暂时无法连接所选服务器，当前连接已保留。"
+        }
+    }
+
+    private func makeClient(_ address: ServerAddress) -> WildstringClient {
+        let client = WildstringClient(server: address, store: store, configuration: configuration)
+        client.preferClientHeader("macos")
+        return client
+    }
+
+    private func deactivate(preservingQueue: Bool) async {
+        sync?.stop()
+        connection?.stop()
+        desktopLyrics.close()
+        if let playback {
+            playback.pause()
+            playback.shutdown(preservingQueue: preservingQueue)
+            await playback.flushPersistence()
+        }
         playback = nil
         favorites = nil
         assistant = nil
-        sync?.stop()
         sync = nil
-        connection?.stop()
         connection = nil
         profile = "listener"
-        if page == .manage { page = .tracks }
-        if let client { try? await client.logout() }
         client = nil
-        phase = .connect
+        selectedLibraryID = nil
+        page = .home
+        showFullscreen = false
+        showLyrics = false
+        showQueue = false
     }
 
     func selectLibrary(_ id: String?) {
@@ -250,9 +321,9 @@ final class MacSession {
         guard case .connected(let server, let username) = phase else { return }
         let key = "mac.library.\(server)|\(username)"
         if let id, !id.isEmpty {
-            UserDefaults.standard.set(id, forKey: key)
+            defaults.set(id, forKey: key)
         } else {
-            UserDefaults.standard.removeObject(forKey: key)
+            defaults.removeObject(forKey: key)
         }
     }
 
@@ -262,6 +333,7 @@ final class MacSession {
     }
 
     private func activate(client: WildstringClient, address: ServerAddress, username: String) async {
+        await deactivate(preservingQueue: true)
         self.client = client
         assistant = MacAssistantModel(client: client)
         let space = Self.spaceName(address.origin)
@@ -280,13 +352,13 @@ final class MacSession {
             }
         )
         playback.clientHeaderName = "macos"
-        let bitrate = UserDefaults.standard.integer(forKey: "macPreferredBitrate")
+        let bitrate = defaults.integer(forKey: "macPreferredBitrate")
         playback.preferredBitrateKbps = bitrate == 0 ? nil : bitrate
-        let rate = UserDefaults.standard.double(forKey: "podcastPlaybackRate")
+        let rate = defaults.double(forKey: "podcastPlaybackRate")
         if rate > 0 { playback.setPodcastPlaybackRate(Float(rate)) }
-        playback.podcastDeviceID = Self.deviceID()
+        playback.podcastDeviceID = Self.deviceID(defaults: defaults)
         let libraryKey = "mac.library.\(address.description)|\(username)"
-        if let library = UserDefaults.standard.string(forKey: libraryKey), !library.isEmpty {
+        if let library = defaults.string(forKey: libraryKey), !library.isEmpty {
             client.selectLibrary(library)
             selectedLibraryID = library
         } else {
@@ -324,7 +396,7 @@ final class MacSession {
         connection = monitor
         let favorites = MacFavorites(client: client)
         self.favorites = favorites
-        let sync = MacPlaybackSync(client: client, playback: playback, deviceId: Self.deviceID())
+        let sync = MacPlaybackSync(client: client, playback: playback, deviceId: Self.deviceID(defaults: defaults))
         self.sync = sync
         sync.start()
         Task { await favorites.load() }
@@ -334,17 +406,16 @@ final class MacSession {
                 username: username,
                 lastUsedAt: .now,
                 allowInsecureHTTP: allowInsecureHTTP
-            )
+            ), defaults: defaults
         )
-        servers = MacServers.load()
+        servers = MacServers.load(defaults: defaults)
         if let status = try? await client.authStatus() {
             profile = status.user?.profile ?? "listener"
         }
         phase = .connected(server: address.description, username: username)
     }
 
-    private static func deviceID() -> String {
-        let defaults = UserDefaults.standard
+    private static func deviceID(defaults: UserDefaults) -> String {
         if let stored = defaults.string(forKey: "mac.deviceID"), !stored.isEmpty { return stored }
         let created = UUID().uuidString
         defaults.set(created, forKey: "mac.deviceID")

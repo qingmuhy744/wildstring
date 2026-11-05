@@ -100,10 +100,8 @@ struct MacQueueView: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 7)
-        .background(current ? MacTheme.accent.opacity(0.10) : Color.clear)
-        .overlay(alignment: .bottom) {
-            Rectangle().fill(MacTheme.border.opacity(0.55)).frame(height: 1)
-        }
+        .background(current ? MacTheme.accentSoft : Color.clear,
+            in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         .overlay(alignment: .leading) {
             if current {
                 Capsule()
@@ -112,6 +110,7 @@ struct MacQueueView: View {
                     .padding(.vertical, 10)
             }
         }
+        .padding(.vertical, 2)
     }
 
     @ViewBuilder
