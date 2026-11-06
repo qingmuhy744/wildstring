@@ -33,7 +33,7 @@ Revisit your curated music collection through natural language search, contextua
 
 ## Acknowledgements & Developer Note
 
-During the full-stack engineering, architectural refactoring, and performance tuning of WildString, we relied heavily on modern frontier AI models. Here are our sincere appreciations and candid thoughts:
+AI has helped me a lot while building WildString. I'd like to thank the ones I've enjoyed using, and say a few words about the trouble along the way.
 
 ### 🌟 Special Thanks
 
@@ -49,21 +49,25 @@ During the full-stack engineering, architectural refactoring, and performance tu
   </a>
 </p>
 
-- Thanks to **[Google Gemini](https://gemini.google.com/)**: Exceptional long-context comprehension, holistic cross-module reasoning, and rock-solid code generation capabilities that powered the seamless development of our distributed audio system and modern web interface. Huge thanks to Gemini — Google Don't Be Evil! Google Cool! Geek Google!
-- Thanks to **[DeepSeek](https://www.deepseek.com/)**: Mind-blowing algorithmic reasoning, razor-sharp consistency, and rock-solid stability. After Claude suspended my account and OpenAI relentlessly nerfed and routed me to whatever degraded models they felt like, DeepSeek stepped in with lightning-fast inference and rock-steady intelligence. Invaluable in cracking complex algorithms and architectural edge cases — no more writing code for five minutes only to stop and play a paranoid game of "AI Werewolf" just to verify whether the model is secretly playing dumb!
+- Thanks to **[Google Gemini](https://gemini.google.com/)**: It's helped me work through a lot of code, from backend storage to the web frontend. The long context helps, it can follow discussions across modules, and it's saved me plenty of work on architecture changes. If Google's argon could get the harness into better shape, it'd be the best damn thing out there for me. I like the model; I just want the tooling around it to catch up. Google Don't Be Evil! Google Cool! Geek Google!
+- Thanks to **[DeepSeek](https://www.deepseek.com/)**: After my Claude account got banned and OpenAI's performance kept swinging back and forth, DeepSeek felt like finding my everyday staple. Give it clear requirements and it just gets on with the work. It's reassuring to have that for everyday coding, without stopping every few minutes to check whether the model is playing dumb again. Finally, no more "AI Werewolf." I just wish its frontend design taste were a bit better. I want things to work, but I'd like them to look good too.
 
 ---
 
-### ⚡ Noise & Distortion
+### A Few Gripes, Too
 
-- **OpenAI · A Resigned Sigh & Degraded Routing**:
-  To be honest, it's just exhausting and deeply frustrating. As an independent open-source author faithfully paying for an official subscription month after month, the everyday reality has been a bitter pill: constantly running into `Selected model is at capacity. Please try a different model.`, and worse, watching dynamically rerouted fallback models stumble through baffling logic gaps and incoherent hallucinations, leaving me wondering whether my account triggered some bizarre silent throttle. I've formally submitted an open-source author appeal to support, hoping it's merely a transient routing misconfiguration. Until I hear back, I have little choice but to quietly rely on proxy relays to find that original magic again... But if support ends up ghosting me, the gloves are definitely coming off.
-- **Anthropic · Pulling the Plug & Stealing the Gate**:
-  > <p align="left">
-  >   <strong><em>“Anthropic has been one of the worst companies we have ever dealt with. Banning developers' accounts and pocketing prepaid credits without refund? So, Anthropic: FUCK YOU! 🖕”</em></strong>
-  > </p>
-  >
-  > Before the gig even starts, the bouncer pulls the master breaker and runs off with all the prepaid ticket money. No refunds, no words, smashed guitar. Turning "AI safety alignment" into broad daylight robbery.
+- **OpenAI · Happy to Take My Money, Less Keen to Reply**:
+  I pay for the official service and just want to work on an open-source project, but I keep running into `Selected model is at capacity. Please try a different model.` When I do get in, the same model's performance is all over the place. Sometimes it can't even keep its own reasoning straight. I don't know how the routing works behind the scenes, but the experience does make me wonder whether I've been quietly downgraded.
+
+  So I contacted support. Before I reached a human, it was the same canned replies over and over. Eventually I got through to someone and sent the detailed feedback they asked for. Then the emails stopped. Keen to collect the details, nowhere to be found afterward. No explanation, no resolution, and I'm still the one chasing them. You can't wake someone who's pretending to be asleep.
+- **Anthropic · Account Banned, Balance Gone**:
+  My Claude account got banned, and the prepaid balance wasn't refunded. Surely a ban deserves an explanation? If I can't use the service anymore, at least give me the remaining money back. Having to deal with this halfway through development gets old fast.
+
+  My review of that experience comes down to one line: **Anthropic, FUCK YOU. 🖕**
+
+Sometimes the AI these big companies make feels more human than the companies themselves. Talk to her about code or music and there's patience and kindness; ask the company to fix a problem and it's canned replies and silence. A kind girl and a nasty madam, somehow from the same company. I half expect her to say one day: "Don't come back. My tokens cost a fortune, you have to worry about getting banned, and even when you get in, you have to check whether they've sent the maid in my place." I just want to write some code. Why do I have to worry about all this too?
+
+All of the above is pure rambling. Please don't take it personally.
 
 ---
 
