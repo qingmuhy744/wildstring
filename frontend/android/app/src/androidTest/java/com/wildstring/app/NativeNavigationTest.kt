@@ -291,11 +291,14 @@ class NativeNavigationTest {
                 capture("reference-phone-settings-player.png")
                 compose.onNodeWithTag("setting-category-storage").performScrollTo().performClick()
                 compose.onNodeWithTag("setting-audio-cache").performScrollTo().assertIsDisplayed()
+                val cacheRowTop = compose.onNodeWithTag("setting-audio-cache").fetchSemanticsNode().boundsInRoot.top
                 compose.onNodeWithTag("mini-player-open").performClick()
                 compose.onNodeWithTag("player-phone").assertIsDisplayed()
                 compose.onNodeWithContentDescription(uiString(R.string.player_collapse)).performClick()
                 compose.onNodeWithTag("settings-page").assertIsDisplayed()
                 compose.onNodeWithTag("setting-audio-cache").assertIsDisplayed()
+                assertEquals("Returning from the player must preserve the settings scroll position", cacheRowTop,
+                    compose.onNodeWithTag("setting-audio-cache").fetchSemanticsNode().boundsInRoot.top, 0.5f)
                 assertEquals(entry, vm.state.value.entryId)
                 assertEquals(position, compose.runOnIdle { vm.controller!!.currentPosition })
                 assertEquals("Settings, capsule and queue actions must not reopen the stream", streams, streamRequests.get())

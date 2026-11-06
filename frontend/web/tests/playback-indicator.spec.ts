@@ -137,7 +137,7 @@ test('播放标识在歌单和我喜欢中随真实播放、暂停、切歌变�
 test('播放标识在每日推荐中跟随切歌并在缓冲、后台和暂停时停止动画', async ({ page }, info) => {
   await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
   await login(page);
-  await section(page, '每日推荐 · AI');
+  await section(page, '推荐');
   const panel = page.getByRole('region', { name: '音乐发现', exact: true });
   const rows = panel.locator('.daily-track');
   await expect(rows).toHaveCount(2);

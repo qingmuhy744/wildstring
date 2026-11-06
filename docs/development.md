@@ -73,7 +73,7 @@ make docker-down
 
 运行目录保存 `wildstring.sqlite3` 和扫描锁，SQLite 使用 WAL。数据库启动时逐步迁移到 v14（含歌词覆盖、本地用户、Host 白名单、转码缓存、元数据来源、跨设备快照与个人推荐），保留原曲库与曲目 ID；不支持更高版本数据库自动降级。备份应使用 SQLite backup API 获取一致快照，不在运行时仅复制主文件并遗漏 WAL。
 
-首次启动后执行 `make docker-admin`，或仅首次通过 `.env` 中 `WILDSTRING_ADMIN_PASSWORD` 初始化管理员。现有管理员不会被启动配置覆盖；重置密码会撤销目标用户全部会话。Cookie 默认为本机 HTTP 配置，通过 HTTPS 访问时设置 `WILDSTRING_COOKIE_SECURE=true`。
+首次启动后执行 `make docker-admin`，或仅首次通过 `.env` 中 `WILDSTRING_ADMIN_PASSWORD` 初始化管理员。现有管理员不会被启动配置覆盖；重置密码会撤销目标用户全部会话。升级前 Cookie 配置保留。新部署可在管理中心 → 服务器 → 访问设置选择 HTTP + HTTPS 或仅 HTTPS；新策略按访问协议自动设置 Secure。页面保存值优先于 `WILDSTRING_CONNECTION_POLICY` / `WILDSTRING_SERVER_NAME`，清除覆盖后恢复环境默认。TLS 反向代理须用 `WILDSTRING_TRUSTED_PROXIES` 明确配置代理地址或网段，应用不默认信任转发协议头；不要额外启用 Uvicorn 的代理头处理。
 
 网页已提供登录、曲库搜索与原文件播放；详见 [接口与播放边界](../contracts/playback-auth-api.md)。艺人浏览、普通/规则歌单、收藏和收听统计见 [个人曲库](../contracts/personal-library.md)。封面、歌曲/专辑视图和本地歌词已接入，见 [本地资源规则](../contracts/local-library-assets.md)。管理页与 AI API 连接配置见 [管理接口](../contracts/library-management.md)。已提供 WAV/CUE 到 FLAC 的导入转换；批量整理、已有文件标签写回与 Agent 尚未实现，健康检查不代表完整 MVP 完成。写回方案见 [服务端修复](architecture/metadata-repair.md)。
 

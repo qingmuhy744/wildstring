@@ -21,7 +21,14 @@ public struct User: Decodable, Equatable, Sendable {
     public let language: String?
 }
 
+public struct ServerInfo: Decodable, Equatable, Sendable {
+    public let instance_id: String
+    public let name: String
+    public let connection_policy: String
+}
+
 public struct AuthStatus: Decodable, Equatable, Sendable {
+    public let server: ServerInfo?
     public let configured: Bool
     public let authenticated: Bool
     public let user: User?
@@ -66,15 +73,23 @@ public final class WildstringClient: Sendable {
         self.cookies = CookieJar(store: store, origin: server.origin)
     }
 
-    public func authStatus() async throws -> AuthStatus {
+    deinit { session.invalidateAndCancel() }
+
+    public func authStatus(timeout: TimeInterval? = nil) async throws -> AuthStatus {
         let data = try await perform(
             Request(
                 method: "GET",
                 path: "api/v1/auth/status",
+                timeout: timeout,
                 clearsSessionOnUnauthorized: false
             )
         )
         return try JSONDecoder().decode(AuthStatus.self, from: data)
+    }
+
+    public func serverInfo() async throws -> ServerInfo {
+        let data = try await perform(Request(method: "GET", path: "api/v1/server"))
+        return try JSONDecoder().decode(ServerInfo.self, from: data)
     }
 
     public func login(username: String, password: String) async throws -> User {
@@ -126,12 +141,12 @@ public final class WildstringClient: Sendable {
 
     /// Whether a session cookie is stored locally; the server may still reject it.
     public func storedSessionExists() async -> Bool {
-        (try? await cookies.headerValue()) != nil
+        (try? await cookies.headerValue(url: server.appending(path: "api/v1/"))) != nil
     }
 
     /// Cookie header value for auxiliary requests such as AVPlayer asset loading.
     public func cookieHeaderValue() async -> String? {
-        try? await cookies.headerValue()
+        try? await cookies.headerValue(url: server.appending(path: "api/v1/"))
     }
 
     public func clearSession() async {
@@ -213,7 +228,7 @@ public final class WildstringClient: Sendable {
         if let library = librarySelection.withLock({ $0 }), !library.isEmpty {
             urlRequest.setValue(library, forHTTPHeaderField: "X-Wildstring-Library")
         }
-        if let cookieHeader = try await cookies.headerValue() {
+        if let cookieHeader = try await cookies.headerValue(url: url) {
             urlRequest.setValue(cookieHeader, forHTTPHeaderField: "Cookie")
         }
         let (data, response) = try await session.data(for: urlRequest)
@@ -246,8 +261,13 @@ private actor CookieJar {
         self.origin = origin
     }
 
-    func headerValue(now: Date = .now) throws -> String? {
+    func headerValue(url: URL, now: Date = .now) throws -> String? {
         let active = try current().filter { cookie in
+            guard !cookie.isSecure || url.scheme == "https" else { return false }
+            let domain = cookie.domain.trimmingCharacters(in: CharacterSet(charactersIn: ".")).lowercased()
+            guard let host = url.host?.lowercased(), host == domain || host.hasSuffix("." + domain) else { return false }
+            let path = url.path.isEmpty ? "/" : url.path
+            guard path == cookie.path || (path.hasPrefix(cookie.path) && (cookie.path.hasSuffix("/") || path.dropFirst(cookie.path.count).hasPrefix("/"))) else { return false }
             guard let expiresAt = cookie.expiresAt else { return true }
             return expiresAt > now
         }

@@ -201,7 +201,7 @@ struct AlbumDetailView: View {
                     .font(.caption)
                     .foregroundStyle(.tertiary)
                 Button {
-                    if let first = model?.items.first {
+                    if let first = model?.items.first(where: \.isAvailable) ?? model?.items.first {
                         playTracks(model?.items ?? [], startingAt: first, using: playback)
                     }
                 } label: {

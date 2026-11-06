@@ -51,7 +51,7 @@ class ReleaseClient internal constructor(private val client: OkHttpClient = publ
     fun download(asset: ReleaseAsset, destination: File, progress: (Long, Long) -> Unit) {
         open(asset.url, asset).use { response ->
             requireResponse(response)
-            val body = response.body ?: throw UpdateFailure("download_invalid")
+            val body = response.body
             if (body.contentLength() >= 0 && body.contentLength() != asset.size) throw UpdateFailure("download_invalid")
             body.byteStream().use { input -> destination.outputStream().use { output ->
                 val buffer = ByteArray(64 * 1024); var count = 0L
@@ -68,7 +68,7 @@ class ReleaseClient internal constructor(private val client: OkHttpClient = publ
         if (!response.isSuccessful) throw UpdateFailure("github_unavailable")
     }
     private fun read(response: Response, maximum: Long): ByteArray {
-        val body = response.body ?: throw UpdateFailure("release_invalid")
+        val body = response.body
         if (body.contentLength() > maximum) throw UpdateFailure("response_too_large")
         val output = ByteArrayOutputStream()
         body.byteStream().use { input -> val buffer = ByteArray(8192); while (true) { ensureActive(); val count = input.read(buffer); if (count < 0) break

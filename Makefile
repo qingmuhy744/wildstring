@@ -126,11 +126,13 @@ ios-build: ios-gen ## Build the iOS app for the simulator
 	xcodebuild -project frontend/ios/WildString.xcodeproj -scheme WildString -destination 'generic/platform=iOS Simulator' build
 
 .PHONY: macos-gen macos-build macos-dmg macos-test
+MACOS_CONFIGURATION ?= Release
+
 macos-gen: ## Generate the Mac Xcode project from frontend/macos/project.yml (requires XcodeGen)
 	cd frontend/macos && xcodegen generate
 
 macos-build: macos-gen ## Build the Mac app
-	xcodebuild -project frontend/macos/WildStringMac.xcodeproj -scheme WildString -destination 'platform=macOS' -configuration Release -derivedDataPath artifacts/macos-derived CODE_SIGN_IDENTITY=- CODE_SIGNING_ALLOWED=YES ENABLE_HARDENED_RUNTIME=YES build
+	xcodebuild -project frontend/macos/WildStringMac.xcodeproj -scheme WildString -destination 'platform=macOS' -configuration $(MACOS_CONFIGURATION) -derivedDataPath artifacts/macos-derived CODE_SIGN_IDENTITY=- CODE_SIGNING_ALLOWED=YES ENABLE_HARDENED_RUNTIME=YES build
 
 macos-dmg: macos-build ## Pack the Mac app into a DMG under artifacts/
 	bash scripts/package_macos_dmg.sh
@@ -291,3 +293,7 @@ test-network: ## Verify probes and production requests share actual proxy and mo
 .PHONY: test-research
 test-research: ## Verify model protocols, live-search contracts, summaries and user-owned memories
 	$(RUN) pytest -c backend/pyproject.toml backend/tests/test_agent_research.py
+
+.PHONY: test-mcp-setup
+test-mcp-setup: ## Check external-client MCP templates without credentials or external services
+	node --experimental-strip-types --test frontend/web/tests/mcp-setup.node.mjs

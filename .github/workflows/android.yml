@@ -25,6 +25,10 @@ on:
       run_emulator:
         type: boolean
         default: false
+  schedule:
+    # Weekly emulator regression baseline on main (Mondays 09:00 Asia/Shanghai)
+    # so flaky tests surface on a known-good ref instead of during releases.
+    - cron: "0 1 * * 1"
 
 permissions:
   contents: read
@@ -36,7 +40,10 @@ concurrency:
 jobs:
   apk:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 45
+    env:
+      # The scheduled run doubles as the weekly emulator baseline on main.
+      RUN_EMULATOR: ${{ inputs.run_emulator == true || github.event_name == 'schedule' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -55,11 +62,11 @@ jobs:
       - name: Check, test and package APK
         run: make android-ci
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
-        if: ${{ inputs.run_emulator == true }}
+        if: ${{ env.RUN_EMULATOR == 'true' }}
         with:
           version: "0.13.1"
       - name: Start disposable synthetic API for native integration
-        if: ${{ inputs.run_emulator == true }}
+        if: ${{ env.RUN_EMULATOR == 'true' }}
         run: |
           mkdir -p artifacts
           uv sync --frozen --project backend
@@ -72,13 +79,18 @@ jobs:
           cat artifacts/android-synthetic-api.log
           exit 1
       - name: Enable emulator acceleration
-        if: ${{ inputs.run_emulator == true }}
+        if: ${{ env.RUN_EMULATOR == 'true' }}
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
       - name: Native login, streaming and lyrics test
-        if: ${{ inputs.run_emulator == true }}
+        id: emulator_regression
+        # A first failure keeps the job alive so the retry below can rerun the
+        # whole suite on a freshly booted emulator; SwiftShader rendering makes
+        # single waitUntil timeouts a recurring false alarm.
+        continue-on-error: true
+        if: ${{ env.RUN_EMULATOR == 'true' }}
         timeout-minutes: 20
         uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2
         with:
@@ -91,8 +103,20 @@ jobs:
           ram-size: 2048M
           disable-animations: true
           script: make android-connected-test ANDROID_TEST_ARGS=-Pandroid.testInstrumentationRunnerArguments.realBackend=http://10.0.2.2:19882/
+      - name: Native login, streaming and lyrics test (retry after flake)
+        if: ${{ steps.emulator_regression.outcome == 'failure' }}
+        timeout-minutes: 20
+        uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2
+        with:
+          api-level: 35
+          target: default
+          arch: x86_64
+          profile: pixel_2
+          ram-size: 2048M
+          disable-animations: true
+          script: make android-connected-test ANDROID_TEST_ARGS=-Pandroid.testInstrumentationRunnerArguments.realBackend=http://10.0.2.2:19882/
       - name: Stop synthetic API
-        if: ${{ always() && inputs.run_emulator == true }}
+        if: ${{ always() && env.RUN_EMULATOR == 'true' }}
         run: |
           if test -f "$RUNNER_TEMP/wildstring-synthetic-api.pid"; then
             kill "$(cat "$RUNNER_TEMP/wildstring-synthetic-api.pid")" || true

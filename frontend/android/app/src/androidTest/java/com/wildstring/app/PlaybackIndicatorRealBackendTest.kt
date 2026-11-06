@@ -95,7 +95,7 @@ class PlaybackIndicatorRealBackendTest {
             val entry = hasText(uiString(R.string.daily_recommendations), substring = false) and hasClickAction()
             compose.waitUntil(10_000) { compose.onAllNodes(entry).fetchSemanticsNodes().isNotEmpty() }
             compose.onNode(entry).performSemanticsAction(SemanticsActions.OnClick) { it() }
-            compose.waitUntil(10_000) { compose.onAllNodes(hasText("播放推荐") and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
+            compose.waitUntil(10_000) { compose.onAllNodes(hasTestTag("daily-play") and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
             val dailyTag = "daily-track-${daily.id}"
             compose.onNodeWithTag("daily-recommendations").performScrollToNode(hasTestTag(dailyTag))
             compose.onNodeWithTag(dailyTag).performClick()

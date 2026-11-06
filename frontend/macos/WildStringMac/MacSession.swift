@@ -57,8 +57,6 @@ enum MacPage: String, Identifiable, Hashable {
 
     static let library: [MacPage] = [.tracks, .albums, .artists, .playlists, .favorites]
     static let explore: [MacPage] = [.discover, .podcasts, .assistant]
-    static let more: [MacPage] = [.listening, .devices, .notifications]
-    static let tools: [MacPage] = [.drafts]
 
     var id: String { rawValue }
 
@@ -110,28 +108,32 @@ struct MacSavedServer: Codable, Equatable, Identifiable {
     var username: String
     var lastUsedAt: Date
     var allowInsecureHTTP: Bool
+    var serverName: String? = nil
+    var alias: String? = nil
+    var instanceID: String? = nil
+    var label: String { alias.flatMap { $0.isEmpty ? nil : $0 } ?? serverName ?? address }
     var id: String { address }
 }
 
 enum MacServers {
     private static let key = "mac.savedServers"
 
-    static func load() -> [MacSavedServer] {
-        guard let data = UserDefaults.standard.data(forKey: key),
+    static func load(defaults: UserDefaults = .standard) -> [MacSavedServer] {
+        guard let data = defaults.data(forKey: key),
             let servers = try? JSONDecoder().decode([MacSavedServer].self, from: data)
         else { return [] }
         return servers.sorted { $0.lastUsedAt > $1.lastUsedAt }
     }
 
-    static func upsert(_ server: MacSavedServer) {
-        var servers = load()
+    static func upsert(_ server: MacSavedServer, defaults: UserDefaults = .standard) {
+        var servers = load(defaults: defaults)
         if let index = servers.firstIndex(where: { $0.address == server.address }) {
             servers[index] = server
         } else {
             servers.append(server)
         }
         if let data = try? JSONEncoder().encode(servers) {
-            UserDefaults.standard.set(data, forKey: key)
+            defaults.set(data, forKey: key)
         }
     }
 }
@@ -149,7 +151,6 @@ final class MacSession {
     var phase: Phase = .loading
     var serverText = ""
     var username = ""
-    var password = ""
     var allowInsecureHTTP = false
     var isBusy = false
     var errorMessage: String?
@@ -160,28 +161,51 @@ final class MacSession {
     var showQueue = false
     var showFullscreen = false
     var selectedLibraryID: String?
+    var confirmLogout = false
+    var showServerLogin = false
+    var showRoutes = false
+    private(set) var routes: ServerRoutes?
+    var logicalServerAddress: String { routes?.storageAddress ?? client?.server.description ?? "" }
+    var pendingServer: MacSavedServer?
+    var serverSwitchError: String?
 
     private(set) var client: WildstringClient?
     private(set) var playback: PlaybackService?
     private(set) var favorites: MacFavorites?
     private(set) var sync: MacPlaybackSync?
     private(set) var assistant: MacAssistantModel?
+    private(set) var connection: MacConnectionMonitor?
     private(set) var profile = "listener"
 
     var canManage: Bool { profile != "listener" }
     private(set) var servers: [MacSavedServer] = []
+    var serverLabel: String {
+        servers.first { $0.address == logicalServerAddress }?.label ?? client?.server.description ?? "服务器"
+    }
+
+    func setServerAlias(_ alias: String) {
+        guard var saved = servers.first(where: { $0.address == logicalServerAddress }) else { return }
+        saved.alias = String(alias.trimmingCharacters(in: .whitespacesAndNewlines).prefix(80))
+        MacServers.upsert(saved, defaults: defaults)
+        servers = MacServers.load(defaults: defaults)
+    }
 
     private let store: any SessionStore
     private let queueStore: any QueueStore
+    private let defaults: UserDefaults
+    private let configuration: URLSessionConfiguration?
 
-    init() {
+    init(store: (any SessionStore)? = nil, queueStore: (any QueueStore)? = nil,
+        defaults: UserDefaults = .standard, configuration: URLSessionConfiguration? = nil) {
 #if DEBUG
-        store = MacDebugSessionStore()
+        self.store = store ?? MacDebugSessionStore()
 #else
-        store = KeychainSessionStore(service: "com.wildstring.mac.session")
+        self.store = store ?? KeychainSessionStore(service: "com.wildstring.mac.session")
 #endif
-        queueStore = (try? SwiftDataQueueStore.makeDefault()) ?? InMemoryQueueStore()
-        servers = MacServers.load()
+        self.queueStore = queueStore ?? ((try? SwiftDataQueueStore.makeDefault()) ?? InMemoryQueueStore())
+        self.defaults = defaults
+        self.configuration = configuration
+        servers = MacServers.load(defaults: defaults)
     }
 
     func restore() async {
@@ -195,8 +219,14 @@ final class MacSession {
         serverText = last.address
         username = last.username
         allowInsecureHTTP = last.allowInsecureHTTP
-        let client = WildstringClient(server: address, store: store)
-        client.preferClientHeader("macos")
+        let savedRoutes = makeRoutes(address, allowHTTP: last.allowInsecureHTTP)
+        if savedRoutes.profile.routes.count > 1 {
+            if let (candidate, selected, user) = await savedRoutes.restore() {
+                await activate(client: candidate, address: selected, username: user.username, routeProfile: savedRoutes)
+            } else { routes = savedRoutes; phase = .connect }
+            return
+        }
+        let client = makeClient(address)
         if await client.storedSessionExists() {
             if let status = try? await client.authStatus(), status.authenticated, let user = status.user {
                 await activate(client: client, address: address, username: user.username)
@@ -206,18 +236,22 @@ final class MacSession {
         phase = .connect
     }
 
-    func login() async {
+    func login(serverText: String, username: String, password: String, allowInsecureHTTP: Bool) async {
         guard !isBusy else { return }
         isBusy = true
         errorMessage = nil
         defer { isBusy = false }
         do {
             let address = try ServerAddress(input: serverText, allowsInsecureHTTP: allowInsecureHTTP)
-            let client = WildstringClient(server: address, store: store)
-            client.preferClientHeader("macos")
+            let client = makeClient(address)
             let user = try await client.login(username: username, password: password)
-            password = ""
+            self.serverText = serverText
+            self.username = user.username
+            self.allowInsecureHTTP = allowInsecureHTTP
             await activate(client: client, address: address, username: user.username)
+            showServerLogin = false
+        } catch let error as APIError where error.code == "https_required" {
+            errorMessage = "服务器仅允许 HTTPS，请使用 HTTPS 线路登录"
         } catch let error as ServerAddress.ValidationError where error == .insecureHTTPNotAllowed {
             errorMessage = "这是未加密的 HTTP。确认后再连接。"
         } catch {
@@ -226,17 +260,108 @@ final class MacSession {
     }
 
     func logout() async {
-        playback?.shutdown()
+        guard !isBusy else { return }
+        isBusy = true
+        defer { isBusy = false }
+        let previousClient = client
+        let previousRoutes = routes
+        routes = nil
+        previousRoutes?.stop()
+        await deactivate(preservingQueue: false)
+        await previousRoutes?.signOut()
+        if let previousClient {
+            try? await previousClient.logout()
+            await previousClient.clearSession()
+        }
+        phase = .connect
+    }
+
+    func addServer() {
+        pendingServer = nil
+        errorMessage = nil
+        showServerLogin = true
+    }
+
+    func switchServer(_ server: MacSavedServer) async {
+        guard !isBusy, logicalServerAddress != server.address else { return }
+        isBusy = true
+        serverSwitchError = nil
+        errorMessage = nil
+        defer { isBusy = false }
+        do {
+            let address = try ServerAddress(input: server.address, allowsInsecureHTTP: server.allowInsecureHTTP)
+            let savedRoutes = makeRoutes(address, allowHTTP: server.allowInsecureHTTP)
+            if savedRoutes.profile.routes.count > 1 {
+                if let (candidate, selected, user) = await savedRoutes.restore() {
+                    await activate(client: candidate, address: selected, username: user.username, routeProfile: savedRoutes)
+                } else { serverSwitchError = "已保存线路不可用，请检查网络或登录状态" }
+                return
+            }
+            let candidate = makeClient(address)
+            guard await candidate.storedSessionExists() else {
+                pendingServer = server
+                errorMessage = "请登录这个服务器"
+                showServerLogin = client != nil
+                return
+            }
+            let status = try await candidate.authStatus()
+            guard status.authenticated, let user = status.user else {
+                pendingServer = server
+                errorMessage = "登录已过期，请重新登录"
+                showServerLogin = client != nil
+                return
+            }
+            serverText = server.address
+            username = user.username
+            allowInsecureHTTP = server.allowInsecureHTTP
+            await activate(client: candidate, address: address, username: user.username)
+            showServerLogin = false
+        } catch {
+            serverSwitchError = "暂时无法连接所选服务器，当前连接已保留。"
+        }
+    }
+
+    private func makeRoutes(_ address: ServerAddress, allowHTTP: Bool) -> ServerRoutes {
+        let controller = ServerRoutes(primary: ServerRoute(name: "默认线路", address: address.description, allowHTTP: allowHTTP), defaults: defaults) { [store, configuration] address in
+            let client = WildstringClient(server: address, store: store, configuration: configuration)
+            client.preferClientHeader("macos")
+            return client
+        }
+        controller.onSelected = { [weak self, weak controller] candidate, selected in
+            guard let self, let controller, self.routes === controller,
+                  let status = try? await candidate.authStatus(), let user = status.user else { return }
+            await self.activate(client: candidate, address: selected, username: user.username, routeProfile: controller)
+        }
+        return controller
+    }
+
+    private func makeClient(_ address: ServerAddress) -> WildstringClient {
+        let client = WildstringClient(server: address, store: store, configuration: configuration)
+        client.preferClientHeader("macos")
+        return client
+    }
+
+    private func deactivate(preservingQueue: Bool) async {
+        sync?.stop()
+        connection?.stop()
+        desktopLyrics.close()
+        if let playback {
+            playback.pause()
+            playback.shutdown(preservingQueue: preservingQueue)
+            await playback.flushPersistence()
+        }
         playback = nil
         favorites = nil
         assistant = nil
-        sync?.stop()
         sync = nil
+        connection = nil
         profile = "listener"
-        if page == .manage { page = .tracks }
-        if let client { try? await client.logout() }
         client = nil
-        phase = .connect
+        selectedLibraryID = nil
+        page = .home
+        showFullscreen = false
+        showLyrics = false
+        showQueue = false
     }
 
     func selectLibrary(_ id: String?) {
@@ -247,9 +372,9 @@ final class MacSession {
         guard case .connected(let server, let username) = phase else { return }
         let key = "mac.library.\(server)|\(username)"
         if let id, !id.isEmpty {
-            UserDefaults.standard.set(id, forKey: key)
+            defaults.set(id, forKey: key)
         } else {
-            UserDefaults.standard.removeObject(forKey: key)
+            defaults.removeObject(forKey: key)
         }
     }
 
@@ -258,10 +383,23 @@ final class MacSession {
         playback.seek(to: playback.currentTime + seconds)
     }
 
-    private func activate(client: WildstringClient, address: ServerAddress, username: String) async {
+    private func activate(client: WildstringClient, address: ServerAddress, username: String, routeProfile: ServerRoutes? = nil) async {
+        let previousPage = page
+        let previousLibrary = selectedLibraryID
+        let resume = routeProfile === routes && playback?.wantsPlayback == true
+        let queueSnapshot = playback?.queue
+        let positionSnapshot = playback?.currentTime ?? 0
+        let volumeSnapshot = playback?.volume ?? 1
+        let rateSnapshot = playback?.podcastPlaybackRate ?? 1
+        let sameServer = routeProfile != nil && routeProfile === routes && playback != nil
+        if !sameServer { routes?.stop() }
+        let controller = routeProfile ?? makeRoutes(address, allowHTTP: address.url.scheme == "http")
+        let primary = (try? ServerAddress(input: controller.storageAddress, allowsInsecureHTTP: true)) ?? address
+        await deactivate(preservingQueue: true)
+        routes = controller
         self.client = client
         assistant = MacAssistantModel(client: client)
-        let space = Self.spaceName(address.origin)
+        let space = Self.spaceName(primary.origin)
         let cache = AudioDiskCache(
             directory: FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
                 .appendingPathComponent("WildStringMac/\(space)", isDirectory: true),
@@ -272,18 +410,19 @@ final class MacSession {
             store: queueStore.scoped(to: space),
             cookieHeader: { [weak client] in await client?.cookieHeaderValue() },
             fragmentCache: cache,
+            connectionFailure: { [weak controller] in await controller?.playbackConnectionFailed(address: address.description) },
             planProvider: { trackID, bitrate, startMs in
                 try await client.playbackPlan(trackID: trackID, bitrateKbps: bitrate, startMs: startMs)
             }
         )
         playback.clientHeaderName = "macos"
-        let bitrate = UserDefaults.standard.integer(forKey: "macPreferredBitrate")
+        let bitrate = defaults.integer(forKey: "macPreferredBitrate")
         playback.preferredBitrateKbps = bitrate == 0 ? nil : bitrate
-        let rate = UserDefaults.standard.double(forKey: "podcastPlaybackRate")
+        let rate = defaults.double(forKey: "podcastPlaybackRate")
         if rate > 0 { playback.setPodcastPlaybackRate(Float(rate)) }
-        playback.podcastDeviceID = Self.deviceID()
-        let libraryKey = "mac.library.\(address.description)|\(username)"
-        if let library = UserDefaults.standard.string(forKey: libraryKey), !library.isEmpty {
+        playback.podcastDeviceID = Self.deviceID(defaults: defaults)
+        let libraryKey = "mac.library.\(primary.description)|\(username)"
+        if let library = defaults.string(forKey: libraryKey), !library.isEmpty {
             client.selectLibrary(library)
             selectedLibraryID = library
         } else {
@@ -314,30 +453,50 @@ final class MacSession {
             }
         }
         await playback.restore()
+        if sameServer, let queueSnapshot {
+            playback.restoreRouteQueue(queueSnapshot, position: positionSnapshot)
+            playback.volume = volumeSnapshot
+            playback.setPodcastPlaybackRate(rateSnapshot)
+        }
         self.playback = playback
+        playback.warmConnection()
+        let monitor = MacConnectionMonitor(server: address, configuration: configuration)
+        monitor.start()
+        connection = monitor
         let favorites = MacFavorites(client: client)
         self.favorites = favorites
-        let sync = MacPlaybackSync(client: client, playback: playback, deviceId: Self.deviceID())
+        let sync = MacPlaybackSync(client: client, playback: playback, deviceId: Self.deviceID(defaults: defaults))
         self.sync = sync
         sync.start()
         Task { await favorites.load() }
+        let previous = servers.first { $0.address == primary.description }
+        let info = try? await client.serverInfo()
         MacServers.upsert(
             MacSavedServer(
-                address: address.description,
+                address: primary.description,
                 username: username,
                 lastUsedAt: .now,
-                allowInsecureHTTP: allowInsecureHTTP
-            )
+                allowInsecureHTTP: primary.url.scheme == "http",
+                serverName: info?.name ?? previous?.serverName,
+                alias: previous?.alias,
+                instanceID: info?.instance_id ?? previous?.instanceID
+            ), defaults: defaults
         )
-        servers = MacServers.load()
-        if let status = try? await client.authStatus() {
-            profile = status.user?.profile ?? "listener"
+        servers = MacServers.load(defaults: defaults)
+        let status = try? await client.authStatus()
+        profile = status?.user?.profile ?? "listener"
+        controller.bind(info: info, userID: status?.user?.id, activeAddress: address.description)
+        controller.onSelected = { [weak self, weak controller] candidate, address in
+            guard let self, let controller, self.routes === controller else { return }
+            await self.activate(client: candidate, address: address, username: username, routeProfile: controller)
         }
-        phase = .connected(server: address.description, username: username)
+        phase = .connected(server: primary.description, username: username)
+        if sameServer { page = previousPage; selectLibrary(previousLibrary) }
+        if resume { playback.resume() }
+        if !sameServer { controller.start() }
     }
 
-    private static func deviceID() -> String {
-        let defaults = UserDefaults.standard
+    private static func deviceID(defaults: UserDefaults) -> String {
         if let stored = defaults.string(forKey: "mac.deviceID"), !stored.isEmpty { return stored }
         let created = UUID().uuidString
         defaults.set(created, forKey: "mac.deviceID")

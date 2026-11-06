@@ -17,11 +17,12 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import uuid4
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, ConfigDict
 
 from wildstring import get_app_version
 
@@ -31,6 +32,7 @@ MAX_BYTES = 200 * 1024 * 1024
 _context = contextvars.ContextVar("wildstring_diagnostics", default=None)
 _name = re.compile(r"^[A-Za-z0-9_.:-]{1,100}$")
 _trace = re.compile(r"^[a-f0-9]{32}$")
+_levels = {"DEBUG": 10, "INFO": 20, "WARNING": 30, "ERROR": 40, "CRITICAL": 50}
 _fields = {
     "trace_id",
     "user_id",
@@ -60,6 +62,52 @@ _fields = {
 }
 
 
+class LogSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    level: Literal["INFO", "WARNING", "ERROR"] = "INFO"
+    capture_stack: bool = True
+
+
+def exception_stack(error):
+    """Code locations only: never render exception messages, source lines or locals."""
+    chain, seen = [], set()
+    relation = "raised"
+    while error is not None and id(error) not in seen and len(chain) < 5:
+        seen.add(id(error))
+        frames = []
+        tb = error.__traceback__
+        while tb is not None:
+            module = tb.tb_frame.f_globals.get("__name__", "unknown")
+            function = tb.tb_frame.f_code.co_name
+            frames.append(
+                {
+                    "module": module
+                    if isinstance(module, str) and _name.fullmatch(module)
+                    else "unknown",
+                    "function": function
+                    if function.isidentifier() or function in {"<module>", "<lambda>"}
+                    else "unknown",
+                    "line": tb.tb_lineno,
+                }
+            )
+            tb = tb.tb_next
+        chain.append(
+            {
+                "type": type(error).__name__,
+                "relation": relation,
+                "frames": frames[-32:],
+                "frames_truncated": len(frames) > 32,
+            }
+        )
+        if error.__cause__ is not None:
+            error, relation = error.__cause__, "cause"
+        elif not error.__suppress_context__:
+            error, relation = error.__context__, "context"
+        else:
+            error = None
+    return {"exceptions": chain, "chain_truncated": error is not None}
+
+
 def trace_id():
     return (_context.get() or {}).get("trace_id") or uuid4().hex
 
@@ -87,7 +135,7 @@ def _project(event, level, fields):
         "time": datetime.now(UTC).isoformat(),
         "schema_version": 1,
         "version": get_app_version(),
-        "level": level if level in {"DEBUG", "INFO", "WARNING", "ERROR"} else "INFO",
+        "level": level if level in _levels else "INFO",
         "event": event
         if isinstance(event, str) and _name.fullmatch(event)
         else "application.event",
@@ -103,13 +151,19 @@ def _project(event, level, fields):
     return result
 
 
-def record_event(event, *, level="INFO", trace_id=None, sink=None, **fields):
+def record_event(event, *, level="INFO", trace_id=None, sink=None, error=None, **fields):
     context = _context.get() or {}
     target = sink or context.get("sink")
     values = {key: value for key, value in context.items() if key != "sink"} | fields
     if trace_id:
         values["trace_id"] = trace_id
     result = _project(event, level, values)
+    if target is not None and not target.accepts(result):
+        return result
+    if error is not None:
+        result["exception_type"] = type(error).__name__
+        if target is None or target.settings.capture_stack:
+            result["stack"] = exception_stack(error)
     if target is not None:
         target.record(result)
     # No raw values are passed to the logging subsystem.
@@ -119,35 +173,65 @@ def record_event(event, *, level="INFO", trace_id=None, sink=None, **fields):
     return result
 
 
+def log_event(record, diagnostics=None):
+    if getattr(record, "safe_event", None) is not None:
+        return record.safe_event
+    context = _context.get() or {}
+    target = context.get("sink") or diagnostics
+    fields = {key: value for key, value in context.items() if key != "sink"}
+    fields.update(source=record.name, line=record.lineno)
+    result = _project("application.log", record.levelname, fields)
+    if record.exc_info and record.exc_info[1] is not None:
+        result["exception_type"] = record.exc_info[0].__name__
+        if target is None or target.settings.capture_stack:
+            result["stack"] = exception_stack(record.exc_info[1])
+    return result
+
+
 class SafeFormatter(logging.Formatter):
+    def __init__(self, diagnostics=None):
+        super().__init__()
+        self.diagnostics = diagnostics
+
     def format(self, record):
-        result = getattr(record, "safe_event", None)
-        if result is None:
-            result = _project("application.log", record.levelname, {"source": record.name})
-            if record.exc_info and record.exc_info[0]:
-                result["exception_type"] = record.exc_info[0].__name__
-            result["line"] = record.lineno
-        return json.dumps(result, ensure_ascii=False, allow_nan=False)
+        return json.dumps(log_event(record, self.diagnostics), ensure_ascii=False, allow_nan=False)
+
+
+class DiagnosticLevelFilter(logging.Filter):
+    def __init__(self, diagnostics):
+        super().__init__()
+        self.diagnostics = diagnostics
+
+    def filter(self, record):
+        target = (_context.get() or {}).get("sink") or self.diagnostics
+        return target is None or target.accepts(log_event(record, target))
 
 
 class SafeCapture(logging.Handler):
+    def __init__(self, diagnostics=None):
+        super().__init__()
+        self.diagnostics = diagnostics
+
     def emit(self, record):
         context = _context.get() or {}
-        target = context.get("sink")
+        target = context.get("sink") or self.diagnostics
         if target is None or record.name == "wildstring.events":
             return
-        fields = {key: value for key, value in context.items() if key != "sink"}
-        fields.update(source=record.name, line=record.lineno)
-        if record.exc_info and record.exc_info[0]:
-            fields["exception_type"] = record.exc_info[0].__name__
-        target.record(_project("application.log", record.levelname, fields))
+        record.safe_event = log_event(record, target)
+        target.record(record.safe_event)
 
 
-def install_logging():
+def install_logging(diagnostics=None):
     """Cover Uvicorn's console too; do not replace capture or third-party handlers."""
     root = logging.getLogger()
     if not any(isinstance(handler, SafeCapture) for handler in root.handlers):
-        root.addHandler(SafeCapture())
+        root.addHandler(SafeCapture(diagnostics))
+    for handler in root.handlers:
+        if isinstance(handler, SafeCapture):
+            handler.diagnostics = diagnostics
+    root.setLevel(logging.INFO)
+    # DEBUG is gated at the handlers, by the instance's temporary module setting.
+    logging.getLogger("wildstring").setLevel(logging.DEBUG)
     if not any(
         isinstance(handler, logging.StreamHandler)
         and not type(handler).__module__.startswith("_pytest")
@@ -162,7 +246,11 @@ def install_logging():
             if isinstance(handler, logging.StreamHandler) and not type(
                 handler
             ).__module__.startswith("_pytest"):
-                handler.setFormatter(SafeFormatter())
+                handler.setFormatter(SafeFormatter(diagnostics))
+                for existing in list(handler.filters):
+                    if isinstance(existing, DiagnosticLevelFilter):
+                        handler.removeFilter(existing)
+                handler.addFilter(DiagnosticLevelFilter(diagnostics))
 
 
 class DiagnosticFileHandler(RotatingFileHandler):
@@ -195,6 +283,7 @@ class Diagnostics:
         self.next_cleanup = 0
         self.database = None
         self.repository = None
+        self.settings = LogSettings()
 
     def connect(self):
         connection = sqlite3.connect(self.path, timeout=1)
@@ -211,7 +300,11 @@ class Diagnostics:
                     "payload TEXT NOT NULL);"
                     "CREATE INDEX IF NOT EXISTS event_trace ON events(trace_id,sequence);"
                     "CREATE INDEX IF NOT EXISTS event_time ON events(at);"
+                    "CREATE TABLE IF NOT EXISTS settings (id INTEGER PRIMARY KEY CHECK(id=1),payload TEXT NOT NULL);"
                 )
+                saved = connection.execute("SELECT payload FROM settings WHERE id=1").fetchone()
+                if saved is not None:
+                    self.settings = LogSettings.model_validate_json(saved["payload"])
             self.file_handler = DiagnosticFileHandler(
                 self, self.directory / "events.jsonl", maxBytes=5 * 1024 * 1024, backupCount=9
             )
@@ -220,17 +313,29 @@ class Diagnostics:
                 target=self.work, name="wildstring-diagnostics", daemon=True
             )
             self.thread.start()
-        except (OSError, sqlite3.Error):
+        except (OSError, sqlite3.Error, ValueError):
             self.degraded = True
 
-    def record(self, event):
-        if event["level"] == "DEBUG" and (
-            time.time() > self.debug_until
-            or (
-                self.debug_module != "all"
-                and not event["event"].startswith(self.debug_module + ".")
+    def accepts(self, event):
+        if event["level"] == "DEBUG":
+            module = event.get("source", "").removeprefix("wildstring.")
+            return time.time() < self.debug_until and (
+                self.debug_module == "all"
+                or event["event"].startswith(self.debug_module + ".")
+                or module.startswith(self.debug_module)
             )
-        ):
+        return _levels[event["level"]] >= _levels[self.settings.level]
+
+    def configure(self, settings):
+        with self.connect() as connection:
+            connection.execute(
+                "INSERT INTO settings(id,payload) VALUES(1,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload",
+                (settings.model_dump_json(),),
+            )
+        self.settings = settings
+
+    def record(self, event):
+        if not self.accepts(event):
             return
         if event["event"] in {
             "provider.worker.failed",
@@ -343,6 +448,8 @@ class Diagnostics:
             "degraded": self.degraded,
             "dropped_events": self.dropped,
             "debug_until": self.debug_until if self.debug_until > time.time() else None,
+            "debug_module": self.debug_module,
+            **self.settings.model_dump(),
         }
 
     def trace_members(self, identity):
@@ -443,7 +550,7 @@ class RequestTrace:
             try:
                 await self.app(scope, receive, traced_send)
             except Exception as error:
-                record_event("request.failed", level="ERROR", exception_type=type(error).__name__)
+                record_event("request.failed", level="ERROR", error=error)
                 raise
             finally:
                 user = scope["state"].get("user") or {}
@@ -453,7 +560,13 @@ class RequestTrace:
                 )
                 record_event(
                     "request.completed",
-                    level="DEBUG" if quiet else "INFO",
+                    level="DEBUG"
+                    if quiet
+                    else "ERROR"
+                    if status >= 500
+                    else "WARNING"
+                    if status >= 400
+                    else "INFO",
                     method=scope.get("method"),
                     user_id=user.get("id"),
                     http_status=status,
@@ -490,6 +603,14 @@ def diagnostics_router(service, auth, database):
         return service.events(
             limit=limit, cursor=cursor, trace_id=trace_id, level=level, event=event, task_id=task_id
         )
+
+    @router.put("/settings", dependencies=[Depends(auth.require_client)])
+    def configure(body: LogSettings):
+        try:
+            service.configure(body)
+        except (OSError, sqlite3.Error):
+            raise HTTPException(503, "diagnostic_settings_unavailable") from None
+        return service.status()
 
     @router.get("/traces/{identity}")
     def trace(identity: str):

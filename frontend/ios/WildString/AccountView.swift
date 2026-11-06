@@ -10,6 +10,7 @@ struct AccountView: View {
     let username: String
     let onLogout: () -> Void
 
+    @Environment(ConnectionModel.self) private var connection
     @State private var playlists: [Playlist] = []
     @State private var path = NavigationPath()
     @State private var isLoading = true
@@ -95,7 +96,7 @@ struct AccountView: View {
                 }
                 Section("账号") {
                     LabeledContent("用户名", value: username)
-                    LabeledContent("服务器", value: server)
+                    LabeledContent("服务器", value: connection.servers.first { $0.address == server }?.label ?? server)
                 }
                 Section {
                     NavigationLink(value: SettingsMarker()) {

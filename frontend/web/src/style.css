@@ -639,8 +639,10 @@ a {
   cursor: pointer;
   touch-action: manipulation;
 }
-.track-row:hover {
-  background: #20231c;
+@media (hover: hover) {
+  .track-row:hover {
+    background: #20231c;
+  }
 }
 .track-row.current {
   background: #262b21;
@@ -719,6 +721,37 @@ a {
 }
 .track-title:hover {
   background: transparent;
+}
+/* A song row reacts as one surface. The title button stays the accessible play
+   action, while its stretched hit area also covers the cover and the gaps;
+   secondary controls sit above it. Touch screens skip hover, so a tap does not
+   leave a lingering highlight, and press feedback comes from :active instead. */
+.track-row,
+.discovery-track {
+  position: relative;
+  -webkit-tap-highlight-color: transparent;
+}
+.discovery-track .track-title::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+}
+.discovery-track
+  :is(.row-menu-trigger, .favorite-button, .candidate-actions, .daily-track-number input) {
+  position: relative;
+  z-index: 1;
+}
+:is(.track-row, .discovery-track) .track-title:focus-visible {
+  outline: none;
+}
+:is(.track-row, .discovery-track):has(.track-title:focus-visible) {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.track-row:active:not(:has(button:not(.track-title):active)),
+.discovery-track:has(.track-title:active) {
+  background: rgb(var(--accent-rgb) / 10%);
 }
 .track-title strong {
   display: block;
@@ -4258,7 +4291,7 @@ textarea {
   color: #30332a;
   border-color: #c9cbbd;
 }
-[data-theme='light'] button:not(.primary):hover {
+[data-theme='light'] button:not(.primary, .track-title, .track-artist-link):hover {
   background: #e0e3d4;
 }
 [data-theme='light']
@@ -4272,8 +4305,10 @@ textarea {
   background: #dde2d0;
   color: #57492f;
 }
-[data-theme='light'] .track-row:hover {
-  background: #eeeee4;
+@media (hover: hover) {
+  [data-theme='light'] .track-row:hover {
+    background: #eeeee4;
+  }
 }
 [data-theme='light']
   :is(
@@ -5962,4 +5997,14 @@ textarea {
   justify-content: flex-end;
   flex-wrap: wrap;
   margin-top: 24px;
+}
+
+.track-unavailable .track-title strong {
+  color: var(--muted);
+}
+.track-unavailable-label {
+  color: var(--muted);
+  font-size: 11px;
+  margin-left: 8px;
+  font-weight: 400;
 }

@@ -2,6 +2,7 @@ package com.wildstring.app
 
 import com.wildstring.app.data.friendlyError
 import com.wildstring.app.playback.podcastPlaybackMessage
+import com.wildstring.app.playback.trackPlaybackMessage
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.Assert.assertEquals
@@ -11,6 +12,13 @@ import retrofit2.HttpException
 import retrofit2.Response
 
 class PodcastPlaybackErrorTest {
+    @Test fun missingFilesAndNetworkErrorsHaveDifferentRecoveryHints() {
+        assertTrue(trackPlaybackMessage(404, """{"detail":"audio_not_found"}""").contains("文件缺失"))
+        assertTrue(trackPlaybackMessage(409, """{"detail":"file_changed_rescan_required"}""").contains("重新扫描"))
+        assertTrue(trackPlaybackMessage(401, "").contains("登录"))
+        assertTrue(trackPlaybackMessage(null, "").contains("检查连接"))
+        assertTrue(!trackPlaybackMessage(503, "").contains("文件缺失"))
+    }
     @Test fun upstreamFailureIsNotReportedAsAFormatProblem() {
         val upstream = podcastPlaybackMessage(502, """{"detail":"podcast_audio_upstream_failed"}""", false)
         assertTrue(upstream.contains("播客源站暂时无法连接"))

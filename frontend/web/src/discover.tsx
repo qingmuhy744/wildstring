@@ -1,7 +1,10 @@
 import './recommendations.css';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
+import type { TFunction } from 'i18next';
+import { useTranslation } from 'react-i18next';
 import { api, eventId, artist, time, type Playlist, type Track, type User } from './api';
 import { Cover } from './cover';
+import { Icon } from './icons';
 import { FavoriteButton, type Favorites } from './favorites';
 import { RowMenu } from './row-menu';
 import { RecommendationLyricsDialog, RecommendationPlaylistDialog } from './recommendation-dialogs';
@@ -14,7 +17,7 @@ import { ListeningRankings } from './listening-rankings';
 import { ExternalRecommendations } from './external-recommendations';
 import { PlaybackIndicator } from './playback-indicator';
 import {
-  recommendationSources,
+  recommendationSourceName,
   type DailyRecommendation,
   type RecommendationChoice,
   type RecommendationPreferences,
@@ -35,8 +38,68 @@ interface Discovery {
   warnings?: RecommendationWarning[];
   degraded?: boolean;
 }
-function explanation(reason: unknown): string {
-  return typeof reason === 'string' ? reason : '来自你的曲库';
+const reasonKeys: Record<string, string> = {
+  来自你的收藏: 'discover.reasons.liked',
+  根据你之前的收听反馈: 'discover.reasons.feedback',
+  来自你听过或收藏的艺人: 'discover.reasons.artist',
+  重听曲库里的熟悉旋律: 'discover.reasons.revisit',
+  探索曲库中尚未听过的歌曲: 'discover.reasons.explore',
+  来自曲库用户近30天的实际收听热度: 'discover.reasons.community',
+  探索本曲库中你尚未听过的歌曲: 'discover.reasons.discovery',
+  你已超过30天没有重听这首歌: 'discover.reasons.revisit30',
+  'Last.fm 公共来源中找到与本库标题、艺人一致的歌曲': 'discover.reasons.lastfm',
+  从本地曲库中选取: 'discover.reasons.localPick',
+};
+function explanation(t: TFunction, reason: unknown): string {
+  if (typeof reason !== 'string') return t('discover.row.reasonFallback');
+  const key = reasonKeys[reason];
+  return key ? t(key) : reason;
+}
+/** Server dates are ISO days; anything else (legacy local batches) is shown as given. */
+function dailyDate(date: string | undefined, language: string): string {
+  if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return date || '';
+  return new Intl.DateTimeFormat(language.startsWith('zh') ? 'zh-CN' : 'en', {
+    month: 'long',
+    day: 'numeric',
+  }).format(new Date(`${date}T00:00:00`));
+}
+/** Names the sources that actually contributed, so the summary says why these songs are here. */
+function dailySummary(daily: Daily, t: TFunction): string {
+  const sources = (daily.source_status || [])
+    .filter((source) => source.status === 'ok' && source.matched > 0)
+    .slice(0, 2)
+    .map((source) => recommendationSourceName(t, source.id));
+  const engine = daily.engine.includes('ai')
+    ? t('discover.daily.engineAi')
+    : sources.length
+      ? ''
+      : t('discover.daily.engineLocal');
+  return [t('discover.daily.count', { count: daily.items.length }), ...sources, engine]
+    .filter(Boolean)
+    .join(' · ');
+}
+/** The first covers give each day's batch its own face; short batches show a single cover. */
+function DailyMosaic({ tracks }: { tracks: Track[] }) {
+  const shown = tracks.length >= 4 ? tracks.slice(0, 4) : tracks.slice(0, 1);
+  return (
+    <div className={`daily-mosaic ${shown.length === 4 ? 'is-grid' : ''}`} aria-hidden="true">
+      {shown.map((track) => (
+        <Cover key={track.id} trackId={track.id} title={track.title} />
+      ))}
+    </div>
+  );
+}
+const discoveryTitleKeys: Record<string, string> = {
+  曲库里的发现: 'discover.ai.localTitle',
+  为你选的歌: 'discover.ai.defaultTitle',
+  曲库中没有可推荐的歌曲: 'discover.ai.noTitle',
+};
+function discoveryTitle(title: string, t: TFunction): string {
+  const key = discoveryTitleKeys[title];
+  return key ? t(key) : title;
+}
+function dailySource(ids: string[] | undefined, t: TFunction): string | undefined {
+  return ids?.map((id) => recommendationSourceName(t, id)).find(Boolean);
 }
 function Choices({
   items,
@@ -63,6 +126,7 @@ function Choices({
   selected?: Set<string>;
   onSelect?: (id: string) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="discovery-list">
       {items.map(({ track, reason, source_ids }, index) => (
@@ -72,32 +136,44 @@ function Choices({
           className={`discovery-track ${feedback ? 'daily-track' : ''} ${player.current?.id === track.id ? 'is-current' : ''} ${selected?.has(track.id) ? 'is-selected' : ''}`}
           actions={[
             {
-              label: '下一首播放',
+              label: t('discover.row.next'),
               icon: 'next',
               run: () =>
                 onNotice(
                   player.playNext(track)
-                    ? `下一首播放：${track.title}`
-                    : '播放队列已满，请先移除一些歌曲。',
+                    ? t('discover.row.nextNotice', { title: track.title })
+                    : t('discover.row.queueFull'),
                 ),
             },
             {
-              label: '加入播放队列',
+              label: t('discover.row.queue'),
               icon: 'queue',
               run: () =>
                 onNotice(
                   player.enqueue(track)
-                    ? `已加入队列：${track.title}`
-                    : '播放队列已满，请先移除一些歌曲。',
+                    ? t('discover.row.queueNotice', { title: track.title })
+                    : t('discover.row.queueFull'),
                 ),
             },
-            { label: '加入歌单…', icon: 'playlist', run: () => onPlaylist([track]) },
-            { label: '查看歌词', icon: 'draft', run: () => onLyrics(track) },
+            {
+              label: t('discover.row.playlist'),
+              icon: 'playlist',
+              run: () => onPlaylist([track]),
+            },
+            { label: t('discover.row.lyrics'), icon: 'draft', run: () => onLyrics(track) },
             ...(track.album_id
-              ? [{ label: '查看所属专辑', icon: 'album' as const, run: () => onOpenAlbum(track) }]
+              ? [
+                  {
+                    label: t('discover.row.album'),
+                    icon: 'album' as const,
+                    run: () => onOpenAlbum(track),
+                  },
+                ]
               : []),
             {
-              label: favorites.ids.has(track.id) ? '取消收藏' : '收藏',
+              label: favorites.ids.has(track.id)
+                ? t('discover.row.unfavorite')
+                : t('discover.row.favorite'),
               icon: 'heart',
               disabled: !favorites.ready || favorites.busy.has(track.id),
               run: () => void favorites.toggle(track),
@@ -105,12 +181,12 @@ function Choices({
             ...(feedback
               ? [
                   {
-                    label: '不感兴趣',
+                    label: t('discover.row.dismiss'),
                     icon: 'remove' as const,
                     run: () => feedback(track.id, 'dismiss_track'),
                   },
                   {
-                    label: '少推荐此艺人',
+                    label: t('discover.row.lessArtist'),
                     icon: 'artist' as const,
                     run: () => feedback(track.id, 'less_artist'),
                   },
@@ -123,7 +199,7 @@ function Choices({
               {onSelect ? (
                 <input
                   type="checkbox"
-                  aria-label={`选择 ${track.title}`}
+                  aria-label={t('discover.row.select', { title: track.title })}
                   checked={selected?.has(track.id) ?? false}
                   onChange={() => onSelect(track.id)}
                 />
@@ -149,7 +225,7 @@ function Choices({
               );
               feedback?.(track.id, 'accept');
             }}
-            aria-label={`播放 ${track.title}`}
+            aria-label={t('discover.row.play', { title: track.title })}
           >
             <strong>
               {!feedback && player.current?.id === track.id && (
@@ -157,15 +233,17 @@ function Choices({
               )}
               {track.title}
             </strong>
-            <small>
+            <small title={feedback ? explanation(t, reason) : undefined}>
               {artist(track)}
-              {feedback && track.album ? ` · ${track.album}` : ''}
+              {feedback && (dailySource(source_ids, t) || track.album)
+                ? ` · ${dailySource(source_ids, t) || track.album}`
+                : ''}
             </small>
-            {!feedback && <small>{explanation(reason)}</small>}
+            {!feedback && <small>{explanation(t, reason)}</small>}
             {!feedback && !!source_ids?.length && (
               <span className="recommendation-source-pills">
                 {source_ids.slice(0, 3).map((id) => (
-                  <span key={id}>{recommendationSources[id] || id}</span>
+                  <span key={id}>{recommendationSourceName(t, id)}</span>
                 ))}
               </span>
             )}
@@ -174,7 +252,7 @@ function Choices({
           {onChange && (
             <div className="candidate-actions">
               <button
-                aria-label={`候选上移 ${track.title}`}
+                aria-label={t('discover.row.moveUp', { title: track.title })}
                 disabled={index === 0}
                 onClick={() => {
                   const next = [...items];
@@ -185,7 +263,7 @@ function Choices({
                 ↑
               </button>
               <button
-                aria-label={`候选下移 ${track.title}`}
+                aria-label={t('discover.row.moveDown', { title: track.title })}
                 disabled={index === items.length - 1}
                 onClick={() => {
                   const next = [...items];
@@ -196,7 +274,7 @@ function Choices({
                 ↓
               </button>
               <button
-                aria-label={`移除候选 ${track.title}`}
+                aria-label={t('discover.row.remove', { title: track.title })}
                 onClick={() => onChange(items.filter((i) => i.track.id !== track.id))}
               >
                 ×
@@ -225,6 +303,7 @@ export function Discover({
   playlists: Playlist[];
   onOpenAlbum: (track: Track) => void;
 }) {
+  const { t, i18n } = useTranslation();
   const connections = useModelConnections();
   const [section, setSection] = useState('daily');
   const [selecting, setSelecting] = useState(false);
@@ -256,10 +335,14 @@ export function Discover({
   }
   function queueSelection(next = false) {
     if (player.addToQueue(chosen, next)) {
-      setMessage(`已将 ${chosen.length} 首${next ? '安排为接下来播放' : '加入播放队列'}。`);
+      setMessage(
+        next
+          ? t('discover.daily.queuedNext', { count: chosen.length })
+          : t('discover.daily.queued', { count: chosen.length }),
+      );
       setSelected(new Set());
       setSelecting(false);
-    } else setError('播放队列已满，请先移除一些歌曲。');
+    } else setError(t('discover.daily.queueFull'));
   }
   const choiceActions = {
     onPlaylist: setPlaylistTracks,
@@ -285,7 +368,7 @@ export function Discover({
       pendingLists.current.delete(key);
       return updated;
     } catch {
-      throw new Error('歌单已建立，曲目保存结果尚未确认；请查看歌单，或再次尝试。');
+      throw new Error(t('discover.messages.savePlaylistError'));
     }
   }
 
@@ -306,20 +389,20 @@ export function Discover({
       })
       .catch((reason) => {
         if (!controller.signal.aborted)
-          setError(reason instanceof Error ? reason.message : '推荐暂时无法读取，联网后可重试。');
+          setError(reason instanceof Error ? reason.message : t('discover.messages.loadError'));
       });
     return () => controller.abort();
   }, [refresh]);
-  async function action(label: string, fn: () => Promise<void>) {
+  async function action(labelKey: string, fn: () => Promise<void>) {
     if (pending.current) return;
     pending.current = true;
-    setBusy(label);
+    setBusy(labelKey);
     setError('');
     setMessage('');
     try {
       await fn();
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '未完成，请重试。');
+      setError(reason instanceof Error ? reason.message : t('discover.messages.actionError'));
     } finally {
       pending.current = false;
       setBusy('');
@@ -340,7 +423,11 @@ export function Discover({
       body: JSON.stringify({ event_id: eventId(), track_id: id, action }),
     })
       .then(() =>
-        setMessage(action === 'accept' ? '已记录，继续听喜欢的声音。' : '已记录你的偏好。'),
+        setMessage(
+          action === 'accept'
+            ? t('discover.messages.feedbackAccepted')
+            : t('discover.messages.feedbackSaved'),
+        ),
       )
       .catch(() => {
         setDaily((current) => {
@@ -357,13 +444,13 @@ export function Discover({
           items.splice(Math.min(previous.items.indexOf(item), items.length), 0, item);
           return { ...current, items };
         });
-        setError('偏好未保存，已恢复，可重试。');
+        setError(t('discover.messages.feedbackFailed'));
       })
       .finally(() => feedbackPending.current.delete(id));
   }
   function discover(event: FormEvent) {
     event.preventDefault();
-    void action('正在找歌…', async () => {
+    void action('discover.ai.busy', async () => {
       let result: Discovery;
       if (!Array.isArray(preferences?.sources)) {
         const page = await api<{ items: Track[] }>(
@@ -398,10 +485,11 @@ export function Discover({
     }
   }
   return (
-    <section className="completion-page music-discovery" aria-label="音乐发现">
-      <p className="eyebrow">MADE FOR YOUR EARS</p>
-      <h1>今天，听点什么。</h1>
-      <p className="muted">熟悉的旋律，再听一遍；还没遇见的，留一份收歌线索。</p>
+    <section className="completion-page music-discovery" aria-label={t('discover.aria')}>
+      <header className="discovery-hero">
+        <h1>{t('discover.title')}</h1>
+        <p className="muted">{t('discover.subtitle')}</p>
+      </header>
       {connections.error && (
         <p className="error" role="alert">
           {connections.error}
@@ -409,24 +497,24 @@ export function Discover({
       )}
       {error && (
         <p className="error" role="alert">
-          {error} <button onClick={() => setRefresh((v) => v + 1)}>重新读取</button>
+          {error} <button onClick={() => setRefresh((v) => v + 1)}>{t('discover.reload')}</button>
         </p>
       )}
-      {(busy || message) && <p role="status">{busy || message}</p>}
+      {(busy || message) && <p role="status">{busy ? t(busy) : message}</p>}
       <details className="ai-discover">
         <summary>
-          <span className="eyebrow">ASK YOUR COLLECTION</span>
-          <span className="discovery-prompt-title">说说你想听的。</span>
+          <Icon name="assistant" />
+          <span className="discovery-prompt-title">{t('discover.ai.title')}</span>
           <span className="muted">
-            找歌，或生成一张歌单 <span aria-hidden="true">↗</span>
+            {t('discover.ai.hint')} <span aria-hidden="true">↗</span>
           </span>
         </summary>
         <form onSubmit={discover}>
           <label>
-            找歌或生成歌单
+            {t('discover.ai.formLabel')}
             <textarea
-              aria-label="找歌或生成歌单"
-              placeholder="来几首节奏舒缓的歌，或按心情/流派组成半小时歌单…"
+              aria-label={t('discover.ai.formLabel')}
+              placeholder={t('discover.ai.placeholder')}
               value={prompt}
               maxLength={2000}
               required
@@ -445,27 +533,27 @@ export function Discover({
                   ...(id === 'local' ? { external_use_ai: false } : {}),
                 })
               }
-              label="这次找歌使用的连接"
+              label={t('discover.ai.connection')}
               disabled={!!busy || connections.loading || !Array.isArray(preferences?.sources)}
               onManage={onConnections}
             />
           )}
-          <p className="muted">
-            点击后从真实本库候选中选歌。模型不可用时会说明降级，不切换其他付费连接；库外线索在“发现新音乐”单独展示。
-          </p>
+          <p className="muted">{t('discover.ai.note')}</p>
           <button className="primary" disabled={!!busy || !prompt.trim()}>
-            {busy === '正在找歌…' ? busy : '生成候选'}
+            {busy === 'discover.ai.busy' ? t(busy) : t('discover.ai.generate')}
           </button>
         </form>
         {discovery && (
-          <div aria-label="歌单候选预览">
-            <h3>{discovery.title}</h3>
+          <div aria-label={t('discover.ai.previewAria')}>
+            <h3>{discoveryTitle(discovery.title, t)}</h3>
             <p role="status">
-              {discovery.mode === 'local' ? '当前使用本地检索回退。' : 'AI 已从本地曲库选择候选。'}{' '}
+              {discovery.mode === 'local'
+                ? t('discover.ai.localFallback')
+                : t('discover.ai.aiPicked')}{' '}
               {discovery.warning === 'no_local_matches'
-                ? '没有匹配的本地曲目。'
+                ? t('discover.ai.noMatches')
                 : discovery.warning === 'ai_unavailable_local_fallback'
-                  ? '模型暂不可用，基础找歌仍可使用。'
+                  ? t('discover.ai.aiUnavailable')
                   : ''}
             </p>
             <RecommendationSources
@@ -481,13 +569,13 @@ export function Discover({
               onChange={(items) => setDiscovery((current) => current && { ...current, items })}
             />
             {!discovery.items.length ? (
-              <p>没有匹配的曲目，换一种说法试试。</p>
+              <p>{t('discover.ai.empty')}</p>
             ) : (
               <>
                 <label>
-                  歌单名称
+                  {t('discover.ai.name')}
                   <input
-                    aria-label="候选歌单名称"
+                    aria-label={t('discover.ai.nameAria')}
                     value={name}
                     maxLength={100}
                     onChange={(e) => setName(e.target.value)}
@@ -502,23 +590,23 @@ export function Discover({
                       )
                     }
                   >
-                    试听候选
+                    {t('discover.ai.preview')}
                   </button>
                   <button
                     disabled={!!busy || !name.trim()}
                     onClick={() =>
-                      void action('正在保存歌单…', async () => {
+                      void action('discover.ai.saving', async () => {
                         const list = await saveList(
                           name,
                           discovery.items.map((i) => i.track.id),
                         );
                         setDiscovery(null);
                         onSaved(list);
-                        setMessage('已保存，可以在歌单中继续整理。');
+                        setMessage(t('discover.ai.saved'));
                       })
                     }
                   >
-                    确认保存歌单
+                    {t('discover.ai.save')}
                   </button>
                 </div>
               </>
@@ -526,29 +614,33 @@ export function Discover({
           </div>
         )}
       </details>
-      <div className="discovery-sections workspace-tabs" role="group" aria-label="发现分类">
+      <div
+        className="discovery-sections workspace-tabs"
+        role="group"
+        aria-label={t('discover.tabs.aria')}
+      >
         <button aria-pressed={section === 'daily'} onClick={() => setSection('daily')}>
-          每日推荐
+          {t('discover.tabs.daily')}
         </button>
         <button aria-pressed={section === 'rankings'} onClick={() => setSection('rankings')}>
-          收听排行
+          {t('discover.tabs.rankings')}
         </button>
         <button aria-pressed={section === 'external'} onClick={() => setSection('external')}>
-          发现新音乐
+          {t('discover.tabs.external')}
         </button>
       </div>
       <div hidden={section !== 'daily'}>
-        <div className="discovery-heading">
-          <div>
-            <h2>每日推荐</h2>
+        <div className="daily-hero">
+          <DailyMosaic tracks={daily?.items.slice(0, 4).map((item) => item.track) ?? []} />
+          <div className="daily-hero-copy">
+            <h2>{dailyDate(daily?.date, i18n.language) || t('discover.daily.fallbackTitle')}</h2>
             <p className="muted">
-              {daily
-                ? `${daily.date} · ${daily.items.length} 首 · ${daily.engine.includes('ai') ? 'AI 编排' : '本地推荐'}${daily.engine.includes('lastfm') ? ' · Last.fm 增强' : ''}`
-                : '正在准备推荐…'}
+              {daily ? dailySummary(daily, t) : t('discover.daily.preparing')}
             </p>
           </div>
-          <div className="toolbar-actions">
+          <div className="toolbar-actions daily-hero-actions">
             <button
+              className="primary"
               disabled={!daily?.items.length}
               onClick={() =>
                 daily &&
@@ -558,12 +650,16 @@ export function Discover({
                 )
               }
             >
-              播放推荐
+              <Icon name="play" />
+              {t('discover.daily.play')}
             </button>
             <button
+              className="daily-icon-action"
+              aria-label={t('discover.daily.refresh')}
+              title={t('discover.daily.refresh')}
               disabled={!!busy}
               onClick={() =>
-                void action('正在换一批…', async () => {
+                void action('discover.daily.refreshBusy', async () => {
                   setSelected(new Set());
                   setSelecting(false);
                   if (!Array.isArray(preferences?.sources)) {
@@ -574,7 +670,10 @@ export function Discover({
                       id: 'legacy-local',
                       date: new Date().toLocaleDateString(),
                       engine: 'local',
-                      items: page.items.map((track) => ({ track, reason: '本地曲库候选' })),
+                      items: page.items.map((track) => ({
+                        track,
+                        reason: '本地曲库候选',
+                      })),
                     });
                     return;
                   }
@@ -594,68 +693,45 @@ export function Discover({
                 })
               }
             >
-              换一批
+              <Icon name="refresh" />
             </button>
             <button
+              className="daily-icon-action"
+              aria-label={t('discover.daily.save')}
+              title={t('discover.daily.save')}
               disabled={!!busy || !daily?.items.length}
               onClick={() =>
-                void action('正在保存歌单…', async () => {
+                void action('discover.daily.saveBusy', async () => {
                   const list = await saveList(
-                    `每日推荐 ${daily!.date}`,
+                    t('discover.daily.playlistName', { date: daily!.date }),
                     daily!.items.map((i) => i.track.id),
                   );
                   onSaved(list);
-                  setMessage('每日推荐已保存为歌单。');
+                  setMessage(t('discover.daily.saved'));
                 })
               }
             >
-              保存推荐歌单
+              <Icon name="playlist" />
             </button>
-          </div>
-        </div>
-        <div className="daily-selection" role="group" aria-label="挑选推荐歌曲">
-          <div>
-            <strong>{selecting ? `已选 ${chosen.length} 首` : '把今天想听的，放在一起'}</strong>
-            <p className="muted">可逐首加入队列，也可以多选后存入自己的歌单。</p>
-          </div>
-          <div className="toolbar-actions">
-            {selecting && (
-              <>
-                <button
-                  onClick={() =>
-                    setSelected(
-                      new Set(
-                        chosen.length === daily?.items.length
-                          ? []
-                          : daily?.items.map(({ track }) => track.id),
-                      ),
-                    )
-                  }
-                >
-                  {chosen.length === daily?.items.length ? '取消全选' : '全选'}
-                </button>
-                <button disabled={!chosen.length} onClick={() => queueSelection(true)}>
-                  下一首播放所选
-                </button>
-                <button disabled={!chosen.length} onClick={() => queueSelection()}>
-                  加入播放队列
-                </button>
-                <button disabled={!chosen.length} onClick={() => setPlaylistTracks(chosen)}>
-                  加入歌单…
-                </button>
-              </>
-            )}
             <button
-              disabled={!daily?.items.length && !selecting}
+              className="daily-icon-action"
+              aria-label={t('discover.daily.select')}
+              title={t('discover.daily.select')}
               aria-pressed={selecting}
+              disabled={!daily?.items.length && !selecting}
               onClick={() => {
                 setSelecting(!selecting);
                 setSelected(new Set());
               }}
             >
-              {selecting ? '完成挑选' : '挑选歌曲'}
+              <Icon name="select" />
             </button>
           </div>
+          <RecommendationSources
+            items={daily?.source_status}
+            warnings={daily?.warnings}
+            degraded={daily?.degraded}
+          />
         </div>
         {daily && (
           <Choices
@@ -668,11 +744,46 @@ export function Discover({
             onSelect={selecting ? selectTrack : undefined}
           />
         )}
-        <RecommendationSources
-          items={daily?.source_status}
-          warnings={daily?.warnings}
-          degraded={daily?.degraded}
-        />
+        {selecting && (
+          <div className="daily-selection" role="group" aria-label={t('discover.daily.selectAria')}>
+            <strong>{t('discover.daily.selected', { count: chosen.length })}</strong>
+            <div className="toolbar-actions">
+              <button
+                onClick={() =>
+                  setSelected(
+                    new Set(
+                      chosen.length === daily?.items.length
+                        ? []
+                        : daily?.items.map(({ track }) => track.id),
+                    ),
+                  )
+                }
+              >
+                {chosen.length === daily?.items.length
+                  ? t('discover.daily.clearAll')
+                  : t('discover.daily.selectAll')}
+              </button>
+              <button disabled={!chosen.length} onClick={() => queueSelection(true)}>
+                {t('discover.daily.playNextSelected')}
+              </button>
+              <button disabled={!chosen.length} onClick={() => queueSelection()}>
+                {t('discover.daily.addQueue')}
+              </button>
+              <button disabled={!chosen.length} onClick={() => setPlaylistTracks(chosen)}>
+                {t('discover.daily.addPlaylist')}
+              </button>
+              <button
+                className="text-button"
+                onClick={() => {
+                  setSelecting(false);
+                  setSelected(new Set());
+                }}
+              >
+                {t('discover.daily.done')}
+              </button>
+            </div>
+          </div>
+        )}
       </div>
       {playlistTracks && (
         <RecommendationPlaylistDialog
@@ -681,7 +792,7 @@ export function Discover({
           onClose={() => setPlaylistTracks(null)}
           onSaved={(list) => {
             onSaved(list);
-            setMessage(`已加入「${list.name}」`);
+            setMessage(t('discover.daily.playlistSaved', { name: list.name }));
             setSelected(new Set());
             setSelecting(false);
           }}
@@ -704,7 +815,7 @@ export function Discover({
           connectionsBusy={connections.loading || connections.unsupported}
           onConnections={onConnections}
           onSave={() =>
-            void action('正在保存偏好…', async () => {
+            void action('discover.messages.savingPreferences', async () => {
               const body = Array.isArray(draftPreferences.sources)
                 ? {
                     ...draftPreferences,
@@ -722,7 +833,7 @@ export function Discover({
               });
               setPreferences(settings);
               setDraftPreferences(settings);
-              setMessage('偏好已保存。点击“换一批”或“获取收歌建议”生成新结果。');
+              setMessage(t('discover.messages.preferenceSaved'));
             })
           }
         />

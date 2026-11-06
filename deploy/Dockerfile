@@ -45,4 +45,5 @@ USER 10001:10001
 EXPOSE 8000
 HEALTHCHECK --interval=10s --timeout=6s --start-period=10s --retries=3 \
     CMD ["python", "-m", "wildstring.healthcheck", "--url", "http://127.0.0.1:8000/health/ready"]
-CMD ["uvicorn", "wildstring.main:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000"]
+# 长保持连接 75 秒：客户端心跳与首次播放复用温热连接，避免频繁重新握手
+CMD ["uvicorn", "wildstring.main:create_app", "--factory", "--no-proxy-headers", "--host", "0.0.0.0", "--port", "8000", "--timeout-keep-alive", "75"]

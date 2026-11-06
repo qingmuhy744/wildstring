@@ -180,43 +180,81 @@ struct MacDevicesView: View {
     let playback: PlaybackService
 
     var body: some View {
-        Form {
-            if let sync {
-                Section("账号共享进度") {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                if let sync {
                     if let snapshot = sync.snapshot, !snapshot.trackIds.isEmpty {
-                        LabeledContent("队列", value: "\(snapshot.trackIds.count) 首")
-                        LabeledContent("位置", value: "第 \(snapshot.index + 1) 首 · \(clock(Double(snapshot.positionMs) / 1000))")
-                        LabeledContent("方式", value: modeName(snapshot.mode))
+                        VStack(spacing: 0) {
+                            infoRow("队列", "\(snapshot.trackIds.count) 首")
+                            infoRow(
+                                "位置",
+                                "第 \(snapshot.index + 1) 首 · \(clock(Double(snapshot.positionMs) / 1000))"
+                            )
+                            infoRow("方式", modeName(snapshot.mode))
+                        }
+                        .background(
+                            MacTheme.panel,
+                            in: RoundedRectangle(cornerRadius: MacTheme.panelRadius, style: .continuous)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: MacTheme.panelRadius, style: .continuous)
+                                .strokeBorder(MacTheme.border, lineWidth: 1)
+                        )
                     } else {
                         Text("还没有共享的播放进度")
-                            .foregroundStyle(.secondary)
+                            .font(MacTheme.caption)
+                            .foregroundStyle(MacTheme.muted)
+                    }
+                    HStack(spacing: 10) {
+                        Button(sync.busy ? "处理中…" : "读取最新进度") {
+                            Task { await sync.refresh() }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(MacTheme.accentDeep)
+                        .disabled(sync.busy)
+                        Button("共享当前播放进度") {
+                            Task { await sync.shareCurrent() }
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(sync.busy || playback.currentItem == nil)
+                        Button("载入并暂停在这里") {
+                            Task { await sync.loadRemote() }
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(sync.busy || (sync.snapshot?.trackIds.isEmpty ?? true))
                     }
                     if let message = sync.message {
-                        Text(message).font(.callout)
+                        Text(message)
+                            .font(MacTheme.caption)
+                            .foregroundStyle(MacTheme.accentDeep)
                     }
-                    Button(sync.busy ? "处理中…" : "读取最新进度") {
-                        Task { await sync.refresh() }
-                    }
-                    .disabled(sync.busy)
-                    Button("共享当前播放进度") {
-                        Task { await sync.shareCurrent() }
-                    }
-                    .disabled(sync.busy || playback.currentItem == nil)
-                    Button("载入并暂停在这里") {
-                        Task { await sync.loadRemote() }
-                    }
-                    .disabled(sync.busy || (sync.snapshot?.trackIds.isEmpty ?? true))
-                }
-                Section {
                     Text("暂停时会记下进度。其他设备最近一次暂停会出现在窗口顶部，载入后先不播放。")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
+                        .font(MacTheme.caption)
+                        .foregroundStyle(MacTheme.muted)
                 }
             }
+            .padding(24)
+            .frame(maxWidth: 640, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .top)
         }
-        .formStyle(.grouped)
+        .background(MacTheme.canvas)
         .navigationTitle("跨设备继续")
-        .padding()
+    }
+
+    private func infoRow(_ label: String, _ value: String) -> some View {
+        HStack {
+            Text(label).font(MacTheme.caption).foregroundStyle(MacTheme.muted)
+            Spacer()
+            Text(value).font(.system(size: 13)).foregroundStyle(MacTheme.ink)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 11)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(MacTheme.border.opacity(0.55))
+                .frame(height: 1)
+                .padding(.horizontal, 16)
+        }
     }
 
     private func modeName(_ mode: String) -> String {

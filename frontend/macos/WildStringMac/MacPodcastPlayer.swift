@@ -207,22 +207,54 @@ struct MacPlaybackRateMenu: View {
     @AppStorage("podcastPlaybackRate") private var savedRate = 1.0
     var body: some View {
         Menu {
-            ForEach([0.75, 1.0, 1.25, 1.5, 1.75, 2.0], id: \.self) { rate in
-                Button("\(rate.formatted())×") {
+            ForEach([0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0], id: \.self) { rate in
+                Button {
                     savedRate = rate
                     playback.setPodcastPlaybackRate(Float(rate))
+                } label: {
+                    if Float(rate) == playback.podcastPlaybackRate {
+                        Label("\(rate.formatted())×", systemImage: "checkmark")
+                    } else {
+                        Text("\(rate.formatted())×")
+                    }
                 }
             }
         } label: {
-            Text("\(playback.podcastPlaybackRate.formatted())×").font(.callout.monospacedDigit())
-        }.menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
-            .help("播放速度").accessibilityLabel("播放速度")
+            HStack(spacing: 4) {
+                Text("倍速 \(playback.podcastPlaybackRate.formatted())×")
+                Image(systemName: "chevron.down").font(.system(size: 8, weight: .semibold))
+            }
+                .font(.system(size: 11, weight: .semibold, design: .rounded).monospacedDigit())
+                .foregroundStyle(MacTheme.accentDeep)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 4)
+                .background(
+                    Capsule()
+                        .fill(MacTheme.accent.opacity(0.10))
+                )
+                .overlay(
+                    Capsule()
+                        .strokeBorder(MacTheme.accent.opacity(0.55), lineWidth: 1)
+                )
+        }
+        .buttonStyle(.plain)
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("播放速度")
+        .accessibilityLabel("播放速度")
     }
 }
 
 struct MacSleepMenu: View {
     let playback: PlaybackService
     var podcast = false
+    var iconOnly = false
+
+    private var isActive: Bool {
+        playback.sleepTimerEnd != nil || playback.pauseAfterCurrentTrack
+    }
+
     var body: some View {
         Menu {
             ForEach([15, 30, 60], id: \.self) { minutes in
@@ -231,14 +263,28 @@ struct MacSleepMenu: View {
             Button(podcast ? "本集播完后暂停" : "这首播完后暂停") { playback.sleepAfterCurrentTrack() }
             Button("取消定时") { playback.cancelSleepTimer() }
         } label: {
-            Label {
-                if let end = playback.sleepTimerEnd {
-                    Text("\(end, style: .time) 暂停")
-                } else {
-                    Text(playback.pauseAfterCurrentTrack ? (podcast ? "本集结束后暂停" : "本曲结束后暂停") : "定时暂停")
+            if iconOnly {
+                Image(systemName: isActive ? "moon.fill" : "moon.zzz")
+                    .font(.system(size: 15))
+                    .foregroundStyle(isActive ? MacTheme.accentDeep : MacTheme.muted)
+                    .frame(width: 28, height: 30)
+            } else {
+                Label {
+                    if let end = playback.sleepTimerEnd {
+                        Text("\(end, style: .time) 暂停")
+                    } else {
+                        Text(playback.pauseAfterCurrentTrack ? (podcast ? "本集结束后暂停" : "本曲结束后暂停") : "定时暂停")
+                    }
+                } icon: {
+                    Image(systemName: isActive ? "moon.fill" : "moon")
                 }
-            } icon: { Image(systemName: "moon") }
-        }.menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+            }
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("睡眠定时")
+        .accessibilityLabel("睡眠定时")
     }
 }
 

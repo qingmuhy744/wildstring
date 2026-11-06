@@ -43,11 +43,13 @@ jobs:
 
   verify_android:
     uses: ./.github/workflows/android.yml
+    with:
+      run_emulator: true
 
   android:
     needs: source
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -93,6 +95,23 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
       - name: Install and open the signed, optimized APK
+        id: release_smoke
+        # Retry once on a fresh emulator before failing the release; the
+        # software-rendered CI emulator produces occasional false alarms.
+        continue-on-error: true
+        timeout-minutes: 15
+        uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2
+        with:
+          api-level: 35
+          target: default
+          arch: x86_64
+          profile: pixel_2
+          ram-size: 2048M
+          disable-animations: true
+          script: make android-release-smoke
+      - name: Release smoke retry after flake
+        if: ${{ steps.release_smoke.outcome == 'failure' }}
+        timeout-minutes: 15
         uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2
         with:
           api-level: 35

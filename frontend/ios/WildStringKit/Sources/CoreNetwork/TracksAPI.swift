@@ -10,9 +10,19 @@ public struct Track: Decodable, Equatable, Sendable, Identifiable {
     public let albumId: String?
     public let trackNumber: Int?
     public let discNumber: Int?
+    public let status: String?
+
+    public var unavailableReason: String? {
+        switch status {
+        case "missing": return "文件缺失"
+        case "unreadable": return "文件无法读取"
+        default: return nil
+        }
+    }
+    public var isAvailable: Bool { unavailableReason == nil }
 
     enum CodingKeys: String, CodingKey {
-        case id, title, artists, album
+        case id, title, artists, album, status
         case durationMs = "duration_ms"
         case hasCover = "has_cover"
         case albumId = "album_id"
@@ -45,7 +55,10 @@ extension WildstringClient {
     public func browseIndex(kind: String = "tracks", query: String? = nil) async throws
         -> BrowseIndex
     {
-        var queryItems = [URLQueryItem(name: "kind", value: kind)]
+        var queryItems = [
+            URLQueryItem(name: "include_unavailable", value: "true"),
+            URLQueryItem(name: "kind", value: kind),
+        ]
         if let query, !query.isEmpty {
             queryItems.append(URLQueryItem(name: "q", value: query))
         }
@@ -67,6 +80,7 @@ extension WildstringClient {
         playedOnly: Bool = false
     ) async throws -> Page<Track> {
         var queryItems = [
+            URLQueryItem(name: "include_unavailable", value: "true"),
             URLQueryItem(name: "limit", value: String(limit)),
             URLQueryItem(name: "offset", value: String(offset)),
             URLQueryItem(name: "sort", value: sort.rawValue),

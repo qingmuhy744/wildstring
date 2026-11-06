@@ -42,6 +42,18 @@ const paths = {
       <path d="m12 3 2.6 6.4L21 12l-6.4 2.6L12 21l-2.6-6.4L3 12l6.4-2.6Z" />
     </>
   ),
+  compass: (
+    <>
+      <circle cx="12" cy="12" r="9" />
+      <path d="m15.5 8.5-2 5-5 2 2-5Z" />
+    </>
+  ),
+  select: (
+    <>
+      <rect x="4" y="4" width="16" height="16" rx="4" />
+      <path d="m8.5 12 2.5 2.5 4.5-5" />
+    </>
+  ),
   draft: (
     <>
       <path d="M14 3H5v18h14V8Zm0 0v5h5M8 12h8M8 16h6" />

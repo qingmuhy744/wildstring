@@ -16,32 +16,11 @@ struct MacAssistantView: View {
     var body: some View {
         VStack(spacing: 0) {
             conversationHeader
-            Divider()
             messages
             composer
         }
+        .background(MacTheme.canvas)
         .navigationTitle("音乐助手")
-        .toolbar {
-            Button {
-                showHistory.toggle()
-            } label: {
-                Label("历史对话", systemImage: "clock.arrow.circlepath")
-            }
-            .popover(isPresented: $showHistory, arrowEdge: .bottom) { history }
-            Button {
-                model.newConversation()
-                inputFocused = true
-            } label: {
-                Label("新对话", systemImage: "square.and.pencil")
-            }
-            .disabled(model.busy)
-            Button {
-                Task { await model.refresh() }
-            } label: {
-                Label("刷新", systemImage: "arrow.clockwise")
-            }
-            .disabled(model.isLoading || model.isSending)
-        }
         .task { await model.prepare() }
         .task(id: model.pollingID) { await model.poll() }
         .sheet(
@@ -94,32 +73,65 @@ struct MacAssistantView: View {
     }
 
     private var conversationHeader: some View {
-        HStack(alignment: .center, spacing: 16) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(model.detail?.title ?? "从想听的音乐开始")
-                    .font(.title3.weight(.semibold))
-                    .lineLimit(2)
-                Text(model.connectionID == "local" ? "本地检索 · 使用歌名或艺人关键词" : "模型助手 · 找歌、整理与生成歌单草案")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            Spacer(minLength: 12)
-            Picker("检索方式", selection: $model.connectionID) {
-                Text("本地检索 · 不使用模型").tag("local")
-                ForEach(model.connections.filter { $0.enabled || $0.id == model.connectionID }) {
-                    connection in
-                    Text("\(connection.name) · \(connection.model)")
-                        .tag(connection.id).disabled(!connection.enabled)
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 12) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 18))
+                    .foregroundStyle(MacTheme.accentDeep)
+                    .frame(width: 38, height: 38)
+                    .background(MacTheme.accentSoft, in: RoundedRectangle(cornerRadius: 12))
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(model.detail?.title ?? "音乐助手")
+                        .font(MacTheme.section(16)).foregroundStyle(MacTheme.ink).lineLimit(2)
+                    Text("从你的曲库，找到想听的声音")
+                        .font(MacTheme.caption).foregroundStyle(MacTheme.muted)
                 }
-                if model.connectionID != "local", model.selectedConnection == nil {
-                    Text("之前的模型连接不可用").tag(model.connectionID)
+                Spacer(minLength: 8)
+                HStack(spacing: 6) {
+                    Button { showHistory.toggle() } label: {
+                        Label("历史对话", systemImage: "clock.arrow.circlepath").frame(width: 30, height: 30)
+                    }
+                    .help("历史对话")
+                    .popover(isPresented: $showHistory, arrowEdge: .bottom) { history }
+                    Button {
+                        model.newConversation()
+                        inputFocused = true
+                    } label: {
+                        Label("新对话", systemImage: "square.and.pencil").frame(width: 30, height: 30)
+                    }
+                    .disabled(model.busy).help("新对话")
+                    Button { Task { await model.refresh() } } label: {
+                        Label("刷新", systemImage: "arrow.clockwise").frame(width: 30, height: 30)
+                    }
+                    .disabled(model.isLoading || model.isSending).help("刷新")
                 }
+                .labelStyle(.iconOnly)
+                .buttonStyle(.plain)
+                .foregroundStyle(MacTheme.muted)
             }
-            .labelsHidden()
-            .frame(maxWidth: 300)
-            .disabled(model.busy)
+            HStack(spacing: 10) {
+                Text("检索方式").font(MacTheme.micro).foregroundStyle(MacTheme.muted)
+                Picker("检索方式", selection: $model.connectionID) {
+                    Text("本地检索 · 不使用模型").tag("local")
+                    ForEach(model.connections.filter { $0.enabled || $0.id == model.connectionID }) {
+                        connection in
+                        Text("\(connection.name) · \(connection.model)")
+                            .tag(connection.id).disabled(!connection.enabled)
+                    }
+                    if model.connectionID != "local", model.selectedConnection == nil {
+                        Text("之前的模型连接不可用").tag(model.connectionID)
+                    }
+                }
+                .labelsHidden().controlSize(.small)
+                .frame(maxWidth: 320).disabled(model.busy)
+                Spacer(minLength: 0)
+            }
         }
+        .macPanel(padding: 18, radius: 18)
+        .frame(maxWidth: 876)
         .padding(.horizontal, 24)
-        .padding(.vertical, 16)
+        .padding(.top, 18)
+        .frame(maxWidth: .infinity)
     }
 
     private var messages: some View {
@@ -182,14 +194,19 @@ struct MacAssistantView: View {
     private var welcome: some View {
         VStack(alignment: .leading, spacing: 18) {
             Image(systemName: "sparkles")
-                .font(.system(size: 32)).foregroundStyle(MacTheme.accentDeep)
-            Text("今天想听什么？").font(.largeTitle.bold())
+                .font(.system(size: 22, weight: .medium))
+                .foregroundStyle(MacTheme.accentDeep)
+                .frame(width: 44, height: 44)
+                .background(MacTheme.accentSoft, in: Circle())
+            Text("今天想听什么？")
+                .font(MacTheme.display(32))
+                .foregroundStyle(MacTheme.ink)
             Text(
                 model.connectionID == "local"
                     ? "输入歌名、艺人或专辑，直接检索当前曲库。选择上方的模型连接后，可以用自然语言描述心情、场景或歌单要求。"
                     : "描述你的想法，助手会查找真实曲目并说明依据。生成的歌单可先试听，再确认保存。"
             )
-            .font(.callout).foregroundStyle(.secondary).lineSpacing(5)
+            .font(MacTheme.caption).foregroundStyle(MacTheme.muted).lineSpacing(5)
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: 10) { suggestions }
                 VStack(alignment: .leading, spacing: 10) { suggestions }
@@ -240,7 +257,7 @@ struct MacAssistantView: View {
             .padding(message.isUser ? 16 : 0)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
-                message.isUser ? MacTheme.accent.opacity(0.12) : .clear,
+                message.isUser ? MacTheme.accentSoft : .clear,
                 in: RoundedRectangle(cornerRadius: 14))
             if !message.isUser { Spacer(minLength: 30) }
         }
@@ -257,7 +274,7 @@ struct MacAssistantView: View {
                         model.isSending || model.isLoading)
                 }
             }
-            HStack(alignment: .bottom, spacing: 12) {
+            VStack(alignment: .leading, spacing: 14) {
                 TextField(
                     model.connectionID == "local" ? "输入歌名、艺人或专辑" : "描述想听的音乐，或让助手生成歌单", text: $model.input,
                     axis: .vertical
@@ -266,19 +283,30 @@ struct MacAssistantView: View {
                 .lineLimit(2...5)
                 .focused($inputFocused)
                 .disabled(model.isSending || model.running)
-                .padding(13)
-                .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 12))
-                .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.separator.opacity(0.5)))
-                Button {
-                    Task { await model.send() }
-                } label: {
-                    Label(model.isSending ? "处理中" : "发送", systemImage: "arrow.up")
+                .padding(2)
+                HStack {
+                    Label(model.connectionID == "local" ? "曲库检索" : "模型助手",
+                        systemImage: model.connectionID == "local" ? "magnifyingglass" : "sparkles")
+                        .font(MacTheme.caption).foregroundStyle(MacTheme.muted)
+                    Spacer()
+                    Button {
+                        Task { await model.send() }
+                    } label: {
+                        Label(model.isSending ? "处理中" : "发送", systemImage: "arrow.up")
+                            .labelStyle(.iconOnly)
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(MacTheme.onAccent)
+                            .frame(width: 32, height: 32)
+                            .background(model.canSend ? MacTheme.accent : MacTheme.faint, in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .keyboardShortcut(.return, modifiers: .command)
+                    .disabled(!model.canSend)
+                    .help("发送 · ⌘ Return")
                 }
-                .buttonStyle(.borderedProminent)
-                .keyboardShortcut(.return, modifiers: .command)
-                .disabled(!model.canSend)
-                .padding(.bottom, 4)
             }
+            .macPanel(padding: 16, radius: 18, fill: MacTheme.raised)
+            .shadow(color: .black.opacity(0.03), radius: 10, y: 4)
             HStack {
                 Text(
                     model.connectionID == "local"
@@ -288,13 +316,14 @@ struct MacAssistantView: View {
                 Spacer()
                 Text(model.input.count > 8_000 ? "超过 8,000 字，请缩短内容" : "⌘ Return 发送 · Return 换行")
             }
-            .font(.caption).foregroundStyle(.secondary)
+            .font(MacTheme.micro).foregroundStyle(MacTheme.faint)
+            .padding(.horizontal, 4)
         }
         .frame(maxWidth: 820)
         .padding(.horizontal, 28)
         .padding(.vertical, 16)
         .frame(maxWidth: .infinity)
-        .background(.bar)
+        .background(MacTheme.canvas)
     }
 
     private var history: some View {

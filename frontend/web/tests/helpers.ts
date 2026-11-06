@@ -23,14 +23,15 @@ export async function section(page: Page, name: string) {
     await page.getByRole('button', { name, exact: true }).click();
     return;
   }
-  if (await page.getByLabel('浏览方式', { exact: true }).isVisible()) {
-    await page.getByLabel('浏览方式', { exact: true }).selectOption({ label: name });
+  const mobileSection = page.locator('select.mobile-section');
+  if (await mobileSection.isVisible()) {
+    await mobileSection.selectOption({ label: name });
     return;
   }
   const sidebar = page.locator('.sidebar');
   const target = sidebar.getByRole('button', { name: new RegExp(`^${name}(?: |$)`) });
   if (!(await target.isVisible())) {
-    await sidebar.getByText('助手工具', { exact: true }).click();
+    await sidebar.locator('details.sidebar-group > summary').first().click();
   }
   await target.click();
 }

@@ -103,7 +103,7 @@ class CoverCacheInterceptor(private val cache: ClientCache, private val session:
             if (saved != null && profile != null && session.cacheScope() == profile && error !is javax.net.ssl.SSLException) return cached()
             throw error
         }
-        if (!response.isSuccessful || response.body == null) return response
+        if (!response.isSuccessful) return response
         val bytes = response.peekBody(2 * 1024L * 1024 + 1).bytes()
         if (bytes.size <= 2 * 1024 * 1024) cache.put(request.url.toString(), bytes, profile, cover = true)
         return response

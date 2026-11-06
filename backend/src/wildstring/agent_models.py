@@ -258,6 +258,7 @@ class MessageCreate(Input):
     content: str = Field(min_length=1, max_length=8000)
     connection_id: str | None = Field(default=None, max_length=128)
     max_calls: int = Field(default=4, ge=1, le=20)
+    locale: Literal["zh", "en"] | None = Field(default=None)
 
 
 class AssistantPreferences(Input):

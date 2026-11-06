@@ -301,7 +301,7 @@ struct BrowseView: View {
 
     private func autoPlayIfNeeded() {
         openDemoEditorsIfNeeded()
-        guard autoPlayFirst, !didAutoPlay, let first = songsLoader?.items.first else { return }
+        guard autoPlayFirst, !didAutoPlay, let first = songsLoader?.items.first(where: \.isAvailable) ?? songsLoader?.items.first else { return }
         didAutoPlay = true
         playTracks(songsLoader?.items ?? [], startingAt: first, using: playback)
     }
@@ -398,7 +398,7 @@ struct BrowseView: View {
 
     private func openDemoEditorsIfNeeded() {
         #if DEBUG
-            guard let first = songsLoader?.items.first else { return }
+            guard let first = songsLoader?.items.first(where: \.isAvailable) ?? songsLoader?.items.first else { return }
             let environment = ProcessInfo.processInfo.environment
             if environment["WILDSTRING_DEMO_OPEN_METADATA"] == "1", demoMetadataTrack == nil {
                 demoMetadataTrack = first

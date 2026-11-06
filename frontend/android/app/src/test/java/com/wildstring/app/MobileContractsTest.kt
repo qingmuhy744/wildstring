@@ -8,6 +8,15 @@ import org.junit.Test
 
 class MobileContractsTest {
     private val gson = Gson()
+    @Test fun unavailableMetadataIsPreservedAndLegacyTracksRemainPlayable() {
+        for (status in listOf("missing", "unreadable", "available")) {
+            val track = gson.fromJson("""{"id":"a","title":"歌","artists":[],"duration_ms":5000,"status":"$status"}""", Track::class.java)
+            assertEquals(status == "available", track.isAvailable)
+            assertEquals(status == "available", track.unavailableReason == null)
+        }
+        val legacy = gson.fromJson("""{"id":"a","title":"歌","artists":[],"duration_ms":5000}""", Track::class.java)
+        assertTrue(legacy.isAvailable)
+    }
     @Test fun serverDatesAndListeningStatisticsDeserialize() {
         val track = gson.fromJson("""{"id":"a","title":"歌","artists":["艺人"],"duration_ms":5000,"play_count":7,"listened_ms":12345,"last_played_at":"2026-10-17T12:00:00+00:00"}""", Track::class.java)
         assertEquals(7, track.playCount)

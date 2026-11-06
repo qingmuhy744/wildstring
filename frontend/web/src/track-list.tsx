@@ -1,5 +1,5 @@
 import { Fragment, useLayoutEffect, useRef } from 'react';
-import { listeningTime, time, type TrackPage } from './api';
+import { trackUnavailableReason, listeningTime, time, type TrackPage } from './api';
 import { TrackActions, type TrackOperations } from './track-actions';
 import { Cover } from './cover';
 import type { Player } from './player';
@@ -115,7 +115,7 @@ export function TrackList({
               );
             })()}
           <div
-            className={`track-row ${player.current?.id === track.id ? 'current' : ''}`}
+            className={`track-row ${player.current?.id === track.id ? 'current' : ''} ${trackUnavailableReason(track) ? 'track-unavailable' : ''}`}
             role="row"
             aria-current={player.current?.id === track.id ? 'true' : undefined}
             key={track.id}
@@ -153,6 +153,9 @@ export function TrackList({
                   aria-label={`播放 ${track.title}`}
                 >
                   <strong>{track.title}</strong>
+                  {trackUnavailableReason(track) && (
+                    <span className="track-unavailable-label">{trackUnavailableReason(track)}</span>
+                  )}
                 </button>
                 <small className="track-artist-row">
                   {albumTracks && multiDisc && !groupDiscs && (

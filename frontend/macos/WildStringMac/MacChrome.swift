@@ -1,15 +1,127 @@
+import AppKit
 import CoreNetwork
 import SwiftUI
 
+enum MacAppearance {
+    static let notification = Notification.Name("AppleInterfaceThemeChangedNotification")
+
+    static func isSystemDark() -> Bool {
+        if let style = CFPreferencesCopyValue(
+            "AppleInterfaceStyle" as CFString,
+            kCFPreferencesAnyApplication,
+            kCFPreferencesCurrentUser,
+            kCFPreferencesAnyHost
+        ) as? String {
+            return style.lowercased() == "dark"
+        }
+        return false
+    }
+
+    static func resolvedColorScheme(
+        for setting: String,
+        systemDark: Bool = isSystemDark()
+    ) -> ColorScheme {
+        switch setting {
+        case "light": return .light
+        case "dark": return .dark
+        default: return systemDark ? .dark : .light
+        }
+    }
+
+    static func nsAppearance(
+        for setting: String,
+        systemDark: Bool = isSystemDark()
+    ) -> NSAppearance? {
+        let scheme = resolvedColorScheme(for: setting, systemDark: systemDark)
+        return NSAppearance(named: scheme == .dark ? .darkAqua : .aqua)
+    }
+
+    @MainActor
+    static func apply(_ setting: String, systemDark: Bool = isSystemDark()) {
+        let target = nsAppearance(for: setting, systemDark: systemDark)
+        NSApplication.shared.appearance = target
+        for window in NSApplication.shared.windows {
+            window.appearance = target
+            window.contentView?.appearance = target
+            window.contentView?.needsDisplay = true
+        }
+    }
+}
+
 enum MacTheme {
-    /// Web light accent `#e98a6d`.
-    static let accent = Color(red: 233 / 255, green: 138 / 255, blue: 109 / 255)
-    /// Keep accent text readable in both window appearances.
-    static let accentDeep = Color(nsColor: NSColor(name: nil) { appearance in
-        appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-            ? NSColor(red: 233 / 255, green: 138 / 255, blue: 109 / 255, alpha: 1)
-            : NSColor(red: 188 / 255, green: 84 / 255, blue: 56 / 255, alpha: 1)
-    })
+    /// Warm editorial palette aligned with the Web light/dark theme tokens.
+    private static func adaptive(light: UInt32, dark: UInt32) -> Color {
+        Color(nsColor: NSColor(name: nil) { appearance in
+            let value = appearance.name.rawValue.lowercased().contains("dark") ? dark : light
+            return NSColor(
+                srgbRed: CGFloat((value >> 16) & 0xFF) / 255,
+                green: CGFloat((value >> 8) & 0xFF) / 255,
+                blue: CGFloat(value & 0xFF) / 255,
+                alpha: 1
+            )
+        })
+    }
+
+    static let canvas = adaptive(light: 0xF6F3ED, dark: 0x171716)
+    static let sidebar = adaptive(light: 0xEEEEE5, dark: 0x1C1E18)
+    static let panel = adaptive(light: 0xFAF9F4, dark: 0x22251E)
+    static let raised = adaptive(light: 0xFFFDF8, dark: 0x292C24)
+    static let border = adaptive(light: 0xDEDED2, dark: 0x33342E)
+    static let ink = adaptive(light: 0x2A2B25, dark: 0xEEEAE2)
+    static let muted = adaptive(light: 0x626457, dark: 0xA8A59C)
+    static let faint = adaptive(light: 0x8A8E7D, dark: 0x8E9284)
+    static let accent = adaptive(light: 0xBC5438, dark: 0xE98A6D)
+    static let accentDeep = adaptive(light: 0x9F422B, dark: 0xE98A6D)
+    static let accentSoft = adaptive(light: 0xDDE2D0, dark: 0x262B21)
+    static let olive = adaptive(light: 0x57492F, dark: 0xB4C09E)
+    static let oliveSoft = adaptive(light: 0xE4E7DB, dark: 0x30352A)
+    static let onAccent = adaptive(light: 0xFFFAF3, dark: 0x211B17)
+
+    static let cardRadius: CGFloat = 14
+    static let panelRadius: CGFloat = 16
+    static let rowRadius: CGFloat = 10
+
+    static func display(_ size: CGFloat) -> Font {
+        .system(size: size, weight: .medium, design: .serif)
+    }
+
+    static func section(_ size: CGFloat = 15) -> Font {
+        .system(size: size, weight: .semibold)
+    }
+
+    static let body = Font.system(size: 13)
+    static let caption = Font.system(size: 12)
+    static let micro = Font.system(size: 10, weight: .semibold)
+
+    static func mono(_ size: CGFloat = 11) -> Font {
+        .system(size: size, weight: .medium, design: .monospaced).monospacedDigit()
+    }
+}
+
+private struct MacPanelModifier: ViewModifier {
+    var padding: CGFloat = 16
+    var radius: CGFloat = MacTheme.cardRadius
+    var fill: Color = MacTheme.panel
+
+    func body(content: Content) -> some View {
+        content
+            .padding(padding)
+            .background(fill, in: RoundedRectangle(cornerRadius: radius, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: radius, style: .continuous)
+                    .strokeBorder(MacTheme.border, lineWidth: 1)
+            )
+    }
+}
+
+extension View {
+    func macPanel(
+        padding: CGFloat = 16,
+        radius: CGFloat = MacTheme.cardRadius,
+        fill: Color = MacTheme.panel
+    ) -> some View {
+        modifier(MacPanelModifier(padding: padding, radius: radius, fill: fill))
+    }
 }
 
 enum MacErrorText {
@@ -106,8 +218,29 @@ enum MacPages {
 }
 
 func macClock(milliseconds: Int64) -> String {
-    let total = max(0, Int(milliseconds / 1000))
-    return String(format: "%d:%02d", total / 60, total % 60)
+  let total = max(0, Int(milliseconds) / 1000)
+  return String(format: "%d:%02d", total / 60, total % 60)
+}
+
+/// Human total-length line for collection headings, e.g. "2 小时 38 分钟".
+func macTotalDurationText(_ tracks: [Track]) -> String {
+  let minutes = Int(tracks.reduce(Int64(0)) { $0 + $1.durationMs } / 60_000)
+  if minutes >= 60 {
+    return "\(minutes / 60) 小时 \(minutes % 60) 分钟"
+  }
+  return "\(max(minutes, 1)) 分钟"
+}
+
+/// "3 分钟前"-style stamp for notification rows; nil when unparsable.
+func macRelativeTime(_ iso: String) -> String? {
+  let plain = ISO8601DateFormatter()
+  let fractional = ISO8601DateFormatter()
+  fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+  guard let date = fractional.date(from: iso) ?? plain.date(from: iso) else { return nil }
+  let relative = RelativeDateTimeFormatter()
+  relative.locale = Locale(identifier: "zh_CN")
+  relative.unitsStyle = .full
+  return relative.localizedString(for: date, relativeTo: Date())
 }
 
 struct MacCollectionHeading: View {
@@ -115,31 +248,73 @@ struct MacCollectionHeading: View {
     var subtitle: String
     var symbol: String
     var canPlay: Bool
+    var tileSymbol: String? = nil
+    var badge: String? = nil
+    var onShuffle: (() -> Void)? = nil
     var play: () -> Void
 
     var body: some View {
-        HStack(spacing: 14) {
-            Image(systemName: symbol)
-                .font(.title2)
-                .foregroundStyle(MacTheme.accentDeep)
-                .frame(width: 48, height: 48)
-                .background(
-                    MacTheme.accent.opacity(0.18),
-                    in: RoundedRectangle(cornerRadius: 14, style: .continuous)
-                )
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.title2.bold())
-                Text(subtitle).font(.subheadline).foregroundStyle(.secondary)
+        HStack(spacing: 16) {
+            if let tileSymbol {
+                Image(systemName: tileSymbol)
+                    .font(.system(size: 26, weight: .medium))
+                    .foregroundStyle(MacTheme.onAccent)
+                    .frame(width: 64, height: 64)
+                    .background(
+                        LinearGradient(
+                            colors: [MacTheme.accent, MacTheme.accentDeep],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        in: RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    )
+            } else {
+                Image(systemName: symbol)
+                    .font(.system(size: 19, weight: .medium))
+                    .foregroundStyle(MacTheme.accentDeep)
+                    .frame(width: 44, height: 44)
+                    .background(
+                        MacTheme.accentSoft,
+                        in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    )
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                if let badge {
+                    Text(badge)
+                        .font(MacTheme.micro)
+                        .foregroundStyle(MacTheme.accentDeep)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(MacTheme.accentSoft, in: Capsule())
+                }
+                Text(title).font(MacTheme.display(28)).foregroundStyle(MacTheme.ink)
+                Text(subtitle).font(MacTheme.caption).foregroundStyle(MacTheme.muted)
             }
             Spacer()
             Button(action: play) {
-                Label("播放", systemImage: "play.fill")
+                Label("播放全部", systemImage: "play.fill")
+                    .font(MacTheme.section(13))
             }
             .buttonStyle(.borderedProminent)
+            .tint(MacTheme.accentDeep)
+            .controlSize(.large)
             .disabled(!canPlay)
+            if let onShuffle {
+                Button(action: onShuffle) {
+                    Label("随机", systemImage: "shuffle")
+                        .font(MacTheme.section(13))
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.large)
+                .disabled(!canPlay)
+            }
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 14)
+        .padding(.horizontal, 24)
+        .padding(.vertical, 20)
+        .background(MacTheme.canvas)
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(MacTheme.border).frame(height: 1)
+        }
     }
 }
 
@@ -153,17 +328,28 @@ struct MacCatalogCard<Destination: Hashable>: View {
     var body: some View {
         NavigationLink(value: value) {
             VStack(alignment: .leading, spacing: 8) {
-                MacCover(client: client, trackID: cover, side: 156)
-                Text(title)
-                    .font(.callout.weight(.semibold))
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
-                Text(subtitle)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                MacCover(client: client, trackID: cover, side: 148, cornerRadius: 10)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(MacTheme.ink)
+                        .lineLimit(1)
+                    Text(subtitle.isEmpty ? "—" : subtitle)
+                        .font(MacTheme.caption)
+                        .foregroundStyle(MacTheme.muted)
+                        .lineLimit(1)
+                }
             }
-            .frame(width: 156, alignment: .leading)
+            .frame(width: 148, alignment: .leading)
+            .padding(10)
+            .background(
+                MacTheme.panel,
+                in: RoundedRectangle(cornerRadius: MacTheme.cardRadius, style: .continuous)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: MacTheme.cardRadius, style: .continuous)
+                    .strokeBorder(MacTheme.border, lineWidth: 1)
+            )
         }
         .buttonStyle(.plain)
     }

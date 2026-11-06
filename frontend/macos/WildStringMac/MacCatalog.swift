@@ -50,7 +50,8 @@ enum MacPlayback {
       artist: track.artists.joined(separator: " / "),
       album: track.album,
       hasCover: track.hasCover,
-      streamPath: "api/v1/tracks/\(track.id)/stream"
+      streamPath: "api/v1/tracks/\(track.id)/stream",
+      unavailableReason: track.unavailableReason
     )
   }
 
@@ -73,6 +74,9 @@ struct MacPlayableTracks: View {
   var onReload: (@MainActor () async -> Void)?
   var isLoading = false
   var allowsSelection = false
+  var externalSelecting: Binding<Bool>?
+  var trackBadge: ((Track) -> String?)?
+  var trackReason: ((Track) -> String?)?
   var onRecommendationFeedback: ((Track, String) async -> Void)?
   @Environment(\.navigateToTrackCollection) private var navigate
 
@@ -82,95 +86,58 @@ struct MacPlayableTracks: View {
   @State private var lyricTrack: Track?
   @State private var editing: Track?
   @State private var notice: String?
+  @State private var hoveredTrackID: String?
+
+  private var isSelecting: Bool {
+    externalSelecting?.wrappedValue ?? selecting
+  }
+
+  private func setSelecting(_ value: Bool) {
+    selecting = value
+    externalSelecting?.wrappedValue = value
+  }
 
   var body: some View {
     GeometryReader { geometry in
-      let wide = geometry.size.width >= 820
-      let artistWidth = (geometry.size.width - 32) * 0.22
-      let albumWidth = (geometry.size.width - 32) * 0.25
+      let wide = geometry.size.width >= 680
+      let artistWidth = (geometry.size.width - 36) * 0.21
+      let albumWidth = (geometry.size.width - 36) * 0.24
       VStack(spacing: 0) {
         if wide {
           HStack(spacing: 16) {
-            if selecting { Color.clear.frame(width: 20, height: 1) }
-            Text("歌曲").padding(.leading, 50).frame(maxWidth: .infinity, alignment: .leading)
+            if isSelecting { Color.clear.frame(width: 18, height: 1) }
+            Text("#").frame(width: 28, alignment: .trailing)
+            Text("歌曲标题")
+              .padding(.leading, 52)
+              .frame(maxWidth: .infinity, alignment: .leading)
             Text("艺人").frame(width: artistWidth, alignment: .leading)
             Text("专辑").frame(width: albumWidth, alignment: .leading)
-            Color.clear.frame(width: 36, height: 1)
+            Color.clear.frame(width: 32, height: 1)
             Text("时长").frame(width: 48, alignment: .trailing)
-            Color.clear.frame(width: 28, height: 1)
+            Color.clear.frame(width: 26, height: 1)
           }
-          .font(.caption.weight(.medium)).foregroundStyle(.secondary)
-          .padding(.horizontal, 16).padding(.vertical, 10)
-          .background(.bar)
-          Divider()
+          .font(MacTheme.micro)
+          .foregroundStyle(MacTheme.faint)
+          .padding(.horizontal, 18)
+          .padding(.vertical, 10)
+          .overlay(alignment: .bottom) {
+            Rectangle().fill(MacTheme.border).frame(height: 1)
+          }
         }
-        List(tracks) { track in
-          HStack(spacing: 16) {
-            if selecting {
-              Toggle("选择 \(track.title)", isOn: Binding(
-                get: { selected.contains(track.id) },
-                set: { if $0 { selected.insert(track.id) } else { selected.remove(track.id) } }
-              )).toggleStyle(.checkbox).labelsHidden().frame(width: 20)
-            }
-            HStack(spacing: 10) {
-              Button {
-                if selecting {
-                  if selected.contains(track.id) { selected.remove(track.id) }
-                  else { selected.insert(track.id) }
-                } else {
-                  MacPlayback.play(tracks, startingAt: track, playback: playback)
-                }
-              } label: {
-                MacCover(client: client, trackID: track.hasCover ? track.id : nil, side: 40)
-              }.buttonStyle(.plain).help("播放 \(track.title)")
-              VStack(alignment: .leading, spacing: 4) {
-                Button {
-                  if selecting {
-                    if selected.contains(track.id) { selected.remove(track.id) }
-                    else { selected.insert(track.id) }
-                  } else {
-                    MacPlayback.play(tracks, startingAt: track, playback: playback)
-                  }
-                } label: {
-                  Text(track.title)
-                    .fontWeight(playback.currentItem?.trackID == track.id ? .semibold : .regular)
-                    .lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
-                }.buttonStyle(.plain)
-                if !wide {
-                  HStack(spacing: 5) {
-                    artistLink(track)
-                    if track.albumId != nil {
-                      Text("·").foregroundStyle(.tertiary)
-                      albumLink(track)
-                    }
-                  }.font(.caption)
-                }
-              }.frame(maxWidth: .infinity, alignment: .leading)
-            }.frame(maxWidth: .infinity, alignment: .leading)
-            if wide {
-              artistLink(track).frame(width: artistWidth, alignment: .leading)
-              albumLink(track).frame(width: albumWidth, alignment: .leading)
-            }
-            HStack(spacing: 5) {
-              if favorites?.isFavorite(track.id) == true { Image(systemName: "heart.fill") }
-              if playback.currentItem?.trackID == track.id {
-                Image(systemName: playback.isPlaying ? "speaker.wave.2.fill" : "pause.fill")
-              }
-            }.font(.caption).foregroundStyle(MacTheme.accentDeep).frame(width: 36)
-            Text(macClock(milliseconds: track.durationMs))
-              .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
-              .frame(width: 48, alignment: .trailing)
-            Menu { trackMenu(track) } label: {
-              Image(systemName: "ellipsis").frame(width: 28, height: 28).contentShape(Rectangle())
-            }
-            .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
-            .accessibilityLabel("\(track.title)的更多操作").help("\(track.title)的更多操作")
+        List {
+          ForEach(Array(tracks.enumerated()), id: \.element.id) { index, track in
+            trackRow(
+              track, number: index + 1, wide: wide,
+              artistWidth: artistWidth, albumWidth: albumWidth
+            )
+            .listRowInsets(EdgeInsets(top: 0, leading: 18, bottom: 0, trailing: 18))
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
           }
-          .contextMenu { trackMenu(track) }
-          .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
-          .listRowBackground(playback.currentItem?.trackID == track.id ? MacTheme.accent.opacity(0.12) : Color.clear)
-        }.listStyle(.plain)
+        }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .background(MacTheme.canvas)
       }
     }
     .overlay {
@@ -201,40 +168,205 @@ struct MacPlayableTracks: View {
       MacAddToPlaylistSheet(client: client, tracks: selection.tracks) { message in
         notice = message
         selected = []
-        selecting = false
+        setSelecting(false)
         scheduleNoticeClear()
       }
     }
     .sheet(item: $lyricTrack) { track in MacLyricsPreview(client: client, track: track) }
     .safeAreaInset(edge: .top, spacing: 0) {
-      if allowsSelection {
+      if allowsSelection && (isSelecting || externalSelecting == nil) {
         VStack(alignment: .leading, spacing: 8) {
           HStack {
-            Text(selecting ? "已选 \(selectedTracks.count) 首" : "挑几首，放进自己的播放队列")
-              .font(.callout).foregroundStyle(.secondary)
+            Text(isSelecting ? "已选 \(selectedTracks.count) 首" : "挑几首，放进自己的播放队列")
+              .font(MacTheme.caption).foregroundStyle(MacTheme.muted)
             Spacer()
-            Button(selecting ? "完成挑选" : "挑选歌曲") {
-              selecting.toggle()
+            if isSelecting {
+              HStack(spacing: 8) {
+                Button(selectedTracks.count == tracks.count ? "取消全选" : "全选") {
+                  selected = selectedTracks.count == tracks.count ? [] : Set(tracks.map(\.id))
+                }
+                Button("下一首播放所选") { enqueue(selectedTracks, next: true) }
+                  .disabled(selectedTracks.isEmpty)
+                Button("加入播放队列") { enqueue(selectedTracks) }
+                  .disabled(selectedTracks.isEmpty)
+                Button("加入歌单…") { playlistSelection = MacPlaylistSelection(tracks: selectedTracks) }
+                  .disabled(selectedTracks.isEmpty)
+              }.controlSize(.small)
+            }
+            Button(isSelecting ? "完成挑选" : "挑选歌曲") {
+              setSelecting(!isSelecting)
               selected = []
             }
-            .disabled(tracks.isEmpty && !selecting)
+            .controlSize(.small)
+            .disabled(tracks.isEmpty && !isSelecting)
           }
-          if selecting {
-            HStack {
-              Button(selectedTracks.count == tracks.count ? "取消全选" : "全选") {
-                selected = selectedTracks.count == tracks.count ? [] : Set(tracks.map(\.id))
-              }
-              Button("下一首播放所选") { enqueue(selectedTracks, next: true) }.disabled(
-                selectedTracks.isEmpty)
-              Button("加入播放队列") { enqueue(selectedTracks) }.disabled(selectedTracks.isEmpty)
-              Button("加入歌单…") { playlistSelection = MacPlaylistSelection(tracks: selectedTracks) }
-                .disabled(selectedTracks.isEmpty)
-            }.controlSize(.small)
-          }
-        }.padding(12).background(.bar)
+        }
+        .padding(.horizontal, 24)
+        .padding(.vertical, 10)
+        .background(MacTheme.panel)
+        .overlay(alignment: .bottom) {
+          Rectangle().fill(MacTheme.border).frame(height: 1)
+        }
       }
     }
     .onChange(of: tracks.map(\.id)) { _, ids in selected.formIntersection(Set(ids)) }
+  }
+
+  private func trackRow(
+    _ track: Track,
+    number: Int,
+    wide: Bool,
+    artistWidth: CGFloat,
+    albumWidth: CGFloat
+  ) -> some View {
+    let current = playback.currentItem?.trackID == track.id
+    let numberText = trackBadge?(track) ?? String(format: "%02d", number)
+    let reason = trackReason?(track)?.trimmingCharacters(in: .whitespacesAndNewlines)
+    let isHovered = hoveredTrackID == track.id
+    return HStack(spacing: 16) {
+      if isSelecting {
+        Toggle("选择 \(track.title)", isOn: Binding(
+          get: { selected.contains(track.id) },
+          set: { if $0 { selected.insert(track.id) } else { selected.remove(track.id) } }
+        )).toggleStyle(.checkbox).labelsHidden().frame(width: 18)
+      }
+      if wide {
+        Text(numberText)
+          .font(MacTheme.mono(12))
+          .foregroundStyle(current ? MacTheme.accentDeep : MacTheme.faint)
+          .frame(width: 28, alignment: .trailing)
+      } else if let badge = trackBadge?(track) {
+        Text(badge)
+          .font(MacTheme.mono(12))
+          .foregroundStyle(current ? MacTheme.accentDeep : MacTheme.faint)
+          .frame(width: 28, alignment: .trailing)
+      }
+      HStack(spacing: 10) {
+        Button {
+          if isSelecting {
+            if selected.contains(track.id) { selected.remove(track.id) }
+            else { selected.insert(track.id) }
+          } else {
+            MacPlayback.play(tracks, startingAt: track, playback: playback)
+          }
+        } label: {
+          MacCover(client: client, trackID: track.hasCover ? track.id : nil, side: 42)
+        }
+        .buttonStyle(.plain)
+        .help("播放 \(track.title)")
+
+        VStack(alignment: .leading, spacing: 3) {
+          Button {
+            if isSelecting {
+              if selected.contains(track.id) { selected.remove(track.id) }
+              else { selected.insert(track.id) }
+            } else {
+              MacPlayback.play(tracks, startingAt: track, playback: playback)
+            }
+          } label: {
+            Text(track.title)
+              .font(.system(size: 13, weight: current ? .semibold : .medium))
+              .foregroundStyle(!track.isAvailable ? MacTheme.muted : current ? MacTheme.accentDeep : MacTheme.ink)
+              .lineLimit(1)
+              .frame(maxWidth: .infinity, alignment: .leading)
+              .contentShape(Rectangle())
+          }
+          .buttonStyle(.plain)
+
+          if let reason = track.unavailableReason {
+            Label(reason, systemImage: "exclamationmark.circle")
+              .font(MacTheme.caption).foregroundStyle(MacTheme.muted)
+              .help("恢复文件并重新扫描后，刷新列表重试")
+          } else if current {
+            Text(playback.isPlaying ? "正在播放" : "已暂停")
+              .font(.system(size: 11))
+              .foregroundStyle(MacTheme.accentDeep)
+              .lineLimit(1)
+          } else if !wide {
+            HStack(spacing: 4) {
+              artistLink(track)
+              if track.albumId != nil || !(track.album ?? "").isEmpty {
+                Text("·").foregroundStyle(MacTheme.faint)
+                albumLink(track)
+              }
+            }
+            .font(MacTheme.caption)
+            .foregroundStyle(MacTheme.muted)
+            .lineLimit(1)
+          }
+
+          if let reason, !reason.isEmpty {
+            Text(reason)
+              .font(.system(size: 11))
+              .foregroundStyle(MacTheme.olive)
+              .lineLimit(1)
+          }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+      }
+      .frame(maxWidth: .infinity, alignment: .leading)
+
+      if wide {
+        artistLink(track)
+          .font(MacTheme.caption)
+          .frame(width: artistWidth, alignment: .leading)
+        albumLink(track)
+          .font(MacTheme.caption)
+          .frame(width: albumWidth, alignment: .leading)
+      }
+
+      HStack(spacing: 5) {
+        if favorites?.isFavorite(track.id) == true {
+          Image(systemName: "heart.fill")
+        }
+        if current {
+          Image(systemName: playback.isPlaying ? "speaker.wave.2.fill" : "pause.fill")
+        }
+      }
+      .font(.caption)
+      .foregroundStyle(MacTheme.accentDeep)
+      .frame(width: 32, alignment: .trailing)
+
+      Text(macClock(milliseconds: track.durationMs))
+        .font(MacTheme.mono())
+        .foregroundStyle(current ? MacTheme.accentDeep : MacTheme.faint)
+        .frame(width: 48, alignment: .trailing)
+
+      Menu { trackMenu(track) } label: {
+        Image(systemName: "ellipsis").frame(width: 26, height: 28).contentShape(Rectangle())
+      }
+      .menuStyle(.borderlessButton)
+      .menuIndicator(.hidden)
+      .fixedSize()
+      .accessibilityLabel("\(track.title)的更多操作")
+      .help("\(track.title)的更多操作")
+    }
+    .padding(.vertical, 10)
+    .background(
+      current
+        ? MacTheme.accent.opacity(0.10)
+        : (isHovered ? MacTheme.panel.opacity(0.55) : Color.clear)
+    )
+    .overlay(alignment: .bottom) {
+      Rectangle().fill(MacTheme.border.opacity(0.55)).frame(height: 1)
+    }
+    .overlay(alignment: .leading) {
+      if current {
+        Capsule()
+          .fill(MacTheme.accent)
+          .frame(width: 3)
+          .padding(.vertical, 12)
+      }
+    }
+    .onHover { hovering in
+      guard !isSelecting else { return }
+      if hovering {
+        hoveredTrackID = track.id
+      } else if hoveredTrackID == track.id {
+        hoveredTrackID = nil
+      }
+    }
+    .contextMenu { trackMenu(track) }
   }
 
   @ViewBuilder
@@ -242,7 +374,7 @@ struct MacPlayableTracks: View {
     if track.artists.count == 1, let name = track.artists.first {
       Button { navigate(.artist(name: name)) } label: {
         Text(name).lineLimit(1)
-      }.buttonStyle(.plain).foregroundStyle(.secondary).help("查看艺人：\(name)")
+      }.buttonStyle(.plain).foregroundStyle(MacTheme.muted).help("查看艺人：\(name)")
     } else if track.artists.count > 1 {
       Menu {
         ForEach(track.artists, id: \.self) { name in
@@ -251,20 +383,22 @@ struct MacPlayableTracks: View {
       } label: {
         Text(track.artists.joined(separator: " / ")).lineLimit(1)
       }.menuStyle(.borderlessButton).menuIndicator(.hidden)
-        .foregroundStyle(.secondary).help("选择艺人")
+        .foregroundStyle(MacTheme.muted).help("选择艺人")
     } else {
-      Text("—").foregroundStyle(.secondary)
+      Text("—").foregroundStyle(MacTheme.faint)
     }
   }
 
   @ViewBuilder
   private func albumLink(_ track: Track) -> some View {
-    if let id = track.albumId, let title = track.album {
+    if let id = track.albumId, let title = track.album, !title.isEmpty {
       Button { navigate(.album(id: id, title: title)) } label: {
         Text(title).lineLimit(1)
-      }.buttonStyle(.plain).foregroundStyle(.secondary).help("查看专辑：\(title)")
+      }.buttonStyle(.plain).foregroundStyle(MacTheme.muted).help("查看专辑：\(title)")
+    } else if let title = track.album, !title.isEmpty {
+      Text(title).lineLimit(1).foregroundStyle(MacTheme.muted)
     } else {
-      Text(track.album ?? "—").lineLimit(1).foregroundStyle(.secondary)
+      Text("—").foregroundStyle(MacTheme.faint)
     }
   }
 
@@ -274,7 +408,7 @@ struct MacPlayableTracks: View {
     if playback.enqueue(items: tracks.map(MacPlayback.item), next: next) {
       notice = "已将 \(tracks.count) 首\(next ? "安排为接下来播放" : "加入播放队列")"
       selected = []
-      selecting = false
+      setSelecting(false)
     } else {
       notice = playback.errorMessage
     }
@@ -434,33 +568,33 @@ private struct MacAlbumDetail: View {
   @State private var loading = true
 
   var body: some View {
-    MacPlayableTracks(
-      client: client,
-      playback: playback,
-      favorites: favorites,
-      tracks: tracks,
-      emptyTitle: message == nil ? "这张专辑还没有歌曲" : "无法加载专辑",
-      emptyDetail: message,
-      canManage: canManage,
-      isLoading: loading
-    )
-    .navigationTitle(album.title)
-    .safeAreaInset(edge: .top, spacing: 0) {
+    VStack(spacing: 0) {
       MacCollectionHeading(
         title: album.title,
         subtitle: "\(album.trackCount) 首",
         symbol: "square.stack",
         canPlay: !tracks.isEmpty
       ) {
-        guard let first = tracks.first else { return }
+        guard let first = tracks.first(where: \.isAvailable) ?? tracks.first else { return }
         MacPlayback.play(tracks, startingAt: first, playback: playback)
       }
+      MacPlayableTracks(
+        client: client,
+        playback: playback,
+        favorites: favorites,
+        tracks: tracks,
+        emptyTitle: message == nil ? "这张专辑还没有歌曲" : "无法加载专辑",
+        emptyDetail: message,
+        canManage: canManage,
+        isLoading: loading
+      )
     }
+    .navigationTitle(album.title)
     .task { await load() }
   }
 
   private func load() async {
-    loading = true
+    loading = tracks.isEmpty
     do {
       tracks = try await MacPages.albumTracks(client: client, albumId: album.id)
       message = nil
@@ -586,33 +720,33 @@ private struct MacArtistDetail: View {
   @State private var loading = true
 
   var body: some View {
-    MacPlayableTracks(
-      client: client,
-      playback: playback,
-      favorites: favorites,
-      tracks: tracks,
-      emptyTitle: message == nil ? "这个艺人还没有歌曲" : "无法加载艺人",
-      emptyDetail: message,
-      canManage: canManage,
-      isLoading: loading
-    )
-    .navigationTitle(artist.name)
-    .safeAreaInset(edge: .top, spacing: 0) {
+    VStack(spacing: 0) {
       MacCollectionHeading(
         title: artist.name,
         subtitle: "\(artist.trackCount) 首",
         symbol: "person.2",
         canPlay: !tracks.isEmpty
       ) {
-        guard let first = tracks.first else { return }
+        guard let first = tracks.first(where: \.isAvailable) ?? tracks.first else { return }
         MacPlayback.play(tracks, startingAt: first, playback: playback)
       }
+      MacPlayableTracks(
+        client: client,
+        playback: playback,
+        favorites: favorites,
+        tracks: tracks,
+        emptyTitle: message == nil ? "这个艺人还没有歌曲" : "无法加载艺人",
+        emptyDetail: message,
+        canManage: canManage,
+        isLoading: loading
+      )
     }
+    .navigationTitle(artist.name)
     .task { await load() }
   }
 
   private func load() async {
-    loading = true
+    loading = tracks.isEmpty
     do {
       tracks = try await MacPages.artistTracks(client: client, artistId: artist.id)
       message = nil
@@ -785,30 +919,30 @@ private struct MacPlaylistDetail: View {
   @State private var loading = true
 
   var body: some View {
-    MacPlayableTracks(
-      client: client,
-      playback: playback,
-      favorites: favorites,
-      tracks: tracks,
-      emptyTitle: message == nil ? "这个歌单还是空的" : "无法加载歌单",
-      emptyDetail: message,
-      canManage: canManage,
-      playlist: playlist,
-      onReload: { await load() },
-      isLoading: loading
-    )
-    .navigationTitle(playlist.name)
-    .safeAreaInset(edge: .top, spacing: 0) {
+    VStack(spacing: 0) {
       MacCollectionHeading(
         title: playlist.name,
         subtitle: "\(tracks.count) 首",
         symbol: "music.note.list",
         canPlay: !tracks.isEmpty
       ) {
-        guard let first = tracks.first else { return }
+        guard let first = tracks.first(where: \.isAvailable) ?? tracks.first else { return }
         MacPlayback.play(tracks, startingAt: first, playback: playback)
       }
+      MacPlayableTracks(
+        client: client,
+        playback: playback,
+        favorites: favorites,
+        tracks: tracks,
+        emptyTitle: message == nil ? "这个歌单还是空的" : "无法加载歌单",
+        emptyDetail: message,
+        canManage: canManage,
+        playlist: playlist,
+        onReload: { await load() },
+        isLoading: loading
+      )
     }
+    .navigationTitle(playlist.name)
     .task { await load() }
   }
 
@@ -836,34 +970,48 @@ struct MacFavoritesView: View {
   @State private var loading = true
 
   var body: some View {
-    MacPlayableTracks(
-      client: client,
-      playback: playback,
-      favorites: favorites,
-      tracks: tracks,
-      emptyTitle: message == nil ? "还没有红心歌曲" : "无法加载红心",
-      emptyDetail: message,
-      emptyIcon: "heart",
-      canManage: canManage,
-      isLoading: loading
-    )
-    .navigationTitle("我喜欢")
-    .safeAreaInset(edge: .top, spacing: 0) {
+    VStack(spacing: 0) {
       MacCollectionHeading(
         title: "我喜欢",
-        subtitle: loading && tracks.isEmpty ? "正在读取" : "\(tracks.count) 首",
+        subtitle: loading && tracks.isEmpty
+          ? "正在读取"
+          : "\(tracks.count) 首歌曲 · 总时长 \(macTotalDurationText(tracks))",
         symbol: "heart.fill",
-        canPlay: !tracks.isEmpty
+        canPlay: !tracks.isEmpty,
+        tileSymbol: "heart",
+        badge: "收藏歌单",
+        onShuffle: {
+          guard let pick = tracks.randomElement() else { return }
+          if !playback.isShuffled { playback.toggleShuffle() }
+          MacPlayback.play(tracks, startingAt: pick, playback: playback)
+        }
       ) {
-        guard let first = tracks.first else { return }
+        guard let first = tracks.first(where: \.isAvailable) ?? tracks.first else { return }
         MacPlayback.play(tracks, startingAt: first, playback: playback)
       }
+      MacPlayableTracks(
+        client: client,
+        playback: playback,
+        favorites: favorites,
+        tracks: tracks,
+        emptyTitle: message == nil ? "还没有红心歌曲" : "无法加载红心",
+        emptyDetail: message,
+        emptyIcon: "heart",
+        canManage: canManage,
+        onReload: { await load() },
+        isLoading: loading
+      )
+    }
+    .navigationTitle("我喜欢")
+    .toolbar {
+      Button("刷新", systemImage: "arrow.clockwise") { Task { await load() } }
+        .disabled(loading)
     }
     .task { await load() }
   }
 
   private func load() async {
-    loading = true
+    loading = tracks.isEmpty
     do {
       guard let playlist = try await MacPages.favoritesPlaylist(client: client) else {
         message = "服务器上还没有「我喜欢」歌单"
@@ -905,11 +1053,15 @@ struct MacListeningView: View {
       isLoading: loading
     )
     .navigationTitle("收听记录")
+    .toolbar {
+      Button("刷新", systemImage: "arrow.clockwise") { Task { await load() } }
+        .disabled(loading)
+    }
     .task { await load() }
   }
 
   private func load() async {
-    loading = true
+    loading = tracks.isEmpty
     do {
       tracks = try await MacPages.collect { offset in
         try await client.tracks(
@@ -936,43 +1088,96 @@ struct MacNotificationsView: View {
   @State private var message: String?
 
   var body: some View {
-    List {
+    Group {
       if let page {
-        Section {
-          Button("全部标为已读") {
-            Task { await markAll(page.highWatermark) }
+        VStack(spacing: 0) {
+          HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Text("通知")
+              .font(MacTheme.section(18))
+              .foregroundStyle(MacTheme.ink)
+            Text(
+              page.unreadCount > 0
+                ? "\(page.unreadCount) 条未读 · 共 \(page.items.count) 条"
+                : "共 \(page.items.count) 条 · 都已读完"
+            )
+            .font(MacTheme.caption)
+            .foregroundStyle(MacTheme.muted)
+            Spacer()
+            Button("全部标为已读") {
+              Task { await markAll(page.highWatermark) }
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .disabled(page.unreadCount == 0)
           }
-          .disabled(page.unreadCount == 0)
-        }
-        ForEach(page.items) { item in
-          VStack(alignment: .leading, spacing: 4) {
-            HStack {
-              Text(item.title).font(.headline)
-              if item.isUnread {
-                Text("未读").font(.caption).foregroundStyle(.orange)
+          .padding(.horizontal, 24)
+          .padding(.top, 20)
+          .padding(.bottom, 12)
+          Rectangle().fill(MacTheme.border).frame(height: 1)
+          ScrollView {
+            LazyVStack(spacing: 0) {
+              ForEach(page.items) { item in
+                notificationRow(item)
               }
             }
-            Text(item.summary)
-              .font(.callout)
-              .foregroundStyle(.secondary)
-          }
-          .task {
-            if item.isUnread {
-              try? await client.markNotificationsRead(ids: [item.id])
-            }
           }
         }
+      } else if let message {
+        ContentUnavailableView("无法加载通知", systemImage: "bell", description: Text(message))
+      } else {
+        ProgressView()
       }
     }
+    .frame(maxWidth: .infinity, maxHeight: .infinity)
+    .background(MacTheme.canvas)
     .navigationTitle("通知")
     .overlay {
-      if page == nil, let message {
-        ContentUnavailableView("无法加载通知", systemImage: "bell", description: Text(message))
-      } else if page?.items.isEmpty == true {
+      if page?.items.isEmpty == true {
         ContentUnavailableView("没有通知", systemImage: "bell")
       }
     }
     .task { await load() }
+  }
+
+  private func notificationRow(_ item: AppNotification) -> some View {
+    HStack(alignment: .top, spacing: 12) {
+      Circle()
+        .fill(item.isUnread ? MacTheme.accent : MacTheme.border.opacity(0.6))
+        .frame(width: 7, height: 7)
+        .padding(.top, 5)
+      VStack(alignment: .leading, spacing: 4) {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+          Text(item.title)
+            .font(.system(size: 13, weight: item.isUnread ? .semibold : .regular))
+            .foregroundStyle(item.isUnread ? MacTheme.ink : MacTheme.muted)
+            .lineLimit(1)
+          Spacer(minLength: 12)
+          Text(macRelativeTime(item.createdAt) ?? "")
+            .font(MacTheme.micro)
+            .foregroundStyle(MacTheme.faint)
+        }
+        if !item.summary.isEmpty {
+          Text(item.summary)
+            .font(MacTheme.caption)
+            .foregroundStyle(MacTheme.muted)
+            .lineLimit(2)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+      }
+    }
+    .padding(.horizontal, 24)
+    .padding(.vertical, 12)
+    .overlay(alignment: .bottom) {
+      Rectangle()
+        .fill(MacTheme.border.opacity(0.55))
+        .frame(height: 1)
+        .padding(.horizontal, 24)
+    }
+    .task {
+      if item.isUnread {
+        try? await client.markNotificationsRead(ids: [item.id])
+      }
+    }
   }
 
   private func load() async {

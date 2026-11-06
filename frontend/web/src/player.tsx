@@ -1,3 +1,4 @@
+import { trackUnavailableReason } from './api';
 import { hints } from './help-content';
 import { useEffect, useId, useRef, useState } from 'react';
 import {
@@ -456,6 +457,15 @@ export function usePlayer(userId: string) {
     const element = audio.current;
     const track = tracks[target];
     if (!element || !track) return;
+    const unavailable = trackUnavailableReason(track);
+    if (unavailable) {
+      setError(`「${track.title}」${unavailable}。请恢复文件并重新扫描，刷新列表后重试。`);
+      return;
+    }
+    if (tracks.some((item) => trackUnavailableReason(item))) {
+      target = tracks.slice(0, target).filter((item) => !trackUnavailableReason(item)).length;
+      tracks = tracks.filter((item) => !trackUnavailableReason(item));
+    }
     if (tracks.length > QUEUE_LIMIT) {
       setError(`播放队列最多 ${QUEUE_LIMIT} 首。`);
       return;
@@ -569,7 +579,11 @@ export function usePlayer(userId: string) {
   }
 
   function addToQueue(tracks: Track[], next = false) {
-    if (!tracks.length) return false;
+    tracks = tracks.filter((track) => !trackUnavailableReason(track));
+    if (!tracks.length) {
+      setError('没有可播放的歌曲，请恢复文件并重新扫描后重试。');
+      return false;
+    }
     if (queue.length + tracks.length > QUEUE_LIMIT) {
       setError(`播放队列最多 ${QUEUE_LIMIT} 首。`);
       return false;

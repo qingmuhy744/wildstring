@@ -38,6 +38,8 @@ public struct DailyRecommendations: Decodable, Equatable, Sendable {
     public let id: String
     public let date: String
     public let items: [RecommendationItem]
+    public let engine: String?
+    public let sources: [String: Int]?
     public let degraded: Bool?
 }
 
@@ -70,6 +72,7 @@ extension WildstringClient {
                 method: "GET",
                 path: "api/v1/playlists",
                 queryItems: [
+                    URLQueryItem(name: "include_unavailable", value: "true"),
                     URLQueryItem(name: "limit", value: String(limit)),
                     URLQueryItem(name: "offset", value: String(offset)),
                 ]
@@ -79,7 +82,7 @@ extension WildstringClient {
     }
 
     public func playlist(id: String) async throws -> Playlist {
-        let data = try await perform(Request(method: "GET", path: "api/v1/playlists/\(id)"))
+        let data = try await perform(Request(method: "GET", path: "api/v1/playlists/\(id)", queryItems: [URLQueryItem(name: "include_unavailable", value: "true")]))
         return try JSONDecoder().decode(Playlist.self, from: data)
     }
 
@@ -93,6 +96,7 @@ extension WildstringClient {
                 method: "GET",
                 path: "api/v1/playlists/\(playlistID)/tracks",
                 queryItems: [
+                    URLQueryItem(name: "include_unavailable", value: "true"),
                     URLQueryItem(name: "limit", value: String(limit)),
                     URLQueryItem(name: "offset", value: String(offset)),
                 ]

@@ -259,7 +259,7 @@ class OfflineDownloads @Inject constructor(@ApplicationContext private val conte
                         part.delete(); progress = progress.copy(bytes = 0, etag = null)
                         throw IOException("续传响应不一致，请重新下载。")
                     }
-                    val body = response.body ?: throw IOException("下载响应为空。")
+                    val body = response.body
                     val expected = body.contentLength().takeIf { it >= 0 }?.plus(offset) ?: 0
                     val otherBytes = synchronized(this@OfflineDownloads) { mutable.value.filter { it.track.id != id }.sumOf { it.bytes } }
                     require(expected == 0L || expected + otherBytes <= capacityGb * 1024L * 1024 * 1024) { "超过离线总容量，请删除音乐或提高限额。" }

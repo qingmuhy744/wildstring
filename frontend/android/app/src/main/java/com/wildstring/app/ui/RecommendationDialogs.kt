@@ -9,7 +9,9 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import com.wildstring.app.R
 import com.wildstring.app.data.*
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
@@ -82,5 +84,5 @@ internal fun RecommendationLyricsDialog(vm: MusicViewModel, track: Track, dismis
                 else -> lyrics!!.lines.forEach { Text(it.text) }
             }
         }
-    }, confirmButton = { TextButton(dismiss) { Text("关闭歌词预览") } })
+    }, confirmButton = { TextButton(dismiss) { Text(stringResource(R.string.lyrics_preview_close)) } })
 }

@@ -44,6 +44,14 @@ export interface Track {
   added_at: string;
 }
 
+export function trackUnavailableReason(track: Pick<Track, 'status'>): string | null {
+  return track.status === 'missing'
+    ? '文件缺失'
+    : track.status === 'unreadable'
+      ? '文件无法读取'
+      : null;
+}
+
 export interface DiscSummary {
   number: number;
   track_count: number;

@@ -52,8 +52,19 @@
 .track-list .track-row.current,
 .music-discovery .daily-track.is-current {
   background: var(--workspace-selected);
-  box-shadow: inset 3px 0 var(--accent);
   border-radius: 8px;
+}
+/* A short rounded bar marks the current song without bending around the row corners. */
+.track-list .track-row.current::before,
+.music-discovery .daily-track.is-current::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 14px;
+  bottom: 14px;
+  width: 3px;
+  border-radius: 3px;
+  background: var(--accent);
 }
 .discovery-track .track-title strong > .playback-indicator {
   margin-right: 7px;

@@ -57,17 +57,16 @@ struct MacHomeView: View {
         GeometryReader { geometry in
             ScrollView {
                 VStack(alignment: .leading, spacing: 30) {
-                    HStack(alignment: .top) {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("今天，想听点什么？").font(.system(size: 30, weight: .bold))
-                            Text("从熟悉的旋律，到刚加入收藏的新声音。")
-                                .font(.callout).foregroundStyle(.secondary)
+                    ViewThatFits(in: .horizontal) {
+                        HStack(alignment: .center, spacing: 24) {
+                            introduction
+                            Spacer(minLength: 0)
+                            actions
                         }
-                        Spacer()
-                        Button("搜索曲库", systemImage: "magnifyingglass") {
-                            session.page = .search
-                            session.focusLibrarySearch = true
-                        }.controlSize(.large)
+                        VStack(alignment: .leading, spacing: 16) {
+                            introduction
+                            actions
+                        }
                     }
 
                     LazyVGrid(
@@ -81,7 +80,7 @@ struct MacHomeView: View {
                             symbol: "play.circle.fill", tint: .green) {
                             if playback.currentItem != nil {
                                 playback.resume()
-                            } else if let first = model.recent.first {
+                            } else if let first = model.recent.first(where: \.isAvailable) ?? model.recent.first {
                                 MacPlayback.play(model.recent, startingAt: first, playback: playback)
                             } else {
                                 session.page = .listening
@@ -113,9 +112,14 @@ struct MacHomeView: View {
                                         } label: {
                                             VStack(alignment: .leading, spacing: 8) {
                                                 MacCover(client: client, trackID: album.coverTrackId, side: 144)
-                                                Text(album.title).font(.headline).lineLimit(1)
+                                                Text(album.title)
+                                                    .font(.system(size: 13, weight: .semibold))
+                                                    .foregroundStyle(MacTheme.ink)
+                                                    .lineLimit(1)
                                                 Text(album.artists.joined(separator: " / "))
-                                                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                                                    .font(MacTheme.caption)
+                                                    .foregroundStyle(MacTheme.muted)
+                                                    .lineLimit(1)
                                             }.frame(width: 144, alignment: .leading).contentShape(Rectangle())
                                         }.buttonStyle(.plain).help("打开专辑「\(album.title)」")
                                     }
@@ -142,11 +146,46 @@ struct MacHomeView: View {
             }
         }
         .navigationTitle("首页")
-        .toolbar {
-            Button("音乐助手", systemImage: "bubble.left.and.bubble.right") { session.page = .assistant }
-            Button("刷新首页", systemImage: "arrow.clockwise") { Task { await model.load() } }.disabled(model.loading)
-        }
         .task { await model.load() }
+    }
+
+    private var introduction: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("今天，想听点什么？")
+                .font(MacTheme.display(32))
+                .foregroundStyle(MacTheme.ink)
+            Text("从熟悉的旋律，到刚加入收藏的新声音。")
+                .font(MacTheme.caption)
+                .foregroundStyle(MacTheme.muted)
+        }
+    }
+
+    private var actions: some View {
+        HStack(spacing: 8) {
+            Button {
+                session.page = .assistant
+            } label: {
+                Label("音乐助手", systemImage: "bubble.left.and.bubble.right")
+                    .padding(.horizontal, 12)
+                    .frame(height: 34)
+                    .macPanel(padding: 0, radius: 10)
+            }
+            .help("打开音乐助手")
+
+            Button {
+                Task { await model.load() }
+            } label: {
+                Label("刷新首页", systemImage: "arrow.clockwise")
+                    .labelStyle(.iconOnly)
+                    .frame(width: 34, height: 34)
+                    .macPanel(padding: 0, radius: 10)
+            }
+            .disabled(model.loading)
+            .help(model.loading ? "正在刷新首页…" : "刷新首页")
+        }
+        .font(MacTheme.caption)
+        .foregroundStyle(MacTheme.muted)
+        .buttonStyle(.plain)
     }
 
     private var recommendationDetail: String {
@@ -158,27 +197,32 @@ struct MacHomeView: View {
     private func entry(_ title: String, detail: String, symbol: String, tint: Color, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             VStack(alignment: .leading, spacing: 12) {
-                Image(systemName: symbol).font(.title2).foregroundStyle(tint)
-                Text(title).font(.title3.bold())
-                Text(detail).font(.callout).foregroundStyle(.secondary).lineLimit(1)
+                Image(systemName: symbol)
+                    .font(.system(size: 18, weight: .medium))
+                    .foregroundStyle(tint)
+                    .frame(width: 36, height: 36)
+                    .background(tint.opacity(0.12), in: Circle())
+                Text(title).font(MacTheme.section(15)).foregroundStyle(MacTheme.ink)
+                Text(detail).font(MacTheme.caption).foregroundStyle(MacTheme.muted).lineLimit(1)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(20)
-            .background(tint.opacity(0.09), in: RoundedRectangle(cornerRadius: 18))
-            .contentShape(RoundedRectangle(cornerRadius: 18))
+            .macPanel(padding: 18, radius: MacTheme.panelRadius)
+            .contentShape(RoundedRectangle(cornerRadius: MacTheme.panelRadius))
         }.buttonStyle(.plain)
     }
 
     private func heading(_ title: String, more: String, action: @escaping () -> Void) -> some View {
-        HStack {
-            Text(title).font(.title3.bold())
+        HStack(alignment: .firstTextBaseline) {
+            Text(title).font(MacTheme.display(20)).foregroundStyle(MacTheme.ink)
             Spacer()
-            Button(more, action: action).buttonStyle(.link).font(.callout)
+            Button(more, action: action)
+                .buttonStyle(.link)
+                .font(MacTheme.caption)
         }
     }
 
     private func empty(_ message: String) -> some View {
-        Text(message).font(.callout).foregroundStyle(.secondary)
+        Text(message).font(MacTheme.caption).foregroundStyle(MacTheme.muted)
             .frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 20)
     }
 
@@ -190,14 +234,23 @@ struct MacHomeView: View {
             ForEach(tracks) { track in
                 Button { MacPlayback.play(tracks, startingAt: track, playback: playback) } label: {
                     HStack(spacing: 12) {
-                        MacCover(client: client, trackID: track.hasCover ? track.id : nil, side: 44)
-                        VStack(alignment: .leading, spacing: 5) {
-                            Text(track.title).lineLimit(1)
-                            Text(track.artists.joined(separator: " / ")).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                        MacCover(client: client, trackID: track.hasCover ? track.id : nil, side: 42)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(track.title)
+                                .font(.system(size: 13, weight: playback.currentItem?.trackID == track.id ? .semibold : .regular))
+                                .foregroundStyle(!track.isAvailable ? MacTheme.muted : playback.currentItem?.trackID == track.id ? MacTheme.accentDeep : MacTheme.ink)
+                                .lineLimit(1)
+                            if let reason = track.unavailableReason {
+                                Label(reason, systemImage: "exclamationmark.circle").font(MacTheme.caption).foregroundStyle(MacTheme.muted)
+                            }
+                            Text(track.artists.joined(separator: " / "))
+                                .font(MacTheme.caption)
+                                .foregroundStyle(MacTheme.muted)
+                                .lineLimit(1)
                         }.frame(maxWidth: .infinity, alignment: .leading)
                         Image(systemName: playback.currentItem?.trackID == track.id && playback.isPlaying ? "speaker.wave.2.fill" : "play.circle")
                             .foregroundStyle(MacTheme.accentDeep)
-                    }.padding(.vertical, 5).contentShape(Rectangle())
+                    }.padding(.vertical, 6).contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("播放 \(track.title)")

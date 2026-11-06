@@ -1,3 +1,4 @@
+import { McpOnboarding } from './mcp-onboarding';
 import { HelpLabel, HelpText } from './desktop-help';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { api, type User } from './api';
@@ -542,6 +543,14 @@ export function ToolCredentials({ user }: { user: User }) {
     [busy, setBusy] = useState(false),
     [error, setError] = useState(''),
     [notice, setNotice] = useState('');
+  async function copyToken() {
+    try {
+      await navigator.clipboard.writeText(token);
+      setNotice('凭据已复制。');
+    } catch {
+      setError('无法写入剪贴板，请手动复制上方凭据。');
+    }
+  }
   async function create(e: FormEvent) {
     e.preventDefault();
     if (busy) return;
@@ -588,21 +597,13 @@ export function ToolCredentials({ user }: { user: User }) {
       <WorkspaceNotice error={error || list.error} notice={notice} unavailable={list.unsupported} />
       {!list.unsupported && (
         <>
+          <McpOnboarding />
           {token && (
             <div className="workspace-secret" role="status">
               <strong>凭据只显示这一次，请保存到安全的位置。</strong>
               <code>{token}</code>
               <div className="workspace-actions">
-                <button
-                  onClick={() =>
-                    void navigator.clipboard
-                      .writeText(token)
-                      .then(() => setNotice('凭据已复制。'))
-                      .catch(() => setError('无法写入剪贴板，请手动复制。'))
-                  }
-                >
-                  复制凭据
-                </button>
+                <button onClick={() => void copyToken()}>复制凭据</button>
                 <button onClick={() => setToken('')}>隐藏凭据</button>
               </div>
             </div>
@@ -684,21 +685,6 @@ export function ToolCredentials({ user }: { user: User }) {
               </div>
             ))}
           </div>
-          <details>
-            <summary>Codex 接入说明</summary>
-            <p className="muted">
-              使用服务端提供的 stdio MCP
-              桥接；通过环境变量提供服务器地址与上方凭据。配置示例见仓库的 MCP
-              接入文档，不把令牌写进启动参数或提交到 Git。
-            </p>
-            <a
-              href="https://github.com/qingmuhy744/wildstring"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              查看 GitHub 文档 ↗
-            </a>
-          </details>
         </>
       )}
     </section>

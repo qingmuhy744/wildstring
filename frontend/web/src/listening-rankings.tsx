@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { api, artist, listeningTime, type Track } from './api';
 import { Cover } from './cover';
 import { FavoriteButton, type Favorites } from './favorites';
@@ -24,6 +25,7 @@ interface RankingPage {
   generated_at: string;
 }
 export function ListeningRankings({ player, favorites }: { player: Player; favorites: Favorites }) {
+  const { t } = useTranslation();
   const [scope, setScope] = useState('personal'),
     [period, setPeriod] = useState('30d'),
     [metric, setMetric] = useState('plays'),
@@ -103,16 +105,16 @@ export function ListeningRankings({ player, favorites }: { player: Player; favor
             { signal: c.signal },
           );
           if (page.total > QUEUE_LIMIT)
-            throw new Error(`当前播放队列最多 ${QUEUE_LIMIT} 首，请缩小排行时间范围。`);
+            throw new Error(t('rankings.queueLimit', { limit: QUEUE_LIMIT }));
           items.push(...page.items);
           offset += page.items.length;
           if (offset >= page.total) break;
-          if (!page.items.length) throw new Error('排行读取不完整，请刷新后重试。');
+          if (!page.items.length) throw new Error(t('rankings.incomplete'));
         }
       }
       if (c.signal.aborted || token !== epoch.current) return;
       const index = id ? items.findIndex((item) => item.track.id === id) : 0;
-      if (index < 0) throw new Error('歌曲已不在当前榜单，请刷新。');
+      if (index < 0) throw new Error(t('rankings.missing'));
       player.start(
         items.map((item) => item.track),
         index,
@@ -126,65 +128,72 @@ export function ListeningRankings({ player, favorites }: { player: Player; favor
       }
     }
   }
+  const days = period === 'all' ? 0 : Number(period.slice(0, -1));
+  const reason =
+    scope === 'personal'
+      ? period === 'all'
+        ? t('rankings.reasonPersonalAll')
+        : t('rankings.reasonPersonalPeriod', { days })
+      : period === 'all'
+        ? t('rankings.reasonCommunityAll')
+        : t('rankings.reasonCommunityPeriod', { days });
   return (
-    <section className="listening-rankings" aria-label="收听排行">
+    <section className="listening-rankings" aria-label={t('rankings.aria')}>
       <div className="discovery-heading">
         <div>
           <span className="eyebrow">ON REPEAT</span>
-          <h2>那些反复响起的。</h2>
+          <h2>{t('rankings.title')}</h2>
           <p className="muted">
-            {scope === 'personal'
-              ? '这是你在野弦听过的歌曲。'
-              : '这是本站用户的汇总收听热度，不展示个人记录。'}
+            {scope === 'personal' ? t('rankings.personalNote') : t('rankings.communityNote')}
           </p>
         </div>
         <div className="toolbar-actions">
           <button disabled={!rows.length || playing} onClick={() => void play()}>
             <Icon name="playlist" />
-            {playing ? '正在准备队列…' : '播放排行'}
+            {playing ? t('rankings.preparing') : t('rankings.play')}
           </button>
           <button
             disabled={loading || playing}
             onClick={() => setRevision((value) => value + 1)}
-            aria-label="刷新收听排行"
+            aria-label={t('rankings.refreshAria')}
           >
             <Icon name="refresh" />
           </button>
         </div>
       </div>
       <div className="ranking-controls">
-        <div className="workspace-tabs" role="group" aria-label="排行范围">
+        <div className="workspace-tabs" role="group" aria-label={t('rankings.scopeAria')}>
           <button aria-pressed={scope === 'personal'} onClick={() => setScope('personal')}>
-            我常听
+            {t('rankings.personal')}
           </button>
           <button aria-pressed={scope === 'community'} onClick={() => setScope('community')}>
-            大家常听
+            {t('rankings.community')}
           </button>
         </div>
         <label>
-          <span className="sr-only">排行时间范围</span>
+          <span className="sr-only">{t('rankings.periodAria')}</span>
           <select
-            aria-label="排行时间范围"
+            aria-label={t('rankings.periodAria')}
             value={period}
             disabled={playing}
             onChange={(event) => setPeriod(event.target.value)}
           >
-            <option value="7d">近 7 天</option>
-            <option value="30d">近 30 天</option>
-            <option value="90d">近 90 天</option>
-            <option value="all">全部时间</option>
+            <option value="7d">{t('rankings.period7')}</option>
+            <option value="30d">{t('rankings.period30')}</option>
+            <option value="90d">{t('rankings.period90')}</option>
+            <option value="all">{t('rankings.periodAll')}</option>
           </select>
         </label>
         <label>
-          <span className="sr-only">排行指标</span>
+          <span className="sr-only">{t('rankings.metricAria')}</span>
           <select
-            aria-label="排行指标"
+            aria-label={t('rankings.metricAria')}
             value={metric}
             disabled={playing}
             onChange={(event) => setMetric(event.target.value)}
           >
-            <option value="plays">播放次数</option>
-            <option value="listened_ms">收听时长</option>
+            <option value="plays">{t('rankings.plays')}</option>
+            <option value="listened_ms">{t('rankings.listened')}</option>
           </select>
         </label>
       </div>
@@ -200,16 +209,18 @@ export function ListeningRankings({ player, favorites }: { player: Player; favor
             <Cover trackId={item.track.id} title={item.track.title} />
             <button
               className="track-title"
-              aria-label={`播放排行 ${item.track.title}`}
+              aria-label={t('rankings.playAria', { title: item.track.title })}
               disabled={playing}
               onClick={() => void play(item.track.id)}
             >
               <strong>{item.track.title}</strong>
               <small>{artist(item.track)}</small>
-              <small>{item.reason}</small>
+              <small>{reason}</small>
             </button>
             <span className="ranking-stat">
-              {metric === 'plays' ? `${item.play_count} 次` : listeningTime(item.listened_ms)}
+              {metric === 'plays'
+                ? t('rankings.playsCount', { count: item.play_count })
+                : listeningTime(item.listened_ms)}
             </span>
             <FavoriteButton track={item.track} favorites={favorites} />
           </article>
@@ -217,19 +228,17 @@ export function ListeningRankings({ player, favorites }: { player: Player; favor
       </div>
       {!rows.length && !loading && !error && (
         <p className="workspace-empty">
-          {scope === 'personal'
-            ? '这段时间还没有收听记录，先放一首喜欢的歌。'
-            : '这段时间还没有可用的全站收听记录。'}
+          {scope === 'personal' ? t('rankings.emptyPersonal') : t('rankings.emptyCommunity')}
         </p>
       )}
       {loading && (
         <p role="status" className="muted">
-          正在读取收听排行…
+          {t('rankings.loading')}
         </p>
       )}
       {rows.length < total && (
         <button disabled={loading || playing} onClick={() => void more()}>
-          查看更多排行 · {rows.length} / {total}
+          {t('rankings.more', { loaded: rows.length, total })}
         </button>
       )}
     </section>

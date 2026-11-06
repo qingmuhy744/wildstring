@@ -1,3 +1,4 @@
+import { trackUnavailableReason } from './api';
 import { useTranslation } from 'react-i18next';
 import { readPreference, writePreference } from './user-preferences';
 import { CatalogSortControl, useCatalogSorting } from './catalog-sort';
@@ -122,7 +123,7 @@ const labels: Record<View, string> = {
   playlists: '歌单',
   favorites: '我喜欢',
   listening: '收听记录',
-  discover: '每日推荐 · AI',
+  discover: '推荐',
   podcasts: '电台 · 播客',
   offline: '离线音乐',
   devices: '跨设备继续',
@@ -141,6 +142,7 @@ const viewIcons: Record<
   | 'heart'
   | 'history'
   | 'assistant'
+  | 'compass'
   | 'podcast'
   | 'download'
   | 'refresh'
@@ -155,7 +157,7 @@ const viewIcons: Record<
   playlists: 'playlist',
   favorites: 'heart',
   listening: 'history',
-  discover: 'assistant',
+  discover: 'compass',
   podcasts: 'podcast',
   offline: 'download',
   devices: 'refresh',
@@ -340,7 +342,6 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
     [lyricsOpen, setLyricsOpen] = useState(false);
   const [notice, setNotice] = useState('');
   const [navigation, setNavigation] = useState<CatalogLocation[]>([]);
-  const [counts, setCounts] = useState<ReadonlyMap<View, number>>(() => new Map());
   const [editor, setEditor] = useState<{ initial: Playlist | null; track: Track | null } | null>(
     null,
   );
@@ -422,9 +423,12 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
       const lists: Playlist[] = [];
       let cursor = 0;
       while (!controller.signal.aborted) {
-        const response = await api<PlaylistPage>(`/playlists?limit=100&offset=${cursor}`, {
-          signal: controller.signal,
-        });
+        const response = await api<PlaylistPage>(
+          `/playlists?include_unavailable=true&limit=100&offset=${cursor}`,
+          {
+            signal: controller.signal,
+          },
+        );
         lists.push(...response.items);
         cursor += response.items.length;
         if (cursor >= response.total || !response.items.length) break;
@@ -462,7 +466,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
     return () => controller.abort();
   }, [view, revision, listeningRevision, favorites.change]);
 
-  const parameters = new URLSearchParams({ q: album ? '' : query });
+  const parameters = new URLSearchParams({ q: album ? '' : query, include_unavailable: 'true' });
   let browsePath = '/tracks';
   if (activePlaylist) browsePath = `/playlists/${activePlaylist.id}/tracks`;
   else if (playlistGrid) browsePath = '/playlists';
@@ -520,7 +524,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
     setIndexError(false);
     if (!indexEnabled) return;
     const controller = new AbortController();
-    const indexParameters = new URLSearchParams({ kind, q: query });
+    const indexParameters = new URLSearchParams({ kind, q: query, include_unavailable: 'true' });
     if (selectedArtist) indexParameters.set('artist_id', selectedArtist.id);
     if (view === 'artists' && artistRole) indexParameters.set('role', artistRole);
     api<BrowseIndex>(`/browse-index?${indexParameters}`, { signal: controller.signal })
@@ -532,12 +536,6 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
       });
     return () => controller.abort();
   }, [browseIdentity, indexEnabled, indexRevision]);
-  useEffect(() => {
-    if (visible && !query && !album && !selectedArtist && !activePlaylist)
-      setCounts((current) =>
-        current.get(view) === visible.total ? current : new Map(current).set(view, visible.total),
-      );
-  }, [visible?.total, view, query, album?.id, selectedArtist?.id, activePlaylist?.id]);
   const listRoot = useRef<HTMLDivElement>(null);
   const listEnd = useRef<HTMLDivElement>(null);
   const listStart = useRef<HTMLDivElement>(null);
@@ -788,9 +786,12 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
     setLyricsOpen(false);
     setQueueOpen(false);
     try {
-      const target = await api<Album>(`/albums/${encodeURIComponent(track.album_id)}`, {
-        signal: controller.signal,
-      });
+      const target = await api<Album>(
+        `/albums/${encodeURIComponent(track.album_id)}?include_unavailable=true`,
+        {
+          signal: controller.signal,
+        },
+      );
       if (controller.signal.aborted) return;
       setAlbum(target);
       setAlbumLoading(false);
@@ -894,7 +895,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
     }
   }
   function collectionPath() {
-    const parameters = new URLSearchParams({ q: album ? '' : query });
+    const parameters = new URLSearchParams({ q: album ? '' : query, include_unavailable: 'true' });
     let path = '/tracks';
     if (activePlaylist) path = `/playlists/${activePlaylist.id}/tracks`;
     else if (selectedArtist) {
@@ -916,7 +917,14 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
     setCollectionBusy(true);
     setNotice(download ? '正在准备离线歌曲…' : '正在读取完整播放列表…');
     try {
-      const tracks = await collectTracks(collectionPath(), controller.signal);
+      const collection = await collectTracks(collectionPath(), controller.signal);
+      if (target && trackUnavailableReason(target)) {
+        throw new Error(
+          `「${target.title}」${trackUnavailableReason(target)}。请恢复文件并重新扫描，刷新列表后重试。`,
+        );
+      }
+      const tracks = collection.filter((track) => !trackUnavailableReason(track));
+      if (!tracks.length) throw new Error('没有可播放的歌曲，请恢复文件并重新扫描后重试。');
       if (controller.signal.aborted) return;
       if (download) {
         await saveDownloads(tracks);
@@ -1056,10 +1064,6 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
         <small className="notification-count" aria-label={t('nav.unread', { count: inbox.unread })}>
           {inbox.unread > 99 ? '99+' : inbox.unread}
         </small>
-      ) : target === 'favorites' ? (
-        <small>{favorites.ids.size}</small>
-      ) : counts.has(target) ? (
-        <small>{counts.get(target)}</small>
       ) : null}
     </button>
   );
@@ -1915,7 +1919,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
             closePlaylistMenu();
           }}
           onEdit={() => {
-            void api<Playlist>(`/playlists/${playlistMenu.item.id}`)
+            void api<Playlist>(`/playlists/${playlistMenu.item.id}?include_unavailable=true`)
               .then((initial) => setEditor({ initial, track: null }))
               .catch(() => setNotice('无法读取歌单，请重试。'));
             closePlaylistMenu();

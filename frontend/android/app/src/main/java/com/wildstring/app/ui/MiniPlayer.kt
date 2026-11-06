@@ -15,7 +15,6 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -34,15 +33,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.draw.drawWithContent
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 
-/** Album-tinted capsule with independent playback and queue targets. No per-frame artwork work. */
+/** Shares the navigation surface; the album only lends a soft tint. No per-frame artwork work. */
 @Composable internal fun MiniPlayer(
     vm: MusicViewModel,
     state: MusicState,
@@ -103,11 +100,9 @@ import androidx.compose.ui.unit.dp
                 color = colors.outlineVariant.copy(alpha = 0.35f),
             )
             Box(Modifier.fillMaxWidth()) {
-                art?.let { Image(it.image, null, Modifier.matchParentSize(), contentScale = ContentScale.Crop,
-                    alpha = if (LocalRedCloth.current) .10f else if (dark) .16f else .18f, filterQuality = FilterQuality.Medium) }
                 Row(
                     Modifier.fillMaxWidth()
-                        .background(Brush.horizontalGradient(listOf(tint.copy(alpha = if (dark) .28f else .16f), tint.copy(alpha = .04f), Color.Transparent)))
+                        .background(Brush.horizontalGradient(listOf(tint.copy(alpha = if (dark) .14f else .10f), Color.Transparent)))
                         .then(
                             if (includeBottomInset) {
                                 Modifier.windowInsetsPadding(WindowInsets.navigationBars.only(WindowInsetsSides.Bottom))
@@ -144,7 +139,6 @@ import androidx.compose.ui.unit.dp
                                 shape = RoundedCornerShape(8.dp),
                                 color = colors.surfaceContainerHighest,
                                 border = BorderStroke(0.5.dp, colors.outlineVariant.copy(alpha = 0.45f)),
-                                shadowElevation = 1.dp,
                             ) {
                                 Cover(vm, currentTrack.id.takeIf { currentTrack.hasCover }, currentTrack.title, Modifier.size(44.dp))
                             }
@@ -158,8 +152,8 @@ import androidx.compose.ui.unit.dp
                     FilledTonalIconButton(
                         onClick = tactile(vm::toggle),
                         colors = IconButtonDefaults.filledTonalIconButtonColors(
-                            containerColor = colors.primaryContainer.copy(alpha = 0.88f),
-                            contentColor = colors.onPrimaryContainer,
+                            containerColor = colors.primary.copy(alpha = 0.14f),
+                            contentColor = colors.primary,
                         ),
                         modifier = Modifier.size(38.dp),
                     ) {

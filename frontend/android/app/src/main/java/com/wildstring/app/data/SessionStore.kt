@@ -23,14 +23,16 @@ import okhttp3.Cookie
 import okhttp3.CookieJar
 import okhttp3.HttpUrl
 
+data class ServerRoute(val name: String, val url: String, val allowHttp: Boolean)
+
 interface CookieVault { fun read(): String?; fun write(value: String?) }
-data class ServerConfiguration(val id: String, val url: String, val name: String = "", val allowLocalHttp: Boolean = false) {
-    val label: String get() = name.ifBlank { url }
+data class ServerConfiguration(val id: String, val url: String, val name: String = "", val allowLocalHttp: Boolean = false, val serverName: String? = null, val instanceId: String? = null) {
+    val label: String get() = name.ifBlank { serverName?.takeIf { it.isNotBlank() } ?: url }
 }
 
 /** Persistent server identities and encrypted sessions; request owners change on every selection. */
 @Singleton
-class SessionStore @Inject constructor(@ApplicationContext context: Context) : CookieVault {
+class SessionStore @Inject constructor(@ApplicationContext context: Context) : CookieVault, ServerRouteSessions {
     private val prefs = context.getSharedPreferences("connection", Context.MODE_PRIVATE)
     private val gson = Gson()
     private val invalid = MutableSharedFlow<String>(extraBufferCapacity = 1)
@@ -39,11 +41,13 @@ class SessionStore @Inject constructor(@ApplicationContext context: Context) : C
     private val profile = MutableStateFlow<String?>(null)
     val profiles = profile.asStateFlow()
     private val savedServers = MutableStateFlow<List<ServerConfiguration>>(emptyList())
-    val servers = savedServers.asStateFlow()
+    override val servers = savedServers.asStateFlow()
+    private val savedRoutes = MutableStateFlow<List<ServerRoute>>(emptyList())
+    val routes = savedRoutes.asStateFlow()
     private val retained = MutableStateFlow<Set<String>>(emptySet())
     val retainedScopes = retained.asStateFlow()
     @Volatile private var validUntil = 0L
-    val activeServerId: String? get() = prefs.getString("active_server", null)
+    override val activeServerId: String? get() = prefs.getString("active_server", null)
     private fun field(name: String, id: String? = activeServerId) = "server:$id:$name"
     private fun records(): List<ServerConfiguration> = runCatching {
         gson.fromJson<List<ServerConfiguration>>(prefs.getString("servers_v1", "[]"), object : TypeToken<List<ServerConfiguration>>() {}.type)
@@ -74,8 +78,9 @@ class SessionStore @Inject constructor(@ApplicationContext context: Context) : C
     }
     @Synchronized private fun publish() {
         savedServers.value = records()
+        savedRoutes.value = routeRecords()
         retained.value = records().mapNotNull { prefs.getString(field("cache_profile", it.id), null) }.toSet()
-        profile.value = if (prefs.contains(field("session_ciphertext")) && prefs.contains(field("cache_profile"))) generation else null
+        profile.value = if (prefs.contains(cookieField()) && prefs.contains(field("cache_profile"))) generation else null
     }
     @Synchronized fun <T> withStorageScope(expected: String?, action: (String) -> T): T? {
         if (expected == null || cacheScope() != expected) return null
@@ -101,9 +106,9 @@ class SessionStore @Inject constructor(@ApplicationContext context: Context) : C
     private fun readAccount(id: String?): Account? = prefs.getString(field("account_ciphertext", id), null)?.let {
         runCatching { gson.fromJson(decrypt(it), Account::class.java) }.getOrNull()
     }
-    val account: Account? get() = readAccount(activeServerId)
+    override val account: Account? get() = readAccount(activeServerId)
     fun accountFor(id: String): Account? = readAccount(id)
-    fun hasSession(id: String): Boolean = prefs.contains(field("session_ciphertext", id))
+    fun hasSession(id: String): Boolean = prefs.contains(cookieField(id))
     @Synchronized fun bindAccount(account: Account?): Boolean {
         val changed = this.account?.id?.let { it != account?.id } == true
         val edit = prefs.edit()
@@ -114,21 +119,65 @@ class SessionStore @Inject constructor(@ApplicationContext context: Context) : C
         check(edit.commit()); publish(); return changed
     }
     /** Explicit per-server consent for cleartext HTTP; retained name keeps old preferences compatible. */
-    val localHttp: Boolean get() = records().firstOrNull { it.id == activeServerId }?.allowLocalHttp == true
-    val endpoint: HttpUrl? get() = records().firstOrNull { it.id == activeServerId }?.let { runCatching { ServerAddress.normalize(it.url, localHttp) }.getOrNull() }
+    val localHttp: Boolean get() = routeRecords().firstOrNull { it.url == activeRouteUrl }?.allowHttp == true
+    override val activeRouteUrl: String? get() = prefs.getString(field("active_route"), null) ?: records().firstOrNull { it.id == activeServerId }?.url
+    override val manualRoute: String? get() = prefs.getString(field("manual_route"), null)
+    val endpoint: HttpUrl? get() = activeRouteUrl?.let { runCatching { ServerAddress.normalize(it, localHttp) }.getOrNull() }
+    override fun routeRecords(): List<ServerRoute> = routesFor(activeServerId)
+    private fun routesFor(id: String?): List<ServerRoute> {
+        val server = records().firstOrNull { it.id == id } ?: return emptyList()
+        val stored = prefs.getString(field("routes", id), null)
+        return if (stored == null) listOf(ServerRoute("默认线路", server.url, server.allowLocalHttp)) else
+            gson.fromJson(stored, object : TypeToken<List<ServerRoute>>() {}.type)
+    }
+    private fun cookieField(id: String? = activeServerId, url: String? = null): String {
+        val primary = records().firstOrNull { it.id == id }?.url
+        val route = url ?: prefs.getString(field("active_route", id), null) ?: primary
+        return if (route == primary) field("session_ciphertext", id) else field("route_cookie:$route", id)
+    }
+    @Synchronized override fun routeCookie(url: String): String? = prefs.getString(cookieField(url = url), null)?.let(::decrypt)
+    @Synchronized override fun saveRoute(route: ServerRoute, cookie: String) {
+        val previous = routeRecords()
+        val routes = if (previous.any { it.url == route.url }) previous.map { if (it.url == route.url) route else it } else previous + route
+        check(prefs.edit().putString(field("routes"), gson.toJson(routes)).putString(cookieField(url = route.url), encrypt(cookie)).commit()); publish()
+    }
+    @Synchronized fun editRoutes(routes: List<ServerRoute>) {
+        require(routes.isNotEmpty() && routes.any { it.url == activeRouteUrl })
+        val removed = routeRecords().filter { old -> routes.none { it.url == old.url } }
+        val edit = prefs.edit().putString(field("routes"), gson.toJson(routes))
+        removed.forEach { edit.remove(cookieField(url = it.url)) }
+        check(edit.commit()); publish()
+    }
+    @Synchronized override fun setRouteMode(address: String?) { check(prefs.edit().putString(field("manual_route"), address).commit()); publish() }
+    @Synchronized override fun selectRoute(route: ServerRoute) {
+        require(routeRecords().any { it == route })
+        check(prefs.edit().putString(field("active_route"), route.url).commit())
+        validUntil = 0; publish()
+    }
+    @Synchronized fun clearRouteSessions() {
+        val edit = prefs.edit()
+        routeRecords().forEach { edit.remove(cookieField(url = it.url)) }
+        check(edit.commit()); write(null)
+    }
     @Synchronized fun saveServer(id: String?, raw: String, name: String, allowLocalHttp: Boolean): ServerConfiguration {
         val base = ServerAddress.normalize(raw, allowLocalHttp).toString()
         val records = records()
         val existing = id?.let { key -> records.firstOrNull { it.id == key } ?: error("服务器配置不存在。") }
         require(records.none { it.url == base && it.id != id }) { "这个服务器已经保存，请直接选择。" }
         require(name.trim().length <= 80) { "服务器名称最多 80 个字符。" }
-        val value = ServerConfiguration(existing?.id ?: UUID.randomUUID().toString(), base, name.trim(), allowLocalHttp)
+        val value = ServerConfiguration(existing?.id ?: UUID.randomUUID().toString(), base, name.trim(), allowLocalHttp, existing?.serverName?.takeIf { existing.url == base }, existing?.instanceId?.takeIf { existing.url == base })
         val edit = prefs.edit().putString("servers_v1", gson.toJson(if (existing == null) records + value else records.map { if (it.id == id) value else it }))
         if (existing != null && existing.url != base) {
+            prefs.all.keys.filter { it.startsWith("server:${existing.id}:route_cookie:") }.forEach(edit::remove)
+            listOf("routes", "active_route", "manual_route").forEach { edit.remove(field(it, existing.id)) }
             listOf("session_ciphertext", "cache_profile", "account", "account_ciphertext").forEach { edit.remove(field(it, existing.id)) }
             if (id == activeServerId) { validUntil = 0; generation = UUID.randomUUID().toString() }
         }
         check(edit.commit()); publish(); return value
+    }
+    @Synchronized fun updateServerInfo(info: ServerInfo) {
+        val values = records().map { if (it.id == activeServerId) it.copy(serverName = info.name, instanceId = info.instance_id) else it }
+        check(prefs.edit().putString("servers_v1", gson.toJson(values)).commit()); publish()
     }
     @Synchronized fun selectServer(id: String) {
         require(records().any { it.id == id }) { "服务器配置不存在。" }
@@ -139,15 +188,22 @@ class SessionStore @Inject constructor(@ApplicationContext context: Context) : C
     @Synchronized fun removeServer(id: String) {
         val edit = prefs.edit().putString("servers_v1", gson.toJson(records().filterNot { it.id == id }))
         listOf("session_ciphertext", "cache_profile", "account", "account_ciphertext").forEach { edit.remove(field(it, id)) }
+        prefs.all.keys.filter { it.startsWith("server:$id:") }.forEach(edit::remove)
         if (activeServerId == id) { edit.remove("active_server"); generation = UUID.randomUUID().toString(); validUntil = 0 }
         check(edit.commit()); publish()
     }
     @Synchronized fun configure(raw: String, allowLocalHttp: Boolean) {
         val base = ServerAddress.normalize(raw, allowLocalHttp).toString()
-        val existing = records().firstOrNull { it.url == base }
+        val existing = records().firstOrNull { it.url == base || routesFor(it.id).any { route -> route.url == base } }
         selectServer((existing ?: saveServer(null, raw, "", allowLocalHttp)).id)
+        // A login form authorizes only the address it displays, even if a previous
+        // visit selected a fallback route for this logical server.
+        val edit = prefs.edit().putString(field("active_route"), base)
+        if (routeRecords().size > 1) edit.putString(field("manual_route"), base)
+        check(edit.commit())
+        validUntil = 0; publish()
     }
-    @Synchronized fun requestState(): ServerRequestState? = endpoint?.let { ServerRequestState("$activeServerId:$generation", it) }
+    @Synchronized fun requestState(): ServerRequestState? = endpoint?.let { ServerRequestState("$activeServerId:$generation:$it", it) }
     @Synchronized fun isCurrent(state: ServerRequestState): Boolean = requestState()?.selection == state.selection
     @Synchronized fun cookieFor(state: ServerRequestState): String? = if (isCurrent(state)) read() else null
     @Synchronized fun cookieFrom(state: ServerRequestState, value: String?) {
@@ -179,19 +235,19 @@ class SessionStore @Inject constructor(@ApplicationContext context: Context) : C
         return String(cipher.doFinal(Base64.decode(parts[1], Base64.NO_WRAP)), Charsets.UTF_8)
     }
     @Synchronized override fun read(): String? {
-        val value = prefs.getString(field("session_ciphertext"), null) ?: return null
+        val value = prefs.getString(cookieField(), null) ?: return null
         return runCatching { decrypt(value) }.getOrElse { write(null); null }
     }
     @Synchronized override fun write(value: String?) {
         val edit = prefs.edit()
         if (value == null) {
-            edit.remove(field("session_ciphertext")).remove(field("cache_profile")).remove(field("account")).remove(field("account_ciphertext"))
+            edit.remove(cookieField()).remove(field("cache_profile")).remove(field("account")).remove(field("account_ciphertext"))
             generation = UUID.randomUUID().toString(); validUntil = 0
         } else {
             check(activeServerId != null) { "请先选择服务器。" }
             if (!prefs.contains(field("cache_profile"))) edit.putString(field("cache_profile"), UUID.randomUUID().toString())
             validUntil = endpoint?.let { Cookie.parse(it, value)?.expiresAt } ?: 0
-            edit.putString(field("session_ciphertext"), encrypt(value))
+            edit.putString(cookieField(), encrypt(value))
         }
         check(edit.commit()); publish()
     }
@@ -210,6 +266,6 @@ class SessionCookieJar(private val vault: CookieVault, private val endpoint: () 
     @Synchronized override fun saveFromResponse(url: HttpUrl, cookies: List<Cookie>) {
         val base = endpoint() ?: return
         if (!ServerAddress.contains(base, url)) return
-        cookies.lastOrNull { it.name == "wildstring_session" && it.matches(url) }?.let { vault.write(if (it.expiresAt <= System.currentTimeMillis()) null else it.toString()) }
+        cookies.lastOrNull { it.name in setOf("wildstring_session", "wildstring_session_http", "wildstring_session_https") && it.matches(url) }?.let { vault.write(if (it.expiresAt <= System.currentTimeMillis()) null else it.toString()) }
     }
 }

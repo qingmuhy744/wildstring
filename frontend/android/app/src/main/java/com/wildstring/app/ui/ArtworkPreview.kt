@@ -62,7 +62,7 @@ import kotlinx.coroutines.withContext
             val imageSizePx = with(density) { imageSize.toPx() }
             var scale by remember { mutableFloatStateOf(1f) }
             var offset by remember { mutableStateOf(Offset.Zero) }
-            val transformState = rememberTransformableState { zoomChange, panChange, _ ->
+            val transformState = rememberTransformableState { _, zoomChange, panChange, _ ->
                 val nextScale = (scale * zoomChange).coerceIn(1f, 4f)
                 val maxPan = imageSizePx * (nextScale - 1f) / 2f
                 scale = nextScale

@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { section } from './helpers';
 
 test.use({ locale: 'en-US' });
 
@@ -98,4 +99,73 @@ test('error codes are translated for English', async ({ page }) => {
   await page.getByRole('button', { name: /Open library/ }).click();
   await expect(page.locator('.error, [role="alert"]').first()).toBeVisible();
   await expect(page.locator('.error, [role="alert"]').first()).not.toContainText(/[\u4e00-\u9fff]/);
+});
+
+test('recommendation page, preferences and charts are translated', async ({ page }, info) => {
+  await signIn(page);
+  await section(page, 'For you');
+  const panel = page.getByRole('region', { name: 'Music discovery', exact: true });
+  await expect(
+    panel.getByRole('heading', { name: 'What are we listening to today?' }),
+  ).toBeVisible();
+  await expect(panel.getByRole('button', { name: 'Play picks', exact: true })).toBeVisible();
+  await expect(panel.getByRole('button', { name: 'New batch', exact: true })).toBeVisible();
+  await expect(panel.getByRole('button', { name: 'Select tracks', exact: true })).toBeVisible();
+  await expect(panel.locator('.daily-hero-copy h2')).not.toHaveText(/[\u4e00-\u9fff]/);
+  await expect(panel.locator('.daily-hero-copy .muted')).not.toHaveText(/[\u4e00-\u9fff]/);
+  await expect(panel.locator('.daily-track')).toHaveCount(2);
+  if (shots) await page.screenshot({ path: `${shots}/${info.project.name}-discover-en.png` });
+
+  await panel.getByText('Recommendation preferences', { exact: true }).click();
+  await expect(panel.getByText('Library pick sources', { exact: true })).toBeVisible();
+  await expect(panel.getByLabel('Tracks per day')).toBeVisible();
+  await expect(panel.getByRole('button', { name: 'Save preferences', exact: true })).toBeVisible();
+
+  await panel.getByRole('button', { name: 'Listening charts', exact: true }).click();
+  const charts = page.getByRole('region', { name: 'Listening charts', exact: true });
+  await expect(charts.getByRole('heading', { name: 'The ones on repeat.' })).toBeVisible();
+  await expect(charts.getByRole('button', { name: 'Play chart', exact: true })).toBeVisible();
+  await expect(
+    charts.getByRole('button', { name: 'Community repeats', exact: true }),
+  ).toBeVisible();
+
+  await panel.getByRole('button', { name: 'New finds', exact: true }).click();
+  await expect(page.getByRole('region', { name: 'New finds', exact: true })).toContainText(
+    'Sounds not on your shelves yet.',
+  );
+});
+
+test('assistant chat uses English labels and fallback text', async ({ page }, info) => {
+  await signIn(page);
+  await section(page, 'Music assistant');
+  const panel = page.getByRole('region', { name: 'AI music assistant', exact: true });
+  await expect(
+    panel.getByRole('heading', { name: "Let's talk about what you want to hear." }),
+  ).toBeVisible();
+  const composer = panel.getByLabel('Message for the assistant');
+  await expect(composer).toBeVisible();
+  await composer.fill('calm music for tonight');
+  await panel.getByRole('button', { name: 'Send', exact: true }).click();
+  await expect(panel.locator('.workspace-message.assistant')).toContainText(
+    'Local keyword search. No model was called.',
+  );
+  await expect(panel.getByText('Local keyword search · no model called')).toBeVisible();
+  if (shots) await page.screenshot({ path: `${shots}/${info.project.name}-assistant-en.png` });
+});
+
+test('AI find uses English fallback titles', async ({ page }) => {
+  await signIn(page);
+  const current = await (await page.request.get('/api/v1/recommendations/preferences')).json();
+  await page.route('**/api/v1/recommendations/preferences', (route) =>
+    route.fulfill({ json: { ...current, sources: ['personal', 'discovery'] } }),
+  );
+  await page.route('**/api/v1/ai/discover', (route) =>
+    route.fulfill({ json: { title: '曲库里的发现', items: [], mode: 'local' } }),
+  );
+  await section(page, 'For you');
+  const panel = page.getByRole('region', { name: 'Music discovery', exact: true });
+  await panel.locator('.ai-discover > summary').click();
+  await panel.getByLabel('Find tracks or build a playlist').fill('calm');
+  await panel.getByRole('button', { name: 'Generate picks', exact: true }).click();
+  await expect(panel.locator('.ai-discover h3')).toHaveText('Local library finds');
 });

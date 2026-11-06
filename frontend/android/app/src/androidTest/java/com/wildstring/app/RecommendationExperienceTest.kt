@@ -105,18 +105,22 @@ class RecommendationExperienceTest {
         Fixture().use { fixture -> val vm = connect(fixture)
             try {
                 open(uiString(R.string.daily_recommendations))
-                compose.waitUntil(10_000) { compose.onAllNodesWithText("1 首 · 今日的临时歌单").fetchSemanticsNodes().isNotEmpty() }
+                compose.waitUntil(10_000) { compose.onAllNodes(hasTestTag("daily-summary") and hasText(uiString(R.string.daily_summary, 1), substring = true)).fetchSemanticsNodes().isNotEmpty() }
+                compose.onNodeWithTag("daily-summary").assertTextContains(uiString(R.string.recommendation_source_personal), substring = true)
+                compose.onNode(hasTestTag("daily-track-local-a") and hasText(uiString(R.string.recommendation_source_revisit), substring = true)).assertExists()
                 compose.onNodeWithTag("daily-recommendations").performScrollToNode(hasTestTag("daily-track-local-a"))
                 val more = hasTestTag("daily-more-local-a") and hasClickAction()
                 // The clickable row merges descendants; target the actual nested button.
                 compose.waitUntil(10_000) { compose.onAllNodes(more, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
-                compose.onNodeWithText("不感兴趣", substring = false).assertDoesNotExist()
+                compose.onNodeWithText(uiString(R.string.recommendation_not_interested), substring = false).assertDoesNotExist()
                 compose.onNode(more, useUnmergedTree = true).performScrollTo().assertIsDisplayed().performClick()
-                compose.onNodeWithText("不感兴趣", substring = false).assertIsDisplayed()
+                compose.onNodeWithText(uiString(R.string.recommendation_not_interested), substring = false).assertIsDisplayed()
                 InstrumentationRegistry.getInstrumentation().uiAutomation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK)
                 compose.onNodeWithTag("daily-recommendations").performScrollToIndex(0)
-                compose.onNodeWithText("推荐依据", substring = false).performClick()
+                compose.onNodeWithTag("daily-more-actions").performClick()
+                compose.onNodeWithTag("recommendation-evidence").performClick()
                 compose.onNodeWithText("AI：AI 预算不足，保留本地结果").assertExists()
+                compose.onNodeWithTag("daily-more-actions").performClick()
                 compose.onNodeWithTag("recommendation-settings").performClick()
                 compose.onNodeWithTag("recommendation-source-community").performScrollTo().assertIsOn().performClick().assertIsOff()
                 compose.onNodeWithTag("ai-connection-choice").performScrollTo().performClick()
@@ -128,7 +132,9 @@ class RecommendationExperienceTest {
                 val saved = JsonParser.parseString(fixture.preferences).asJsonObject
                 assertEquals("personal-one", saved.text("connection_id")); assertFalse(saved["sources"].asJsonArray.any { it.asString == "community" })
                 capture("recommendation-daily-phone.png")
-                compose.onNode(hasText("收听排行", substring = false) and hasAnyAncestor(hasTestTag("daily-recommendations"))).performClick()
+                compose.onNodeWithTag("daily-recommendations").performScrollToIndex(0)
+                compose.onNodeWithTag("daily-more-actions").performClick()
+                compose.onNodeWithTag("daily-rankings").performClick()
                 compose.onNodeWithText("大家常听", substring = false).performClick()
                 compose.waitUntil(10_000) { fixture.requests.any { it.first.contains("/rankings?") && it.first.contains("scope=community") } }
                 compose.onNodeWithText("所有用户的汇总收听排行，不展示其他账号信息。").assertExists()
@@ -146,7 +152,7 @@ class RecommendationExperienceTest {
             try {
                 open(uiString(R.string.daily_recommendations))
                 compose.waitUntil(10_000) { compose.onAllNodesWithTag("daily-track-local-a").fetchSemanticsNodes().isNotEmpty() }
-                compose.onNodeWithText("播放推荐", substring = false).performClick()
+                compose.onNodeWithTag("daily-play").performClick()
                 compose.waitUntil(10_000) { vm.state.value.current?.id == "local-a" }
                 compose.runOnIdle { vm.controller?.pause() }
                 compose.waitUntil(5_000) { !vm.state.value.playing }
@@ -154,23 +160,30 @@ class RecommendationExperienceTest {
                 val before = compose.runOnIdle { vm.controller!!.currentPosition }
                 compose.onNodeWithTag("daily-recommendations").performScrollToNode(hasTestTag("daily-track-local-a"))
                 compose.onNode(hasTestTag("daily-more-local-a") and hasClickAction(), useUnmergedTree = true).performScrollTo().performClick()
-                compose.onNodeWithText("查看歌词", substring = false).performClick()
+                compose.onNodeWithText(uiString(R.string.lyrics_view), substring = false).performClick()
                 compose.onNodeWithTag("recommendation-lyrics").assertExists()
-                compose.onNodeWithText("关闭歌词预览", substring = false).performClick()
+                compose.onNodeWithText(uiString(R.string.lyrics_preview_close), substring = false).performClick()
                 assertEquals(entry, vm.state.value.entryId)
                 assertFalse(vm.state.value.playing)
                 assertTrue(kotlin.math.abs(compose.runOnIdle { vm.controller!!.currentPosition } - before) < 250)
-                compose.onNodeWithTag("daily-recommendations").performScrollToIndex(2)
-                compose.onNodeWithText("挑选歌曲", substring = false).performClick()
-                compose.onNodeWithTag("daily-recommendations").performScrollToNode(hasTestTag("daily-select-local-a"))
-                compose.onNodeWithTag("daily-select-local-a", useUnmergedTree = true).performClick()
-                compose.onNodeWithTag("daily-recommendations").performScrollToIndex(2)
-                compose.onNodeWithText("下一首播放所选", substring = false).performClick()
+                // Long press starts the selection with that song already picked.
+                compose.onNodeWithTag("daily-recommendations").performScrollToNode(hasTestTag("daily-track-local-a"))
+                compose.onNodeWithTag("daily-track-local-a").performTouchInput { longClick() }
+                compose.onNodeWithTag("daily-select-local-a", useUnmergedTree = true).assertIsOn()
+                compose.onNodeWithTag("daily-selection-play-next").performClick()
                 compose.waitUntil(5_000) { vm.state.value.queue.size == 2 }
                 assertEquals(entry, vm.state.value.entryId)
                 assertFalse(vm.state.value.playing)
                 assertEquals(listOf("local-a", "local-a"), vm.state.value.queue.map { it.trackId })
                 capture("recommendation-selection-queue.png")
+                compose.onNodeWithTag("daily-selection").assertDoesNotExist()
+                compose.onNode(hasTestTag("mini-player-open") and hasAnyAncestor(hasTestTag("daily-mini-player"))).performClick()
+                compose.waitUntil(5_000) { compose.onAllNodesWithTag("player-visual-stage").fetchSemanticsNodes().isNotEmpty() }
+                compose.onNodeWithTag("feature-daily").assertDoesNotExist()
+                compose.onNodeWithTag("recommendation-lyrics").assertDoesNotExist()
+                compose.runOnIdle { compose.activity.onBackPressedDispatcher.onBackPressed() }
+                compose.waitUntil(5_000) { compose.onAllNodesWithTag("feature-daily").fetchSemanticsNodes().isNotEmpty() }
+                assertEquals(entry, vm.state.value.entryId)
             } finally { cleanup(vm) }
         }
     }

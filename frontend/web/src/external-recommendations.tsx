@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { api, type Track } from './api';
 import type { Player } from './player';
 import { Icon } from './icons';
@@ -58,6 +59,7 @@ export function ExternalRecommendations({
   onPreferences: () => void;
   onUsage: () => void;
 }) {
+  const { t } = useTranslation();
   const [batch, setBatch] = useState<ExternalBatch | null>(null),
     [loading, setLoading] = useState(false),
     [error, setError] = useState(''),
@@ -136,10 +138,10 @@ export function ExternalRecommendations({
       if (mounted.current)
         setNotice(
           action === 'want'
-            ? '已记在想收清单。'
+            ? t('external.noticeWant')
             : 'clear' === action
-              ? '已移出想收清单。'
-              : '已记录，不再推荐这条线索。',
+              ? t('external.noticeClear')
+              : t('external.noticeDismiss'),
         );
     } catch (reason) {
       if (mounted.current) {
@@ -179,9 +181,9 @@ export function ExternalRecommendations({
     try {
       if (!navigator.clipboard) throw new Error('clipboard_unavailable');
       await navigator.clipboard.writeText(content);
-      if (mounted.current) setNotice(`已复制：${content}`);
+      if (mounted.current) setNotice(t('external.copied', { content }));
     } catch {
-      if (mounted.current) setError(`无法写入剪贴板，请手动复制：${content}`);
+      if (mounted.current) setError(t('external.copyError', { content }));
     }
   }
   const allItems = [
@@ -195,18 +197,16 @@ export function ExternalRecommendations({
   const visible = allItems.filter((item) => filter !== 'wanted' || item.wanted);
   const enabled = !!preferences.external_enabled;
   return (
-    <section className="external-recommendations" aria-label="发现新音乐">
+    <section className="external-recommendations" aria-label={t('external.aria')}>
       <div className="discovery-heading">
         <div>
           <span className="eyebrow">BEYOND YOUR SHELVES</span>
-          <h2>还没收进来的声音。</h2>
-          <p className="muted">
-            来自真实资料的收歌线索，留给你自己去找。这里的“新发现”也可能是一首老歌。
-          </p>
+          <h2>{t('external.title')}</h2>
+          <p className="muted">{t('external.subtitle')}</p>
         </div>
         <div className="toolbar-actions">
           <button type="button" onClick={onPreferences}>
-            更新频率与来源
+            {t('external.settings')}
           </button>
           <button
             className="primary"
@@ -214,7 +214,11 @@ export function ExternalRecommendations({
             onClick={() => void load(true)}
           >
             <Icon name="refresh" />
-            {loading ? '正在整理建议…' : batch?.items.length ? '换一批收歌建议' : '获取收歌建议'}
+            {loading
+              ? t('external.loading')
+              : batch?.items.length
+                ? t('external.refresh')
+                : t('external.get')}
           </button>
         </div>
       </div>
@@ -222,7 +226,7 @@ export function ExternalRecommendations({
         <p role="alert" className="error">
           {error}
           <button disabled={loading} onClick={() => void load()}>
-            重新读取建议
+            {t('external.reload')}
           </button>
         </p>
       )}
@@ -235,41 +239,39 @@ export function ExternalRecommendations({
         <div className="external-intro">
           <Icon name="album" />
           <div>
-            <h3>给下一次收歌，留一点灵感。</h3>
-            <p className="muted">
-              开启后按你选择的频率更新，只提供歌曲信息和来源。下载由你安排，放进导入文件夹后再交给曲库处理。
-            </p>
-            <button onClick={onPreferences}>设置收歌建议</button>
+            <h3>{t('external.introTitle')}</h3>
+            <p className="muted">{t('external.introBody')}</p>
+            <button onClick={onPreferences}>{t('external.introAction')}</button>
           </div>
         </div>
       ) : (
         <>
           <p className="muted external-batch-status">
             {preferences.external_refresh_days === 0
-              ? '仅手动更新'
-              : `每 ${preferences.external_refresh_days ?? 7} 天更新`}
-            {batch?.generated_at ? ` · 上次 ${localDate(batch.generated_at)}` : ''}
-            {batch?.next_refresh_at ? ` · 下次 ${localDate(batch.next_refresh_at)}` : ''}
-            {batch?.cached ? ' · 已保存的建议' : ''}
-            {batch?.stale ? ' · 资料已过期，当前显示之前的结果' : ''}
+              ? t('external.manual')
+              : t('external.everyDays', { days: preferences.external_refresh_days ?? 7 })}
+            {batch?.generated_at ? t('external.last', { date: localDate(batch.generated_at) }) : ''}
+            {batch?.next_refresh_at
+              ? t('external.next', { date: localDate(batch.next_refresh_at) })
+              : ''}
+            {batch?.cached ? t('external.cached') : ''}
+            {batch?.stale ? t('external.stale') : ''}
           </p>
           <p className="external-boundary">
-            库外歌曲暂不可播放；收进曲库后会重新匹配。
-            {preferences.external_use_ai
-              ? '本次整理可使用已选模型及共用额度。'
-              : '使用资料来源与本地规则，不调用模型。'}
+            {t('external.boundary')}{' '}
+            {preferences.external_use_ai ? t('external.boundaryAi') : t('external.boundaryLocal')}
           </p>
-          <div className="workspace-tabs" role="group" aria-label="收歌建议分类">
+          <div className="workspace-tabs" role="group" aria-label={t('external.filterAria')}>
             <button aria-pressed={filter === 'all'} onClick={() => setFilter('all')}>
-              全部线索
+              {t('external.all')}
             </button>
             <button aria-pressed={filter === 'wanted'} onClick={() => setFilter('wanted')}>
-              我想收 · {allItems.filter((item) => item.wanted).length}
+              {t('external.wanted', { count: allItems.filter((item) => item.wanted).length })}
             </button>
           </div>
           {loading && (
             <p role="status" className="muted">
-              正在读取真实候选与来源，音乐会继续播放…
+              {t('external.loadingList')}
             </p>
           )}
           <div className="external-suggestion-grid">
@@ -283,16 +285,16 @@ export function ExternalRecommendations({
                     </span>
                     <div>
                       <h3>{item.name}</h3>
-                      <p>{item.artists.join(' / ') || '艺人资料待核对'}</p>
+                      <p>{item.artists.join(' / ') || t('external.artistUnknown')}</p>
                       {item.album && <small>{item.album}</small>}
                     </div>
                     <span className="workspace-badge">
-                      {item.local_track ? '已在曲库' : '收歌线索'}
+                      {item.local_track ? t('external.inLibrary') : t('external.clue')}
                     </span>
                   </div>
                   <p className="external-reason">{item.reason}</p>
                   <details>
-                    <summary>来源与依据</summary>
+                    <summary>{t('external.evidence')}</summary>
                     {item.evidence.map((evidence, index) => (
                       <p className="muted" key={index}>
                         <strong>{evidence.source}</strong> · {evidence.summary}
@@ -303,9 +305,9 @@ export function ExternalRecommendations({
                     {item.local_track && (
                       <button
                         onClick={() => player.start([item.local_track!], 0)}
-                        aria-label={`播放已入库 ${item.name}`}
+                        aria-label={t('external.playLocalAria', { name: item.name })}
                       >
-                        播放本库歌曲
+                        {t('external.playLocal')}
                       </button>
                     )}
                     <button
@@ -313,9 +315,9 @@ export function ExternalRecommendations({
                       aria-pressed={item.wanted}
                       onClick={() => void feedback(item, item.wanted ? 'clear' : 'want')}
                     >
-                      {item.wanted ? '已加入想收' : '想收这首'}
+                      {item.wanted ? t('external.wantedOn') : t('external.wantedOff')}
                     </button>
-                    <button onClick={() => void copy(item)}>复制歌名与艺人</button>
+                    <button onClick={() => void copy(item)}>{t('external.copy')}</button>
                     {link && (
                       <a
                         className="external-source-link"
@@ -323,7 +325,7 @@ export function ExternalRecommendations({
                         target="_blank"
                         rel="noopener noreferrer"
                       >
-                        查看 Last.fm 资料 ↗
+                        {t('external.lastfm')}
                       </a>
                     )}
                     <button
@@ -331,7 +333,7 @@ export function ExternalRecommendations({
                       disabled={busyIds.has(item.external_id)}
                       onClick={() => void feedback(item, 'dismiss')}
                     >
-                      不再推荐
+                      {t('external.dismiss')}
                     </button>
                   </div>
                 </article>
@@ -341,12 +343,12 @@ export function ExternalRecommendations({
           {!visible.length && !loading && !error && (
             <p className="workspace-empty">
               {filter === 'wanted'
-                ? '还没有想收的线索，看到喜欢的名字就记下来。'
+                ? t('external.emptyWanted')
                 : batch?.status === 'unavailable'
-                  ? '外部资料暂不可用，之后可以重新读取。'
+                  ? t('external.emptyUnavailable')
                   : batch?.status === 'manual'
-                    ? '点击“获取收歌建议”，准备第一批线索。'
-                    : '暂时没有可核对的新线索，换一个标签或之后再看看。'}
+                    ? t('external.emptyManual')
+                    : t('external.emptyOther')}
             </p>
           )}
           <RecommendationSources

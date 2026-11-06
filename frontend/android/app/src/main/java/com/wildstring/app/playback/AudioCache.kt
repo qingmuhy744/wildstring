@@ -70,11 +70,11 @@ class AudioCache @Inject constructor(@ApplicationContext context: Context, priva
                 if (!ServerAddress.contains(base, target) || !target.encodedPath.endsWith("/stream")) throw IOException("拒绝其他来源的音频。")
                 storage = session.storageScope() ?: throw IOException("登录已失效。")
                 key = "$storage:${dataSpec.uri}"
-                if (settings.state.value.audioMb > 0) validateCached(key!!, dataSpec.uri.toString(), client)
+                if (settings.state.value.audioMb > 0) validateCached(key, dataSpec.uri.toString(), client)
                 if (profile != session.cacheScope()) throw IOException("登录已失效。")
                 val length = source.open(dataSpec)
                 val etag = source.responseHeaders.entries.firstOrNull { it.key.equals("ETag", true) }?.value?.firstOrNull()
-                if (etag != null && profile == session.cacheScope()) cache.applyContentMetadataMutations(key!!, ContentMetadataMutations()
+                if (etag != null && profile == session.cacheScope()) cache.applyContentMetadataMutations(key, ContentMetadataMutations()
                     .set("wildstring-etag", etag).set("wildstring-verified", System.currentTimeMillis()))
                 return length
             }

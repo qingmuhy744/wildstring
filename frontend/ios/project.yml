@@ -9,14 +9,15 @@ packages:
 settings:
   base:
     SWIFT_VERSION: "6.0"
-    MARKETING_VERSION: "0.8.5"
-    CURRENT_PROJECT_VERSION: "40"
+    MARKETING_VERSION: "0.8.6"
+    CURRENT_PROJECT_VERSION: "41"
 targets:
   WildString:
     type: application
     platform: iOS
     sources:
       - path: WildString
+      - path: ../apple-shared
     dependencies:
       - package: WildStringKit
         product: CoreNetwork

@@ -217,6 +217,17 @@ struct StubbedHTTPTests {
             )
         }
 
+        @Test func trackStatusDistinguishesMissingUnreadableAndLegacyResponses() throws {
+            for (status, available) in [("missing", false), ("unreadable", false), ("available", true)] {
+                let data = Data("{\"id\":\"t1\",\"title\":\"Track\",\"artists\":[],\"duration_ms\":1000,\"has_cover\":false,\"status\":\"\(status)\"}".utf8)
+                let track = try JSONDecoder().decode(Track.self, from: data)
+                #expect(track.isAvailable == available)
+                #expect((track.unavailableReason == nil) == available)
+            }
+            let legacy = try JSONDecoder().decode(Track.self, from: Data(#"{"id":"t1","title":"Track","artists":[],"duration_ms":1000,"has_cover":false}"#.utf8))
+            #expect(legacy.isAvailable)
+        }
+
         @Test func tracksDecodesPageAndSendsPagingQuery() async throws {
             StubURLProtocol.respond { request in
                 #expect(request.httpMethod == "GET")
@@ -376,7 +387,7 @@ struct StubbedHTTPTests {
         @Test func artistsDecodePageAndQuery() async throws {
             StubURLProtocol.respond { request in
                 #expect(request.url?.path == "/api/v1/artists")
-                #expect(request.url?.query == "q=%E9%98%BF&limit=50&offset=0")
+                #expect(request.url?.query == "q=%E9%98%BF&include_unavailable=true&limit=50&offset=0")
                 return .json(
                     status: 200,
                     body: """
@@ -441,7 +452,7 @@ struct StubbedHTTPTests {
         @Test func browseIndexDecodesGroups() async throws {
             StubURLProtocol.respond { request in
                 #expect(request.url?.path == "/api/v1/browse-index")
-                #expect(request.url?.query == "kind=tracks")
+                #expect(request.url?.query == "include_unavailable=true&kind=tracks")
                 return .json(
                     status: 200,
                     body: """
@@ -592,7 +603,7 @@ struct StubbedHTTPTests {
         @Test func playlistsDecodePage() async throws {
             StubURLProtocol.respond { request in
                 #expect(request.url?.path == "/api/v1/playlists")
-                #expect(request.url?.query == "limit=100&offset=0")
+                #expect(request.url?.query == "include_unavailable=true&limit=100&offset=0")
                 return .json(
                     status: 200,
                     body: """
@@ -611,7 +622,7 @@ struct StubbedHTTPTests {
         @Test func playlistTracksDecodePage() async throws {
             StubURLProtocol.respond { request in
                 #expect(request.url?.path == "/api/v1/playlists/p1/tracks")
-                #expect(request.url?.query == "limit=200&offset=0")
+                #expect(request.url?.query == "include_unavailable=true&limit=200&offset=0")
                 return .json(status: 200, body: #"{"items":[],"total":0,"limit":200,"offset":0}"#)
             }
             _ = try await makeClient().playlistTracks(playlistID: "p1")

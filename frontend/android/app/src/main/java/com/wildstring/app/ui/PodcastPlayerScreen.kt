@@ -124,10 +124,12 @@ private fun rememberPodcastDismissScroll(
     onThresholdCrossed: () -> Unit,
 ): NestedScrollConnection {
     val threshold = with(LocalDensity.current) { 52.dp.toPx() }
+    val flingDistance = with(LocalDensity.current) { 16.dp.toPx() }
+    val flingVelocity = with(LocalDensity.current) { PlayerFlingVelocity.toPx() }
     val dismiss by rememberUpdatedState(onDismiss)
     val dragOffset by rememberUpdatedState(onDragOffset)
     val thresholdCrossed by rememberUpdatedState(onThresholdCrossed)
-    return remember(enabled, threshold) {
+    return remember(enabled, threshold, flingDistance, flingVelocity) {
         object : NestedScrollConnection {
             private var distance = 0f
             private var crossed = false
@@ -151,7 +153,7 @@ private fun rememberPodcastDismissScroll(
 
             override suspend fun onPreFling(available: Velocity): Velocity {
                 val active = distance > 0f
-                val shouldDismiss = distance >= threshold
+                val shouldDismiss = distance >= threshold || (distance >= flingDistance && available.y >= flingVelocity)
                 distance = 0f
                 crossed = false
                 if (shouldDismiss) dismiss() else if (active) dragOffset(0f, false)

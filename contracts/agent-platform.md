@@ -70,3 +70,23 @@ Web／Android 默认仅显示未读通知，已读通知保留在「已读记录
 管理员会话可读取 `GET /metadata-review/albums` 与 `GET /metadata-review?album_id=...`（或 `track_id`），查看当前、文件原始值、人工覆盖及待核对来源。每个候选带 `candidate_digest`；`POST /metadata-review/accept` 提交 `items[{track_id,suggestion_id,metadata_version,candidate_digest,fields}]`、`idempotency_key` 和可选 `cover_draft_id`，返回 applied 草案或 conflict 列表。最多 500 首，批次所有写入同一事务，重试同键同内容只执行一次。
 
 `POST /metadata-review/cover` 只准备 cover 草案与快照，不受账号自动应用设置影响；可带同专辑 `targets[{track_id,metadata_version}]`。固定封面与文字一起接受时，子草案也原子标记已应用，每曲元数据版本只增加一次。客户端不能提交伪造的 `cover_snapshot`。这些审核路由仅限登录会话；MCP 继续使用现有草案工具。
+
+## Web MCP 接入引导（2026-11-05）
+
+个人设置的 MCP 与外部工具沿用现有按账号、scope、期限签发和撤销凭据接口。
+新增 Codex、Cursor、Antigravity、OpenCode 和通用提示词的本地模板生成。
+用户填写连接名称和外部客户端能访问的单个 `/mcp` 完整地址；支持部署子路径，
+拒绝 URL 用户信息、query、fragment，HTTP 必须明确允许。
+复制提示词和配置不含本次生成的令牌；令牌仍只在签发时显示一次、单独复制。
+Codex 使用 bearer_token_env_var，Cursor 使用 headers 环境变量插值，OpenCode 使用
+remote + headers + oauth=false，Antigravity 使用 serverUrl + headers 占位符，不能臆造环境语法。
+
+提示词要求保留现有配置、核对同名冲突、通过用户安全输入设置凭据、初始化 MCP、
+列工具并执行只读查询。禁止仅因写出配置就宣称接入成功。浏览器不自动修改外部客户端文件。
+不把原生多线路 Fallback 套用到外部客户端。网页引导不向指定地址发送令牌或测试请求。
+
+文档核对来源：
+- https://developers.openai.com/codex/mcp
+- https://cursor.com/docs/context/mcp
+- https://antigravity.google/docs/mcp
+- https://opencode.ai/docs/mcp-servers/

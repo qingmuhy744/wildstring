@@ -110,8 +110,8 @@ private val reviewLabels = mapOf("title" to "歌名", "artists" to "歌曲艺人
     suspend fun purgeStale() {
         action.run {
             val res = vm.agent.request("metadata-review/stale/purge", "POST")
-            val count = res.number("purged_count").toLong()
-            val remaining = res.number("remaining_pending").toLong()
+            val count = res.number("purged_count")
+            val remaining = res.number("remaining_pending")
             val msg = if (count > 0) "已清理 $count 个失效候选，剩余 $remaining 个待核对候选。" else "暂无失效候选，全部均为有效版本。"
             action.message = msg
             val updated = loadAlbums()

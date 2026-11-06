@@ -141,7 +141,7 @@ test('模式、睡眠与账号播放恢复，恢复时暂停', async ({ page }) 
 
 test('每日推荐、偏好、本地AI回退、预览确认才保存歌单', async ({ page }, info) => {
   await login(page);
-  await section(page, '每日推荐 · AI');
+  await section(page, '推荐');
   const panel = page.getByLabel('音乐发现', { exact: true });
   await expect(panel.getByRole('button', { name: '播放推荐', exact: true })).toBeEnabled();
   await panel.getByText('推荐偏好', { exact: true }).click();
@@ -368,7 +368,7 @@ test('离线暂停、Range续传、容量失败与重试', async ({ page }) => {
 
 test('并行推荐反馈失败只恢复失败曲目', async ({ page }) => {
   await login(page);
-  await section(page, '每日推荐 · AI');
+  await section(page, '推荐');
   const panel = page.getByLabel('音乐发现', { exact: true });
   await expect(panel.locator('.discovery-track')).toHaveCount(2);
   const titles = await panel.locator('.discovery-track strong').allTextContents();

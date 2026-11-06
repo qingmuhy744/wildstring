@@ -5,6 +5,7 @@ import SwiftUI
 struct MacQueueView: View {
     let client: WildstringClient
     let playback: PlaybackService
+    var showsHeader = true
     @State private var selection: UUID?
 
     private var entries: [PlaybackService.Item] { playback.playbackItems }
@@ -12,25 +13,28 @@ struct MacQueueView: View {
 
     var body: some View {
         ScrollViewReader { proxy in
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text("播放队列").font(.headline)
-                    Text("\(entries.count) \(podcastsOnly ? "集" : "项")").font(.caption).foregroundStyle(.secondary)
-                    Spacer()
-                    Button {
-                        if let id = playback.currentItem?.id {
-                            selection = id
-                            withAnimation { proxy.scrollTo(id, anchor: .center) }
+            VStack(alignment: .leading, spacing: 10) {
+                if showsHeader {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text("播放队列").font(MacTheme.section(15))
+                        Text("\(entries.count) \(podcastsOnly ? "集" : "项")")
+                            .font(MacTheme.micro).foregroundStyle(MacTheme.muted)
+                        Spacer()
+                        Button {
+                            if let id = playback.currentItem?.id {
+                                selection = id
+                                withAnimation { proxy.scrollTo(id, anchor: .center) }
+                            }
+                        } label: {
+                            Image(systemName: "scope")
                         }
-                    } label: {
-                        Image(systemName: "scope")
+                        .buttonStyle(.borderless)
+                        .help("定位当前播放")
+                        .disabled(playback.currentItem == nil)
                     }
-                    .buttonStyle(.borderless)
-                    .help("定位当前播放")
-                    .disabled(playback.currentItem == nil)
                 }
                 Text(playback.isShuffled ? "随机播放顺序 · 拖动可调整" : "拖动调整顺序 · 双击播放")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(MacTheme.micro).foregroundStyle(MacTheme.muted)
                 List(selection: $selection) {
                     ForEach(Array(entries.enumerated()), id: \.element.id) { position, item in
                         row(item, position: position)
@@ -39,7 +43,8 @@ struct MacQueueView: View {
                             .contentShape(Rectangle())
                             .onTapGesture(count: 2) { play(item) }
                             .contextMenu { actions(item, position: position) }
-                            .listRowInsets(EdgeInsets(top: 5, leading: 4, bottom: 5, trailing: 4))
+                            .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+                            .listRowBackground(Color.clear)
                             .listRowSeparator(.hidden)
                     }
                     .onMove { offsets, destination in
@@ -78,23 +83,34 @@ struct MacQueueView: View {
             .buttonStyle(.plain)
             .help(current ? (playback.isPlaying ? "暂停" : "继续播放") : "播放 \(item.title)")
             VStack(alignment: .leading, spacing: 3) {
-                Text(item.title).font(.callout.weight(current ? .semibold : .regular))
-                    .foregroundStyle(current ? MacTheme.accentDeep : Color.primary)
+                Text(item.title)
+                    .font(.system(size: 13, weight: current ? .semibold : .regular))
+                    .foregroundStyle(current ? MacTheme.accentDeep : MacTheme.ink)
                     .lineLimit(item.trackID.hasPrefix("podcast_ep_") ? 2 : 1)
-                Text(item.artist).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                Text(item.artist).font(MacTheme.caption).foregroundStyle(MacTheme.muted).lineLimit(1)
             }.frame(maxWidth: .infinity, alignment: .leading)
             Text(current ? (playback.isPlaying ? "播放中" : "已暂停") : String(format: "%02d", position + 1))
-                .font(.caption2.monospacedDigit())
-                .foregroundStyle(current ? MacTheme.accentDeep : Color.secondary)
+                .font(MacTheme.mono(10))
+                .foregroundStyle(current ? MacTheme.accentDeep : MacTheme.faint)
             Menu { actions(item, position: position) } label: {
                 Image(systemName: "ellipsis").frame(width: 24, height: 28)
             }
             .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
             .accessibilityLabel("\(item.title)的队列操作")
         }
-        .padding(.horizontal, 6).padding(.vertical, 5)
-        .background(current ? MacTheme.accent.opacity(0.12) : Color.clear,
-            in: RoundedRectangle(cornerRadius: 8))
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(current ? MacTheme.accentSoft : Color.clear,
+            in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(alignment: .leading) {
+            if current {
+                Capsule()
+                    .fill(MacTheme.accent)
+                    .frame(width: 3)
+                    .padding(.vertical, 10)
+            }
+        }
+        .padding(.vertical, 2)
     }
 
     @ViewBuilder

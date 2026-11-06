@@ -1,5 +1,6 @@
 import { HelpLabel } from './desktop-help';
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { api } from './api';
 import {
   DiagnosticId,
@@ -22,27 +23,49 @@ interface LogEvent {
   http_status?: number;
   elapsed_ms?: number;
   domain?: string;
+  source?: string;
+  line?: number;
+  exception_type?: string;
+  stack?: {
+    exceptions: {
+      type: string;
+      relation: 'raised' | 'cause' | 'context';
+      frames: { module: string; function: string; line: number }[];
+      frames_truncated: boolean;
+    }[];
+    chain_truncated: boolean;
+  };
+}
+interface LogSettings {
+  level: 'INFO' | 'WARNING' | 'ERROR';
+  capture_stack: boolean;
 }
 interface LogPage {
   items: LogEvent[];
   next_cursor: string | null;
-  debug_until: string | null;
+  debug_until: number | null;
   degraded: boolean;
 }
 interface SystemStatus {
   version: string;
   schema_version: number;
-  logging: {
+  logging: LogSettings & {
     retention_days: number;
     max_bytes: number;
     degraded: boolean;
-    debug_until: string | null;
+    debug_until: number | null;
   };
   external_services: string[];
   agent_available: boolean;
 }
 export function SystemDiagnostics() {
+  const { t } = useTranslation();
   const status = useWorkspaceResource<SystemStatus>('/manage/diagnostics/status');
+  const [logSettings, setLogSettings] = useState<LogSettings | null>(null);
+  const configured: LogSettings = logSettings || {
+    level: status.value?.logging.level || 'INFO',
+    capture_stack: status.value?.logging.capture_stack ?? true,
+  };
   const [trace, setTrace] = useState(''),
     [level, setLevel] = useState(''),
     [event, setEvent] = useState(''),
@@ -61,12 +84,30 @@ export function SystemDiagnostics() {
   const displayed = Array.from(
     new Map([...pages, ...(logs.value?.items || [])].map((item) => [item.id, item])).values(),
   );
+  async function saveLogSettings() {
+    setBusy(true);
+    setError('');
+    setNotice('');
+    try {
+      await api('/manage/diagnostics/settings', {
+        method: 'PUT',
+        body: JSON.stringify(configured),
+      });
+      await status.reload();
+      setLogSettings(null);
+      setNotice(t('diagnostics.settingsSaved'));
+    } catch (reason) {
+      setError(errorText(reason));
+    } finally {
+      setBusy(false);
+    }
+  }
   async function debug(stop = false) {
     setBusy(true);
     setError('');
     setNotice('');
     try {
-      const result = await api<{ debug_until: string | null }>('/manage/diagnostics/debug', {
+      const result = await api<{ debug_until: number | null }>('/manage/diagnostics/debug', {
         method: 'POST',
         body: JSON.stringify({ minutes: stop ? 0 : minutes, module: debugModule }),
       });
@@ -147,6 +188,46 @@ export function SystemDiagnostics() {
               className="workspace-form"
               onSubmit={(e) => {
                 e.preventDefault();
+                void saveLogSettings();
+              }}
+            >
+              <h3>{t('diagnostics.settings')}</h3>
+              <p className="muted">{t('diagnostics.settingsHint')}</p>
+              <label>
+                {t('diagnostics.minimumLevel')}
+                <select
+                  aria-label={t('diagnostics.minimumLevel')}
+                  value={configured.level}
+                  disabled={busy || !status.value}
+                  onChange={(e) =>
+                    setLogSettings({ ...configured, level: e.target.value as LogSettings['level'] })
+                  }
+                >
+                  <option value="INFO">{t('diagnostics.levelInfo')}</option>
+                  <option value="WARNING">{t('diagnostics.levelWarning')}</option>
+                  <option value="ERROR">{t('diagnostics.levelError')}</option>
+                </select>
+              </label>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={configured.capture_stack}
+                  disabled={busy || !status.value}
+                  onChange={(e) =>
+                    setLogSettings({ ...configured, capture_stack: e.target.checked })
+                  }
+                />
+                {t('diagnostics.captureStack')}
+              </label>
+              <p className="muted">{t('diagnostics.stackHint')}</p>
+              <button type="submit" disabled={busy || !status.value || !logSettings}>
+                {t('diagnostics.saveSettings')}
+              </button>
+            </form>
+            <form
+              className="workspace-form"
+              onSubmit={(e) => {
+                e.preventDefault();
                 setPages([]);
                 setCursor('');
                 const p = new URLSearchParams({ limit: '50' });
@@ -175,7 +256,7 @@ export function SystemDiagnostics() {
                   onChange={(e) => setLevel(e.target.value)}
                 >
                   <option value="">全部</option>
-                  {['DEBUG', 'INFO', 'WARNING', 'ERROR'].map((value) => (
+                  {['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'].map((value) => (
                     <option key={value}>{value}</option>
                   ))}
                 </select>
@@ -225,6 +306,34 @@ export function SystemDiagnostics() {
                   </small>
                   <DiagnosticId id={item.trace_id} />
                   {item.task_id && <small>任务 {item.task_id}</small>}
+                  {(item.exception_type || item.source) && (
+                    <small>
+                      {[item.exception_type, item.source, item.line].filter(Boolean).join(' · ')}
+                    </small>
+                  )}
+                  {item.stack && (
+                    <details className="diagnostic-stack">
+                      <summary>{t('diagnostics.errorStack')}</summary>
+                      {item.stack.exceptions.map((exception, index) => (
+                        <div key={index}>
+                          <strong>
+                            {t(`diagnostics.relation.${exception.relation}`)} · {exception.type}
+                          </strong>
+                          <ol>
+                            {exception.frames.map((frame, frameIndex) => (
+                              <li key={frameIndex}>
+                                <code>
+                                  {frame.module}.{frame.function}:{frame.line}
+                                </code>
+                              </li>
+                            ))}
+                          </ol>
+                          {exception.frames_truncated && <p>{t('diagnostics.framesTruncated')}</p>}
+                        </div>
+                      ))}
+                      {item.stack.chain_truncated && <p>{t('diagnostics.chainTruncated')}</p>}
+                    </details>
+                  )}
                 </div>
                 {item.trace_id && (
                   <button

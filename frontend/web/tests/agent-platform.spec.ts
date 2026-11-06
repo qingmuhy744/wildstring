@@ -487,6 +487,20 @@ test('连接编辑仅发送允许字段，MCP 凭据只显示一次且可撤销'
   await expect(page.getByRole('region', { name: 'MCP 工具凭据' })).toContainText(
     'ws_synthetic-once-only-secret',
   );
+  const setup = page.getByRole('region', { name: '外部 AI 接入配置' });
+  await setup.getByLabel('MCP 地址', { exact: true }).fill('https://music.example.test/base/mcp');
+  await setup.getByText('查看配置与提示词', { exact: true }).click();
+  for (const client of ['codex', 'cursor', 'antigravity', 'opencode', 'generic']) {
+    await setup.getByLabel('AI 客户端', { exact: true }).selectOption(client);
+    await expect(setup.getByLabel('AI 接入提示词', { exact: true })).toHaveValue(/保留其他 MCP/);
+    expect(await setup.getByLabel('AI 接入提示词', { exact: true }).inputValue()).not.toContain(
+      'ws_synthetic-once-only-secret',
+    );
+  }
+  await setup.getByLabel('MCP 地址', { exact: true }).fill('http://192.168.1.2/mcp');
+  await expect(setup.getByRole('alert')).toContainText('明确允许这条线路');
+  await setup.getByRole('checkbox').check();
+  await expect(setup.getByRole('button', { name: '复制 AI 接入提示词' })).toBeVisible();
   await page.getByRole('button', { name: '隐藏凭据', exact: true }).click();
   await expect(page.getByRole('region', { name: 'MCP 工具凭据' })).not.toContainText(
     'ws_synthetic-once-only-secret',
@@ -584,16 +598,24 @@ test('规则巡检不调用模型，计划默认关闭并通过完整版本参�
   expect(changed.id).toBeUndefined();
 });
 
-test('受控诊断按编号筛选，时间线带错误码，临时调试最长15分钟', async ({ page }) => {
+test('受控诊断保存采集设置、展开错误栈，临时调试最长15分钟', async ({ page }) => {
   await fixture(page);
   let queries: URLSearchParams[] = [],
     debug: any = null;
+  let logSettings = { level: 'INFO', capture_stack: true };
+  let failSave = true;
   await page.route('**/api/v1/manage/diagnostics/status', (r) =>
     r.fulfill({
       json: {
         version: '0.4.0',
         schema_version: 17,
-        logging: { retention_days: 7, max_bytes: 209715200, degraded: false, debug_until: null },
+        logging: {
+          retention_days: 7,
+          max_bytes: 209715200,
+          degraded: false,
+          debug_until: null,
+          ...logSettings,
+        },
         external_services: ['musicbrainz'],
         agent_available: true,
       },
@@ -614,6 +636,26 @@ test('受控诊断按编号筛选，时间线带错误码，临时调试最长15
             code: 'timeout',
             elapsed_ms: 1000,
             domain: 'musicbrainz.org',
+            source: 'wildstring.outbound',
+            exception_type: 'RuntimeError',
+            line: 80,
+            stack: {
+              exceptions: [
+                {
+                  type: 'RuntimeError',
+                  relation: 'raised',
+                  frames: [{ module: 'wildstring.outbound', function: 'request', line: 120 }],
+                  frames_truncated: false,
+                },
+                {
+                  type: 'TimeoutError',
+                  relation: 'cause',
+                  frames: [{ module: 'http.client', function: 'connect', line: 90 }],
+                  frames_truncated: false,
+                },
+              ],
+              chain_truncated: false,
+            },
           },
         ],
         next_cursor: null,
@@ -626,6 +668,15 @@ test('受控诊断按编号筛选，时间线带错误码，临时调试最长15
     debug = r.request().postDataJSON();
     return r.fulfill({ json: { debug_until: now, module: debug.module } });
   });
+  await page.route('**/api/v1/manage/diagnostics/settings', (r) => {
+    expect(r.request().method()).toBe('PUT');
+    if (failSave) {
+      failSave = false;
+      return r.fulfill({ status: 503, json: { detail: 'diagnostic_settings_unavailable' } });
+    }
+    logSettings = r.request().postDataJSON();
+    return r.fulfill({ json: logSettings });
+  });
   await login(page);
   if (await page.getByLabel('浏览方式', { exact: true }).isVisible())
     await page.getByLabel('浏览方式', { exact: true }).selectOption('manage');
@@ -633,6 +684,21 @@ test('受控诊断按编号筛选，时间线带错误码，临时调试最长15
   await manageTab(page, '诊断');
   const panel = page.getByRole('region', { name: '系统诊断' });
   await expect(panel).toContainText('outbound.failed');
+  await panel.getByText('查看错误栈', { exact: true }).click();
+  await expect(panel).toContainText('wildstring.outbound.request:120');
+  await expect(panel).toContainText('直接原因 · TimeoutError');
+  await panel.getByLabel('最低记录等级', { exact: true }).selectOption('ERROR');
+  await panel.getByLabel('记录诊断调用栈', { exact: true }).uncheck();
+  await panel.getByRole('button', { name: '保存日志设置', exact: true }).click();
+  await expect(panel.getByRole('alert')).toBeVisible();
+  await expect(panel.getByLabel('最低记录等级', { exact: true })).toHaveValue('ERROR');
+  await expect(panel.getByLabel('记录诊断调用栈', { exact: true })).not.toBeChecked();
+  await panel.getByRole('button', { name: '保存日志设置', exact: true }).click();
+  await expect(panel).toContainText('日志设置已保存并生效。');
+  expect(logSettings).toEqual({ level: 'ERROR', capture_stack: false });
+  await panel.getByRole('button', { name: '刷新', exact: true }).click();
+  await expect(panel.getByLabel('最低记录等级', { exact: true })).toHaveValue('ERROR');
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await panel.getByLabel('筛选诊断编号', { exact: true }).fill('trace-log-040');
   await panel.getByRole('button', { name: '查询日志', exact: true }).click();
   await expect.poll(() => queries.at(-1)?.get('trace_id')).toBe('trace-log-040');
