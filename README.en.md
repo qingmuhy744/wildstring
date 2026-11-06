@@ -95,6 +95,7 @@ The Chinese name **野弦** (Yě Xián) stems from a deep reverence for Chinese 
 
 ## Recent Highlights
 
+- **v0.8.6**: Mac server switching with separate queues; multiple connection routes and local server aliases on Mac, iOS, and Android; server naming, access policies, and MCP setup guides on Web; unavailable-track indicators and playback filtering across clients; improvements to Mac settings and podcast speed controls, Android navigation and Daily Mix, and bilingual Web UI. See [v0.8.6 Release Notes](docs/releases/v0.8.6.md); check the corresponding Actions runs for validation and release status.
 - **v0.8.5**: Deep fix for album metadata modification & cover upload pipeline; podcast zero-reference cleanup preview modal & breakdown; Apple playback dynamic duration sync; management center & download cards dual-theme refinement; complete wiki overhaul with fresh web captures; dependency & CI/CD upgrades. See [v0.8.5 Release Notes](docs/releases/v0.8.5.md).
 - **v0.8.4**: Unified cross-platform versioning to 0.8.4; reinforced bilingual release automation and resilient test gates. See [v0.8.4 Release Notes](docs/releases/v0.8.4.md).
 - **v0.8.3**: Podcast regional top charts discovery and preview-before-follow across Web, Android, and Mac; direct raw audio downloads; content vs. settings sidebar re-organization; wide folder picker. See [v0.8.3 Release Notes](docs/releases/v0.8.3.md).
