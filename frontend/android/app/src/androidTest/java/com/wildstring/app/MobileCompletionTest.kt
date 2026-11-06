@@ -302,7 +302,9 @@ class MobileCompletionTest {
                 compose.onAllNodesWithContentDescription(uiString(R.string.back)).onLast().performClick()
                 compose.waitUntil(10_000) { compose.onAllNodesWithTag("feature-daily").fetchSemanticsNodes().isEmpty() }
                 compose.onNodeWithTag("nav-assistant").performClick()
-                compose.waitUntil(10_000) { compose.onAllNodesWithTag("agent-chat-input").fetchSemanticsNodes().isNotEmpty() }
+                // Match AgentWorkspaceTest: the assistant destination is slow
+                // on the software-rendered CI emulator.
+                compose.waitUntil(15_000) { compose.onAllNodesWithTag("agent-chat-input").fetchSemanticsNodes().isNotEmpty() }
                 compose.onNodeWithTag("agent-chat-input").assertIsDisplayed()
                 compose.onNodeWithTag("nav-mine").performClick()
                 compose.onNodeWithContentDescription(uiString(R.string.playlist_new)).performClick()
