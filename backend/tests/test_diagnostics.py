@@ -150,6 +150,11 @@ def test_failed_request_records_origin_stack_and_status(settings, authenticated_
             raise ValueError("private-request-value")
 
         client.app.add_api_route("/api/v1/diagnostic-fixture", failing_route)
+        # The web dist mount sits at the end of the route table (the container
+        # image pins WILDSTRING_WEB_DIR, overriding the test-environment guard
+        # in config) and would shadow routes appended after startup; match
+        # from the front so the fixture route wins regardless of environment.
+        client.app.router.routes.insert(0, client.app.router.routes.pop())
         with pytest.raises(ValueError):
             client.get("/api/v1/diagnostic-fixture", headers={"X-Wildstring-Trace-Id": "e" * 32})
         service = client.app.state.diagnostics
