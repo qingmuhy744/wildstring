@@ -71,7 +71,7 @@ test('从艺人歌曲打开完整所属专辑，清除艺人与搜索限制', as
   const target = (await (await page.request.get('/api/v1/tracks')).json()).items.find(
     (track: { title: string }) => track.title === '晴天测试曲',
   );
-  const request = page.waitForRequest((item) => item.url().endsWith(`/albums/${target.album_id}`));
+  const request = page.waitForRequest((item) => item.url().includes(`/albums/${target.album_id}?`));
   await page.getByRole('button', { name: '歌曲操作 晴天测试曲', exact: true }).click();
   await page.getByRole('button', { name: '查看所属专辑', exact: true }).click();
   await request;
@@ -114,7 +114,9 @@ test('播放页点击专辑名后继续播放，队列和进度不重置', async
 test('专辑不可用时保留当前页面，可重试打开', async ({ page }, info) => {
   await login(page);
   const target = (await (await page.request.get('/api/v1/tracks')).json()).items[0];
-  const route = `**/api/v1/albums/${target.album_id}`;
+  // The app fetches album details with `?include_unavailable=true`; the glob
+  // must cover the query string to intercept the request.
+  const route = `**/api/v1/albums/${target.album_id}?*`;
   await page.route(route, (request) =>
     request.fulfill({ status: 404, json: { detail: 'album_not_found' } }),
   );
