@@ -224,7 +224,12 @@ fun WildStringApp(model: MusicViewModel) {
         MaterialTheme(colorScheme = if (preferences.redCloth) redColors else if (dark) classicDarkColors else classicLightColors) {
             Surface(Modifier.fillMaxSize().testTag(if (preferences.redCloth) "appearance-red-cloth" else if (dark) "appearance-dark" else "appearance-light")) {
                 key(state.serverSelection) { Crossfade(state.connected, animationSpec = tween(220), label = "connection") { connected ->
-                    if (!connected) ConnectionScreen(state, model::connect, routes = model.repository.session.routes.value) { servers = true } else LibraryApp(model, state)
+                    if (!connected) {
+                        val routes by model.repository.session.routes.collectAsStateWithLifecycle()
+                        ConnectionScreen(state, model::connect, routes = routes) { servers = true }
+                    } else {
+                        LibraryApp(model, state)
+                    }
                 } }
                 com.wildstring.app.update.UpdatePrompt()
                 PodcastProgressDialog(model)
