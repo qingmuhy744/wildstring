@@ -107,7 +107,7 @@ struct MacDiscoverView: View {
 
           VStack(alignment: .trailing, spacing: 8) {
             Button {
-              if let first = tracks.first {
+              if let first = tracks.first(where: \.isAvailable) ?? tracks.first {
                 MacPlayback.play(tracks, startingAt: first, playback: playback)
               }
             } label: {

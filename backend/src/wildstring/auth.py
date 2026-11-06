@@ -17,6 +17,8 @@ from wildstring.permissions import require_owner, require_scope
 from wildstring.user_language_schema import resolve_language
 
 COOKIE = "wildstring_session"
+HTTPS_COOKIE = "wildstring_session_https"
+HTTP_COOKIE = "wildstring_session_http"
 SESSION_SECONDS = 7 * 24 * 60 * 60
 
 
@@ -143,16 +145,40 @@ class Auth:
                 connection.execute("DELETE FROM sessions WHERE user_id='admin'")
                 connection.execute("DELETE FROM login_attempts")
 
+    def session_cookie(self, request: Request) -> str:
+        policy = getattr(request.state, "connection_policy", None)
+        if policy is None:
+            from wildstring.server_settings import ServerSettings
+
+            policy = ServerSettings(self.database, self.settings).read()["connection_policy"]
+        if policy == "legacy":
+            return COOKIE
+        return HTTPS_COOKIE if request.url.scheme == "https" else HTTP_COOKIE
+
+    def session_token(self, request: Request) -> str:
+        token = request.cookies.get(self.session_cookie(request), "")
+        # HTTPS legacy cookies may survive selecting a modern policy. HTTP legacy
+        # sessions are revoked by that transition and cannot be reactivated.
+        if not token and request.url.scheme == "https":
+            token = request.cookies.get(COOKIE, "")
+        return token
+
     def require_session(self, request: Request) -> dict:
         if getattr(request.state, "user", None) is None:
-            token = request.cookies.get(COOKIE, "")
+            token = self.session_token(request)
             if not token or len(token) > 128:
                 raise HTTPException(401, "authentication_required")
             with self.database.connect() as connection:
                 row = connection.execute(
                     "SELECT u.* FROM sessions s JOIN users u ON u.id=s.user_id "
-                    "WHERE s.token_hash=? AND s.expires_at>? AND u.enabled=1 AND u.password_hash IS NOT NULL",
-                    (token_hash(token), int(time.time())),
+                    "WHERE s.token_hash=? AND s.expires_at>? AND u.enabled=1 AND u.password_hash IS NOT NULL "
+                    "AND (s.transport=? OR (s.transport='' AND ?))",
+                    (
+                        token_hash(token),
+                        int(time.time()),
+                        request.url.scheme,
+                        self.session_cookie(request) == COOKIE,
+                    ),
                 ).fetchone()
             if row is None:
                 raise HTTPException(401, "authentication_required")
@@ -231,7 +257,7 @@ class Auth:
         connection.execute("DELETE FROM login_attempts WHERE guard_key=?", (guard_key,))
 
     def login(
-        self, username: str, password: str, *, client_host: str | None = None
+        self, username: str, password: str, *, client_host: str | None = None, transport: str = ""
     ) -> tuple[str, dict]:
         with self.database.connect(write=True) as connection:
             connection.execute("BEGIN IMMEDIATE")
@@ -255,16 +281,17 @@ class Auth:
             )
             token = secrets.token_urlsafe(32)
             connection.execute(
-                "INSERT INTO sessions(token_hash,expires_at,user_id) VALUES (?,?,?)",
-                (token_hash(token), current + SESSION_SECONDS, row["id"]),
+                "INSERT INTO sessions(token_hash,expires_at,user_id,transport) VALUES (?,?,?,?)",
+                (token_hash(token), current + SESSION_SECONDS, row["id"], transport),
             )
             return token, public_user(row)
 
-    def logout_response(self):
+    def logout_response(self, request: Request):
         response = Response(status_code=204, headers={"Cache-Control": "no-store"})
-        response.delete_cookie(
-            COOKIE, path="/", secure=self.settings.cookie_secure, httponly=True, samesite="strict"
-        )
+        for name in {self.session_cookie(request), COOKIE}:
+            response.delete_cookie(
+                name, path="/", secure=name == HTTPS_COOKIE, httponly=True, samesite="strict"
+            )
         return response
 
     def router(self) -> APIRouter:
@@ -274,7 +301,10 @@ class Auth:
         def status(request: Request, response: Response):
             response.headers["Cache-Control"] = "no-store"
             authenticated = self.authenticated(request)
+            from wildstring.server_settings import ServerSettings
+
             result = {
+                "server": ServerSettings(self.database, self.settings).public(),
                 "configured": self.configured(),
                 "authenticated": authenticated,
                 "version": get_app_version(),
@@ -297,13 +327,18 @@ class Auth:
                 value.username,
                 value.password.get_secret_value(),
                 client_host=request.client.host if request.client else None,
+                transport=request.url.scheme,
             )
             response.set_cookie(
-                COOKIE,
+                self.session_cookie(request),
                 token,
                 max_age=SESSION_SECONDS,
                 httponly=True,
-                secure=self.settings.cookie_secure,
+                secure=(
+                    self.settings.cookie_secure
+                    if self.session_cookie(request) == COOKIE
+                    else request.url.scheme == "https"
+                ),
                 samesite="strict",
                 path="/",
             )
@@ -340,7 +375,7 @@ class Auth:
                     (hashed, user["id"]),
                 )
                 connection.execute("DELETE FROM sessions WHERE user_id=?", (user["id"],))
-            return self.logout_response()
+            return self.logout_response(request)
 
         @router.put("/profile")
         def update_profile(request: Request, body: object = Body(...)):
@@ -392,9 +427,9 @@ class Auth:
             with self.database.connect(write=True) as connection:
                 connection.execute(
                     "DELETE FROM sessions WHERE token_hash=?",
-                    (token_hash(request.cookies.get(COOKIE, "")),),
+                    (token_hash(self.session_token(request)),),
                 )
-            return self.logout_response()
+            return self.logout_response(request)
 
         from wildstring.avatars import router as avatar_router
 

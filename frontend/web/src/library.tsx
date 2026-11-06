@@ -1,3 +1,4 @@
+import { trackUnavailableReason } from './api';
 import { useTranslation } from 'react-i18next';
 import { readPreference, writePreference } from './user-preferences';
 import { CatalogSortControl, useCatalogSorting } from './catalog-sort';
@@ -422,9 +423,12 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
       const lists: Playlist[] = [];
       let cursor = 0;
       while (!controller.signal.aborted) {
-        const response = await api<PlaylistPage>(`/playlists?limit=100&offset=${cursor}`, {
-          signal: controller.signal,
-        });
+        const response = await api<PlaylistPage>(
+          `/playlists?include_unavailable=true&limit=100&offset=${cursor}`,
+          {
+            signal: controller.signal,
+          },
+        );
         lists.push(...response.items);
         cursor += response.items.length;
         if (cursor >= response.total || !response.items.length) break;
@@ -462,7 +466,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
     return () => controller.abort();
   }, [view, revision, listeningRevision, favorites.change]);
 
-  const parameters = new URLSearchParams({ q: album ? '' : query });
+  const parameters = new URLSearchParams({ q: album ? '' : query, include_unavailable: 'true' });
   let browsePath = '/tracks';
   if (activePlaylist) browsePath = `/playlists/${activePlaylist.id}/tracks`;
   else if (playlistGrid) browsePath = '/playlists';
@@ -520,7 +524,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
     setIndexError(false);
     if (!indexEnabled) return;
     const controller = new AbortController();
-    const indexParameters = new URLSearchParams({ kind, q: query });
+    const indexParameters = new URLSearchParams({ kind, q: query, include_unavailable: 'true' });
     if (selectedArtist) indexParameters.set('artist_id', selectedArtist.id);
     if (view === 'artists' && artistRole) indexParameters.set('role', artistRole);
     api<BrowseIndex>(`/browse-index?${indexParameters}`, { signal: controller.signal })
@@ -782,9 +786,12 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
     setLyricsOpen(false);
     setQueueOpen(false);
     try {
-      const target = await api<Album>(`/albums/${encodeURIComponent(track.album_id)}`, {
-        signal: controller.signal,
-      });
+      const target = await api<Album>(
+        `/albums/${encodeURIComponent(track.album_id)}?include_unavailable=true`,
+        {
+          signal: controller.signal,
+        },
+      );
       if (controller.signal.aborted) return;
       setAlbum(target);
       setAlbumLoading(false);
@@ -888,7 +895,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
     }
   }
   function collectionPath() {
-    const parameters = new URLSearchParams({ q: album ? '' : query });
+    const parameters = new URLSearchParams({ q: album ? '' : query, include_unavailable: 'true' });
     let path = '/tracks';
     if (activePlaylist) path = `/playlists/${activePlaylist.id}/tracks`;
     else if (selectedArtist) {
@@ -910,7 +917,14 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
     setCollectionBusy(true);
     setNotice(download ? '正在准备离线歌曲…' : '正在读取完整播放列表…');
     try {
-      const tracks = await collectTracks(collectionPath(), controller.signal);
+      const collection = await collectTracks(collectionPath(), controller.signal);
+      if (target && trackUnavailableReason(target)) {
+        throw new Error(
+          `「${target.title}」${trackUnavailableReason(target)}。请恢复文件并重新扫描，刷新列表后重试。`,
+        );
+      }
+      const tracks = collection.filter((track) => !trackUnavailableReason(track));
+      if (!tracks.length) throw new Error('没有可播放的歌曲，请恢复文件并重新扫描后重试。');
       if (controller.signal.aborted) return;
       if (download) {
         await saveDownloads(tracks);
@@ -1905,7 +1919,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
             closePlaylistMenu();
           }}
           onEdit={() => {
-            void api<Playlist>(`/playlists/${playlistMenu.item.id}`)
+            void api<Playlist>(`/playlists/${playlistMenu.item.id}?include_unavailable=true`)
               .then((initial) => setEditor({ initial, track: null }))
               .catch(() => setNotice('无法读取歌单，请重试。'));
             closePlaylistMenu();

@@ -896,3 +896,25 @@
 .application-policy > button {
   margin-right: 8px;
 }
+
+.mcp-onboarding {
+  padding: 20px 0;
+  margin: 0 0 20px;
+  border-block: 1px solid var(--border);
+}
+.mcp-onboarding details {
+  margin-top: 14px;
+}
+.mcp-onboarding details label {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+}
+.mcp-onboarding textarea {
+  width: 100%;
+  min-width: 0;
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  resize: vertical;
+}

@@ -50,7 +50,8 @@ enum MacPlayback {
       artist: track.artists.joined(separator: " / "),
       album: track.album,
       hasCover: track.hasCover,
-      streamPath: "api/v1/tracks/\(track.id)/stream"
+      streamPath: "api/v1/tracks/\(track.id)/stream",
+      unavailableReason: track.unavailableReason
     )
   }
 
@@ -265,14 +266,18 @@ struct MacPlayableTracks: View {
           } label: {
             Text(track.title)
               .font(.system(size: 13, weight: current ? .semibold : .medium))
-              .foregroundStyle(current ? MacTheme.accentDeep : MacTheme.ink)
+              .foregroundStyle(!track.isAvailable ? MacTheme.muted : current ? MacTheme.accentDeep : MacTheme.ink)
               .lineLimit(1)
               .frame(maxWidth: .infinity, alignment: .leading)
               .contentShape(Rectangle())
           }
           .buttonStyle(.plain)
 
-          if current {
+          if let reason = track.unavailableReason {
+            Label(reason, systemImage: "exclamationmark.circle")
+              .font(MacTheme.caption).foregroundStyle(MacTheme.muted)
+              .help("恢复文件并重新扫描后，刷新列表重试")
+          } else if current {
             Text(playback.isPlaying ? "正在播放" : "已暂停")
               .font(.system(size: 11))
               .foregroundStyle(MacTheme.accentDeep)
@@ -570,7 +575,7 @@ private struct MacAlbumDetail: View {
         symbol: "square.stack",
         canPlay: !tracks.isEmpty
       ) {
-        guard let first = tracks.first else { return }
+        guard let first = tracks.first(where: \.isAvailable) ?? tracks.first else { return }
         MacPlayback.play(tracks, startingAt: first, playback: playback)
       }
       MacPlayableTracks(
@@ -722,7 +727,7 @@ private struct MacArtistDetail: View {
         symbol: "person.2",
         canPlay: !tracks.isEmpty
       ) {
-        guard let first = tracks.first else { return }
+        guard let first = tracks.first(where: \.isAvailable) ?? tracks.first else { return }
         MacPlayback.play(tracks, startingAt: first, playback: playback)
       }
       MacPlayableTracks(
@@ -921,7 +926,7 @@ private struct MacPlaylistDetail: View {
         symbol: "music.note.list",
         canPlay: !tracks.isEmpty
       ) {
-        guard let first = tracks.first else { return }
+        guard let first = tracks.first(where: \.isAvailable) ?? tracks.first else { return }
         MacPlayback.play(tracks, startingAt: first, playback: playback)
       }
       MacPlayableTracks(
@@ -981,7 +986,7 @@ struct MacFavoritesView: View {
           MacPlayback.play(tracks, startingAt: pick, playback: playback)
         }
       ) {
-        guard let first = tracks.first else { return }
+        guard let first = tracks.first(where: \.isAvailable) ?? tracks.first else { return }
         MacPlayback.play(tracks, startingAt: first, playback: playback)
       }
       MacPlayableTracks(

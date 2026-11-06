@@ -39,8 +39,10 @@ data class CatalogPage(val tracks: List<Track> = emptyList(), val albums: List<A
 
 @Singleton
 class Repository @Inject constructor(@param:ApplicationContext private val context: Context, val session: SessionStore, val client: OkHttpClient, val database: QueueDatabase, val cache: ClientCache, val settings: AppSettings, val downloads: OfflineDownloads) {
+    val connectionRoutes = ServerRouteManager(session)
     private val preferenceScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.Main.immediate)
     init {
+        preferenceScope.launch { connectionRoutes.monitor() }
         settings.bindAccount(session.activeServerId, session.account?.id)
         preferenceScope.launch {
             session.profiles.collect { settings.bindAccount(session.activeServerId, session.account?.id) }
@@ -279,6 +281,7 @@ class Repository @Inject constructor(@param:ApplicationContext private val conte
         val endpoint = session.endpoint
         return api().status().also {
             if (owner != session.cacheScope() || endpoint != session.endpoint) throw CancellationException("会话已变化。")
+            it.server?.let(session::updateServerInfo)
         }
     }
     suspend fun acceptAccount(account: Account?): Boolean {
@@ -484,17 +487,27 @@ class Repository @Inject constructor(@param:ApplicationContext private val conte
         }
     }
     suspend fun logout() {
-        val target = url("api", "v1", "auth", "logout")
-        val cookie = session.read()?.substringBefore(';')
+        val routes = session.routeRecords().mapNotNull { route ->
+            val base = ServerAddress.normalize(route.url, route.allowHttp)
+            val cookie = session.routeCookie(route.url)?.let { okhttp3.Cookie.parse(base, it) }
+                ?.takeIf { it.matches(base) } ?: return@mapNotNull null
+            base.resolve("api/v1/auth/logout")!! to "${cookie.name}=${cookie.value}"
+        }
         client.dispatcher.cancelAll()
-        cache.clear(); session.invalidate(); knownTracks.clear(); database.queue().clear()
+        cache.clear(); session.clearRouteSessions(); session.invalidate(); knownTracks.clear(); database.queue().clear()
         settings.bindAccount(session.activeServerId, session.account?.id)
         withContext(Dispatchers.IO) {
-            if (cookie != null) client.newBuilder().apply { interceptors().clear(); networkInterceptors().clear() }.cookieJar(CookieJar.NO_COOKIES).build().newCall(
-                Request.Builder().url(target).header("Cookie", cookie).post("".toRequestBody()).build()
-            ).execute().close()
+            val isolated = client.newBuilder().apply { interceptors().clear(); networkInterceptors().clear() }
+                .cookieJar(CookieJar.NO_COOKIES).retryOnConnectionFailure(false).build()
+            for ((target, cookie) in routes) {
+                try {
+                    isolated.newCall(Request.Builder().url(target).header("Cookie", cookie)
+                        .header("X-Wildstring-Client", "android").post("".toRequestBody()).build()).execute().close()
+                } catch (_: IOException) { /* The local session was already removed; unreachable routes expire server-side. */ }
+            }
         }
     }
+
 }
 fun friendlyError(error: Throwable): String = (when (error) {
     is AgentApiException -> error.message ?: "操作未完成，请重试。"
@@ -509,7 +522,7 @@ fun friendlyError(error: Throwable): String = (when (error) {
             else -> "输入不符合服务器要求，请检查后重试。"
         }
         401 -> "登录已失效，请重新登录。"
-        403 -> "服务器拒绝请求，请检查服务版本与权限。"
+        403 -> if (error.response()?.errorBody()?.string()?.contains("https_required") == true) "服务器仅允许 HTTPS，请使用 HTTPS 线路登录。" else "服务器拒绝请求，请检查服务版本与权限。"
         404 -> "内容不存在或已经移除。"
         409 -> "内容已变化，请刷新后重试。"
         429 -> "尝试次数较多，请稍后一分钟重试。"

@@ -6,9 +6,16 @@ struct SavedServer: Codable, Equatable, Identifiable {
     var lastUsedAt: Date
     var allowInsecureHTTP: Bool
 
+    var serverName: String?
+    var alias: String?
+    var instanceID: String?
+    var label: String { alias.flatMap { $0.isEmpty ? nil : $0 } ?? serverName ?? address }
     var id: String { address }
 
-    init(address: String, username: String, lastUsedAt: Date, allowInsecureHTTP: Bool = false) {
+    init(address: String, username: String, lastUsedAt: Date, allowInsecureHTTP: Bool = false, serverName: String? = nil, alias: String? = nil, instanceID: String? = nil) {
+        self.serverName = serverName
+        self.alias = alias
+        self.instanceID = instanceID
         self.address = address
         self.username = username
         self.lastUsedAt = lastUsedAt
@@ -16,11 +23,14 @@ struct SavedServer: Codable, Equatable, Identifiable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case address, username, lastUsedAt, allowInsecureHTTP
+        case address, username, lastUsedAt, allowInsecureHTTP, serverName, alias, instanceID
     }
 
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
+        serverName = try values.decodeIfPresent(String.self, forKey: .serverName)
+        alias = try values.decodeIfPresent(String.self, forKey: .alias)
+        instanceID = try values.decodeIfPresent(String.self, forKey: .instanceID)
         address = try values.decode(String.self, forKey: .address)
         username = try values.decode(String.self, forKey: .username)
         lastUsedAt = try values.decode(Date.self, forKey: .lastUsedAt)

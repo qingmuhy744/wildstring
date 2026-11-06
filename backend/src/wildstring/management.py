@@ -32,6 +32,7 @@ from wildstring.library.lyric_edits import LyricsEditor, LyricsText, LyricsUpdat
 from wildstring.library.repository import now
 from wildstring.library.scanner import ScanBusyError, scan_library
 from wildstring.recommendations import DAY_ZONE, Recommendations
+from wildstring.server_settings import ServerSettings
 from wildstring.task_notifications import management_result
 
 logger = logging.getLogger(__name__)
@@ -1069,6 +1070,9 @@ class Management:
                 "host": self.settings.host,
                 "port": self.settings.port,
                 "cookie_secure": self.settings.cookie_secure,
+                "connection_policy": ServerSettings(self.database, self.settings).read()[
+                    "connection_policy"
+                ],
                 "source_readonly": True,
                 "metadata_writeback": False,
             },

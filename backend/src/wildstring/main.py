@@ -11,6 +11,7 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.routing import Route
+from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
 from wildstring import get_app_version
 from wildstring.agent_platform import AgentPlatform
@@ -34,6 +35,7 @@ from wildstring.podcast_search import PodcastSearch
 from wildstring.podcasts import PodcastManager, podcast_router
 from wildstring.providers import Providers
 from wildstring.request_privacy import CallbackPrivacy, install_callback_filter
+from wildstring.server_settings import ConnectionSecurity, ServerSettings
 from wildstring.site_access import HostAllowlist, SiteAccess
 
 logger = logging.getLogger(__name__)
@@ -49,6 +51,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     playlists = PlaylistStore(repository)
     management = Management(current, repository)
     access = SiteAccess(database)
+    server_settings = ServerSettings(database, current)
     transcoding = Transcoding(repository)
     providers = Providers(repository)
     diagnostics = Diagnostics(current.data_dir)
@@ -77,6 +80,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         current.data_dir.mkdir(parents=True, exist_ok=True)
         current.podcasts_dir.mkdir(parents=True, exist_ok=True)
         database.initialize()
+        policy = server_settings.read()["connection_policy"]
+        if policy != "legacy":
+            with database.connect(write=True) as connection:
+                connection.execute("DELETE FROM sessions WHERE transport=''")
+                if policy == "https_only":
+                    connection.execute("DELETE FROM sessions WHERE transport='http'")
         catalog.initialize()
         repository.root.mkdir(parents=True, exist_ok=True)
         diagnostics.start()
@@ -153,6 +162,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(auth.router())
     app.include_router(auth.users_router())
     app.include_router(access.router(auth))
+    app.include_router(server_settings.router(auth))
     app.state.transcoding = transcoding
     app.state.library_catalog = catalog
     app.state.podcasts = podcasts
@@ -190,8 +200,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.mount("/", StaticFiles(directory=current.web_dir, html=True), name="web")
 
     app.add_middleware(LibraryAccess, auth=auth, catalog=catalog, router=app.router)
+    app.add_middleware(ConnectionSecurity, server_settings=server_settings)
     app.add_middleware(HostAllowlist, access=access)
     app.add_middleware(CallbackPrivacy)
     app.add_middleware(RequestTrace, diagnostics=diagnostics)
+
+    app.add_middleware(ProxyHeadersMiddleware, trusted_hosts=current.trusted_proxies)
 
     return app

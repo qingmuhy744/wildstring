@@ -98,8 +98,10 @@ class PlaylistStore:
             raise HTTPException(409, "playlist_version_conflict")
         return result
 
-    def _selection(self, record, q=""):
+    def _selection(self, record, q="", *, include_unavailable=False):
         where = "library_visible(t.library_id) AND t.status = 'available'"
+        if include_unavailable and record["kind"] in ("manual", "favorites"):
+            where = "library_visible(t.library_id) AND t.status IN ('available', 'missing', 'unreadable')"
         parameters = {"library_id": self.library.library_id(), "playlist_id": record["id"]}
         cap = 2_147_483_647
         if record["kind"] == "manual":
@@ -128,8 +130,8 @@ class PlaylistStore:
         )
         return selection, parameters
 
-    def _public(self, connection, record):
-        selection, parameters = self._selection(record)
+    def _public(self, connection, record, *, include_unavailable=False):
+        selection, parameters = self._selection(record, include_unavailable=include_unavailable)
         # selection is built exclusively by _selection; all user values are SQL parameters.
         summary = connection.execute(
             "".join(
@@ -149,12 +151,16 @@ class PlaylistStore:
         result["definition"] = json.loads(record["definition"]) if record["definition"] else None
         return result
 
-    def get(self, playlist_id):
+    def get(self, playlist_id, *, include_unavailable=False):
         with self.database.connect() as connection:
             configure_artist_queries(connection)
-            return self._public(connection, self._record(connection, playlist_id))
+            return self._public(
+                connection,
+                self._record(connection, playlist_id),
+                include_unavailable=include_unavailable,
+            )
 
-    def listing(self, q="", limit=50, offset=0):
+    def listing(self, q="", limit=50, offset=0, *, include_unavailable=False):
         query = normalize(q).replace("\\", "\\\\").replace("%", r"\%").replace("_", r"\_")
         parameters = (self.user_id, query, f"%{query}%")
         with self.database.connect() as connection:
@@ -167,14 +173,19 @@ class PlaylistStore:
                 "SELECT * FROM playlists WHERE user_id = ? AND (? = '' OR normalized(name) LIKE ? ESCAPE '\\') ORDER BY kind = 'favorites' DESC, updated_at DESC, id LIMIT ? OFFSET ?",
                 (*parameters, limit, offset),
             ).fetchall()
-            items = [self._public(connection, dict(row)) for row in rows]
+            items = [
+                self._public(connection, dict(row), include_unavailable=include_unavailable)
+                for row in rows
+            ]
         return {"items": items, "total": total, "limit": limit, "offset": offset}
 
-    def tracks(self, playlist_id, q="", limit=50, offset=0):
+    def tracks(self, playlist_id, q="", limit=50, offset=0, *, include_unavailable=False):
         with self.database.connect() as connection:
             configure_artist_queries(connection)
             record = self._record(connection, playlist_id)
-            selection, parameters = self._selection(record, q)
+            selection, parameters = self._selection(
+                record, q, include_unavailable=include_unavailable
+            )
             filtered = "".join(
                 (
                     "SELECT * FROM (",
@@ -279,21 +290,25 @@ class PlaylistStore:
                 if requested == set(ids):
                     ids = reorder
                 else:
-                    available = {
-                        row["id"]
+                    visible = {
+                        row["id"]: row["status"]
                         for row in connection.execute(
-                            "SELECT id FROM tracks WHERE library_visible(library_id) AND status='available' "
+                            "SELECT id,status FROM tracks WHERE library_visible(library_id) "
+                            "AND status IN ('available', 'missing', 'unreadable') "
                             "AND id IN (SELECT value FROM json_each(?))",
                             (json.dumps(ids),),
                         )
                     }
-                    if requested != available:
+                    available = {
+                        identity for identity, status in visible.items() if status == "available"
+                    }
+                    if requested != available and requested != set(visible):
                         raise HTTPException(409, "playlist_order_conflict")
-                    # Preserve every unavailable reference and its slot. Sorting visible songs
-                    # must neither silently drop missing entries nor reinterpret a partial page.
+                    # Old clients see only available entries; new clients also see missing
+                    # files. Preserve every reference hidden by either view in its slot.
                     replacements = iter(reorder)
                     ids = [
-                        next(replacements) if identity in available else identity
+                        next(replacements) if identity in requested else identity
                         for identity in ids
                     ]
             if move is not None:
@@ -336,16 +351,21 @@ def playlist_router(store: PlaylistStore, auth):
         q: str = Query(default="", max_length=256),
         limit: int = Query(default=50, ge=1, le=100),
         offset: int = Query(default=0, ge=0),
+        include_unavailable: bool = False,
     ):
-        return current.listing(q, limit, offset)
+        return current.listing(q, limit, offset, include_unavailable=include_unavailable)
 
     @router.post("", dependencies=[Depends(auth.require_client)], status_code=201)
     def create(body: PlaylistCreate, current: Annotated[PlaylistStore, Depends(scoped)]):
         return current.create(body)
 
     @router.get("/{playlist_id}")
-    def detail(playlist_id: str, current: Annotated[PlaylistStore, Depends(scoped)]):
-        return current.get(playlist_id)
+    def detail(
+        playlist_id: str,
+        current: Annotated[PlaylistStore, Depends(scoped)],
+        include_unavailable: bool = False,
+    ):
+        return current.get(playlist_id, include_unavailable=include_unavailable)
 
     @router.put("/{playlist_id}", dependencies=[Depends(auth.require_client)])
     def update(
@@ -368,8 +388,11 @@ def playlist_router(store: PlaylistStore, auth):
         q: str = Query(default="", max_length=256),
         limit: int = Query(default=50, ge=1, le=200),
         offset: int = Query(default=0, ge=0),
+        include_unavailable: bool = False,
     ):
-        return current.tracks(playlist_id, q, limit, offset)
+        return current.tracks(
+            playlist_id, q, limit, offset, include_unavailable=include_unavailable
+        )
 
     @router.post("/{playlist_id}/tracks", dependencies=[Depends(auth.require_client)])
     def append(

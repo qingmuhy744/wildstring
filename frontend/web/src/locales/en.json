@@ -182,6 +182,10 @@
     "requestFailed": "The request didn't finish. Try again."
   },
   "errors": {
+    "audio_not_found": "Audio file is missing. Restore it and rescan the library, then retry.",
+    "audio_unavailable": "The server cannot read the audio file. Check its storage and retry.",
+    "track_unavailable": "Audio is unavailable. Restore it and rescan the library, then retry.",
+    "file_changed_rescan_required": "The audio file changed. Rescan the library and retry.",
     "folder_name_invalid": "Enter a valid folder name without path separators, control characters or a leading dot.",
     "folder_already_exists": "A file or folder with this name already exists. Choose another name.",
     "remote_url_fake_ip": "The server's DNS is in fake-ip mode (198.18.0.0/15). Configure an outbound proxy in network settings, or set WILDSTRING_PODCAST_ALLOW_FAKE_IP=true on the server and restart it.",

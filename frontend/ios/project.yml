@@ -17,6 +17,7 @@ targets:
     platform: iOS
     sources:
       - path: WildString
+      - path: ../apple-shared
     dependencies:
       - package: WildStringKit
         product: CoreNetwork

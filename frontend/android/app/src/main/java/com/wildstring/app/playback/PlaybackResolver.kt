@@ -56,7 +56,7 @@ class PlaybackResolver @Inject constructor(private val session: SessionStore, pr
             client.newCall(Request.Builder().url(probe).build()).execute().use { response ->
                 if (!response.isSuccessful) throw PlaybackResolutionException(when (response.code) {
                     401 -> "登录已失效，请重新登录。"
-                    404 -> "服务器尚不支持 AAC，请切换原音。"
+                    404, 409 -> trackPlaybackMessage(response.code, response.peekBody(8192).string())
                     429 -> "服务器转码繁忙，请稍后重试或切换原音。"
                     503 -> "AAC 转码暂不可用，请重试或切换原音。"
                     else -> "无法获取 AAC 播放信息，请重试或切换原音。"

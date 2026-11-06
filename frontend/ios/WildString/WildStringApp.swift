@@ -65,6 +65,7 @@ struct RootView: View {
             Self.applyDemoDefaults()
             await model.restore()
         }
+        .environment(model)
         .preferredColorScheme((ThemeChoice(rawValue: theme) ?? .system).colorScheme)
         .environment(\.locale, InterfaceLanguage(preference: language).locale)
     }

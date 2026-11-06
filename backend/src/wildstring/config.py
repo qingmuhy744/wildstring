@@ -22,6 +22,11 @@ class Settings(BaseSettings):
     web_dir: Path | None = None
     admin_password: SecretStr | None = None
     cookie_secure: bool = False
+    # Validate only the effective fallback: a DB override must also win over a
+    # malformed or obsolete environment value on a later restart.
+    server_name: str | None = None
+    connection_policy: str | None = None
+    trusted_proxies: str = ""
     # Opt-in for hosts whose DNS runs Clash/mihomo fake-ip mode (198.18.0.0/15 answers).
     podcast_allow_fake_ip: bool = False
     podcast_search_regions: str = "us,tw,cn"
@@ -29,6 +34,13 @@ class Settings(BaseSettings):
     # except in the test environment; WILDSTRING_PODCAST_IDENTITY_AUTO_BACKFILL=false disables.
     podcast_identity_auto_backfill: bool | None = None
     podcast_identity_auto_backfill_delay_seconds: int = Field(default=180, ge=0, le=86400)
+
+    @field_validator("server_name", "connection_policy", mode="before")
+    @classmethod
+    def optional_server_setting(cls, value):
+        if isinstance(value, str):
+            return value.strip() or None
+        return value
 
     @field_validator("data_dir", "music_dir", "podcasts_dir", "web_dir")
     @classmethod

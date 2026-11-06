@@ -9,6 +9,7 @@ struct SettingsView: View {
     let server: String
     let username: String
 
+    @Environment(ConnectionModel.self) private var connection
     @Environment(OfflineModel.self) private var offline
     @Environment(\.isAdmin) private var isAdmin
     @State private var limitMB = 512
@@ -68,6 +69,16 @@ struct SettingsView: View {
                 }
                 .sheet(isPresented: $showingReview) {
                     MetadataReviewView(client: client)
+                }
+            }
+            if let routes = connection.routes {
+                Section("服务器") {
+                    TextField("本机别名（留空使用服务器名称）", text: Binding(get: { connection.servers.first { $0.address == routes.storageAddress }?.alias ?? "" }, set: { value in
+                        if let saved = connection.servers.first(where: { $0.address == routes.storageAddress }) { connection.setAlias(value, for: saved) }
+                    }))
+                    NavigationLink("线路与故障切换") { ServerRoutesEditor(routes: routes).navigationTitle("服务器线路") }
+                    Text("当前线路：\(routes.activeName)").font(.caption).foregroundStyle(.secondary)
+                    if let message = routes.message { Text(message).font(.caption).foregroundStyle(.secondary) }
                 }
             }
             Section("settings.appearance") {

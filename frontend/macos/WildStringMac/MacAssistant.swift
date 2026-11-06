@@ -286,7 +286,7 @@ struct MacAssistantView: View {
                 .padding(2)
                 HStack {
                     Label(model.connectionID == "local" ? "曲库检索" : "模型助手",
-                        systemImage: model.connectionID == "local" ? "music.note.magnifyingglass" : "sparkles")
+                        systemImage: model.connectionID == "local" ? "magnifyingglass" : "sparkles")
                         .font(MacTheme.caption).foregroundStyle(MacTheme.muted)
                     Spacer()
                     Button {

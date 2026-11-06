@@ -22,9 +22,9 @@ final class MacConnectionMonitor {
     private var loop: Task<Void, Never>?
     private var failures = 0
 
-    init(server: ServerAddress) {
+    init(server: ServerAddress, configuration: URLSessionConfiguration? = nil) {
         self.server = server
-        let configuration = URLSessionConfiguration.ephemeral
+        let configuration = configuration ?? URLSessionConfiguration.ephemeral
         configuration.timeoutIntervalForRequest = 8
         configuration.httpCookieStorage = nil
         self.session = URLSession(configuration: configuration)

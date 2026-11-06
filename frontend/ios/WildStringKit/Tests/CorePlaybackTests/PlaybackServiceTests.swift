@@ -6,6 +6,23 @@ import Testing
 @Suite("PlaybackService", .serialized)
 @MainActor
 struct PlaybackServiceTests {
+    @Test func missingItemsAreSkippedWithoutChangingManualSelectionOrPreviousQueue() throws {
+        let service = try makeService(store: InMemoryQueueStore())
+        defer { service.shutdown() }
+        let missing = PlaybackService.Item(trackID: "missing", title: "Missing", artist: "Artist", streamPath: "unused", unavailableReason: "文件缺失")
+        let available = PlaybackService.Item(trackID: "available", title: "Available", artist: "Artist", streamPath: "unused")
+        service.play(items: [missing, available, missing], startingAt: 1)
+        #expect(service.items == [available])
+        #expect(service.currentIndex == 0)
+        service.pause()
+        service.play(items: [missing], startingAt: 0)
+        #expect(service.items == [available])
+        #expect(!service.wantsPlayback)
+        #expect(service.errorMessage?.contains("文件缺失") == true)
+        #expect(!service.enqueue(items: [missing]))
+        #expect(service.items == [available])
+    }
+
     @Test func serverSwitchShutdownPreservesQueueAndPausedPosition() async throws {
         let store = InMemoryQueueStore()
         let service = try makeService(store: store)
@@ -27,6 +44,20 @@ struct PlaybackServiceTests {
         restored.shutdown()
         await restored.flushPersistence()
         #expect(try await store.load() == nil)
+    }
+
+    @Test func routeSwitchKeepsEntryOrderShuffleRepeatAndProgress() async throws {
+        let service = try makeService(store: InMemoryQueueStore())
+        let items = ["a", "b", "a"].map { PlaybackService.Item(trackID: $0, title: $0, artist: "Artist", streamPath: "unused") }
+        service.adopt(items: items, startingAt: 1, position: 91.2, mode: "shuffle")
+        let snapshot = service.queue
+        let next = try makeService(store: InMemoryQueueStore())
+        next.restoreRouteQueue(snapshot, position: service.currentTime)
+        #expect(next.queue == snapshot)
+        #expect(next.currentTime == 91.2)
+        #expect(next.currentItem?.id == service.currentItem?.id)
+        #expect(!next.isPlaying)
+        service.shutdown(); next.shutdown()
     }
 
     @Test func podcastSpeedDoesNotStartPausedPlaybackOrAffectMusic() async throws {

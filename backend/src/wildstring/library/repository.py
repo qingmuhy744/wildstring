@@ -20,7 +20,7 @@ COUNTERS = ("visited", "added", "updated", "unchanged", "errors", "missing", "sk
 # Reuse each selection for both the paginated rows and the global letter index.
 # This keeps literal search, contributor roles, availability and library scope equal.
 TRACK_SELECTION = """SELECT * FROM personal_tracks
-    WHERE library_selected(library_id, :library_id) AND status = 'available'
+    WHERE library_selected(library_id, :library_id) AND track_available(status)
     AND (:query = '' OR search_text LIKE :pattern ESCAPE '\\')
     AND (:album_id IS NULL OR album_id = :album_id)
     AND (:played_only = 0 OR last_played_at IS NOT NULL)
@@ -35,7 +35,7 @@ ALBUM_SELECTION = """SELECT album_id AS id,
         THEN browse_sort(json_extract(album_artists, '$[0]')) END),
         min(browse_sort(COALESCE(json_extract(artists, '$[0]'), '')))) AS sort_artist
     FROM tracks
-    WHERE library_selected(library_id, :library_id) AND status = 'available'
+    WHERE library_selected(library_id, :library_id) AND track_available(status)
     AND (:artist_id IS NULL OR id IN
         (SELECT track_id FROM artist_credits WHERE artist_id = :artist_id))
     GROUP BY album_id
@@ -274,6 +274,7 @@ class LibraryRepository:
         sort: str = "title",
         order: str | None = None,
         role: str | None = None,
+        include_unavailable: bool = False,
     ) -> dict:
         query = normalize(q).replace("\\", "\\\\").replace("%", r"\%").replace("_", r"\_")
         parameters = {
@@ -288,7 +289,7 @@ class LibraryRepository:
             "sort": sort,
         }
         with self.database.connect() as connection:
-            configure_artist_queries(connection, role)
+            configure_artist_queries(connection, role, include_unavailable=include_unavailable)
             configure_browse_queries(connection)
             total = connection.execute(
                 "".join((ARTIST_CREDITS, "SELECT count(*) FROM (", TRACK_SELECTION, ")")),
@@ -353,7 +354,7 @@ class LibraryRepository:
         result.pop("sort_artist", None)
         members = connection.execute(
             """SELECT id, artists, album_artists,library_id FROM tracks
-            WHERE library_visible(library_id) AND album_id = ? AND status = 'available'
+            WHERE library_visible(library_id) AND album_id = ? AND track_available(status)
             ORDER BY has_cover DESC, COALESCE(disc_number, 1), COALESCE(track_number, 2147483647), title, id""",
             (result["id"],),
         ).fetchall()
@@ -382,6 +383,7 @@ class LibraryRepository:
         role: str | None = None,
         sort: str = "title",
         order: str | None = None,
+        include_unavailable: bool = False,
     ) -> dict:
         query = normalize(q).replace("\\", "\\\\").replace("%", r"\%").replace("_", r"\_")
         parameters = {
@@ -393,7 +395,7 @@ class LibraryRepository:
             "offset": offset,
         }
         with self.database.connect() as connection:
-            configure_artist_queries(connection, role)
+            configure_artist_queries(connection, role, include_unavailable=include_unavailable)
             configure_browse_queries(connection)
             total = connection.execute(
                 "".join((ARTIST_CREDITS, "SELECT count(*) FROM (", ALBUM_SELECTION, ")")),
@@ -414,7 +416,13 @@ class LibraryRepository:
         return {"items": items, "total": total, "limit": limit, "offset": offset}
 
     def artists(
-        self, q: str = "", limit: int = 50, offset: int = 0, *, role: str | None = None
+        self,
+        q: str = "",
+        limit: int = 50,
+        offset: int = 0,
+        *,
+        role: str | None = None,
+        include_unavailable: bool = False,
     ) -> dict:
         query = normalize(q).replace("\\", "\\\\").replace("%", r"\%").replace("_", r"\_")
         parameters = {
@@ -425,7 +433,7 @@ class LibraryRepository:
             "offset": offset,
         }
         with self.database.connect() as connection:
-            configure_artist_queries(connection, role)
+            configure_artist_queries(connection, role, include_unavailable=include_unavailable)
             configure_browse_queries(connection)
             total = connection.execute(
                 "".join((ARTIST_CREDITS, "SELECT count(*) FROM (", ARTIST_SELECTION, ")")),
@@ -456,6 +464,7 @@ class LibraryRepository:
         *,
         artist_id: str | None = None,
         role: str | None = None,
+        include_unavailable: bool = False,
     ) -> dict:
         query = normalize(q).replace("\\", "\\\\").replace("%", r"\%").replace("_", r"\_")
         parameters = {
@@ -473,7 +482,7 @@ class LibraryRepository:
         }[kind]
         group_expression = "browse_group(name)" if kind == "artists" else "browse_group(title)"
         with self.database.connect() as connection:
-            configure_artist_queries(connection, role)
+            configure_artist_queries(connection, role, include_unavailable=include_unavailable)
             configure_browse_queries(connection)
             rows = connection.execute(
                 "".join(
@@ -498,9 +507,9 @@ class LibraryRepository:
             offset += count
         return {"kind": kind, "total": offset, "groups": groups}
 
-    def artist(self, artist_id: str) -> dict | None:
+    def artist(self, artist_id: str, *, include_unavailable: bool = False) -> dict | None:
         with self.database.connect() as connection:
-            configure_artist_queries(connection)
+            configure_artist_queries(connection, include_unavailable=include_unavailable)
             row = connection.execute(
                 "".join(
                     (
@@ -513,12 +522,13 @@ class LibraryRepository:
             ).fetchone()
         return dict(row) if row else None
 
-    def album(self, album_id: str) -> dict | None:
+    def album(self, album_id: str, *, include_unavailable: bool = False) -> dict | None:
         with self.database.connect() as connection:
+            configure_artist_queries(connection, include_unavailable=include_unavailable)
             row = connection.execute(
                 """SELECT album_id AS id, min(COALESCE(NULLIF(album, ''), '未命名专辑')) AS title,
                 count(*) AS track_count, sum(duration_ms) AS duration_ms FROM tracks
-                WHERE library_visible(library_id) AND album_id = ? AND status = 'available' GROUP BY album_id""",
+                WHERE library_visible(library_id) AND album_id = ? AND track_available(status) GROUP BY album_id""",
                 (album_id,),
             ).fetchone()
             return self._album(connection, row) if row else None

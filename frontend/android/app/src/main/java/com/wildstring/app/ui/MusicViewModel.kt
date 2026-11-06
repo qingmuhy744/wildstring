@@ -152,6 +152,11 @@ class MusicViewModel @Inject constructor(
             mutable.value = connectionState(message.takeIf { it.isNotBlank() })
             imageLoader.memoryCache?.clear()
         } }
+        viewModelScope.launch { repository.connectionRoutes.changes.collect {
+            imageLoader.memoryCache?.clear()
+            mutable.update { it.copy(connected = true, offline = false, error = null) }
+            load()
+        } }
         if (repository.session.endpoint != null) resumeServer()
     }
 
@@ -763,9 +768,17 @@ class MusicViewModel @Inject constructor(
         controller?.shuffleModeEnabled = saved.mode == "shuffle"
         controller?.repeatMode = when(saved.mode) { "repeat_one" -> Player.REPEAT_MODE_ONE; "repeat_all", "shuffle" -> Player.REPEAT_MODE_ALL; else -> Player.REPEAT_MODE_OFF }
     }
-    fun play(tracks: List<Track>, index: Int = 0, autoplay: Boolean = true, positionMs: Long? = null) {
+    fun play(tracks: List<Track>, index: Int? = null, autoplay: Boolean = true, positionMs: Long? = null) {
         val c = controller ?: return
         if (tracks.isEmpty()) return
+        val selected = index ?: tracks.indexOfFirst { it.isAvailable }.takeIf { it >= 0 } ?: 0
+        val target = tracks.getOrNull(selected) ?: return
+        if (!target.isAvailable) {
+            mutable.update { it.copy(error = "「${target.title}」${target.unavailableReason}。请恢复文件并重新扫描，刷新列表后重试。") }
+            return
+        }
+        val index = tracks.take(selected).count { it.isAvailable }
+        val tracks = tracks.filter { it.isAvailable }
         require(tracks.size <= 5000) { "播放队列最多 5000 首。" }
         // Media3 transports bundle lists with a retriever; smaller additions also bound each transaction.
         tracks.forEach { repository.rememberPlaybackTrack(it) }
@@ -800,7 +813,7 @@ class MusicViewModel @Inject constructor(
             val tracks = repository.collectionTracks(request)
             if (profile != repository.session.cacheScope()) return@launch
             if (tracks.isEmpty()) { mutable.update { it.copy(mutationMessage = "集合中没有可播放的音乐") }; return@launch }
-            play(tracks, startId?.let { id -> tracks.indexOfFirst { it.id == id }.coerceAtLeast(0) } ?: 0)
+            play(tracks, startId?.let { id -> tracks.indexOfFirst { it.id == id }.coerceAtLeast(0) })
             onStarted()
         } catch (error: CancellationException) { throw error }
         catch (error: Exception) { mutable.update { it.copy(error = friendlyError(error), mutationMessage = null) } }
@@ -878,7 +891,11 @@ class MusicViewModel @Inject constructor(
     } }
     fun addToQueue(tracks: List<Track>, next: Boolean = false): Boolean {
         val c = controller ?: return false
-        if (tracks.isEmpty()) return false
+        val tracks = tracks.filter { it.isAvailable }
+        if (tracks.isEmpty()) {
+            mutable.update { it.copy(error = "没有可播放的歌曲，请恢复文件并重新扫描后重试。") }
+            return false
+        }
         if (c.mediaItemCount + tracks.size > 5000) { mutable.update { it.copy(error = "播放队列最多 5000 项。") }; return false }
         localPlaybackEpoch++
         tracks.forEach { repository.rememberPlaybackTrack(it) }

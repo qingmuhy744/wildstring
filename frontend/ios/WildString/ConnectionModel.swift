@@ -20,6 +20,7 @@ final class ConnectionModel {
     var password = ""
     var allowInsecureHTTP = false
     var showInsecureHTTPWarning = false
+    private(set) var routes: ServerRoutes?
     var isBusy = false
     var errorMessage: String?
 
@@ -85,6 +86,13 @@ final class ConnectionModel {
         serverText = last.address
         username = last.username
         allowInsecureHTTP = last.allowInsecureHTTP
+        let savedRoutes = makeRoutes(address, allowHTTP: last.allowInsecureHTTP)
+        if savedRoutes.profile.routes.count > 1 {
+            if let (candidate, selected, user) = await savedRoutes.restore() {
+                await activate(client: candidate, address: selected, username: user.username, profile: user.profile, routeProfile: savedRoutes)
+            } else { routes = savedRoutes; phase = .servers }
+            return
+        }
         let client = WildstringClient(server: address, store: store)
         if await client.storedSessionExists() {
             do {
@@ -147,10 +155,14 @@ final class ConnectionModel {
         if let playback {
             await playback.clearFragmentCache()
         }
+        let previousRoutes = routes
+        routes = nil
+        previousRoutes?.stop()
         sharing?.stop()
         sharing = nil
         playback?.shutdown()
         playback = nil
+        await previousRoutes?.signOut()
         if let offline {
             await offline.shutdown()
         }
@@ -187,6 +199,13 @@ final class ConnectionModel {
         }
         isBusy = true
         defer { isBusy = false }
+        let savedRoutes = makeRoutes(address, allowHTTP: server.allowInsecureHTTP)
+        if savedRoutes.profile.routes.count > 1 {
+            if let (candidate, selected, user) = await savedRoutes.restore() {
+                await activate(client: candidate, address: selected, username: user.username, profile: user.profile, routeProfile: savedRoutes)
+            } else { routes = savedRoutes; errorMessage = "已保存线路不可用，请检查网络或登录状态" }
+            return
+        }
         let client = WildstringClient(server: address, store: store)
         if await client.storedSessionExists() {
             do {
@@ -212,6 +231,13 @@ final class ConnectionModel {
         phase = .connect
     }
 
+    func setAlias(_ alias: String, for server: SavedServer) {
+        var saved = server
+        saved.alias = String(alias.trimmingCharacters(in: .whitespacesAndNewlines).prefix(80))
+        SavedServersStore.upsert(saved)
+        servers = SavedServersStore.load()
+    }
+
     func showAddServer() {
         serverText = ""
         username = ""
@@ -229,6 +255,9 @@ final class ConnectionModel {
     /// Deletes a server and its session, caches, offline copies and queue space.
     func deleteServer(_ server: SavedServer) async {
         if let address = try? makeAddress(server.address, allowInsecureHTTP: server.allowInsecureHTTP) {
+            let savedRoutes = makeRoutes(address, allowHTTP: server.allowInsecureHTTP)
+            await savedRoutes.signOut()
+            savedRoutes.forget()
             try? store.clearSession(origin: address.origin)
             let space = Self.spaceName(for: address)
             try? FileManager.default.removeItem(
@@ -269,20 +298,46 @@ final class ConnectionModel {
         return created
     }
 
+    private func makeRoutes(_ address: ServerAddress, allowHTTP: Bool) -> ServerRoutes {
+        let controller = ServerRoutes(primary: ServerRoute(name: "默认线路", address: address.description, allowHTTP: allowHTTP)) { [store] in WildstringClient(server: $0, store: store) }
+        controller.onSelected = { [weak self, weak controller] candidate, selected in
+            guard let self, let controller, self.routes === controller,
+                  let status = try? await candidate.authStatus(), let user = status.user else { return }
+            await self.activate(client: candidate, address: selected, username: user.username, profile: user.profile, routeProfile: controller)
+        }
+        return controller
+    }
+
     private func activate(
         client: WildstringClient,
         address: ServerAddress,
         username: String,
-        profile: String
+        profile: String,
+        routeProfile: ServerRoutes? = nil
     ) async {
+        let sameServer = routeProfile != nil && routeProfile === routes && playback != nil
+        let resume = sameServer && playback?.wantsPlayback == true
+        let queueSnapshot = playback?.queue
+        let positionSnapshot = playback?.currentTime ?? 0
+        let volumeSnapshot = playback?.volume ?? 1
+        let rateSnapshot = playback?.podcastPlaybackRate ?? 1
+        if !sameServer { routes?.stop() }
+        let controller = routeProfile ?? makeRoutes(address, allowHTTP: address.url.scheme == "http")
+        let primary = (try? ServerAddress(input: controller.storageAddress, allowsInsecureHTTP: true)) ?? address
+        sharing?.stop()
+        playback?.pause()
+        playback?.shutdown(preservingQueue: true)
+        await playback?.flushPersistence()
+        await offline?.shutdown()
+        routes = controller
         self.client = client
-        let preferences = AccountPreferences(server: address.description, username: username)
+        let preferences = AccountPreferences(server: primary.description, username: username)
         preferences.applyMirrors()
         OfflineDownloads.allowsCellularAccess = preferences.allowsCellularDownloads
         if let library = preferences.libraryID {
             client.selectLibrary(library)
         }
-        let space = Self.spaceName(for: address)
+        let space = Self.spaceName(for: primary)
         let fragmentCache = AudioDiskCache(
             directory: Self.cachesRoot().appendingPathComponent(space, isDirectory: true),
             limitBytes: Int64(preferences.cacheLimitMB) * 1_048_576
@@ -306,6 +361,7 @@ final class ConnectionModel {
                 await client?.cookieHeaderValue()
             },
             fragmentCache: fragmentCache,
+            connectionFailure: { [weak controller] in await controller?.playbackConnectionFailed(address: address.description) },
             offlineLookup: { trackID in
                 let url = offlineDirectory.appendingPathComponent(
                     OfflineDownloads.fileName(for: trackID)
@@ -347,6 +403,11 @@ final class ConnectionModel {
             }
         }
         await playback.restore()
+        if sameServer, let queueSnapshot {
+            playback.restoreRouteQueue(queueSnapshot, position: positionSnapshot)
+            playback.volume = volumeSnapshot
+            playback.setPodcastPlaybackRate(rateSnapshot)
+        }
         self.playback = playback
         self.favorites = FavoritesModel(client: client)
         self.offline = OfflineModel(downloads: downloads)
@@ -361,11 +422,21 @@ final class ConnectionModel {
                 preferences.setLibraryID(nil)
             }
         }
+        let previous = servers.first { $0.address == primary.description }
+        let info = try? await client.serverInfo()
         SavedServersStore.upsert(
-            SavedServer(address: address.description, username: username, lastUsedAt: .now, allowInsecureHTTP: allowInsecureHTTP)
+            SavedServer(address: primary.description, username: username, lastUsedAt: .now, allowInsecureHTTP: primary.url.scheme == "http", serverName: info?.name ?? previous?.serverName, alias: previous?.alias, instanceID: info?.instance_id ?? previous?.instanceID)
         )
         servers = SavedServersStore.load()
-        phase = .connected(server: address.description, username: username)
+        let status = try? await client.authStatus()
+        controller.bind(info: info, userID: status?.user?.id, activeAddress: address.description)
+        controller.onSelected = { [weak self, weak controller] candidate, address in
+            guard let self, let controller, self.routes === controller else { return }
+            await self.activate(client: candidate, address: address, username: username, profile: profile, routeProfile: controller)
+        }
+        phase = .connected(server: primary.description, username: username)
+        if resume { playback.resume() }
+        if !sameServer { controller.start() }
     }
 
     private func makeAddress(_ raw: String) throws -> ServerAddress {
@@ -379,6 +450,7 @@ final class ConnectionModel {
     private static func message(for error: Error) -> String {
         if let error = error as? APIError {
             switch error.code {
+            case "https_required": return "服务器仅允许 HTTPS，请使用 HTTPS 线路登录"
             case "invalid_credentials": return "用户名或密码错误"
             case "login_throttled": return "尝试次数过多，请稍后再试"
             case "owner_setup_required": return "服务器尚未初始化所有者，请先在服务端完成设置"

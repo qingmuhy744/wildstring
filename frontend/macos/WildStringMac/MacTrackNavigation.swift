@@ -39,7 +39,7 @@ struct MacTrackCollectionView: View {
         VStack(spacing: 0) {
             MacCollectionHeading(title: destination.title, subtitle: "\(tracks.count) 首",
                 symbol: symbol, canPlay: !tracks.isEmpty) {
-                if let first = tracks.first { MacPlayback.play(tracks, startingAt: first, playback: playback) }
+                if let first = tracks.first(where: \.isAvailable) ?? tracks.first { MacPlayback.play(tracks, startingAt: first, playback: playback) }
             }
             MacPlayableTracks(client: client, playback: playback, favorites: favorites, tracks: tracks,
                 emptyTitle: error == nil ? "暂无歌曲" : "暂时无法打开", emptyDetail: error,

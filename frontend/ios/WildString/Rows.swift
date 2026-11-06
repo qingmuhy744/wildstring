@@ -25,8 +25,12 @@ struct TrackRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(track.title)
                     .font(listSize.titleFont)
-                    .foregroundStyle(isCurrent ? Color.accentColor : .primary)
+                    .foregroundStyle(!track.isAvailable ? Color.secondary : isCurrent ? Color.accentColor : .primary)
                     .lineLimit(1)
+                if let reason = track.unavailableReason {
+                    Label(reason, systemImage: "exclamationmark.circle")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
                 Text(detailLine)
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -175,7 +179,8 @@ extension Track {
             artist: artistDisplay,
             album: album,
             hasCover: hasCover,
-            streamPath: "api/v1/tracks/\(id)/stream"
+            streamPath: "api/v1/tracks/\(id)/stream",
+      unavailableReason: unavailableReason
         )
     }
 }

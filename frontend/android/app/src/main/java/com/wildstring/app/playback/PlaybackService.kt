@@ -195,6 +195,12 @@ class PlaybackService : MediaSessionService() {
                 engine.duration.takeIf { it >= 0 }, engine.isCurrentMediaItemLive, engine.isCurrentMediaItemSeekable)
         }
         player.addListener(object : Player.Listener {
+            override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                if (error.errorCode in listOf(androidx.media3.common.PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED, androidx.media3.common.PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT)) {
+                    val address = repository.session.activeRouteUrl
+                    scope.launch { repository.connectionRoutes.playbackConnectionFailed(address) }
+                }
+            }
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                 gainProcessor.factor = 1f; refreshGain()
                 if (mediaItem?.mediaId == listeningEntry && reason == Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED) return
@@ -285,6 +291,25 @@ class PlaybackService : MediaSessionService() {
             sleep.cancel(); player.stop(); player.clearMediaItems()
             saveMutex.withLock { withContext(Dispatchers.IO) { repository.database.queue().clear() }; lastSavedQueue = null }
         } }
+        scope.launch { repository.connectionRoutes.changes.collect {
+            val owner = repository.session.cacheScope()
+            if (owner == null || queueOwner != owner) return@collect
+            repository.downloads.pauseAll()
+            val index = player.currentMediaItemIndex
+            val position = player.currentPosition
+            val autoplay = player.playWhenReady
+            val items = (0 until player.mediaItemCount).map { itemIndex ->
+                val old = player.getMediaItemAt(itemIndex)
+                val id = old.mediaMetadata.extras?.getString("track_id").orEmpty()
+                val extras = Bundle(old.mediaMetadata.extras).apply { putString("original_stream", repository.originalStream(id)) }
+                old.buildUpon().setUri(repository.stream(id))
+                    .setMediaMetadata(old.mediaMetadata.buildUpon().setExtras(extras).build()).build()
+            }
+            if (items.isNotEmpty()) {
+                player.setMediaItems(items, index.coerceIn(items.indices), position)
+                player.prepare(); player.playWhenReady = autoplay
+            }
+        } }
         scope.launch { repository.session.profiles.drop(1).collect { owner ->
             yield()
             if (owner != repository.session.cacheScope()) return@collect
@@ -342,7 +367,7 @@ class PlaybackService : MediaSessionService() {
 
     private fun persist(force: Boolean = false) {
         if (restoring) return
-        val endpoint = repository.session.endpoint?.toString() ?: return
+        val endpoint = repository.session.servers.value.firstOrNull { it.id == repository.session.activeServerId }?.url ?: return
         val profile = queueOwner ?: return
         if (profile != repository.session.cacheScope()) return
         val entries = queueEntries
@@ -357,7 +382,7 @@ class PlaybackService : MediaSessionService() {
         }
         val position = SavedPosition(endpoint = endpoint, entryId = player.currentMediaItem?.mediaId, positionMs = player.currentPosition.coerceAtLeast(0))
         scope.launch { saveMutex.withLock {
-            if (profile != repository.session.cacheScope() || endpoint != repository.session.endpoint?.toString()) return@withLock
+            if (profile != repository.session.cacheScope() || endpoint != repository.session.servers.value.firstOrNull { it.id == repository.session.activeServerId }?.url) return@withLock
             withContext(Dispatchers.IO) {
                 if (lastSavedQueue == entries) repository.database.queue().insertPosition(position)
                 else repository.database.queue().save(entries, position)
@@ -371,7 +396,7 @@ class PlaybackService : MediaSessionService() {
             val profile = repository.session.cacheScope() ?: return
             val dao = repository.database.queue()
             val (saved, entries) = withContext(Dispatchers.IO) { dao.position() to dao.entries() }
-            if (saved == null || saved.endpoint != repository.session.endpoint?.toString() || entries.isEmpty()) return
+            if (saved == null || saved.endpoint != repository.session.servers.value.firstOrNull { it.id == repository.session.activeServerId }?.url || entries.isEmpty()) return
             val offline = try { if (!repository.api().status().authenticated) return; false }
             catch (error: IOException) { if (error is javax.net.ssl.SSLException || repository.session.cacheScope() != profile) return; true }
             val items = mutableListOf<MediaItem>()
@@ -384,7 +409,7 @@ class PlaybackService : MediaSessionService() {
                     if (error.code() != 404 && error.code() != 409) throw error
                 }
             }
-            if (items.isEmpty() || player.mediaItemCount != 0 || saved.endpoint != repository.session.endpoint?.toString() || repository.session.cacheScope() != profile) return
+            if (items.isEmpty() || player.mediaItemCount != 0 || saved.endpoint != repository.session.servers.value.firstOrNull { it.id == repository.session.activeServerId }?.url || repository.session.cacheScope() != profile) return
             val index = items.indexOfFirst { it.mediaId == saved.entryId }.coerceAtLeast(0)
             player.setMediaItems(items, index, saved.positionMs)
             player.prepare()

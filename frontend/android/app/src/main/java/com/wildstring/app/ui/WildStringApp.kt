@@ -224,7 +224,7 @@ fun WildStringApp(model: MusicViewModel) {
         MaterialTheme(colorScheme = if (preferences.redCloth) redColors else if (dark) classicDarkColors else classicLightColors) {
             Surface(Modifier.fillMaxSize().testTag(if (preferences.redCloth) "appearance-red-cloth" else if (dark) "appearance-dark" else "appearance-light")) {
                 key(state.serverSelection) { Crossfade(state.connected, animationSpec = tween(220), label = "connection") { connected ->
-                    if (!connected) ConnectionScreen(state, model::connect) { servers = true } else LibraryApp(model, state)
+                    if (!connected) ConnectionScreen(state, model::connect, routes = model.repository.session.routes.value) { servers = true } else LibraryApp(model, state)
                 } }
                 com.wildstring.app.update.UpdatePrompt()
                 PodcastProgressDialog(model)
@@ -336,7 +336,7 @@ fun WildStringApp(model: MusicViewModel) {
 }
 
 @Composable
-fun ConnectionScreen(state: MusicState, connect: (String, String, String, Boolean) -> Unit, manageServers: () -> Unit = {}) {
+fun ConnectionScreen(state: MusicState, connect: (String, String, String, Boolean) -> Unit, routes: List<com.wildstring.app.data.ServerRoute> = emptyList(), manageServers: () -> Unit = {}) {
     var server by rememberSaveable(state.serverSelection) { mutableStateOf(state.server) }
     var username by rememberSaveable { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
@@ -355,7 +355,11 @@ fun ConnectionScreen(state: MusicState, connect: (String, String, String, Boolea
             Text(stringResource(R.string.brand_name), fontSize = 32.sp, fontWeight = FontWeight.Medium)
             Text(stringResource(R.string.connect_collection), color = Muted)
             TextButton(manageServers, Modifier.testTag("connection-servers")) { Icon(Icons.Default.Dns, null); Spacer(Modifier.width(8.dp)); Text(stringResource(R.string.settings_servers)) }
-            OutlinedTextField(server, { server = it }, Modifier.fillMaxWidth(), label = { Text(stringResource(R.string.server_address)) }, placeholder = { Text("music.your-domain.com") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri), enabled = !state.connecting)
+            if (routes.size > 1) {
+                Text("选择已保存线路重新登录", style = MaterialTheme.typography.bodySmall)
+                routes.forEach { route -> TextButton({ server = route.url; localHttp = route.allowHttp; password = "" }, enabled = !state.connecting) { Text(route.name + " · " + route.url) } }
+            }
+            OutlinedTextField(server, { server = it; localHttp = false }, Modifier.fillMaxWidth(), label = { Text(stringResource(R.string.server_address)) }, placeholder = { Text("music.your-domain.com") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri), enabled = !state.connecting)
             OutlinedTextField(username, { username = it }, Modifier.fillMaxWidth(), label = { Text(stringResource(R.string.account)) }, singleLine = true, enabled = !state.connecting)
             OutlinedTextField(password, { password = it }, Modifier.fillMaxWidth(), label = { Text(stringResource(R.string.password)) }, visualTransformation = PasswordVisualTransformation(), singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password), enabled = !state.connecting)
             Row(Modifier.fillMaxWidth().clickable(enabled = !state.connecting) { localHttp = !localHttp }, verticalAlignment = Alignment.CenterVertically) {
@@ -1105,8 +1109,8 @@ internal fun TrackRow(vm: MusicViewModel, track: Track, state: MusicState, index
             }
         }
         Column(Modifier.weight(1f).padding(start = 14.dp)) {
-            Text(track.title, Modifier.testTag("track-title-$index"), color = if (current) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.bodyLarge, fontSize = size.titleSp.sp, lineHeight = size.titleLineSp.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(listOfNotNull(if (album && state.discs.size > 1 && state.sort !in listOf("title", "track_number")) "Disc ${track.discNumber ?: 1}" else null, track.artist, metric).joinToString(" · "), Modifier.testTag("track-subtitle-$index"), color = Muted,
+            Text(track.title, Modifier.testTag("track-title-$index"), color = if (!track.isAvailable) Muted else if (current) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.bodyLarge, fontSize = size.titleSp.sp, lineHeight = size.titleLineSp.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(listOfNotNull(track.unavailableReason, if (album && state.discs.size > 1 && state.sort !in listOf("title", "track_number")) "Disc ${track.discNumber ?: 1}" else null, track.artist, metric).joinToString(" · "), Modifier.testTag("track-subtitle-$index"), color = Muted,
                 style = MaterialTheme.typography.bodySmall, fontSize = size.artistSp.sp, lineHeight = size.artistLineSp.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         IconButton(actions, Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp).testTag("track-action-$index")) { Icon(Icons.Default.MoreVert, stringResource(R.string.track_actions_named, track.title)) }

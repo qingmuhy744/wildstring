@@ -26,7 +26,8 @@ data class ProfileUpdate(
     val email: String = ""
 )
 data class PreferencesUpdate(val language: String)
-data class AuthStatus(val configured: Boolean, val authenticated: Boolean, val user: Account? = null, val version: String? = null)
+data class ServerInfo(val instance_id: String, val name: String, val connection_policy: String)
+data class AuthStatus(val configured: Boolean, val authenticated: Boolean, val user: Account? = null, val version: String? = null, val server: ServerInfo? = null)
 data class PasswordChange(@SerializedName("current_password") val currentPassword: String, @SerializedName("new_password") val newPassword: String)
 data class LoginRequest(val username: String, val password: String)
 data class Track(
@@ -45,6 +46,12 @@ data class Track(
     val artist: String get() = artists.joinToString(" / ").ifBlank { "未知艺人" }
     val podcastEpisodeId: String? get() = podcastEpisodeId(id)
     val isPodcast: Boolean get() = podcastEpisodeId != null
+    val unavailableReason: String? get() = when (status) {
+        "missing" -> "文件缺失"
+        "unreadable" -> "文件无法读取"
+        else -> null
+    }
+    val isAvailable: Boolean get() = unavailableReason == null
 }
 data class PodcastTrackInfo(val podcastId: String, val coverUrl: String = "")
 data class Album(val id: String, val title: String, val artists: List<String>,

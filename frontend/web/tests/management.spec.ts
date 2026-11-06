@@ -250,3 +250,20 @@ test('AI 服务保存、密钥不回显、连接测试与清除密钥', async ({
   expect((await (await page.request.get('/api/v1/manage/ai')).json()).has_api_key).toBe(false);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
+
+test('服务器名称的页面覆盖可以保存并恢复环境配置', async ({ page }, info) => {
+  await login(page);
+  await manage(page, info.project.name === 'mobile');
+  await manageTab(page, '访问设置');
+  const form = page.getByRole('form', { name: '服务器名称与连接安全' });
+  const value = `本机测试音乐库 ${info.project.name}`;
+  await form.getByLabel('服务器名称', { exact: true }).fill(value);
+  await form.getByRole('button', { name: '保存服务器设置', exact: true }).click();
+  await expect(form.getByRole('status')).toContainText('设置已保存');
+  expect((await (await page.request.get('/api/v1/server')).json()).name).toBe(value);
+  await form.getByRole('button', { name: '名称恢复使用环境配置' }).click();
+  await expect(form.getByLabel('服务器名称', { exact: true })).toHaveValue('野弦');
+  expect((await (await page.request.get('/api/v1/manage/server')).json()).sources.name).toBe(
+    'default',
+  );
+});

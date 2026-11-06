@@ -9,7 +9,7 @@ from wildstring.library.metadata import normalize
 ARTIST_CREDITS = """WITH artist_credits AS (
     SELECT DISTINCT t.id AS track_id, p.id AS artist_id, p.name
     FROM track_credits c JOIN tracks t ON t.id=c.track_id JOIN people p ON p.id=c.person_id
-    WHERE library_selected(t.library_id, :library_id) AND t.status = 'available'
+    WHERE library_selected(t.library_id, :library_id) AND track_available(t.status)
     AND (credit_role() IS NULL OR c.role=credit_role())
 )
 """
@@ -27,7 +27,16 @@ def artist_key(library_id: str, name: str) -> str:
     return hashlib.sha256(value.encode()).hexdigest()
 
 
-def configure_artist_queries(connection: sqlite3.Connection, role: str | None = None) -> None:
+def configure_artist_queries(
+    connection: sqlite3.Connection, role: str | None = None, *, include_unavailable: bool = False
+) -> None:
     connection.create_function("artist_key", 2, artist_key, deterministic=True)
     connection.create_function("normalized", 1, normalize, deterministic=True)
     connection.create_function("credit_role", 0, lambda: role)
+    connection.create_function(
+        "track_available",
+        1,
+        lambda status: (
+            status == "available" or (include_unavailable and status in ("missing", "unreadable"))
+        ),
+    )

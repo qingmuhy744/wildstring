@@ -11,6 +11,7 @@ public final class WildstringAudioResourceLoader: NSObject, AVAssetResourceLoade
     public static let scheme = "wildstring-audio"
 
     private let fetcher: AudioRangeFetcher
+    private let connectionFailure: (@Sendable () async -> Void)?
     private let cache: AudioDiskCache?
     private let lock = NSLock()
     private let queueKey = DispatchSpecificKey<UInt8>()
@@ -29,7 +30,8 @@ public final class WildstringAudioResourceLoader: NSObject, AVAssetResourceLoade
         server: ServerAddress,
         cookieHeader: @escaping @Sendable () async -> String?,
         configuration: URLSessionConfiguration? = nil,
-        cache: AudioDiskCache? = nil
+        cache: AudioDiskCache? = nil,
+        connectionFailure: (@Sendable () async -> Void)? = nil
     ) {
         self.fetcher = AudioRangeFetcher(
             server: server,
@@ -37,6 +39,7 @@ public final class WildstringAudioResourceLoader: NSObject, AVAssetResourceLoade
             configuration: configuration
         )
         self.cache = cache
+        self.connectionFailure = connectionFailure
         super.init()
         callbackQueue.setSpecific(key: queueKey, value: 1)
     }
@@ -262,6 +265,9 @@ public final class WildstringAudioResourceLoader: NSObject, AVAssetResourceLoade
                 await onLoaderQueue(boxed, gate: gate) { $0.finishLoading() }
             }
         } catch {
+            if let network = error as? URLError, [.timedOut, .cannotConnectToHost, .cannotFindHost, .networkConnectionLost, .notConnectedToInternet].contains(network.code) {
+                await connectionFailure?()
+            }
             let failure = SendableError(error)
             await onLoaderQueue(boxed, gate: gate) { request in
                 request.finishLoading(with: failure.underlying)

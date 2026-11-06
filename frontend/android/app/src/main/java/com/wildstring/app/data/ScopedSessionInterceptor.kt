@@ -22,7 +22,7 @@ class ScopedSessionInterceptor(private val state: () -> ServerRequestState?, pri
         }.build()
         val response = chain.proceed(request)
         if (state()?.selection != captured.selection) { response.close(); throw IOException("服务器或会话已切换。") }
-        Cookie.parseAll(url, response.headers).lastOrNull { it.name == "wildstring_session" && it.matches(url) }?.let {
+        Cookie.parseAll(url, response.headers).lastOrNull { it.name in setOf("wildstring_session", "wildstring_session_http", "wildstring_session_https") && it.matches(url) }?.let {
             save(captured, if (it.expiresAt <= System.currentTimeMillis()) null else it.toString())
         }
         return response

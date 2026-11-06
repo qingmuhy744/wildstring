@@ -145,7 +145,7 @@ struct MacTransportBar: View {
                             .frame(width: isPodcast ? 58 : 38, alignment: .leading)
                     }.font(MacTheme.mono(10)).foregroundStyle(MacTheme.faint).lineLimit(1)
                     if let message = playback.errorMessage ?? playback.podcastProgressMessage {
-                        Text(message).font(.caption2).foregroundStyle(.orange).lineLimit(1)
+                        Text(message).font(.caption2).foregroundStyle(.orange).lineLimit(2).help(message)
                     }
                 }
                 .frame(maxWidth: 560)
@@ -204,10 +204,10 @@ struct MacTransportBar: View {
             .padding(.horizontal, 20)
             .frame(width: geo.size.width, height: geo.size.height)
         }
-        .frame(height: playback.errorMessage == nil && playback.podcastProgressMessage == nil ? 84 : 100)
+        .frame(height: playback.errorMessage == nil && playback.podcastProgressMessage == nil ? 84 : 116)
         .background(MacTheme.panel)
         .overlay(alignment: .top) {
-            Rectangle().fill(MacTheme.border).frame(height: 1)
+            Rectangle().fill(MacTheme.border.opacity(0.5)).frame(height: 1)
         }
         .task(id: playback.currentItem?.trackID) {
             podcastDuration = 0

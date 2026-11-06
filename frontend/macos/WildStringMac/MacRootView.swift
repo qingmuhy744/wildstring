@@ -19,7 +19,7 @@ struct MacRootView: View {
             case .connected:
                 if let client = session.client, let playback = session.playback {
                     MacShellView(session: session, client: client, playback: playback)
-                        .id(client.server.origin)
+                        .id(client.server.description)
                 } else {
                     ProgressView()
                 }
@@ -45,8 +45,17 @@ struct MacRootView: View {
         }
         .sheet(isPresented: Bindable(session).showServerLogin) {
             MacLoginView(session: session, addingServer: true)
-                .frame(width: 520, height: 500)
+                .frame(width: 500)
                 .interactiveDismissDisabled(session.isBusy)
+        }
+        .sheet(isPresented: Bindable(session).showRoutes) {
+            if let routes = session.routes {
+                VStack {
+                    HStack { Text("服务器与线路").font(.title2); Spacer(); Button("完成") { session.showRoutes = false } }.padding()
+                    TextField("本机别名（留空使用服务器名称）", text: Binding(get: { session.servers.first { $0.address == session.logicalServerAddress }?.alias ?? "" }, set: { session.setServerAlias($0) })).padding(.horizontal)
+                    ServerRoutesEditor(routes: routes)
+                }.frame(width: 640, height: 620)
+            }
         }
         .confirmationDialog("退出当前服务器？", isPresented: Bindable(session).confirmLogout, titleVisibility: .visible) {
             Button("退出服务器", role: .destructive) { Task { await session.logout() } }
@@ -83,80 +92,129 @@ private struct MacLoginView: View {
     }
 
     var body: some View {
-        ZStack {
-            LinearGradient(
-                colors: [MacTheme.accent.opacity(0.18), Color(nsColor: .windowBackgroundColor)],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            VStack(alignment: .leading, spacing: 16) {
-                HStack(spacing: 12) {
-                    Image(systemName: "waveform")
-                        .font(.title2)
-                        .foregroundStyle(MacTheme.accentDeep)
-                        .frame(width: 44, height: 44)
-                        .background(
-                            MacTheme.accent.opacity(0.18),
-                            in: RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        )
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("野弦").font(.title2.bold())
-                        Text(addingServer ? "连接另一个服务器" : "连接到你的曲库").font(.callout).foregroundStyle(.secondary)
-                    }
+        VStack(alignment: .leading, spacing: 24) {
+            HStack(spacing: 12) {
+                Image("MenuBarIcon")
+                    .renderingMode(.template)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 28, height: 24)
+                    .foregroundStyle(MacTheme.accent)
+                    .frame(width: 48, height: 48)
+                    .background(MacTheme.accentSoft, in: RoundedRectangle(cornerRadius: 14))
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(addingServer ? "连接其他服务器" : "欢迎回到野弦")
+                        .font(MacTheme.section(20))
+                    Text(addingServer ? "登录后，即可在不同曲库间切换。" : "连接服务器，开始聆听你的音乐。")
+                        .font(MacTheme.caption).foregroundStyle(MacTheme.muted)
                 }
-                TextField("服务器地址", text: $serverText)
-                    .textFieldStyle(.roundedBorder)
-                TextField("用户名", text: $username)
-                    .textFieldStyle(.roundedBorder)
-                SecureField("密码", text: $password)
-                    .textFieldStyle(.roundedBorder)
-                Toggle("允许未加密的 HTTP", isOn: $allowInsecureHTTP)
-                if let errorMessage = session.errorMessage {
-                    Text(errorMessage)
-                        .font(.callout)
-                        .foregroundStyle(.red)
+            }
+            VStack(alignment: .leading, spacing: 18) {
+                field("服务器地址", symbol: "server.rack") {
+                    TextField("服务器地址", text: $serverText, prompt: Text(verbatim: "https://music.example.com"))
+                        .textContentType(.URL)
                 }
-                HStack {
-                    if addingServer {
-                        Button("取消") { session.showServerLogin = false }
-                            .keyboardShortcut(.cancelAction)
-                            .disabled(session.isBusy)
-                    }
-                    Button(session.isBusy ? "正在连接…" : "连接") {
-                        Task {
-                            await session.login(serverText: serverText, username: username, password: password,
-                                allowInsecureHTTP: allowInsecureHTTP)
-                            if session.errorMessage == nil { password = "" }
-                        }
-                    }
-                    .keyboardShortcut(.defaultAction)
-                    .buttonStyle(.borderedProminent)
-                    .disabled(session.isBusy || serverText.isEmpty || username.isEmpty || password.isEmpty)
+                field("用户名", symbol: "person") {
+                    TextField("输入用户名", text: $username).textContentType(.username)
                 }
-                if !session.servers.isEmpty {
-                    Text("最近的服务器")
-                        .font(.headline)
+                field("密码", symbol: "lock") {
+                    SecureField("输入密码", text: $password).textContentType(.password)
+                }
+                VStack(alignment: .leading, spacing: 6) {
+                    Toggle("允许此服务器使用 HTTP", isOn: $allowInsecureHTTP)
+                        .toggleStyle(.checkbox)
+                    Text("用于局域网或 SD-WAN 的 HTTP 地址；公网建议使用 HTTPS。")
+                        .font(MacTheme.caption).foregroundStyle(MacTheme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .disabled(session.isBusy)
+            if let errorMessage = session.errorMessage {
+                Label(errorMessage, systemImage: "exclamationmark.circle")
+                    .font(MacTheme.caption).foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if session.routes != nil && !addingServer {
+                Button("管理已保存线路 / 重新登录") { session.showRoutes = true }
+            }
+            if !session.servers.isEmpty {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("已保存的服务器").font(MacTheme.caption).foregroundStyle(MacTheme.muted)
                     ScrollView {
-                        VStack(alignment: .leading, spacing: 10) {
+                        VStack(spacing: 6) {
                             ForEach(session.servers) { server in
-                                Button("\(server.username) · \(server.address)") {
+                                Button {
                                     serverText = server.address
                                     username = server.username
                                     password = ""
                                     allowInsecureHTTP = server.allowInsecureHTTP
                                     Task { await session.switchServer(server) }
+                                } label: {
+                                    HStack(spacing: 10) {
+                                        Image(systemName: "server.rack").foregroundStyle(MacTheme.muted)
+                                        VStack(alignment: .leading, spacing: 3) {
+                                            Text(server.label).font(MacTheme.section(12)).lineLimit(1)
+                                            Text(server.username).font(MacTheme.caption).foregroundStyle(MacTheme.muted)
+                                        }
+                                        Spacer()
+                                        if session.logicalServerAddress == server.address {
+                                            Text("当前连接").font(MacTheme.caption).foregroundStyle(MacTheme.muted)
+                                        } else {
+                                            Image(systemName: "arrow.right").foregroundStyle(MacTheme.accent)
+                                        }
+                                    }
+                                    .padding(12)
+                                    .background(MacTheme.panel, in: RoundedRectangle(cornerRadius: 10))
+                                    .contentShape(Rectangle())
                                 }
                                 .buttonStyle(.plain)
-                                .disabled(session.isBusy || session.client?.server.description == server.address)
+                                .disabled(session.isBusy || session.logicalServerAddress == server.address)
                             }
                         }
                     }
-                    .frame(maxHeight: 100)
+                    .frame(height: CGFloat(min(session.servers.count, 2)) * 62)
                 }
             }
-            .padding(28)
-            .frame(width: 440)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            HStack(spacing: 12) {
+                if session.isBusy { ProgressView().controlSize(.small) }
+                Spacer()
+                if addingServer {
+                    Button("取消") { session.showServerLogin = false }
+                        .keyboardShortcut(.cancelAction)
+                        .disabled(session.isBusy)
+                }
+                Button(session.isBusy ? "正在连接…" : "连接服务器") {
+                    Task {
+                        await session.login(serverText: serverText, username: username, password: password,
+                            allowInsecureHTTP: allowInsecureHTTP)
+                        if session.errorMessage == nil { password = "" }
+                    }
+                }
+                .keyboardShortcut(.defaultAction)
+                .buttonStyle(.borderedProminent)
+                .disabled(session.isBusy || serverText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || username.isEmpty || password.isEmpty)
+            }
+            .controlSize(.large)
+        }
+        .font(MacTheme.body)
+        .foregroundStyle(MacTheme.ink)
+        .padding(28)
+        .frame(width: 500)
+        .background(MacTheme.canvas, in: RoundedRectangle(cornerRadius: 16))
+        .frame(maxWidth: .infinity, maxHeight: addingServer ? nil : .infinity)
+        .background(MacTheme.canvas)
+    }
+
+    private func field<Content: View>(_ title: String, symbol: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title).font(MacTheme.caption).foregroundStyle(MacTheme.muted)
+            HStack(spacing: 10) {
+                Image(systemName: symbol).foregroundStyle(MacTheme.faint).frame(width: 16)
+                content().textFieldStyle(.plain).accessibilityLabel(title)
+            }
+            .padding(12)
+            .background(MacTheme.panel, in: RoundedRectangle(cornerRadius: 9))
+            .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(MacTheme.border))
         }
     }
 }
@@ -210,7 +268,6 @@ private struct MacShellView: View {
         VStack(spacing: 0) {
             HStack(spacing: 0) {
                 sidebar
-                Divider()
                 NavigationStack(path: $navigationPath) {
                     page
                         .id(session.selectedLibraryID ?? "")
@@ -220,6 +277,20 @@ private struct MacShellView: View {
                             MacTrackCollectionView(client: client, playback: playback, favorites: session.favorites,
                                 destination: destination, canManage: session.canManage)
                         }
+                }
+                .toolbar {
+                    // Keep the native toolbar alive on pages without actions so
+                    // switching pages does not move the window controls/content.
+                    if #available(macOS 26.0, *) {
+                        ToolbarItem(placement: .automatic) {
+                            Color.clear.frame(width: 1, height: 1).accessibilityHidden(true)
+                        }
+                        .sharedBackgroundVisibility(.hidden)
+                    } else {
+                        ToolbarItem(placement: .automatic) {
+                            Color.clear.frame(width: 1, height: 1).accessibilityHidden(true)
+                        }
+                    }
                 }
                 .environment(\.navigateToTrackCollection) { navigationPath.append($0) }
                 .onChange(of: session.page) { _, _ in navigationPath = NavigationPath() }
@@ -232,13 +303,12 @@ private struct MacShellView: View {
                         .padding(12)
                 }
             }
-            Divider()
             MacTransportBar(session: session, client: client, playback: playback)
         }
         .background(MacTheme.canvas)
         .allowsHitTesting(!session.showFullscreen)
         .accessibilityHidden(session.showFullscreen)
-        .toolbar(session.showFullscreen ? .hidden : .automatic, for: .windowToolbar)
+        .toolbar(session.showFullscreen ? .hidden : .visible, for: .windowToolbar)
         .toolbarBackground(.hidden, for: .windowToolbar)
         .task { libraries = (try? await client.libraries()) ?? [] }
         .onChange(of: playback.isPlaying) { _, playing in
@@ -322,8 +392,11 @@ private struct MacShellView: View {
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 10) {
-                Image(systemName: "waveform")
-                    .font(.system(size: 17, weight: .semibold))
+                Image("MenuBarIcon")
+                    .renderingMode(.template)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 22, height: 18)
                     .foregroundStyle(sidebarAccent)
                     .frame(width: 32, height: 32)
                     .background(
@@ -389,7 +462,7 @@ private struct MacShellView: View {
                     footerButton(.settings)
                 }
                 .padding(.horizontal, 8)
-                serverMenu
+                serverCard
             }
             .padding(14)
         }
@@ -413,14 +486,15 @@ private struct MacShellView: View {
                     Button {
                         Task { await session.switchServer(server) }
                     } label: {
-                        Label("\(server.username) · \(server.address)",
-                            systemImage: client.server.description == server.address ? "checkmark.circle.fill" : "server.rack")
+                        Label("\(server.label) · \(server.username)",
+                            systemImage: session.logicalServerAddress == server.address ? "checkmark.circle.fill" : "server.rack")
                     }
-                    .disabled(client.server.description == server.address)
+                    .disabled(session.logicalServerAddress == server.address)
                 }
                 Button("连接其他服务器…", systemImage: "plus") { session.addServer() }
             }
             Divider()
+            Button("服务器名称与线路…", systemImage: "network") { session.showRoutes = true }
             Button("跨设备继续", systemImage: MacPage.devices.symbol) { session.page = .devices }
             Button("待确认草案", systemImage: MacPage.drafts.symbol) { session.page = .drafts }
             if session.canManage {
@@ -431,30 +505,44 @@ private struct MacShellView: View {
                 session.confirmLogout = true
             }
         } label: {
-            HStack(spacing: 9) {
-                Image(systemName: "server.rack")
-                    .font(.system(size: 15)).foregroundStyle(sidebarMuted)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(client.server.url.host ?? "当前服务器")
-                        .font(MacTheme.section(12)).foregroundStyle(sidebarInk).lineLimit(1)
-                    HStack(spacing: 5) {
-                        Circle().fill(session.connection.map { connectionColor($0.status) } ?? sidebarFaint)
-                            .frame(width: 5, height: 5)
-                        Text("\(session.username) · \(session.connection?.label ?? "连接中…")")
-                            .font(MacTheme.micro).foregroundStyle(sidebarMuted).lineLimit(1)
-                    }
-                }
-                Spacer(minLength: 0)
-                Image(systemName: "chevron.up.chevron.down").font(.system(size: 9)).foregroundStyle(sidebarFaint)
-            }
-            .padding(10)
-            .background(sidebarAccentSoft.opacity(0.5), in: RoundedRectangle(cornerRadius: 10))
+            Text(session.serverLabel)
+                .font(MacTheme.section(12))
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
+        .overlay(alignment: .trailing) {
+            Image(systemName: "chevron.up.chevron.down").font(.system(size: 9))
+                .foregroundStyle(sidebarFaint).allowsHitTesting(false)
+        }
         .disabled(session.isBusy)
         .help("账号与服务器 · 点击切换服务器")
         .accessibilityLabel("账号与服务器")
+    }
+
+    private var serverCard: some View {
+        HStack(alignment: .top, spacing: 9) {
+            Image(systemName: "server.rack")
+                .font(.system(size: 15)).foregroundStyle(sidebarMuted)
+            VStack(alignment: .leading, spacing: 4) {
+                serverMenu.foregroundStyle(sidebarInk)
+                Text(session.username)
+                    .font(MacTheme.micro).foregroundStyle(sidebarMuted).lineLimit(1)
+                HStack(spacing: 5) {
+                    Circle().fill(session.connection.map { connectionColor($0.status) } ?? sidebarFaint)
+                        .frame(width: 7, height: 7)
+                    Text(session.connection?.label ?? "连接中…")
+                        .font(MacTheme.mono(10)).foregroundStyle(sidebarMuted)
+                        .lineLimit(1).fixedSize(horizontal: true, vertical: false)
+                }
+                .help(session.connection?.label ?? "连接中…")
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(sidebarAccentSoft.opacity(0.5), in: RoundedRectangle(cornerRadius: 10))
+        .help("\(session.routes?.activeName ?? "默认线路") · \(session.connection?.label ?? "连接中…")")
     }
 
     private func footerButton(_ page: MacPage) -> some View {

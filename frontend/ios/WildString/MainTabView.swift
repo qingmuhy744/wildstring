@@ -20,12 +20,15 @@ struct MainTabView: View {
     var body: some View {
         TabView(selection: $selection) {
             DiscoverView(client: client, playback: playback)
+                .id(client.server.description)
                 .tabItem { Label("tab.discover", systemImage: "sparkles") }
                 .tag(0)
             PodcastsView(client: client, playback: playback)
+                .id(client.server.description)
                 .tabItem { Label("tab.radio", systemImage: "antenna.radiowaves.left.and.right") }
                 .tag(1)
             AssistantView(client: client, showsDismiss: false)
+                .id(client.server.description)
                 .tabItem { Label("tab.assistant", systemImage: "bubble.left.and.bubble.right") }
                 .tag(2)
             BrowseView(
@@ -35,6 +38,7 @@ struct MainTabView: View {
                 username: username,
                 autoPlayFirst: autoPlayFirst
             )
+            .id(client.server.description)
             .tabItem { Label("tab.music", systemImage: "music.note") }
             .tag(3)
             AccountView(
@@ -44,6 +48,7 @@ struct MainTabView: View {
                 username: username,
                 onLogout: onLogout
             )
+            .id(client.server.description)
             .tabItem { Label("tab.mine", systemImage: "person.crop.circle") }
             .tag(4)
         }
@@ -61,7 +66,7 @@ struct MainTabView: View {
             }
             Task { await sharing.publishCurrent() }
         }
-        .task {
+        .task(id: client.server.description) {
             await favorites.load()
             await downloadDemoTrackIfNeeded()
             sharing.start()

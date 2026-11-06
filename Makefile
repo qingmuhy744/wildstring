@@ -293,3 +293,7 @@ test-network: ## Verify probes and production requests share actual proxy and mo
 .PHONY: test-research
 test-research: ## Verify model protocols, live-search contracts, summaries and user-owned memories
 	$(RUN) pytest -c backend/pyproject.toml backend/tests/test_agent_research.py
+
+.PHONY: test-mcp-setup
+test-mcp-setup: ## Check external-client MCP templates without credentials or external services
+	node --experimental-strip-types --test frontend/web/tests/mcp-setup.node.mjs

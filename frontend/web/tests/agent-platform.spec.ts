@@ -487,6 +487,20 @@ test('连接编辑仅发送允许字段，MCP 凭据只显示一次且可撤销'
   await expect(page.getByRole('region', { name: 'MCP 工具凭据' })).toContainText(
     'ws_synthetic-once-only-secret',
   );
+  const setup = page.getByRole('region', { name: '外部 AI 接入配置' });
+  await setup.getByLabel('MCP 地址', { exact: true }).fill('https://music.example.test/base/mcp');
+  await setup.getByText('查看配置与提示词', { exact: true }).click();
+  for (const client of ['codex', 'cursor', 'antigravity', 'opencode', 'generic']) {
+    await setup.getByLabel('AI 客户端', { exact: true }).selectOption(client);
+    await expect(setup.getByLabel('AI 接入提示词', { exact: true })).toHaveValue(/保留其他 MCP/);
+    expect(await setup.getByLabel('AI 接入提示词', { exact: true }).inputValue()).not.toContain(
+      'ws_synthetic-once-only-secret',
+    );
+  }
+  await setup.getByLabel('MCP 地址', { exact: true }).fill('http://192.168.1.2/mcp');
+  await expect(setup.getByRole('alert')).toContainText('明确允许这条线路');
+  await setup.getByRole('checkbox').check();
+  await expect(setup.getByRole('button', { name: '复制 AI 接入提示词' })).toBeVisible();
   await page.getByRole('button', { name: '隐藏凭据', exact: true }).click();
   await expect(page.getByRole('region', { name: 'MCP 工具凭据' })).not.toContainText(
     'ws_synthetic-once-only-secret',

@@ -17,6 +17,7 @@ targets:
     platform: macOS
     sources:
       - path: WildStringMac
+      - path: ../apple-shared
     dependencies:
       - package: WildStringKit
         product: CoreNetwork

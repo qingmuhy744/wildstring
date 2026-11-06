@@ -217,6 +217,8 @@ class Transcoding:
                         if len(self.probes) >= 512:
                             self.probes.clear()
                         self.probes[signature] = observed
+        except (FileNotFoundError, NotADirectoryError) as error:
+            raise HTTPException(404, "audio_not_found") from error
         except (OSError, MutagenError, ValueError, TypeError) as error:
             raise HTTPException(409, "audio_unavailable") from error
         encode = format_name == "aac" and observed["lossless"]

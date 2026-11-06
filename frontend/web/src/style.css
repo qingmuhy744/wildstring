@@ -5998,3 +5998,13 @@ textarea {
   flex-wrap: wrap;
   margin-top: 24px;
 }
+
+.track-unavailable .track-title strong {
+  color: var(--muted);
+}
+.track-unavailable-label {
+  color: var(--muted);
+  font-size: 11px;
+  margin-left: 8px;
+  font-weight: 400;
+}

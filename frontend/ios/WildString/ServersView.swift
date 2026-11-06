@@ -6,6 +6,10 @@ import SwiftUI
 struct ServersView: View {
     @Bindable var model: ConnectionModel
 
+    @State private var editing: SavedServer?
+    @State private var alias = ""
+    @State private var showRoutes = false
+
     var body: some View {
         NavigationStack {
             List {
@@ -16,7 +20,7 @@ struct ServersView: View {
                                 Task { await model.connect(to: server) }
                             } label: {
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text(server.address)
+                                    Text(server.label)
                                         .lineLimit(1)
                                     Text(server.username)
                                         .font(.caption)
@@ -24,6 +28,9 @@ struct ServersView: View {
                                 }
                             }
                             .buttonStyle(.plain)
+                            .contextMenu {
+                                Button("本机别名") { alias = server.alias ?? ""; editing = server }
+                            }
                             .swipeActions {
                                 Button("删除", role: .destructive) {
                                     Task { await model.deleteServer(server) }
@@ -31,6 +38,9 @@ struct ServersView: View {
                             }
                         }
                     }
+                }
+                if model.routes != nil {
+                    Section { Button("当前服务器线路") { showRoutes = true } }
                 }
                 Section {
                     Button {
@@ -50,6 +60,16 @@ struct ServersView: View {
                 }
             }
             .navigationTitle("野弦")
+            .sheet(isPresented: $showRoutes) {
+                if let routes = model.routes {
+                    NavigationStack { ServerRoutesEditor(routes: routes).navigationTitle("服务器线路").toolbar { Button("完成") { showRoutes = false } } }
+                }
+            }
+            .alert("本机别名", isPresented: Binding(get: { editing != nil }, set: { if !$0 { editing = nil } })) {
+                TextField("留空使用服务器名称", text: $alias)
+                Button("保存") { if let editing { model.setAlias(alias, for: editing) }; editing = nil }
+                Button("取消", role: .cancel) { editing = nil }
+            } message: { Text("别名仅保存在这台设备。") }
         }
     }
 }

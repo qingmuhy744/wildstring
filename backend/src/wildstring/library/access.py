@@ -48,6 +48,8 @@ class LibraryAccess:
             path.startswith("/api/v1/" + p)
             for p in (
                 "auth",
+                "server",
+                "manage/server",
                 "users",
                 "manage/users",
                 "podcasts",

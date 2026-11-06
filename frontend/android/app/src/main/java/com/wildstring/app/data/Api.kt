@@ -25,7 +25,7 @@ interface Api {
     @POST suspend fun uploadPlugin(@Url url: String, @Body body: okhttp3.RequestBody, @Tag owner: RequestOwner? = null): retrofit2.Response<JsonObject>
     @Streaming @GET suspend fun downloadPlugin(@Url url: String, @Tag owner: RequestOwner? = null): ResponseBody
     @Streaming @GET suspend fun coverImage(@Url url: String, @Tag owner: RequestOwner): ResponseBody
-    @GET suspend fun playlist(@Url url: String): Playlist
+    @GET suspend fun playlist(@Url url: String, @Query("include_unavailable") includeUnavailable: Boolean = true): Playlist
     @PUT suspend fun updatePlaylist(@Url url: String, @Body body: PlaylistUpdate): Playlist
     @DELETE suspend fun deletePlaylist(@Url url: String, @Query("version") version: Int): retrofit2.Response<Unit>
     @PUT suspend fun reorderPlaylist(@Url url: String, @Body body: AddTracks): Playlist
@@ -54,15 +54,15 @@ interface Api {
     @POST("api/v1/auth/password") suspend fun changePassword(@Header("Cookie") cookie: String, @Body body: PasswordChange): retrofit2.Response<Unit>
     @PUT("api/v1/auth/profile") suspend fun updateProfile(@Body body: ProfileUpdate): Account
     @PUT("api/v1/auth/preferences") suspend fun updatePreferences(@Body body: PreferencesUpdate): Account
-    @GET suspend fun tracks(@Url url: String, @Query("q") query: String, @Query("limit") limit: Int = 50, @Query("offset") offset: Int = 0): Page<Track>
+    @GET suspend fun tracks(@Url url: String, @Query("q") query: String, @Query("limit") limit: Int = 50, @Query("offset") offset: Int = 0, @Query("include_unavailable") includeUnavailable: Boolean = true): Page<Track>
     @GET suspend fun track(@Url url: String): Track
-    @GET("api/v1/albums") suspend fun albums(@Query("q") query: String, @Query("limit") limit: Int = 50, @Query("offset") offset: Int = 0, @Query("sort") sort: String = "title", @Query("order") order: String = "asc"): Page<Album>
-    @GET suspend fun artistAlbums(@Url url: String, @Query("q") query: String, @Query("limit") limit: Int = 50, @Query("offset") offset: Int = 0, @Query("role") role: String = "artist", @Query("sort") sort: String = "title", @Query("order") order: String = "asc"): Page<Album>
-    @GET("api/v1/artists") suspend fun artists(@Query("q") query: String, @Query("limit") limit: Int = 50, @Query("offset") offset: Int = 0, @Query("role") role: String = "artist"): Page<Artist>
+    @GET("api/v1/albums") suspend fun albums(@Query("q") query: String, @Query("limit") limit: Int = 50, @Query("offset") offset: Int = 0, @Query("sort") sort: String = "title", @Query("order") order: String = "asc", @Query("include_unavailable") includeUnavailable: Boolean = true): Page<Album>
+    @GET suspend fun artistAlbums(@Url url: String, @Query("q") query: String, @Query("limit") limit: Int = 50, @Query("offset") offset: Int = 0, @Query("role") role: String = "artist", @Query("sort") sort: String = "title", @Query("order") order: String = "asc", @Query("include_unavailable") includeUnavailable: Boolean = true): Page<Album>
+    @GET("api/v1/artists") suspend fun artists(@Query("q") query: String, @Query("limit") limit: Int = 50, @Query("offset") offset: Int = 0, @Query("role") role: String = "artist", @Query("include_unavailable") includeUnavailable: Boolean = true): Page<Artist>
     @GET("api/v1/browse-index") suspend fun browseIndex(@Query("kind") kind: String, @Query("q") query: String,
         @Query("artist_id") artistId: String? = null, @Query("role") role: String? = null,
-        @Query("album_id") albumId: String? = null): BrowseIndex
-    @GET("api/v1/playlists") suspend fun playlists(@Query("limit") limit: Int = 100, @Query("offset") offset: Int = 0): Page<Playlist>
+        @Query("album_id") albumId: String? = null, @Query("include_unavailable") includeUnavailable: Boolean = true): BrowseIndex
+    @GET("api/v1/playlists") suspend fun playlists(@Query("limit") limit: Int = 100, @Query("offset") offset: Int = 0, @Query("include_unavailable") includeUnavailable: Boolean = true): Page<Playlist>
     @GET suspend fun lyrics(@Url url: String): Lyrics
     @PUT suspend fun favorite(@Url url: String, @Body body: FavoriteRequest): ResponseBody
     @POST("api/v1/playlists") suspend fun createPlaylist(@Body body: PlaylistRequest): Playlist

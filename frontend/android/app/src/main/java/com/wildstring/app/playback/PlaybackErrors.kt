@@ -12,8 +12,8 @@ private const val PODCAST_FAKE_IP = "服务端 DNS 处于 fake-ip 模式，请�
 fun playbackErrorMessage(error: PlaybackException, podcast: Boolean): String {
     val chain = generateSequence<Throwable>(error) { it.cause }
     chain.filterIsInstance<PlaybackResolutionException>().firstOrNull()?.message?.let { return it }
-    if (!podcast) return TRACK_GENERIC
     val http = chain.filterIsInstance<HttpDataSource.InvalidResponseCodeException>().firstOrNull()
+    if (!podcast) return trackPlaybackMessage(http?.responseCode, http?.responseBody?.decodeToString().orEmpty())
     return podcastPlaybackMessage(http?.responseCode, http?.responseBody?.decodeToString().orEmpty(),
         http == null && error.errorCode == PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS)
 }
@@ -25,4 +25,16 @@ fun podcastPlaybackMessage(responseCode: Int?, body: String, badHttpStatus: Bool
     responseCode == 416 -> "播放位置超出了本期音频的范围，请从头播放。"
     badHttpStatus -> PODCAST_UPSTREAM
     else -> PODCAST_GENERIC
+}
+
+/** Network failures never imply a permanently missing track. */
+fun trackPlaybackMessage(responseCode: Int?, body: String): String = when {
+    "audio_not_found" in body -> "音频文件缺失，请恢复文件并重新扫描后重试。"
+    "track_unavailable" in body -> "音频文件暂不可用，请恢复文件并重新扫描后重试。"
+    "file_changed_rescan_required" in body -> "音频文件已变化，请重新扫描后重试。"
+    "audio_unavailable" in body -> "服务端无法读取音频文件，请检查存储后重试。"
+    responseCode == 401 -> "登录已失效，请重新登录。"
+    responseCode == 404 -> "音频文件不存在或已移除，请刷新曲库后重试。"
+    responseCode == 409 -> "音频文件已变化或无法读取，请检查服务端存储并重新扫描。"
+    else -> TRACK_GENERIC
 }

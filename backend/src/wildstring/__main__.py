@@ -12,6 +12,7 @@ def main() -> None:
     uvicorn.run(
         "wildstring.main:create_app",
         factory=True,
+        proxy_headers=False,
         host=settings.host,
         port=settings.port,
         reload=settings.environment == "development",

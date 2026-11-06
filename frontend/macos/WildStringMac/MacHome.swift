@@ -80,7 +80,7 @@ struct MacHomeView: View {
                             symbol: "play.circle.fill", tint: .green) {
                             if playback.currentItem != nil {
                                 playback.resume()
-                            } else if let first = model.recent.first {
+                            } else if let first = model.recent.first(where: \.isAvailable) ?? model.recent.first {
                                 MacPlayback.play(model.recent, startingAt: first, playback: playback)
                             } else {
                                 session.page = .listening
@@ -238,8 +238,11 @@ struct MacHomeView: View {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(track.title)
                                 .font(.system(size: 13, weight: playback.currentItem?.trackID == track.id ? .semibold : .regular))
-                                .foregroundStyle(playback.currentItem?.trackID == track.id ? MacTheme.accentDeep : MacTheme.ink)
+                                .foregroundStyle(!track.isAvailable ? MacTheme.muted : playback.currentItem?.trackID == track.id ? MacTheme.accentDeep : MacTheme.ink)
                                 .lineLimit(1)
+                            if let reason = track.unavailableReason {
+                                Label(reason, systemImage: "exclamationmark.circle").font(MacTheme.caption).foregroundStyle(MacTheme.muted)
+                            }
                             Text(track.artists.joined(separator: " / "))
                                 .font(MacTheme.caption)
                                 .foregroundStyle(MacTheme.muted)

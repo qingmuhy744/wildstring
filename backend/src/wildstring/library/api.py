@@ -165,8 +165,8 @@ def library_router(repository: LibraryRepository, auth: Auth, transcoding) -> AP
     def scoped(user: Annotated[dict, Depends(auth.require_session)]):
         return repository.for_user(user["id"])
 
-    def require_artist(artist_id: str) -> dict:
-        result = repository.artist(artist_id)
+    def require_artist(artist_id: str, include_unavailable: bool = False) -> dict:
+        result = repository.artist(artist_id, include_unavailable=include_unavailable)
         if result is None:
             raise HTTPException(404, "artist_not_found")
         return result
@@ -179,13 +179,16 @@ def library_router(repository: LibraryRepository, auth: Auth, transcoding) -> AP
         album_id: str | None = None,
         role: Literal["artist", "album_artist", "vocalist", "lyricist", "composer", "arranger"]
         | None = None,
+        include_unavailable: bool = False,
     ):
         # Album members keep disc/track order, so letter offsets would be misleading.
         if album_id is not None or (kind == "artists" and artist_id is not None):
             raise HTTPException(400, "browse_index_not_supported")
         if artist_id is not None:
-            require_artist(artist_id)
-        return repository.browse_index(kind, q, artist_id=artist_id, role=role)
+            require_artist(artist_id, include_unavailable=include_unavailable)
+        return repository.browse_index(
+            kind, q, artist_id=artist_id, role=role, include_unavailable=include_unavailable
+        )
 
     @router.get("/artists", response_model=ArtistPage)
     def artists(
@@ -194,12 +197,15 @@ def library_router(repository: LibraryRepository, auth: Auth, transcoding) -> AP
         offset: Annotated[int, Query(ge=0)] = 0,
         role: Literal["artist", "album_artist", "vocalist", "lyricist", "composer", "arranger"]
         | None = None,
+        include_unavailable: bool = False,
     ):
-        return repository.artists(q, limit, offset, role=role)
+        return repository.artists(
+            q, limit, offset, role=role, include_unavailable=include_unavailable
+        )
 
     @router.get("/artists/{artist_id}", response_model=Artist)
-    def artist(artist_id: str):
-        return require_artist(artist_id)
+    def artist(artist_id: str, include_unavailable: bool = False):
+        return require_artist(artist_id, include_unavailable=include_unavailable)
 
     @router.get("/artists/{artist_id}/tracks", response_model=TrackPage)
     def artist_tracks(
@@ -213,8 +219,9 @@ def library_router(repository: LibraryRepository, auth: Auth, transcoding) -> AP
         order: SortOrder | None = None,
         role: Literal["artist", "album_artist", "vocalist", "lyricist", "composer", "arranger"]
         | None = None,
+        include_unavailable: bool = False,
     ):
-        require_artist(artist_id)
+        require_artist(artist_id, include_unavailable=include_unavailable)
         return current.tracks(
             q,
             limit,
@@ -224,6 +231,7 @@ def library_router(repository: LibraryRepository, auth: Auth, transcoding) -> AP
             role=role,
             sort=sort,
             order=order,
+            include_unavailable=include_unavailable,
         )
 
     @router.get("/artists/{artist_id}/albums", response_model=AlbumPage)
@@ -236,10 +244,18 @@ def library_router(repository: LibraryRepository, auth: Auth, transcoding) -> AP
         offset: Annotated[int, Query(ge=0)] = 0,
         role: Literal["artist", "album_artist", "vocalist", "lyricist", "composer", "arranger"]
         | None = None,
+        include_unavailable: bool = False,
     ):
-        require_artist(artist_id)
+        require_artist(artist_id, include_unavailable=include_unavailable)
         return repository.albums(
-            q, limit, offset, artist_id=artist_id, role=role, sort=sort, order=order
+            q,
+            limit,
+            offset,
+            artist_id=artist_id,
+            role=role,
+            sort=sort,
+            order=order,
+            include_unavailable=include_unavailable,
         )
 
     @router.get("/imports")
@@ -279,12 +295,15 @@ def library_router(repository: LibraryRepository, auth: Auth, transcoding) -> AP
         q: Annotated[str, Query(max_length=256)] = "",
         limit: Annotated[int, Query(ge=1, le=100)] = 50,
         offset: Annotated[int, Query(ge=0)] = 0,
+        include_unavailable: bool = False,
     ):
-        return repository.albums(q, limit, offset, sort=sort, order=order)
+        return repository.albums(
+            q, limit, offset, sort=sort, order=order, include_unavailable=include_unavailable
+        )
 
     @router.get("/albums/{album_id}", response_model=Album)
-    def album(album_id: str):
-        result = repository.album(album_id)
+    def album(album_id: str, include_unavailable: bool = False):
+        result = repository.album(album_id, include_unavailable=include_unavailable)
         if result is None:
             raise HTTPException(404, "album_not_found")
         return result
@@ -297,10 +316,18 @@ def library_router(repository: LibraryRepository, auth: Auth, transcoding) -> AP
         offset: Annotated[int, Query(ge=0)] = 0,
         sort: TrackSort = "title",
         order: SortOrder | None = None,
+        include_unavailable: bool = False,
     ):
-        if repository.album(album_id) is None:
+        if repository.album(album_id, include_unavailable=include_unavailable) is None:
             raise HTTPException(404, "album_not_found")
-        return current.tracks(limit=limit, offset=offset, album_id=album_id, sort=sort, order=order)
+        return current.tracks(
+            limit=limit,
+            offset=offset,
+            album_id=album_id,
+            sort=sort,
+            order=order,
+            include_unavailable=include_unavailable,
+        )
 
     @router.api_route("/tracks/{track_id}/stream", methods=["GET", "HEAD"])
     def stream(
@@ -339,8 +366,17 @@ def library_router(repository: LibraryRepository, auth: Auth, transcoding) -> AP
         played_only: bool = False,
         sort: TrackSort = "title",
         order: SortOrder | None = None,
+        include_unavailable: bool = False,
     ):
-        return current.tracks(q, limit, offset, played_only=played_only, sort=sort, order=order)
+        return current.tracks(
+            q,
+            limit,
+            offset,
+            played_only=played_only,
+            sort=sort,
+            order=order,
+            include_unavailable=include_unavailable,
+        )
 
     @router.get("/tracks/{track_id}", response_model=Track)
     def track(track_id: str, current: Annotated[LibraryRepository, Depends(scoped)]):

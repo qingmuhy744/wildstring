@@ -556,3 +556,60 @@ def test_reorder_visible_selection_preserves_missing_slots_and_requires_exact_se
         with database.connect(write=True) as connection:
             connection.execute("UPDATE tracks SET status='available'")
         assert [item["id"] for item in client.get(endpoint + "/tracks").json()["items"]] == full
+
+
+def test_unavailable_browsing_opt_in_preserves_collection_and_restores_files(
+    settings, authenticated_client
+):
+    path = music(settings, "missing.flac", ["乐队"], ["乐队"])
+    original = path.read_bytes()
+    scan_library(settings)
+    with authenticated_client(settings) as client:
+        track = next(iter(get_tracks(client).values()))
+        artist = client.get("/api/v1/artists").json()["items"][0]
+        playlist = create_playlist(client)
+        endpoint = f"/api/v1/playlists/{playlist['id']}"
+        assert (
+            client.post(
+                endpoint + "/tracks",
+                headers=HEADERS,
+                json={"version": 1, "track_ids": [track["id"]]},
+            ).status_code
+            == 200
+        )
+        client.put(f"/api/v1/tracks/{track['id']}/favorite", headers=HEADERS, json={"loved": True})
+        path.unlink()
+        # Real file failures have a precise reason before the next scan.
+        assert (
+            client.get(f"/api/v1/tracks/{track['id']}/playback").json()["detail"]
+            == "audio_not_found"
+        )
+        scan_library(settings)
+        assert client.get("/api/v1/tracks").json()["total"] == 0
+        assert client.get(endpoint + "/tracks").json()["total"] == 0
+        params = {"include_unavailable": True}
+        for route in [
+            "/api/v1/tracks",
+            f"/api/v1/albums/{track['album_id']}/tracks",
+            f"/api/v1/artists/{artist['id']}/tracks",
+            endpoint + "/tracks",
+        ]:
+            page = client.get(route, params=params).json()
+            assert page["total"] == 1, page
+            assert page["items"][0]["status"] == "missing"
+            assert page["items"][0]["id"] == track["id"]
+        assert client.get(endpoint, params=params).json()["track_count"] == 1
+        for kind in ["tracks", "albums", "artists"]:
+            assert client.get(f"/api/v1/{kind}", params=params).json()["total"] == 1
+            assert (
+                client.get("/api/v1/browse-index", params={**params, "kind": kind}).json()["total"]
+                == 1
+            )
+        assert client.get(f"/api/v1/tracks/{track['id']}/stream").status_code == 409
+        assert client.get("/api/v1/favorites/ids").json()["ids"] == [track["id"]]
+        path.write_bytes(original)
+        scan_library(settings)
+        restored = client.get(endpoint + "/tracks", params=params).json()["items"]
+        assert restored[0]["id"] == track["id"]
+        assert restored[0]["status"] == "available"
+        assert restored[0]["loved"]

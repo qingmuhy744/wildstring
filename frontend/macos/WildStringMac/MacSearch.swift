@@ -158,7 +158,7 @@ struct MacSearchView: View {
             .foregroundStyle(MacTheme.muted)
         }
         Spacer()
-        if !model.tracks.isEmpty, let first = model.tracks.first {
+        if !model.tracks.isEmpty, let first = model.tracks.first(where: \.isAvailable) ?? model.tracks.first {
           Button {
             MacPlayback.play(model.tracks, startingAt: first, playback: playback)
           } label: {
@@ -391,13 +391,16 @@ struct MacSearchView: View {
         } label: {
           Text(track.title)
             .font(.system(size: 13, weight: current ? .semibold : .regular))
-            .foregroundStyle(current ? MacTheme.accentDeep : MacTheme.ink)
+            .foregroundStyle(!track.isAvailable ? MacTheme.muted : current ? MacTheme.accentDeep : MacTheme.ink)
             .lineLimit(1)
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
 
+        if let reason = track.unavailableReason {
+          Label(reason, systemImage: "exclamationmark.circle").font(MacTheme.caption).foregroundStyle(MacTheme.muted)
+        }
         HStack(spacing: 4) {
           artistLink(track)
           if track.albumId != nil || !(track.album ?? "").isEmpty {

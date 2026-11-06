@@ -109,6 +109,7 @@ extension WildstringClient {
         order: CatalogSortOrder? = nil
     ) async throws -> AlbumTrackPage {
         var queryItems = [
+            URLQueryItem(name: "include_unavailable", value: "true"),
             URLQueryItem(name: "limit", value: String(limit)),
             URLQueryItem(name: "offset", value: String(offset)),
             URLQueryItem(name: "sort", value: sort.rawValue),
@@ -183,6 +184,7 @@ extension WildstringClient {
         order: CatalogSortOrder?
     ) async throws -> Page<Element> {
         var queryItems = [
+            URLQueryItem(name: "include_unavailable", value: "true"),
             URLQueryItem(name: "limit", value: String(limit)),
             URLQueryItem(name: "offset", value: String(offset)),
             URLQueryItem(name: "sort", value: sort),
@@ -207,6 +209,7 @@ extension WildstringClient {
         role: String? = nil
     ) async throws -> Page<Element> {
         var queryItems = [
+            URLQueryItem(name: "include_unavailable", value: "true"),
             URLQueryItem(name: "limit", value: String(limit)),
             URLQueryItem(name: "offset", value: String(offset)),
         ]

@@ -39,9 +39,10 @@ public final class PlaybackService {
         public var album: String?
         public var hasCover: Bool
         public var streamPath: String
+        public var unavailableReason: String?
 
         private enum CodingKeys: String, CodingKey {
-            case id, trackID, title, artist, album, hasCover, streamPath
+            case id, trackID, title, artist, album, hasCover, streamPath, unavailableReason
         }
 
         public init(
@@ -51,7 +52,8 @@ public final class PlaybackService {
             artist: String,
             album: String? = nil,
             hasCover: Bool = false,
-            streamPath: String
+            streamPath: String,
+            unavailableReason: String? = nil
         ) {
             self.id = id
             self.trackID = trackID
@@ -60,6 +62,7 @@ public final class PlaybackService {
             self.album = album
             self.hasCover = hasCover
             self.streamPath = streamPath
+            self.unavailableReason = unavailableReason
         }
 
         public init(from decoder: Decoder) throws {
@@ -71,6 +74,7 @@ public final class PlaybackService {
             album = try container.decodeIfPresent(String.self, forKey: .album)
             hasCover = try container.decodeIfPresent(Bool.self, forKey: .hasCover) ?? false
             streamPath = try container.decode(String.self, forKey: .streamPath)
+            unavailableReason = try container.decodeIfPresent(String.self, forKey: .unavailableReason)
         }
     }
 
@@ -88,6 +92,7 @@ public final class PlaybackService {
     }
     public private(set) var errorMessage: String?
 
+    public var wantsPlayback: Bool { intendedPlaying }
     public var items: [Item] { queue.items }
     public var playbackItems: [Item] { queue.playbackItems }
     public var currentIndex: Int? { queue.currentIndex }
@@ -162,6 +167,7 @@ public final class PlaybackService {
         store: any QueueStore,
         cookieHeader: @escaping @Sendable () async -> String?,
         fragmentCache: AudioDiskCache? = nil,
+        connectionFailure: (@Sendable () async -> Void)? = nil,
         offlineLookup: @escaping @Sendable (String) -> URL? = { _ in nil },
         planProvider: (@Sendable (String, Int?, Int64) async throws -> PlaybackPlan)? = nil
     ) {
@@ -177,7 +183,8 @@ public final class PlaybackService {
         self.resourceLoader = WildstringAudioResourceLoader(
             server: server,
             cookieHeader: cookieHeader,
-            cache: fragmentCache
+            cache: fragmentCache,
+            connectionFailure: connectionFailure
         )
     }
 
@@ -191,10 +198,28 @@ public final class PlaybackService {
         updateSystemNowPlaying()
     }
 
+    /// Transfers an in-memory queue between routes of the same authenticated server.
+    /// Preserve entry IDs, shuffle order, repeat mode and position without reloading items.
+    public func restoreRouteQueue(_ snapshot: PlaybackQueue, position: Double) {
+        queue = snapshot
+        currentTime = max(0, position)
+        duration = 0
+        isPlaying = false
+        persistQueueAndProgress()
+        updateSystemNowPlaying()
+    }
+
     // MARK: - Commands
 
     public func play(items: [Item], startingAt index: Int, position: Double = 0) {
-        queue.set(items: items, startingAt: index)
+        guard items.indices.contains(index) else { return }
+        if let reason = items[index].unavailableReason {
+            errorMessage = "「\(items[index].title)」\(reason)。请恢复文件并重新扫描，刷新列表后重试。"
+            return
+        }
+        let playable = items.filter { $0.unavailableReason == nil }
+        let selectedIndex = items.prefix(index).filter { $0.unavailableReason == nil }.count
+        queue.set(items: playable, startingAt: selectedIndex)
         startCurrent(autoplay: true, startAt: max(0, position))
         persistQueueAndProgress()
     }
@@ -250,7 +275,11 @@ public final class PlaybackService {
 
     @discardableResult
     public func enqueue(items: [Item], next: Bool = false) -> Bool {
-        guard !items.isEmpty else { return false }
+        let items = items.filter { $0.unavailableReason == nil }
+        guard !items.isEmpty else {
+            errorMessage = "没有可播放的歌曲。请恢复文件并重新扫描，刷新列表后重试。"
+            return false
+        }
         guard queue.count + items.count <= 5000 else {
             errorMessage = "播放队列最多 5000 首。"
             return false
@@ -997,9 +1026,12 @@ public final class PlaybackService {
 
     private static func message(for error: APIError) -> String {
         switch error.code {
-        case "authentication_required": return "登录已过期，请重新登录"
+        case "authentication_required", "http_401": return "登录已过期，请重新登录"
         case "track_not_found": return "这首歌曲已不在曲库"
-        case "file_changed", "track_unavailable": return "音频文件已变化，无法播放"
+        case "track_unavailable": return "音频文件暂不可用，请恢复文件并重新扫描后重试"
+        case "audio_not_found", "http_404": return "音频文件缺失，请恢复文件并重新扫描后重试"
+        case "audio_unavailable", "http_409": return "服务端无法读取音频文件，请检查存储后重试"
+        case "file_changed", "file_changed_rescan_required": return "音频文件已变化，请重新扫描后重试"
         default: return "无法播放（\(error.statusCode)）"
         }
     }

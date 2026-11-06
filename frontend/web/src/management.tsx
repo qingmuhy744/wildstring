@@ -8,6 +8,7 @@ import { ProviderSettings } from './providers';
 import { LyricScanEntry } from './lyric-scans';
 import { UsersPanel } from './accounts';
 import { TranscodingSettings } from './transcoding-settings';
+import { ServerSettings } from './server-settings';
 import { HostSettings } from './host-settings';
 import { useEffect, useRef, useState } from 'react';
 import { api, type Track, type TrackPage, type User } from './api';
@@ -63,7 +64,7 @@ interface Overview {
   library: Directory;
   data: Directory;
   last_scan: Run | null;
-  deployment: { host: string; port: number; cookie_secure: boolean };
+  deployment: { host: string; port: number; cookie_secure: boolean; connection_policy?: string };
 }
 const statuses: Record<string, string> = {
   queued: '排队中',
@@ -698,7 +699,12 @@ export function Management({
                 </section>
               )}
               {tab === 'transcoding' && canOwner && <TranscodingSettings />}
-              {tab === 'access' && canOwner && <HostSettings />}
+              {tab === 'access' && canOwner && (
+                <>
+                  <ServerSettings />
+                  <HostSettings />
+                </>
+              )}
               {tab === 'library-settings' && canOwner && (
                 <>
                   <section className="management-library-settings" aria-label="当前音乐库设置">
@@ -743,7 +749,15 @@ export function Management({
                         ['数据库版本', String(overview.schema_version)],
                         ['运行数据', overview.data.path],
                         ['服务端地址', `${overview.deployment.host}:${overview.deployment.port}`],
-                        ['安全 Cookie', overview.deployment.cookie_secure ? '已启用' : '未启用'],
+                        [
+                          '安全 Cookie',
+                          overview.deployment.connection_policy &&
+                          overview.deployment.connection_policy !== 'legacy'
+                            ? '按 HTTP / HTTPS 自动设置'
+                            : overview.deployment.cookie_secure
+                              ? '已启用'
+                              : '未启用',
+                        ],
                         ['媒体标签写回', '未启用'],
                       ].map(([key, value]) => (
                         <div key={key}>

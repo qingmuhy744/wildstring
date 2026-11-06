@@ -86,7 +86,7 @@ struct PlaylistDetailView: View {
                     .font(.caption)
                     .foregroundStyle(.tertiary)
                 Button {
-                    if let first = loader?.items.first {
+                    if let first = loader?.items.first(where: \.isAvailable) ?? loader?.items.first {
                         playTracks(loader?.items ?? [], startingAt: first, using: playback)
                     }
                 } label: {
