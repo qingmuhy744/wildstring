@@ -989,7 +989,7 @@ class Providers:
                             "provider.worker.failed",
                             level="WARNING",
                             sink=getattr(self, "diagnostics", None),
-                            exception_type=type(failure).__name__,
+                            error=failure,
                             code=getattr(failure, "code", "provider_worker_failed"),
                         )
                         continue
@@ -998,7 +998,7 @@ class Providers:
                 "provider.worker.stopped",
                 level="ERROR",
                 sink=getattr(self, "diagnostics", None),
-                exception_type=type(failure).__name__,
+                error=failure,
                 code="provider_storage_unavailable",
             )
         finally:
@@ -1063,7 +1063,16 @@ class Providers:
                     record_event(
                         "provider.task.finished", stage=finished["status"], code=finished["error"]
                     )
-            except (ProviderError, ValueError, TypeError, KeyError, AttributeError):
+            except (ProviderError, ValueError, TypeError, KeyError, AttributeError) as failure:
+                record_event(
+                    "provider.task.failed",
+                    level="WARNING" if isinstance(failure, ProviderError) else "ERROR",
+                    sink=getattr(self, "diagnostics", None),
+                    trace_id=job["id"].replace("-", ""),
+                    task_id=job["id"],
+                    error=failure,
+                    code=getattr(failure, "code", "provider_unavailable"),
+                )
                 with self.database.connect(write=True) as connection:
                     connection.execute(
                         "UPDATE provider_jobs SET status='failed',error='provider_unavailable',updated_at=? WHERE id=?",

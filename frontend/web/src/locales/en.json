@@ -1,4 +1,24 @@
 {
+  "diagnostics": {
+    "settings": "Log settings",
+    "settingsHint": "Controls new logs in both the console and diagnostic storage. Saved settings survive restarts; temporary DEBUG stays separate.",
+    "minimumLevel": "Minimum log level",
+    "levelInfo": "INFO — normal activity and above",
+    "levelWarning": "WARNING — warnings and above",
+    "levelError": "ERROR — errors and critical failures",
+    "captureStack": "Record diagnostic stack traces",
+    "stackHint": "Records exception types, modules, functions, line numbers and causes. Excludes error messages, source text, local variables and full paths. Changes apply to new events only.",
+    "saveSettings": "Save log settings",
+    "settingsSaved": "Log settings saved and applied.",
+    "errorStack": "View error stack",
+    "framesTruncated": "Only the last 32 frames are shown.",
+    "chainTruncated": "The exception chain was truncated after 5 exceptions.",
+    "relation": {
+      "raised": "Raised exception",
+      "cause": "Caused by",
+      "context": "During handling of"
+    }
+  },
   "common": {
     "cancel": "Cancel",
     "close": "Close",

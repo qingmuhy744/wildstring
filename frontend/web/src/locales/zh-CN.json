@@ -1,4 +1,20 @@
 {
+  "diagnostics": {
+    "settings": "日志设置",
+    "settingsHint": "控制新日志的采集，同步作用于终端和诊断存储。设置重启后保留，临时 DEBUG 独立控制。",
+    "minimumLevel": "最低记录等级",
+    "levelInfo": "INFO — 常规运行及以上",
+    "levelWarning": "WARNING — 警告及以上",
+    "levelError": "ERROR — 错误与严重故障",
+    "captureStack": "记录诊断调用栈",
+    "stackHint": "记录异常类型、模块、函数、行号和异常因果链，不含异常原文、源代码、局部变量和完整路径。设置只影响新事件。",
+    "saveSettings": "保存日志设置",
+    "settingsSaved": "日志设置已保存并生效。",
+    "errorStack": "查看错误栈",
+    "framesTruncated": "仅保留最后 32 层调用。",
+    "chainTruncated": "异常链超过 5 个，后续已省略。",
+    "relation": { "raised": "抛出异常", "cause": "直接原因", "context": "处理前一个异常时" }
+  },
   "common": {
     "cancel": "取消",
     "close": "关闭",

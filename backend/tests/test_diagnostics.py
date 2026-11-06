@@ -5,9 +5,191 @@ import logging
 import time
 from concurrent.futures import ThreadPoolExecutor
 
-from wildstring.diagnostics import Diagnostics, SafeFormatter, record_event, trace_context
+import pytest
+
+from wildstring.diagnostics import (
+    DiagnosticLevelFilter,
+    Diagnostics,
+    LogSettings,
+    SafeCapture,
+    SafeFormatter,
+    exception_stack,
+    record_event,
+    trace_context,
+)
 
 HEADERS = {"X-Wildstring-Client": "web"}
+
+
+def test_exception_stack_preserves_origin_and_causes_without_values(tmp_path):
+    service = Diagnostics(tmp_path)
+    service.start()
+
+    def failing_origin():
+        private_local = "must-not-appear-in-stack"
+        raise ValueError(private_local)
+
+    with trace_context("c" * 32, sink=service):
+        try:
+            try:
+                failing_origin()
+            except ValueError as cause:
+                raise RuntimeError("outer-private-message") from cause
+        except RuntimeError as error:
+            record_event("test.failed", level="ERROR", error=error)
+    service.stop()
+    event = service.events(trace_id="c" * 32)["items"][0]
+    chain = event["stack"]["exceptions"]
+    assert [item["type"] for item in chain] == ["RuntimeError", "ValueError"]
+    assert chain[1]["relation"] == "cause"
+    assert chain[1]["frames"][-1]["function"] == "failing_origin"
+    assert chain[1]["frames"][-1]["line"] > 0
+    for text in (json.dumps(event), (service.directory / "events.jsonl").read_text()):
+        assert "must-not-appear-in-stack" not in text
+        assert "outer-private-message" not in text
+        assert str(tmp_path) not in text
+
+
+def test_standard_logs_and_events_share_levels_debug_scope_and_stack_toggle(tmp_path, monkeypatch):
+    import io
+
+    service = Diagnostics(tmp_path)
+    service.start()
+    service.configure(LogSettings(level="WARNING", capture_stack=False))
+    output = io.StringIO()
+    console = logging.StreamHandler(output)
+    console.setFormatter(SafeFormatter(service))
+    console.addFilter(DiagnosticLevelFilter(service))
+    logger = logging.getLogger("wildstring.agent.fixture")
+    monkeypatch.setattr(logger, "handlers", [SafeCapture(service), console])
+    monkeypatch.setattr(logger, "propagate", False)
+    previous_level = logger.level
+    logger.setLevel(logging.DEBUG)
+    try:
+        with trace_context("d" * 32, sink=service):
+            logger.info("private-info")
+            record_event("agent.info")
+            logger.debug("private-debug")
+            service.debug_until = time.time() + 30
+            service.debug_module = "outbound"
+            logger.debug("private-wrong-module")
+            service.debug_module = "agent"
+            logger.debug("private-matching-debug")
+            record_event("agent.debug", level="DEBUG")
+            record_event("outbound.debug", level="DEBUG")
+            try:
+                raise RuntimeError("private-error-message")
+            except RuntimeError:
+                logger.exception("private-log-message")
+            logger.critical("private-critical")
+    finally:
+        logger.setLevel(previous_level)
+        service.stop()
+    events = service.events(trace_id="d" * 32)["items"]
+    assert sorted(item["level"] for item in events) == ["CRITICAL", "DEBUG", "DEBUG", "ERROR"]
+    assert all("stack" not in item for item in events)
+    assert any(item.get("exception_type") == "RuntimeError" for item in events)
+    console_events = [json.loads(line) for line in output.getvalue().splitlines()]
+    assert [item["level"] for item in console_events] == ["DEBUG", "ERROR", "CRITICAL"]
+    assert "private-" not in output.getvalue()
+
+
+def test_settings_are_owner_only_validated_and_survive_restart(
+    settings, authenticated_client, monkeypatch
+):
+    from test_users import login, new_user
+
+    with authenticated_client(settings) as client:
+        endpoint = "/api/v1/manage/diagnostics/settings"
+        body = {"level": "ERROR", "capture_stack": False}
+        assert client.put(endpoint, json=body).status_code == 403
+        for invalid in (
+            {"level": "DEBUG", "capture_stack": True},
+            {"level": "ERROR", "capture_stack": "false"},
+            body | {"unknown": True},
+        ):
+            assert client.put(endpoint, json=invalid, headers=HEADERS).status_code == 422
+        saved = client.put(endpoint, json=body, headers=HEADERS)
+        assert saved.status_code == 200
+        assert saved.json()["level"] == "ERROR"
+        assert saved.json()["capture_stack"] is False
+        service = client.app.state.diagnostics
+        with monkeypatch.context() as patch:
+            import sqlite3
+
+            def unavailable():
+                raise sqlite3.OperationalError("synthetic-disk-failure")
+
+            patch.setattr(service, "connect", unavailable)
+            failed = client.put(
+                endpoint, json={"level": "INFO", "capture_stack": True}, headers=HEADERS
+            )
+            assert failed.status_code == 503
+            assert service.settings == LogSettings(level="ERROR", capture_stack=False)
+        service.debug_until = time.time() + 30
+        new_user(client)
+        client.post("/api/v1/auth/logout", headers=HEADERS)
+        assert login(client).status_code == 200
+        assert client.put(endpoint, json=body, headers=HEADERS).status_code == 403
+        assert client.get("/api/v1/manage/diagnostics/events").status_code == 403
+        client.post("/api/v1/auth/logout", headers=HEADERS)
+        assert client.put(endpoint, json=body, headers=HEADERS).status_code == 401
+    restarted = Diagnostics(settings.data_dir)
+    restarted.start()
+    try:
+        assert restarted.settings == LogSettings(level="ERROR", capture_stack=False)
+        assert restarted.status()["debug_until"] is None
+    finally:
+        restarted.stop()
+
+
+def test_failed_request_records_origin_stack_and_status(settings, authenticated_client):
+    with authenticated_client(settings) as client:
+
+        def failing_route():
+            raise ValueError("private-request-value")
+
+        client.app.add_api_route("/api/v1/diagnostic-fixture", failing_route)
+        with pytest.raises(ValueError):
+            client.get("/api/v1/diagnostic-fixture", headers={"X-Wildstring-Trace-Id": "e" * 32})
+        service = client.app.state.diagnostics
+        service.flush()
+        events = service.events(trace_id="e" * 32)["items"]
+        failed = next(item for item in events if item["event"] == "request.failed")
+        assert failed["level"] == "ERROR"
+        assert failed["stack"]["exceptions"][0]["frames"][-1]["function"] == "failing_route"
+        completed = next(item for item in events if item["event"] == "request.completed")
+        assert completed["level"] == "ERROR" and completed["http_status"] == 500
+        assert "private-request-value" not in json.dumps(service.bundle("e" * 32))
+
+
+def test_stack_honors_suppression_and_bounds():
+    try:
+        try:
+            raise ValueError("hidden")
+        except ValueError:
+            raise RuntimeError("hidden") from None
+    except RuntimeError as error:
+        assert len(exception_stack(error)["exceptions"]) == 1
+
+    previous = None
+    for _ in range(7):
+        error = RuntimeError("hidden")
+        error.__cause__ = previous
+        previous = error
+    stack = exception_stack(previous)
+    assert len(stack["exceptions"]) == 5 and stack["chain_truncated"]
+
+    def recurse(depth):
+        if depth:
+            return recurse(depth - 1)
+        raise RuntimeError("hidden")
+
+    try:
+        recurse(40)
+    except RuntimeError as error:
+        frames = exception_stack(error)["exceptions"][0]
+        assert len(frames["frames"]) == 32 and frames["frames_truncated"]
 
 
 def test_structured_projection_drops_secrets_in_values_and_exception(tmp_path):

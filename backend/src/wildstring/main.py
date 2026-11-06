@@ -89,7 +89,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         catalog.initialize()
         repository.root.mkdir(parents=True, exist_ok=True)
         diagnostics.start()
-        install_logging()
+        install_logging(diagnostics)
         playlists.ensure_default()
         if (
             current.admin_password is not None

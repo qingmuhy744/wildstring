@@ -546,7 +546,11 @@ class Assistant:
                     (configuration["id"], actor.user_id, day),
                 )
             self.log(
-                "agent.model.error", actor, error_code=getattr(failure, "code", "ai_request_failed")
+                "agent.model.error",
+                actor,
+                level="ERROR",
+                error=failure,
+                error_code=getattr(failure, "code", "ai_request_failed"),
             )
             raise HTTPException(502, getattr(failure, "code", "ai_request_failed")) from None
         if key and len(key) >= 8 and key in encoded(response):
@@ -581,7 +585,7 @@ class Assistant:
             return parsed
         except Exception as failure:
             code = getattr(failure, "code", "ai_invalid_response")
-            self.log("agent.model.rejected", actor, error_code=code)
+            self.log("agent.model.rejected", actor, level="WARNING", error=failure, error_code=code)
             raise HTTPException(502, code) from None
 
     def test_connection(self, actor, identity):
@@ -1182,7 +1186,8 @@ class Assistant:
                 + ". Existing drafts are in the draft list; playback and local search still work.",
             )
             result["content"] = budget if error == "ai_run_budget_exhausted" else failed
-        except Exception:
+        except Exception as failure:
+            self.log("agent.run.failed", actor, level="ERROR", error=failure, trace_id=trace_id)
             status, error = "failed", "ai_run_internal_error"
             result["content"] = localized_message(
                 body.locale,

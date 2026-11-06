@@ -10,6 +10,7 @@ from fastapi import HTTPException
 
 from wildstring.agent_common import encoded, future, validate
 from wildstring.agent_models import Inspection
+from wildstring.diagnostics import record_event
 from wildstring.library.repository import now
 
 RESUMABLE = {
@@ -469,7 +470,8 @@ class Automation:
                 else "failed"
             )
             self.finish_task(job, status, counts, error_code=str(failure.detail))
-        except Exception:
+        except Exception as error:
+            record_event("agent.task.failed", level="ERROR", error=error)
             self.finish_task(job, "failed", counts, error_code="agent_task_internal_error")
 
     def schedules(self, actor):
@@ -588,9 +590,12 @@ class Automation:
                 if not job and not sent:
                     self.wake.wait(2)
                     self.wake.clear()
-            except Exception:
+            except Exception as error:
                 self.log(
-                    "agent.worker.error", level="ERROR", error_code="agent_worker_iteration_failed"
+                    "agent.worker.error",
+                    level="ERROR",
+                    error=error,
+                    error_code="agent_worker_iteration_failed",
                 )
                 self.wake.wait(2)
                 self.wake.clear()

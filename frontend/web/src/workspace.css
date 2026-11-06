@@ -918,3 +918,18 @@
   line-height: 1.6;
   resize: vertical;
 }
+
+.diagnostic-stack {
+  margin-top: 8px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.diagnostic-stack summary {
+  cursor: pointer;
+  color: var(--accent);
+}
+.diagnostic-stack ol {
+  padding-inline-start: 24px;
+  font-size: 12px;
+  line-height: 1.7;
+}
