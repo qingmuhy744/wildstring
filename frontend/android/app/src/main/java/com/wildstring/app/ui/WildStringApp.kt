@@ -549,7 +549,7 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
         BackHandler(enabled = !settings && (expanded || queue || state.canGoBack || state.tab != "search")) {
             when { queue && (!wide || state.current?.isPodcast == true) -> queue = false; lyrics && !wide && state.current?.isPodcast != true -> lyrics = false; expanded -> collapsePlayer(); state.tab == "podcast" && state.podcastId != null -> vm.back(); state.canGoBack -> vm.back(); else -> vm.navigate("search") }
         }
-        @Composable fun BaseDestination(target: String) {
+        val baseDestinationContent by rememberUpdatedState<@Composable (String) -> Unit> { target ->
             Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))) {
             if (target == "settings") savedPages.SaveableStateProvider("settings") { SettingsScreen(vm, bottomBar = {
                 MiniPlayer(vm, state, onQueue = { queue = true }, includeBottomInset = true) { playerFromSettings = true; settings = false; expanded = true; lyrics = false; queue = false }
@@ -685,6 +685,13 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
             }
             }
             }
+        }
+        // Move each page between its destination and the player backdrop without recreating
+        // its saveable registry before the outgoing instance has saved its state.
+        val settingsContent = remember { movableContentOf { baseDestinationContent("settings") } }
+        val catalogContent = remember { movableContentOf { baseDestinationContent("catalog") } }
+        @Composable fun BaseDestination(target: String) {
+            if (target == "settings") settingsContent() else catalogContent()
         }
         AnimatedContent(destination, transitionSpec = {
             if (targetState == "settings" || initialState == "settings") {

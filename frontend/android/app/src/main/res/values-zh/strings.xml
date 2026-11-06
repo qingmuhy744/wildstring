@@ -473,6 +473,7 @@
     <string name="select_all">全选</string>
     <string name="select_none">取消全选</string>
     <string name="lyrics_view">查看歌词</string>
+    <string name="lyrics_preview_close">关闭歌词预览</string>
     <string name="recommendation_settings">推荐设置</string>
     <string name="recommendation_evidence">推荐依据</string>
     <string name="recommendation_evidence_hide">收起推荐依据</string>

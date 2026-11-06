@@ -160,9 +160,9 @@ class RecommendationExperienceTest {
                 val before = compose.runOnIdle { vm.controller!!.currentPosition }
                 compose.onNodeWithTag("daily-recommendations").performScrollToNode(hasTestTag("daily-track-local-a"))
                 compose.onNode(hasTestTag("daily-more-local-a") and hasClickAction(), useUnmergedTree = true).performScrollTo().performClick()
-                compose.onNodeWithText("查看歌词", substring = false).performClick()
+                compose.onNodeWithText(uiString(R.string.lyrics_view), substring = false).performClick()
                 compose.onNodeWithTag("recommendation-lyrics").assertExists()
-                compose.onNodeWithText("关闭歌词预览", substring = false).performClick()
+                compose.onNodeWithText(uiString(R.string.lyrics_preview_close), substring = false).performClick()
                 assertEquals(entry, vm.state.value.entryId)
                 assertFalse(vm.state.value.playing)
                 assertTrue(kotlin.math.abs(compose.runOnIdle { vm.controller!!.currentPosition } - before) < 250)

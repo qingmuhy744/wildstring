@@ -473,6 +473,7 @@
     <string name="select_all">Select all</string>
     <string name="select_none">Clear selection</string>
     <string name="lyrics_view">View lyrics</string>
+    <string name="lyrics_preview_close">Close lyric preview</string>
     <string name="recommendation_settings">Recommendation settings</string>
     <string name="recommendation_evidence">Why these songs</string>
     <string name="recommendation_evidence_hide">Hide reasons</string>
