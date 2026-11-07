@@ -191,7 +191,7 @@ a {
   text-overflow: ellipsis;
 }
 .error {
-  color: #f1a88e;
+  color: var(--danger);
   font-size: 13px;
   line-height: 1.6;
 }
@@ -576,7 +576,7 @@ a {
 .subtle {
   font-size: 10px;
   letter-spacing: 0.5px;
-  color: #8a8e7d;
+  color: var(--muted);
 }
 .track-list {
   width: 100%;
@@ -4328,7 +4328,7 @@ textarea {
   color: #30332a;
   background: transparent;
 }
-[data-theme='light'] :is(.error, .danger-text) {
+[data-theme='light'] .danger-text {
   color: #a64027;
 }
 [data-theme='light'] .access-warning {

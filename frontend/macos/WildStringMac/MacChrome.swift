@@ -69,7 +69,7 @@ enum MacTheme {
     static let border = adaptive(light: 0xDEDED2, dark: 0x33342E)
     static let ink = adaptive(light: 0x2A2B25, dark: 0xEEEAE2)
     static let muted = adaptive(light: 0x626457, dark: 0xA8A59C)
-    static let faint = adaptive(light: 0x8A8E7D, dark: 0x8E9284)
+    static let faint = adaptive(light: 0x6A6E5B, dark: 0x8E9284)
     static let accent = adaptive(light: 0xBC5438, dark: 0xE98A6D)
     static let accentDeep = adaptive(light: 0x9F422B, dark: 0xE98A6D)
     static let accentSoft = adaptive(light: 0xDDE2D0, dark: 0x262B21)
