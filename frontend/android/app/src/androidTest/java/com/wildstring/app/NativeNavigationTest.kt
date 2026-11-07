@@ -58,7 +58,7 @@ class NativeNavigationTest {
         val refreshGate = CountDownLatch(1)
         val audio = InstrumentationRegistry.getInstrumentation().context.assets.open("playback.mp3").use { it.readBytes() }
         val vm = compose.runOnIdle { ViewModelProvider(compose.activity)[MusicViewModel::class.java] }
-        compose.runOnIdle { vm.settings.theme(false); vm.settings.appearance("light"); vm.settings.quality(0) }
+        compose.runOnIdle { vm.settings.appearance("light"); vm.settings.quality(0) }
         val cover = Bitmap.createBitmap(96, 96, Bitmap.Config.ARGB_8888).let { bitmap ->
             val canvas = android.graphics.Canvas(bitmap)
             canvas.drawColor(android.graphics.Color.rgb(37, 72, 60))
@@ -328,7 +328,7 @@ class NativeNavigationTest {
                 refreshGate.countDown()
                 compose.runOnIdle { pauseObserver?.release() }
                 shell("wm size reset"); shell("wm density reset")
-                compose.runOnIdle { vm.settings.theme(false); vm.settings.appearance("system"); vm.logout() }
+                compose.runOnIdle { vm.settings.appearance("system"); vm.logout() }
                 compose.waitUntil(10_000) { !vm.state.value.connected }
             }
         }

@@ -1,7 +1,9 @@
 package com.wildstring.app
 
 import android.app.Application
+import android.content.ComponentName
 import android.content.Context
+import android.content.pm.PackageManager
 import androidx.room.Room
 import coil.ImageLoader
 import dagger.Module
@@ -21,6 +23,18 @@ class WildStringApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         CrashHandler.install(this)
+        restoreClassicLauncher()
+    }
+
+    /** People who picked the removed red icon disabled ClassicIcon. Turn that entry back on first. */
+    private fun restoreClassicLauncher() {
+        val manager = packageManager
+        val classic = ComponentName(this, "com.wildstring.app.ClassicIcon")
+        val red = ComponentName(this, "com.wildstring.app.RedClothIcon")
+        runCatching {
+            manager.setComponentEnabledSetting(classic, PackageManager.COMPONENT_ENABLED_STATE_ENABLED, PackageManager.DONT_KILL_APP)
+            manager.setComponentEnabledSetting(red, PackageManager.COMPONENT_ENABLED_STATE_DISABLED, PackageManager.DONT_KILL_APP)
+        }
     }
 }
 @Module @InstallIn(SingletonComponent::class)

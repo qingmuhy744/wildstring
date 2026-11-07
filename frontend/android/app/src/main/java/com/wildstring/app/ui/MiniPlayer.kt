@@ -51,7 +51,7 @@ import androidx.compose.ui.unit.dp
     val feedback = LocalTactileFeedback.current
     val art = artworkAtmosphere(vm, track)
     val colors = MaterialTheme.colorScheme
-    val dark = LocalDarkAppearance.current || LocalRedCloth.current
+    val dark = LocalDarkAppearance.current
     val tint = art?.tint ?: colors.secondary
     val currentQueueIndex = remember(state.entryId, state.queue) {
         state.queue.indexOfFirst { it.entryId == state.entryId }
@@ -71,7 +71,7 @@ import androidx.compose.ui.unit.dp
         animationSpec = if (draggingX) snap() else spring(stiffness = Spring.StiffnessMediumLow),
         label = "mini-player-drag-x",
     )
-    val barColor = if (LocalRedCloth.current) Color(0xFF380C0F).copy(alpha = 0.96f) else colors.surfaceContainer
+    val barColor = colors.surfaceContainer
     Surface(
         modifier = Modifier.fillMaxWidth().testTag("mini-player")
             .trackSwipeGestures(

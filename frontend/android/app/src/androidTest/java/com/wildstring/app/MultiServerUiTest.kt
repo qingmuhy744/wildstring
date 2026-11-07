@@ -53,7 +53,7 @@ class MultiServerUiTest {
     }
     @Test fun switchingKeepsEachLoginAndLogoutOnlyClearsTheSelectedServer() {
         val vm = compose.runOnIdle { ViewModelProvider(compose.activity)[MusicViewModel::class.java] }
-        compose.runOnIdle { vm.repository.session.invalidate(); vm.settings.theme(false); vm.settings.appearance("light") }
+        compose.runOnIdle { vm.repository.session.invalidate(); vm.settings.appearance("light") }
         compose.waitUntil(10000) { !vm.state.value.connected }
         val aRequests = ConcurrentLinkedQueue<RecordedRequest>(); val bRequests = ConcurrentLinkedQueue<RecordedRequest>()
         val revoked = AtomicBoolean(false)

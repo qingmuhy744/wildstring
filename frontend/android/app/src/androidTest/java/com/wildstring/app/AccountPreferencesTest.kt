@@ -24,7 +24,7 @@ class AccountPreferencesTest {
 
     @Test fun preferencesMigrateOnceAndRestoreAcrossAccountsServersAndRestarts() = isolated { context ->
         val legacy = context.getSharedPreferences("appearance_cache", Context.MODE_PRIVATE)
-        legacy.edit().putString("appearance", "dark").putInt("aac_bitrate", 192).putBoolean("red_icon", true).commit()
+        legacy.edit().putString("appearance", "dark").putInt("aac_bitrate", 192).commit()
         val settings = AppSettings(context)
         settings.bindAccount("server-a", "account-a")
         assertEquals("dark", settings.state.value.appearance)
@@ -36,7 +36,6 @@ class AccountPreferencesTest {
         assertEquals(0, settings.state.value.aacBitrate)
         assertEquals(SongListSize.MEDIUM, settings.state.value.songListSize)
         assertEquals(CatalogSort("title", "asc"), settings.catalogSort("other-login", "tracks"))
-        assertTrue(settings.state.value.redIcon) // One launcher icon belongs to the installed app.
         settings.quality(320); settings.appearance("light")
         settings.bindAccount("server-b", "account-a")
         assertEquals(0, settings.state.value.aacBitrate)

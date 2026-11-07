@@ -1,17 +1,15 @@
 package com.wildstring.app.data
 
-import android.content.ComponentName
 import android.content.Context
 import android.content.SharedPreferences
 import java.security.MessageDigest
-import android.content.pm.PackageManager
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
-data class Preferences(val redCloth: Boolean = false, val redIcon: Boolean = false,
+data class Preferences(
     val metadataMb: Int = 32, val artworkMb: Int = 64, val audioMb: Int = 256, val haptics: Boolean = true, val appearance: String = "system", val aacBitrate: Int = 0,
     val playbackStyle: String = "cover", val songListSize: SongListSize = SongListSize.MEDIUM,
     val lyricFollowSeconds: Int = 2, val lyricSize: LyricSize = LyricSize.MEDIUM,
@@ -23,13 +21,17 @@ class AppSettings @Inject constructor(@param:ApplicationContext private val cont
     private var prefs = devicePrefs
     private var boundAccount: String? = null
     private var initializedBinding = false
-    private fun preferences() = Preferences(prefs.getBoolean("red_cloth", false), devicePrefs.getBoolean("red_icon", false),
+    private fun preferences(): Preferences {
+        if (prefs.contains("red_cloth")) prefs.edit().remove("red_cloth").apply()
+        if (devicePrefs.contains("red_icon")) devicePrefs.edit().remove("red_icon").apply()
+        return Preferences(
         prefs.getInt("metadata_mb", 32), prefs.getInt("artwork_mb", 64), prefs.getInt("audio_mb", 256), prefs.getBoolean("haptics", true), prefs.getString("appearance", "system") ?: "system", prefs.getInt("aac_bitrate", 0).takeIf { it in listOf(0, 128, 192, 256, 320) } ?: 0,
         prefs.getString("playback_style", "cover").takeIf { it in listOf("cover", "vinyl", "cassette") } ?: "cover",
         SongListSize.fromStored(runCatching { prefs.getString("song_list_size", null) }.getOrNull()),
         prefs.getInt("lyric_follow_seconds", 2).takeIf { it in listOf(1, 2, 3, 5, 10) } ?: 2,
         LyricSize.fromStored(runCatching { prefs.getString("lyric_size", null) }.getOrNull()),
         prefs.getString("screen_orientation", "auto").takeIf { it in listOf("auto", "portrait", "sensor") } ?: "auto")
+    }
     private val mutable = MutableStateFlow(preferences())
 
     /** Stable server and account IDs survive token refreshes and reconnects. */
@@ -130,18 +132,9 @@ class AppSettings @Inject constructor(@param:ApplicationContext private val cont
             .apply()
     }
     fun haptics(enabled: Boolean) { prefs.edit().putBoolean("haptics", enabled).apply(); mutable.value = mutable.value.copy(haptics = enabled) }
-    fun theme(red: Boolean) { prefs.edit().putBoolean("red_cloth", red).apply(); mutable.value = mutable.value.copy(redCloth = red) }
     fun limits(metadata: Int, artwork: Int, audio: Int) {
         require(metadata in CacheLimits.metadataMb && artwork in CacheLimits.artworkMb && audio in CacheLimits.audioMb)
         prefs.edit().putInt("metadata_mb", metadata).putInt("artwork_mb", artwork).putInt("audio_mb", audio).apply()
         mutable.value = mutable.value.copy(metadataMb = metadata, artworkMb = artwork, audioMb = audio)
-    }
-    fun icon(red: Boolean) {
-        val manager = context.packageManager
-        fun component(redIcon: Boolean) = ComponentName(context, "com.wildstring.app." + if (redIcon) "RedClothIcon" else "ClassicIcon")
-        // Enable the destination first so an interrupted switch always leaves a launcher entry.
-        manager.setComponentEnabledSetting(component(red), PackageManager.COMPONENT_ENABLED_STATE_ENABLED, PackageManager.DONT_KILL_APP)
-        manager.setComponentEnabledSetting(component(!red), PackageManager.COMPONENT_ENABLED_STATE_DISABLED, PackageManager.DONT_KILL_APP)
-        devicePrefs.edit().putBoolean("red_icon", red).apply(); mutable.value = mutable.value.copy(redIcon = red)
     }
 }

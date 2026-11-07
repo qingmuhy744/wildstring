@@ -5,7 +5,6 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 
 internal val LocalDarkAppearance = staticCompositionLocalOf { true }
-internal val LocalRedCloth = staticCompositionLocalOf { false }
 
 // The original warm orange / deep green palette remains the classic dark appearance.
 internal val classicLightColors = lightColorScheme(

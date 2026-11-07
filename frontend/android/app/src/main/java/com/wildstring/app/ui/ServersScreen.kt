@@ -32,7 +32,7 @@ import kotlinx.coroutines.launch
     var deleting by remember { mutableStateOf<ServerConfiguration?>(null) }
     Dialog(dismiss, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         val view = androidx.compose.ui.platform.LocalView.current
-        val darkBars = LocalDarkAppearance.current || LocalRedCloth.current
+        val darkBars = LocalDarkAppearance.current
         LaunchedEffect(view, darkBars) {
             (view.parent as? androidx.compose.ui.window.DialogWindowProvider)?.window?.let { window ->
                 androidx.core.view.WindowCompat.enableEdgeToEdge(window)
@@ -114,7 +114,7 @@ import kotlinx.coroutines.launch
     var selected by remember { mutableStateOf(session.manualRoute) }
     Dialog(dismiss, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         val view = androidx.compose.ui.platform.LocalView.current
-        val darkBars = LocalDarkAppearance.current || LocalRedCloth.current
+        val darkBars = LocalDarkAppearance.current
         LaunchedEffect(view, darkBars) {
             (view.parent as? androidx.compose.ui.window.DialogWindowProvider)?.window?.let { window ->
                 androidx.core.view.WindowCompat.enableEdgeToEdge(window)
