@@ -172,11 +172,8 @@ export function PodcastProgrammesAdmin({ canCleanResources }: { canCleanResource
     <section className="management-card podcast-programmes-admin" aria-label="全服节目管理">
       <div className="management-section-heading">
         <div>
-          <h2>全服节目与生命周期管理</h2>
-          <p className="muted">
-            统一查看本服收录的所有播客节目、订阅人数与本地缓存。无人关注的节目会自动暂停定时 RSS
-            抓取以节省算力与带宽，但保留已有资料与缓存，可在此集中清理或下线。
-          </p>
+          <h2>全服节目</h2>
+          <p className="muted">无人关注的节目会暂停定时更新，已有资料与缓存保留。</p>
         </div>
         <button type="button" disabled={refreshingAll || loading} onClick={() => void refreshAll()}>
           {refreshingAll ? '正在同步…' : '同步活跃节目'}

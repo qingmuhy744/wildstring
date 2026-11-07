@@ -21,32 +21,14 @@
   gap: 24px;
 }
 .settings-page-heading h1 {
-  margin: 8px 0 12px;
-  font-family: 'Songti SC', 'Noto Serif CJK SC', serif;
-  font-size: clamp(28px, 3.2vw, 40px);
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 28px;
   letter-spacing: -0.025em;
   line-height: 1.25;
 }
 .settings-page-heading h1:focus {
   outline: none;
-}
-.settings-page-heading p {
-  margin: 0;
-  line-height: 1.7;
-}
-.settings-heading-icon {
-  display: grid;
-  place-items: center;
-  width: 72px;
-  height: 72px;
-  border-radius: 50%;
-  color: var(--accent);
-  background: rgba(var(--accent-rgb), 0.08);
-  flex-shrink: 0;
-}
-.settings-heading-icon svg {
-  width: 30px;
-  height: 30px;
 }
 .settings-directory {
   display: grid;
@@ -136,11 +118,6 @@
 .settings-content-heading h2 {
   font-size: 22px;
   margin: 0 0 8px;
-}
-.settings-content-heading p {
-  margin: 0;
-  line-height: 1.7;
-  font-size: 13px;
 }
 .settings-content .management-card {
   margin: 0 0 20px;
@@ -324,10 +301,6 @@
   }
 }
 @media (max-width: 760px) {
-  .has-category .settings-page-heading .eyebrow,
-  .has-category .settings-page-heading p.muted {
-    display: none;
-  }
   .has-category .settings-page-heading h1 {
     font-size: 24px;
     margin: 0;
@@ -338,20 +311,9 @@
   .settings-page-header {
     margin-bottom: 24px;
   }
-  .settings-heading-icon {
-    width: 48px;
-    height: 48px;
-  }
-  .settings-heading-icon svg {
-    width: 23px;
-    height: 23px;
-  }
   .settings-page-heading {
     align-items: flex-start;
     gap: 16px;
-  }
-  .settings-page-heading p.muted {
-    font-size: 13px;
   }
   .settings-directory {
     grid-template-columns: minmax(0, 1fr);
@@ -388,4 +350,10 @@
   .settings-content :is(.music-library-configuration, .management-settings) {
     overflow-wrap: anywhere;
   }
+}
+
+.podcast-admin-programme-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }

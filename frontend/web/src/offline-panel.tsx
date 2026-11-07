@@ -35,18 +35,35 @@ const labels = {
   paused: '已暂停',
   failed: '下载失败',
 };
-export function OfflinePanel({ player, onSettings }: { player: Player; onSettings: () => void }) {
+export function OfflinePanel({
+  player,
+  onSettings,
+  onBrowse,
+}: {
+  player: Player;
+  onSettings: () => void;
+  onBrowse: () => void;
+}) {
   const [records, setRecords] = useState<OfflineTrack[]>([]),
-    [error, setError] = useState('');
+    [error, setError] = useState(''),
+    [loading, setLoading] = useState(true),
+    [revision, setRevision] = useState(0);
   useEffect(() => {
     let live = true;
     const reload = () => {
       void offlineTracks()
         .then((r) => {
-          if (live) setRecords(r);
+          if (live) {
+            setRecords(r);
+            setError('');
+            setLoading(false);
+          }
         })
         .catch(() => {
-          if (live) setError('无法读取离线存储。');
+          if (live) {
+            setError('无法读取离线存储，请重试。');
+            setLoading(false);
+          }
         });
     };
     reload();
@@ -55,7 +72,7 @@ export function OfflinePanel({ player, onSettings }: { player: Player; onSetting
       live = false;
       window.removeEventListener('wildstring:offline-updated', reload);
     };
-  }, []);
+  }, [revision]);
   const ready = records.filter((r) => r.state === 'complete');
   async function action(fn: () => Promise<void>) {
     try {
@@ -66,32 +83,30 @@ export function OfflinePanel({ player, onSettings }: { player: Player; onSetting
     }
   }
   return (
-    <section className="completion-page" aria-label="离线音乐">
-      <p className="eyebrow">YOUR MUSIC, OFF THE GRID</p>
-      <h1>没网，也有回响。</h1>
-      <p className="muted">
-        {ready.length} 首完整保存 · 已用 {size(records.reduce((s, r) => s + r.bytes, 0))} /{' '}
-        {offlineLimit() / 1024 / 1024} MB
-      </p>
-      <p className="muted">
-        从歌曲操作、专辑或歌单保存音乐。退出登录会清除本机离线音乐。离线访问有效期 7
-        天，浏览器空间不足时可能回收内容。
-      </p>
-      <div className="toolbar-actions">
-        <button
-          className="primary"
-          disabled={!ready.length}
-          onClick={() =>
-            player.start(
-              ready.map((r) => r.track),
-              0,
-            )
-          }
-        >
-          播放离线音乐
-        </button>
+    <section className="completion-page offline-page" aria-label="离线音乐">
+      <h1>离线音乐</h1>
+      {!loading && (!error || records.length > 0) && (
+        <p className="muted">
+          {ready.length} 首完整保存 · 已用 {size(records.reduce((s, r) => s + r.bytes, 0))} /{' '}
+          {offlineLimit() / 1024 / 1024} MB
+        </p>
+      )}
+      <div className="toolbar-actions offline-page-actions">
+        {ready.length > 0 && (
+          <button
+            className="primary"
+            onClick={() =>
+              player.start(
+                ready.map((r) => r.track),
+                0,
+              )
+            }
+          >
+            播放离线音乐
+          </button>
+        )}
+        <button onClick={onSettings}>下载设置</button>
       </div>
-      <button onClick={onSettings}>下载设置与自动下载歌单</button>
       {(!('serviceWorker' in navigator) || !isSecureContext) && (
         <p className="muted" role="status">
           断网后重新打开网页需要 HTTPS 或 localhost。当前地址可以下载音频，离线页面壳暂不可用。
@@ -99,13 +114,26 @@ export function OfflinePanel({ player, onSettings }: { player: Player; onSetting
       )}
       {error && (
         <p role="alert" className="error">
-          {error}
+          {error}{' '}
+          <button
+            className="text-button"
+            onClick={() => {
+              setLoading(true);
+              setRevision((v) => v + 1);
+            }}
+          >
+            重试
+          </button>
         </p>
       )}
-      {!records.length && (
+      {loading && <p role="status">正在读取离线音乐…</p>}
+      {!loading && !error && !records.length && (
         <div className="empty">
-          <h2>把喜欢的声音带走。</h2>
-          <p>在歌曲操作中选择“保存离线”，或保存整个专辑、歌单。</p>
+          <h2>暂无离线音乐</h2>
+          <p>在歌曲、专辑或歌单中选择“保存离线”。</p>
+          <button className="primary" onClick={onBrowse}>
+            浏览音乐
+          </button>
         </div>
       )}
       <div className="offline-list">
@@ -136,7 +164,7 @@ export function OfflinePanel({ player, onSettings }: { player: Player; onSetting
                   : '原音'}
               </p>
               {record.error && <p className="error">{record.error}</p>}
-              {record.total > 0 && (
+              {record.total > 0 && record.state !== 'complete' && (
                 <progress
                   aria-label={`${record.track.title} 下载进度`}
                   max={record.total}
@@ -186,6 +214,9 @@ export function OfflineSettings({ userId }: { userId: string }) {
   return (
     <>
       <section className="management-card offline-options" aria-label="下载设置">
+        <p className="muted">
+          退出登录会清除本机离线音乐。离线访问有效期 7 天，浏览器空间不足时可能回收内容。
+        </p>
         <label>
           <HelpLabel hint="offlineLimit">容量上限（MB）</HelpLabel>
           <input

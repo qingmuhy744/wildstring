@@ -131,7 +131,7 @@ test('专辑不可用时保留当前页面，可重试打开', async ({ page }, 
     await page.getByRole('button', { name: '查看所属专辑', exact: true }).click();
   }
   await expect(page.locator('.toast')).toContainText('所属专辑已变化或不可用');
-  await expect(page.getByRole('heading', { name: '收藏的声音。', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '歌曲', exact: true })).toBeVisible();
   await page.unroute(route);
   await page.getByRole('button', { name: '歌曲操作 晴天测试曲', exact: true }).click();
   await page.getByRole('button', { name: '查看所属专辑', exact: true }).click();

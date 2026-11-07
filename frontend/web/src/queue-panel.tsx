@@ -36,7 +36,6 @@ export function QueuePanel({
     <aside className={`queue-panel ${embedded ? 'embedded-queue' : ''}`} aria-label="播放队列">
       <div className="queue-heading">
         <div>
-          <span className="eyebrow">UP NEXT</span>
           <h2>
             {upNextOnly ? '下一集' : '播放队列'} <small>{entries.length}</small>
           </h2>
