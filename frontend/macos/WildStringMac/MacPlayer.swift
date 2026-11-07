@@ -244,6 +244,8 @@ struct MacPlayerInspector: View {
 
     @State private var timeline: LyricTimeline?
     @State private var lyricTrackID: String?
+    @State private var lyricPhase: LyricPhase = .ready
+    @State private var lyricAttempt = 0
     @State private var focus: InspectorFocus = .lyrics
 
     private enum InspectorFocus: Hashable {
@@ -300,7 +302,7 @@ struct MacPlayerInspector: View {
         .padding(16)
         .frame(maxHeight: .infinity, alignment: .top)
         .background(MacTheme.panel)
-        .task(id: playback.currentItem?.trackID) { await loadLyrics() }
+        .task(id: "\(playback.currentItem?.trackID ?? "")-\(lyricAttempt)") { await loadLyrics() }
         .onChange(of: session.showLyrics) { _, showing in
             if showing { focus = .lyrics }
         }
@@ -332,7 +334,11 @@ struct MacPlayerInspector: View {
                         }
                     }
                 }
-                MacLyricScroll(playback: playback, timeline: timeline, empty: playback.currentItem == nil ? "选一首歌后，歌词会显示在这里" : "这首歌没有歌词")
+                MacLyricScroll(
+                    playback: playback, timeline: timeline,
+                    empty: playback.currentItem == nil ? "选一首歌后，歌词会显示在这里" : "这首歌没有歌词",
+                    phase: lyricPhase, onRetry: { lyricTrackID = nil; lyricAttempt += 1 }
+                )
             }
         }
     }
@@ -345,14 +351,21 @@ struct MacPlayerInspector: View {
         guard let trackID = playback.currentItem?.trackID, !trackID.hasPrefix("podcast_ep_") else {
             timeline = nil
             lyricTrackID = nil
+            lyricPhase = .ready
             return
         }
         guard lyricTrackID != trackID else { return }
         lyricTrackID = trackID
-        if let lyrics = try? await client.lyrics(trackID: trackID) {
+        lyricPhase = .loading
+        do {
+            let lyrics = try await client.lyrics(trackID: trackID)
+            guard playback.currentItem?.trackID == trackID else { return }
             timeline = LyricTimeline(lyrics: lyrics)
-        } else {
+            lyricPhase = .ready
+        } catch {
+            guard playback.currentItem?.trackID == trackID else { return }
             timeline = nil
+            lyricPhase = .failed
         }
     }
 }

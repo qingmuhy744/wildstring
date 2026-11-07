@@ -1261,12 +1261,12 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
                 canManageResources={currentUser.profile === 'owner'}
                 onManage={openManagement}
                 onQueueTrack={(track, next) => {
-                  if (next) player.playNext(track);
-                  else if (!player.current) player.start([track], 0, undefined, false);
-                  else player.enqueue(track);
+                  if (next) return player.playNext(track);
+                  if (!player.current) return player.playPodcastEpisode(track, false);
+                  return player.enqueue(track);
                 }}
                 onPlayTrack={(track) => {
-                  player.start([track], 0);
+                  void player.playPodcastEpisode(track);
                   setNotice(`正在播放播客《${track.title}》`);
                 }}
               />

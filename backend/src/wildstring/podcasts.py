@@ -1311,7 +1311,13 @@ class PodcastManager:
                     podcast_id,
                 ),
             )
+            new_episode_ids: list[str] = []
             for ep in parsed["episodes"]:
+                existing = conn.execute(
+                    "SELECT 1 FROM podcast_episodes WHERE podcast_id=? AND guid=?",
+                    (podcast_id, ep["guid"]),
+                ).fetchone()
+                episode_id = str(uuid4())
                 conn.execute(
                     """
                     INSERT INTO podcast_episodes (
@@ -1329,7 +1335,7 @@ class PodcastManager:
                         season_number = excluded.season_number
                     """,
                     (
-                        str(uuid4()),
+                        episode_id,
                         podcast_id,
                         ep["guid"],
                         ep["title"],
@@ -1342,6 +1348,12 @@ class PodcastManager:
                         updated_time,
                     ),
                 )
+                if existing is None:
+                    new_episode_ids.append(episode_id)
+            if new_episode_ids:
+                from wildstring.podcast_queue import distribute_new_episodes
+
+                distribute_new_episodes(conn, podcast_id, new_episode_ids)
         self.auto_downloads.reconcile_programme(podcast_id)
         return True
 
@@ -2256,6 +2268,9 @@ def podcast_router(
         add_and_follow=lambda user, url: add_and_follow(user, PodcastCreateRequest(feed_url=url)),
         require_add=lambda user: catalog_policy.require_add(user, {"feed_url"}),
     )
+    from wildstring import podcast_queue
+
+    podcast_queue.routes(router, auth, manager.database)
 
     @router.get("/publishers", response_model=list[PublisherSummary])
     def list_publishers(user: Annotated[dict, Depends(auth.require_session)]):

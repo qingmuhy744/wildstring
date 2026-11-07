@@ -1,10 +1,45 @@
 import { expect, test, type Page } from '@playwright/test';
 import { audio, login, section, podcastCatalog, leaveSettings } from './helpers';
 
+test.describe.configure({ timeout: 90_000 });
+
 test.skip(
   process.env.WILDSTRING_TEST_PODCAST !== '1',
   'Run make test-podcast-web for the local podcast fixture.',
 );
+
+async function resetPodcastQueue(page: Page) {
+  const current = await (await page.request.get('/api/v1/podcasts/queue')).json();
+  const cleared = await page.request.put('/api/v1/podcasts/queue', {
+    headers: { 'X-Wildstring-Client': 'web' },
+    data: { version: current.version, device_id: 'podcast-player-spec', items: [] },
+  });
+  expect(cleared.ok()).toBeTruthy();
+  const prefs = await (await page.request.get('/api/v1/podcasts/queue/preferences')).json();
+  const saved = await page.request.put('/api/v1/podcasts/queue/preferences', {
+    headers: { 'X-Wildstring-Client': 'web' },
+    data: {
+      default_action: prefs.default_action,
+      auto_limit: prefs.auto_limit,
+      shows: {
+        ...prefs.shows,
+        'radio-test': {
+          action: prefs.shows?.['radio-test']?.action ?? prefs.default_action ?? 'inbox',
+          auto_limit: prefs.shows?.['radio-test']?.auto_limit ?? prefs.auto_limit ?? 3,
+          order: 'follow',
+          skip_completed: true,
+          auto_continue: true,
+        },
+      },
+    },
+  });
+  expect(saved.ok()).toBeTruthy();
+  await page.evaluate(() => {
+    for (const key of Object.keys(localStorage)) {
+      if (key.startsWith('wildstring:podcast-order:')) localStorage.removeItem(key);
+    }
+  });
+}
 
 async function openRadio(page: Page) {
   await login(page);
@@ -26,9 +61,16 @@ async function openRadio(page: Page) {
     });
     expect(reset.status()).toBe(200);
   }
+  await resetPodcastQueue(page);
+  await page.reload();
   await podcastCatalog(page);
   await page.locator('.podcast-card').filter({ hasText: '午后广播测试' }).click();
+  const queued = page.waitForResponse(
+    (response) =>
+      response.url().endsWith('/api/v1/podcasts/queue') && response.request().method() === 'PUT',
+  );
   await page.locator('.episode-play-btn').first().click();
+  expect((await queued).ok()).toBeTruthy();
   await page.getByRole('button', { name: '全屏播放', exact: true }).click();
   await expect(page.locator('.programme-track')).toHaveCount(3);
   await page.getByRole('button', { name: '收音机暂停', exact: true }).click();
@@ -184,6 +226,7 @@ test('单集右键和更多菜单可以立即播放、插入下一集、追加�
   await expect(menu.getByRole('menuitem')).toHaveText([
     '播放单集',
     '下一集播放',
+    '加入稍后听',
     '加入待播',
     '保存到服务器',
   ]);
@@ -271,8 +314,15 @@ test('真实接口：顺序切换、跳过已听完、偏好恢复，收起界�
   await expect(page.locator('.programme-track').nth(1)).toContainText('第 3 集');
   await page.getByLabel('播客续播顺序').selectOption('asc');
   await expect(page.locator('.programme-track')).toHaveCount(0);
+  const savedOrder = page.waitForResponse(
+    (response) =>
+      response.url().includes('/podcasts/queue/preferences') &&
+      response.request().method() === 'PUT' &&
+      (response.request().postData() || '').includes('"order":"off"'),
+  );
   await page.getByLabel('播客续播顺序').selectOption('off');
-  await expect(page.getByText('听完这一集，让耳朵休息一下。')).toBeVisible();
+  await expect(page.getByText('已关闭，播完即停')).toBeVisible();
+  expect((await savedOrder).ok()).toBeTruthy();
   await page.reload();
   await page.getByRole('button', { name: '全屏播放', exact: true }).click();
   await expect(page.getByLabel('播客续播顺序')).toHaveValue('off');

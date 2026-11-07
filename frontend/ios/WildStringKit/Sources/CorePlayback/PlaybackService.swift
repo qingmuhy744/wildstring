@@ -102,7 +102,7 @@ public final class PlaybackService {
     public var items: [Item] { queue.items }
     public var playbackItems: [Item] { queue.playbackItems }
     public var currentIndex: Int? { queue.currentIndex }
-    public var currentItem: Item? { queue.current }
+    public var currentItem: Item? { podcastOverrideItem ?? queue.current }
     public var repeatMode: PlaybackQueue.RepeatMode { queue.repeatMode }
     public var isShuffled: Bool { queue.isShuffled }
     public private(set) var podcastPlaybackRate: Float = 1
@@ -151,6 +151,17 @@ public final class PlaybackService {
     @ObservationIgnored public var submitPodcastProgress:
         (@Sendable (String, PodcastProgressWrite) async -> PodcastSubmitResult)?
     public private(set) var podcastProgressMessage: String?
+    /// Cloud 待播 queue. Nil keeps the local player behavior used by tests.
+    public var podcastCloud: PodcastCloudQueue?
+    /// Client-side podcast auto-continuation state (never synced, never queued).
+    public var podcastAutoContinueEnabled = true
+    @ObservationIgnored private var podcastEpisodes: [PodcastContinuation.Episode] = []
+    @ObservationIgnored private var podcastPreference = PodcastContinuation.Preference()
+    /// Transient episode played by auto-continuation; deliberately not part of
+    /// `queue`, so the "接下来" auto part stays a read-only preview.
+    var podcastOverrideItem: Item?
+    /// Bumped whenever a newer play should cancel an in-flight cloud handoff.
+    @ObservationIgnored private var podcastTurn = 0
     public private(set) var currentOutputLabel: String?
     public private(set) var sleepTimerEnd: Date?
     public private(set) var pauseAfterCurrentTrack = false
@@ -198,6 +209,7 @@ public final class PlaybackService {
     public func restore() async {
         guard let persisted = try? await store.load() else { return }
         queue = PlaybackQueue(items: persisted.items, currentIndex: persisted.currentIndex)
+        podcastOverrideItem = nil
         currentTime = persisted.position
         duration = 0
         isPlaying = false
@@ -208,6 +220,7 @@ public final class PlaybackService {
     /// Preserve entry IDs, shuffle order, repeat mode and position without reloading items.
     public func restoreRouteQueue(_ snapshot: PlaybackQueue, position: Double) {
         queue = snapshot
+        podcastOverrideItem = nil
         currentTime = max(0, position)
         duration = 0
         isPlaying = false
@@ -219,6 +232,8 @@ public final class PlaybackService {
 
     public func play(items: [Item], startingAt index: Int, position: Double = 0) {
         guard items.indices.contains(index) else { return }
+        invalidatePodcastAdvance()
+        podcastOverrideItem = nil
         if let reason = items[index].unavailableReason {
             errorMessage = "「\(items[index].title)」\(reason)。请恢复文件并重新扫描，刷新列表后重试。"
             return
@@ -228,6 +243,110 @@ public final class PlaybackService {
         queue.set(items: playable, startingAt: selectedIndex)
         startCurrent(autoplay: true, startAt: max(0, position))
         persistQueueAndProgress()
+    }
+
+    // MARK: - Podcast auto-continuation
+
+    /// Configures the client-side auto-continuation rule for the show currently
+    /// being played. Pure local data: no network calls and no queue writes.
+    public func configurePodcastContinuation(
+        episodes: [PodcastContinuation.Episode],
+        preference: PodcastContinuation.Preference
+    ) {
+        podcastEpisodes = episodes
+        podcastPreference = preference
+        podcastAutoContinueEnabled = preference.autoContinue
+    }
+
+    /// Plays one explicitly chosen episode. With a cloud queue attached, only
+    /// that episode is inserted at the head of the cloud queue (origin manual);
+    /// the rest of the show is not added. Music already in the local queue stays.
+    public func playPodcastEpisode(_ item: Item, position: Double = 0) {
+        startPodcastEpisode(item, position: position, recordInCloudQueue: true)
+    }
+
+    private func startPodcastEpisode(_ item: Item, position: Double, recordInCloudQueue: Bool) {
+        invalidatePodcastAdvance()
+        guard item.unavailableReason == nil else {
+            errorMessage = "「\(item.title)」不可用。"
+            return
+        }
+        podcastOverrideItem = nil
+        let rest: [Item]
+        if podcastCloud != nil {
+            rest = queue.items.filter { !$0.trackID.hasPrefix("podcast_ep_") }
+        } else {
+            rest = queue.items.filter { $0.id != item.id }
+        }
+        queue.set(items: [item] + rest, startingAt: 0)
+        startCurrent(autoplay: true, startAt: max(0, position))
+        persistQueueAndProgress()
+        if recordInCloudQueue, let episodeID = Self.podcastEpisodeID(item.trackID) {
+            podcastCloud?.noteUserPlay(episodeID: episodeID)
+        }
+    }
+
+    /// Manual 上一集 / 下一集 in podcast mode. Derives the adjacent episode
+    /// from the pure rule without adding it to the queue.
+    public func skipPodcastEpisode(_ direction: PodcastContinuation.Skip) {
+        invalidatePodcastAdvance()
+        guard let currentID = currentItem?.trackID, currentID.hasPrefix("podcast_ep_"),
+              let next = podcastAdjacentItem(
+                  currentID: currentID, direction: direction, requireAutoContinue: false
+              )
+        else { return }
+        podcastOverrideItem = next
+        startCurrent(autoplay: intendedPlaying, startAt: 0)
+    }
+
+    /// Read-only preview of what auto-continuation will play once the manual
+    /// queue is exhausted. These items are never written to `queue`.
+    public func podcastAutoPreview(limit: Int = 3, anchorTrackID: String? = nil) -> [Item] {
+        guard podcastAutoContinueEnabled else { return [] }
+        guard let anchor = anchorTrackID
+                ?? podcastOverrideItem?.trackID
+                ?? queue.playbackItems.last?.trackID
+                ?? currentItem?.trackID,
+              anchor.hasPrefix("podcast_ep_") else { return [] }
+        var result: [Item] = []
+        var id = anchor
+        while result.count < limit {
+            guard let next = podcastAdjacentItem(
+                currentID: id, direction: .next, requireAutoContinue: true
+            ) else { break }
+            result.append(next)
+            id = next.trackID
+        }
+        return result
+    }
+
+    private func podcastAdjacentItem(
+        currentID: String,
+        direction: PodcastContinuation.Skip,
+        requireAutoContinue: Bool
+    ) -> Item? {
+        let episodeID = String(currentID.dropFirst("podcast_ep_".count))
+        var preference = podcastPreference
+        preference.autoContinue = requireAutoContinue ? podcastAutoContinueEnabled : true
+        let episode: PodcastContinuation.Episode?
+        switch direction {
+        case .next:
+            episode = PodcastContinuation.nextEpisode(
+                currentID: episodeID, episodes: podcastEpisodes, preference: preference
+            )
+        case .previous:
+            episode = PodcastContinuation.previousEpisode(
+                currentID: episodeID, episodes: podcastEpisodes, preference: preference
+            )
+        }
+        guard let episode else { return nil }
+        return Item(
+            trackID: "podcast_ep_\(episode.id)",
+            title: episode.title,
+            artist: episode.artist,
+            album: episode.album,
+            streamPath: "api/v1/podcasts/episodes/\(episode.id)/stream?proxy=1&cache=1"
+        )
     }
 
     public func togglePlayPause() {
@@ -270,10 +389,12 @@ public final class PlaybackService {
     }
 
     public func next() {
+        if podcastOverrideItem != nil { skipPodcastEpisode(.next); return }
         move(by: 1)
     }
 
     public func previous() {
+        if podcastOverrideItem != nil { skipPodcastEpisode(.previous); return }
         move(by: -1)
     }
 
@@ -291,6 +412,7 @@ public final class PlaybackService {
             return false
         }
         let wasEmpty = queue.count == 0
+        podcastOverrideItem = nil
         queue.enqueue(items, next: next)
         persistQueueAndProgress()
         if wasEmpty { startCurrent(autoplay: true, startAt: 0) }
@@ -307,6 +429,7 @@ public final class PlaybackService {
     }
 
     public func playQueueEntry(at index: Int) {
+        podcastOverrideItem = nil
         queue.move(to: index)
         startCurrent(autoplay: true, startAt: 0)
         persistProgress()
@@ -314,16 +437,19 @@ public final class PlaybackService {
 
     public func removeQueueEntry(at index: Int) {
         guard index != currentIndex else { return }
+        podcastOverrideItem = nil
         queue.remove(at: index)
         persistQueueAndProgress()
     }
 
     public func movePlaybackEntries(fromOffsets offsets: IndexSet, toOffset destination: Int) {
+        podcastOverrideItem = nil
         queue.movePlaybackEntries(fromOffsets: offsets, toOffset: destination)
         persistQueueAndProgress()
     }
 
     public func moveQueueEntries(fromOffsets offsets: IndexSet, toOffset destination: Int) {
+        podcastOverrideItem = nil
         queue.moveEntries(fromOffsets: offsets, toOffset: destination)
         persistQueueAndProgress()
     }
@@ -421,6 +547,7 @@ public final class PlaybackService {
         seekInFlight = false
         player.replaceCurrentItem(with: nil)
         queue = PlaybackQueue()
+        podcastOverrideItem = nil
         currentTime = 0
         duration = 0
         isPlaying = false
@@ -499,6 +626,7 @@ public final class PlaybackService {
     /// Adopts a snapshot from another device: queue, mode and paused position.
     public func adopt(items: [Item], startingAt index: Int, position: Double, mode: String) {
         guard !items.isEmpty else { return }
+        podcastOverrideItem = nil
         queue.set(items: items, startingAt: min(max(0, index), items.count - 1))
         let shuffled = mode == "shuffle"
         if queue.isShuffled != shuffled {
@@ -902,7 +1030,7 @@ public final class PlaybackService {
             updateSystemNowPlaying()
             return
         }
-        if queue.repeatMode == .one {
+        if queue.repeatMode == .one, podcastOverrideItem == nil {
             intendedPlaying = true
             seek(to: 0)
             return
@@ -915,17 +1043,92 @@ public final class PlaybackService {
             deliver(report)
         }
         checkpointPodcast(event: "ended", force: true)
-        if queue.advance() != nil {
+        let endedTrackID = currentItem?.trackID
+        if let endedTrackID, let episodeID = Self.podcastEpisodeID(endedTrackID), podcastCloud != nil {
+            let turn = invalidatePodcastAdvance()
+            let cloud = podcastCloud
+            Task { @MainActor in
+                await self.advanceCloudPodcast(episodeID: episodeID, endedTrackID: endedTrackID, turn: turn, cloud: cloud)
+            }
+            return
+        }
+        // A non-empty manual queue always wins (contract: 队列非空一律按队列走).
+        if podcastOverrideItem == nil, queue.advance() != nil {
             startCurrent(autoplay: true, startAt: 0)
             persistProgress()
-        } else {
-            intendedPlaying = false
-            isPlaying = false
-            didFinishQueue = true
-            currentTime = duration
-            persistProgress()
-            updateSystemNowPlaying()
+            return
         }
+        // Queue exhausted (or already auto-continuing): hand off to the local
+        // podcast rule. The continuation is a transient item, never a queue
+        // entry, so "接下来" keeps it as a read-only 自动续播 preview.
+        if let endedTrackID, endedTrackID.hasPrefix("podcast_ep_"),
+           let next = podcastAdjacentItem(
+               currentID: endedTrackID, direction: .next, requireAutoContinue: true
+           ) {
+            podcastOverrideItem = next
+            startCurrent(autoplay: true, startAt: 0)
+            return
+        }
+        podcastOverrideItem = nil
+        intendedPlaying = false
+        isPlaying = false
+        didFinishQueue = true
+        currentTime = duration
+        persistProgress()
+        updateSystemNowPlaying()
+    }
+
+    private func advanceCloudPodcast(
+        episodeID: String,
+        endedTrackID: String,
+        turn: Int,
+        cloud: PodcastCloudQueue?
+    ) async {
+        let next = await cloud?.episodeFinished(episodeID)
+        guard turn == podcastTurn else { return }
+        if let next {
+            guard let item = await cloud?.playbackItem(for: next.episodeId) else {
+                guard turn == podcastTurn else { return }
+                errorMessage = "下一集暂时打不开。待播队列还在，可以重试。"
+                stopAtEndOfPodcast()
+                return
+            }
+            guard turn == podcastTurn else { return }
+            startPodcastEpisode(item, position: 0, recordInCloudQueue: false)
+            return
+        }
+        if let auto = podcastAdjacentItem(
+            currentID: endedTrackID, direction: .next, requireAutoContinue: true
+        ) {
+            guard turn == podcastTurn else { return }
+            podcastOverrideItem = auto
+            startCurrent(autoplay: true, startAt: 0)
+            return
+        }
+        guard turn == podcastTurn else { return }
+        stopAtEndOfPodcast()
+    }
+
+    private func stopAtEndOfPodcast() {
+        podcastOverrideItem = nil
+        intendedPlaying = false
+        isPlaying = false
+        didFinishQueue = true
+        currentTime = duration
+        persistProgress()
+        updateSystemNowPlaying()
+    }
+
+    @discardableResult
+    private func invalidatePodcastAdvance() -> Int {
+        podcastTurn += 1
+        return podcastTurn
+    }
+
+    public static func podcastEpisodeID(_ trackID: String) -> String? {
+        guard trackID.hasPrefix("podcast_ep_") else { return nil }
+        let episodeID = String(trackID.dropFirst("podcast_ep_".count))
+        return episodeID.isEmpty ? nil : episodeID
     }
 
     private func persistQueueAndProgress() {

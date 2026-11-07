@@ -473,7 +473,12 @@ final class MacSession {
         playback.preferredBitrateKbps = bitrate == 0 ? nil : bitrate
         let rate = defaults.double(forKey: "podcastPlaybackRate")
         if rate > 0 { playback.setPodcastPlaybackRate(Float(rate)) }
-        playback.podcastDeviceID = Self.deviceID(defaults: defaults)
+        let podcastDeviceID = Self.deviceID(defaults: defaults)
+        playback.podcastDeviceID = podcastDeviceID
+        playback.podcastCloud = PodcastCloudQueue(
+            client: client,
+            deviceID: WildstringDeviceID.resolve(preferred: podcastDeviceID)
+        )
         let libraryKey = "mac.library.\(primary.description)|\(username)"
         if let library = defaults.string(forKey: libraryKey), !library.isEmpty {
             client.selectLibrary(library)
@@ -512,6 +517,8 @@ final class MacSession {
             playback.setPodcastPlaybackRate(rateSnapshot)
         }
         self.playback = playback
+        let podcastCloud = playback.podcastCloud
+        Task { await podcastCloud?.refresh() }
         playback.warmConnection()
         let monitor = MacConnectionMonitor(server: address, configuration: configuration)
         monitor.start()

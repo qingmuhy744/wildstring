@@ -13,12 +13,28 @@ struct MacPodcastPlayer: View {
     @State private var loading = true
     @State private var error: String?
     @State private var showQueue = false
+    @State private var actionError: String?
     @Environment(\.colorScheme) private var colorScheme
 
-    private var upcoming: [PlaybackService.Item] {
-        let entries = playback.playbackItems
-        guard let index = entries.firstIndex(where: { $0.id == playback.currentItem?.id }) else { return [] }
-        return Array(entries.dropFirst(index + 1))
+    private var cloud: PodcastCloudQueue? { playback.podcastCloud }
+
+    private var currentEpisodeID: String? {
+        guard let trackID = playback.currentItem?.trackID else { return nil }
+        return PlaybackService.podcastEpisodeID(trackID)
+    }
+
+    private var queuedUpcoming: [PodcastQueueItem] {
+        cloud?.upcoming(after: currentEpisodeID) ?? []
+    }
+
+    private var autoPreview: [PlaybackService.Item] {
+        let anchor: String?
+        if let last = queuedUpcoming.last {
+            anchor = "podcast_ep_\(last.episodeId)"
+        } else {
+            anchor = playback.currentItem?.trackID
+        }
+        return playback.podcastAutoPreview(limit: 3, anchorTrackID: anchor)
     }
 
     var body: some View {
@@ -44,8 +60,7 @@ struct MacPodcastPlayer: View {
                     }.scrollIndicators(.hidden).frame(width: geo.size.width < 1250 ? 290 : 340)
                     Group {
                         if showQueue {
-                            MacQueueView(client: client, playback: playback)
-                                .padding(24)
+                            queuePane
                         } else {
                             articlePane
                         }
@@ -64,6 +79,7 @@ struct MacPodcastPlayer: View {
         .tint(MacTheme.accentDeep)
         .onExitCommand { session.showFullscreen = false }
         .task(id: playback.currentItem?.trackID) { await load() }
+        .task { await cloud?.refreshQueue() }
     }
 
     private var listeningCard: some View {
@@ -92,9 +108,12 @@ struct MacPodcastPlayer: View {
                     Text(playback.duration > 0 ? "剩余 \(macPlaybackClock(max(0, playback.duration - playback.currentTime)))" : "时长加载中")
                 }.font(.caption.monospacedDigit()).foregroundStyle(.secondary)
             }
-            HStack {
+            HStack(spacing: 14) {
                 MacPlaybackRateMenu(playback: playback)
-                Spacer()
+                Spacer(minLength: 8)
+                Button { playback.skipPodcastEpisode(.previous) } label: {
+                    Image(systemName: "backward.end.fill").font(.title3)
+                }.help("上一集").accessibilityLabel("上一集")
                 Button { playback.seek(to: max(0, playback.currentTime - 15)) } label: {
                     Image(systemName: "gobackward.15").font(.title2)
                 }.help("后退 15 秒").accessibilityLabel("后退 15 秒")
@@ -107,42 +126,121 @@ struct MacPodcastPlayer: View {
                 Button { playback.seek(to: playback.currentTime + 30) } label: {
                     Image(systemName: "goforward.30").font(.title2)
                 }.help("前进 30 秒").accessibilityLabel("前进 30 秒")
-                Spacer()
+                Button { playback.skipPodcastEpisode(.next) } label: {
+                    Image(systemName: "forward.end.fill").font(.title3)
+                }.help("下一集").accessibilityLabel("下一集")
+                Spacer(minLength: 8)
             }.buttonStyle(.plain)
             MacSleepMenu(playback: playback, podcast: true)
-            if let message = playback.errorMessage ?? playback.podcastProgressMessage {
-                Text(message).font(.caption).foregroundStyle(.orange)
+            if let message = actionError ?? playback.errorMessage ?? playback.podcastProgressMessage {
+                Text(message).font(.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
             }
             Divider()
+            if let cloud {
+                PodcastCloudStatus(cloud: cloud)
+            }
             HStack {
                 Text("接下来").font(.headline)
                 Spacer()
-                Text("\(upcoming.count) \(upcoming.allSatisfy { $0.trackID.hasPrefix("podcast_ep_") } ? "集" : "项")")
-                    .font(.caption).foregroundStyle(.secondary)
+                Text("\(queuedUpcoming.count) 集")
+                    .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
             }
-            if upcoming.isEmpty {
-                Text("本集结束后停止。可以从单集列表安排下一集。")
+            if cloud?.loading == true, queuedUpcoming.isEmpty, cloud?.items.isEmpty != false {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text("正在同步待播队列…").font(.callout).foregroundStyle(.secondary)
+                }
+            } else if queuedUpcoming.isEmpty {
+                Text(playback.podcastAutoContinueEnabled ? "播完会接下一集" : "已关闭，播完即停")
                     .font(.callout).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             } else {
                 Button("查看与调整队列") { showQueue = true }.buttonStyle(.plain)
                     .font(.caption).foregroundStyle(MacTheme.accentDeep)
-                LazyVStack(alignment: .leading, spacing: 20) {
-                    ForEach(upcoming) { item in
-                        Button {
-                            if let index = playback.items.firstIndex(where: { $0.id == item.id }) {
-                                playback.playQueueEntry(at: index)
-                            }
-                        } label: {
+                LazyVStack(alignment: .leading, spacing: 16) {
+                    ForEach(queuedUpcoming) { item in
+                        Button { Task { await playQueued(item.episodeId) } } label: {
                             HStack(alignment: .top, spacing: 9) {
                                 Image(systemName: "play.circle").foregroundStyle(MacTheme.accentDeep)
-                                Text(item.title).font(.callout).lineLimit(3).multilineTextAlignment(.leading)
+                                Text(cloud?.title(for: item.episodeId) ?? item.episodeId)
+                                    .font(.callout).lineLimit(3).multilineTextAlignment(.leading)
                                 Spacer(minLength: 0)
                             }
                         }.buttonStyle(.plain)
                     }
                 }
             }
+            if !autoPreview.isEmpty {
+                Text("自动续播").font(.caption.weight(.medium)).foregroundStyle(.secondary)
+                Text("不会写入待播队列").font(.caption2).foregroundStyle(.tertiary)
+                LazyVStack(alignment: .leading, spacing: 10) {
+                    ForEach(autoPreview) { item in
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Text(item.title).font(.callout).foregroundStyle(.secondary)
+                                .lineLimit(2).multilineTextAlignment(.leading)
+                            Spacer(minLength: 8)
+                            Button("加入待播") {
+                                guard let episodeID = PlaybackService.podcastEpisodeID(item.trackID) else { return }
+                                cloud?.enqueueEpisode(episodeID, next: false, currentEpisodeID: currentEpisodeID)
+                            }
+                            .buttonStyle(.plain)
+                            .font(.caption)
+                            .foregroundStyle(MacTheme.accentDeep)
+                        }
+                    }
+                }
+            }
         }.padding(.vertical, 12)
+    }
+
+    private var queuePane: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("待播队列").font(.headline)
+            if let cloud {
+                PodcastCloudStatus(cloud: cloud)
+                if cloud.loading, cloud.items.isEmpty {
+                    HStack(spacing: 8) {
+                        ProgressView().controlSize(.small)
+                        Text("正在同步待播队列…").font(.callout).foregroundStyle(.secondary)
+                    }
+                } else if cloud.items.isEmpty {
+                    Text(playback.podcastAutoContinueEnabled ? "播完会接下一集" : "已关闭，播完即停")
+                        .font(.callout).foregroundStyle(.secondary)
+                } else {
+                    List {
+                        ForEach(cloud.items) { item in
+                            HStack(spacing: 8) {
+                                Text(cloud.title(for: item.episodeId))
+                                    .lineLimit(2)
+                                Spacer(minLength: 8)
+                                if item.episodeId == currentEpisodeID {
+                                    Text("正在收听").font(.caption).foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                        .onMove { cloud.moveItems(from: $0, to: $1) }
+                    }
+                    .frame(minHeight: 180)
+                }
+            }
+            if !autoPreview.isEmpty {
+                Text("自动续播").font(.caption.weight(.medium)).foregroundStyle(.secondary)
+                ForEach(autoPreview) { item in
+                    Text(item.title).font(.callout).foregroundStyle(.secondary).lineLimit(2)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(24)
+    }
+
+    private func playQueued(_ episodeID: String) async {
+        guard let item = await cloud?.playbackItem(for: episodeID) else {
+            actionError = "这集暂时打不开。待播队列还在，可以重试。"
+            return
+        }
+        actionError = nil
+        playback.playPodcastEpisode(item)
     }
 
     private var articlePane: some View {
@@ -198,6 +296,33 @@ struct MacPodcastPlayer: View {
         } catch {
             guard !Task.isCancelled, playback.currentItem?.trackID == trackID else { return }
             self.error = MacErrorText.message(for: error)
+        }
+    }
+}
+
+struct PodcastCloudStatus: View {
+    let cloud: PodcastCloudQueue
+
+    var body: some View {
+        if cloud.conflict != nil {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(PodcastCloudQueue.conflictMessage)
+                    .font(.callout)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 8) {
+                    Button("使用服务器上的队列") { cloud.adoptServerQueue() }
+                    Button("用本机覆盖") { cloud.overwriteWithLocal() }
+                }
+            }
+        } else if let syncError = cloud.syncError {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(syncError)
+                    .font(.callout)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button("重试") { Task { await cloud.retrySync() } }
+            }
         }
     }
 }

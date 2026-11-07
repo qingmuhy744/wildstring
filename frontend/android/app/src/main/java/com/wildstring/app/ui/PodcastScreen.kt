@@ -33,6 +33,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
+import com.wildstring.app.R
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
@@ -45,9 +47,11 @@ import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.wildstring.app.data.PodcastDetail
 import com.wildstring.app.data.PodcastEpisode
+import com.wildstring.app.data.PodcastShowQueuePreference
 import com.wildstring.app.data.PodcastSummary
 import com.wildstring.app.data.PodcastPublisher
 import com.wildstring.app.data.EpisodeProgress
+import com.wildstring.app.data.effectiveShowPreference
 import com.wildstring.app.data.friendlyError
 import com.wildstring.app.data.podcastPublishedMillis
 import kotlinx.coroutines.launch
@@ -75,6 +79,7 @@ fun PodcastChannelPage(
     val state by vm.state.collectAsStateWithLifecycle()
     val positions by vm.podcastProgress.positions.collectAsStateWithLifecycle()
     val browser by vm.podcastBrowser.state.collectAsStateWithLifecycle()
+    val cloud by vm.podcastCloud.collectAsStateWithLifecycle()
     val owner = vm.repository.session.cacheScope()
     val podcasts = browser.podcasts.takeIf { browser.owner == owner }.orEmpty()
     val loading = browser.owner != owner || !browser.listLoaded || browser.listLoading
@@ -116,6 +121,10 @@ fun PodcastChannelPage(
     BackHandler(enabled = selectedId == null && selectedPublisher != null) { closePublisher() }
 
     LaunchedEffect(owner, browser.listLoaded) { vm.podcastBrowser.ensureList() }
+    LaunchedEffect(owner) { if (owner != null) vm.refreshPodcastCloud() }
+    LaunchedEffect(cloud.notice) {
+        cloud.notice?.let { statusMessage = it; vm.clearPodcastQueueNotice() }
+    }
     LaunchedEffect(owner, selectedId, selectedId in browser.loadedDetails) { selectedId?.let(vm.podcastBrowser::ensureDetail) }
     LaunchedEffect(browser.message) {
         browser.message?.let { statusMessage = it; vm.podcastBrowser.clearMessage() }
@@ -137,6 +146,12 @@ fun PodcastChannelPage(
                     onQueueEpisode = { ep, next ->
                         vm.addPodcastEpisodeToQueue(ep, selectedPodcast, next)
                     },
+                    onAddToInbox = { ep -> vm.addPodcastEpisodeToInbox(ep) },
+                    showPreference = cloud.preferences?.let { effectiveShowPreference(it, selectedPodcast.id) },
+                    preferenceLoading = cloud.preferencesLoading && cloud.preferences == null,
+                    preferenceError = cloud.preferencesError,
+                    onShowPreference = { action, limit -> vm.updatePodcastShowPreference(selectedPodcast.id, action, limit) },
+                    onRetryPreference = vm::refreshPodcastQueuePreferences,
                     onFollow = { vm.togglePodcastFollow(selectedPodcast) },
                     onAutoDownload = { autoDownloadPodcast = selectedPodcast },
                     onReadDownloads = { vm.podcastBrowser.refresh(selectedPodcast.id, synchronize = false) },
@@ -196,7 +211,31 @@ fun PodcastChannelPage(
                     onSelect = { vm.openPodcast(it.id) },
                     onAddClick = { exploring = true },
                     onExplore = { exploring = true },
-                    onRefreshAll = { vm.podcastBrowser.reloadList(synchronize = false) },
+                    onRefreshAll = {
+                        vm.podcastBrowser.reloadList(synchronize = false)
+                        vm.refreshPodcastCloud()
+                    },
+                    queueHeader = {
+                        PodcastCloudLists(
+                            cloud = cloud,
+                            autoContinue = cloud.preferences?.autoContinue ?: vm.settings.podcastContinuePreference().autoContinue,
+                            onRetry = vm::retryPodcastQueueSync,
+                            onBrowse = { exploring = true },
+                            onPlay = { episodeId ->
+                                scope.launch {
+                                    try {
+                                        val episode = vm.repository.podcastEpisode(episodeId)
+                                        val detail = vm.repository.podcastDetail(episode.podcastId)
+                                        vm.playPodcastEpisode(episode, detail.podcast)
+                                    } catch (e: CancellationException) { throw e }
+                                    catch (e: Exception) { statusMessage = friendlyError(e) }
+                                }
+                            },
+                            onQueueInbox = vm::movePodcastInboxToQueue,
+                            onRemoveInbox = vm::removePodcastInboxEpisode,
+                            onRemoveQueue = vm::removePodcastQueueEpisode,
+                        )
+                    },
                     onDelete = { p ->
                         scope.launch {
                             try {
@@ -264,6 +303,150 @@ fun PodcastChannelPage(
 }
 
 @Composable
+private fun PodcastCloudLists(
+    cloud: PodcastCloudState,
+    autoContinue: Boolean,
+    onRetry: () -> Unit,
+    onBrowse: () -> Unit,
+    onPlay: (String) -> Unit,
+    onQueueInbox: (String) -> Unit,
+    onRemoveInbox: (String) -> Unit,
+    onRemoveQueue: (String) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp)) {
+        cloud.syncError?.let { message ->
+            PodcastStatusCard(message, onRetry, stringResource(R.string.podcast_sync_retry), tag = "podcast-sync-error")
+        }
+        PodcastQueueBlock(
+            title = stringResource(R.string.podcast_inbox_title),
+            loading = cloud.inboxLoading,
+            error = cloud.inboxError,
+            empty = stringResource(R.string.podcast_inbox_empty),
+            rows = cloud.inboxRows,
+            onRetry = onRetry,
+            tag = "podcast-inbox",
+            emptyAction = stringResource(R.string.podcast_browse_shows),
+            onEmptyAction = onBrowse,
+            onPlay = onPlay,
+            secondary = stringResource(R.string.podcast_add_queue) to onQueueInbox,
+            onRemove = onRemoveInbox,
+        )
+        PodcastQueueBlock(
+            title = stringResource(R.string.podcast_queue_title),
+            loading = cloud.queueLoading,
+            error = cloud.queueError,
+            empty = stringResource(if (autoContinue) R.string.podcast_queue_empty_on else R.string.podcast_queue_empty_off),
+            rows = cloud.queueRows,
+            onRetry = onRetry,
+            tag = "podcast-queue",
+            onPlay = onPlay,
+            secondary = null,
+            onRemove = onRemoveQueue,
+        )
+    }
+}
+
+@Composable
+private fun PodcastQueueBlock(
+    title: String,
+    loading: Boolean,
+    error: String?,
+    empty: String,
+    rows: List<PodcastQueueRow>,
+    onRetry: () -> Unit,
+    tag: String,
+    emptyAction: String? = null,
+    onEmptyAction: () -> Unit = {},
+    onPlay: (String) -> Unit,
+    secondary: Pair<String, (String) -> Unit>?,
+    onRemove: (String) -> Unit,
+) {
+    Column(Modifier.fillMaxWidth().testTag(tag), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+        when {
+            loading -> repeat(2) {
+                Box(
+                    Modifier.fillMaxWidth().height(44.dp).clip(RoundedCornerShape(12.dp))
+                        .background(MaterialTheme.colorScheme.surfaceContainerHigh),
+                )
+            }
+            error != null -> PodcastStatusCard(error, onRetry, stringResource(R.string.podcast_sync_retry), tag = "$tag-error")
+            rows.isEmpty() -> Column {
+                Text(empty, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (emptyAction != null) TextButton(onEmptyAction) { Text(emptyAction) }
+            }
+            else -> rows.forEach { row ->
+                Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surfaceContainer, modifier = Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(
+                            if (row.unavailable) stringResource(R.string.podcast_episode_unavailable) else row.title.ifBlank { row.episodeId },
+                            style = MaterialTheme.typography.bodyMedium,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        if (row.showTitle.isNotBlank()) Text(row.showTitle, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            if (!row.unavailable) TextButton({ onPlay(row.episodeId) }, contentPadding = PaddingValues(horizontal = 8.dp)) { Text(stringResource(R.string.podcast_play)) }
+                            secondary?.let { (label, action) ->
+                                TextButton({ action(row.episodeId) }, contentPadding = PaddingValues(horizontal = 8.dp)) { Text(label, maxLines = 1) }
+                            }
+                            TextButton({ onRemove(row.episodeId) }, contentPadding = PaddingValues(horizontal = 8.dp)) { Text(stringResource(R.string.podcast_remove)) }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PodcastStatusCard(message: String, onAction: () -> Unit, action: String, tag: String) {
+    Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.errorContainer, modifier = Modifier.fillMaxWidth().testTag(tag)) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(message, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onErrorContainer)
+            TextButton(onAction) { Text(action) }
+        }
+    }
+}
+
+@Composable
+private fun PodcastShowPreferenceSection(
+    preference: PodcastShowQueuePreference?,
+    loading: Boolean,
+    error: String?,
+    onChange: (String, Int) -> Unit,
+    onRetry: () -> Unit,
+) {
+    val current = preference ?: PodcastShowQueuePreference()
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp).testTag("podcast-new-episode"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(stringResource(R.string.podcast_new_episode_action), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+        when {
+            loading -> Box(Modifier.fillMaxWidth().height(36.dp).clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surfaceContainerHigh))
+            error != null && preference == null -> PodcastStatusCard(error, onRetry, stringResource(R.string.podcast_sync_retry), tag = "podcast-pref-error")
+            else -> {
+                if (error != null) PodcastStatusCard(error, onRetry, stringResource(R.string.podcast_sync_retry), tag = "podcast-pref-error")
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf(
+                        "inbox" to R.string.podcast_action_inbox,
+                        "queue_last" to R.string.podcast_action_queue_last,
+                        "queue_next" to R.string.podcast_action_queue_next,
+                        "ignore" to R.string.podcast_action_ignore,
+                    ).forEach { (action, label) ->
+                        FilterChip(selected = current.action == action, onClick = { onChange(action, current.autoLimit) }, label = { Text(stringResource(label), maxLines = 1) })
+                    }
+                }
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(stringResource(R.string.podcast_auto_limit), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                    IconButton({ onChange(current.action, (current.autoLimit - 1).coerceAtLeast(0)) }, enabled = current.autoLimit > 0) { Icon(Icons.Default.Remove, contentDescription = null) }
+                    Text(stringResource(R.string.podcast_auto_limit_value, current.autoLimit), style = MaterialTheme.typography.bodyMedium.copy(fontFeatureSettings = "tnum"))
+                    IconButton({ onChange(current.action, (current.autoLimit + 1).coerceAtMost(100)) }) { Icon(Icons.Default.Add, contentDescription = null) }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun PodcastRefreshBox(loading: Boolean, onRefresh: () -> Unit, tag: String,
     actionLabel: String, content: @Composable BoxScope.() -> Unit) {
     val refresh = rememberPullToRefreshState()
@@ -299,6 +482,7 @@ private fun PodcastListView(
     onExplore: () -> Unit,
     onRefreshAll: () -> Unit,
     onDelete: (PodcastSummary) -> Unit,
+    queueHeader: @Composable () -> Unit = {},
 ) {
     Column(Modifier.fillMaxSize()) {
         Row(
@@ -356,6 +540,7 @@ private fun PodcastListView(
                     contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 96.dp, top = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
+                    item { queueHeader() }
                     if (podcasts.isEmpty() && !loading) item {
                         Box(Modifier.fillParentMaxSize()) {
                             if (followingOnly) Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -641,6 +826,12 @@ private fun PodcastDetailView(
     onRefresh: () -> Unit,
     onPlayEpisode: (PodcastEpisode) -> Unit,
     onQueueEpisode: (PodcastEpisode, Boolean) -> Unit,
+    onAddToInbox: (PodcastEpisode) -> Unit = {},
+    showPreference: PodcastShowQueuePreference? = null,
+    preferenceLoading: Boolean = false,
+    preferenceError: String? = null,
+    onShowPreference: (String, Int) -> Unit = { _, _ -> },
+    onRetryPreference: () -> Unit = {},
     onSaveEpisode: (PodcastEpisode) -> Unit,
     onFollow: () -> Unit,
     onAutoDownload: () -> Unit,
@@ -848,6 +1039,13 @@ private fun PodcastDetailView(
                             )
                         }
                     }
+                    PodcastShowPreferenceSection(
+                        preference = showPreference,
+                        loading = preferenceLoading,
+                        error = preferenceError,
+                        onChange = onShowPreference,
+                        onRetry = onRetryPreference,
+                    )
                     Row(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         FilterChip(episodeScope == "saved", { episodeScope = "saved"; onReadDownloads() }, label = { Text("我的下载") })
                         FilterChip(episodeScope == "downloaded", { episodeScope = "downloaded" }, label = { Text("服务器已有") })
@@ -912,6 +1110,7 @@ private fun PodcastDetailView(
                             onPlay = { onPlayEpisode(ep) },
                             onPlayNext = { onQueueEpisode(ep, true) },
                             onAddToQueue = { onQueueEpisode(ep, false) },
+                            onAddToInbox = { onAddToInbox(ep) },
                             onSave = { onSaveEpisode(ep) },
                         )
                     }
@@ -933,6 +1132,7 @@ private fun EpisodeRowItem(
     onPlay: () -> Unit,
     onPlayNext: () -> Unit,
     onAddToQueue: () -> Unit,
+    onAddToInbox: () -> Unit = {},
     onSave: () -> Unit,
 ) {
     var details by remember(episode.id) { mutableStateOf(false) }
@@ -1020,16 +1220,22 @@ private fun EpisodeRowItem(
                 }
                 DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
                     DropdownMenuItem(
-                        text = { Text("下一集播放") },
+                        text = { Text(stringResource(R.string.podcast_play_next)) },
                         leadingIcon = { Icon(Icons.AutoMirrored.Filled.PlaylistPlay, null) },
                         onClick = { showMenu = false; feedback(TactileKind.Tap); onPlayNext() },
                         modifier = Modifier.testTag("podcast-episode-play-next-${episode.id}"),
                     )
                     DropdownMenuItem(
-                        text = { Text("加入播放队列") },
+                        text = { Text(stringResource(R.string.podcast_add_queue)) },
                         leadingIcon = { Icon(Icons.AutoMirrored.Filled.QueueMusic, null) },
                         onClick = { showMenu = false; feedback(TactileKind.Tap); onAddToQueue() },
                         modifier = Modifier.testTag("podcast-episode-enqueue-${episode.id}"),
+                    )
+                    DropdownMenuItem(
+                        text = { Text(stringResource(R.string.podcast_add_inbox)) },
+                        leadingIcon = { Icon(Icons.Default.Inbox, null) },
+                        onClick = { showMenu = false; feedback(TactileKind.Tap); onAddToInbox() },
+                        modifier = Modifier.testTag("podcast-episode-inbox-${episode.id}"),
                     )
                     DropdownMenuItem(
                         text = { Text(if (episode.resourceSaved) "取消个人保存" else "保存到服务器") },
