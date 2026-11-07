@@ -13,6 +13,7 @@ import {
 } from './api';
 import { Cover } from './cover';
 import { Icon } from './icons';
+import { maybePlayRadioClick } from './radio-click';
 import { FavoriteButton, type Favorites } from './favorites';
 import { ListeningTracker } from './listening';
 import {
@@ -1400,7 +1401,10 @@ export function PlaybackControls({ player }: { player: Player }) {
         </button>
         <button
           className="play-button"
-          onClick={player.toggle}
+          onClick={() => {
+            if (podcast) maybePlayRadioClick();
+            player.toggle();
+          }}
           disabled={!current}
           aria-label={playing ? '暂停' : '播放'}
         >
