@@ -85,6 +85,36 @@ struct MacRootView: View {
         } message: {
             Text(session.serverSwitchError ?? "")
         }
+        .alert(
+            "发现新版本 WildString v\(session.updater.latestRelease?.version ?? "")",
+            isPresented: Bindable(session.updater).showUpdateAlert
+        ) {
+            if let release = session.updater.latestRelease {
+                Button("下载更新 (DMG)") {
+                    session.updater.openDownload(for: release)
+                }
+                Button("查看发布说明") {
+                    session.updater.openReleasePage(for: release)
+                }
+            }
+            Button("稍后再说", role: .cancel) {}
+        } message: {
+            if let notes = session.updater.latestRelease?.releaseNotes {
+                Text(notes.prefix(300))
+            } else {
+                Text("有新版本可用，建议升级以获得最新特性与稳定性修复。")
+            }
+        }
+        .alert("已是最新版本", isPresented: Bindable(session.updater).showUpToDateAlert) {
+            Button("好", role: .cancel) {}
+        } message: {
+            Text("当前使用的 WildString v\(session.updater.currentVersion) 已是最新版本。")
+        }
+        .alert("检查更新失败", isPresented: Bindable(session.updater).showErrorAlert) {
+            Button("好", role: .cancel) {}
+        } message: {
+            Text(session.updater.errorMessage ?? "无法连接到更新服务器，请检查网络后重试。")
+        }
         .task { await session.restore() }
     }
 }
@@ -634,6 +664,14 @@ private struct MacShellView: View {
                 .frame(width: 28, height: 28)
                 .background(session.page == page ? sidebarAccentSoft : .clear,
                     in: RoundedRectangle(cornerRadius: 8))
+                .overlay(alignment: .topTrailing) {
+                    if page == .settings, case .available = session.updater.phase {
+                        Circle()
+                            .fill(sidebarAccent)
+                            .frame(width: 6, height: 6)
+                            .offset(x: -2, y: 2)
+                    }
+                }
         }
         .buttonStyle(.plain)
         .help(page.title)

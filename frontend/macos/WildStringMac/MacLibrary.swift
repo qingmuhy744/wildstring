@@ -110,6 +110,7 @@ struct MacSettingsView: View {
                         VStack(spacing: 20) {
                             lyricsCard
                             accountCard
+                            softwareUpdateCard
                         }
                         .frame(maxWidth: .infinity)
                     }
@@ -311,6 +312,100 @@ struct MacSettingsView: View {
                 }
             }
             .disabled(session.isBusy)
+        }
+    }
+
+    private var softwareUpdateCard: some View {
+        card("软件更新", symbol: "arrow.triangle.2.circlepath") {
+            HStack {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("当前版本：v\(session.updater.currentVersion)")
+                        .font(MacTheme.section(14))
+                    if let date = session.updater.lastCheckedAt {
+                        Text("上次检查：\(date.formatted(date: .numeric, time: .shortened))")
+                            .font(MacTheme.caption)
+                            .foregroundStyle(MacTheme.muted)
+                    } else {
+                        Text("尚未检查更新")
+                            .font(MacTheme.caption)
+                            .foregroundStyle(MacTheme.muted)
+                    }
+                }
+                Spacer(minLength: 12)
+                Button(session.updater.phase == .checking ? "正在检查…" : "检查更新") {
+                    Task { await session.updater.checkForUpdates(manual: true) }
+                }
+                .buttonStyle(.bordered)
+                .disabled(session.updater.phase == .checking)
+            }
+
+            switch session.updater.phase {
+            case .available(let release):
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "sparkles")
+                            .foregroundStyle(MacTheme.accent)
+                        Text("发现新版本 v\(release.version)")
+                            .font(MacTheme.section(14))
+                            .foregroundStyle(MacTheme.accent)
+                    }
+                    if !release.releaseNotes.isEmpty {
+                        Text(release.releaseNotes)
+                            .font(MacTheme.caption)
+                            .foregroundStyle(MacTheme.ink)
+                            .lineLimit(4)
+                            .padding(10)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(MacTheme.panel, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    }
+                    HStack(spacing: 10) {
+                        Button("下载更新 (DMG)") {
+                            session.updater.openDownload(for: release)
+                        }
+                        .buttonStyle(.borderedProminent)
+
+                        Button("查看发布说明 ↗") {
+                            session.updater.openReleasePage(for: release)
+                        }
+                        .buttonStyle(.plain)
+                        .font(MacTheme.caption)
+                        .foregroundStyle(MacTheme.accent)
+                    }
+                }
+                .padding(.top, 4)
+
+            case .upToDate:
+                if session.updater.showManualFeedback {
+                    HStack(spacing: 6) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
+                        Text("当前已是最新版本")
+                            .font(MacTheme.caption)
+                            .foregroundStyle(MacTheme.muted)
+                    }
+                }
+
+            case .error(let message):
+                if session.updater.showManualFeedback {
+                    HStack(spacing: 6) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+                        Text(message)
+                            .font(MacTheme.caption)
+                            .foregroundStyle(.orange)
+                    }
+                }
+
+            case .idle, .checking:
+                EmptyView()
+            }
+
+            Divider()
+            settingToggle("自动检查更新", isOn: Binding(
+                get: { session.updater.autoCheckEnabled },
+                set: { session.updater.autoCheckEnabled = $0 }
+            ))
+            note("开启后将在后台静默检测新版本；发现新版本时在设置与菜单中提示。")
         }
     }
 

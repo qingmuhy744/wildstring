@@ -188,6 +188,7 @@ final class MacSession {
 
     var canManage: Bool { profile != "listener" }
     private(set) var servers: [MacSavedServer] = []
+    let updater: MacUpdater
     var serverLabel: String {
         servers.first { $0.address == logicalServerAddress }?.label ?? client?.server.description ?? "服务器"
     }
@@ -214,10 +215,16 @@ final class MacSession {
         self.queueStore = queueStore ?? ((try? SwiftDataQueueStore.makeDefault()) ?? InMemoryQueueStore())
         self.defaults = defaults
         self.configuration = configuration
+        self.updater = MacUpdater(defaults: defaults, sessionConfiguration: configuration ?? .ephemeral)
         servers = MacServers.load(defaults: defaults)
     }
 
     func restore() async {
+        defer {
+            Task { [weak self] in
+                await self?.updater.checkForUpdates(manual: false)
+            }
+        }
         guard case .loading = phase else { return }
         guard let last = servers.first,
             let address = try? ServerAddress(input: last.address, allowsInsecureHTTP: last.allowInsecureHTTP)
