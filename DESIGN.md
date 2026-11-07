@@ -33,7 +33,7 @@
 
 ## 3. Color System & Theme Tokens
 
-WildString supports three themes: **Light (Warm Paper — Daylight)**, **Dark (Charcoal Olive — Night)**, and an optional signature **Red Cloth (一块红布)** theme on mobile.
+WildString supports two themes: **Light (Warm Paper — Daylight)** and **Dark (Charcoal Olive — Night)**. Android follows the system, or a saved light or dark choice.
 
 ### 3.1 Light Theme (Warm Paper & Daylight Olive)
 
@@ -49,13 +49,18 @@ WildString supports three themes: **Light (Warm Paper — Daylight)**, **Dark (C
 | `--border-strong` | `#C9CBBD` | Secondary button borders and input outlines |
 | `--text` / `ink` | `#2A2B25` | Primary body text, track titles, active headings |
 | `--muted` | `#626457` | Secondary text, artist/album names, inactive nav labels |
-| `--faint` | `#8A8E7D` | Timestamps, table column headers, completed podcast episodes |
+| `--faint` | `#6A6E5B` | Timestamps, table column headers, completed podcast episodes (≥ 4.5:1 on canvas, panel and sidebar; use `--muted` on `--row-active`) |
 | `--accent` | `#BC5438` | Primary terracotta coral (play buttons, active indicators, progress fill) |
 | `--accent-text` / `accentDeep` | `#9F422B` | High-contrast terracotta for text links, badges, and active icons |
 | `--olive` | `#57492F` | Warm archival olive-brown for recommendation reasons & editorial tags |
 | `--olive-soft` | `#E4E7DB` | Soft sage pill background for AI/editorial badges |
 | `--on-accent` | `#FFFAF3` | Text and icons placed on top of `--accent` buttons |
-| `--danger` | `#B83B2A` | Destructive actions (`取消订阅`, `删除`) |
+| `--success` | `#496332` | Success status text and icons |
+| `--warning` | `#80591E` | Warning status text and icons |
+| `--danger` | `#A64027` | Destructive actions (`取消订阅`, `删除`) |
+| `--tag-bg` | `#E0E5D6` | Neutral tag and chip fill |
+| `--accent-hover` | `#A8472E` | Hover state for primary accent controls |
+| `--accent-tint` | `--accent` at 14% | Currently playing podcast episode row fill |
 
 ### 3.2 Dark Theme (Charcoal Olive & Warm Coral)
 
@@ -64,19 +69,25 @@ WildString supports three themes: **Light (Warm Paper — Daylight)**, **Dark (C
 | `--bg` / `canvas` | `#171716` | Primary page canvas (warm carbon black) |
 | `--sidebar` | `#1C1E18` | Left navigation sidebar & right inspector background |
 | `--surface` / `panel` | `#22251E` | Cards, track rows, hero panels, bottom transport bar |
-| `--surface-subtle` / `raised` | `#292C24` | Elevated cards, search inputs, hover surfaces |
+| `--surface-subtle` / `raised` | `#292C24` | Elevated cards, hover surfaces |
+| `--surface-input` | `#191D17` | Search inputs and form fields |
 | `--bg-hover` | `#30332B` | Hover state for rows and secondary controls |
 | `--row-active` / `accentSoft` | `#262B21` | Currently playing track row fill |
-| `--nav-active` / `oliveSoft` | `#30352A` | Selected sidebar navigation pill & AI badge fill |
+| `--nav-active` / `oliveSoft` / `--tag-bg` | `#30352A` | Selected sidebar navigation pill, AI badge and neutral tag fill |
 | `--border` | `#33342E` | Hairline dividers (`1px`) and card strokes |
 | `--text` / `ink` | `#EEEAE2` | Primary warm parchment text |
 | `--muted` | `#A8A59C` | Secondary metadata text (artist, album, descriptions) |
 | `--faint` | `#8E9284` | Timestamps, disabled/completed episode text, section kickers |
-| `--accent` / `accentDeep` | `#E98A6D` | Warm coral accent for buttons, active waveform, and progress bars |
+| `--accent` / `--accent-text` / `accentDeep` | `#E98A6D` | Warm coral accent for buttons, active waveform, and progress bars |
 | `--accent-hover` | `#F0A48A` | Hover highlight for primary accent controls |
 | `--olive` | `#B4C09E` | Soft sage-olive text for recommendation reasons (`reason`) |
 | `--on-accent` | `#211B17` | Dark ink icon/text on `--accent` primary buttons |
-| `--danger` | `#F08C7B` | Error banners and destructive menu items |
+| `--success` | `#B2C69A` | Success status text and icons |
+| `--warning` | `#E5BD7C` | Warning status text and icons |
+| `--danger` | `#F2A392` | Error banners and destructive menu items |
+| `--accent-tint` | `--accent` at 14% | Currently playing podcast episode row fill |
+
+Dark has no `--border-strong`; secondary button and input outlines use `--border`.
 
 ---
 
@@ -127,6 +138,33 @@ WildString supports three themes: **Light (Warm Paper — Daylight)**, **Dark (C
     - Progress row: Elapsed time (`12:34`), **Buffered Scrubbing Bar** (`5px` track height, `--accent` 28% buffered range, `--accentDeep` played range, `14×14` white thumb with `2px` coral stroke), and Total/Remaining time (`-33:27` for podcasts).
   - **Right (`26%`, max `330px`)**: Mute toggle + compact `72px` Volume Slider, Lyrics toggle, Queue toggle, Fullscreen toggle, Desktop Lyrics toggle.
 
+### 5.2 Accessibility Floor
+
+- **Text contrast**: body and metadata text must reach 4.5:1 against the surface it sits on, in both themes. `--accent` is for fills, progress and large icons; accent-coloured text uses `--accent-text`. On `--row-active` use `--muted`, not `--faint`.
+- **Type size**: no text below 11px; Chinese text below 12px is limited to micro kickers and table headers.
+- **Touch targets**: interactive controls are at least 44×44pt on iOS and 48×48dp on Android. Visually smaller controls (such as the `32×32` `⋯` button) expand their hit area on touch platforms. Desktop controls are at least 28×28.
+- **Focus**: every focusable control shows a 2px `--accent` focus ring with a 2px offset. The ring is never removed without a replacement.
+- **Playback state**: play/pause, favorite, shuffle, repeat and mute expose their current state to assistive technology (`aria-pressed` on Web, `selected` / `stateDescription` on Android and `accessibilityValue` on Apple platforms). Progress sliders announce elapsed and total time.
+- **Colour is never the only signal**: completed episodes keep the checkmark and `已听完`; in-progress episodes keep `剩 N 分钟`; errors keep their text.
+
+### 5.3 Narrow Screens & Native Clients
+
+- **Web breakpoints**: the shell reflows at `1100px`, `980px`, `760px` and `700px`. Below `760px` the sidebar collapses and the layout is single-column; the supported minimum width is `320px`, and acceptance is checked at `390px`.
+- **Navigation**: Android uses the Material bottom `NavigationBar` and iOS uses `TabView`; the mini player sits directly above it and expands to the fullscreen player. Web keeps the transport bar at the bottom of the viewport.
+- **Action groups** wrap as whole controls; the primary action stays first and is never clipped. Secondary and destructive actions move into `⋯`.
+- **Safe areas**: native bottom bars, mini players and sheets respect system insets; content never sits under the status bar, home indicator or gesture area.
+- **Native tokens** use the same names and values as §3 (`MacTheme` and the Android `Appearance` colours mirror them); a value changes in `DESIGN.md` first, then in each client.
+
+### 5.4 Boundary State Patterns
+
+| State | Pattern |
+| :--- | :--- |
+| Loading | Layout-matched placeholder (rows or cards at their final height); no full-page spinner; keep already loaded content visible during refresh. |
+| Empty | One calm sentence naming what is missing plus one action that fixes it (import, browse, subscribe). No illustration or slogan. |
+| Error | `role="alert"`, `--danger` text, one sentence of what failed plus what to do next, with a `重试` control when retrying can help. Keep the surrounding page usable. |
+| Permission denied | Same shape as Error without retry: state what is not allowed and who can change it (library owner) or which account to switch to. |
+| Offline / AI unavailable | Basic browsing and playback continue; only the affected feature shows the Error pattern. |
+
 ---
 
 ## 6. Core Component Specifications
@@ -161,7 +199,7 @@ WildString supports three themes: **Light (Warm Paper — Daylight)**, **Dark (C
   - Time section headers: `本周` and `更早`.
   - Automatic title cleanup strips redundant trailing show-name brackets (e.g., `【王局拍案播客】`).
 - **Episode Row States (Three Distinct Visual Tiers)**:
-  1. **Currently Playing (`current`)**: Full-row warm tint (`rgba(188, 84, 56, 0.14)`), left animated/colored `waveform` icon, bold ink title, subtitle `日期 · N分钟 · 正在播放` (in coral).
+  1. **Currently Playing (`current`)**: Full-row warm tint (`--accent-tint`), left animated/colored `waveform` icon, bold ink title, subtitle `日期 · N分钟 · 正在播放` (in coral).
   2. **In Progress (`0 < position < duration`)**: Left bordered circular play button, normal ink title, subtitle `日期 · 剩 N 分钟` (coral highlight), and a slim `3.5px` coral progress bar at the bottom of the row.
   3. **Completed (`position >= duration`)**: Muted grey play circle, **greyed-out title (`var(--faint)`)**, inline `checkmark.circle.fill` icon right after the title, muted subtitle `日期 · N分钟 · 已听完`, and **no bottom progress bar**.
 
@@ -174,10 +212,10 @@ WildString supports three themes: **Light (Warm Paper — Daylight)**, **Dark (C
 - Supports model connection selector, natural-language queries ("找几首适合雨天夜晚听的器乐"), inline playable track cards with one-click `播放全部` or `保存为歌单`, and graceful degradation when AI connections are offline.
 
 ### 6.6 Lyrics View (`歌词`)
-- **Only the current line is emphasized** (see §2.3): played and upcoming lines share one muted color; word-level karaoke tinting is confined to the active line, never accumulated on lines already sung.
+- **Only the current line is emphasized** (see §2, item 3): played and upcoming lines share one muted color; word-level karaoke tinting is confined to the active line, never accumulated on lines already sung.
 - **Position is content-driven**: the current line centers only within the scrollable range (`clamp(lineCenter − H/2, 0, maxScroll)`); short lyrics are centered as a block and never scroll; the first lines start from the top.
 - **Follow recovery is shared across pointer types**: 2 s after manual browsing stops while playing; paused playback suspends the timer. Pointer-specific behavior is limited to line taps and seek confirmation.
-- Cross-platform rules and per-platform implementation status: [`contracts/lyric-view.md`](../contracts/lyric-view.md).
+- Cross-platform rules and per-platform implementation status: [`contracts/lyric-view.md`](contracts/lyric-view.md).
 
 ---
 
