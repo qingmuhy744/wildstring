@@ -197,9 +197,9 @@ test('同名 LRC、歌词点击跳转、跟随高亮与切歌后的内嵌歌词'
       steps: 5,
     });
     await page.mouse.up();
-    const confirm = panel.getByRole('group', { name: '歌词跳转预览' }).getByRole('button');
-    await expect(confirm).toBeVisible();
-    await confirm.click();
+    // A fine pointer seeks by clicking a line; the touch-only confirm must stay hidden.
+    await expect(panel.getByRole('group', { name: '歌词跳转预览' })).toHaveCount(0);
+    await panel.getByRole('button', { name: /^跳转到.*侧车第三行/ }).click();
   }
   await expect.poll(async () => (await audio(page)).time).toBeGreaterThanOrEqual(5.9);
   if (!(await audio(page)).paused)

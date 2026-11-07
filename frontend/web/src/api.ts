@@ -6,7 +6,7 @@ export interface Track {
   id: string;
   library_id?: string;
   podcast_id?: string;
-  podcast_queue_origin?: 'auto';
+  podcast_queue_origin?: 'auto' | 'manual' | 'rule';
   podcast_list_order?: 'asc' | 'desc';
   podcast_position_seconds?: number;
   podcast_completed?: boolean;
@@ -74,6 +74,7 @@ export class ApiError extends Error {
     public code?: string,
     public traceId?: string,
     public retryAfter?: number,
+    public detail?: unknown,
   ) {
     super(traceId ? i18n.t('api.withDiagnostic', { message, id: traceId }) : message);
   }
@@ -200,7 +201,7 @@ export async function api<T>(path: string, options: ApiOptions = {}): Promise<T>
         : Number.isFinite(retryBody) && retryBody > 0
           ? Math.ceil(retryBody)
           : undefined;
-    throw new ApiError(response.status, message, code, traceId, retryAfter);
+    throw new ApiError(response.status, message, code, traceId, retryAfter, body.detail);
   }
   const value = response.status === 204 ? (undefined as T) : await response.json();
   if (expectedOwner !== libraryUser()) throw new DOMException('Account changed', 'AbortError');

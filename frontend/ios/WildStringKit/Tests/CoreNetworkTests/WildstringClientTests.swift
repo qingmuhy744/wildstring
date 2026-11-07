@@ -1442,4 +1442,95 @@ struct StubbedHTTPTests {
             #expect(data == jpeg)
         }
     }
+
+    @Suite("PodcastQueue HTTP")
+    struct PodcastQueueHTTPSuite {
+        private func makeClient() throws -> WildstringClient {
+            WildstringClient(
+                server: try ServerAddress(input: "music.example.com"),
+                store: InMemorySessionStore(),
+                configuration: StubURLProtocol.configuration()
+            )
+        }
+
+        @Test func putConflictThrowsTheServerQueueAndDoesNotSucceed() async throws {
+            StubURLProtocol.respond { request in
+                #expect(request.httpMethod == "PUT")
+                #expect(request.url?.path == "/api/v1/podcasts/queue")
+                #expect(request.value(forHTTPHeaderField: "X-Wildstring-Client") == "ios")
+                let body = try #require(StubURLProtocol.bodyData(of: request))
+                let json = try #require(try JSONSerialization.jsonObject(with: body) as? [String: Any])
+                #expect(json["version"] as? Int == 2)
+                #expect(json["device_id"] as? String == "phone")
+                let items = try #require(json["items"] as? [[String: String]])
+                #expect(items.map { $0["episode_id"] } == ["local"])
+                #expect(items.map { $0["origin"] } == ["manual"])
+                return .json(
+                    status: 409,
+                    body: """
+                        {"detail":{"code":"podcast_queue_conflict","current":{"version":5,"items":[{"episode_id":"server","origin":"rule"}]}}}
+                        """
+                )
+            }
+            let client = try makeClient()
+            await #expect(
+                throws: PodcastQueueConflict(
+                    current: PodcastQueueState(
+                        version: 5,
+                        items: [PodcastQueueItem(episodeId: "server", origin: "rule")]
+                    )
+                )
+            ) {
+                _ = try await client.replacePodcastQueue(
+                    PodcastQueueUpdate(
+                        version: 2,
+                        deviceId: "phone",
+                        items: [PodcastQueueItem(episodeId: "local", origin: "manual")]
+                    )
+                )
+            }
+            #expect(StubURLProtocol.requests.count == 1)
+        }
+
+        @Test func savingOneShowKeepsTheOthers() async throws {
+            StubURLProtocol.respond { request in
+                if request.httpMethod == "GET" {
+                    #expect(request.url?.path == "/api/v1/podcasts/queue/preferences")
+                    return .json(
+                        status: 200,
+                        body: """
+                            {"default_action":"inbox","auto_limit":3,"shows":{"keep":{"action":"ignore","auto_limit":1,"order":"asc","skip_completed":true,"auto_continue":true},"edit":{"action":"inbox","auto_limit":3,"order":"follow","skip_completed":false,"auto_continue":true}}}
+                            """
+                    )
+                }
+                #expect(request.httpMethod == "PUT")
+                let body = try #require(StubURLProtocol.bodyData(of: request))
+                let json = try #require(try JSONSerialization.jsonObject(with: body) as? [String: Any])
+                #expect(json["default_action"] as? String == "inbox")
+                #expect(json["auto_limit"] as? Int == 3)
+                let shows = try #require(json["shows"] as? [String: [String: Any]])
+                #expect(shows["keep"]?["action"] as? String == "ignore")
+                #expect(shows["keep"]?["order"] as? String == "asc")
+                #expect(shows["edit"]?["action"] as? String == "queue_last")
+                #expect(shows["edit"]?["auto_limit"] as? Int == 4)
+                #expect(shows["edit"]?["skip_completed"] as? Bool == false)
+                return .json(
+                    status: 200,
+                    body: """
+                        {"default_action":"inbox","auto_limit":3,"shows":{"keep":{"action":"ignore","auto_limit":1,"order":"asc","skip_completed":true,"auto_continue":true},"edit":{"action":"queue_last","auto_limit":4,"order":"follow","skip_completed":false,"auto_continue":true}}}
+                        """
+                )
+            }
+            let client = try makeClient()
+            var preferences = try await client.podcastQueuePreferences()
+            var show = preferences.shows["edit"] ?? PodcastShowPreference()
+            show.action = "queue_last"
+            show.autoLimit = 4
+            preferences.shows["edit"] = show
+            let saved = try await client.savePodcastQueuePreferences(preferences)
+            #expect(saved.shows["keep"]?.action == "ignore")
+            #expect(saved.shows["edit"]?.action == "queue_last")
+            #expect(saved.shows["edit"]?.skipCompleted == false)
+        }
+    }
 }

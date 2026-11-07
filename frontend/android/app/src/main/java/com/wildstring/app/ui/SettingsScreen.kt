@@ -163,6 +163,21 @@ internal enum class SettingsSection(@androidx.annotation.StringRes val title: In
                             listOf("ask" to stringResource(R.string.podcast_resume_ask), "auto" to stringResource(R.string.podcast_resume_auto), "restart" to stringResource(R.string.podcast_resume_restart)), podcastMode,
                             stringResource(R.string.podcast_resume_hint), vm.podcastProgress::mode)
                     }
+                    SettingsGroup(stringResource(R.string.podcast_continue_group)) {
+                        val cloud by vm.podcastCloud.collectAsStateWithLifecycle()
+                        LaunchedEffect(settingsOwner) { vm.refreshPodcastQueuePreferences() }
+                        val autoContinue = cloud.preferences?.autoContinue ?: vm.settings.podcastContinuePreference().autoContinue
+                        ListItem(
+                            headlineContent = { Text(stringResource(R.string.podcast_continue)) },
+                            supportingContent = { Text(stringResource(R.string.podcast_continue_hint)) },
+                            leadingContent = { Icon(Icons.Default.Podcasts, null) },
+                            trailingContent = { Switch(autoContinue, vm::updatePodcastAutoContinue) },
+                        )
+                        cloud.preferencesError?.let { message ->
+                            Text(message, Modifier.padding(horizontal = 16.dp, vertical = 8.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                            TextButton({ vm.updatePodcastAutoContinue(autoContinue) }, Modifier.padding(horizontal = 8.dp)) { Text(stringResource(R.string.podcast_sync_retry)) }
+                        }
+                    }
                     podcastPlayback?.let { playback ->
                         SettingsGroup(stringResource(R.string.settings_group_podcast_cache)) {
                             val savePodcastPlayback: (com.wildstring.app.data.PodcastPlaybackSettings) -> Unit = save@{ next ->

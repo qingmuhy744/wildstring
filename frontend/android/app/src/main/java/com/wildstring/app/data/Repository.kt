@@ -269,6 +269,45 @@ class Repository @Inject constructor(@param:ApplicationContext private val conte
         if (settings.userId != session.account?.id) throw CancellationException("会话已变化。")
         return api().updatePodcastPlaybackSettings(PodcastPlaybackSettingsUpdate(settings.version, settings.autoCacheCurrent, settings.prefetchNext, settings.networkPolicy), RequestOwner(owner)).also { requireProfile(owner) }
     }
+    suspend fun podcastInbox(): PodcastInboxSnapshot {
+        val owner = session.cacheScope(); requireProfile(owner)
+        return api().podcastInbox(RequestOwner(owner)).also { requireProfile(owner) }
+    }
+    suspend fun addPodcastInbox(episodeId: String): PodcastInboxWriteResult {
+        val owner = session.cacheScope(); requireProfile(owner)
+        return api().addPodcastInboxItem(episodeId, com.google.gson.JsonObject(), RequestOwner(owner)).also { requireProfile(owner) }
+    }
+    suspend fun removePodcastInbox(episodeId: String): PodcastInboxWriteResult {
+        val owner = session.cacheScope(); requireProfile(owner)
+        return api().removePodcastInboxItem(episodeId, RequestOwner(owner)).also { requireProfile(owner) }
+    }
+    suspend fun podcastQueue(): PodcastQueueSnapshot {
+        val owner = session.cacheScope(); requireProfile(owner)
+        return api().podcastQueue(RequestOwner(owner)).normalized().also { requireProfile(owner) }
+    }
+    suspend fun replacePodcastQueue(version: Int, deviceId: String, items: List<PodcastQueueItem>): PodcastQueueSnapshot {
+        val owner = session.cacheScope(); requireProfile(owner)
+        return try {
+            api().replacePodcastQueue(PodcastQueueUpdate(version, deviceId, podcastQueueNormalize(items)), RequestOwner(owner)).normalized().also { requireProfile(owner) }
+        } catch (error: HttpException) {
+            if (error.code() == 409) podcastQueueConflict(error)?.let { throw it }
+            throw error
+        }
+    }
+    suspend fun podcastQueuePreferences(): PodcastQueuePreferences {
+        val owner = session.cacheScope(); requireProfile(owner)
+        return api().podcastQueuePreferences(RequestOwner(owner)).forUpload().also { requireProfile(owner) }
+    }
+    suspend fun savePodcastQueuePreferences(body: PodcastQueuePreferences): PodcastQueuePreferences {
+        val owner = session.cacheScope(); requireProfile(owner)
+        return api().savePodcastQueuePreferences(body.forUpload(), RequestOwner(owner)).forUpload().also { requireProfile(owner) }
+    }
+    private fun podcastQueueConflict(error: HttpException): PodcastQueueConflictException? {
+        val raw = error.response()?.errorBody()?.string().orEmpty()
+        val parsed = runCatching { networkGson().fromJson(raw, PodcastQueueConflictEnvelope::class.java) }.getOrNull() ?: return null
+        if (parsed.detail.code != "podcast_queue_conflict") return null
+        return PodcastQueueConflictException(parsed.detail.current.normalized())
+    }
     suspend fun checkCatalogGaps(artist: String, limit: Int = 10): com.google.gson.JsonObject {
         val payload = com.google.gson.JsonObject().apply {
             addProperty("artist", artist)

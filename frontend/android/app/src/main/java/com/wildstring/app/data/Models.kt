@@ -313,3 +313,61 @@ data class PodcastPlaybackSettingsUpdate(
 
 
 data class PodcastSaveResult(val id: String, val saved: Boolean, val reused: Boolean = false, val status: String = "")
+
+data class PodcastQueueItem(
+    @SerializedName("episode_id") val episodeId: String = "",
+    val origin: String = "manual",
+)
+
+data class PodcastQueueSnapshot(
+    val version: Int = 0,
+    @SerializedName("device_id") val deviceId: String = "",
+    val items: List<PodcastQueueItem> = emptyList(),
+    @SerializedName("updated_at") val updatedAt: String? = null,
+)
+
+data class PodcastQueueUpdate(
+    val version: Int,
+    @SerializedName("device_id") val deviceId: String,
+    val items: List<PodcastQueueItem>,
+)
+
+data class PodcastInboxItem(
+    @SerializedName("episode_id") val episodeId: String = "",
+    @SerializedName("podcast_id") val podcastId: String = "",
+    val source: String = "manual",
+    @SerializedName("added_at") val addedAt: String = "",
+)
+
+data class PodcastInboxSnapshot(
+    val version: Int = 0,
+    val items: List<PodcastInboxItem> = emptyList(),
+)
+
+data class PodcastInboxWriteResult(
+    @SerializedName("episode_id") val episodeId: String = "",
+    val saved: Boolean = false,
+)
+
+data class PodcastShowQueuePreference(
+    val action: String = "inbox",
+    @SerializedName("auto_limit") val autoLimit: Int = 3,
+    val order: String = "follow",
+    @SerializedName("skip_completed") val skipCompleted: Boolean = true,
+    @SerializedName("auto_continue") val autoContinue: Boolean = true,
+)
+
+/** Account default (`auto_continue`) plus per-show overrides. Read before every write. */
+data class PodcastQueuePreferences(
+    @SerializedName("default_action") val defaultAction: String = "inbox",
+    @SerializedName("auto_limit") val autoLimit: Int = 3,
+    @SerializedName("auto_continue") val autoContinue: Boolean = true,
+    val shows: Map<String, PodcastShowQueuePreference>? = emptyMap(),
+)
+
+data class PodcastQueueConflictEnvelope(val detail: PodcastQueueConflictDetail = PodcastQueueConflictDetail())
+
+data class PodcastQueueConflictDetail(
+    val code: String = "",
+    val current: PodcastQueueSnapshot = PodcastQueueSnapshot(),
+)

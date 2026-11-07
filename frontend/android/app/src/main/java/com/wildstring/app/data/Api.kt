@@ -90,5 +90,12 @@ interface Api {
     @PUT("api/v1/podcasts/{id}/download-settings") suspend fun updatePodcastDownloadSettings(@Path("id") id: String, @Body body: PodcastDownloadSettingsUpdate, @Tag owner: RequestOwner): PodcastDownloadSettings
     @GET("api/v1/podcasts/playback-settings") suspend fun podcastPlaybackSettings(@Tag owner: RequestOwner): PodcastPlaybackSettings
     @PUT("api/v1/podcasts/playback-settings") suspend fun updatePodcastPlaybackSettings(@Body body: PodcastPlaybackSettingsUpdate, @Tag owner: RequestOwner): PodcastPlaybackSettings
+    @GET("api/v1/podcasts/inbox") suspend fun podcastInbox(@Tag owner: RequestOwner): PodcastInboxSnapshot
+    @PUT("api/v1/podcasts/inbox/items/{episode_id}") suspend fun addPodcastInboxItem(@Path("episode_id") episodeId: String, @Body body: JsonObject, @Tag owner: RequestOwner): PodcastInboxWriteResult
+    @DELETE("api/v1/podcasts/inbox/items/{episode_id}") suspend fun removePodcastInboxItem(@Path("episode_id") episodeId: String, @Tag owner: RequestOwner): PodcastInboxWriteResult
+    @GET("api/v1/podcasts/queue") suspend fun podcastQueue(@Tag owner: RequestOwner): PodcastQueueSnapshot
+    @PUT("api/v1/podcasts/queue") suspend fun replacePodcastQueue(@Body body: PodcastQueueUpdate, @Tag owner: RequestOwner): PodcastQueueSnapshot
+    @GET("api/v1/podcasts/queue/preferences") suspend fun podcastQueuePreferences(@Tag owner: RequestOwner): PodcastQueuePreferences
+    @PUT("api/v1/podcasts/queue/preferences") suspend fun savePodcastQueuePreferences(@Body body: PodcastQueuePreferences, @Tag owner: RequestOwner): PodcastQueuePreferences
     @POST("api/v1/ai/catalog-gaps") suspend fun catalogGaps(@Body body: JsonObject): JsonObject
 }

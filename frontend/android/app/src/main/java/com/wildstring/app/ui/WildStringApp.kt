@@ -498,12 +498,27 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
             }
         }
     }
-    LaunchedEffect(state.error, state.mutationMessage) {
-        (state.error ?: state.mutationMessage)?.let { message ->
-            try { mutationSnackbar.showSnackbar(message) }
-            finally { if (state.error == null) vm.acknowledgeMessage(message) }
+    val podcastCloud by vm.podcastCloud.collectAsStateWithLifecycle()
+    val podcastRetry = stringResource(R.string.podcast_sync_retry)
+    LaunchedEffect(state.error, state.mutationMessage, podcastCloud.syncError) {
+        val syncError = podcastCloud.syncError
+        val message = state.error ?: state.mutationMessage ?: syncError
+        if (message != null) {
+            try {
+                if (syncError != null && message == syncError) {
+                    val result = mutationSnackbar.showSnackbar(message, podcastRetry, duration = SnackbarDuration.Long)
+                    if (result == SnackbarResult.ActionPerformed) vm.retryPodcastQueueSync()
+                } else mutationSnackbar.showSnackbar(message)
+            } finally { if (state.error == null) vm.acknowledgeMessage(message) }
         }
     }
+    if (podcastCloud.conflict != null) AlertDialog(
+            onDismissRequest = {},
+            title = { Text(stringResource(R.string.podcast_queue_conflict_title)) },
+            text = { Text(stringResource(R.string.podcast_queue_conflict_body)) },
+            confirmButton = { TextButton({ vm.resolvePodcastQueueConflict(com.wildstring.app.data.PodcastQueueConflictChoice.USE_SERVER) }) { Text(stringResource(R.string.podcast_queue_use_server)) } },
+            dismissButton = { TextButton({ vm.resolvePodcastQueueConflict(com.wildstring.app.data.PodcastQueueConflictChoice.OVERWRITE) }) { Text(stringResource(R.string.podcast_queue_overwrite)) } },
+        )
     val savedPages = rememberSaveableStateHolder()
     val pullRefresh = rememberPullToRefreshState()
     val savedKeys = remember { ArrayDeque<String>() }
