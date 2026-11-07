@@ -138,6 +138,7 @@ test('播客管理集中入口、策略持久化与快捷入口保持一致', as
       await (await page.request.get('/api/v1/podcasts/resources/settings')).json(),
     ).toMatchObject({ enabled: true, retention_days: 3650 });
     await section(page, '电台 · 播客');
+    await page.locator('.podcasts-more-trigger').click();
     await page.getByRole('button', { name: '共享音频管理', exact: true }).click();
     await expect(resources.getByLabel('零引用后保留天数')).toHaveValue('3650');
     await expect(page.getByRole('dialog')).toHaveCount(0);
@@ -147,6 +148,7 @@ test('播客管理集中入口、策略持久化与快捷入口保持一致', as
     );
     await leaveSettings(page);
     await expect(page.locator('.podcasts-page')).toBeVisible();
+    await page.locator('.podcasts-more-trigger').click();
     await page.getByRole('button', { name: '下载管理', exact: true }).click();
     await expect(page.getByRole('region', { name: '下载管理', exact: true })).toBeVisible();
     await leaveSettings(page);

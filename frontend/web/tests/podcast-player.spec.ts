@@ -37,6 +37,7 @@ async function openRadio(page: Page) {
 test('播放缓存设置可保存并在重新打开后保留', async ({ page }) => {
   await login(page);
   await podcastCatalog(page);
+  await page.locator('.podcasts-more-trigger').click();
   await page.getByRole('button', { name: '⚡ 播放缓存', exact: true }).click();
   await page.getByRole('radio', { name: '允许所有网络', exact: true }).check();
   const saved = page.waitForResponse(
@@ -48,6 +49,7 @@ test('播放缓存设置可保存并在重新打开后保留', async ({ page }) 
   const response = await saved;
   expect(await response.json()).toMatchObject({ network_policy: 'any' });
   expect(response.status()).toBe(200);
+  await page.locator('.podcasts-more-trigger').click();
   await page.getByRole('button', { name: '⚡ 播放缓存', exact: true }).click();
   await expect(page.getByRole('radio', { name: '允许所有网络', exact: true })).toBeChecked();
   await page.getByRole('button', { name: '取消', exact: true }).click();
@@ -217,6 +219,7 @@ test('下载管理可切换状态，昼夜配色可读且窄屏不溢出', async
       localStorage.setItem('wildstring-theme', value);
       window.dispatchEvent(new CustomEvent('wildstring:theme-changed', { detail: value }));
     }, theme);
+    await page.locator('.podcasts-more-trigger').click();
     await page.getByRole('button', { name: '下载管理', exact: true }).click();
     const dialog = page.getByRole('region', { name: '下载管理', exact: true });
     await expect(dialog).toBeVisible();

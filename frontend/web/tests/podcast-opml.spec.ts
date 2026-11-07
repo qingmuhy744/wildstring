@@ -49,6 +49,7 @@ test('OPML 导入先预览、可勾选，再分批导入并逐条显示结果', 
   });
   await login(page);
   await podcastCatalog(page);
+  await page.locator('.podcasts-more-trigger').click();
   await page.locator('.podcasts-header').getByRole('button', { name: '导入 OPML' }).click();
   const dialog = page.getByRole('dialog', { name: '导入 OPML' });
   await dialog.getByLabel('选择 OPML 文件').setInputFiles({
@@ -101,6 +102,7 @@ test('导入超过一批时按 10 个一批提交', async ({ page }) => {
   });
   await login(page);
   await podcastCatalog(page);
+  await page.locator('.podcasts-more-trigger').click();
   await page.locator('.podcasts-header').getByRole('button', { name: '导入 OPML' }).click();
   const dialog = page.getByRole('dialog', { name: '导入 OPML' });
   await dialog.getByLabel('选择 OPML 文件').setInputFiles({
@@ -119,6 +121,7 @@ test('解析失败时显示中文错误', async ({ page }) => {
   );
   await login(page);
   await podcastCatalog(page);
+  await page.locator('.podcasts-more-trigger').click();
   await page.locator('.podcasts-header').getByRole('button', { name: '导入 OPML' }).click();
   const dialog = page.getByRole('dialog', { name: '导入 OPML' });
   await dialog.getByLabel('选择 OPML 文件').setInputFiles({
@@ -133,6 +136,7 @@ test('解析失败时显示中文错误', async ({ page }) => {
 test('导出 OPML 下载当前账号关注的节目', async ({ page }) => {
   await login(page);
   await podcastCatalog(page);
+  await page.locator('.podcasts-more-trigger').click();
   const link = page.locator('.podcasts-header').getByRole('link', { name: '导出 OPML' });
   await expect(link).toHaveAttribute('href', '/api/v1/podcasts/opml/export');
   const [download] = await Promise.all([page.waitForEvent('download'), link.click()]);

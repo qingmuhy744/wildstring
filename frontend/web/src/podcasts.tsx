@@ -41,6 +41,7 @@ export interface PodcastSummary {
   publisher?: PodcastPublisher | null;
   publisher_version?: number;
   followed?: boolean;
+  follower_count?: number;
 }
 
 export interface PodcastPlaybackSettings {
@@ -160,7 +161,7 @@ interface PodcastsProps {
   canEditPublishers?: boolean;
   canManageSources?: boolean;
   canManageResources?: boolean;
-  onManage: (tab: 'resources' | 'downloads') => void;
+  onManage: (tab: 'programmes' | 'resources' | 'downloads') => void;
   onPlayTrack: (track: Track) => void;
   onQueueTrack: (track: Track, next: boolean) => void;
 }
@@ -248,7 +249,11 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
 
   const menuRef = useRef<HTMLDivElement | null>(null);
+  const headerMenuRef = useRef<HTMLDetailsElement | null>(null);
   const settingsDialog = useRef<HTMLDialogElement | null>(null);
+  const closeHeaderMenu = () => {
+    headerMenuRef.current?.removeAttribute('open');
+  };
   const previousCompleted = useRef<string | null>(null);
   const completedRevision =
     queueInfo?.recent_completed
@@ -783,11 +788,15 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
         setContextMenu(null);
       }
+      if (headerMenuRef.current && !headerMenuRef.current.contains(e.target as Node)) {
+        headerMenuRef.current.removeAttribute('open');
+      }
     };
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         setContextMenu(null);
         setSettingsPodcast(null);
+        headerMenuRef.current?.removeAttribute('open');
       }
     };
     window.addEventListener('click', handleGlobalClick);
@@ -845,19 +854,6 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
     void loadPlaybackSettings();
   }, []);
 
-  if (showSearch) {
-    return (
-      <PodcastSearchPage
-        canAdd={canAddPodcast}
-        initialQuery={modalFeedUrl}
-        initialExplore={exploring}
-        onClose={closeSubscribe}
-        onSubscribed={handleSubscribed}
-        onOpen={openFromSearch}
-      />
-    );
-  }
-
   return (
     <div
       className={`podcasts-page${publisherView && !selectedPodcast ? ' podcast-publisher-page' : ''}`}
@@ -899,42 +895,6 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
         </div>
 
         <div className="podcasts-actions">
-          {canManageResources && (
-            <button
-              type="button"
-              className="podcasts-action-btn"
-              onClick={() => onManage('resources')}
-            >
-              共享音频管理
-            </button>
-          )}
-          <button
-            type="button"
-            className="podcasts-action-btn"
-            onClick={() => {
-              setPlaybackSettingsError(null);
-              setShowPlaybackSettings(true);
-            }}
-            title="播放未下载单集时自动缓存当前单集"
-          >
-            ⚡ 播放缓存
-          </button>
-          {canManageSources && (
-            <button
-              type="button"
-              className={`podcasts-action-btn ${queueInfo && queueInfo.total_pending > 0 ? 'highlight-pulse' : ''}`}
-              onClick={() => onManage('downloads')}
-              title={queueError || '查看播客音频下载队列与传输状态'}
-            >
-              <Icon name="download" /> 下载管理
-              {queueInfo && queueInfo.total_pending > 0 && (
-                <span className="queue-pill-count">{queueInfo.total_pending}</span>
-              )}
-              {queueInfo && queueInfo.failed_count > 0 && queueInfo.total_pending === 0 && (
-                <span className="queue-pill-count failed">!</span>
-              )}
-            </button>
-          )}
           {!selectedPodcast && canManageSources && (
             <button
               type="button"
@@ -946,45 +906,147 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
               <Icon name="podcast" /> {refreshingAll ? '更新中…' : '全部更新'}
             </button>
           )}
-          {!selectedPodcast && canAddPodcast && (
-            <button
-              type="button"
-              className="podcasts-action-btn"
-              onClick={() => setShowOpmlImport(true)}
-              title="从其他播客应用导出的 OPML 文件批量关注节目"
-            >
-              导入 OPML
-            </button>
-          )}
-          {!selectedPodcast && (
-            <a
-              className="podcasts-action-btn"
-              href={OPML_EXPORT_URL}
-              download="wildstring-podcasts.opml"
-              title="把我关注的节目导出为 OPML 文件"
-            >
-              导出 OPML
-            </a>
-          )}
           {!selectedPodcast && (
             <button
               type="button"
               className="podcasts-action-btn primary"
-              onClick={() => setShowSearch(true)}
+              onClick={() => {
+                setExploring(false);
+                setShowSearch(true);
+              }}
             >
               {canAddPodcast ? '+ 添加节目' : '搜索节目'}
             </button>
           )}
+          <details className="podcasts-more-menu" ref={headerMenuRef}>
+            <summary
+              className={`podcasts-action-btn podcasts-more-trigger ${queueInfo && queueInfo.total_pending > 0 ? 'highlight-pulse' : ''}`}
+              aria-label="更多操作"
+              title={queueError || '播放缓存、OPML 导入导出与管理入口'}
+            >
+              <Icon name="more" />
+              {queueInfo && queueInfo.total_pending > 0 && (
+                <span className="queue-pill-count">{queueInfo.total_pending}</span>
+              )}
+              {queueInfo && queueInfo.failed_count > 0 && queueInfo.total_pending === 0 && (
+                <span className="queue-pill-count failed">!</span>
+              )}
+            </summary>
+            <div className="podcasts-more-popover">
+              <button
+                type="button"
+                className="podcasts-more-item"
+                onClick={() => {
+                  closeHeaderMenu();
+                  setPlaybackSettingsError(null);
+                  setShowPlaybackSettings(true);
+                }}
+                title="播放未下载单集时自动缓存当前单集"
+              >
+                ⚡ 播放缓存
+              </button>
+              {!selectedPodcast && canAddPodcast && (
+                <button
+                  type="button"
+                  className="podcasts-more-item"
+                  onClick={() => {
+                    closeHeaderMenu();
+                    setShowOpmlImport(true);
+                  }}
+                  title="从其他播客应用导出的 OPML 文件批量关注节目"
+                >
+                  导入 OPML
+                </button>
+              )}
+              {!selectedPodcast && (
+                <a
+                  className="podcasts-more-item"
+                  href={OPML_EXPORT_URL}
+                  download="wildstring-podcasts.opml"
+                  onClick={() => closeHeaderMenu()}
+                  title="把我关注的节目导出为 OPML 文件"
+                >
+                  导出 OPML
+                </a>
+              )}
+              {(canManageSources || canManageResources) && (
+                <div className="podcasts-more-divider" role="separator" />
+              )}
+              {canManageSources && (
+                <button
+                  type="button"
+                  className="podcasts-more-item"
+                  onClick={() => {
+                    closeHeaderMenu();
+                    onManage('programmes');
+                  }}
+                >
+                  全服节目管理
+                </button>
+              )}
+              {canManageSources && (
+                <button
+                  type="button"
+                  className="podcasts-more-item"
+                  onClick={() => {
+                    closeHeaderMenu();
+                    onManage('downloads');
+                  }}
+                  title={queueError || '查看播客音频下载队列与传输状态'}
+                >
+                  <span>下载管理</span>
+                  {queueInfo && queueInfo.total_pending > 0 && (
+                    <span className="queue-pill-count">{queueInfo.total_pending}</span>
+                  )}
+                  {queueInfo && queueInfo.failed_count > 0 && queueInfo.total_pending === 0 && (
+                    <span className="queue-pill-count failed">!</span>
+                  )}
+                </button>
+              )}
+              {canManageResources && (
+                <button
+                  type="button"
+                  className="podcasts-more-item"
+                  onClick={() => {
+                    closeHeaderMenu();
+                    onManage('resources');
+                  }}
+                >
+                  共享音频管理
+                </button>
+              )}
+            </div>
+          </details>
         </div>
       </div>
 
       {!selectedPodcast && !publisherView && (
         <div className="podcast-catalog-tabs" role="group" aria-label="节目范围">
-          <button type="button" aria-pressed={personalOnly} onClick={() => setFollowingOnly(true)}>
-            我的关注
-          </button>
           <button
             type="button"
+            aria-pressed={!showSearch && personalOnly}
+            onClick={() => {
+              closeSubscribe();
+              setFollowingOnly(true);
+            }}
+          >
+            我的关注
+          </button>
+          {canManageSources && (
+            <button
+              type="button"
+              aria-pressed={!showSearch && !personalOnly}
+              onClick={() => {
+                closeSubscribe();
+                setFollowingOnly(false);
+              }}
+            >
+              本服节目
+            </button>
+          )}
+          <button
+            type="button"
+            aria-pressed={showSearch}
             onClick={() => {
               setExploring(true);
               setShowSearch(true);
@@ -992,19 +1054,19 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
           >
             探索播客
           </button>
-          {canManageSources && (
-            <button
-              type="button"
-              aria-pressed={!personalOnly}
-              onClick={() => setFollowingOnly(false)}
-            >
-              本服节目
-            </button>
-          )}
         </div>
       )}
 
-      {selectedPodcast ? (
+      {showSearch && !selectedPodcast && !publisherView ? (
+        <PodcastSearchPage
+          canAdd={canAddPodcast}
+          initialQuery={modalFeedUrl}
+          initialExplore={exploring}
+          onClose={closeSubscribe}
+          onSubscribed={handleSubscribed}
+          onOpen={openFromSearch}
+        />
+      ) : selectedPodcast ? (
         <div className="podcast-detail-view">
           <div className="podcast-meta-card">
             <div className="podcast-meta-cover">
@@ -1431,10 +1493,38 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
                       </button>
                     )}
                     <div className="podcast-card-footer">
+                      <div className="podcast-card-meta">
+                        <span className="podcast-card-ep-count">
+                          {p.total_episodes} 单集
+                          {p.unplayed_episodes > 0 && (
+                            <span className="podcast-card-unplayed">
+                              {p.unplayed_episodes} 未听
+                            </span>
+                          )}
+                        </span>
+                        {!personalOnly && typeof p.follower_count === 'number' && (
+                          <span
+                            className={
+                              p.follower_count === 0
+                                ? 'podcast-card-dormant'
+                                : 'podcast-card-followers'
+                            }
+                            title={
+                              p.follower_count === 0
+                                ? '无人关注，已暂停后台自动巡检'
+                                : `当前有 ${p.follower_count} 位用户关注`
+                            }
+                          >
+                            {p.follower_count === 0
+                              ? '0 人关注 · 已休眠'
+                              : `${p.follower_count} 人关注`}
+                          </span>
+                        )}
+                      </div>
                       <div className="podcast-card-actions">
                         <button
                           type="button"
-                          className="podcast-card-action"
+                          className={`podcast-card-action${p.followed ? '' : ' primary'}`}
                           disabled={followBusy === p.id}
                           onClick={(event) => {
                             event.stopPropagation();
@@ -1453,19 +1543,6 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
                             }}
                           >
                             自动下载
-                          </button>
-                        )}
-                      </div>
-                      <div className="podcast-card-meta">
-                        <span>{p.total_episodes} 单集</span>
-                        {canManageSources && (
-                          <button
-                            type="button"
-                            className="podcast-delete-btn"
-                            onClick={(e) => handleOpenSettings(p, e)}
-                            title="服务器下载与存储设置"
-                          >
-                            <Icon name="settings" /> 设置
                           </button>
                         )}
                       </div>

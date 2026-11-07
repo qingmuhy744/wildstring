@@ -191,9 +191,10 @@ fun PodcastChannelPage(
                     canManage = false,
                     canAdd = canAddPodcast,
                     onFollow = vm::togglePodcastFollow,
+                    onAutoDownload = { autoDownloadPodcast = it },
                     loading = loading,
                     onSelect = { vm.openPodcast(it.id) },
-                    onAddClick = { showSubscribeDialog = true },
+                    onAddClick = { exploring = true },
                     onExplore = { exploring = true },
                     onRefreshAll = { vm.podcastBrowser.reloadList(synchronize = false) },
                     onDelete = { p ->
@@ -291,6 +292,7 @@ private fun PodcastListView(
     canManage: Boolean,
     canAdd: Boolean,
     onFollow: (PodcastSummary) -> Unit,
+    onAutoDownload: (PodcastSummary) -> Unit,
     loading: Boolean,
     onSelect: (PodcastSummary) -> Unit,
     onAddClick: () -> Unit,
@@ -299,30 +301,50 @@ private fun PodcastListView(
     onDelete: (PodcastSummary) -> Unit,
 ) {
     Column(Modifier.fillMaxSize()) {
-        FlowRow(
-            Modifier
+        Row(
+            modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
+                .padding(horizontal = 16.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.weight(1f, fill = false),
             ) {
-                FilterChip(followingOnly, { onScope(true) }, label = { Text("我的关注") })
-                if (canBrowseCatalog) FilterChip(!followingOnly, { onScope(false) }, label = { Text("本服节目") })
+                FilterChip(
+                    selected = followingOnly,
+                    onClick = { onScope(true) },
+                    label = { Text("我的关注", maxLines = 1, softWrap = false) },
+                )
+                if (canBrowseCatalog) {
+                    FilterChip(
+                        selected = !followingOnly,
+                        onClick = { onScope(false) },
+                        label = { Text("本服节目", maxLines = 1, softWrap = false) },
+                    )
+                }
             }
-            TextButton(onExplore, Modifier.align(Alignment.CenterVertically).testTag("podcast-open-explore")) { Text("探索") }
-            if (canAdd) FilledTonalButton(
-                onClick = onAddClick,
-                modifier = Modifier.align(Alignment.CenterVertically),
+            Spacer(Modifier.width(8.dp))
+            FilledTonalButton(
+                onClick = onExplore,
+                modifier = Modifier.testTag("podcast-open-explore"),
                 contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
                 shape = RoundedCornerShape(20.dp),
             ) {
-                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                Icon(
+                    if (canAdd) Icons.Default.Add else Icons.Default.Search,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp),
+                )
                 Spacer(Modifier.width(4.dp))
-                Text("添加节目", fontSize = 13.sp, maxLines = 1, softWrap = false)
+                Text(
+                    text = if (canAdd) "探索与添加" else "探索",
+                    fontSize = 13.sp,
+                    maxLines = 1,
+                    softWrap = false,
+                )
             }
         }
         PodcastRefreshBox(loading, onRefreshAll, "podcast-list-refresh", "刷新播客订阅") {
@@ -332,13 +354,13 @@ private fun PodcastListView(
                 LazyColumn(
                     modifier = Modifier.fillMaxSize().testTag("podcast-list"),
                     contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 96.dp, top = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     if (podcasts.isEmpty() && !loading) item {
                         Box(Modifier.fillParentMaxSize()) {
                             if (followingOnly) Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
                                 Text("还没有关注的节目")
-                                if (canAdd) TextButton(onAddClick) { Text("添加 RSS 并关注") }
+                                TextButton(onExplore) { Text(if (canAdd) "探索或添加节目" else "探索热门播客") }
                                 if (canBrowseCatalog) TextButton({ onScope(false) }) { Text("浏览本服节目") }
                             } else EmptyPodcastState(canAdd = canAdd, onPresetSelect = onAddClick)
                         }
@@ -351,6 +373,7 @@ private fun PodcastListView(
                                 onClick = { onSelect(podcast) },
                                 onDelete = { onDelete(podcast) },
                                 onFollow = { onFollow(podcast) },
+                                onAutoDownload = { onAutoDownload(podcast) },
                                 canManage = canManage,
                                 modifier = Modifier.fillMaxWidth(),
                             )
@@ -365,6 +388,7 @@ private fun PodcastListView(
                                         onClick = { onSelect(podcast) },
                                         onDelete = { onDelete(podcast) },
                                         onFollow = { onFollow(podcast) },
+                                        onAutoDownload = { onAutoDownload(podcast) },
                                         canManage = canManage,
                                         modifier = Modifier.weight(1f),
                                     )
@@ -387,12 +411,12 @@ private fun PodcastCardItem(
     onClick: () -> Unit,
     onDelete: () -> Unit,
     onFollow: () -> Unit,
+    onAutoDownload: () -> Unit,
     canManage: Boolean,
     modifier: Modifier = Modifier,
 ) {
     var showMenu by remember { mutableStateOf(false) }
     var deleting by remember { mutableStateOf(false) }
-    val summary = remember(podcast.description) { podcastDescription(podcast.description) }
 
     Surface(
         shape = RoundedCornerShape(16.dp),
@@ -400,13 +424,13 @@ private fun PodcastCardItem(
         modifier = modifier.clickable(onClick = onClick),
     ) {
         Row(
-            modifier = Modifier.padding(14.dp),
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Box(
                 modifier = Modifier
-                    .size(72.dp)
-                    .clip(RoundedCornerShape(14.dp))
+                    .size(64.dp)
+                    .clip(RoundedCornerShape(12.dp))
                     .background(MaterialTheme.colorScheme.surfaceContainerHighest),
                 contentAlignment = Alignment.Center,
             ) {
@@ -425,7 +449,7 @@ private fun PodcastCardItem(
                         Icons.Default.Podcasts,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(32.dp),
+                        modifier = Modifier.size(30.dp),
                     )
                 }
             }
@@ -434,7 +458,7 @@ private fun PodcastCardItem(
 
             Column(
                 modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
+                verticalArrangement = Arrangement.spacedBy(3.dp),
             ) {
                 Text(
                     text = podcast.title,
@@ -451,96 +475,101 @@ private fun PodcastCardItem(
                     overflow = TextOverflow.Ellipsis,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                if (summary.isNotBlank()) {
-                    Text(
-                        text = summary,
-                        style = MaterialTheme.typography.bodySmall,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.78f),
-                    )
-                }
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                     modifier = Modifier.padding(top = 2.dp),
                 ) {
-                    Surface(
-                        shape = RoundedCornerShape(6.dp),
-                        color = MaterialTheme.colorScheme.secondaryContainer,
-                    ) {
-                        Text(
-                            text = "${podcast.totalEpisodes} 集",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSecondaryContainer,
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                        )
-                    }
+                    Text(
+                        text = "${podcast.totalEpisodes} 集",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                     if (podcast.unplayedEpisodes > 0) {
-                        Spacer(Modifier.width(6.dp))
                         Surface(
                             shape = RoundedCornerShape(6.dp),
-                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.14f),
                         ) {
                             Text(
                                 text = "${podcast.unplayedEpisodes} 未听",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.primary,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp),
                             )
                         }
                     }
                 }
             }
 
-            Spacer(Modifier.width(12.dp))
+            Spacer(Modifier.width(8.dp))
 
-            if (podcast.followed) {
-                OutlinedButton(
-                    onClick = onFollow,
-                    shape = RoundedCornerShape(18.dp),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
-                    modifier = Modifier.height(34.dp),
-                ) {
-                    Text("取消关注", fontSize = 12.sp, maxLines = 1, softWrap = false)
-                }
-            } else {
+            if (!podcast.followed) {
                 FilledTonalButton(
                     onClick = onFollow,
                     shape = RoundedCornerShape(18.dp),
                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
                     modifier = Modifier.height(34.dp),
                 ) {
-                    Text("关注节目", fontSize = 12.sp, maxLines = 1, softWrap = false)
+                    Text("关注", fontSize = 12.sp, maxLines = 1, softWrap = false)
                 }
             }
 
-            if (canManage) Box {
-                IconButton(onClick = { showMenu = true }) {
-                    Icon(
-                        Icons.Default.MoreVert,
-                        contentDescription = "更多操作",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                DropdownMenu(
-                    expanded = showMenu,
-                    onDismissRequest = { showMenu = false },
-                ) {
-                    DropdownMenuItem(
-                        text = { Text("删除共享节目", color = MaterialTheme.colorScheme.error) },
-                        onClick = {
-                            showMenu = false
-                            deleting = true
-                        },
-                        leadingIcon = {
-                            Icon(
-                                Icons.Default.DeleteOutline,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.error,
+            if (podcast.followed || canManage) {
+                Box {
+                    IconButton(
+                        onClick = { showMenu = true },
+                        modifier = Modifier.size(36.dp),
+                    ) {
+                        Icon(
+                            Icons.Default.MoreVert,
+                            contentDescription = "更多操作",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    DropdownMenu(
+                        expanded = showMenu,
+                        onDismissRequest = { showMenu = false },
+                    ) {
+                        if (podcast.followed) {
+                            DropdownMenuItem(
+                                text = { Text("自动下载设置") },
+                                onClick = {
+                                    showMenu = false
+                                    onAutoDownload()
+                                },
+                                leadingIcon = {
+                                    Icon(Icons.Default.Download, contentDescription = null)
+                                },
                             )
-                        },
-                    )
+                            DropdownMenuItem(
+                                text = { Text("取消关注") },
+                                onClick = {
+                                    showMenu = false
+                                    onFollow()
+                                },
+                                leadingIcon = {
+                                    Icon(Icons.Default.RemoveCircleOutline, contentDescription = null)
+                                },
+                            )
+                        }
+                        if (canManage) {
+                            DropdownMenuItem(
+                                text = { Text("删除共享节目", color = MaterialTheme.colorScheme.error) },
+                                onClick = {
+                                    showMenu = false
+                                    deleting = true
+                                },
+                                leadingIcon = {
+                                    Icon(
+                                        Icons.Default.DeleteOutline,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.error,
+                                    )
+                                },
+                            )
+                        }
+                    }
                 }
             }
         }
