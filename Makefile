@@ -193,6 +193,13 @@ icons: ## Regenerate the transparent favicon from its SVG source (requires Chrom
 browser-install: ## Install Chromium for the Web integration tests
 	npm --prefix frontend/web exec -- playwright install chromium
 
+.PHONY: test-affected test-affected-desktop
+test-affected: ## Detect stale test assertions and run backend/Web tests affected by current git changes
+	$(RUN) python scripts/test_affected.py --fail-on-stale --run
+
+test-affected-desktop: ## Fast local run of affected backend tests and desktop Playwright specs
+	$(RUN) python scripts/test_affected.py --fail-on-stale --run --desktop-only
+
 test-web: build-web ## Test login, search, playback and mobile UI with an isolated fixture library
 	npm --prefix frontend/web run test
 
