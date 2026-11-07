@@ -105,8 +105,32 @@ test('离线进度跨刷新保留，旧设备补传不覆盖新设备，用户�
   expect((await local(page)).conflict).toBe(false);
 });
 
-test('加入待播和刷新不抢占进度；开始收听时才询问并接续', async ({ page }) => {
+test('加入待播和刷新不抢占进度；默认自动接续开始收听', async ({ page }) => {
   await login(page);
+  const saved = await otherDevice(page, 7);
+  await episodes(page);
+  await page
+    .locator('.podcast-episode-row')
+    .first()
+    .getByRole('button', { name: /更多操作/ })
+    .click();
+  await page.getByRole('menuitem', { name: '加入待播', exact: true }).click();
+  await expect(page.getByRole('button', { name: '全屏播放', exact: true })).toBeVisible();
+  expect(await state(page)).toEqual(saved);
+  await page.reload();
+  await expect(page.locator('.app-shell')).toBeVisible();
+  expect((await audio(page)).paused).toBe(true);
+  expect(await state(page)).toEqual(saved);
+  await page.getByRole('button', { name: '播放', exact: true }).click();
+  await expect.poll(async () => (await audio(page)).paused).toBe(false);
+  await expect.poll(async () => (await audio(page)).time).toBeGreaterThanOrEqual(7);
+  await page.getByRole('button', { name: '暂停', exact: true }).click();
+  expect((await state(page)).session_id).not.toBe(saved.session_id);
+});
+
+test('配置为询问模式时，开始收听弹窗询问并接续', async ({ page }) => {
+  await login(page);
+  await page.evaluate(() => localStorage.setItem('wildstring:podcast-resume:admin', 'ask'));
   const saved = await otherDevice(page, 7);
   await episodes(page);
   await page
@@ -144,11 +168,8 @@ test('同一浏览器另一个标签页接手后，原页面主动回听仍能�
   await next.goto('/');
   await expect(next.locator('.app-shell')).toBeVisible();
   await next.getByRole('button', { name: '播放', exact: true }).click();
-  await next
-    .getByRole('dialog', { name: '播客单集进度' })
-    .getByRole('button', { name: '继续 0:06', exact: true })
-    .click();
   await expect.poll(async () => (await audio(next)).paused).toBe(false);
+  await expect.poll(async () => (await audio(next)).time).toBeGreaterThanOrEqual(6);
   // Metadata restoration can emit a late seek checkpoint. Finish it before pausing,
   // then wait for the pause itself, rather than the already-synced play checkpoint.
   await expect

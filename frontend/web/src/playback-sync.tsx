@@ -70,8 +70,8 @@ export function SyncModeControl({ userId }: { userId: string }) {
             localStorage.setItem(`wildstring:podcast-resume:${userId}`, value);
           }}
         >
-          <option value="ask">询问（默认）</option>
-          <option value="auto">自动继续</option>
+          <option value="auto">自动继续（默认）</option>
+          <option value="ask">询问</option>
           <option value="restart">从头播放</option>
         </select>
       </label>
