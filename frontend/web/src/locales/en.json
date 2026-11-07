@@ -89,7 +89,6 @@
     "setupLocalBefore": "For local development, use ",
     "setupLocalAfter": ", then refresh this page. The username is admin.",
     "setupDone": "Done, refresh",
-    "privateNote": "Your library stays on your own server.",
     "footer": "WildString · Start with your own music"
   },
   "connection": {
