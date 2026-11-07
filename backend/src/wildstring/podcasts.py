@@ -1991,7 +1991,8 @@ class PodcastManager:
                     p.last_updated_at, p.created_at,
                     COUNT(e.id) AS total_episodes,
                     SUM(CASE WHEN e.id IS NOT NULL AND COALESCE(pr.completed, 0) = 0 THEN 1 ELSE 0 END) AS unplayed_episodes,
-                    SUM(CASE WHEN e.download_status = 'downloaded' THEN 1 ELSE 0 END) AS downloaded_episodes
+                    SUM(CASE WHEN e.download_status = 'downloaded' THEN 1 ELSE 0 END) AS downloaded_episodes,
+                    (SELECT COUNT(*) FROM podcast_follows pf WHERE pf.podcast_id = p.id) AS follower_count
                 FROM podcasts p
                 LEFT JOIN podcast_publishers pub ON pub.id=p.publisher_id
                 LEFT JOIN podcast_episodes e ON e.podcast_id = p.id
@@ -2023,6 +2024,9 @@ class PodcastManager:
                     "storage_path": podcast_folder_name(r["id"]),
                     **publisher_fields(r),
                     "followed": r["id"] in following,
+                    **(
+                        {"follower_count": int(r["follower_count"] or 0)} if visible is None else {}
+                    ),
                 }
                 for r in rows
                 if visible is None or r["id"] in visible
