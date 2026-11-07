@@ -56,7 +56,7 @@ API 默认 `127.0.0.1:18780`，React 默认 `127.0.0.1:18781`。开发配置开�
 
 `make test-web` 可单独运行浏览器集成测试：默认使用 18782 端口（可用 `WILDSTRING_WEB_TEST_PORT=18783 make test-web` 避开其他测试服务），临时创建独立数据库与合成音频；不读取 `.env` 的个人曲库。失败截图与播放预览输出到已忽略的 `artifacts/`。GitHub Actions 安装 Chromium 系统依赖后执行同一组 `make ci`。
 
-更新 Python 依赖后运行 `uv lock --project backend`。npm 依赖在 `frontend/web` 更新并提交锁文件。历史原始讨论与已有 LICENSE 不参与空白自动改写。
+更新 Python 依赖后运行 `uv lock --project backend`。npm 依赖在 `frontend/web` 更新并提交锁文件。Android 依赖用 `make android-locks` 刷新 `gradle.lockfile` 与 `verification-metadata.xml`；注意 Gradle 9 在 macOS 上生成时只写入本平台的 aapt2 校验（`--write-verification-metadata` 已不支持指定 linux 等平台），需从 Google 官方 Maven 下载对应 `aapt2-<版本>-linux.jar`、计算 sha256 并手动补入 `com.android.tools.build:aapt2` 组件，否则 linux CI 的依赖校验与 CodeQL 会失败。历史原始讨论与已有 LICENSE 不参与空白自动改写。
 
 ## Docker
 
