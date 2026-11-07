@@ -234,7 +234,7 @@ struct MacHomeView: View {
             ForEach(tracks) { track in
                 Button { MacPlayback.play(tracks, startingAt: track, playback: playback) } label: {
                     HStack(spacing: 12) {
-                        MacCover(client: client, trackID: track.hasCover ? track.id : nil, side: 42)
+                        MacCover(client: client, trackID: track.hasCover ? track.id : (track.album != nil ? track.id : nil), side: 42)
                         VStack(alignment: .leading, spacing: 4) {
                             Text(track.title)
                                 .font(.system(size: 13, weight: playback.currentItem?.trackID == track.id ? .semibold : .regular))

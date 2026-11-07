@@ -140,7 +140,7 @@ import androidx.compose.ui.unit.dp
                                 color = colors.surfaceContainerHighest,
                                 border = BorderStroke(0.5.dp, colors.outlineVariant.copy(alpha = 0.45f)),
                             ) {
-                                Cover(vm, currentTrack.id.takeIf { currentTrack.hasCover }, currentTrack.title, Modifier.size(44.dp))
+                                Cover(vm, currentTrack.coverId, currentTrack.title, Modifier.size(44.dp))
                             }
                             Column(Modifier.weight(1f).padding(vertical = 2.dp)) {
                                 Text(currentTrack.title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)

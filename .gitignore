@@ -42,4 +42,7 @@ frontend/ios/WildString/Info.plist
 # macOS
 frontend/macos/*.xcodeproj
 frontend/macos/DerivedData/
+frontend/macos/DerivedData.noindex/
+frontend/ios/DerivedData.noindex/
+*.noindex/
 xcuserdata/

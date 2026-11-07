@@ -46,7 +46,7 @@ fun Track.mediaItem(repository: Repository, entryId: String = UUID.randomUUID().
     MediaItem.Builder().setMediaId(entryId).setUri(repository.stream(id))
         .setMediaMetadata(MediaMetadata.Builder().setTitle(title).setArtist(artist).setAlbumTitle(album)
             .setDurationMs(durationMs.takeIf { it > 0 })
-            .setArtworkUri(if (hasCover) Uri.parse(repository.cover(id)) else null)
+            .setArtworkUri(if (mayHaveCover) Uri.parse(repository.cover(id)) else null)
             .setExtras(Bundle().apply { putString("profile", repository.session.cacheScope()); putString("track_id", id); putLong("duration_ms", durationMs); putString("format", format); putString("original_stream", repository.originalStream(id)) }).build()).build()
 
 @OptIn(UnstableApi::class)
@@ -238,7 +238,11 @@ class PlaybackService : MediaSessionService() {
             override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
                 if (playWhenReady && preparingPodcast && !applyingPodcast) { player.pause(); return }
                 val podcast = podcastEpisodeId(player.currentMediaItem?.mediaMetadata?.extras?.getString("track_id")) != null
-                if (playWhenReady && podcast && reason == Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST) preparePodcast()
+                if (playWhenReady && podcast && reason == Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST) {
+                    if (progressEntry != player.currentMediaItem?.mediaId) {
+                        preparePodcast()
+                    }
+                }
                 else if (playWhenReady && !podcast) sharing.localPlaybackStarted()
                 else if (!playWhenReady) { checkpointPodcast(if (player.playbackState == Player.STATE_ENDED) "ended" else "pause", true); persist(force = true) }
             }

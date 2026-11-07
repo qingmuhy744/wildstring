@@ -31,21 +31,54 @@ struct MacTrackCollectionView: View {
     let favorites: MacFavorites?
     let destination: MacTrackDestination
     var canManage = false
+    @Environment(\.dismiss) private var dismiss
     @State private var tracks: [Track] = []
     @State private var loading = true
     @State private var error: String?
 
+    private var coverTrackID: String? {
+        tracks.first(where: \.hasCover)?.id ?? tracks.first?.id
+    }
+
     var body: some View {
         VStack(spacing: 0) {
-            MacCollectionHeading(title: destination.title, subtitle: "\(tracks.count) 首",
-                symbol: symbol, canPlay: !tracks.isEmpty) {
-                if let first = tracks.first(where: \.isAvailable) ?? tracks.first { MacPlayback.play(tracks, startingAt: first, playback: playback) }
+            MacCollectionHeading(
+                title: destination.title,
+                subtitle: "\(tracks.count) 首",
+                symbol: symbol,
+                canPlay: !tracks.isEmpty,
+                coverTrackID: coverTrackID,
+                client: client,
+                onBack: { dismiss() }
+            ) {
+                if let first = tracks.first(where: \.isAvailable) ?? tracks.first {
+                    MacPlayback.play(tracks, startingAt: first, playback: playback)
+                }
             }
-            MacPlayableTracks(client: client, playback: playback, favorites: favorites, tracks: tracks,
-                emptyTitle: error == nil ? "暂无歌曲" : "暂时无法打开", emptyDetail: error,
-                canManage: canManage, isLoading: loading)
+            MacPlayableTracks(
+                client: client,
+                playback: playback,
+                favorites: favorites,
+                tracks: tracks,
+                emptyTitle: error == nil ? "暂无歌曲" : "暂时无法打开",
+                emptyDetail: error,
+                canManage: canManage,
+                isLoading: loading
+            )
         }
-            .navigationTitle(destination.title)
+        .navigationTitle(destination.title)
+        .navigationBarBackButtonHidden(true)
+        .toolbar {
+            ToolbarItem(placement: .navigation) {
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "chevron.backward")
+                }
+                .help("返回")
+                .keyboardShortcut("[", modifiers: .command)
+            }
+        }
             .task(id: destination) {
                 loading = true
                 error = nil

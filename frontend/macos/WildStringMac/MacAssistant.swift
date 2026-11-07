@@ -456,7 +456,7 @@ struct MacAssistantTracks: View {
                         }, startingAt: index)
                 } label: {
                     HStack(spacing: 12) {
-                        MacCover(client: client, trackID: track.hasCover ? track.id : nil, side: 36)
+                        MacCover(client: client, trackID: track.hasCover ? track.id : (track.album != nil ? track.id : nil), side: 36)
                         VStack(alignment: .leading, spacing: 3) {
                             Text(track.title).font(.callout.weight(.medium)).lineLimit(1)
                             Text(track.artists.joined(separator: " / ")).font(.caption).foregroundStyle(

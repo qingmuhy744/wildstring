@@ -473,7 +473,10 @@ export function NowPlaying({
             if (event.target === event.currentTarget) setArtwork(false);
           }}
         >
-          {current.has_cover && (
+          {(current.has_cover ||
+            Boolean(current.album) ||
+            Boolean(current.album_id) ||
+            current.id.startsWith('podcast_ep_')) && (
             <a
               className="artwork-preview-download"
               href={coverUrl(current.id, 768)}

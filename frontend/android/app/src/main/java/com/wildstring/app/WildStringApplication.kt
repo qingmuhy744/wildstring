@@ -11,12 +11,18 @@ import dagger.hilt.android.HiltAndroidApp
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import com.wildstring.app.data.*
+import com.wildstring.app.diagnostics.CrashHandler
 import java.util.concurrent.TimeUnit
 import javax.inject.Singleton
 import okhttp3.OkHttpClient
 
 @HiltAndroidApp
-class WildStringApplication : Application()
+class WildStringApplication : Application() {
+    override fun onCreate() {
+        super.onCreate()
+        CrashHandler.install(this)
+    }
+}
 @Module @InstallIn(SingletonComponent::class)
 object ApplicationModule {
     @Provides @Singleton fun client(session: SessionStore, cache: ClientCache): OkHttpClient = OkHttpClient.Builder()

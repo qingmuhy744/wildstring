@@ -30,7 +30,19 @@ import kotlinx.coroutines.launch
     var adding by remember { mutableStateOf(false) }
     var showRoutes by remember { mutableStateOf(false) }
     var deleting by remember { mutableStateOf<ServerConfiguration?>(null) }
-    Dialog(dismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+    Dialog(dismiss, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
+        val view = androidx.compose.ui.platform.LocalView.current
+        val darkBars = LocalDarkAppearance.current || LocalRedCloth.current
+        LaunchedEffect(view, darkBars) {
+            (view.parent as? androidx.compose.ui.window.DialogWindowProvider)?.window?.let { window ->
+                androidx.core.view.WindowCompat.enableEdgeToEdge(window)
+                if (android.os.Build.VERSION.SDK_INT >= 29) window.isNavigationBarContrastEnforced = false
+                androidx.core.view.WindowCompat.getInsetsController(window, view).apply {
+                    isAppearanceLightStatusBars = !darkBars
+                    isAppearanceLightNavigationBars = !darkBars
+                }
+            }
+        }
         Surface(Modifier.fillMaxSize().testTag("server-manager")) {
             Scaffold(topBar = { TopAppBar(title = { Text(stringResource(R.string.servers)) }, navigationIcon = { IconButton(dismiss, Modifier.testTag("servers-back")) { Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.back)) } },
                 actions = { IconButton({ adding = true }, Modifier.testTag("server-add")) { Icon(Icons.Default.Add, stringResource(R.string.server_add)) } }) }) { padding ->
@@ -100,7 +112,19 @@ import kotlinx.coroutines.launch
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var selected by remember { mutableStateOf(session.manualRoute) }
-    Dialog(dismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+    Dialog(dismiss, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
+        val view = androidx.compose.ui.platform.LocalView.current
+        val darkBars = LocalDarkAppearance.current || LocalRedCloth.current
+        LaunchedEffect(view, darkBars) {
+            (view.parent as? androidx.compose.ui.window.DialogWindowProvider)?.window?.let { window ->
+                androidx.core.view.WindowCompat.enableEdgeToEdge(window)
+                if (android.os.Build.VERSION.SDK_INT >= 29) window.isNavigationBarContrastEnforced = false
+                androidx.core.view.WindowCompat.getInsetsController(window, view).apply {
+                    isAppearanceLightStatusBars = !darkBars
+                    isAppearanceLightNavigationBars = !darkBars
+                }
+            }
+        }
         Surface(Modifier.fillMaxSize()) {
             Scaffold(topBar = { TopAppBar(title = { Text("服务器线路") }, navigationIcon = { IconButton(dismiss) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回") } }) }) { padding ->
                 Column(Modifier.padding(padding).padding(16.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {

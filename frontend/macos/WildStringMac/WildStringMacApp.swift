@@ -34,6 +34,11 @@ private struct MacMenus: Commands {
     }
 
     var body: some Commands {
+        CommandGroup(after: .appInfo) {
+            Button("检查更新…") {
+                Task { await session.updater.checkForUpdates(manual: true) }
+            }
+        }
         CommandGroup(replacing: .appSettings) {
             Button("设置…") { navigate(.settings) }
                 .keyboardShortcut(",", modifiers: .command)

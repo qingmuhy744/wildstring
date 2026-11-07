@@ -20,6 +20,12 @@ public struct Track: Decodable, Equatable, Sendable, Identifiable {
         }
     }
     public var isAvailable: Bool { unavailableReason == nil }
+    public var mayHaveCover: Bool {
+        hasCover || (album != nil && !album!.isEmpty) || (albumId != nil && !albumId!.isEmpty)
+    }
+    public var coverTrackID: String? {
+        mayHaveCover ? id : nil
+    }
 
     enum CodingKeys: String, CodingKey {
         case id, title, artists, album, status

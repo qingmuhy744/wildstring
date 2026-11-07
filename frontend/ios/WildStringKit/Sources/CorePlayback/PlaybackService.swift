@@ -38,6 +38,12 @@ public final class PlaybackService {
         public var artist: String
         public var album: String?
         public var hasCover: Bool
+        public var mayHaveCover: Bool {
+            hasCover || (album != nil && !album!.isEmpty)
+        }
+        public var coverTrackID: String? {
+            mayHaveCover ? trackID : nil
+        }
         public var streamPath: String
         public var unavailableReason: String?
 
@@ -175,7 +181,7 @@ public final class PlaybackService {
         self.store = store
         self.persistence = PersistenceQueue(store: store)
         self.player = AVPlayer()
-        self.player.automaticallyWaitsToMinimizeStalling = false
+        self.player.automaticallyWaitsToMinimizeStalling = true
         self.cookieHeader = cookieHeader
         self.fragmentCache = fragmentCache
         self.offlineLookup = offlineLookup

@@ -19,7 +19,7 @@ struct TrackRow: View {
         HStack(spacing: 12) {
             CoverImage(
                 client: client,
-                trackID: track.hasCover ? track.id : nil,
+                trackID: track.coverTrackID,
                 size: listSize.coverSide
             )
             VStack(alignment: .leading, spacing: 2) {

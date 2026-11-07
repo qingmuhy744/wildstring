@@ -110,6 +110,7 @@ struct MacSettingsView: View {
                         VStack(spacing: 20) {
                             lyricsCard
                             accountCard
+                            softwareUpdateCard
                         }
                         .frame(maxWidth: .infinity)
                     }
@@ -232,44 +233,180 @@ struct MacSettingsView: View {
             .disabled(session.isBusy || session.routes == nil)
             note("为这台服务器设置本机别名，管理线路与切换方式。账号资料和曲库管理请前往网页版。")
             Divider()
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 12) {
-                    serverActions
+            if session.servers.count > 1 {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("已保存的服务器")
+                        .font(MacTheme.caption)
+                        .foregroundStyle(MacTheme.muted)
+                    ForEach(session.servers) { server in
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                HStack(spacing: 6) {
+                                    Text(server.label)
+                                        .font(MacTheme.section(13))
+                                    if server.address == session.logicalServerAddress {
+                                        Text("当前")
+                                            .font(MacTheme.caption)
+                                            .foregroundStyle(MacTheme.accent)
+                                    }
+                                }
+                                Text("\(server.username) · \(server.address)")
+                                    .font(MacTheme.caption)
+                                    .foregroundStyle(MacTheme.muted)
+                            }
+                            Spacer()
+                            if server.address != session.logicalServerAddress {
+                                Button("切换") {
+                                    Task { await session.switchServer(server) }
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                            }
+                            Button {
+                                session.serverToDelete = server
+                            } label: {
+                                Image(systemName: "trash")
+                                    .foregroundStyle(MacTheme.muted)
+                            }
+                            .buttonStyle(.plain)
+                            .help("删除服务器")
+                        }
+                        .padding(.vertical, 2)
+                    }
                 }
-                VStack(alignment: .leading, spacing: 12) {
-                    serverActions
+                Divider()
+            }
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 10) {
+                    Button("连接其他服务器…", systemImage: "plus") { session.addServer() }
+                        .buttonStyle(.bordered)
+                    Spacer()
+                    Button("退出当前服务器…", systemImage: "rectangle.portrait.and.arrow.right") {
+                        session.confirmLogout = true
+                    }
+                    .buttonStyle(.bordered)
+                    Button("删除当前服务器…", systemImage: "trash", role: .destructive) {
+                        if let current = session.servers.first(where: { $0.address == session.logicalServerAddress }) {
+                            session.serverToDelete = current
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(.red)
+                }
+                VStack(alignment: .leading, spacing: 10) {
+                    Button("连接其他服务器…", systemImage: "plus") { session.addServer() }
+                        .buttonStyle(.bordered)
+                    HStack(spacing: 10) {
+                        Button("退出当前服务器…", systemImage: "rectangle.portrait.and.arrow.right") {
+                            session.confirmLogout = true
+                        }
+                        .buttonStyle(.bordered)
+                        Button("删除当前服务器…", systemImage: "trash", role: .destructive) {
+                            if let current = session.servers.first(where: { $0.address == session.logicalServerAddress }) {
+                                session.serverToDelete = current
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(.red)
+                    }
                 }
             }
-            Button("退出当前服务器…", role: .destructive) { session.confirmLogout = true }
-                .buttonStyle(.borderless)
-                .foregroundStyle(.red)
-                .disabled(session.isBusy)
+            .disabled(session.isBusy)
         }
     }
 
-    @ViewBuilder
-    private var serverActions: some View {
-        if session.servers.count > 1 {
-            Menu("切换服务器") {
-                ForEach(session.servers) { server in
-                    Button {
-                        Task { await session.switchServer(server) }
-                    } label: {
-                        if server.address == session.logicalServerAddress {
-                            Label("\(server.label) · \(server.username)", systemImage: "checkmark")
-                        } else {
-                            Text("\(server.label) · \(server.username)")
-                        }
+    private var softwareUpdateCard: some View {
+        card("软件更新", symbol: "arrow.triangle.2.circlepath") {
+            HStack {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("当前版本：v\(session.updater.currentVersion)")
+                        .font(MacTheme.section(14))
+                    if let date = session.updater.lastCheckedAt {
+                        Text("上次检查：\(date.formatted(date: .numeric, time: .shortened))")
+                            .font(MacTheme.caption)
+                            .foregroundStyle(MacTheme.muted)
+                    } else {
+                        Text("尚未检查更新")
+                            .font(MacTheme.caption)
+                            .foregroundStyle(MacTheme.muted)
                     }
-                    .disabled(server.address == session.logicalServerAddress)
                 }
+                Spacer(minLength: 12)
+                Button(session.updater.phase == .checking ? "正在检查…" : "检查更新") {
+                    Task { await session.updater.checkForUpdates(manual: true) }
+                }
+                .buttonStyle(.bordered)
+                .disabled(session.updater.phase == .checking)
             }
-            .fixedSize()
-            .disabled(session.isBusy)
+
+            switch session.updater.phase {
+            case .available(let release):
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "sparkles")
+                            .foregroundStyle(MacTheme.accent)
+                        Text("发现新版本 v\(release.version)")
+                            .font(MacTheme.section(14))
+                            .foregroundStyle(MacTheme.accent)
+                    }
+                    if !release.releaseNotes.isEmpty {
+                        Text(release.releaseNotes)
+                            .font(MacTheme.caption)
+                            .foregroundStyle(MacTheme.ink)
+                            .lineLimit(4)
+                            .padding(10)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(MacTheme.panel, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    }
+                    HStack(spacing: 10) {
+                        Button("下载更新 (DMG)") {
+                            session.updater.openDownload(for: release)
+                        }
+                        .buttonStyle(.borderedProminent)
+
+                        Button("查看发布说明 ↗") {
+                            session.updater.openReleasePage(for: release)
+                        }
+                        .buttonStyle(.plain)
+                        .font(MacTheme.caption)
+                        .foregroundStyle(MacTheme.accent)
+                    }
+                }
+                .padding(.top, 4)
+
+            case .upToDate:
+                if session.updater.showManualFeedback {
+                    HStack(spacing: 6) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
+                        Text("当前已是最新版本")
+                            .font(MacTheme.caption)
+                            .foregroundStyle(MacTheme.muted)
+                    }
+                }
+
+            case .error(let message):
+                if session.updater.showManualFeedback {
+                    HStack(spacing: 6) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+                        Text(message)
+                            .font(MacTheme.caption)
+                            .foregroundStyle(.orange)
+                    }
+                }
+
+            case .idle, .checking:
+                EmptyView()
+            }
+
+            Divider()
+            settingToggle("自动检查更新", isOn: Binding(
+                get: { session.updater.autoCheckEnabled },
+                set: { session.updater.autoCheckEnabled = $0 }
+            ))
+            note("开启后将在后台静默检测新版本；发现新版本时在设置与菜单中提示。")
         }
-        Button("连接其他服务器…", systemImage: "plus") { session.addServer() }
-            .buttonStyle(.bordered)
-            .disabled(session.isBusy)
     }
 
     private func card<Content: View>(

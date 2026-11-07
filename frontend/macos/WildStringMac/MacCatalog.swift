@@ -223,6 +223,9 @@ struct MacPlayableTracks: View {
     let numberText = trackBadge?(track) ?? String(format: "%02d", number)
     let reason = trackReason?(track)?.trimmingCharacters(in: .whitespacesAndNewlines)
     let isHovered = hoveredTrackID == track.id
+    let coverTrackID: String? = track.hasCover
+      ? track.id
+      : (tracks.first(where: \.hasCover)?.id ?? (tracks.first?.album != nil ? tracks.first?.id : nil))
     return HStack(spacing: 16) {
       if isSelecting {
         Toggle("选择 \(track.title)", isOn: Binding(
@@ -250,7 +253,7 @@ struct MacPlayableTracks: View {
             MacPlayback.play(tracks, startingAt: track, playback: playback)
           }
         } label: {
-          MacCover(client: client, trackID: track.hasCover ? track.id : nil, side: 42)
+          MacCover(client: client, trackID: coverTrackID, side: 42)
         }
         .buttonStyle(.plain)
         .help("播放 \(track.title)")
@@ -562,6 +565,7 @@ private struct MacAlbumDetail: View {
   var favorites: MacFavorites?
   let album: Album
   var canManage = false
+  @Environment(\.dismiss) private var dismiss
 
   @State private var tracks: [Track] = []
   @State private var message: String?
@@ -573,7 +577,10 @@ private struct MacAlbumDetail: View {
         title: album.title,
         subtitle: "\(album.trackCount) 首",
         symbol: "square.stack",
-        canPlay: !tracks.isEmpty
+        canPlay: !tracks.isEmpty,
+        coverTrackID: album.coverTrackId,
+        client: client,
+        onBack: { dismiss() }
       ) {
         guard let first = tracks.first(where: \.isAvailable) ?? tracks.first else { return }
         MacPlayback.play(tracks, startingAt: first, playback: playback)
@@ -590,6 +597,18 @@ private struct MacAlbumDetail: View {
       )
     }
     .navigationTitle(album.title)
+    .navigationBarBackButtonHidden(true)
+    .toolbar {
+      ToolbarItem(placement: .navigation) {
+        Button {
+          dismiss()
+        } label: {
+          Image(systemName: "chevron.backward")
+        }
+        .help("返回")
+        .keyboardShortcut("[", modifiers: .command)
+      }
+    }
     .task { await load() }
   }
 
@@ -714,6 +733,7 @@ private struct MacArtistDetail: View {
   var favorites: MacFavorites?
   let artist: Artist
   var canManage = false
+  @Environment(\.dismiss) private var dismiss
 
   @State private var tracks: [Track] = []
   @State private var message: String?
@@ -725,7 +745,10 @@ private struct MacArtistDetail: View {
         title: artist.name,
         subtitle: "\(artist.trackCount) 首",
         symbol: "person.2",
-        canPlay: !tracks.isEmpty
+        canPlay: !tracks.isEmpty,
+        coverTrackID: artist.coverTrackId,
+        client: client,
+        onBack: { dismiss() }
       ) {
         guard let first = tracks.first(where: \.isAvailable) ?? tracks.first else { return }
         MacPlayback.play(tracks, startingAt: first, playback: playback)
@@ -742,6 +765,18 @@ private struct MacArtistDetail: View {
       )
     }
     .navigationTitle(artist.name)
+    .navigationBarBackButtonHidden(true)
+    .toolbar {
+      ToolbarItem(placement: .navigation) {
+        Button {
+          dismiss()
+        } label: {
+          Image(systemName: "chevron.backward")
+        }
+        .help("返回")
+        .keyboardShortcut("[", modifiers: .command)
+      }
+    }
     .task { await load() }
   }
 
@@ -913,6 +948,7 @@ private struct MacPlaylistDetail: View {
   var favorites: MacFavorites?
   let playlist: Playlist
   var canManage = false
+  @Environment(\.dismiss) private var dismiss
 
   @State private var tracks: [Track] = []
   @State private var message: String?
@@ -924,7 +960,10 @@ private struct MacPlaylistDetail: View {
         title: playlist.name,
         subtitle: "\(tracks.count) 首",
         symbol: "music.note.list",
-        canPlay: !tracks.isEmpty
+        canPlay: !tracks.isEmpty,
+        coverTrackID: playlist.coverTrackId,
+        client: client,
+        onBack: { dismiss() }
       ) {
         guard let first = tracks.first(where: \.isAvailable) ?? tracks.first else { return }
         MacPlayback.play(tracks, startingAt: first, playback: playback)
@@ -943,6 +982,18 @@ private struct MacPlaylistDetail: View {
       )
     }
     .navigationTitle(playlist.name)
+    .navigationBarBackButtonHidden(true)
+    .toolbar {
+      ToolbarItem(placement: .navigation) {
+        Button {
+          dismiss()
+        } label: {
+          Image(systemName: "chevron.backward")
+        }
+        .help("返回")
+        .keyboardShortcut("[", modifiers: .command)
+      }
+    }
     .task { await load() }
   }
 

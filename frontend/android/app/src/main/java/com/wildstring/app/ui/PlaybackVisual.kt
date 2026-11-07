@@ -107,7 +107,7 @@ internal val playbackStyles = listOf("cover" to "封面", "vinyl" to "黑胶", "
                             repeat(65) { groove -> drawCircle(Color(0xFFBBC1AD).copy(alpha = .14f), radius * (.46f + groove * .008f), style = Stroke(.65.dp.toPx())) }
                             drawCircle(Color(0xFF69715E), radius - 1.dp.toPx(), style = Stroke(1.dp.toPx()))
                         }
-                        Cover(vm, track.id.takeIf { track.hasCover }, track.title,
+                        Cover(vm, track.coverId, track.title,
                             Modifier.align(Alignment.Center).fillMaxSize(.56f).clip(CircleShape))
                         Box(Modifier.align(Alignment.Center).size(side * .023f).clip(CircleShape).background(Color(0xFF191C15)))
                     }
@@ -147,10 +147,10 @@ internal val playbackStyles = listOf("cover" to "封面", "vinyl" to "黑胶", "
                             if (side >= 130.dp) Text(track.artist, fontSize = artistSize, lineHeight = artistSize * 1.3f, color = Color(0xFF605C4C), maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                     }
-                    Cover(vm, track.id.takeIf { track.hasCover }, track.title, Modifier.offset(side * .09f, side * .28f).size(side * .13f))
+                    Cover(vm, track.coverId, track.title, Modifier.offset(side * .09f, side * .28f).size(side * .13f))
                     TapeWindow(vm, phase, duration.takeIf { it > 0 } ?: track.durationMs, Modifier.offset(side * .15f, side * .488f).width(side * .7f).height(side * .198f))
                 }
-                else -> Cover(vm, track.id.takeIf { track.hasCover }, track.title, Modifier.size(side))
+                else -> Cover(vm, track.coverId, track.title, Modifier.size(side))
             }
         }
     }

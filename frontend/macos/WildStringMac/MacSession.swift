@@ -136,6 +136,14 @@ enum MacServers {
             defaults.set(data, forKey: key)
         }
     }
+
+    static func remove(address: String, defaults: UserDefaults = .standard) {
+        var servers = load(defaults: defaults)
+        servers.removeAll { $0.address == address }
+        if let data = try? JSONEncoder().encode(servers) {
+            defaults.set(data, forKey: key)
+        }
+    }
 }
 
 @MainActor
@@ -164,6 +172,7 @@ final class MacSession {
     var confirmLogout = false
     var showServerLogin = false
     var showRoutes = false
+    var serverToDelete: MacSavedServer?
     private(set) var routes: ServerRoutes?
     var logicalServerAddress: String { routes?.storageAddress ?? client?.server.description ?? "" }
     var pendingServer: MacSavedServer?
@@ -179,6 +188,7 @@ final class MacSession {
 
     var canManage: Bool { profile != "listener" }
     private(set) var servers: [MacSavedServer] = []
+    let updater: MacUpdater
     var serverLabel: String {
         servers.first { $0.address == logicalServerAddress }?.label ?? client?.server.description ?? "服务器"
     }
@@ -205,10 +215,16 @@ final class MacSession {
         self.queueStore = queueStore ?? ((try? SwiftDataQueueStore.makeDefault()) ?? InMemoryQueueStore())
         self.defaults = defaults
         self.configuration = configuration
+        self.updater = MacUpdater(defaults: defaults, sessionConfiguration: configuration ?? .ephemeral)
         servers = MacServers.load(defaults: defaults)
     }
 
     func restore() async {
+        defer {
+            Task { [weak self] in
+                await self?.updater.checkForUpdates(manual: false)
+            }
+        }
         guard case .loading = phase else { return }
         guard let last = servers.first,
             let address = try? ServerAddress(input: last.address, allowsInsecureHTTP: last.allowInsecureHTTP)
@@ -280,6 +296,43 @@ final class MacSession {
         pendingServer = nil
         errorMessage = nil
         showServerLogin = true
+    }
+
+    func deleteServer(_ server: MacSavedServer) async {
+        guard !isBusy else { return }
+        isBusy = true
+        let isCurrent = (logicalServerAddress == server.address)
+        if isCurrent {
+            showRoutes = false
+            confirmLogout = false
+            routes?.stop()
+            routes = nil
+            await deactivate(preservingQueue: false)
+            phase = .connect
+        }
+        if let address = try? ServerAddress(input: server.address, allowsInsecureHTTP: server.allowInsecureHTTP) {
+            let savedRoutes = makeRoutes(address, allowHTTP: server.allowInsecureHTTP)
+            await savedRoutes.signOut()
+            savedRoutes.forget()
+            try? store.clearSession(origin: address.origin)
+            let space = Self.spaceName(address.origin)
+            let cacheDir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+                .appendingPathComponent("WildStringMac/\(space)", isDirectory: true)
+            try? FileManager.default.removeItem(at: cacheDir)
+            try? await queueStore.scoped(to: space).clear()
+        }
+        MacServers.remove(address: server.address, defaults: defaults)
+        servers = MacServers.load(defaults: defaults)
+        isBusy = false
+        if isCurrent {
+            if let next = servers.first {
+                await switchServer(next)
+            } else {
+                serverText = ""
+                username = ""
+                pendingServer = nil
+            }
+        }
     }
 
     func switchServer(_ server: MacSavedServer) async {

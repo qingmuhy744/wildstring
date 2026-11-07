@@ -518,7 +518,7 @@ private struct ArtworkPreview: View {
                     GeometryReader { proxy in
                         CoverImage(
                             client: client,
-                            trackID: item.hasCover ? item.trackID : nil,
+                            trackID: item.coverTrackID,
                             size: min(proxy.size.width - 48, 420)
                         )
                         .frame(maxWidth: .infinity, maxHeight: .infinity)

@@ -16,6 +16,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -192,10 +193,14 @@ private fun PodcastPlayerControls(vm: MusicViewModel, state: MusicState, duratio
             IconButton({ vm.seek((position + 30_000).let { if (duration > 0) it.coerceAtMost(duration) else it }) }) { Icon(Icons.Default.Forward30, "前进 30 秒") }
             IconButton(onQueue) { Icon(Icons.AutoMirrored.Filled.QueueMusic, "播放队列") }
         }
-        state.playbackError?.let { message ->
+        val progressMessage by vm.podcastProgress.message.collectAsStateWithLifecycle()
+        val displayMessage = state.playbackError ?: progressMessage
+        displayMessage?.let { message ->
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(message, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
-                TextButton(vm::toggle) { Text("重试") }
+                Text(message, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, color = if (state.playbackError != null) MaterialTheme.colorScheme.error else Color(0xFFE98A6D))
+                if (state.playbackError != null) {
+                    TextButton(vm::toggle) { Text("重试") }
+                }
             }
         }
     }

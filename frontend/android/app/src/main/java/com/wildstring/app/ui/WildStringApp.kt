@@ -232,7 +232,6 @@ fun WildStringApp(model: MusicViewModel) {
                     }
                 } }
                 com.wildstring.app.update.UpdatePrompt()
-                PodcastProgressDialog(model)
                 LaunchedEffect(state.playing, state.handoff?.version) {
                     if (state.playing && state.current != null && state.handoff != null) model.dismissHandoff()
                 }
@@ -486,6 +485,19 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
     }
     val scope = rememberCoroutineScope()
     val mutationSnackbar = remember { SnackbarHostState() }
+    val context = LocalContext.current
+    var crashReportOpen by rememberSaveable { mutableStateOf(false) }
+    val crashDetectedMessage = stringResource(R.string.crash_detected_message)
+    val crashViewAction = stringResource(R.string.crash_view_action)
+    LaunchedEffect(Unit) {
+        if (com.wildstring.app.diagnostics.CrashHandler.hasNewCrash(context)) {
+            com.wildstring.app.diagnostics.CrashHandler.clearNewCrashFlag(context)
+            val result = mutationSnackbar.showSnackbar(crashDetectedMessage, crashViewAction, duration = SnackbarDuration.Long)
+            if (result == SnackbarResult.ActionPerformed) {
+                crashReportOpen = true
+            }
+        }
+    }
     LaunchedEffect(state.error, state.mutationMessage) {
         (state.error ?: state.mutationMessage)?.let { message ->
             try { mutationSnackbar.showSnackbar(message) }
@@ -862,6 +874,7 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
     lyricScanAlbum?.let { albumId -> FeatureDialog(vm, "lyric-scans", albumId = albumId, dismiss = { lyricScanAlbum = null }) }
     refreshAlbum?.let { albumId -> MetadataRefreshPrompt(vm, "album", albumId) { refreshAlbum = null } }
     if (sleepDialog) SleepDialog(vm) { sleepDialog = false }
+    if (crashReportOpen) CrashReportsDialog { crashReportOpen = false }
     deletingPlaylist?.let { playlist -> AlertDialog(onDismissRequest = { if (!playlistAction.busy) deletingPlaylist = null }, title = { Text(stringResource(R.string.playlist_delete_title)) }, text = { Column { Text(playlist.name); ActionStatus(playlistAction) } }, confirmButton = { TextButton({ scope.launch { playlistAction.run { vm.deletePlaylist(playlist); deletingPlaylist = null } } }, enabled = !playlistAction.busy) { Text(stringResource(R.string.delete)) } }, dismissButton = { TextButton({ deletingPlaylist = null }, enabled = !playlistAction.busy) { Text(stringResource(R.string.cancel)) } }) }
     actions?.let { track -> ModalBottomSheet(
         onDismissRequest = { actions = null },
@@ -878,7 +891,7 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
     ) {
         Column(Modifier.fillMaxWidth().heightIn(max = 640.dp).testTag("song-actions-scroll").verticalScroll(rememberScrollState(), overscrollEffect = null)) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            Cover(vm, track.id.takeIf { track.hasCover }, track.title, Modifier.size(48.dp))
+            Cover(vm, track.coverId, track.title, Modifier.size(48.dp))
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(track.title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 Text(track.artist, style = MaterialTheme.typography.bodySmall, color = Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -1114,7 +1127,7 @@ internal fun TrackRow(vm: MusicViewModel, track: Track, state: MusicState, index
             if (current) PlaybackIndicator(state.playing, state.buffering)
             else Text(track.trackNumber?.toString()?.padStart(2, '0') ?: "—", color = Muted, style = MaterialTheme.typography.bodySmall, fontSize = size.artistSp.sp, lineHeight = size.artistLineSp.sp)
         } else Box(Modifier.size(size.coverDp.dp).clip(RoundedCornerShape(10.dp)).testTag("track-cover-$index"), contentAlignment = Alignment.Center) {
-            Cover(vm, track.id.takeIf { track.hasCover }, track.title, Modifier.fillMaxSize())
+            Cover(vm, track.coverId, track.title, Modifier.fillMaxSize())
             if (current) {
                 Box(Modifier.matchParentSize().background(Color.Black.copy(alpha = .46f)))
                 PlaybackIndicator(state.playing, state.buffering, color = Color.White)

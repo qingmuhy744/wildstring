@@ -120,7 +120,7 @@ extension PlaybackService {
         if duration > 0 {
             info[MPMediaItemPropertyPlaybackDuration] = duration
         }
-        if !item.hasCover {
+        if !item.mayHaveCover {
             info.removeValue(forKey: MPMediaItemPropertyArtwork)
         }
         center.nowPlayingInfo = info
@@ -138,7 +138,7 @@ extension PlaybackService {
     }
 
     private func loadArtworkIfNeeded(for item: PlaybackService.Item) {
-        guard item.hasCover else { return }
+        guard item.mayHaveCover else { return }
         let trackID = item.trackID
         if let image = NowPlayingArtworkCache.shared.image(for: trackID) {
             applyArtwork(image, to: trackID)

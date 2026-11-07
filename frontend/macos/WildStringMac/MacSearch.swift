@@ -378,7 +378,7 @@ struct MacSearchView: View {
       } label: {
         MacCover(
           client: client,
-          trackID: track.hasCover ? track.id : nil,
+          trackID: track.hasCover ? track.id : (track.album != nil ? track.id : nil),
           side: 42
         )
       }
