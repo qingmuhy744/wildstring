@@ -157,7 +157,10 @@ export function PodcastSearchPage({
   const urlMode = isFeedAddress(term);
 
   useEffect(() => {
-    if (!explore) return;
+    setExplore(initialExplore);
+  }, [initialExplore]);
+
+  useEffect(() => {
     const controller = new AbortController();
     void api<{ regions: string[] }>('/podcasts/search-settings', { signal: controller.signal })
       .then((settings) => {
@@ -165,30 +168,24 @@ export function PodcastSearchPage({
       })
       .catch(() => {});
     return () => controller.abort();
-  }, [explore]);
-
-  useEffect(() => {
-    heading.current?.focus();
   }, []);
 
   useEffect(() => {
-    if (selection) detailPanel.current?.focus();
+    heading.current?.focus({ preventScroll: true });
+  }, []);
+
+  useEffect(() => {
+    if (selection) detailPanel.current?.focus({ preventScroll: true });
   }, [selection]);
 
   function returnToResults() {
     setSelection(null);
-    requestAnimationFrame(() => selectedCard.current?.focus());
+    requestAnimationFrame(() => selectedCard.current?.focus({ preventScroll: true }));
   }
 
   useEffect(() => {
     searchAbort.current?.abort();
     setError(null);
-    if (!term && !explore) {
-      setResponse(null);
-      setSearching(false);
-      setSelection(null);
-      return;
-    }
     if (urlMode) {
       setResponse(null);
       setSearching(false);
@@ -201,34 +198,32 @@ export function PodcastSearchPage({
     const controller = new AbortController();
     searchAbort.current = controller;
     setSearching(true);
-    const timer = window.setTimeout(
-      () => {
-        api<PodcastSearchResponse>(
-          term
-            ? `/podcasts/search?q=${encodeURIComponent(term)}`
-            : `/podcasts/discover${region ? `?region=${encodeURIComponent(region)}` : ''}`,
-          {
-            signal: controller.signal,
-            timeoutMs: 30000,
-          },
-        )
-          .then((value) => {
-            if (controller.signal.aborted) return;
-            setResponse(value);
-            setSelection((current) => (current?.kind === 'url' ? null : current));
-          })
-          .catch((reason) => {
-            if (controller.signal.aborted) return;
-            if (reason instanceof DOMException && reason.name === 'AbortError') return;
-            setResponse(null);
-            setError(describeError(reason));
-          })
-          .finally(() => {
-            if (!controller.signal.aborted) setSearching(false);
-          });
-      },
-      submitted ? 0 : SEARCH_DEBOUNCE_MS,
-    );
+    const delayMs = submitted || (!term && explore) ? 0 : SEARCH_DEBOUNCE_MS;
+    const timer = window.setTimeout(() => {
+      api<PodcastSearchResponse>(
+        term
+          ? `/podcasts/search?q=${encodeURIComponent(term)}`
+          : `/podcasts/discover${region ? `?region=${encodeURIComponent(region)}` : ''}`,
+        {
+          signal: controller.signal,
+          timeoutMs: 30000,
+        },
+      )
+        .then((value) => {
+          if (controller.signal.aborted) return;
+          setResponse(value);
+          setSelection((current) => (current?.kind === 'url' ? null : current));
+        })
+        .catch((reason) => {
+          if (controller.signal.aborted) return;
+          if (reason instanceof DOMException && reason.name === 'AbortError') return;
+          setResponse(null);
+          setError(describeError(reason));
+        })
+        .finally(() => {
+          if (!controller.signal.aborted) setSearching(false);
+        });
+    }, delayMs);
     return () => {
       window.clearTimeout(timer);
       controller.abort();
@@ -352,15 +347,15 @@ export function PodcastSearchPage({
       }}
     >
       <header className="podcast-explore-header">
-        <button type="button" className="podcast-back-btn" onClick={onClose}>
-          ← 返回电台
-        </button>
         <div>
           <h2 id="podcast-search-title" ref={heading} tabIndex={-1}>
             {explore ? '探索播客' : canAdd ? '搜索或添加节目' : '搜索节目'}
           </h2>
           <p>找一个感兴趣的声音，先看看，再决定是否关注。</p>
         </div>
+        <button type="button" className="podcast-back-btn" onClick={onClose}>
+          ← 返回电台
+        </button>
       </header>
       <div className="podcast-search-controls">
         <form
@@ -391,7 +386,7 @@ export function PodcastSearchPage({
         <div className="podcast-search-filters">
           <button
             type="button"
-            aria-pressed={explore && !term}
+            aria-pressed={!term}
             onClick={() => {
               setExplore(true);
               setQuery('');
@@ -401,7 +396,7 @@ export function PodcastSearchPage({
           >
             热门探索
           </button>
-          {explore && !term && (
+          {!term && (
             <label>
               区域{' '}
               <select
@@ -428,7 +423,7 @@ export function PodcastSearchPage({
       <p className="podcast-search-hint">
         {urlMode
           ? '已识别为 RSS 地址，将直接预览这个源。'
-          : `通过 Apple Podcasts 目录${!term && explore ? '浏览热门节目' : '搜索'}${
+          : `通过 Apple Podcasts 目录${!term ? '浏览热门节目' : '搜索'}${
               regions.length ? `：${regions.map(regionName).join(' · ')}` : ''
             }`}
       </p>

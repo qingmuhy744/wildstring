@@ -5,6 +5,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
@@ -12,6 +13,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -41,19 +43,28 @@ import kotlinx.coroutines.launch
     var retry by remember { mutableIntStateOf(0) }
     val scope = rememberCoroutineScope()
     val regions = listOf("" to "服务器默认", "tw" to "台湾", "cn" to "中国大陆", "hk" to "香港", "us" to "美国", "jp" to "日本", "gb" to "英国")
-    LaunchedEffect(query, region, retry) {
+    val trimmedQuery = query.trim()
+    val isRssUrl = trimmedQuery.startsWith("http://", ignoreCase = true) || trimmedQuery.startsWith("https://", ignoreCase = true)
+    val activeFeedUrl = if (isRssUrl) trimmedQuery else selected?.feedUrl
+
+    LaunchedEffect(trimmedQuery, region, retry, isRssUrl) {
+        if (isRssUrl) {
+            loading = false; error = null; page = null; selected = null
+            return@LaunchedEffect
+        }
         loading = true; error = null; page = null; selected = null
         delay(350)
-        try { page = vm.repository.podcastDirectory(query.trim(), region) }
+        try { page = vm.repository.podcastDirectory(trimmedQuery, region) }
         catch (e: CancellationException) { throw e }
         catch (e: Exception) { error = friendlyError(e) }
         finally { loading = false }
     }
-    LaunchedEffect(selected?.feedUrl) {
+    LaunchedEffect(activeFeedUrl) {
         preview = null; previewError = null
-        val item = selected ?: return@LaunchedEffect
+        val feedUrl = activeFeedUrl ?: return@LaunchedEffect
+        if (isRssUrl) delay(350)
         previewing = true
-        try { preview = vm.repository.previewPodcast(item.feedUrl) }
+        try { preview = vm.repository.previewPodcast(feedUrl) }
         catch (e: CancellationException) { throw e }
         catch (e: Exception) { previewError = friendlyError(e) }
         finally { previewing = false }
@@ -66,7 +77,11 @@ import kotlinx.coroutines.launch
                     IconButton({ if (selected != null) selected = null else onDismiss() }) {
                         Icon(if (selected != null) Icons.AutoMirrored.Filled.ArrowBack else Icons.Default.Close, if (selected != null) "返回探索列表" else "关闭探索")
                     }
-                    Text("探索播客", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+                    Text(
+                        text = if (canAdd) "探索与添加播客" else "探索播客",
+                        style = MaterialTheme.typography.titleLarge,
+                        modifier = Modifier.weight(1f),
+                    )
                     Box {
                         TextButton({ regionMenu = true }, enabled = query.isBlank() && !busy) { Text(regions.first { it.first == region }.second) }
                         DropdownMenu(regionMenu, { regionMenu = false }) {
@@ -74,27 +89,64 @@ import kotlinx.coroutines.launch
                         }
                     }
                 }
-                OutlinedTextField(query, { query = it.take(100) }, label = { Text("搜索节目名称") }, singleLine = true,
-                    modifier = Modifier.fillMaxWidth().testTag("podcast-explore-search"), enabled = !busy)
-                if (selected == null) {
-                    Text(if (query.isBlank()) "Apple Podcasts 区域热门榜 · ${page?.regions.orEmpty().joinToString().uppercase()}" else "搜索 Apple Podcasts 公开目录", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it.take(512) },
+                    label = { Text(if (canAdd) "搜索节目名称，或粘贴 RSS 地址" else "搜索节目名称") },
+                    singleLine = true,
+                    trailingIcon = {
+                        if (query.isNotEmpty() && !busy) {
+                            IconButton({ query = ""; selected = null }) {
+                                Icon(Icons.Default.Close, contentDescription = "清空搜索")
+                            }
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth().testTag("podcast-explore-search"),
+                    enabled = !busy,
+                )
+                if (selected == null && !isRssUrl) {
+                    Text(
+                        text = if (query.isBlank()) "Apple Podcasts 区域热门榜 · ${page?.regions.orEmpty().joinToString().uppercase()}" else "搜索 Apple Podcasts 公开目录",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                     if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
                     error?.let { Text(it, color = MaterialTheme.colorScheme.error); TextButton({ retry++ }) { Text(stringResource(R.string.retry)) } }
                     if (page?.failedRegions?.isNotEmpty() == true) Text("部分区域暂时不可用，已保留可用结果。", style = MaterialTheme.typography.bodySmall)
                     if ((page?.explicitHidden ?: 0) > 0) Text("已按管理员设置隐藏成人内容", style = MaterialTheme.typography.bodySmall)
                     LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         items(page?.results.orEmpty(), key = { it.feedUrl }) { item ->
-                            ListItem(headlineContent = { Text(item.title, maxLines = 2, overflow = TextOverflow.Ellipsis) },
+                            ListItem(
+                                headlineContent = { Text(item.title, maxLines = 2, overflow = TextOverflow.Ellipsis) },
                                 supportingContent = { Text(listOf(item.author, if (item.followed) "已关注" else if (item.explicit) "成人内容" else item.genres.joinToString(" · ")).filter { it.isNotEmpty() }.joinToString("\n"), maxLines = 2) },
-                                leadingContent = { AsyncImage(item.artworkUrl, null, Modifier.size(56.dp), contentScale = ContentScale.Crop) },
-                                modifier = Modifier.testTag("podcast-explore-${item.itunesId}").clickable { selected = item })
+                                leadingContent = {
+                                    AsyncImage(
+                                        model = item.artworkUrl,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(56.dp).clip(RoundedCornerShape(10.dp)),
+                                        contentScale = ContentScale.Crop,
+                                    )
+                                },
+                                modifier = Modifier.testTag("podcast-explore-${item.itunesId}").clickable { selected = item },
+                            )
                         }
                         if (!loading && error == null && page?.results?.isEmpty() == true) item { Text("暂无节目，试试其他区域或关键词。") }
                     }
                 } else {
-                    val item = selected!!
+                    val titleText = preview?.title?.takeIf { it.isNotBlank() } ?: selected?.title ?: trimmedQuery
+                    val feedUrlToSubscribe = activeFeedUrl.orEmpty()
+                    val itunesIdToSubscribe = selected?.itunesId
                     LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                        item { Text(item.title, style = MaterialTheme.typography.headlineSmall) }
+                        if (isRssUrl) {
+                            item {
+                                Text(
+                                    text = "已识别为 RSS 地址，正在直接预览该订阅源",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.primary,
+                                )
+                            }
+                        }
+                        item { Text(titleText, style = MaterialTheme.typography.headlineSmall) }
                         if (previewing) item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
                         previewError?.let { message -> item { Text(message, color = MaterialTheme.colorScheme.error) } }
                         preview?.let { value ->
@@ -104,22 +156,29 @@ import kotlinx.coroutines.launch
                             items(value.latestEpisodes) { episode -> Text(episode.title) }
                         }
                     }
-                    preview?.let { value ->
-                        Button(onClick = {
-                            busy = true; previewError = null
-                            scope.launch {
-                                try {
-                                    val id = value.catalogPodcastId?.also { if (!value.followed) vm.repository.followPodcast(it, true) }
-                                        ?: vm.repository.subscribePodcast(item.feedUrl, item.itunesId).podcast.id
-                                    onFollowed(id)
-                                } catch (e: CancellationException) { throw e }
-                                catch (e: Exception) { previewError = friendlyError(e) }
-                                finally { busy = false }
-                            }
-                        }, enabled = !busy && (canAdd || value.catalogPodcastId != null), modifier = Modifier.fillMaxWidth().testTag("podcast-explore-follow")) {
-                            Text(if (busy) "正在关注…" else if (value.followed) "打开节目" else "关注节目")
+                    val canConfirm = !busy && !previewing && (preview != null || (isRssUrl && previewError != null)) && (canAdd || preview?.catalogPodcastId != null)
+                    if (preview != null || isRssUrl) {
+                        Button(
+                            onClick = {
+                                busy = true; previewError = null
+                                scope.launch {
+                                    try {
+                                        val value = preview
+                                        val id = value?.catalogPodcastId?.also { if (!value.followed) vm.repository.followPodcast(it, true) }
+                                            ?: vm.repository.subscribePodcast(feedUrlToSubscribe, itunesIdToSubscribe).podcast.id
+                                        onFollowed(id)
+                                    } catch (e: CancellationException) { throw e }
+                                    catch (e: Exception) { previewError = friendlyError(e) }
+                                    finally { busy = false }
+                                }
+                            },
+                            enabled = canConfirm,
+                            modifier = Modifier.fillMaxWidth().testTag("podcast-explore-follow"),
+                        ) {
+                            val followed = preview?.followed == true
+                            Text(if (busy) "正在关注…" else if (followed) "打开节目" else if (isRssUrl && preview?.catalogPodcastId == null) "添加并关注" else "关注节目")
                         }
-                        if (!canAdd && value.catalogPodcastId == null) Text("管理员尚未开放添加节目", style = MaterialTheme.typography.bodySmall)
+                        if (!canAdd && preview?.catalogPodcastId == null) Text("管理员尚未开放添加节目", style = MaterialTheme.typography.bodySmall)
                     }
                 }
             }
