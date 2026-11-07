@@ -10,8 +10,9 @@ struct NowPlayingView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.horizontalSizeClass) private var sizeClass
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorScheme) private var colorScheme
     @Environment(FavoritesModel.self) private var favorites
-    @AppStorage("playerStyle") private var playerStyleRaw = PlayerStyle.cover.rawValue
+    @AppStorage("playerStyle") private var playerStyleRaw = PlayerStyle.vinyl.rawValue
     @State private var showLyrics: Bool
     @State private var scrubTime: Double?
     @State private var showingQueue = false
@@ -27,12 +28,19 @@ struct NowPlayingView: View {
     private var isRegular: Bool { sizeClass == .regular }
 
     private var playerStyle: PlayerStyle {
-        PlayerStyle(rawValue: playerStyleRaw) ?? .cover
+        PlayerStyle(rawValue: playerStyleRaw) ?? .vinyl
     }
 
     var body: some View {
         ZStack {
-            ArtworkBackdrop(client: client, trackID: playback.currentItem?.trackID)
+            if playerStyle == .vinyl && !isPodcast {
+                (colorScheme == .dark
+                    ? Color(red: 0.09, green: 0.09, blue: 0.086)
+                    : Color(red: 0.965, green: 0.953, blue: 0.929))
+                    .ignoresSafeArea()
+            } else {
+                ArtworkBackdrop(client: client, trackID: playback.currentItem?.trackID)
+            }
             VStack(spacing: 0) {
                 header
                 if isRegular {
@@ -55,7 +63,7 @@ struct NowPlayingView: View {
                 controls
             }
         }
-        .tint(.wildAccent)
+        .tint(colorScheme == .dark ? .wildAccent : Color(red: 0.737, green: 0.329, blue: 0.22))
         .sheet(isPresented: $showingQueue) {
             QueueView(client: client, playback: playback)
         }
@@ -93,8 +101,10 @@ struct NowPlayingView: View {
             } label: {
                 Image(systemName: "chevron.down")
                     .font(.body.bold())
+                    .frame(width: 44, height: 44)
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("关闭播放器")
             Spacer()
             Text("正在播放")
                 .font(.footnote)
@@ -108,8 +118,7 @@ struct NowPlayingView: View {
                 } label: {
                     Text("词")
                         .font(.footnote.bold())
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 5)
+                        .frame(width: 44, height: 44)
                         .background(
                             showLyrics
                                 ? AnyShapeStyle(Color.wildAccent.opacity(0.22))
@@ -141,7 +150,7 @@ struct NowPlayingView: View {
                     .padding(.top, 8)
                 VStack(spacing: 6) {
                     Text(item.title)
-                        .font(.title2.bold())
+                        .font(.system(.title2, design: .serif, weight: .semibold))
                         .multilineTextAlignment(.center)
                         .lineLimit(2)
                     HStack(spacing: 12) {
@@ -173,7 +182,7 @@ struct NowPlayingView: View {
                     if let label = playback.currentOutputLabel {
                         Text(label)
                             .font(.caption2)
-                            .foregroundStyle(.tertiary)
+                            .foregroundStyle(.secondary)
                     }
                     if let message = playback.errorMessage ?? playback.podcastProgressMessage {
                         Text(message)
@@ -222,7 +231,7 @@ struct NowPlayingView: View {
 
     private var controls: some View {
         VStack(spacing: 12) {
-            HStack(spacing: 36) {
+            HStack(spacing: 16) {
                 Button {
                     Haptics.selection()
                     playback.toggleShuffle()
@@ -232,6 +241,7 @@ struct NowPlayingView: View {
                         .foregroundStyle(
                             playback.isShuffled ? Color.wildAccent : Color.secondary
                         )
+                        .frame(width: 44, height: 44)
                 }
                 .buttonStyle(.plain)
                 Button {
@@ -242,7 +252,9 @@ struct NowPlayingView: View {
                         playback.previous()
                     }
                 } label: {
-                    Image(systemName: isPodcast ? "gobackward.15" : "backward.fill").font(.title2)
+                    Image(systemName: isPodcast ? "gobackward.15" : "backward.fill")
+                        .font(.title2)
+                        .frame(width: 44, height: 44)
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(isPodcast ? "后退 15 秒" : "上一首")
@@ -250,8 +262,12 @@ struct NowPlayingView: View {
                     Haptics.tap()
                     playback.togglePlayPause()
                 } label: {
-                    Image(systemName: playback.isPlaying ? "pause.circle.fill" : "play.circle.fill")
-                        .font(.system(size: 64))
+                    Image(systemName: playback.isPlaying ? "pause.fill" : "play.fill")
+                        .font(.system(size: 24, weight: .semibold))
+                        .offset(x: playback.isPlaying ? 0 : 1)
+                        .foregroundStyle(colorScheme == .dark ? Color(red: 0.13, green: 0.106, blue: 0.09) : Color(red: 1, green: 0.98, blue: 0.953))
+                        .frame(width: 64, height: 64)
+                        .background(colorScheme == .dark ? Color.wildAccent : Color(red: 0.737, green: 0.329, blue: 0.22), in: Circle())
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(playback.isPlaying ? "暂停" : "播放")
@@ -263,7 +279,9 @@ struct NowPlayingView: View {
                         playback.next()
                     }
                 } label: {
-                    Image(systemName: isPodcast ? "goforward.30" : "forward.fill").font(.title2)
+                    Image(systemName: isPodcast ? "goforward.30" : "forward.fill")
+                        .font(.title2)
+                        .frame(width: 44, height: 44)
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(isPodcast ? "前进 30 秒" : "下一首")
@@ -276,6 +294,7 @@ struct NowPlayingView: View {
                         .foregroundStyle(
                             playback.repeatMode == .off ? Color.secondary : Color.wildAccent
                         )
+                        .frame(width: 44, height: 44)
                 }
                 .buttonStyle(.plain)
             }
@@ -339,14 +358,15 @@ struct NowPlayingView: View {
                 client: client,
                 trackID: item.trackID,
                 size: coverSize,
-                isPlaying: playback.isPlaying && !reduceMotion
+                isPlaying: playback.isPlaying && !playback.isBuffering && playback.errorMessage == nil,
+                reduceMotion: reduceMotion
             )
         case .cassette:
             CassetteArtwork(
                 client: client,
                 trackID: item.trackID,
                 width: coverSize,
-                isPlaying: playback.isPlaying && !reduceMotion,
+                isPlaying: playback.isPlaying && !playback.isBuffering && playback.errorMessage == nil && !reduceMotion,
                 progress: playback.duration > 0 ? playback.currentTime / playback.duration : 0,
                 title: item.title
             )
@@ -374,50 +394,53 @@ private struct VinylArtwork: View {
     let trackID: String
     let size: CGFloat
     let isPlaying: Bool
+    let reduceMotion: Bool
 
     @State private var baseAngle: Double = 0
     @State private var spinStarted: Date?
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !isPlaying)) { context in
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !isPlaying || reduceMotion)) { context in
             let live =
-                isPlaying && spinStarted != nil
+                isPlaying && !reduceMotion && spinStarted != nil
                 ? context.date.timeIntervalSince(spinStarted ?? context.date) / 20 * 360
                 : 0
             let angle = (baseAngle + live).truncatingRemainder(dividingBy: 360)
             ZStack {
+                ZStack {
+                    Circle().fill(RadialGradient(colors: [Color(red: 0.19, green: 0.21, blue: 0.17), Color(red: 0.067, green: 0.082, blue: 0.059), Color(red: 0.145, green: 0.169, blue: 0.125)], center: .center, startRadius: 0, endRadius: size / 2))
+                    ForEach(0..<7) { index in
+                        Circle()
+                            .stroke(Color(red: 0.73, green: 0.76, blue: 0.68).opacity(0.08), lineWidth: 1)
+                            .frame(width: size * (0.48 + CGFloat(index) * 0.075))
+                    }
+                    CoverImage(client: client, trackID: trackID, size: size * 0.44, circular: true)
+                    Circle().fill(Color(red: 0.098, green: 0.11, blue: 0.082)).frame(width: 8, height: 8)
+                }
+                .rotationEffect(.degrees(angle))
+                Path { path in
+                    path.move(to: CGPoint(x: size * 0.87, y: size * 0.05))
+                    path.addLine(to: CGPoint(x: size * (isPlaying ? 0.81 : 0.90), y: size * 0.31))
+                    path.addLine(to: CGPoint(x: size * (isPlaying ? 0.70 : 0.84), y: size * 0.42))
+                }
+                .stroke(Color(white: 0.65), style: StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round))
                 Circle()
-                    .fill(
-                        RadialGradient(
-                            colors: [Color(white: 0.20), Color(white: 0.06)],
-                            center: .center,
-                            startRadius: 0,
-                            endRadius: size / 2
-                        )
-                    )
-                    .overlay(Circle().stroke(Color(white: 0.28), lineWidth: 1))
-                    .rotationEffect(.degrees(angle))
-                CoverImage(
-                    client: client,
-                    trackID: trackID,
-                    size: size * 0.42,
-                    circular: true
-                )
-                Capsule()
-                    .fill(Color(white: 0.72))
-                    .frame(width: size * 0.03, height: size * 0.22)
-                    .offset(x: size * 0.30, y: -size * 0.18)
-                    .rotationEffect(.degrees(isPlaying ? 16 : 28), anchor: .top)
+                    .fill(Color(white: 0.65))
+                    .frame(width: 11, height: 11)
+                    .position(x: size * 0.87, y: size * 0.05)
             }
             .frame(width: size, height: size)
         }
-        .onAppear { spinStarted = isPlaying ? .now : nil }
+        .onAppear { spinStarted = isPlaying && !reduceMotion ? .now : nil }
         .onChange(of: isPlaying) { _, playing in
-            anchorSpin(playing: playing, at: .now)
+            anchorSpin(playing: playing && !reduceMotion, at: .now)
+        }
+        .onChange(of: reduceMotion) { _, reduced in
+            anchorSpin(playing: isPlaying && !reduced, at: .now)
         }
         .onChange(of: trackID) { _, _ in
             baseAngle = 0
-            spinStarted = isPlaying ? .now : nil
+            spinStarted = isPlaying && !reduceMotion ? .now : nil
         }
     }
 

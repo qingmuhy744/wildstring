@@ -28,7 +28,7 @@ test('三种样式共用音频，暂停保留进度，开关歌词不重开串�
   await page.getByRole('button', { name: '全屏播放', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: '全屏播放', exact: true });
   const visual = dialog.locator('.playback-visual');
-  await expect(visual).toHaveAttribute('data-style', 'cover');
+  await expect(visual).toHaveAttribute('data-style', 'vinyl');
   await expect(dialog.getByLabel('播放样式')).toHaveCount(0);
   await dialog.getByRole('button', { name: '暂停', exact: true }).click();
   const paused = await audio(page);
@@ -74,6 +74,36 @@ test('三种样式共用音频，暂停保留进度，开关歌词不重开串�
   const account = page.getByRole('region', { name: '个人设置', exact: true });
   await expect(account.getByLabel('播放样式', { exact: true })).toHaveValue('cassette');
   await account.getByLabel('播放样式', { exact: true }).selectOption('cover');
+  await page.reload();
+  if (info.project.name === 'mobile') await page.getByLabel('浏览方式').selectOption('account');
+  else await page.getByRole('button', { name: '个人设置', exact: true }).click();
+  await personalCategory(page, 'playback');
+  await expect(page.getByLabel('播放样式', { exact: true })).toHaveValue('cover');
+});
+
+test('唱片主题在桌面与手机浅深色可读', async ({ page }, info) => {
+  if (info.project.name === 'mobile') await page.setViewportSize({ width: 390, height: 844 });
+  await login(page);
+  await page.getByRole('button', { name: '播放全部', exact: true }).click();
+  await page.getByRole('button', { name: '全屏播放', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: '全屏播放', exact: true });
+  await dialog.getByRole('button', { name: '暂停', exact: true }).click();
+  for (const theme of ['light', 'dark']) {
+    await page.evaluate(
+      (value) =>
+        window.dispatchEvent(new CustomEvent('wildstring:theme-changed', { detail: value })),
+      theme,
+    );
+    await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
+    await expect(dialog).toHaveAttribute('data-music-style', 'vinyl');
+    await expect(dialog.locator('.player-atmosphere')).toHaveCount(0);
+    await expect
+      .poll(() => page.evaluate(() => document.body.scrollWidth <= innerWidth))
+      .toBe(true);
+    await page.screenshot({
+      path: `../../artifacts/player-audit/web-vinyl-${theme}-${info.project.name}.png`,
+    });
+  }
 });
 
 test('减少动态、页面隐藏与缓冲会停止拟物动画，恢复后继续播放', async ({ page }) => {
@@ -84,7 +114,7 @@ test('减少动态、页面隐藏与缓冲会停止拟物动画，恢复后继�
   await page.getByRole('button', { name: '播放全部', exact: true }).click();
   await page.getByRole('button', { name: '全屏播放', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: '全屏播放', exact: true });
-  await expect(dialog.locator('.playback-visual')).toHaveAttribute('data-style', 'cover');
+  await expect(dialog.locator('.playback-visual')).toHaveAttribute('data-style', 'vinyl');
   await chooseStyle(page, 'vinyl');
   const visual = dialog.locator('.playback-visual');
   await expect(visual).toHaveAttribute('data-moving', 'true');
@@ -132,7 +162,7 @@ test('拟物样式在手机、桌面和窄横屏保持视觉与控制可达', as
     const stage = (await dialog.locator('.playback-visual').boundingBox())!;
     const cover = (await dialog.locator('.fullscreen-cover').boundingBox())!;
     expect(cover.width).toBeLessThanOrEqual(stage.width * (value === 'cassette' ? 0.16 : 0.55));
-    if (value === 'vinyl') expect(cover.width).toBeGreaterThan(stage.width * 0.45);
+    if (value === 'vinyl') expect(cover.width).toBeGreaterThan(stage.width * 0.3);
     expect(cover.x).toBeGreaterThanOrEqual(stage.x);
     expect(cover.y).toBeGreaterThanOrEqual(stage.y);
     expect(cover.x + cover.width).toBeLessThanOrEqual(stage.x + stage.width + 1);

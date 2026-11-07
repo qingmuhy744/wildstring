@@ -6,7 +6,8 @@
   --font-mono: 'SF Mono', 'JetBrains Mono', ui-monospace, Menlo, monospace;
   font-family: var(--font-sans);
   color: #eeeae2;
-  background: #171716;
+  --bg: #171716;
+  background: var(--bg);
   font-synthesis: none;
   color-scheme: dark;
   --accent: #e98a6d;
@@ -4172,11 +4173,13 @@ textarea {
 }
 .fullscreen-player {
   color-scheme: dark;
-  --muted: #b5afa6;
   background: #141519;
   transition:
     --cover-primary 800ms ease,
     --cover-accent 800ms ease;
+}
+.fullscreen-player[data-player-kind='music']:not([data-music-style='vinyl']) {
+  --muted: #b5afa6;
 }
 .player-atmosphere {
   filter: blur(100px) saturate(1.25);
@@ -4201,7 +4204,8 @@ textarea {
 :root[data-theme='light'] {
   color-scheme: light;
   color: #2a2b25;
-  background: #f6f3ed;
+  --bg: #f6f3ed;
+  background: var(--bg);
   --muted: #626457;
   --border: #deded2;
   --accent: #bc5438;
@@ -5984,4 +5988,103 @@ textarea {
 .queue-heading small,
 .management-metrics strong {
   font-variant-numeric: tabular-nums;
+}
+
+/* Vinyl uses the theme canvas rather than artwork atmosphere. */
+.fullscreen-player[data-music-style='vinyl'] {
+  color-scheme: inherit;
+  --lyric-active-color: var(--accent-text);
+  color: var(--text);
+  background: var(--bg);
+  transition: none;
+}
+.fullscreen-player[data-music-style='vinyl']::before {
+  background: none;
+}
+.fullscreen-player[data-music-style='vinyl']
+  :is(
+    .fullscreen-header,
+    .collapse-player,
+    .fullscreen-subtitles,
+    .fullscreen-subtitles .player-artist-link,
+    .fullscreen-subtitles .player-album-link,
+    .lyrics-toolbar,
+    .lyric-empty,
+    .lyric-empty > span,
+    .fullscreen-quality,
+    .fullscreen-quality small,
+    .fullscreen-quality .format,
+    .fullscreen-controls .timeline,
+    .fullscreen-controls .volume,
+    .fullscreen-options .quality-control,
+    .fullscreen-panel-switches button,
+    .embedded-queue .track-title small,
+    .embedded-queue .queue-grip.icon-button
+  ) {
+  color: var(--muted);
+}
+.fullscreen-player[data-music-style='vinyl']
+  :is(.lyric-line, .lyric-translation, .lyric-romanization) {
+  color: var(--muted);
+}
+.fullscreen-player[data-music-style='vinyl']
+  :is(.lyric-line, .player-meta-link, .player-artist-link) {
+  transition: none;
+}
+.fullscreen-player[data-music-style='vinyl']
+  :is(
+    .lyric-line.active-line,
+    .lyric-line:hover,
+    .player-meta-link:hover,
+    .player-meta-link:focus-visible,
+    .collapse-player:hover,
+    .fullscreen-controls .transport-buttons .icon-button
+  ) {
+  color: var(--text);
+}
+.fullscreen-player[data-music-style='vinyl'] .fullscreen-metadata h1 {
+  font-family: var(--font-display);
+  font-weight: 500;
+}
+.fullscreen-player[data-music-style='vinyl'] .fullscreen-metadata > .favorite-button {
+  color: var(--muted);
+}
+.fullscreen-player[data-music-style='vinyl'] .fullscreen-metadata > .favorite-button.is-loved {
+  color: var(--accent-text);
+}
+.fullscreen-player[data-music-style='vinyl'] .fullscreen-controls .play-button {
+  color: var(--on-accent);
+  background: var(--accent);
+}
+.fullscreen-player[data-music-style='vinyl'] .fullscreen-controls .play-button:hover {
+  background: var(--accent-hover);
+}
+.fullscreen-player[data-music-style='vinyl'] .fullscreen-controls input[type='range'] {
+  accent-color: var(--accent);
+}
+.fullscreen-player[data-music-style='vinyl'] .fullscreen-options .quality-control select {
+  color: var(--text);
+  border-color: var(--border);
+  background-color: var(--surface);
+  backdrop-filter: none;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.fullscreen-player[data-music-style='vinyl'] .fullscreen-options .quality-control option {
+  color: var(--text);
+  background: var(--surface);
+}
+.fullscreen-player[data-music-style='vinyl']
+  .fullscreen-panel-switches
+  button[aria-pressed='true'] {
+  color: var(--text);
+  background: var(--tag-bg);
+  border-color: var(--border);
+}
+.fullscreen-player[data-music-style='vinyl']
+  :is(.embedded-queue .queue-heading, .embedded-queue li) {
+  border-color: var(--border);
+}
+.fullscreen-player[data-music-style='vinyl'] .embedded-queue li.is-dragging {
+  background: var(--bg-hover);
 }

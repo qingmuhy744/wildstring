@@ -51,6 +51,22 @@ class AccountPreferencesTest {
         assertEquals("light", reopened.state.value.appearance)
     }
 
+    @Test fun vinylIsDefaultWithoutOverwritingSavedStyles() = isolated { context ->
+        val settings = AppSettings(context)
+        assertEquals("vinyl", settings.state.value.playbackStyle)
+        settings.bindAccount("server", "first")
+        assertEquals("vinyl", settings.state.value.playbackStyle)
+        settings.playbackStyle("cover")
+        settings.bindAccount("server", "second")
+        assertEquals("vinyl", settings.state.value.playbackStyle)
+        settings.playbackStyle("cassette")
+        val reopened = AppSettings(context)
+        reopened.bindAccount("server", "first")
+        assertEquals("cover", reopened.state.value.playbackStyle)
+        reopened.bindAccount("server", "second")
+        assertEquals("cassette", reopened.state.value.playbackStyle)
+    }
+
     @Test fun networkAndDownloadOptionsAreIsolatedAndKeepLegacyValuesForOneAccount() = isolated { context ->
         val name = "offline-options"
         val keys = setOf("wifi_only", "download_bitrate", "capacity_gb")

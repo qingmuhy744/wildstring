@@ -95,6 +95,7 @@ test('确认在线歌词后正在显示的播放器立即更新语言数据', as
   await page.getByRole('button', { name: '显示歌词', exact: true }).click();
   const player = page.getByRole('dialog', { name: '全屏播放', exact: true });
   await expect(player).toContainText('侧车第一行');
+  await player.getByRole('button', { name: '暂停', exact: true }).click();
   await player.getByRole('button', { name: '收起全屏播放', exact: true }).click();
   await page.getByRole('button', { name: '歌曲操作 晴天测试曲', exact: true }).click();
   await page.getByRole('button', { name: '编辑歌曲信息', exact: true }).click();
