@@ -95,6 +95,7 @@ The Chinese name **野弦** (Yě Xián) stems from a deep reverence for Chinese 
 
 ## Recent Highlights
 
+- **v0.8.7**: macOS fullscreen frosted-glass Up Next queue drawer (three-column zero-occlusion layout on wide screens); native macOS auto-update checker (`MacUpdater`) with one-click DMG download; remote high-bitrate FLAC streaming buffer fix on macOS; unified track-to-album artwork inheritance across Web, Android, iOS, and macOS; route renaming and server deletion across native clients; Android crash log collector & diagnostic export; unified automatic podcast bookmark continuation across all four platforms. See [v0.8.7 Release Notes](docs/releases/v0.8.7.md).
 - **v0.8.6**: Mac server switching with separate queues; multiple connection routes and local server aliases on Mac, iOS, and Android; server naming, access policies, and MCP setup guides on Web; unavailable-track indicators and playback filtering across clients; web diagnostics with configurable log levels and call-stack capture; improvements to Mac settings and podcast speed controls, Android navigation and Daily Mix, and bilingual Web UI. See [v0.8.6 Release Notes](docs/releases/v0.8.6.md); check the corresponding Actions runs for validation and release status.
 - **v0.8.5**: Deep fix for album metadata modification & cover upload pipeline; podcast zero-reference cleanup preview modal & breakdown; Apple playback dynamic duration sync; management center & download cards dual-theme refinement; complete wiki overhaul with fresh web captures; dependency & CI/CD upgrades. See [v0.8.5 Release Notes](docs/releases/v0.8.5.md).
 - **v0.8.4**: Unified cross-platform versioning to 0.8.4; reinforced bilingual release automation and resilient test gates. See [v0.8.4 Release Notes](docs/releases/v0.8.4.md).
@@ -116,7 +117,7 @@ The Chinese name **野弦** (Yě Xián) stems from a deep reverence for Chinese 
 - **🏠 100% Self-Hosted & Local-First**: Import folders remain strictly read-only; managed libraries and metadata live locally in SQLite with zero telemetry or audio leakage.
 - **📻 Podcasts & Radio Streams**: Subscribe to RSS feeds, orchestrate background downloads, and enjoy automatic zero-reference garbage collection.
 - **📜 Rich Synchronized Lyrics**: Synced word-by-word LRC display, side-by-side bilingual lyrics, dynamic album color extraction, and nostalgic vinyl / cassette playback styles.
-- **📱 True Multi-Platform**: Responsive modern Web frontend alongside native Android (Kotlin / Jetpack Compose / Media3) and iOS (SwiftUI) applications.
+- **📱 True Multi-Platform**: Responsive modern Web frontend alongside native macOS (SwiftUI / AppKit), Android (Kotlin / Jetpack Compose / Media3), and iOS (SwiftUI) applications.
 
 ---
 
@@ -197,6 +198,14 @@ WildString builds on the generous efforts of open-source projects:
 | [commonmark-java](https://github.com/commonmark/commonmark-java) / [react-markdown](https://github.com/remarkjs/react-markdown) | Markdown rendering for assistant dialogs |
 
 Special thanks to [MusicBrainz](https://musicbrainz.org/), [Cover Art Archive](https://coverartarchive.org/), [AcoustID](https://acoustid.org/), [Last.fm](https://www.last.fm/api), and [FFmpeg](https://ffmpeg.org/).
+
+---
+
+## Community
+
+WildString supports and recognizes the [LINUX DO](https://linux.do/) community and welcomes open, friendly technical discussions and open-source sharing.
+
+Find the author on LINUX DO: [@qingmuhy](https://linux.do/u/qingmuhy/summary).
 
 ---
 
