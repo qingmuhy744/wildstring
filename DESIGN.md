@@ -217,6 +217,14 @@ Dark has no `--border-strong`; secondary button and input outlines use `--border
 - **Follow recovery is shared across pointer types**: 2 s after manual browsing stops while playing; paused playback suspends the timer. Pointer-specific behavior is limited to line taps and seek confirmation.
 - Cross-platform rules and per-platform implementation status: [`contracts/lyric-view.md`](contracts/lyric-view.md).
 
+### 6.7 Music Vinyl Player
+
+- With no valid saved music player style, default to Vinyl. Preserve an existing explicit Cover, Vinyl, or Cassette choice; changing this default must not overwrite it. Podcast playback keeps its own presentation.
+- Vinyl sits on the theme canvas from §3, with restrained dark olive grooves and a slender tonearm. The disc uses `#30352C`, `#11150F`, and `#252B20`, with `#BBC1AD` grooves at 8% opacity and a `#191C15` spindle. The circular artwork occupies approximately 44% of the disc diameter. Use the display face for the track title, tabular figures for time and audio quality, and the theme accent for the primary play control.
+- On a wide Android player, let the visual and controls use available space up to 480dp, with lyrics or queue alongside; preserve the safe area and adapt to shorter windows without fixed-height filler.
+- The disc and arm reflect actual playback, including buffering and failure; stop decorative motion while inactive or when reduced motion is requested. Keep cover preview, lyrics, queue, transport and existing style choices accessible in the native layout.
+- Other music styles may retain their artwork atmosphere. Do not add a full-screen blurred artwork layer to Vinyl; let the disc and theme canvas provide the visual hierarchy.
+
 ---
 
 ## 7. Guardrails for UI Generation (Do's & Don'ts)
