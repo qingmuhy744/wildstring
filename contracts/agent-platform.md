@@ -1,20 +1,37 @@
-# Agent 平台 API（0.4.0）
+# Agent 平台与 MCP API
 
-基础路径 `/api/v1/agent`；普通客户端使用现有 Cookie 和 `X-Wildstring-Client`；工具可使用独立 `Authorization: Bearer ws_…`。除 `/tools/*`、`/capabilities` 外的修改均需站内 Cookie 会话；工具凭据不能批准草案或读取/更改连接秘密。错误沿用 `{"detail":"stable_error_code"}`，trace 由公共 middleware 提供。所有列表 `{items,total,limit,offset}`，默认 50、上限 100。时间 UTC ISO，版本是整数。
+基础路径 `/api/v1/agent`（同时提供 stdio `python -m wildstring.mcp_bridge` 与 Streamable HTTP `/mcp` 端点）；普通客户端使用现有 Cookie 和 `X-Wildstring-Client`；外部工具可使用独立 `Authorization: Bearer ws_…`。除 `/tools/*`、`/capabilities` 外的修改均需站内 Cookie 会话；工具凭据不能直接修改自动整理策略或读取/更改连接密钥。错误沿用 `{"detail":"stable_error_code"}`，trace 由公共 middleware 提供。所有列表 `{items,total,limit,offset}`，默认 50、上限 100。时间 UTC ISO，版本是整数。
 
 ## 权限及工具
 
-`GET /capabilities` 返回 `{version:1,scopes:[…],tools:[{name,description,scope,input_schema,read_only}]}`。scope：`library:read, personal:read, drafts:write, drafts:apply, tasks:write, diagnostics:read, notifications:read`。所有工具 Schema 接受可选 `library_id` 作为库级目标；需要库上下文的工具据此选择并复核授权。账号有多个可访问库且工具无法从对象推断目标时，库级工具必须显式传入该字段，否则返回 422 `library_selection_required`；个人数据仍按当前账号隔离。
+`GET /capabilities` 返回 `{version:1,scopes:[…],tools:[{name,description,scope,input_schema,read_only}]}`（MCP `tools/list` 同时返回 `annotations: {readOnlyHint, destructiveHint, idempotentHint, openWorldHint}`）。
 
-`GET /credentials`；`POST /credentials {name,scopes,expires_in_days:30}` 返回 `{id,name,scopes,created_at,expires_at,revoked_at,token}`，token 只在创建响应出现。`DELETE /credentials/{id}` 立即撤销。
+全量 scope：`library:read, personal:read, drafts:write, drafts:apply, tasks:write, diagnostics:read, notifications:read, library:manage, personal:write, web:search`。所有库级工具 Schema 接受可选 `library_id` 作为目标；账号有多个可访问库且工具无法从对象推断目标时，库级工具必须显式传入该字段，否则返回 422 `library_selection_required`；个人数据仍按当前账号隔离。
 
-`POST /tools/{name}` 直接传工具 arguments。工具包括 `search_tracks {q,limit,offset}`, `search_albums {q,limit,offset}`, `search_artists {q,limit,offset}`, `get_track {track_id}`, `get_metadata_suggestions {track_id}`（管理员读取已有来源证据）, `request_metadata_refresh {track_ids,force?}`（管理员提交既有来源查询队列，不应用结果）, `get_personal_library {kind:playlists|favorites|history,limit,offset}`, `inspect_library {track_ids?,limit}`, `create_draft {kind,title,payload,evidence?}`, `get_draft {draft_id}`, `apply_draft {draft_id,version,idempotency_key}`, `submit_inspection {track_ids?,max_tracks?,max_calls?}`, `get_task {task_id}`, `cancel_task {task_id}`, `list_notifications {limit,offset}`。不存在任意 URL/SQL/Shell 工具。诊断工具由诊断服务另接。
+`GET /credentials`；`POST /credentials {name,scopes,expires_in_days:30}` 返回 `{id,name,scopes,created_at,expires_at,revoked_at,token}`，token 只在创建响应出现（有效期 1–365 天）。`DELETE /credentials/{id}` 立即撤销。
+
+`POST /tools/{name}` 直接传工具 arguments。受控工具按领域分为：
+- **曲库与专辑检索（`library:read`）**：`search_tracks`, `search_albums`, `search_artists`, `get_track`, `get_album_tracks`, `get_inspection_rules`, `inspect_library`, `get_lyrics_quality`, `get_loudness`
+- **个人曲库与响度偏好（`personal:read` / `personal:write`）**：`get_personal_library {kind:playlists|favorites|history}`, `get_gain_settings`, `set_gain_settings`, `adjust_gain`
+- **整理草案与策略（`drafts:write` / `drafts:apply`）**：`get_application_policy`, `create_draft`, `get_draft`, `list_drafts`, `apply_draft`
+- **曲库管理、导入、封面与歌词候选（`library:manage`，仅所有者/管理员）**：`get_metadata_suggestions`, `request_metadata_refresh`, `get_album_release_lock`, `set_album_release_lock`, `clear_album_release_lock`, `get_cover_candidates`, `get_cover_preview`, `get_import_settings`, `set_import_settings`, `discover_imports`, `list_intake_items`, `get_intake_item`, `submit_library_task`, `list_library_tasks`, `get_library_task`, `get_lyric_candidates`, `request_lyrics_lookup`, `get_lyric_scan_settings`, `set_lyric_scan_settings`, `submit_lyric_scan`, `list_lyric_scans`, `get_lyric_scan`, `control_lyric_scan`, `request_loudness_analysis`
+- **巡检任务与站内通知（`tasks:write` / `notifications:read`）**：`submit_inspection`, `get_task`, `list_tasks`, `cancel_task`, `resume_task`, `list_notifications`
+- **受控联网检索（`web:search`）**：`get_search_settings`, `search_web`, `read_webpage`（仅读取最近 24 小时检索返回的 `source_id`，不接受任意 URL）
+- **系统诊断（`diagnostics:read`，管理员专属）**：`get_system_status`, `search_log_events`, `get_operation_trace`, `get_task_diagnostics`, `test_external_services`
+
+不存在任意 URL/SQL/Shell 工具。
 
 ## 草案
 
-`GET /drafts?status=&limit=&offset=`；`POST /drafts {kind:playlist|metadata,title,payload,evidence:[]}`；`GET /drafts/{id}`。草案字段：`id,kind,title,payload,evidence,status:pending|approved|applied|rejected,version,approved_version,created_at,updated_at,result,trace_id`。`result` 为对象或 null；客户端必须接受显式 null。列表待处理（pending/approved）优先，其余按 updated_at 倒序；按 status 过滤时也按最近处理时间排列。Android 默认待处理视图，已应用/已拒绝自动进入处理记录；Web 既有已应用/已拒绝视图保留。
+`GET /drafts?status=&limit=&offset=`；`POST /drafts {kind,title,payload,evidence:[]}`；`GET /drafts/{id}`。支持 6 种草案类型（`kind`）：
+- `playlist`：歌单创建或追加（`{name,track_ids:[真实ID],playlist_id?,playlist_version?}`）
+- `metadata`：单曲元数据覆盖（`{track_id,metadata_version,overrides}`）
+- `metadata_batch`：专辑/多曲原子批量元数据修改
+- `cover`：固定封面候选快照草案
+- `intake`：待整理导入项修复草案（`{item_id,version,overrides}`）
+- `lyrics`：歌词候选选用草案（`{candidate_id,...}`）
 
-歌单 payload `{name,track_ids:[真实ID],playlist_id?:已有本人手工歌单ID,playlist_version?:版本}`；元数据 payload `{track_id,metadata_version,overrides:{字段:值}}`，仅管理员可创建和应用共享元数据草案。证据为 `{source,summary,url?}`，最多 20 项。元数据更新合并既有人工覆盖，不清空无关修改。
+草案字段：`id,kind,title,payload,evidence,status:pending|approved|applied|rejected,version,approved_version,created_at,updated_at,result,trace_id`。`result` 为对象或 null；客户端必须接受显式 null。列表待处理（pending/approved）优先，其余按 updated_at 倒序；按 status 过滤时也按最近处理时间排列。Android 默认待处理视图，已应用/已拒绝自动进入处理记录；Web 既有已应用/已拒绝视图保留。共享曲库修改（元数据、封面、歌词、导入项）仅管理员可创建和应用。证据为 `{source,summary,url?}`，最多 20 项。元数据更新合并既有人工覆盖，不清空无关修改。
 
 `PATCH /drafts/{id} {version,title?,payload?,evidence?}` 修改后回到 pending 并清除批准；已应用不可修改。`POST /drafts/{id}/approve {version}` 只能从站内 Cookie 批准当前具体版本；`POST /drafts/{id}/reject {version}`；`POST /drafts/{id}/apply {version,idempotency_key}` 返回草案（result 包含 playlist_id 或 track_id）。重复同幂等键返回原结果；其他对象版本过期 409。应用、审计、事件、站内通知一个事务。
 
@@ -44,7 +61,7 @@ Web／Android 默认仅显示未读通知，已读通知保留在「已读记录
 
 `PATCH /conversations/{id} {title}` 修改本人对话名称，首尾空白会去除，长度 1–200；消息、所选连接和草案不变。对话列表提供改名和逐条删除，删除前需用户确认。删除正在生成回复的对话返回 `409 conversation_busy`；删除会清理该对话消息和运行记录，已有草案和业务对象独立保留。
 
-聊天使用最近 19 条历史消息及本次提问，系统指令独立保留；单轮工具结果只参与该轮模型循环。保留天数控制数据库清理，不代表全部历史都会送给模型。目前尚无自动摘要或跨对话长期记忆。0.4.1 在 max_calls 内预留最后一次调用直接生成回答（tool_choice=none），不追加付费调用；提供方忽略该要求时不再执行工具。聊天没有实时网页或库外新发行搜索工具，发现页的 Last.fm 收藏建议也不保证最新发行。
+聊天使用最近 19 条历史消息及本次提问，系统指令独立保留；单轮工具结果只参与该轮模型循环。保留天数控制数据库清理，不代表全部历史都会送给模型。在 `max_calls` 内预留最后一次调用直接生成回答（`tool_choice=none`），不追加付费调用；提供方忽略该要求时不再执行工具。对话上下文摘要、本人显式长期记忆及受控联网检索配置见下方 `0.5.0 助手扩展`。
 
 ## 安全和运行边界
 
