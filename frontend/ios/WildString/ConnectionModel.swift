@@ -377,7 +377,12 @@ final class ConnectionModel {
             }
         )
         playback.preferredBitrateKbps = preferences.qualityBitrate
-        playback.podcastDeviceID = Self.deviceID()
+        let podcastDeviceID = Self.deviceID()
+        playback.podcastDeviceID = podcastDeviceID
+        playback.podcastCloud = PodcastCloudQueue(
+            client: client,
+            deviceID: WildstringDeviceID.resolve(preferred: podcastDeviceID)
+        )
         playback.submitListening = { [weak client] report in
             guard let client else { return false }
             do {
@@ -409,6 +414,8 @@ final class ConnectionModel {
             playback.setPodcastPlaybackRate(rateSnapshot)
         }
         self.playback = playback
+        let podcastCloud = playback.podcastCloud
+        Task { await podcastCloud?.refresh() }
         self.favorites = FavoritesModel(client: client)
         self.offline = OfflineModel(downloads: downloads)
         self.profile = profile

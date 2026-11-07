@@ -173,13 +173,22 @@ WildString supports three themes: **Light (Warm Paper — Daylight)**, **Dark (C
 - Conversational interface grounded in real library track IDs.
 - Supports model connection selector, natural-language queries ("找几首适合雨天夜晚听的器乐"), inline playable track cards with one-click `播放全部` or `保存为歌单`, and graceful degradation when AI connections are offline.
 
+### 6.6 Lyrics View (`歌词`)
+- **Only the current line is emphasized** (see §2.3): played and upcoming lines share one muted color; word-level karaoke tinting is confined to the active line, never accumulated on lines already sung.
+- **Position is content-driven**: the current line centers only within the scrollable range (`clamp(lineCenter − H/2, 0, maxScroll)`); short lyrics are centered as a block and never scroll; the first lines start from the top.
+- **Follow recovery is shared across pointer types**: 2 s after manual browsing stops while playing; paused playback suspends the timer. Pointer-specific behavior is limited to line taps and seek confirmation.
+- Cross-platform rules and per-platform implementation status: [`contracts/lyric-view.md`](../contracts/lyric-view.md).
+
 ---
 
 ## 7. Guardrails for UI Generation (Do's & Don'ts)
 
 - **DO** use the exact warm paper (`#F6F3ED`) / olive stone (`#EEEEE5`) / charcoal olive (`#171716`) / terracotta (`#BC5438` & `#E98A6D`) palette across all screens.
-- **DO** keep border radii consistent: `16px` for hero panels, `14px` for cards, `10px–12px` for track/episode rows, `999px` (capsule) for filter chips and primary pill CTAs.
+- **DO** keep border radii consistent: `16px` for hero panels, `14px` for cards, `10px–12px` for track/episode rows, `999px` (capsule) for filter chips and primary pill CTAs. When nesting rounded shapes with `gap < 32px`, follow `inner radius = outer radius - gap` (for values `> 2px`) so concentric corners align cleanly.
+- **DO** maintain strict visual and baseline alignment across side-by-side cards, table columns, and action bars; apply `1px–2px` optical centering adjustments for play triangles inside circles and icons beside text.
+- **DO** ship every interactive surface with complete states (`Hover`, `Active`, visible keyboard `Focus`, layout-matched `Loading`, actionable `Empty`, and inline `Error` / permission feedback). System and error messages must stay calm and specific ("what failed + what to do next"), without exclamation marks or filler copy.
 - **DO** grey out completed podcast episodes and hide their progress bars so only partially played episodes show progress bars.
-- **DON'T** introduce cold blue, neon purple, or pure black (`#000000`) backgrounds.
+- **DON'T** clutter high-frequency listening views with marketing slogans, redundant helper paragraphs, or decorative secondary badges—if a screen needs explanatory text to be understood, fix the layout hierarchy instead.
+- **DON'T** introduce cold blue, neon purple, or pure black (`#000000`) backgrounds, or stack heavy drop shadows on bordered cards; rely on spacing, `1px solid var(--border)` strokes, and subtle surface tonal shifts for depth.
+- **DON'T** animate layout properties (`top`, `left`, `width`, `height`) or attach unthrottled scroll listeners; animate only `transform` and `opacity` and always respect `prefers-reduced-motion`.
 - **DON'T** place destructive buttons (`取消订阅`, `删除`) next to primary `播放` / `继续收听` buttons; always place them inside the `⋯` menu.
-- **DON'T** use heavy drop shadows; rely on `1px solid var(--border)` strokes and subtle surface tonal shifts for depth.

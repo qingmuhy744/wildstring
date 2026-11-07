@@ -89,7 +89,6 @@
     "setupLocalBefore": "For local development, use ",
     "setupLocalAfter": ", then refresh this page. The username is admin.",
     "setupDone": "Done, refresh",
-    "privateNote": "Your library stays on your own server.",
     "footer": "WildString · Start with your own music"
   },
   "connection": {
@@ -145,6 +144,20 @@
     "tasks": "Checks & tasks",
     "notifications": "Notifications",
     "assistant-settings": "Assistant settings"
+  },
+  "collection": {
+    "tracks": "Songs",
+    "searchResults": "Search results",
+    "count": {
+      "tracks_one": "{{value}} song",
+      "tracks_other": "{{value}} songs",
+      "albums_one": "{{value}} album",
+      "albums_other": "{{value}} albums",
+      "artists_one": "{{value}} artist",
+      "artists_other": "{{value}} artists",
+      "playlists_one": "{{value}} playlist",
+      "playlists_other": "{{value}} playlists"
+    }
   },
   "roles": {
     "owner": "Owner",
@@ -224,6 +237,8 @@
     "podcast_subscriptions_disabled": "The admin hasn't allowed members to add RSS feeds yet. You can follow shows already on this server.",
     "podcast_catalog_management_required": "Only admins can change server-wide podcast settings.",
     "podcast_catalog_settings_conflict": "Podcast permissions were changed. Check the latest settings and try again.",
+    "podcast_queue_conflict": "The podcast queue was updated on another device. This device kept its queue. Use the server queue, or replace it with this device's queue.",
+    "episode_unavailable": "This episode can't be added right now. It may no longer be available. Choose another episode.",
     "invalid_avatar": "Choose a valid JPG, PNG or WebP image of up to 25 megapixels.",
     "avatar_too_large": "The avatar image is larger than 5 MiB. Compress it and try again.",
     "avatar_account_changed": "The account changed. Reopen account settings.",
@@ -416,7 +431,7 @@
   },
   "discover": {
     "aria": "Music discovery",
-    "title": "What are we listening to today?",
+    "title": "Music recommendations",
     "subtitle": "Revisit familiar sounds, and leave a trail for what you haven't met yet.",
     "reload": "Reload",
     "ai": {
@@ -717,7 +732,7 @@
   },
   "assistant": {
     "aria": "AI music assistant",
-    "title": "Let's talk about what you want to hear.",
+    "title": "Music assistant",
     "description": "Find tracks from your real library, adjust candidates, and create drafts. You always get the final confirmation before anything is saved or changed.",
     "newChat": "New chat",
     "recent": "Recent chats",

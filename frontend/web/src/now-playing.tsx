@@ -508,6 +508,8 @@ function LyricsPanel({ player, onTogglePanel }: { player: Player; onTogglePanel:
   const [error, setError] = useState(false);
   const [revision, setRevision] = useState(0);
   const [follow, setFollow] = useState(true);
+  // Bumping the interaction counter restarts the follow-recovery timer on every scroll.
+  const [interaction, setInteraction] = useState(0);
   const [coarse, setCoarse] = useState(() => matchMedia('(pointer: coarse)').matches);
   const [preview, setPreview] = useState<number | null>(null);
   const [
@@ -542,6 +544,10 @@ function LyricsPanel({ player, onTogglePanel }: { player: Player; onTogglePanel:
     query.addEventListener('change', changed);
     return () => query.removeEventListener('change', changed);
   }, []);
+  function pauseFollow() {
+    setFollow(false);
+    setInteraction((value) => value + 1);
+  }
   function selectCentered() {
     const container = scroll.current;
     if (!container) return;
@@ -567,7 +573,7 @@ function LyricsPanel({ player, onTogglePanel }: { player: Player; onTogglePanel:
       scrollTop: event.currentTarget.scrollTop,
       moved: false,
     };
-    setFollow(false);
+    pauseFollow();
   }
   function movePointerDrag(event: PointerEvent<HTMLDivElement>) {
     const currentDrag = drag.current;
@@ -622,6 +628,14 @@ function LyricsPanel({ player, onTogglePanel }: { player: Player; onTogglePanel:
     return () => controller.abort();
   }, [current?.id, revision]);
 
+  // Browsing pauses follow; once scrolling stops and playback is running, return to
+  // the playing line after two seconds. Paused playback suspends the timer.
+  useEffect(() => {
+    if (follow || !player.playing || lyrics?.kind !== 'synced') return;
+    const timer = setTimeout(() => setFollow(true), 2000);
+    return () => clearTimeout(timer);
+  }, [follow, player.playing, lyrics?.kind, interaction]);
+
   let active = -1;
   if (lyrics?.kind === 'synced') {
     let low = 0,
@@ -639,10 +653,26 @@ function LyricsPanel({ player, onTogglePanel }: { player: Player; onTogglePanel:
       line = lines.current[active];
     if (!container) return;
     const center = () => {
-      container.style.setProperty('--lyric-padding', `${container.clientHeight / 2}px`);
-      if (follow && line)
+      const viewport = container.clientHeight;
+      const items = container.querySelector('ol')?.children;
+      const first = (items && items.length ? items[0] : null) as HTMLElement | null;
+      const last = (items && items.length ? items[items.length - 1] : null) as HTMLElement | null;
+      const minTop = 24;
+      const contentHeight =
+        first && last ? last.offsetTop + last.offsetHeight - first.offsetTop : Infinity;
+      // Short lyrics are centered as a whole and never scroll. Clamping the target
+      // keeps the first lines of a long song at the top instead of mid-viewport.
+      const short = contentHeight <= viewport - 2 * minTop;
+      const pad = short ? Math.max(minTop, (viewport - contentHeight) / 2) : minTop;
+      container.style.setProperty('--lyric-pad-top', `${pad}px`);
+      container.style.setProperty('--lyric-pad-bottom', `${short ? pad : viewport / 2}px`);
+      const maxScroll = Math.max(0, container.scrollHeight - viewport);
+      const top = line
+        ? Math.min(Math.max(line.offsetTop + line.clientHeight / 2 - viewport / 2, 0), maxScroll)
+        : 0;
+      if (follow)
         container.scrollTo({
-          top: Math.max(0, line.offsetTop - container.clientHeight / 2 + line.clientHeight / 2),
+          top: short ? 0 : top,
           behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
         });
     };
@@ -731,15 +761,19 @@ function LyricsPanel({ player, onTogglePanel }: { player: Player; onTogglePanel:
           onPointerUp={endPointerDrag}
           onPointerCancel={endPointerDrag}
           onWheel={() => {
-            setFollow(false);
+            pauseFollow();
             requestAnimationFrame(selectCentered);
           }}
           onTouchMove={() => {
-            setFollow(false);
+            pauseFollow();
             selectCentered();
           }}
           onScroll={() => {
-            if (!follow) selectCentered();
+            if (!follow) {
+              // Inertial scrolling keeps restarting the timer until it settles.
+              setInteraction((value) => value + 1);
+              selectCentered();
+            }
           }}
         >
           {error ? (
@@ -792,7 +826,7 @@ function LyricsPanel({ player, onTogglePanel }: { player: Player; onTogglePanel:
                         }
                       }}
                     >
-                      {line.words?.length
+                      {active === index && line.words?.length
                         ? line.words.map((word, wordIndex) => {
                             const progress =
                               Math.max(
@@ -829,7 +863,8 @@ function LyricsPanel({ player, onTogglePanel }: { player: Player; onTogglePanel:
             </ol>
           )}
         </div>
-        {!follow && preview !== null && lyrics?.lines[preview]?.time_ms != null && (
+        {/* Coarse pointers switch to the cover on tap, so only they need an explicit seek confirm. */}
+        {coarse && !follow && preview !== null && lyrics?.lines[preview]?.time_ms != null && (
           <div className="lyric-seek-preview" role="group" aria-label="歌词跳转预览">
             <span>{time(lyrics.lines[preview].time_ms! / 1000)}</span>
             <button

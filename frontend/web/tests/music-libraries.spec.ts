@@ -402,6 +402,7 @@ test('个人保存复用共享音频，管理员预览后清理零引用', async
   await expect(page.getByRole('status').filter({ hasText: '已复用服务器已有音频' })).toBeVisible();
   await page.getByRole('button', { name: '我的下载', exact: false }).click();
   await expect(page.locator('.podcast-episode-row')).toHaveCount(1);
+  await page.locator('.podcasts-more-trigger').click();
   await page.getByRole('button', { name: '共享音频管理', exact: true }).click();
   const manager = page.getByRole('region', { name: '共享音频管理', exact: true });
   await expect(manager).toContainText('1 份引用');

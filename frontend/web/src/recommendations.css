@@ -1,11 +1,6 @@
 .music-discovery .discovery-hero h1 {
   margin: 0 0 6px;
-  font-size: clamp(1.8rem, 3vw, 2.6rem);
-}
-.music-discovery .discovery-hero .muted {
-  margin: 0;
-  line-height: 1.75;
-  max-width: 65ch;
+  font-size: 28px;
 }
 .music-discovery .ai-discover {
   margin: 20px 0 0;

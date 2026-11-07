@@ -488,7 +488,6 @@ export function Discover({
     <section className="completion-page music-discovery" aria-label={t('discover.aria')}>
       <header className="discovery-hero">
         <h1>{t('discover.title')}</h1>
-        <p className="muted">{t('discover.subtitle')}</p>
       </header>
       {connections.error && (
         <p className="error" role="alert">
@@ -898,8 +897,7 @@ export function Devices({ player, user }: { player: Player; user: User }) {
   }, []);
   return (
     <section className="completion-page" aria-label="跨设备继续">
-      <p className="eyebrow">TAKE YOUR MUSIC WITH YOU</p>
-      <h1>换个地方，接着听。</h1>
+      <h1>跨设备继续</h1>
       <p className="muted">
         暂停时自动保存进度。仅对其他设备最近 30
         分钟内的暂停显示一次轻提示；载入后保持暂停，旧记录仍可手动载入。

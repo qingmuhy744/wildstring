@@ -52,7 +52,7 @@ CI 模拟器使用 API 35 的 AOSP `default` 镜像，完整回归和正式包�
 
 ## 发布顺序
 
-1. 用户确认版本号后，将 `CHANGELOG.md` 的本批「未发布」条目归入对应版本，并准备 `docs/releases/vX.Y.Z.md`，说明已实现能力、验证及限制。
+1. 用户确认版本号后，将 `CHANGELOG.md` 的本批「未发布」条目归入对应版本，并准备 `docs/releases/vX.Y.Z.md`，说明已实现能力、验证及限制。在推送或发起发布前，先在本地运行 `make check` 与 `make test-affected`（或完整 `make ci`），确保没有因界面文案调整或重构遗留的过期测试断言。
 2. 通过 PR 合并进入 main，确认主线 CI 与 Android APK 工作流成功，并在该提交手动运行开启 `run_emulator` 的 **Android APK** 完整回归，确认用例实际通过。
 3. 在这个已合并提交创建并推送 `vX.Y.Z` 标签。
 4. **Release** 工作流核对标签、三个端版本及 main 祖先关系，重新执行完整 CI 与 Android 构建、单元测试和 Lint，构建固定签名 APK，并在模拟器实际安装 R8 正式包、检查连接页。

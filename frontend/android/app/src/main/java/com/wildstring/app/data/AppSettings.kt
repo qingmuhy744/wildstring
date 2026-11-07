@@ -116,6 +116,19 @@ class AppSettings @Inject constructor(@param:ApplicationContext private val cont
         require(mode in listOf("auto", "portrait", "sensor"))
         prefs.edit().putString("screen_orientation", mode).apply(); mutable.value = mutable.value.copy(orientation = mode)
     }
+    /** Cache of the account default auto-continue. The server copy is preferences.auto_continue. */
+    fun podcastContinuePreference(): PodcastContinuePreference = PodcastContinuePreference(
+        order = PodcastContinueOrder.fromStored(prefs.getString("podcast_continue_order", null)),
+        skipCompleted = prefs.getBoolean("podcast_continue_skip_completed", true),
+        autoContinue = prefs.getBoolean("podcast_continue_enabled", true),
+    )
+    fun podcastContinuePreference(value: PodcastContinuePreference) {
+        prefs.edit()
+            .putString("podcast_continue_order", value.order.stored)
+            .putBoolean("podcast_continue_skip_completed", value.skipCompleted)
+            .putBoolean("podcast_continue_enabled", value.autoContinue)
+            .apply()
+    }
     fun haptics(enabled: Boolean) { prefs.edit().putBoolean("haptics", enabled).apply(); mutable.value = mutable.value.copy(haptics = enabled) }
     fun theme(red: Boolean) { prefs.edit().putBoolean("red_cloth", red).apply(); mutable.value = mutable.value.copy(redCloth = red) }
     fun limits(metadata: Int, artwork: Int, audio: Int) {

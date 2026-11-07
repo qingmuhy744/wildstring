@@ -20,6 +20,7 @@ import { FolderMetadataEditor } from './folder-metadata';
 import { LibrarySources } from './library-sources';
 import { MusicLibraryManager, LibrarySwitcher } from './music-libraries';
 import { PodcastIdentityAdmin } from './podcast-identity-admin';
+import { PodcastProgrammesAdmin } from './podcast-programmes-admin';
 import { PodcastSearchSettings } from './podcast-search-settings';
 import { PodcastCatalogSettings } from './podcast-catalog-settings';
 
@@ -151,6 +152,7 @@ export type ManagementTab =
   | 'library-settings'
   | 'users'
   | 'diagnostics'
+  | 'programmes'
   | 'catalog'
   | 'search'
   | 'identity'
@@ -328,9 +330,10 @@ export function Management({
           {
             id: 'podcasts',
             label: '播客',
-            description: '目录搜索、节目准入、下载与共享音频',
+            description: '全服节目、目录搜索、节目准入、下载与共享音频',
             icon: 'podcast' as const,
             tabs: [
+              { id: 'programmes' as const, label: '全服节目' },
               { id: 'search' as const, label: '目录搜索' },
               { id: 'identity' as const, label: '重复节目' },
               { id: 'downloads' as const, label: '下载管理' },
@@ -404,7 +407,6 @@ export function Management({
       )}
       <SettingsLayout
         title="管理中心"
-        description="集中管理音乐库、播客与服务器。"
         categories={groups}
         selected={group?.id ?? null}
         onSelect={(id) => setTab(id ? groups.find((item) => item.id === id)!.tabs[0].id : 'home')}
@@ -464,7 +466,6 @@ export function Management({
                     ))}
                   </section>
                   <section className="management-card">
-                    <span className="eyebrow">YOUR LIBRARY</span>
                     <h2>{overview.preferences.name}</h2>
                     {canOwner && (
                       <>
@@ -683,6 +684,9 @@ export function Management({
                 </section>
               )}
               {tab === 'libraries' && canOwner && <MusicLibraryManager />}
+              {tab === 'programmes' && canPodcastAdmin && (
+                <PodcastProgrammesAdmin canCleanResources={canOwner} />
+              )}
               {tab === 'catalog' && canOwner && <PodcastCatalogSettings />}
               {tab === 'search' && canPodcastAdmin && <PodcastSearchSettings />}
               {tab === 'identity' && canPodcastAdmin && <PodcastIdentityAdmin />}

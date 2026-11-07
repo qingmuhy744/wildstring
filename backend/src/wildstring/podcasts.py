@@ -1311,7 +1311,13 @@ class PodcastManager:
                     podcast_id,
                 ),
             )
+            new_episode_ids: list[str] = []
             for ep in parsed["episodes"]:
+                existing = conn.execute(
+                    "SELECT 1 FROM podcast_episodes WHERE podcast_id=? AND guid=?",
+                    (podcast_id, ep["guid"]),
+                ).fetchone()
+                episode_id = str(uuid4())
                 conn.execute(
                     """
                     INSERT INTO podcast_episodes (
@@ -1329,7 +1335,7 @@ class PodcastManager:
                         season_number = excluded.season_number
                     """,
                     (
-                        str(uuid4()),
+                        episode_id,
                         podcast_id,
                         ep["guid"],
                         ep["title"],
@@ -1342,6 +1348,12 @@ class PodcastManager:
                         updated_time,
                     ),
                 )
+                if existing is None:
+                    new_episode_ids.append(episode_id)
+            if new_episode_ids:
+                from wildstring.podcast_queue import distribute_new_episodes
+
+                distribute_new_episodes(conn, podcast_id, new_episode_ids)
         self.auto_downloads.reconcile_programme(podcast_id)
         return True
 
@@ -1991,7 +2003,8 @@ class PodcastManager:
                     p.last_updated_at, p.created_at,
                     COUNT(e.id) AS total_episodes,
                     SUM(CASE WHEN e.id IS NOT NULL AND COALESCE(pr.completed, 0) = 0 THEN 1 ELSE 0 END) AS unplayed_episodes,
-                    SUM(CASE WHEN e.download_status = 'downloaded' THEN 1 ELSE 0 END) AS downloaded_episodes
+                    SUM(CASE WHEN e.download_status = 'downloaded' THEN 1 ELSE 0 END) AS downloaded_episodes,
+                    (SELECT COUNT(*) FROM podcast_follows pf WHERE pf.podcast_id = p.id) AS follower_count
                 FROM podcasts p
                 LEFT JOIN podcast_publishers pub ON pub.id=p.publisher_id
                 LEFT JOIN podcast_episodes e ON e.podcast_id = p.id
@@ -2023,6 +2036,9 @@ class PodcastManager:
                     "storage_path": podcast_folder_name(r["id"]),
                     **publisher_fields(r),
                     "followed": r["id"] in following,
+                    **(
+                        {"follower_count": int(r["follower_count"] or 0)} if visible is None else {}
+                    ),
                 }
                 for r in rows
                 if visible is None or r["id"] in visible
@@ -2252,6 +2268,9 @@ def podcast_router(
         add_and_follow=lambda user, url: add_and_follow(user, PodcastCreateRequest(feed_url=url)),
         require_add=lambda user: catalog_policy.require_add(user, {"feed_url"}),
     )
+    from wildstring import podcast_queue
+
+    podcast_queue.routes(router, auth, manager.database)
 
     @router.get("/publishers", response_model=list[PublisherSummary])
     def list_publishers(user: Annotated[dict, Depends(auth.require_session)]):

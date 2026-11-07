@@ -11,6 +11,8 @@ struct MacFullscreenPlayer: View {
     @State private var showLyrics = true
     @State private var showQueue = false
     @State private var timeline: LyricTimeline?
+    @State private var lyricPhase: LyricPhase = .ready
+    @State private var lyricAttempt = 0
     @State private var palette = MacArtworkPalette.neutral
     @Environment(\.colorScheme) private var colorScheme
 
@@ -93,7 +95,7 @@ struct MacFullscreenPlayer: View {
                 session.showFullscreen = false
             }
         }
-        .task(id: playback.currentItem?.trackID) { await load() }
+        .task(id: "\(playback.currentItem?.trackID ?? "")-\(lyricAttempt)") { await load() }
         .onAppear {
             if isPodcast {
                 showQueue = false
@@ -185,7 +187,10 @@ struct MacFullscreenPlayer: View {
                             .padding(20)
                             .background(ink.opacity(0.035), in: RoundedRectangle(cornerRadius: 18))
                     } else if showLyrics {
-                        MacLyricScroll(playback: playback, timeline: timeline, empty: "这首歌还没有歌词", prominent: true)
+                        MacLyricScroll(
+                            playback: playback, timeline: timeline, empty: "这首歌还没有歌词",
+                            prominent: true, phase: lyricPhase, onRetry: { lyricAttempt += 1 }
+                        )
                             .id(item.trackID)
                     } else {
                         VStack(spacing: 12) {
@@ -306,15 +311,26 @@ struct MacFullscreenPlayer: View {
 
     private func load() async {
         timeline = nil
-        guard let item = playback.currentItem, !isPodcast else { return }
+        guard let item = playback.currentItem, !isPodcast else {
+            lyricPhase = .ready
+            return
+        }
+        lyricPhase = .loading
         if let data = try? await client.authorizedData(path: "api/v1/tracks/\(item.trackID)/cover"),
            !Task.isCancelled {
             palette = MacArtworkPalette.extract(data)
         } else if !Task.isCancelled {
             palette = .neutral
         }
-        if let lyrics = try? await client.lyrics(trackID: item.trackID), !Task.isCancelled {
+        do {
+            let lyrics = try await client.lyrics(trackID: item.trackID)
+            guard !Task.isCancelled else { return }
             timeline = LyricTimeline(lyrics: lyrics)
+            lyricPhase = .ready
+        } catch {
+            guard !Task.isCancelled else { return }
+            timeline = nil
+            lyricPhase = .failed
         }
     }
 }

@@ -22,6 +22,7 @@ import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
@@ -29,6 +30,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.Velocity
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.wildstring.app.R
 import com.wildstring.app.data.PodcastEpisode
 import com.wildstring.app.data.friendlyError
 import kotlinx.coroutines.CancellationException
@@ -192,6 +194,18 @@ private fun PodcastPlayerControls(vm: MusicViewModel, state: MusicState, duratio
             }
             IconButton({ vm.seek((position + 30_000).let { if (duration > 0) it.coerceAtMost(duration) else it }) }) { Icon(Icons.Default.Forward30, "前进 30 秒") }
             IconButton(onQueue) { Icon(Icons.AutoMirrored.Filled.QueueMusic, "播放队列") }
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
+            TextButton({ vm.skipPodcastEpisode(-1) }) {
+                Icon(Icons.Default.SkipPrevious, stringResource(R.string.podcast_previous_episode), Modifier.size(18.dp))
+                Spacer(Modifier.width(6.dp))
+                Text(stringResource(R.string.podcast_previous_episode))
+            }
+            TextButton({ vm.skipPodcastEpisode(1) }) {
+                Text(stringResource(R.string.podcast_next_episode))
+                Spacer(Modifier.width(6.dp))
+                Icon(Icons.Default.SkipNext, stringResource(R.string.podcast_next_episode), Modifier.size(18.dp))
+            }
         }
         val progressMessage by vm.podcastProgress.message.collectAsStateWithLifecycle()
         val displayMessage = state.playbackError ?: progressMessage

@@ -39,18 +39,24 @@ API 默认 `127.0.0.1:18780`，React 默认 `127.0.0.1:18781`。开发配置开�
 
 工具缓存默认位于忽略的 `.cache/`。运行 Git hook 前先完成一次 `make setup`。
 
-## 检查
+## 检查与多端测试
 
-- `make check`：检查已跟踪及新增文件；含格式、语法、密钥、文件大小、Ruff、Bandit 与前端类型检查。
+- `make check`：检查已跟踪及新增文件；含格式、语法、密钥、文件大小、Ruff、Bandit、前端类型、多语言键对齐，以及 **Web 过期测试断言静态扫描**（自动拦截已从源码/语言包删除但仍残留在 `frontend/web/tests/*.spec.ts` 中的旧文案断言）。
+- `make test-affected` / `make test-affected-desktop`：根据当前 `git diff` 自动反查受影响的后端 `pytest` 用例与前端 `Playwright` 用例，并按各自所需环境变量分组执行（避免只跑单个 spec 漏掉跨文件回归，无需每次等待全量 `make ci`）。
 - `make test`：隔离的后端测试，不使用其他项目的数据库或模型服务。
-- `make test-large-web`：257 首真实合成专辑，检查 API 第二页收齐队列与连续播放。
+- `make test-agent` / `make test-network` / `make test-research`：验证 Agent 受控工具、草案、通知、诊断、MCP 协议、出站代理与模型检索摘要。
+- `make test-native-plugin` / `make source-plugins`：编译测试 Nuitka 原生插件扩展与独立社区数据源 ZIP 包。
+- `make test-large-web` / `make test-browse-web` / `make test-catalog-web` / `make test-podcast-web` / `make test-libraries-web`：分别验证大曲库分页续播、拼音跳转、多碟排序、播客目录与多库权限的真实浏览器端到端回归。
 - `make build-web`：TypeScript 检查与 Vite 构建。
-- `make ci`：提交检查、后端测试、Web 构建、桌面/手机 Chromium 集成测试和 Python 锁文件核验。首次先 `make browser-install`。
+- `make ci`：提交检查、插件打包、依赖审计、后端测试、Web 构建、全部 Chromium 浏览器端到端测试和 Python 锁文件核验。首次先 `make browser-install`。
+- `make android-ci`：使用 JDK 21 编译、单测、Lint 检查并打包原生 Android APK（`frontend/android`）。
+- `make macos-build` / `make macos-test` / `make macos-dmg`：通过 XcodeGen 生成并构建、测试、打包原生 macOS 客户端（`frontend/macos`）。
+- `make ios-test` / `make ios-build`：运行 `WildStringKit` 核心包单测并构建原生 iOS 模拟器包（`frontend/ios`）。
 - `make format`：主动格式化 Python 与前端源码。
 
 `make test-web` 可单独运行浏览器集成测试：默认使用 18782 端口（可用 `WILDSTRING_WEB_TEST_PORT=18783 make test-web` 避开其他测试服务），临时创建独立数据库与合成音频；不读取 `.env` 的个人曲库。失败截图与播放预览输出到已忽略的 `artifacts/`。GitHub Actions 安装 Chromium 系统依赖后执行同一组 `make ci`。
 
-更新 Python 依赖后运行 `uv lock --project backend`。npm 依赖在 `frontend/web` 更新并提交锁文件。历史原始讨论与已有 LICENSE 不参与空白自动改写。
+更新 Python 依赖后运行 `uv lock --project backend`。npm 依赖在 `frontend/web` 更新并提交锁文件。Android 依赖用 `make android-locks` 刷新 `gradle.lockfile` 与 `verification-metadata.xml`；注意 Gradle 9 在 macOS 上生成时只写入本平台的 aapt2 校验（`--write-verification-metadata` 已不支持指定 linux 等平台），需从 Google 官方 Maven 下载对应 `aapt2-<版本>-linux.jar`、计算 sha256 并手动补入 `com.android.tools.build:aapt2` 组件，否则 linux CI 的依赖校验与 CodeQL 会失败。历史原始讨论与已有 LICENSE 不参与空白自动改写。
 
 ## Docker
 
@@ -71,15 +77,15 @@ make docker-down
 
 播客 RSS、封面和音频只连接公网地址。宿主机或容器的 DNS 若由 Clash/mihomo 的 fake-ip 模式接管（域名解析到 `198.18.0.0/15`），订阅会返回 `remote_url_fake_ip`。优先在 `HTTP_PROXY` / `HTTPS_PROXY` 或网页联网设置中配置出站代理，此时目标域名由代理解析；无法配置代理时可在 `.env` 设置 `WILDSTRING_PODCAST_ALLOW_FAKE_IP=true` 并重启。该开关只放行 DNS 解析得到的 `198.18.0.0/15`，URL 中直接写出的 IP 和其他私有、回环、链路本地地址仍拒绝；详见 [远程播客访问](../contracts/storage-and-podcast-resources.md#远程播客访问)。
 
-运行目录保存 `wildstring.sqlite3` 和扫描锁，SQLite 使用 WAL。数据库启动时逐步迁移到 v14（含歌词覆盖、本地用户、Host 白名单、转码缓存、元数据来源、跨设备快照与个人推荐），保留原曲库与曲目 ID；不支持更高版本数据库自动降级。备份应使用 SQLite backup API 获取一致快照，不在运行时仅复制主文件并遗漏 WAL。
+运行目录保存 `wildstring.sqlite3` 和扫描锁，SQLite 使用 WAL。数据库启动时逐步迁移到最新 schema（当前 `SCHEMA_VERSION = 48`，覆盖多音乐库与库授权、四角色用户、歌词覆盖与洗版扫描、Host 白名单、转码缓存、元数据来源与发行锁定、播客订阅/目录搜索/共享清理、跨设备快照、个人推荐、Agent/MCP 草案与诊断日志等），保留原曲库与曲目 ID；不支持更高版本数据库自动降级。备份应使用 SQLite backup API 获取一致快照，不在运行时仅复制主文件并遗漏 WAL。
 
 首次启动后执行 `make docker-admin`，或仅首次通过 `.env` 中 `WILDSTRING_ADMIN_PASSWORD` 初始化管理员。现有管理员不会被启动配置覆盖；重置密码会撤销目标用户全部会话。升级前 Cookie 配置保留。新部署可在管理中心 → 服务器 → 访问设置选择 HTTP + HTTPS 或仅 HTTPS；新策略按访问协议自动设置 Secure。页面保存值优先于 `WILDSTRING_CONNECTION_POLICY` / `WILDSTRING_SERVER_NAME`，清除覆盖后恢复环境默认。TLS 反向代理须用 `WILDSTRING_TRUSTED_PROXIES` 明确配置代理地址或网段，应用不默认信任转发协议头；不要额外启用 Uvicorn 的代理头处理。
 
-网页已提供登录、曲库搜索与原文件播放；详见 [接口与播放边界](../contracts/playback-auth-api.md)。艺人浏览、普通/规则歌单、收藏和收听统计见 [个人曲库](../contracts/personal-library.md)。封面、歌曲/专辑视图和本地歌词已接入，见 [本地资源规则](../contracts/local-library-assets.md)。管理页与 AI API 连接配置见 [管理接口](../contracts/library-management.md)。已提供 WAV/CUE 到 FLAC 的导入转换；批量整理、已有文件标签写回与 Agent 尚未实现，健康检查不代表完整 MVP 完成。写回方案见 [服务端修复](architecture/metadata-repair.md)。
+网页及各原生客户端已提供登录、多库切换、曲库搜索、原文件播放、播客订阅与探索、每日推荐及 AI 音乐助手；详见 [接口与播放边界](../contracts/playback-auth-api.md)、[个人曲库](../contracts/personal-library.md)、[本地资源规则](../contracts/local-library-assets.md)、[管理接口](../contracts/library-management.md) 与 [Agent 平台契约](../contracts/agent-platform.md)。已提供 WAV/CUE 到 FLAC 的导入转换及专辑批量差异核对；已有文件标签的物理写回仍后置为显式操作（详见 [服务端修复](architecture/metadata-repair.md)）。
 
 ## 发布镜像
 
-在 `.env` 设置实际已发布的 `WILDSTRING_IMAGE=ghcr.io/qingmuhy744/wildstring:v0.3.0` 后执行 `make docker-pull`，会拉取并启动，不从本地源码构建。私有 GHCR 包需要先完成 Docker 登录。
+在 `.env` 设置实际已发布的 `WILDSTRING_IMAGE=ghcr.io/qingmuhy744/wildstring:v0.8.7` 后执行 `make docker-pull`，会拉取并启动，不从本地源码构建。私有 GHCR 包需要先完成 Docker 登录。
 
 目前仅配置本机部署，未接入远程服务器自动更新。
 

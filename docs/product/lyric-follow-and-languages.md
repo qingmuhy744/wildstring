@@ -47,3 +47,7 @@ Android 和 Web 在原文下显示译文；有数据时提供译文、音译开�
 - 最终负偏移修复后，语言与 ZIP 插件接口回归9项、`make check` 再次通过。
 - `make android-ci` 通过：58项 JVM 单元测试、Debug／Release 构建及 Lint；模拟器歌词专项10项通过。另完成真实候选显示测试和合成歌词截图检查。
 - 最终代码使用独立本地 Compose 项目执行 `make docker-up docker-smoke` 通过，验证 Web、FFmpeg、Chromaprint、非 root 和只读音乐挂载；测试容器已停止，数据卷保留。
+
+## 跨端视图契约
+
+歌词的定位、高亮与跟随恢复规则统一见[歌词视图跨端契约](../../contracts/lyric-view.md)。本页保留 Android 两段滚动修复与双语显示的历史实现和验证记录；契约第 6 节列出各端当前实现状态，文档中的计划不代表已实现。

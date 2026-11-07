@@ -149,8 +149,7 @@ export function SystemDiagnostics() {
   return (
     <section className="workspace-page" aria-label="系统诊断">
       <WorkspaceHeader
-        eyebrow="SEE WHAT HAPPENED"
-        title="找得到，才修得好。"
+        title="诊断"
         description="按诊断编号查看同一次操作。日志只展示受控摘要，修改审计独立保留。"
       >
         <RefreshWorkspace

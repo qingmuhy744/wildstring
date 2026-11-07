@@ -82,7 +82,6 @@ export function PersonalSettings({
     <main className="library personal-settings">
       <SettingsLayout
         title={t('settings.personal')}
-        description={t('settings.personalDescription')}
         categories={categories}
         selected={section}
         onSelect={(id) => setSection(id as PersonalSection | null)}

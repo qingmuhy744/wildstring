@@ -1,6 +1,6 @@
 import { trackUnavailableReason } from './api';
 import { hints } from './help-content';
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import {
   api,
   eventId,
@@ -44,12 +44,22 @@ import type { MusicLibrary } from './music-libraries';
 import { GainControls, usePlaybackGain } from './playback-gain';
 import type { PodcastDetail } from './podcasts';
 import {
-  continuePodcastQueue,
+  nextPodcastPreview,
+  podcastAutoContinues,
   readPodcastPreference,
   savePodcastPreference,
   defaultPodcastPreference,
   type PodcastPreference,
 } from './podcast-continuation';
+import {
+  getPodcastQueue,
+  getQueuePreferences,
+  putPodcastQueue,
+  queueConflictVersion,
+  resolveQueuedTracks,
+  saveShowPlaybackPreference,
+  type RemoteQueueItem,
+} from './podcast-remote';
 
 export function usePlayer(userId: string) {
   const saved = useRef(readPlayback(userId));
@@ -201,11 +211,25 @@ export function usePlayer(userId: string) {
     'loading',
   );
   const dismissedEpisodes = useRef(new Set<string>());
+  const [dismissedTick, setDismissedTick] = useState(0);
+  const remoteQueue = useRef({
+    version: 0,
+    items: [] as RemoteQueueItem[],
+    loaded: false,
+    hold: false,
+  });
+  const queueLoad = useRef<Promise<void> | null>(null);
+  const commitChain = useRef(Promise.resolve());
+  const preferenceSave = useRef<Promise<unknown>>(Promise.resolve());
+  const conflictVersion = useRef<number | null>(null);
+  const [podcastSync, setPodcastSync] = useState<'ready' | 'error' | 'conflict'>('ready');
+  const preferenceRev = useRef(0);
   playbackRateRef.current = podcastPlaybackRate;
   useEffect(() => {
     const show = current?.podcast_id;
     setPodcastDetail(null);
     if (!show) return;
+    const revision = ++preferenceRev.current;
     setPodcastPreference(readPodcastPreference(userId, show));
     setPodcastQueueStatus('loading');
     const controller = new AbortController();
@@ -218,28 +242,54 @@ export function usePlayer(userId: string) {
       .catch(() => {
         if (!controller.signal.aborted) setPodcastQueueStatus('error');
       });
+    void getQueuePreferences()
+      .then((prefs) => {
+        if (controller.signal.aborted || revision !== preferenceRev.current) return;
+        const saved = prefs.shows[show];
+        if (!saved) return;
+        const value: PodcastPreference = {
+          order: saved.auto_continue ? saved.order : 'off',
+          skipCompleted: saved.skip_completed,
+          autoContinue: saved.auto_continue && saved.order !== 'off',
+        };
+        savePodcastPreference(userId, show, value);
+        setPodcastPreference(value);
+      })
+      .catch(() => {});
     return () => controller.abort();
   }, [current?.id, current?.podcast_id, userId]);
-  useEffect(() => {
-    if (!podcastDetail || podcastQueueStatus !== 'ready') return;
-    setQueue((items) =>
-      continuePodcastQueue(
-        items,
-        index,
-        podcastDetail,
-        podcastPreference,
-        dismissedEpisodes.current,
-      ),
+  const podcastPreview = useMemo(() => {
+    if (!current?.podcast_id || podcastDetail?.podcast.id !== current.podcast_id) return [];
+    const exclude = new Set<string>();
+    for (const track of queue) {
+      if (track.podcast_id && track.id !== current.id) exclude.add(track.id);
+    }
+    return nextPodcastPreview(
+      current.id,
+      podcastDetail,
+      podcastPreference,
+      dismissedEpisodes.current,
+      {
+        listOrder: current.podcast_list_order,
+        excludeIds: exclude,
+      },
     );
-  }, [podcastDetail, podcastPreference, podcastQueueStatus, index, queue]);
+  }, [current, podcastDetail, podcastPreference, queue, dismissedTick]);
   const playbackGain = usePlaybackGain(audio, current?.id, userId, volume);
 
   const saveRef = useRef(() => {});
   saveRef.current = () => {
-    if (queue.length)
+    const music = queue.filter((track) => !track.podcast_id);
+    const tracks = current?.podcast_id ? [current] : music;
+    if (tracks.length)
       savePlayback(userId, {
-        tracks: queue,
-        index,
+        tracks,
+        index: current?.podcast_id
+          ? 0
+          : Math.max(
+              0,
+              tracks.findIndex((track) => track.id === current?.id),
+            ),
         position: offset.current + (audio.current?.currentTime || position),
         quality,
         volume,
@@ -475,7 +525,7 @@ export function usePlayer(userId: string) {
     const begin = (position: number) => {
       podcastTrack.current = track;
       tracker.current.start(track, element);
-      if (tracks !== queue) dismissedEpisodes.current.clear();
+      if (!automatic && tracks !== queue) dismissedEpisodes.current.clear();
       setQueue(tracks);
       setIndex(target);
       void loadSource(track, position, autoplay);
@@ -546,6 +596,96 @@ export function usePlayer(userId: string) {
         body: JSON.stringify({ event_id: eventId(), track_id: current.id, action }),
       }).catch(() => {});
   }
+  function ensureRemoteQueue() {
+    if (remoteQueue.current.loaded) return Promise.resolve();
+    if (!queueLoad.current) {
+      queueLoad.current = getPodcastQueue()
+        .then((remote) => {
+          if (!remoteQueue.current.loaded) {
+            remoteQueue.current.version = remote.version;
+            remoteQueue.current.items = remote.items;
+            remoteQueue.current.loaded = true;
+          }
+        })
+        .catch((error) => {
+          queueLoad.current = null;
+          throw error;
+        });
+    }
+    return queueLoad.current;
+  }
+  useEffect(() => {
+    void ensureRemoteQueue().catch(() => {});
+  }, [userId]);
+
+  function commitQueue(items: RemoteQueueItem[]) {
+    remoteQueue.current.items = items;
+    remoteQueue.current.loaded = true;
+    if (remoteQueue.current.hold) {
+      setPodcastSync('conflict');
+      return;
+    }
+    const task = commitChain.current.then(async () => {
+      while (!remoteQueue.current.hold) {
+        const latest = remoteQueue.current.items;
+        const snapshot = JSON.stringify(latest);
+        try {
+          const saved = await putPodcastQueue(remoteQueue.current.version, latest);
+          remoteQueue.current.version = saved.version;
+          if (JSON.stringify(remoteQueue.current.items) !== snapshot) continue;
+          remoteQueue.current.items = saved.items;
+          setPodcastSync('ready');
+          return;
+        } catch (error) {
+          const version = queueConflictVersion(error);
+          if (version !== undefined) {
+            conflictVersion.current = version;
+            remoteQueue.current.hold = true;
+            setPodcastSync('conflict');
+            return;
+          }
+          setPodcastSync('error');
+          return;
+        }
+      }
+    });
+    commitChain.current = task.then(
+      () => undefined,
+      () => undefined,
+    );
+  }
+
+  function audibleFromItems(items: RemoteQueueItem[], tracks: Track[]) {
+    const known = new Map<string, Track>();
+    for (const track of accessQueue.current.queue) {
+      const id = episodeId(track.id);
+      if (id) known.set(id, track);
+    }
+    for (const track of tracks) {
+      const id = episodeId(track.id);
+      if (id) known.set(id, track);
+    }
+    return items.flatMap((item) => {
+      const track = known.get(item.episode_id);
+      return track ? [{ ...track, podcast_queue_origin: item.origin }] : [];
+    });
+  }
+
+  function applyAudible(items: RemoteQueueItem[], tracks: Track[]) {
+    const audible = audibleFromItems(items, tracks);
+    const { queue: previous, index: at } = accessQueue.current;
+    const currentTrack = previous[at];
+    if (currentTrack?.podcast_queue_origin === 'auto') {
+      setQueue([currentTrack, ...audible]);
+      setIndex(0);
+      return;
+    }
+    if (!currentTrack?.podcast_id) return;
+    const found = audible.findIndex((track) => track.id === currentTrack.id);
+    setQueue(found >= 0 ? audible : [currentTrack, ...audible]);
+    setIndex(found >= 0 ? found : 0);
+  }
+
   function step(direction: number, automatic = false) {
     if (!queue.length) return;
     let target = index + direction;
@@ -553,6 +693,42 @@ export function usePlayer(userId: string) {
       setSleep(null);
       desiredPlay.current = false;
       audio.current?.pause();
+      return;
+    }
+    if (current?.podcast_id && direction > 0) {
+      const later = queue.slice(index + 1).filter((track) => track.podcast_queue_origin !== 'auto');
+      if (later.length && !automatic) {
+        start(queue, index + 1, undefined, true, false);
+        return;
+      }
+      const finished = episodeId(current.id);
+      if (finished && current.podcast_queue_origin !== 'auto') {
+        void commitQueue(remoteQueue.current.items.filter((item) => item.episode_id !== finished));
+      }
+      if (later.length) {
+        const without = queue.filter((_, position) => position !== index);
+        const at = without.findIndex((track) => track.id === later[0].id);
+        start(without, at < 0 ? 0 : at, undefined, true, true);
+        return;
+      }
+      const upcoming = nextPodcastPreview(
+        current.id,
+        podcastDetail,
+        podcastPreference,
+        dismissedEpisodes.current,
+        {
+          listOrder: current.podcast_list_order,
+          excludeIds: new Set(
+            remoteQueue.current.items.map((item) => `podcast_ep_${item.episode_id}`),
+          ),
+        },
+      )[0];
+      if (upcoming && podcastAutoContinues(podcastPreference))
+        start([{ ...upcoming, podcast_queue_origin: 'auto' }], 0, undefined, true, true);
+      return;
+    }
+    if (current?.podcast_id && direction < 0) {
+      if (index > 0) start(queue, index - 1, undefined, true, automatic);
       return;
     }
     if (automatic && mode === 'repeat_one' && !current?.podcast_id) target = index;
@@ -578,11 +754,76 @@ export function usePlayer(userId: string) {
     }
   }
 
+  async function playPodcastEpisode(track: Track, autoplay = true) {
+    const id = episodeId(track.id);
+    if (!id) {
+      start([track], 0, undefined, autoplay);
+      return;
+    }
+    try {
+      await ensureRemoteQueue();
+    } catch {
+      setPodcastSync('error');
+    }
+    const existing = remoteQueue.current.items.find((item) => item.episode_id === id);
+    const rest = remoteQueue.current.items.filter((item) => item.episode_id !== id);
+    const items: RemoteQueueItem[] = [
+      { episode_id: id, origin: existing?.origin ?? 'manual' },
+      ...rest,
+    ];
+    const played = { ...track, podcast_queue_origin: existing?.origin ?? 'manual' } as Track;
+    let restTracks: Track[] = [];
+    if (rest.length) {
+      try {
+        restTracks = await resolveQueuedTracks(rest);
+      } catch {
+        setPodcastSync('error');
+      }
+    }
+    start([played, ...restTracks], 0, undefined, autoplay);
+    void commitQueue(items);
+  }
+
+  async function queuePodcast(tracks: Track[], next: boolean) {
+    try {
+      await ensureRemoteQueue();
+    } catch {
+      setPodcastSync('error');
+    }
+    const audible = accessQueue.current;
+    const currentId = episodeId(audible.queue[audible.index]?.id);
+    let items = [...remoteQueue.current.items];
+    const queued: Track[] = [];
+    for (const track of tracks) {
+      const id = episodeId(track.id);
+      if (!id || id === currentId) continue;
+      const manual = { ...track, podcast_queue_origin: 'manual' as const };
+      queued.push(manual);
+      items = items.filter((item) => item.episode_id !== id);
+      const entry = { episode_id: id, origin: 'manual' as const };
+      if (next) {
+        const at = currentId ? items.findIndex((item) => item.episode_id === currentId) : -1;
+        items.splice(at >= 0 ? at + 1 : 0, 0, entry);
+      } else items.push(entry);
+    }
+    if (items.length > QUEUE_LIMIT) {
+      setError(`播放队列最多 ${QUEUE_LIMIT} 首。`);
+      return;
+    }
+    if (audible.queue[audible.index]?.podcast_id || audible.index < 0) applyAudible(items, queued);
+    if (audible.index < 0 && next && queued[0]) start([queued[0]], 0);
+    void commitQueue(items);
+  }
+
   function addToQueue(tracks: Track[], next = false) {
     tracks = tracks.filter((track) => !trackUnavailableReason(track));
     if (!tracks.length) {
       setError('没有可播放的歌曲，请恢复文件并重新扫描后重试。');
       return false;
+    }
+    if (tracks.every((track) => track.podcast_id)) {
+      void queuePodcast(tracks, next);
+      return true;
     }
     if (queue.length + tracks.length > QUEUE_LIMIT) {
       setError(`播放队列最多 ${QUEUE_LIMIT} 首。`);
@@ -594,15 +835,8 @@ export function usePlayer(userId: string) {
     }
     setQueue((items) => {
       if (items.length + tracks.length > QUEUE_LIMIT) return items;
-      const autoAt = items.findIndex(
-        (item, i) => i > index && item.podcast_queue_origin === 'auto',
-      );
-      const at = next ? index + 1 : autoAt < 0 ? items.length : autoAt;
-      return [
-        ...items.slice(0, at),
-        ...tracks.map((track) => ({ ...track, podcast_queue_origin: undefined })),
-        ...items.slice(at),
-      ];
+      const at = next ? index + 1 : items.length;
+      return [...items.slice(0, at), ...tracks, ...items.slice(at)];
     });
     return true;
   }
@@ -807,10 +1041,60 @@ export function usePlayer(userId: string) {
     playbackRate,
     podcastPreference,
     podcastQueueStatus,
+    podcastPreview,
+    podcastSync,
+    retryPodcastQueue: () => {
+      if (remoteQueue.current.hold) return;
+      void commitQueue(remoteQueue.current.items);
+    },
+    useServerPodcastQueue: async () => {
+      try {
+        const remote = await getPodcastQueue();
+        remoteQueue.current = {
+          version: remote.version,
+          items: remote.items,
+          loaded: true,
+          hold: false,
+        };
+        conflictVersion.current = null;
+        const tracks = remote.items.length ? await resolveQueuedTracks(remote.items) : [];
+        const { queue: audible, index: at } = accessQueue.current;
+        const playing = audible[at];
+        if (playing?.podcast_id) {
+          const found = tracks.findIndex((track) => track.id === playing.id);
+          if (found >= 0) {
+            setQueue(tracks);
+            setIndex(found);
+          } else {
+            setQueue([{ ...playing, podcast_queue_origin: 'auto' }, ...tracks]);
+            setIndex(0);
+          }
+        }
+        setPodcastSync('ready');
+      } catch {
+        setPodcastSync('error');
+      }
+    },
+    overwritePodcastQueue: async () => {
+      const version = conflictVersion.current ?? (await getPodcastQueue()).version;
+      remoteQueue.current.version = version;
+      remoteQueue.current.hold = false;
+      await commitQueue(remoteQueue.current.items);
+    },
+    dismissPodcastPreview: (id: string) => {
+      dismissedEpisodes.current.add(id);
+      setDismissedTick((value) => value + 1);
+    },
     setPodcastPreference: (value: PodcastPreference) => {
       if (!current?.podcast_id) return;
-      savePodcastPreference(userId, current.podcast_id, value);
-      setPodcastPreference(value);
+      preferenceRev.current += 1;
+      const next = { ...value, autoContinue: value.order !== 'off' };
+      savePodcastPreference(userId, current.podcast_id, next);
+      setPodcastPreference(next);
+      const show = current.podcast_id;
+      preferenceSave.current = preferenceSave.current
+        .then(() => saveShowPlaybackPreference(show, next))
+        .catch(() => setPodcastSync('error'));
     },
     changeQuality,
     setPlaybackRate,
@@ -837,6 +1121,7 @@ export function usePlayer(userId: string) {
         ? `AAC ${plan.output.bitrate_kbps} kbps`
         : '原音直放',
     start,
+    playPodcastEpisode,
     step,
     seek,
     toggle,
@@ -850,19 +1135,37 @@ export function usePlayer(userId: string) {
       if (from < 0 || to < 0 || from >= queue.length || to >= queue.length || from === to) return;
       const next = [...queue];
       next.splice(to, 0, next.splice(from, 1)[0]);
-      // Explicit reordering takes ownership of the moved automatic entry.
-      if (next[to].podcast_queue_origin === 'auto')
-        next[to] = { ...next[to], podcast_queue_origin: undefined };
+      if (next[to].podcast_queue_origin === 'rule')
+        next[to] = { ...next[to], podcast_queue_origin: 'manual' };
       setQueue(next);
       if (from === index) setIndex(to);
       else if (from < index && to >= index) setIndex(index - 1);
       else if (from > index && to <= index) setIndex(index + 1);
+      if (next.some((track) => track.podcast_id)) {
+        const items: RemoteQueueItem[] = [];
+        for (const track of next) {
+          const id = episodeId(track.id);
+          if (!id || track.podcast_queue_origin === 'auto') continue;
+          items.push({
+            episode_id: id,
+            origin: track.podcast_queue_origin === 'rule' ? 'rule' : 'manual',
+          });
+        }
+        void commitQueue(items);
+      }
     },
     enqueue: (track: Track) => addToQueue([track]),
     remove: (target: number) => {
       if (target === index) return;
-      if (queue[target]?.podcast_queue_origin === 'auto')
-        dismissedEpisodes.current.add(queue[target].id);
+      const track = queue[target];
+      if (track?.podcast_queue_origin === 'auto') {
+        dismissedEpisodes.current.add(track.id);
+        setDismissedTick((value) => value + 1);
+      } else if (track?.podcast_id) {
+        const id = episodeId(track.id);
+        if (id)
+          void commitQueue(remoteQueue.current.items.filter((item) => item.episode_id !== id));
+      }
       setQueue((items) => items.filter((_, i) => i !== target));
       if (target < index) setIndex(index - 1);
     },
@@ -1109,7 +1412,12 @@ export function PlaybackControls({ player }: { player: Player }) {
           className="icon-button transport-track-button"
           onClick={() => player.step(1)}
           disabled={
-            !current || (index >= queue.length - 1 && (podcast || player.mode === 'sequential'))
+            !current ||
+            (index >= queue.length - 1 &&
+              (podcast
+                ? !podcastAutoContinues(player.podcastPreference) ||
+                  player.podcastPreview.length === 0
+                : player.mode === 'sequential'))
           }
           aria-label={podcast ? '下一集' : '下一首'}
         >

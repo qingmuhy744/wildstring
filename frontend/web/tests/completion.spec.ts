@@ -43,7 +43,7 @@ async function offline(context: BrowserContext, page: Page) {
   });
   await context.setOffline(true);
   await page.reload();
-  await expect(page.getByRole('heading', { name: '没网，也有回响。' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '离线音乐' })).toBeVisible();
 }
 
 test('完整集合超过50首，失败原子保留队列与音频，上限明确', async ({ page }) => {
@@ -348,7 +348,7 @@ test('离线暂停、Range续传、容量失败与重试', async ({ page }) => {
   release();
   await expect(page.getByLabel('离线音乐', { exact: true })).toContainText('已暂停');
   await page.unroute(`**/api/v1/tracks/${source.id}/stream`);
-  await page.getByRole('button', { name: '下载设置与自动下载歌单' }).click();
+  await page.getByRole('button', { name: '下载设置' }).click();
   await page.getByLabel('离线容量上限', { exact: true }).fill('100');
   await page.getByLabel('离线容量上限', { exact: true }).blur();
   await section(page, '离线音乐');
@@ -423,7 +423,7 @@ test('网卡在线但服务不可达仍可离线重开及播放，5xx不绕过',
   });
   await page.route('**/api/**', (route) => route.abort('failed'));
   await page.reload();
-  await expect(page.getByRole('heading', { name: '没网，也有回响。' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '离线音乐' })).toBeVisible();
   expect(await page.evaluate(() => navigator.onLine)).toBe(true);
   await page.getByRole('button', { name: '离线播放 晴天测试曲', exact: true }).click();
   await expect.poll(async () => (await audio(page)).source.startsWith('blob:')).toBe(true);

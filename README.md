@@ -95,6 +95,7 @@
 
 ## 近期更新亮点
 
+- **0.8.7**：macOS 全屏播放器毛玻璃抽屉式待播队列（宽屏三栏同屏零遮挡）；macOS 原生自动更新检测与 DMG 一键下载；macOS 远程 FLAC 流媒体缓冲修复；全平台（Web、Android、iOS、macOS）统一曲目封面智能继承与回退；多服务器与线路自定义重命名及彻底删除；Android 客户端崩溃日志收集与诊断导出；四端播客默认自动续播体验对齐。详见[0.8.7 发布说明](docs/releases/v0.8.7.md)。
 - **0.8.6**：Mac 多服务器切换与独立队列；Mac、iOS、Android 多线路连接与本机别名；Web 服务器名称、访问策略和 MCP 接入引导；各端缺失歌曲提示与播放过滤；Web 系统诊断支持日志等级与调用栈采集；Mac 设置与播客倍速、Android 导航与每日推荐、Web 中英双语体验改进。详见[0.8.6 发布说明](docs/releases/v0.8.6.md)，验证与发布状态以对应 Actions 记录为准。
 - **0.8.5**：专辑元数据改动与封面上传链路深度修复；播客共享音频清理清单预览弹窗；Apple 播放内核时长动态监听与进度直达；任务下载卡片深浅双色主题调优；全量 Wiki 文档与最新 Web 视觉截图刷新；依赖与自动化流水线全线加固。详见[0.8.5 发布说明](docs/releases/v0.8.5.md)。
 - **0.8.4**：各端版本统一为 0.8.4，中英双语发布与自动化测试流水线弹性加固。详见[0.8.4 发布说明](docs/releases/v0.8.4.md)。
@@ -116,7 +117,7 @@
 - **🏠 100% 本地与自托管**：导入源严格保持只读，应用独立管理托管副本；所有元数据、向量记忆与收听偏好保存在本地 SQLite，绝不外泄您的本地原音频。
 - **📻 播客与网络电台**：支持订阅 RSS 播客源、后台下载队列与智能零引用垃圾回收，统一跨端播放进度记忆。
 - **📜 极致歌词与沉浸播放**：支持逐行 LRC 滚动歌词、双语歌词对照、动态封面拾色全屏背景，以及拟物化黑胶与磁带播放界面。
-- **📱 全平台覆盖**：除了纯粹高质的 React Web 客户端，还提供了采用 Kotlin / Jetpack Compose 构建的原生 Android 客户端及 iOS 客户端。
+- **📱 全平台覆盖**：除了纯粹高质的 React Web 客户端，还提供了原生 macOS 客户端（SwiftUI + AppKit）、原生 Android 客户端（Kotlin / Jetpack Compose / Media3）及原生 iOS 客户端（SwiftUI）。
 
 ---
 
@@ -201,6 +202,14 @@ scripts/          工程初始化、代码审查与发布打包脚本
 | [commonmark-java](https://github.com/commonmark/commonmark-java)／[react-markdown](https://github.com/remarkjs/react-markdown) | Android 与网页端助手回答的 Markdown 解析与渲染 |
 
 同时衷心感谢 [MusicBrainz](https://musicbrainz.org/)、[Cover Art Archive](https://coverartarchive.org/)、[AcoustID](https://acoustid.org/)、[Last.fm](https://www.last.fm/api) 及 [FFmpeg](https://ffmpeg.org/) 提供的音频与元数据能力支持。
+
+---
+
+## 社区与交流
+
+野弦支持并认可 [LINUX DO](https://linux.do/) 社区，欢迎开放、友善的技术交流与开源分享。
+
+作者的 LINUX DO 账号：[@qingmuhy](https://linux.do/u/qingmuhy/summary)。
 
 ---
 
