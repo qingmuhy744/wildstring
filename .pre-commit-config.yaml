@@ -84,3 +84,9 @@ repos:
         language: system
         files: ^(frontend/web/src/locales/.*\.json|frontend/android/app/src/main/res/values(-zh)?/strings\.xml|frontend/ios/WildString/Localizable\.xcstrings|scripts/check_i18n_keys\.py)$
         pass_filenames: false
+      - id: stale-web-tests
+        name: Web stale test assertions
+        entry: python3 scripts/test_affected.py --scan-only --fail-on-stale
+        language: system
+        files: ^(frontend/web/src/.*\.(tsx?|json)|frontend/web/tests/.*\.spec\.ts|scripts/test_affected\.py)$
+        pass_filenames: false

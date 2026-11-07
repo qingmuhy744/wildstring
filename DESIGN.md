@@ -178,8 +178,11 @@ WildString supports three themes: **Light (Warm Paper — Daylight)**, **Dark (C
 ## 7. Guardrails for UI Generation (Do's & Don'ts)
 
 - **DO** use the exact warm paper (`#F6F3ED`) / olive stone (`#EEEEE5`) / charcoal olive (`#171716`) / terracotta (`#BC5438` & `#E98A6D`) palette across all screens.
-- **DO** keep border radii consistent: `16px` for hero panels, `14px` for cards, `10px–12px` for track/episode rows, `999px` (capsule) for filter chips and primary pill CTAs.
+- **DO** keep border radii consistent: `16px` for hero panels, `14px` for cards, `10px–12px` for track/episode rows, `999px` (capsule) for filter chips and primary pill CTAs. When nesting rounded shapes with `gap < 32px`, follow `inner radius = outer radius - gap` (for values `> 2px`) so concentric corners align cleanly.
+- **DO** maintain strict visual and baseline alignment across side-by-side cards, table columns, and action bars; apply `1px–2px` optical centering adjustments for play triangles inside circles and icons beside text.
+- **DO** ship every interactive surface with complete states (`Hover`, `Active`, visible keyboard `Focus`, layout-matched `Loading`, actionable `Empty`, and inline `Error` / permission feedback). System and error messages must stay calm and specific ("what failed + what to do next"), without exclamation marks or filler copy.
 - **DO** grey out completed podcast episodes and hide their progress bars so only partially played episodes show progress bars.
-- **DON'T** introduce cold blue, neon purple, or pure black (`#000000`) backgrounds.
+- **DON'T** clutter high-frequency listening views with marketing slogans, redundant helper paragraphs, or decorative secondary badges—if a screen needs explanatory text to be understood, fix the layout hierarchy instead.
+- **DON'T** introduce cold blue, neon purple, or pure black (`#000000`) backgrounds, or stack heavy drop shadows on bordered cards; rely on spacing, `1px solid var(--border)` strokes, and subtle surface tonal shifts for depth.
+- **DON'T** animate layout properties (`top`, `left`, `width`, `height`) or attach unthrottled scroll listeners; animate only `transform` and `opacity` and always respect `prefers-reduced-motion`.
 - **DON'T** place destructive buttons (`取消订阅`, `删除`) next to primary `播放` / `继续收听` buttons; always place them inside the `⋯` menu.
-- **DON'T** use heavy drop shadows; rely on `1px solid var(--border)` strokes and subtle surface tonal shifts for depth.
