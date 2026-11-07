@@ -165,12 +165,23 @@ test('歌词浏览：触屏滑动后确认跳转，桌面点击行直接跳转�
 });
 
 test('短歌词整块居中且不滚动，只有当前行高亮', async ({ page }) => {
+  const lines = [
+    { time_ms: 0, text: '短歌词第一行' },
+    { time_ms: 3000, text: '短歌词第二行' },
+  ];
+  await page.route('**/api/v1/tracks/*/lyrics', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ kind: 'synced', source: 'sidecar_lrc', source_url: null, lines }),
+    }),
+  );
   await login(page);
   await page.getByRole('button', { name: '播放 晴天测试曲', exact: true }).click();
   await page.getByRole('button', { name: '显示歌词', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: '全屏播放', exact: true });
   await expect(dialog.getByRole('list', { name: '歌词', exact: true })).toBeVisible();
-  // The synthetic LRC has four lines: equal padding, no scrollable range, no drift.
+  // Short lyrics fit entirely within the viewport: equal padding, no scrollable range, no drift.
   const metrics = await dialog.locator('.lyric-scroll').evaluate((node) => {
     const list = node.querySelector('ol')!;
     return {
@@ -186,7 +197,7 @@ test('短歌词整块居中且不滚动，只有当前行高亮', async ({ page 
   await expect(dialog.locator('[aria-current="true"]')).toHaveCount(1);
 });
 
-test('长歌词开头从上方显示、末尾可居中，逐字着色只在当前行', async ({ page }) => {
+test('长歌词开头从上方显示、末尾可居中，逐字着色只在当前行', async ({ page }, info) => {
   const lines = Array.from({ length: 10 }, (_, index) => ({
     time_ms: index * 1000,
     text: `第 ${index + 1} 行歌词`,
@@ -214,7 +225,11 @@ test('长歌词开头从上方显示、末尾可居中，逐字着色只在当�
   await expect(dialog.locator('.lyric-word')).toHaveCount(2);
   await expect(dialog.locator('[aria-current="true"]')).toHaveCount(1);
   // The bottom half-screen padding lets the last line still reach the center.
-  await dialog.getByRole('button', { name: /^跳转到.*第 10 行歌词/ }).click();
+  if (info.project.name === 'mobile') {
+    await dialog.getByRole('slider', { name: '播放进度' }).fill('9');
+  } else {
+    await dialog.getByRole('button', { name: /^跳转到.*第 10 行歌词/ }).click();
+  }
   await expect.poll(async () => (await audio(page)).time).toBeGreaterThanOrEqual(8.9);
   await expect(dialog.locator('[aria-current="true"]')).toHaveText(/第 10 行歌词/);
   const distance = () =>
