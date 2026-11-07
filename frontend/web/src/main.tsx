@@ -135,7 +135,6 @@ function Login({
               <button onClick={() => location.reload()}>{t('login.setupDone')}</button>
             </>
           )}
-          <p className="private-note">{t('login.privateNote')}</p>
         </section>
       </div>
       <footer>{t('login.footer')}</footer>
