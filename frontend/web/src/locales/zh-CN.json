@@ -13,7 +13,11 @@
     "errorStack": "查看错误栈",
     "framesTruncated": "仅保留最后 32 层调用。",
     "chainTruncated": "异常链超过 5 个，后续已省略。",
-    "relation": { "raised": "抛出异常", "cause": "直接原因", "context": "处理前一个异常时" }
+    "relation": {
+      "raised": "抛出异常",
+      "cause": "直接原因",
+      "context": "处理前一个异常时"
+    }
   },
   "common": {
     "cancel": "取消",
@@ -141,6 +145,20 @@
     "tasks": "巡检与任务",
     "notifications": "通知中心",
     "assistant-settings": "助手设置"
+  },
+  "collection": {
+    "tracks": "歌曲",
+    "searchResults": "搜索结果",
+    "count": {
+      "tracks_one": "{{value}} 首歌曲",
+      "tracks_other": "{{value}} 首歌曲",
+      "albums_one": "{{value}} 张专辑",
+      "albums_other": "{{value}} 张专辑",
+      "artists_one": "{{value}} 位艺人",
+      "artists_other": "{{value}} 位艺人",
+      "playlists_one": "{{value}} 个歌单",
+      "playlists_other": "{{value}} 个歌单"
+    }
   },
   "roles": {
     "owner": "所有者",
@@ -412,7 +430,7 @@
   },
   "discover": {
     "aria": "音乐发现",
-    "title": "今天，听点什么。",
+    "title": "音乐推荐",
     "subtitle": "熟悉的旋律，再听一遍；还没遇见的，留一份收歌线索。",
     "reload": "重新读取",
     "ai": {
@@ -713,7 +731,7 @@
   },
   "assistant": {
     "aria": "AI 音乐助手",
-    "title": "聊聊，想听什么。",
+    "title": "音乐助手",
     "description": "从真实曲库找歌、调整候选、生成草案。保存和修改前，你始终有最后一次确认。",
     "newChat": "新对话",
     "recent": "最近对话",

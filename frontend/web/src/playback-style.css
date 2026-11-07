@@ -201,7 +201,6 @@
 }
 .tape-pack {
   width: var(--left-pack);
-  transition: width 350ms ease;
   background: repeating-radial-gradient(circle, #403529 0 1px, #211e16 1px 2px);
   border: 1px solid #706147;
 }

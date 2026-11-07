@@ -89,11 +89,6 @@
   font-weight: 650;
   pointer-events: none;
 }
-.collection-count {
-  color: var(--muted);
-  white-space: nowrap;
-  font-size: 12px;
-}
 .collection-menu {
   position: relative;
 }
@@ -182,15 +177,10 @@
     gap: 12px;
   }
   .collection-heading h1 {
-    font-size: 27px;
-    margin: 10px 0 8px;
+    font-size: 25px;
+    margin: 0;
   }
-  .collection-heading .eyebrow {
-    font-size: 9px;
-    margin-block: 8px;
-  }
-  .library.is-album .topbar > div,
-  .library.is-album .collection-heading .eyebrow {
+  .library.is-album .topbar > div {
     display: none;
   }
   .library.is-album .topbar {
@@ -216,7 +206,7 @@
     margin-bottom: 8px;
   }
   .collection-stat {
-    display: none;
+    font-size: 12px;
   }
   .album-heading-cover {
     width: 68px;
@@ -224,6 +214,7 @@
   }
   .library-toolbar {
     padding-bottom: 10px;
+    padding-right: 24px;
     align-items: start;
   }
   .library-toolbar .toolbar-actions {

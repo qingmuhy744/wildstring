@@ -446,8 +446,7 @@ export function Drafts({
   return (
     <section className="workspace-page" aria-label="草案工作台">
       <WorkspaceHeader
-        eyebrow="YOUR CHOICES, YOUR CONTROL"
-        title="整理结果，由你掌控。"
+        title="整理结果"
         description="审核模式下接受即应用；自动整理按授权类型执行，并保留差异与结果。"
       >
         <RefreshWorkspace busy={list.loading} onClick={() => void list.reload()} />
@@ -634,8 +633,7 @@ export function AgentTasks({
   return (
     <section className="workspace-page" aria-label="巡检与任务">
       <WorkspaceHeader
-        eyebrow="KEEP YOUR COLLECTION IN TUNE"
-        title="整理音乐，留住秩序。"
+        title="音乐巡检"
         description="巡检只检查和生成草案。任务在服务端继续，关闭网页后可回来查看。"
       >
         <RefreshWorkspace

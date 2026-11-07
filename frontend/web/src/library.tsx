@@ -34,7 +34,6 @@ import { Brand } from './brand';
 import { AccountAvatar } from './avatar';
 import { Cover } from './cover';
 import { useFavorites } from './favorites';
-import { useLibraryMotto } from './library-mottos';
 import { NowPlaying } from './now-playing';
 import { PlayerBar, usePlayer } from './player';
 import { PlaylistEditor } from './playlist-editor';
@@ -358,7 +357,6 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
     [bulkBusy, setBulkBusy] = useState(false);
   const closePlayer = useCallback(() => setLyricsOpen(false), []);
   const player = usePlayer(currentUser.id),
-    motto = useLibraryMotto(),
     favorites = useFavorites(revision, setNotice);
   const favoritesPlaylist = catalog.find((item) => item.kind === 'favorites');
   const activePlaylist = view === 'favorites' ? favoritesPlaylist : playlist;
@@ -1023,16 +1021,10 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
     activePlaylist?.name ||
     selectedArtist?.name ||
     (query
-      ? '找到喜欢的声音。'
-      : artistGrid
-        ? '一群熟悉的名字。'
-        : albumGrid
-          ? '一张专辑，一段时光。'
-          : playlistGrid
-            ? '自己的歌，自己的顺序。'
-            : view === 'listening'
-              ? '那些反复响起的。'
-              : '收藏的声音。');
+      ? t('collection.searchResults')
+      : view === 'tracks'
+        ? t('collection.tracks')
+        : t(`views.${view}`));
   const subtitle = album
     ? `${selectedArtist?.name || album.artists.join(' / ') || '未知艺人'} · ${time(album.duration_ms / 1000)}`
     : selectedArtist
@@ -1040,16 +1032,8 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
       : activePlaylist
         ? `${activePlaylist.track_count} 首歌曲 · ${time(activePlaylist.duration_ms / 1000)}`
         : query
-          ? `“${query}” 的搜索结果`
-          : artistGrid
-            ? '从一个名字，听到一段时光。'
-            : albumGrid
-              ? '按专辑，重新听一遍收藏。'
-              : playlistGrid
-                ? '亲手挑选，或让规则找到下一段旋律。'
-                : view === 'listening'
-                  ? '每一次认真听过，都有回响。'
-                  : motto;
+          ? `“${query}”`
+          : '';
   const nav = (target: View) => (
     <button
       key={target}
@@ -1256,7 +1240,11 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
             />
           )}
           {view === 'offline' && (
-            <OfflinePanel player={player} onSettings={() => openPersonalSettings('downloads')} />
+            <OfflinePanel
+              player={player}
+              onSettings={() => openPersonalSettings('downloads')}
+              onBrowse={() => switchView('tracks')}
+            />
           )}
           <Suspense
             fallback={
@@ -1330,32 +1318,8 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
                             : '返回歌单'}
                     </button>
                   )}
-                  {!specialView && (
-                    <p className="eyebrow collection-eyebrow">
-                      <span className="eyebrow-tagline">YOUR OWN COLLECTION</span>
-                      <span className="eyebrow-sep" aria-hidden="true">
-                        ·
-                      </span>
-                      <span className="eyebrow-crumb">
-                        曲库 /{' '}
-                        {album
-                          ? '专辑'
-                          : selectedArtist
-                            ? '艺人'
-                            : activePlaylist
-                              ? activePlaylist.kind === 'smart'
-                                ? '智能歌单'
-                                : '歌单'
-                              : query
-                                ? '搜索'
-                                : view === 'tracks'
-                                  ? '歌曲'
-                                  : t(`views.${view}`)}
-                      </span>
-                    </p>
-                  )}
                   <h1>{title}</h1>
-                  <p className="muted">{subtitle}</p>
+                  {subtitle && <p className="muted">{subtitle}</p>}
                 </div>
                 {headingCover && (
                   <Cover
@@ -1368,16 +1332,10 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
                 )}
               </div>
               <div className="collection-stat">
-                <strong>{visible?.total ?? '—'}</strong>
-                <span>
-                  {kind === 'artists'
-                    ? '位曲库艺人'
-                    : kind === 'playlists'
-                      ? '个歌单'
-                      : kind === 'albums'
-                        ? '张专辑'
-                        : '首歌曲'}
-                </span>
+                {t(`collection.count.${kind}`, {
+                  count: visible?.total ?? 0,
+                  value: visible?.total ?? '—',
+                })}
               </div>
             </section>
             {view === 'listening' && (
@@ -1471,7 +1429,6 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
                 )}
                 {kind === 'tracks' && (
                   <>
-                    <span className="collection-count">{visible?.total ?? '—'} 首</span>
                     <details className="collection-menu">
                       <summary aria-label="集合更多操作">
                         <Icon name="more" />

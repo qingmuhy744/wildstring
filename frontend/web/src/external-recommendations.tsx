@@ -200,7 +200,6 @@ export function ExternalRecommendations({
     <section className="external-recommendations" aria-label={t('external.aria')}>
       <div className="discovery-heading">
         <div>
-          <span className="eyebrow">BEYOND YOUR SHELVES</span>
           <h2>{t('external.title')}</h2>
           <p className="muted">{t('external.subtitle')}</p>
         </div>

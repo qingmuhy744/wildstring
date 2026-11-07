@@ -141,7 +141,6 @@ export function ListeningRankings({ player, favorites }: { player: Player; favor
     <section className="listening-rankings" aria-label={t('rankings.aria')}>
       <div className="discovery-heading">
         <div>
-          <span className="eyebrow">ON REPEAT</span>
           <h2>{t('rankings.title')}</h2>
           <p className="muted">
             {scope === 'personal' ? t('rankings.personalNote') : t('rankings.communityNote')}

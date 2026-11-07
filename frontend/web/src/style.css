@@ -1,11 +1,10 @@
 :root {
-  font-family:
-    Inter,
-    -apple-system,
-    BlinkMacSystemFont,
-    'Segoe UI',
-    'PingFang SC',
-    sans-serif;
+  --font-display: 'Songti SC', 'STSong', 'Noto Serif CJK SC', 'Source Han Serif SC', Georgia, serif;
+  --font-sans:
+    -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', Inter,
+    system-ui, sans-serif;
+  --font-mono: 'SF Mono', 'JetBrains Mono', ui-monospace, Menlo, monospace;
+  font-family: var(--font-sans);
   color: #eeeae2;
   background: #171716;
   font-synthesis: none;
@@ -536,11 +535,11 @@ a {
   color: var(--muted);
 }
 .collection-heading {
-  padding: 20px 0 28px;
+  padding: 18px 0 20px;
   display: flex;
-  justify-content: space-between;
+  justify-content: flex-start;
   align-items: end;
-  gap: 24px;
+  gap: 16px;
 }
 .collection-heading-main {
   display: flex;
@@ -548,55 +547,25 @@ a {
   gap: 22px;
   min-width: 0;
 }
-.collection-eyebrow {
-  display: inline-flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin: 0 0 10px;
-  font-size: 11px;
-  line-height: 1.4;
-}
-.collection-eyebrow .eyebrow-tagline {
-  letter-spacing: 2px;
-  opacity: 0.65;
-}
-.collection-eyebrow .eyebrow-sep {
-  opacity: 0.45;
-  letter-spacing: 0;
-}
-.collection-eyebrow .eyebrow-crumb {
-  letter-spacing: 1px;
-  color: var(--text);
-  opacity: 0.82;
-}
 .collection-heading h1 {
-  font-size: 40px;
-  font-weight: 500;
-  letter-spacing: -1.5px;
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: -0.8px;
   line-height: 1.2;
-  margin: 0 0 8px;
+  margin: 0;
 }
 .collection-heading .muted {
-  margin: 0;
+  margin: 7px 0 0;
   font-size: 13px;
 }
 .collection-stat {
-  text-align: right;
-  display: grid;
-  gap: 8px;
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
   flex-shrink: 0;
-  padding-bottom: 4px;
-}
-.collection-stat strong {
-  font:
-    47px/1 Georgia,
-    serif;
-  color: #ded7bc;
-}
-.collection-stat span {
   color: var(--muted);
-  font-size: 10px;
+  font-size: 13px;
+  padding-bottom: 4px;
 }
 .library-toolbar {
   display: flex;
@@ -648,6 +617,7 @@ a {
   background: #262b21;
 }
 .track-number {
+  font-family: var(--font-mono);
   font-size: 11px;
   color: #8f9382;
   text-align: center;
@@ -844,6 +814,7 @@ a {
   color: #b6c49c;
 }
 .track-row time {
+  font-family: var(--font-mono);
   color: #a4aa96;
   font-variant-numeric: tabular-nums;
   font-size: 11px;
@@ -1060,6 +1031,7 @@ a {
   background: var(--accent);
 }
 .timeline {
+  font-family: var(--font-mono);
   display: flex;
   align-items: center;
   gap: 10px;
@@ -1216,11 +1188,8 @@ a {
     padding: 30px 0 27px;
   }
   .collection-heading h1 {
-    font-size: 30px;
+    font-size: 28px;
     letter-spacing: -1px;
-  }
-  .collection-stat strong {
-    font-size: 36px;
   }
   .collection-heading .muted {
     font-size: 11px;
@@ -2698,6 +2667,8 @@ textarea {
   line-height: 1;
 }
 .queue-index {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
   text-align: center;
   font-size: 10px;
 }
@@ -2987,8 +2958,12 @@ textarea {
   margin: 14px 0;
   letter-spacing: -1px;
 }
-.management-header button {
+.management-header button,
+.management-section-heading > button {
   flex-shrink: 0;
+}
+.management-section-heading > div {
+  min-width: 0;
 }
 .management-tabs {
   display: flex;
@@ -4328,7 +4303,6 @@ textarea {
 [data-theme='light']
   :is(
     .sidebar-bottom p,
-    .collection-stat strong,
     .listening-summary strong,
     .management-metrics strong,
     .metadata-diff span:last-child,
@@ -5380,7 +5354,6 @@ textarea {
 .progress-fill {
   height: 100%;
   background: var(--accent);
-  transition: width 0.3s ease;
 }
 .upload-summary-box {
   padding: 10px 14px;
@@ -6007,4 +5980,15 @@ textarea {
   font-size: 11px;
   margin-left: 8px;
   font-weight: 400;
+}
+
+:is(.collection-heading, .settings-page-heading, .workspace-heading, .discovery-hero, .offline-page)
+  h1 {
+  font-family: var(--font-display);
+  text-wrap: balance;
+}
+.collection-stat,
+.queue-heading small,
+.management-metrics strong {
+  font-variant-numeric: tabular-nums;
 }

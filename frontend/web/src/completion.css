@@ -557,3 +557,26 @@
     bottom: calc(100px + env(safe-area-inset-bottom));
   }
 }
+
+.offline-page h1 {
+  font-size: 28px;
+  margin: 0 0 8px;
+}
+.offline-page-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 24px;
+}
+
+.sync-mode-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 24px;
+}
+.sync-mode-controls label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}

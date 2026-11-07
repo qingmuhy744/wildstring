@@ -1279,7 +1279,7 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
               <div className="podcast-episodes-list">
                 {displayedEpisodes.map((ep) => (
                   <RowMenu
-                    className="podcast-episode-row"
+                    className={`podcast-episode-row${ep.completed ? ' completed' : ''}`}
                     key={ep.id}
                     label={ep.title}
                     actions={[
@@ -1352,7 +1352,7 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
                               ? '自动保存 · 另作手动保存'
                               : '保存到服务器'}
                         </button>
-                        {ep.completed && <span className="ep-status-tag">已听完</span>}
+                        {ep.completed && <span className="ep-status-tag">✓ 已听完</span>}
                         {!ep.completed && ep.position_seconds > 0 && (
                           <span className="ep-status-tag">
                             已听至 {formatDuration(ep.position_seconds)}
@@ -1385,14 +1385,16 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
                   ? '添加感兴趣的 RSS，你的关注与收听进度会单独保存。'
                   : '这里仅显示你关注的节目。管理员尚未开放添加 RSS。'}
               </p>
-              <button type="button" onClick={() => setShowSearch(true)}>
-                {canAddPodcast ? '搜索或添加节目' : '搜索节目'}
-              </button>
-              {canManageSources && (
-                <button type="button" onClick={() => setFollowingOnly(false)}>
-                  浏览本服节目
+              <div className="podcasts-empty-actions">
+                <button type="button" onClick={() => setShowSearch(true)}>
+                  {canAddPodcast ? '搜索或添加节目' : '搜索节目'}
                 </button>
-              )}
+                {canManageSources && (
+                  <button type="button" onClick={() => setFollowingOnly(false)}>
+                    浏览本服节目
+                  </button>
+                )}
+              </div>
             </div>
           ) : loading && visiblePodcasts.length === 0 ? (
             <div className="podcasts-loading">正在加载节目…</div>

@@ -76,12 +76,10 @@ export function useWorkspaceResource<T>(path: string | null, pollMs = 0) {
 }
 
 export function WorkspaceHeader({
-  eyebrow,
   title,
   description,
   children,
 }: {
-  eyebrow: string;
   title: string;
   description: string;
   children?: ReactNode;
@@ -89,7 +87,6 @@ export function WorkspaceHeader({
   return (
     <header className="workspace-heading">
       <div>
-        <span className="eyebrow">{eyebrow}</span>
         <h1>{title}</h1>
         <p className="muted">{description}</p>
       </div>

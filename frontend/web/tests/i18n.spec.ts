@@ -105,9 +105,7 @@ test('recommendation page, preferences and charts are translated', async ({ page
   await signIn(page);
   await section(page, 'For you');
   const panel = page.getByRole('region', { name: 'Music discovery', exact: true });
-  await expect(
-    panel.getByRole('heading', { name: 'What are we listening to today?' }),
-  ).toBeVisible();
+  await expect(panel.getByRole('heading', { name: 'Music recommendations' })).toBeVisible();
   await expect(panel.getByRole('button', { name: 'Play picks', exact: true })).toBeVisible();
   await expect(panel.getByRole('button', { name: 'New batch', exact: true })).toBeVisible();
   await expect(panel.getByRole('button', { name: 'Select tracks', exact: true })).toBeVisible();
@@ -139,9 +137,7 @@ test('assistant chat uses English labels and fallback text', async ({ page }, in
   await signIn(page);
   await section(page, 'Music assistant');
   const panel = page.getByRole('region', { name: 'AI music assistant', exact: true });
-  await expect(
-    panel.getByRole('heading', { name: "Let's talk about what you want to hear." }),
-  ).toBeVisible();
+  await expect(panel.getByRole('heading', { name: 'Music assistant' })).toBeVisible();
   const composer = panel.getByLabel('Message for the assistant');
   await expect(composer).toBeVisible();
   await composer.fill('calm music for tonight');

@@ -146,6 +146,20 @@
     "notifications": "Notifications",
     "assistant-settings": "Assistant settings"
   },
+  "collection": {
+    "tracks": "Songs",
+    "searchResults": "Search results",
+    "count": {
+      "tracks_one": "{{value}} song",
+      "tracks_other": "{{value}} songs",
+      "albums_one": "{{value}} album",
+      "albums_other": "{{value}} albums",
+      "artists_one": "{{value}} artist",
+      "artists_other": "{{value}} artists",
+      "playlists_one": "{{value}} playlist",
+      "playlists_other": "{{value}} playlists"
+    }
+  },
   "roles": {
     "owner": "Owner",
     "librarian": "Librarian",
@@ -416,7 +430,7 @@
   },
   "discover": {
     "aria": "Music discovery",
-    "title": "What are we listening to today?",
+    "title": "Music recommendations",
     "subtitle": "Revisit familiar sounds, and leave a trail for what you haven't met yet.",
     "reload": "Reload",
     "ai": {
@@ -717,7 +731,7 @@
   },
   "assistant": {
     "aria": "AI music assistant",
-    "title": "Let's talk about what you want to hear.",
+    "title": "Music assistant",
     "description": "Find tracks from your real library, adjust candidates, and create drafts. You always get the final confirmation before anything is saved or changed.",
     "newChat": "New chat",
     "recent": "Recent chats",
