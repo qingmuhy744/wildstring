@@ -89,7 +89,6 @@
     "setupLocalBefore": "本地开发使用 ",
     "setupLocalAfter": "，完成后刷新此页。账号为 admin。",
     "setupDone": "已设置，刷新",
-    "privateNote": "曲库保留在你的服务端。",
     "footer": "野弦 · 从自己的音乐开始"
   },
   "connection": {
