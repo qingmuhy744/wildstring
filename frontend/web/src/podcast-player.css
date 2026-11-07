@@ -22,11 +22,7 @@
   border-radius: 50%;
   background: transparent;
   color: var(--muted);
-  transition:
-    color 160ms ease,
-    background-color 160ms ease,
-    border-color 160ms ease,
-    transform 160ms ease;
+  transition: transform 160ms ease;
 }
 .podcast-transport > .play-button {
   width: var(--transport-play-size);
@@ -130,9 +126,6 @@
   color: var(--paper-ink);
   background: var(--desk);
   color-scheme: dark;
-  transition:
-    background-color 250ms,
-    color 250ms;
 }
 [data-theme='light'] .fullscreen-player[data-player-kind='podcast'] {
   --desk: #e6e1d6;
@@ -381,9 +374,6 @@
   border-radius: 50%;
   background: color-mix(in srgb, var(--device-muted) 60%, var(--device-panel));
   transform: translateY(-0.5px);
-  transition:
-    background-color 600ms ease-out,
-    box-shadow 600ms ease-out;
 }
 .retro-radio[data-live='true'] .retro-on-air i {
   background: #ffb96b;
@@ -397,7 +387,6 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  transition: text-shadow 600ms ease-out;
 }
 .retro-time {
   font-family: 'SFMono-Regular', Consolas, monospace;
@@ -405,7 +394,6 @@
   color: #ffd58d;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
-  transition: text-shadow 600ms ease-out;
 }
 .retro-time small {
   font-size: 10px;
@@ -466,9 +454,6 @@
   font-size: 10px;
   letter-spacing: 0.04em;
   color: #b89c6e;
-  transition:
-    color 550ms ease-out,
-    text-shadow 550ms ease-out;
 }
 .retro-radio[data-live='true'] .retro-tuner-label {
   color: #f6dca4;
@@ -511,9 +496,6 @@
   background: #ff9c6e;
   box-shadow: 0 0 4px rgb(255 140 90 / 40%);
   pointer-events: none;
-  transition:
-    left 260ms linear,
-    box-shadow 550ms ease-out;
 }
 .retro-radio[data-live='true'] .retro-tuner-track > i {
   box-shadow: 0 0 7px 1px rgb(255 140 90 / 70%);
@@ -580,10 +562,7 @@
     inset 0 -2px 0 rgb(0 0 0 / 22%),
     0 2px 0 #1b0d0b,
     0 3px 4px rgb(0 0 0 / 30%);
-  transition:
-    transform 110ms ease,
-    box-shadow 110ms ease,
-    filter 160ms ease;
+  transition: transform 110ms ease;
 }
 .fullscreen-player[data-player-kind='podcast'] .retro-keys button:hover:not(:disabled) {
   filter: brightness(1.08);
@@ -624,9 +603,6 @@
   height: 4px;
   border-radius: 50%;
   background: rgb(110 60 40 / 55%);
-  transition:
-    background-color 400ms ease-out,
-    box-shadow 400ms ease-out;
 }
 .retro-power[aria-pressed='true']::after {
   background: #ff7a45;
@@ -660,7 +636,8 @@
     repeating-linear-gradient(90deg, transparent 0 4px, #180c0a 4px 6px),
     linear-gradient(90deg, #d6b56f 0 68%, #f0a35e 82%, #ff6f45);
   opacity: 0.3;
-  clip-path: inset(0 82% 0 0);
+  transform: scaleX(0.18);
+  transform-origin: left;
   transition: opacity 600ms ease-out;
 }
 .retro-radio[data-live='true'] .retro-vu-window i {
@@ -853,7 +830,6 @@
   padding: 12px 8px;
   border-top: 1px solid color-mix(in srgb, var(--paper-line) 45%, transparent);
   border-radius: 6px;
-  transition: background-color 160ms ease;
 }
 .programme-list li:hover {
   background: color-mix(in srgb, var(--paper-ink) 4%, transparent);
@@ -1254,16 +1230,16 @@
 }
 @keyframes receiver-level {
   0% {
-    clip-path: inset(0 72% 0 0);
+    transform: scaleX(0.28);
   }
   30% {
-    clip-path: inset(0 35% 0 0);
+    transform: scaleX(0.65);
   }
   65% {
-    clip-path: inset(0 55% 0 0);
+    transform: scaleX(0.45);
   }
   100% {
-    clip-path: inset(0 10% 0 0);
+    transform: scaleX(0.9);
   }
 }
 @media (min-width: 1000px) and (max-height: 820px) {
@@ -1447,7 +1423,7 @@
   }
   .retro-radio[data-live='true'] .retro-vu-window i {
     animation: none;
-    clip-path: inset(0 40% 0 0);
+    transform: scaleX(0.6);
   }
   .retro-radio *,
   .retro-radio *::before,

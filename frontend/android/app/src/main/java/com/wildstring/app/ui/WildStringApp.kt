@@ -70,6 +70,7 @@ import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
@@ -1231,7 +1232,11 @@ private fun PlayerScreen(vm: MusicViewModel, state: MusicState, wide: Boolean, l
     val spinning = state.playing && !state.buffering && state.playbackError == null && !artworkPreview
     val thresholdTick = { feedback(TactileKind.Tap) }
     Box(playerModifier) {
-    ArtworkBackdrop(vm, track)
+    if (preferences.playbackStyle == "vinyl") {
+        Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background))
+    } else {
+        ArtworkBackdrop(vm, track)
+    }
     Column(Modifier.testTag(if (wide) "player-tablet" else if (landscape) "player-landscape" else "player-phone")
         .fillMaxSize()
         .safeDrawingPadding()
@@ -1352,7 +1357,7 @@ private fun PlaybackControls(vm: MusicViewModel, state: MusicState, onQueue: () 
     val track = state.current ?: return
     Column(modifier.fillMaxWidth()) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-            Text(track.title, fontSize = if (compact) 20.sp else 23.sp, fontWeight = FontWeight.Medium, maxLines = if (compact) 1 else 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).padding(end = 8.dp))
+            Text(track.title, fontFamily = FontFamily.Serif, fontSize = if (compact) 20.sp else 23.sp, fontWeight = FontWeight.Medium, maxLines = if (compact) 1 else 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).padding(end = 8.dp))
             FavoriteControl(track.loved, track.id in state.pendingFavorites, tactile { vm.favorite(track) })
         }
         Spacer(Modifier.height(if (compact) 2.dp else 4.dp))
