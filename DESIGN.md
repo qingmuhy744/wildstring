@@ -28,6 +28,7 @@
 5. **Honest Analog Tactility**
    - Fullscreen playback supports **Cover**, **Vinyl**, **Cassette** (for music), and **Retro Bakelite Radio + Broadsheet** (for podcasts).
    - Decorative motion (turntable rotation, tape reels, radio dial backlight) is strictly driven by real `isPlaying` state and respects `prefers-reduced-motion`.
+   - The radio play control may pair with a short synthesized power-switch click (≤120 ms, Web Audio, no audio assets). It is strictly opt-in, off by default, and saved per account in the browser.
 
 ---
 
