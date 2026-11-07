@@ -275,7 +275,7 @@ test('实际收听累计、一次计数、暂停跳转不增加与收听视图',
   expect(after.listened_ms).toBe(heard.listened_ms);
   expect(after.play_count).toBe(heard.play_count);
   await section(page, '收听记录');
-  await expect(page.getByRole('heading', { name: '那些反复响起的。', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '收听记录', exact: true })).toBeVisible();
   await expect(page.getByRole('table')).toContainText('夜晚测试曲');
   await expect(page.getByLabel('收听统计')).toBeVisible();
   await page.screenshot({ path: `../../artifacts/listening-${info.project.name}.png` });

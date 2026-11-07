@@ -407,7 +407,6 @@ export function Management({
       )}
       <SettingsLayout
         title="管理中心"
-        description="集中管理音乐库、播客与服务器。"
         categories={groups}
         selected={group?.id ?? null}
         onSelect={(id) => setTab(id ? groups.find((item) => item.id === id)!.tabs[0].id : 'home')}
@@ -467,7 +466,6 @@ export function Management({
                     ))}
                   </section>
                   <section className="management-card">
-                    <span className="eyebrow">YOUR LIBRARY</span>
                     <h2>{overview.preferences.name}</h2>
                     {canOwner && (
                       <>

@@ -187,8 +187,7 @@ export function Notifications({
   return (
     <section className="workspace-page" aria-label="通知中心">
       <WorkspaceHeader
-        eyebrow="YOUR INBOX"
-        title="每一件事，都有回音。"
+        title="通知中心"
         description="优先显示未读消息；已读通知收进记录，随时可查。打开列表不会自动标为已读。"
       >
         <RefreshWorkspace busy={inbox.busy} onClick={() => void inbox.refresh(true)} />

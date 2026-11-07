@@ -22,7 +22,7 @@
   margin-bottom: 30px;
 }
 .workspace-heading h1 {
-  font-size: clamp(28px, 3.2vw, 44px);
+  font-size: 28px;
   margin: 14px 0;
 }
 .workspace-heading p {

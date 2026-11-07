@@ -21,8 +21,7 @@ export function AssistantSettings({
     <section className="workspace-page" aria-label="助手与通知设置">
       {!embedded && (
         <WorkspaceHeader
-          eyebrow="YOUR CHOICES, YOUR CONTROL"
-          title="让助手，按你的方式工作。"
+          title="助手设置"
           description="选择模型、授权范围和结果通知；关闭外部服务后，音乐仍照常播放。"
         />
       )}

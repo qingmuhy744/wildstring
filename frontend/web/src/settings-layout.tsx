@@ -11,7 +11,6 @@ export type SettingsCategory = {
 
 export function SettingsLayout({
   title,
-  description,
   categories,
   selected,
   onSelect,
@@ -19,7 +18,6 @@ export function SettingsLayout({
   children,
 }: {
   title: string;
-  description: string;
   categories: SettingsCategory[];
   selected: string | null;
   onSelect: (id: string | null) => void;
@@ -45,15 +43,10 @@ export function SettingsLayout({
         </button>
         <div className="settings-page-heading">
           <div>
-            <p className="eyebrow">WILDSTRING / {t('settings.preferences')}</p>
             <h1 ref={heading} tabIndex={-1}>
               {title}
             </h1>
-            <p className="muted">{description}</p>
           </div>
-          <span className="settings-heading-icon" aria-hidden="true">
-            <Icon name="settings" />
-          </span>
         </div>
       </header>
       {!category ? (
@@ -88,7 +81,6 @@ export function SettingsLayout({
           <section className="settings-content" aria-label={category.label}>
             <header className="settings-content-heading">
               <h2>{category.label}</h2>
-              <p className="muted">{category.description}</p>
             </header>
             {children}
           </section>

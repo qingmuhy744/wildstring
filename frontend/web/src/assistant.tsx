@@ -202,11 +202,7 @@ export function Assistant({
   const activeConnection = connections.items.find((item) => item.id === connection);
   return (
     <section className="workspace-page" aria-label={t('assistant.aria')}>
-      <WorkspaceHeader
-        eyebrow="A LITTLE HELP FINDING YOUR SOUND"
-        title={t('assistant.title')}
-        description={t('assistant.description')}
-      >
+      <WorkspaceHeader title={t('assistant.title')} description={t('assistant.description')}>
         <button
           disabled={busy}
           onClick={() => {
