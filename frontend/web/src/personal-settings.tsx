@@ -4,6 +4,7 @@ import { api, type User } from './api';
 import { AccountSettings, LanguageControl } from './accounts';
 import { ThemeControl } from './theme';
 import { PlaybackStyleControl } from './playback-style';
+import { RadioClickControl } from './radio-click';
 import { TrackListSizeControl } from './track-list-size';
 import { LyricPreferenceControls } from './lyric-preferences';
 import { OfflineSettings } from './offline-panel';
@@ -100,6 +101,7 @@ export function PersonalSettings({
           <>
             <p className="settings-scope">{t('settings.localScope')}</p>
             <PlaybackStyleControl />
+            <RadioClickControl />
             <LyricPreferenceControls />
           </>
         )}

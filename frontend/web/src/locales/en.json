@@ -417,6 +417,8 @@
     "translation": "Show lyric translations",
     "romanization": "Show romanization",
     "lyricSize": "Lyric size",
+    "radioClickSound": "Radio button click",
+    "radioClickSoundDescription": "Play a short synthesized click when pressing the podcast radio play button. Applies to this browser only.",
     "small": "Small",
     "medium": "Medium",
     "large": "Large",

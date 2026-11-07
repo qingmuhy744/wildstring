@@ -417,6 +417,8 @@
     "translation": "显示歌词译文",
     "romanization": "显示歌词音译",
     "lyricSize": "歌词大小",
+    "radioClickSound": "收音机按键音效",
+    "radioClickSoundDescription": "按下播客收音机的播放键时，播放一声短促的合成咔嗒声。只影响当前浏览器。",
     "small": "小",
     "medium": "中",
     "large": "大",

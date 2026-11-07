@@ -2,6 +2,7 @@ import type { CSSProperties } from 'react';
 import { time } from './api';
 import { Cover } from './cover';
 import { PodcastSkipButton, type Player } from './player';
+import { maybePlayRadioClick } from './radio-click';
 import type { PodcastOrder } from './podcast-continuation';
 import { renderPodcastDescription } from './podcast-description';
 
@@ -92,7 +93,10 @@ function Radio({ player, onPreview }: { player: Player; onPreview: () => void })
           <PodcastSkipButton player={player} seconds={15} direction="backward" variant="retro" />
           <button
             className="retro-power"
-            onClick={player.toggle}
+            onClick={() => {
+              maybePlayRadioClick();
+              player.toggle();
+            }}
             aria-label={player.playing ? '收音机暂停' : '收音机播放'}
             aria-pressed={player.playing}
           >
