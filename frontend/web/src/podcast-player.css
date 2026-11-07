@@ -923,6 +923,59 @@
   line-height: 1.7;
   color: var(--paper-muted);
 }
+.programme-list ol {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.programme-list section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.programme-list section h3,
+.programme-list section p {
+  margin: 8px 8px 0;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  color: var(--paper-muted);
+}
+.programme-sync {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 0 3px 8px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--paper-muted);
+}
+.programme-sync p {
+  margin: 0;
+  flex: 1 1 180px;
+}
+.programme-sync-actions,
+.programme-reorder {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.programme-sync button,
+.programme-reorder button {
+  min-height: 28px;
+  padding: 2px 8px;
+  border: 1px solid var(--paper-line);
+  border-radius: 4px;
+  background: var(--desk);
+  color: var(--paper-body);
+  font: inherit;
+  font-size: 12px;
+}
+.programme-reorder {
+  flex: none;
+  gap: 4px;
+}
 .radio-newspaper {
   display: flex;
   flex-direction: column;

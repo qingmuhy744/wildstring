@@ -1,4 +1,10 @@
 import { PodcastDownloadDialog } from './podcast-download-settings';
+import {
+  PodcastDeliverySelect,
+  PodcastInboxDialog,
+  PodcastQueueDefaults,
+  rememberForLater,
+} from './podcast-inbox';
 import { useCanAddPodcast } from './podcast-catalog-settings';
 import { OPML_EXPORT_URL, PodcastOpmlImportDialog } from './podcast-opml';
 import { PodcastSearchPage } from './podcast-search';
@@ -210,6 +216,7 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
   const [showSearch, setShowSearch] = useState(false);
   const [exploring, setExploring] = useState(false);
   const [showOpmlImport, setShowOpmlImport] = useState(false);
+  const [showInbox, setShowInbox] = useState(false);
   const canAddPodcast = useCanAddPodcast(userId, canManageSources);
   const [modalFeedUrl, setModalFeedUrl] = useState('');
   const [refreshingAll, setRefreshingAll] = useState(false);
@@ -938,6 +945,16 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
                 className="podcasts-more-item"
                 onClick={() => {
                   closeHeaderMenu();
+                  setShowInbox(true);
+                }}
+              >
+                稍后听
+              </button>
+              <button
+                type="button"
+                className="podcasts-more-item"
+                onClick={() => {
+                  closeHeaderMenu();
                   setPlaybackSettingsError(null);
                   setShowPlaybackSettings(true);
                 }}
@@ -1294,6 +1311,14 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
                         run: () => queueEpisode(ep, selectedPodcast, true),
                       },
                       {
+                        label: '加入稍后听',
+                        icon: 'add',
+                        run: () =>
+                          void rememberForLater(ep.id)
+                            .then(() => showNotice('已放入稍后听'))
+                            .catch(() => showNotice('暂时无法放入稍后听，请重试')),
+                      },
+                      {
                         label: '加入待播',
                         icon: 'queue',
                         run: () => queueEpisode(ep, selectedPodcast, false),
@@ -1369,6 +1394,7 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
                 ))}
               </div>
             )}
+            <PodcastDeliverySelect showId={selectedPodcast.id} />
           </div>
         </div>
       ) : (
@@ -1681,6 +1707,7 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
                 保存到服务器不等于下载到手机离线。
               </p>
             </div>
+            <PodcastQueueDefaults />
             {playbackSettingsError && (
               <p className="podcast-settings-error" role="alert">
                 {playbackSettingsError}
@@ -1925,6 +1952,17 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
         />
       )}
 
+      {showInbox && (
+        <PodcastInboxDialog
+          onClose={() => setShowInbox(false)}
+          onBrowse={() => {
+            setShowInbox(false);
+            setSelectedPodcast(null);
+            setSelectedDetail(null);
+          }}
+          onQueueTrack={onQueueTrack}
+        />
+      )}
       {showOpmlImport && (
         <PodcastOpmlImportDialog
           onClose={() => setShowOpmlImport(false)}

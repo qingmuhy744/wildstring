@@ -237,6 +237,8 @@
     "podcast_subscriptions_disabled": "The admin hasn't allowed members to add RSS feeds yet. You can follow shows already on this server.",
     "podcast_catalog_management_required": "Only admins can change server-wide podcast settings.",
     "podcast_catalog_settings_conflict": "Podcast permissions were changed. Check the latest settings and try again.",
+    "podcast_queue_conflict": "The podcast queue was updated on another device. This device kept its queue. Use the server queue, or replace it with this device's queue.",
+    "episode_unavailable": "This episode can't be added right now. It may no longer be available. Choose another episode.",
     "invalid_avatar": "Choose a valid JPG, PNG or WebP image of up to 25 megapixels.",
     "avatar_too_large": "The avatar image is larger than 5 MiB. Compress it and try again.",
     "avatar_account_changed": "The account changed. Reopen account settings.",

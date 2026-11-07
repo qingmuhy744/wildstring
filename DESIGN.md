@@ -173,6 +173,12 @@ WildString supports three themes: **Light (Warm Paper — Daylight)**, **Dark (C
 - Conversational interface grounded in real library track IDs.
 - Supports model connection selector, natural-language queries ("找几首适合雨天夜晚听的器乐"), inline playable track cards with one-click `播放全部` or `保存为歌单`, and graceful degradation when AI connections are offline.
 
+### 6.6 Lyrics View (`歌词`)
+- **Only the current line is emphasized** (see §2.3): played and upcoming lines share one muted color; word-level karaoke tinting is confined to the active line, never accumulated on lines already sung.
+- **Position is content-driven**: the current line centers only within the scrollable range (`clamp(lineCenter − H/2, 0, maxScroll)`); short lyrics are centered as a block and never scroll; the first lines start from the top.
+- **Follow recovery is shared across pointer types**: 2 s after manual browsing stops while playing; paused playback suspends the timer. Pointer-specific behavior is limited to line taps and seek confirmation.
+- Cross-platform rules and per-platform implementation status: [`contracts/lyric-view.md`](../contracts/lyric-view.md).
+
 ---
 
 ## 7. Guardrails for UI Generation (Do's & Don'ts)

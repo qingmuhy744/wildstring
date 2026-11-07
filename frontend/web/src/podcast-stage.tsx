@@ -135,8 +135,12 @@ function Radio({ player, onPreview }: { player: Player; onPreview: () => void })
 }
 
 function Upcoming({ player }: { player: Player }) {
-  const entries = player.queue.slice(player.index + 1);
+  const queued = player.queue
+    .map((track, index) => ({ track, index }))
+    .filter((entry) => entry.index > player.index && entry.track.podcast_queue_origin !== 'auto');
+  const preview = player.podcastPreview;
   const preference = player.podcastPreference;
+  const auto = preference.order !== 'off' && preference.autoContinue !== false;
   const direction =
     preference.order === 'follow' ? player.current?.podcast_list_order || 'desc' : preference.order;
   return (
@@ -144,10 +148,14 @@ function Upcoming({ player }: { player: Player }) {
       <header className="programme-heading">
         <div className="programme-heading-main">
           <h2>
-            接下来播放 <small>{entries.length}</small>
+            接下来播放 <small>{queued.length + preview.length}</small>
           </h2>
           <span className="programme-status">
-            {direction === 'off' ? '自动续播关闭' : direction === 'asc' ? '从旧到新' : '从新到旧'}
+            {direction === 'off' || !auto
+              ? '自动续播关闭'
+              : direction === 'asc'
+                ? '从旧到新'
+                : '从新到旧'}
           </span>
         </div>
         <div className="programme-settings">
@@ -155,7 +163,7 @@ function Upcoming({ player }: { player: Player }) {
             <span className="sr-only">播客续播顺序</span>
             <select
               aria-label="播客续播顺序"
-              value={preference.order}
+              value={!auto ? 'off' : preference.order}
               onChange={(event) =>
                 player.setPodcastPreference({
                   ...preference,
@@ -181,47 +189,148 @@ function Upcoming({ player }: { player: Player }) {
           </label>
         </div>
       </header>
-      <ol className="programme-list">
-        {entries.map((track, i) => (
-          <li key={`${track.id}-${i}`}>
-            <span className="programme-number">{String(i + 1).padStart(2, '0')}</span>
-            <button
-              className="programme-track"
-              onClick={() => player.start(player.queue, player.index + 1 + i)}
-            >
-              <strong>{track.title}</strong>
-              <span>
-                {track.podcast_queue_origin === 'auto' ? '自动续播' : '手动添加'} ·{' '}
-                {time(track.duration_ms / 1000)}
-                {track.podcast_position_seconds
-                  ? ` · 已听 ${time(track.podcast_position_seconds)}`
-                  : ` · ${date(track.release_date)}`}
-              </span>
-            </button>
-            <button
-              className="programme-remove"
-              aria-label={`移除待播 ${track.title}`}
-              onClick={() => player.remove(player.index + 1 + i)}
-            >
-              ×
-            </button>
-          </li>
-        ))}
-      </ol>
-      {!entries.length && (
-        <p className="programme-empty">
-          {preference.order === 'off'
-            ? '听完这一集，让耳朵休息一下。'
-            : player.podcastQueueStatus === 'loading'
-              ? '正在整理接下来的节目…'
-              : player.podcastQueueStatus === 'error'
-                ? '暂时无法读取后续单集，当前播放不受影响。'
-                : '这个方向的未听单集已播完，可以换个顺序。'}
-        </p>
+      {player.podcastSync === 'error' && (
+        <div className="programme-sync" role="status">
+          <p>暂时无法同步，本机播放不受影响</p>
+          <button type="button" onClick={() => player.retryPodcastQueue()}>
+            重试
+          </button>
+        </div>
       )}
-      <footer>
-        <span>手动添加优先 · 每个节目记住偏好</span>
-      </footer>
+      {player.podcastSync === 'conflict' && (
+        <div className="programme-sync" role="status">
+          <p>队列已在其他设备更新，本机队列仍保留。</p>
+          <div className="programme-sync-actions">
+            <button type="button" onClick={() => void player.useServerPodcastQueue()}>
+              使用服务器上的队列
+            </button>
+            <button type="button" onClick={() => void player.overwritePodcastQueue()}>
+              用本机队列覆盖
+            </button>
+          </div>
+        </div>
+      )}
+      <div className="programme-list">
+        {queued.length > 0 && (
+          <ol>
+            {queued.map(({ track, index }, i) => (
+              <li
+                key={`${track.id}-${index}`}
+                draggable
+                onDragStart={(event) => {
+                  event.dataTransfer.setData('text/plain', String(index));
+                  event.dataTransfer.effectAllowed = 'move';
+                }}
+                onDragOver={(event) => event.preventDefault()}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  const from = Number(event.dataTransfer.getData('text/plain'));
+                  if (Number.isInteger(from)) player.move(from, index);
+                }}
+              >
+                <span className="programme-number">{String(i + 1).padStart(2, '0')}</span>
+                <button
+                  className="programme-track"
+                  onClick={() => player.start(player.queue, index)}
+                >
+                  <strong>{track.title}</strong>
+                  <span>
+                    {track.podcast_queue_origin === 'rule' ? '新集规则' : '手动添加'} ·{' '}
+                    {time(track.duration_ms / 1000)}
+                    {track.podcast_position_seconds
+                      ? ` · 已听 ${time(track.podcast_position_seconds)}`
+                      : ` · ${date(track.release_date)}`}
+                  </span>
+                </button>
+                <span
+                  className="programme-reorder"
+                  role="group"
+                  aria-label={`调整待播 ${track.title}`}
+                >
+                  <button
+                    type="button"
+                    aria-label={`上移待播 ${track.title}`}
+                    disabled={i === 0}
+                    onClick={() => player.move(index, queued[i - 1].index)}
+                  >
+                    ↑
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={`下移待播 ${track.title}`}
+                    disabled={i === queued.length - 1}
+                    onClick={() => player.move(index, queued[i + 1].index)}
+                  >
+                    ↓
+                  </button>
+                </span>
+                <button
+                  className="programme-remove"
+                  aria-label={`移除待播 ${track.title}`}
+                  onClick={() => player.remove(index)}
+                >
+                  ×
+                </button>
+              </li>
+            ))}
+          </ol>
+        )}
+        {preview.length > 0 && (
+          <section aria-label="自动续播">
+            <h3>自动续播</h3>
+            {!queued.length && <p>播完会接下一集</p>}
+            <ol>
+              {preview.map((track, i) => (
+                <li key={`${track.id}-${i}`}>
+                  <span className="programme-number">
+                    {String(queued.length + i + 1).padStart(2, '0')}
+                  </span>
+                  <button
+                    className="programme-track"
+                    onClick={() =>
+                      queued.length
+                        ? player.playNext(track)
+                        : player.start(
+                            [{ ...track, podcast_queue_origin: 'auto' }],
+                            0,
+                            undefined,
+                            true,
+                            true,
+                          )
+                    }
+                  >
+                    <strong>{track.title}</strong>
+                    <span>
+                      自动续播 · {time(track.duration_ms / 1000)}
+                      {track.podcast_position_seconds
+                        ? ` · 已听 ${time(track.podcast_position_seconds)}`
+                        : ` · ${date(track.release_date)}`}
+                    </span>
+                  </button>
+                  <button
+                    className="programme-remove"
+                    aria-label={`不再预览 ${track.title}`}
+                    onClick={() => player.dismissPodcastPreview(track.id)}
+                  >
+                    ×
+                  </button>
+                </li>
+              ))}
+            </ol>
+          </section>
+        )}
+        {!queued.length && !preview.length && (
+          <p className="programme-empty">
+            {!auto
+              ? '已关闭，播完即停'
+              : player.podcastQueueStatus === 'loading'
+                ? '正在读取后续单集'
+                : player.podcastQueueStatus === 'error'
+                  ? '暂时无法读取后续单集，当前播放不受影响。'
+                  : '这个方向没有未听的下一集，播完即停'}
+          </p>
+        )}
+      </div>
     </aside>
   );
 }

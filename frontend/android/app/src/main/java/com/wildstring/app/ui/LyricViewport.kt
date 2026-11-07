@@ -178,8 +178,9 @@ import kotlin.math.roundToInt
                 is DragInteraction.Stop, is DragInteraction.Cancel -> { dragging = false; interaction++ }
             }
         } }
-        LaunchedEffect(follow, dragging, list.isScrollInProgress, interaction, lyrics, followDelayMs) {
-            if (!follow && !dragging && !list.isScrollInProgress && lyrics.kind == "synced") {
+        LaunchedEffect(follow, dragging, list.isScrollInProgress, interaction, lyrics, followDelayMs, playing) {
+            // Pause suspends the timer. Scrolling or a new drag cancels it and starts over.
+            if (!follow && !dragging && !list.isScrollInProgress && playing && lyrics.kind == "synced") {
                 delay(followDelayMs.coerceAtLeast(1_000)); follow = true
             }
         }
@@ -216,7 +217,8 @@ import kotlin.math.roundToInt
             items(lines.size) { index ->
                 val line = lines[index]
                 val effectiveActive = if (lyrics.kind == "synced") active.coerceAtLeast(0) else -1
-                val highlighted = if (follow) effectiveActive == index else candidate == index
+                // Only the line at the playback position is emphasized. Manual browsing moves the viewport.
+                val highlighted = effectiveActive == index
                 Column(Modifier.fillMaxWidth().testTag("lyric-row-$index").padding(horizontal = 40.dp, vertical = 14.dp),
                     horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     val text = buildAnnotatedString {

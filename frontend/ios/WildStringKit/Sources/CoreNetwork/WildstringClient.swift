@@ -4,10 +4,18 @@ import os
 public struct APIError: Error, Equatable, Sendable {
     public let statusCode: Int
     public let code: String
+    /// Response body, so callers can read structured errors such as a queue conflict.
+    /// Equality ignores it; existing checks compare status and code only.
+    public let body: Data
 
-    public init(statusCode: Int, code: String) {
+    public init(statusCode: Int, code: String, body: Data = Data()) {
         self.statusCode = statusCode
         self.code = code
+        self.body = body
+    }
+
+    public static func == (lhs: APIError, rhs: APIError) -> Bool {
+        lhs.statusCode == rhs.statusCode && lhs.code == rhs.code
     }
 }
 
@@ -178,6 +186,11 @@ public final class WildstringClient: Sendable {
         let detail: String
     }
 
+    private struct ErrorObjectEnvelope: Decodable {
+        struct Detail: Decodable { let code: String }
+        let detail: Detail
+    }
+
     func perform(_ request: Request) async throws -> Data {
         var attempt = request
         if attempt.clientHeader == "ios" {
@@ -191,6 +204,7 @@ public final class WildstringClient: Sendable {
             }
             let code =
                 (try? JSONDecoder().decode(ErrorEnvelope.self, from: data))?.detail
+                ?? (try? JSONDecoder().decode(ErrorObjectEnvelope.self, from: data))?.detail.code
                 ?? "http_\(response.statusCode)"
             if response.statusCode == 403, code == "client_header_required",
                 attempt.clientHeader != "web"
@@ -204,7 +218,7 @@ public final class WildstringClient: Sendable {
             if code == "library_access_required" {
                 librarySelection.withLock { $0 = nil }
             }
-            throw APIError(statusCode: response.statusCode, code: code)
+            throw APIError(statusCode: response.statusCode, code: code, body: data)
         }
     }
 

@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { continuePodcastQueue } from '../src/podcast-continuation';
+import { previewPodcastTracks } from '../src/podcast-continuation';
 import { podcastEpisodeToTrack } from '../src/podcast-track';
 import type { PodcastDetail } from '../src/podcasts';
 
@@ -22,81 +22,79 @@ const track = (number: number) =>
   podcastEpisodeToTrack(detail.episodes[number - 1], detail.podcast);
 const ids = (queue: ReturnType<typeof track>[]) => queue.map((item) => item.id);
 
-test('倒序续播跳过完成项，保留半途进度且最多补充三集', () => {
-  const queue = continuePodcastQueue(
-    [track(8)],
-    0,
+test('倒序预览跳过已听完，不含当前集，也不改写输入', () => {
+  const current = track(8);
+  const preview = previewPodcastTracks(
+    current,
     detail,
     { order: 'desc', skipCompleted: true },
     new Set(),
   );
-  expect(ids(queue)).toEqual(['podcast_ep_8', 'podcast_ep_6', 'podcast_ep_5', 'podcast_ep_4']);
-  expect(queue[1].podcast_position_seconds).toBe(40);
-  expect(
-    continuePodcastQueue(queue, 0, detail, { order: 'desc', skipCompleted: true }, new Set()),
-  ).toBe(queue);
+  expect(ids(preview)).toEqual(['podcast_ep_6', 'podcast_ep_5', 'podcast_ep_4']);
+  expect(preview[0].podcast_position_seconds).toBe(40);
+  expect(preview.every((item) => item.podcast_queue_origin === 'auto')).toBe(true);
+  expect(current.podcast_queue_origin).toBeUndefined();
 });
-test('跟随列表的正序从当前单集向后续播，关闭时不删除手动项', () => {
+
+test('跟随列表向后续预览，关闭时为空，手动项只作为排除名单', () => {
   const current = { ...track(3), podcast_list_order: 'asc' as const };
-  const manual = track(8);
-  const queue = continuePodcastQueue(
-    [current, manual],
-    0,
-    detail,
-    { order: 'follow', skipCompleted: true },
-    new Set(),
-  );
-  expect(ids(queue)).toEqual([
-    'podcast_ep_3',
-    'podcast_ep_8',
-    'podcast_ep_4',
-    'podcast_ep_5',
-    'podcast_ep_6',
-  ]);
   expect(
-    ids(continuePodcastQueue(queue, 0, detail, { order: 'off', skipCompleted: true }, new Set())),
-  ).toEqual(['podcast_ep_3', 'podcast_ep_8']);
+    ids(
+      previewPodcastTracks(
+        current,
+        detail,
+        { order: 'follow', skipCompleted: true },
+        new Set(['podcast_ep_8']),
+      ),
+    ),
+  ).toEqual(['podcast_ep_4', 'podcast_ep_5', 'podcast_ep_6']);
+  expect(
+    previewPodcastTracks(current, detail, { order: 'off', skipCompleted: true }, new Set()),
+  ).toEqual([]);
+  expect(
+    previewPodcastTracks(
+      current,
+      detail,
+      { order: 'asc', skipCompleted: true, autoContinue: false },
+      new Set(),
+    ),
+  ).toEqual([]);
+  const episodes = detail.episodes.map((episode) => episode.id);
+  previewPodcastTracks(current, detail, { order: 'asc', skipCompleted: true }, new Set());
+  expect(detail.episodes.map((episode) => episode.id)).toEqual(episodes);
 });
-test('手动项优先、移除项不重新出现、队列不会重复单集', () => {
-  const queue = continuePodcastQueue(
-    [track(8), track(5)],
-    0,
-    detail,
-    { order: 'desc', skipCompleted: true },
-    new Set(['podcast_ep_6']),
-  );
-  expect(ids(queue)).toEqual([
-    'podcast_ep_8',
-    'podcast_ep_5',
-    'podcast_ep_4',
-    'podcast_ep_3',
-    'podcast_ep_2',
-  ]);
+
+test('被排除的预览不再出现，已听完可以重新纳入', () => {
+  expect(
+    ids(
+      previewPodcastTracks(
+        track(8),
+        detail,
+        { order: 'desc', skipCompleted: true },
+        new Set(['podcast_ep_6']),
+      ),
+    ),
+  ).toEqual(['podcast_ep_5', 'podcast_ep_4', 'podcast_ep_3']);
+  expect(
+    ids(previewPodcastTracks(track(5), detail, { order: 'asc', skipCompleted: false }, new Set())),
+  ).toEqual(['podcast_ep_6', 'podcast_ep_7', 'podcast_ep_8']);
 });
-test('切换顺序只替换自动尾部，并允许主动重听已完成项', () => {
-  const queue = continuePodcastQueue(
-    [track(5)],
-    0,
-    detail,
-    { order: 'desc', skipCompleted: true },
-    new Set(),
-  );
+
+test('当前单集不在这个节目里时不猜测下一集', () => {
   expect(
-    ids(continuePodcastQueue(queue, 0, detail, { order: 'asc', skipCompleted: false }, new Set())),
-  ).toEqual(['podcast_ep_5', 'podcast_ep_6', 'podcast_ep_7', 'podcast_ep_8']);
-});
-test('读不到当前单集时不猜测接续，且不改其他节目的队列', () => {
-  const unrelated = [{ ...track(3), podcast_id: 'another' }];
-  expect(
-    continuePodcastQueue(unrelated, 0, detail, { order: 'desc', skipCompleted: true }, new Set()),
-  ).toBe(unrelated);
-  expect(
-    continuePodcastQueue(
-      [{ ...track(3), id: 'missing' }],
-      0,
+    previewPodcastTracks(
+      { ...track(3), podcast_id: 'another' },
       detail,
       { order: 'desc', skipCompleted: true },
       new Set(),
     ),
-  ).toHaveLength(1);
+  ).toEqual([]);
+  expect(
+    previewPodcastTracks(
+      { ...track(3), id: 'missing' },
+      detail,
+      { order: 'desc', skipCompleted: true },
+      new Set(),
+    ),
+  ).toEqual([]);
 });
