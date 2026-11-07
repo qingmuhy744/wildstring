@@ -54,7 +54,7 @@ import com.wildstring.app.data.Album
                 val playTrack = tactile { play(state.addedTracks, state.addedTracks.indexOf(track)) }
                 ListItem(headlineContent = { Text(track.title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                     supportingContent = { Text(listOfNotNull(track.artist, track.album).joinToString(" · "), maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                    leadingContent = { Cover(vm, track.id.takeIf { track.hasCover }, track.title, Modifier.size(54.dp)) },
+                    leadingContent = { Cover(vm, track.coverId, track.title, Modifier.size(54.dp)) },
                     trailingContent = { IconButton(playTrack) { Icon(Icons.Default.PlayCircleOutline, stringResource(R.string.play_named, track.title)) } },
                     modifier = Modifier.fillMaxWidth().testTag("discovery-added-${track.id}").clickable(onClick = playTrack).padding(horizontal = 4.dp, vertical = 4.dp))
             }
@@ -66,7 +66,7 @@ import com.wildstring.app.data.Album
                 val playTrack = tactile { play(state.tracks, state.tracks.indexOf(track)) }
                 ListItem(headlineContent = { Text(track.title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                     supportingContent = { Text(listOfNotNull(track.artist, track.album).joinToString(" · "), maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                    leadingContent = { Cover(vm, track.id.takeIf { track.hasCover }, track.title, Modifier.size(54.dp)) },
+                    leadingContent = { Cover(vm, track.coverId, track.title, Modifier.size(54.dp)) },
                     trailingContent = { IconButton(playTrack) { Icon(Icons.Default.PlayCircleOutline, stringResource(R.string.play_named, track.title)) } },
                     modifier = Modifier.fillMaxWidth().clickable(onClick = playTrack).padding(horizontal = 4.dp, vertical = 4.dp))
             }

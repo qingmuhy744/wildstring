@@ -250,12 +250,32 @@ struct MacCollectionHeading: View {
     var canPlay: Bool
     var tileSymbol: String? = nil
     var badge: String? = nil
+    var coverTrackID: String? = nil
+    var client: WildstringClient? = nil
+    var onBack: (() -> Void)? = nil
     var onShuffle: (() -> Void)? = nil
     var play: () -> Void
 
     var body: some View {
         HStack(spacing: 16) {
-            if let tileSymbol {
+            if let onBack {
+                Button(action: onBack) {
+                    Image(systemName: "chevron.backward")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(MacTheme.ink)
+                        .frame(width: 32, height: 32)
+                        .background(MacTheme.raised, in: Circle())
+                        .overlay(Circle().strokeBorder(MacTheme.border))
+                }
+                .buttonStyle(.plain)
+                .help("返回")
+                .keyboardShortcut("[", modifiers: .command)
+            }
+            if let client, let coverTrackID, !coverTrackID.isEmpty {
+                MacCover(client: client, trackID: coverTrackID, side: 64, cornerRadius: 12)
+                    .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(MacTheme.border))
+                    .shadow(color: .black.opacity(0.18), radius: 6, x: 0, y: 3)
+            } else if let tileSymbol {
                 Image(systemName: tileSymbol)
                     .font(.system(size: 26, weight: .medium))
                     .foregroundStyle(MacTheme.onAccent)

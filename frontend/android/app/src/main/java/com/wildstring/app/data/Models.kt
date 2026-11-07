@@ -46,6 +46,8 @@ data class Track(
     val artist: String get() = artists.joinToString(" / ").ifBlank { "未知艺人" }
     val podcastEpisodeId: String? get() = podcastEpisodeId(id)
     val isPodcast: Boolean get() = podcastEpisodeId != null
+    val mayHaveCover: Boolean get() = hasCover || !album.isNullOrBlank() || !albumId.isNullOrBlank() || isPodcast
+    val coverId: String? get() = id.takeIf { mayHaveCover }
     val unavailableReason: String? get() = when (status) {
         "missing" -> "文件缺失"
         "unreadable" -> "文件无法读取"

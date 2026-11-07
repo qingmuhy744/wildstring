@@ -72,6 +72,7 @@ internal enum class SettingsSection(@androidx.annotation.StringRes val title: In
     var servers by remember(settingsOwner) { mutableStateOf(false) }
     var logout by remember(settingsOwner) { mutableStateOf(false) }
     var diagnostics by remember(settingsOwner) { mutableStateOf(false) }
+    var crashReports by remember(settingsOwner) { mutableStateOf(false) }
     var feature by remember(settingsOwner) { mutableStateOf<String?>(null) }
     var podcastPlayback by remember(settingsOwner) { mutableStateOf<com.wildstring.app.data.PodcastPlaybackSettings?>(null) }
     var savingPodcastPlayback by remember(settingsOwner) { mutableStateOf(false) }
@@ -272,6 +273,12 @@ internal enum class SettingsSection(@androidx.annotation.StringRes val title: In
                 SettingsSection.About -> {
                     SettingsGroup(stringResource(R.string.settings_group_about)) {
                         com.wildstring.app.update.UpdateSettings()
+                        SettingsAction(
+                            stringResource(R.string.settings_crash_reports),
+                            Icons.Default.BugReport,
+                            subtitle = stringResource(R.string.settings_crash_reports_summary),
+                            tag = "crash-reports",
+                        ) { crashReports = true }
                         ListItem(headlineContent = { Text(stringResource(R.string.brand_name)) }, supportingContent = { Text(stringResource(R.string.about_version, BuildConfig.VERSION_NAME) + (state.serverVersion?.let { stringResource(R.string.about_server_version, it) } ?: "")) },
                             leadingContent = { Icon(painterResource(R.drawable.ic_wildstring), null, Modifier.size(36.dp), tint = Color.Unspecified) })
                     }
@@ -284,6 +291,7 @@ internal enum class SettingsSection(@androidx.annotation.StringRes val title: In
     }
     if (servers) ServersScreen(vm) { servers = false }
     if (diagnostics) PlaybackDiagnosticsDialog(vm) { diagnostics = false }
+    if (crashReports) CrashReportsDialog { crashReports = false }
     feature?.let { route -> FeatureDialog(vm, route) { feature = null } }
     if (logout) AlertDialog(onDismissRequest = { logout = false }, title = { Text(stringResource(R.string.logout_title)) }, text = { Text(stringResource(R.string.logout_message)) }, confirmButton = { TextButton({ logout = false; back(); vm.logout() }) { Text(stringResource(R.string.logout)) } }, dismissButton = { TextButton({ logout = false }) { Text(stringResource(R.string.cancel)) } })
     if (profile) ProfileDialog(vm) { profile = false }

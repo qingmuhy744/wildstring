@@ -8,8 +8,8 @@ struct MacFullscreenPlayer: View {
     let client: WildstringClient
     let playback: PlaybackService
 
-    private enum Panel { case lyrics, queue }
-    @State private var panel = Panel.lyrics
+    @State private var showLyrics = true
+    @State private var showQueue = false
     @State private var timeline: LyricTimeline?
     @State private var palette = MacArtworkPalette.neutral
     @Environment(\.colorScheme) private var colorScheme
@@ -21,23 +21,52 @@ struct MacFullscreenPlayer: View {
 
     var body: some View {
         GeometryReader { geo in
-            VStack(spacing: 0) {
-                header
-                if let item = playback.currentItem {
-                    stage(item)
-                        .frame(maxWidth: 1180)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .padding(.vertical, 16)
-                } else {
-                    ContentUnavailableView("先播放一首喜欢的歌", systemImage: "music.note")
-                        .frame(maxHeight: .infinity)
+            let isWide = geo.size.width >= 1050
+            let hasDrawer = showQueue && !isPodcast
+            let drawerWidth: CGFloat = min(380, max(320, geo.size.width * 0.28))
+            let shouldShift = hasDrawer && isWide
+
+            ZStack(alignment: .trailing) {
+                VStack(spacing: 0) {
+                    header
+                    if let item = playback.currentItem {
+                        stage(item)
+                            .frame(maxWidth: shouldShift ? 1440 : 1180)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .padding(.vertical, 16)
+                            .padding(.trailing, shouldShift ? (drawerWidth + 24) : 0)
+                    } else {
+                        ContentUnavailableView("先播放一首喜欢的歌", systemImage: "music.note")
+                            .frame(maxHeight: .infinity)
+                    }
+                    controls
+                        .frame(maxWidth: 720)
+                        .padding(.bottom, 24)
                 }
-                controls
-                    .frame(maxWidth: 720)
-                    .padding(.bottom, 24)
+                .padding(.horizontal, 36)
+                .frame(width: geo.size.width, height: geo.size.height)
+
+                if hasDrawer {
+                    if !isWide {
+                        Color.black.opacity(0.001)
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) {
+                                    showQueue = false
+                                }
+                            }
+                    }
+
+                    queueDrawer(width: drawerWidth, height: geo.size.height)
+                        .transition(.asymmetric(
+                            insertion: .move(edge: .trailing).combined(with: .opacity),
+                            removal: .move(edge: .trailing).combined(with: .opacity)
+                        ))
+                        .zIndex(10)
+                }
             }
-            .padding(.horizontal, 36)
-            .frame(width: geo.size.width, height: geo.size.height)
+            .animation(.spring(response: 0.38, dampingFraction: 0.82), value: showQueue)
+            .animation(.spring(response: 0.38, dampingFraction: 0.82), value: showLyrics)
             .background {
                 ZStack {
                     LinearGradient(colors: palette.colors(dark: dark), startPoint: .topLeading, endPoint: .bottomTrailing)
@@ -55,10 +84,32 @@ struct MacFullscreenPlayer: View {
         }
         .foregroundStyle(ink)
         .tint(MacTheme.accent)
-        .onExitCommand { session.showFullscreen = false }
+        .onExitCommand {
+            if showQueue {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) {
+                    showQueue = false
+                }
+            } else {
+                session.showFullscreen = false
+            }
+        }
         .task(id: playback.currentItem?.trackID) { await load() }
-        .onAppear { panel = isPodcast ? .queue : .lyrics }
-        .onChange(of: isPodcast) { _, podcast in panel = podcast ? .queue : .lyrics }
+        .onAppear {
+            if isPodcast {
+                showQueue = false
+                showLyrics = false
+            } else {
+                showLyrics = true
+            }
+        }
+        .onChange(of: isPodcast) { _, podcast in
+            if podcast {
+                showQueue = false
+                showLyrics = false
+            } else {
+                showLyrics = true
+            }
+        }
     }
 
     private var header: some View {
@@ -66,30 +117,42 @@ struct MacFullscreenPlayer: View {
             Text(isPodcast ? "正在收听" : "正在播放")
                 .font(.callout.weight(.medium)).foregroundStyle(ink.opacity(0.65))
             HStack {
-            Button { session.showFullscreen = false } label: {
-                Image(systemName: "chevron.down").font(.system(size: 16, weight: .semibold))
-                    .frame(width: 36, height: 36)
-                    .background(ink.opacity(0.06), in: Circle())
-            }
-            .buttonStyle(.plain).help("收起全屏播放（Esc）").accessibilityLabel("收起全屏播放")
-            Spacer()
-            HStack(spacing: 4) {
-                if !isPodcast { panelButton("歌词", symbol: "quote.bubble", value: .lyrics) }
-                panelButton("队列", symbol: "list.number", value: .queue)
-            }
-            .padding(4).background(ink.opacity(0.045), in: Capsule())
+                Button { session.showFullscreen = false } label: {
+                    Image(systemName: "chevron.down").font(.system(size: 16, weight: .semibold))
+                        .frame(width: 36, height: 36)
+                        .background(ink.opacity(0.06), in: Circle())
+                }
+                .buttonStyle(.plain).help("收起全屏播放（Esc）").accessibilityLabel("收起全屏播放")
+                Spacer()
+                if !isPodcast {
+                    HStack(spacing: 4) {
+                        toggleButton("歌词", symbol: "quote.bubble", isActive: showLyrics) {
+                            withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) {
+                                showLyrics.toggle()
+                            }
+                        }
+                        toggleButton("队列", symbol: "list.number", isActive: showQueue) {
+                            withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) {
+                                showQueue.toggle()
+                            }
+                        }
+                    }
+                    .padding(4).background(ink.opacity(0.045), in: Capsule())
+                }
             }
         }
         .padding(.top, 18).padding(.bottom, 4)
     }
 
-    private func panelButton(_ title: String, symbol: String, value: Panel) -> some View {
-        Button { panel = value } label: {
+    private func toggleButton(_ title: String, symbol: String, isActive: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
             Label(title, systemImage: symbol).font(.callout)
                 .padding(.horizontal, 12).padding(.vertical, 7)
-                .foregroundStyle(panel == value ? ink : ink.opacity(0.55))
-                .background(panel == value ? ink.opacity(0.1) : .clear, in: Capsule())
-        }.buttonStyle(.plain)
+                .foregroundStyle(isActive ? ink : ink.opacity(0.55))
+                .background(isActive ? ink.opacity(0.12) : .clear, in: Capsule())
+        }
+        .buttonStyle(.plain)
+        .help(isActive ? "收起\(title)" : "展开\(title)")
     }
 
     private func stage(_ item: PlaybackService.Item) -> some View {
@@ -97,7 +160,7 @@ struct MacFullscreenPlayer: View {
             let side = min(340, min(geo.size.width * 0.30, max(180, geo.size.height - 140)))
             HStack(alignment: .center, spacing: 48) {
                 VStack(alignment: .leading, spacing: 20) {
-                    MacCover(client: client, trackID: item.hasCover ? item.trackID : nil,
+                    MacCover(client: client, trackID: item.trackID,
                         side: side, cornerRadius: 12)
                         .shadow(color: .black.opacity(dark ? 0.45 : 0.16), radius: 28, y: 16)
                     HStack(alignment: .top, spacing: 12) {
@@ -117,19 +180,59 @@ struct MacFullscreenPlayer: View {
                     }
                 }.frame(width: side)
                 Group {
-                    if panel == .lyrics, !isPodcast {
-                        MacLyricScroll(playback: playback, timeline: timeline, empty: "这首歌还没有歌词", prominent: true)
-                            .id(item.trackID)
-                    } else {
+                    if isPodcast {
                         MacQueueView(client: client, playback: playback)
                             .padding(20)
                             .background(ink.opacity(0.035), in: RoundedRectangle(cornerRadius: 18))
+                    } else if showLyrics {
+                        MacLyricScroll(playback: playback, timeline: timeline, empty: "这首歌还没有歌词", prominent: true)
+                            .id(item.trackID)
+                    } else {
+                        VStack(spacing: 12) {
+                            Image(systemName: "music.note")
+                                .font(.system(size: 36))
+                                .foregroundStyle(ink.opacity(0.2))
+                            Text("沉浸播放中")
+                                .font(.headline)
+                                .foregroundStyle(ink.opacity(0.45))
+                            Text("点击右上角「歌词」展开歌词")
+                                .font(.caption)
+                                .foregroundStyle(ink.opacity(0.35))
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             .frame(width: geo.size.width, height: geo.size.height)
         }
+    }
+
+    private func queueDrawer(width: CGFloat, height: CGFloat) -> some View {
+        let drawerHeight = max(320, height - 180)
+        return VStack(spacing: 0) {
+            MacQueueView(client: client, playback: playback, showsHeader: true, onClose: {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.82)) {
+                    showQueue = false
+                }
+            })
+            .padding(18)
+        }
+        .frame(width: width, height: drawerHeight)
+        .background(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .fill(.ultraThinMaterial)
+        )
+        .background(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .fill(dark ? Color.black.opacity(0.35) : Color.white.opacity(0.50))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .strokeBorder(ink.opacity(dark ? 0.15 : 0.08), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(dark ? 0.45 : 0.12), radius: 28, x: -6, y: 12)
+        .padding(.trailing, 28)
     }
 
     private var controls: some View {
@@ -204,8 +307,7 @@ struct MacFullscreenPlayer: View {
     private func load() async {
         timeline = nil
         guard let item = playback.currentItem, !isPodcast else { return }
-        if item.hasCover,
-           let data = try? await client.authorizedData(path: "api/v1/tracks/\(item.trackID)/cover"),
+        if let data = try? await client.authorizedData(path: "api/v1/tracks/\(item.trackID)/cover"),
            !Task.isCancelled {
             palette = MacArtworkPalette.extract(data)
         } else if !Task.isCancelled {

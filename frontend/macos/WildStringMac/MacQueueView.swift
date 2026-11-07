@@ -6,6 +6,7 @@ struct MacQueueView: View {
     let client: WildstringClient
     let playback: PlaybackService
     var showsHeader = true
+    var onClose: (() -> Void)? = nil
     @State private var selection: UUID?
 
     private var entries: [PlaybackService.Item] { playback.playbackItems }
@@ -31,6 +32,18 @@ struct MacQueueView: View {
                         .buttonStyle(.borderless)
                         .help("定位当前播放")
                         .disabled(playback.currentItem == nil)
+
+                        if let onClose {
+                            Button(action: onClose) {
+                                Image(systemName: "xmark.circle.fill")
+                                    .font(.system(size: 16))
+                                    .foregroundStyle(MacTheme.muted)
+                                    .frame(width: 22, height: 22)
+                            }
+                            .buttonStyle(.plain)
+                            .help("收起队列（Esc）")
+                            .accessibilityLabel("收起队列")
+                        }
                     }
                 }
                 Text(playback.isShuffled ? "随机播放顺序 · 拖动可调整" : "拖动调整顺序 · 双击播放")
@@ -71,7 +84,7 @@ struct MacQueueView: View {
                 .help("拖动调整顺序")
             Button { play(item) } label: {
                 ZStack {
-                    MacCover(client: client, trackID: item.hasCover || item.trackID.hasPrefix("podcast_ep_") ? item.trackID : nil, side: 34,
+                    MacCover(client: client, trackID: item.trackID, side: 34,
                         placeholder: item.trackID.hasPrefix("podcast_ep_") ? "antenna.radiowaves.left.and.right" : "music.note")
                     if current {
                         RoundedRectangle(cornerRadius: 6).fill(.black.opacity(0.45))

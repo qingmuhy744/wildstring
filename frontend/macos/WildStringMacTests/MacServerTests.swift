@@ -157,4 +157,54 @@ extension MacAssistantTests {
         session.showServerLogin = false
         await session.logout()
     }
+
+    @Test func deletingServerRemovesCredentialsAndSwitchesOrResetsConnection() async throws {
+        let suite = "wildstring.server-tests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = InMemorySessionStore()
+        let servers = try ["first.example.invalid", "second.example.invalid"].enumerated().map { index, host in
+            let address = try ServerAddress(input: host)
+            try store.saveSession(StoredSession(cookies: [
+                StoredCookie(name: "session", value: "test-fixture", domain: host, path: "/", isSecure: true)
+            ]), origin: address.origin)
+            let server = MacSavedServer(address: address.description, username: host,
+                lastUsedAt: Date(timeIntervalSince1970: Double(100 - index)), allowInsecureHTTP: false)
+            MacServers.upsert(server, defaults: defaults)
+            return server
+        }
+        StubURLProtocol.respond { request in
+            if request.url!.path == "/api/v1/auth/status" {
+                let host = request.url!.host!
+                return .json(body: "{\"configured\":true,\"authenticated\":true,\"user\":{\"id\":\"\(host)\",\"username\":\"\(host)\",\"profile\":\"listener\",\"version\":1,\"enabled\":true}}")
+            }
+            if request.url!.path == "/api/v1/favorites/ids" { return .json(body: #"{"ids":[]}"#) }
+            return .empty(status: 404)
+        }
+        let queueStore = try SwiftDataQueueStore.inMemory()
+        let session = MacSession(store: store, queueStore: queueStore,
+            defaults: defaults, configuration: StubURLProtocol.configuration())
+        await session.restore()
+        #expect(session.servers.count == 2)
+        #expect(session.client?.server.description == servers[0].address)
+
+        // Delete active server (first)
+        await session.deleteServer(servers[0])
+
+        // First server should be removed from saved servers and credentials cleared
+        #expect(session.servers.count == 1)
+        #expect(session.servers.first?.address == servers[1].address)
+        #expect(try store.loadSession(origin: ServerAddress(input: servers[0].address).origin) == nil)
+
+        // Session automatically switched to second server
+        #expect(session.client?.server.description == servers[1].address)
+        #expect(try store.loadSession(origin: ServerAddress(input: servers[1].address).origin) != nil)
+
+        // Delete the remaining server (second)
+        await session.deleteServer(servers[1])
+        #expect(session.servers.isEmpty)
+        #expect(session.phase == .connect)
+        #expect(session.client == nil)
+        #expect(try store.loadSession(origin: ServerAddress(input: servers[1].address).origin) == nil)
+    }
 }

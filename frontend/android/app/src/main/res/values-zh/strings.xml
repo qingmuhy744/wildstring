@@ -42,10 +42,10 @@
     <string name="podcast_resume_auto_value">自动接续上次位置</string>
     <string name="podcast_resume_restart_value">每次从头播放</string>
     <string name="podcast_resume_ask_value">播放前询问是否续播</string>
-    <string name="podcast_resume_ask">播放前询问（默认）</string>
-    <string name="podcast_resume_auto">自动接续</string>
+    <string name="podcast_resume_ask">播放前询问</string>
+    <string name="podcast_resume_auto">自动接续（默认）</string>
     <string name="podcast_resume_restart">从头播放</string>
-    <string name="podcast_resume_hint">每集进度独立保存。播放时定时同步，离线时先保存在本机；不同设备进度冲突时会让你选择。</string>
+    <string name="podcast_resume_hint">每集进度独立保存。播放时定时同步，离线时先保存在本机；不同设备进度冲突时会在播放器提示。</string>
     <string name="settings_group_podcast_cache">播客播放缓存</string>
     <string name="podcast_cache_saved">播客播放缓存设置已保存。</string>
     <string name="podcast_cache_failed">播客播放缓存设置保存失败，请重新打开设置后重试。</string>
@@ -486,4 +486,13 @@
     <string name="recommendation_source_lastfm_similar">Last.fm 相似</string>
     <string name="recommendation_source_lastfm_charts">Last.fm 公共榜单</string>
     <string name="recommendation_source_lastfm_tags">Last.fm 公共标签</string>
+    <string name="settings_crash_reports">崩溃日志与排查</string>
+    <string name="settings_crash_reports_summary">查看、复制或导出应用闪退堆栈</string>
+    <string name="crash_reports_empty_title">暂无崩溃记录</string>
+    <string name="crash_reports_empty_desc">应用运行正常。如后续遇到闪退，异常堆栈与设备信息将自动保存在这里，方便复制排查。</string>
+    <string name="crash_detected_message">检测到应用上次异常退出</string>
+    <string name="crash_view_action">查看日志</string>
+    <string name="crash_reports_count">共 %1$d 条崩溃记录</string>
+    <string name="crash_share">分享</string>
+    <string name="crash_clear">清空</string>
 </resources>

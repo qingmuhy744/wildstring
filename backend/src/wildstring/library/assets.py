@@ -145,7 +145,9 @@ class TrackAssets:
             return result
         with self.repository.database.connect() as connection:
             siblings = connection.execute(
-                "SELECT id FROM tracks WHERE id<>? AND album_id=(SELECT album_id FROM tracks WHERE id=?) AND status='available' AND (has_cover=1 OR EXISTS(SELECT 1 FROM artwork_choices a WHERE a.track_id=tracks.id AND a.filename IS NOT NULL)) ORDER BY coalesce(disc_number,1),coalesce(track_number,99999),id LIMIT 20",
+                "SELECT id FROM tracks WHERE id<>? AND album_id=(SELECT album_id FROM tracks WHERE id=?) AND status='available' "
+                "ORDER BY (has_cover=1 OR EXISTS(SELECT 1 FROM artwork_choices a WHERE a.track_id=tracks.id AND a.filename IS NOT NULL)) DESC, "
+                "coalesce(disc_number,1), coalesce(track_number,99999), id LIMIT 20",
                 (track_id, track_id),
             ).fetchall()
         for sibling in siblings:
@@ -171,11 +173,24 @@ class TrackAssets:
             if result := self.thumbnail(picture.data, size):
                 return result, "embedded"
         for path in self.candidates(
-            relative, [relative.stem, "cover", "folder", "front"], IMAGE_SUFFIXES
+            relative,
+            [relative.stem, "cover", "folder", "front", relative.parent.name],
+            IMAGE_SUFFIXES,
         ):
             data = self.read_sidecar(path, MAX_COVER_BYTES)
             if data is not None and (result := self.thumbnail(data, size)):
                 return result, "directory"
+        parent_name = (
+            relative.parent.name.casefold().replace(" ", "").replace("_", "").replace("-", "")
+        )
+        if parent_name.startswith(("cd", "disc")) and relative.parent != relative.parent.parent:
+            parent_rel = relative.parent
+            for path in self.candidates(
+                parent_rel, ["cover", "folder", "front", parent_rel.parent.name], IMAGE_SUFFIXES
+            ):
+                data = self.read_sidecar(path, MAX_COVER_BYTES)
+                if data is not None and (result := self.thumbnail(data, size)):
+                    return result, "directory"
         return None
 
     def lyrics(self, track_id: str, *, include_override: bool = True) -> dict:

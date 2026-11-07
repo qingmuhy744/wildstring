@@ -123,22 +123,31 @@ ios-test: ## Run the iOS core package unit tests
 	swift test --package-path frontend/ios/WildStringKit
 
 ios-build: ios-gen ## Build the iOS app for the simulator
-	xcodebuild -project frontend/ios/WildString.xcodeproj -scheme WildString -destination 'generic/platform=iOS Simulator' build
+	xcodebuild -project frontend/ios/WildString.xcodeproj -scheme WildString -destination 'generic/platform=iOS Simulator' -derivedDataPath artifacts/ios-derived.noindex build
 
 .PHONY: macos-gen macos-build macos-dmg macos-test
-MACOS_CONFIGURATION ?= Release
+MACOS_CONFIGURATION ?= Debug
 
 macos-gen: ## Generate the Mac Xcode project from frontend/macos/project.yml (requires XcodeGen)
 	cd frontend/macos && xcodegen generate
 
 macos-build: macos-gen ## Build the Mac app
-	xcodebuild -project frontend/macos/WildStringMac.xcodeproj -scheme WildString -destination 'platform=macOS' -configuration $(MACOS_CONFIGURATION) -derivedDataPath artifacts/macos-derived CODE_SIGN_IDENTITY=- CODE_SIGNING_ALLOWED=YES ENABLE_HARDENED_RUNTIME=YES build
+	xcodebuild -project frontend/macos/WildStringMac.xcodeproj -scheme WildString -destination 'platform=macOS' -configuration $(MACOS_CONFIGURATION) -derivedDataPath artifacts/macos-derived.noindex CODE_SIGN_IDENTITY=- CODE_SIGNING_ALLOWED=YES ENABLE_HARDENED_RUNTIME=YES build
 
-macos-dmg: macos-build ## Pack the Mac app into a DMG under artifacts/
+macos-dmg: ## Pack the Mac app into a DMG under artifacts/
+	$(MAKE) macos-build MACOS_CONFIGURATION=Release
 	bash scripts/package_macos_dmg.sh
 
 macos-test: macos-gen ## Run native Mac assistant regression tests
-	xcodebuild -project frontend/macos/WildStringMac.xcodeproj -scheme WildString -destination 'platform=macOS' -configuration Debug -derivedDataPath artifacts/macos-test-derived CODE_SIGN_IDENTITY=- test
+	xcodebuild -project frontend/macos/WildStringMac.xcodeproj -scheme WildString -destination 'platform=macOS' -configuration Debug -derivedDataPath artifacts/macos-test-derived.noindex CODE_SIGN_IDENTITY=- test
+
+.PHONY: clean-macos clean
+clean-macos: ## Remove macOS build outputs and unregister debug apps
+	rm -rf artifacts/macos-derived* artifacts/macos-test-derived* frontend/macos/DerivedData*
+	@/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -u artifacts/macos-derived*/Build/Products/*/*.app 2>/dev/null || true
+
+clean: clean-macos ## Clean build artifacts
+	rm -rf artifacts/*.noindex dist/ build/
 
 scan: env ## Rescan the managed library; use SCAN_ARGS=--full to refresh all tags
 	$(RUN) python -m wildstring.scan $(SCAN_ARGS)

@@ -232,44 +232,86 @@ struct MacSettingsView: View {
             .disabled(session.isBusy || session.routes == nil)
             note("为这台服务器设置本机别名，管理线路与切换方式。账号资料和曲库管理请前往网页版。")
             Divider()
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 12) {
-                    serverActions
+            if session.servers.count > 1 {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("已保存的服务器")
+                        .font(MacTheme.caption)
+                        .foregroundStyle(MacTheme.muted)
+                    ForEach(session.servers) { server in
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                HStack(spacing: 6) {
+                                    Text(server.label)
+                                        .font(MacTheme.section(13))
+                                    if server.address == session.logicalServerAddress {
+                                        Text("当前")
+                                            .font(MacTheme.caption)
+                                            .foregroundStyle(MacTheme.accent)
+                                    }
+                                }
+                                Text("\(server.username) · \(server.address)")
+                                    .font(MacTheme.caption)
+                                    .foregroundStyle(MacTheme.muted)
+                            }
+                            Spacer()
+                            if server.address != session.logicalServerAddress {
+                                Button("切换") {
+                                    Task { await session.switchServer(server) }
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                            }
+                            Button {
+                                session.serverToDelete = server
+                            } label: {
+                                Image(systemName: "trash")
+                                    .foregroundStyle(MacTheme.muted)
+                            }
+                            .buttonStyle(.plain)
+                            .help("删除服务器")
+                        }
+                        .padding(.vertical, 2)
+                    }
                 }
-                VStack(alignment: .leading, spacing: 12) {
-                    serverActions
-                }
+                Divider()
             }
-            Button("退出当前服务器…", role: .destructive) { session.confirmLogout = true }
-                .buttonStyle(.borderless)
-                .foregroundStyle(.red)
-                .disabled(session.isBusy)
-        }
-    }
-
-    @ViewBuilder
-    private var serverActions: some View {
-        if session.servers.count > 1 {
-            Menu("切换服务器") {
-                ForEach(session.servers) { server in
-                    Button {
-                        Task { await session.switchServer(server) }
-                    } label: {
-                        if server.address == session.logicalServerAddress {
-                            Label("\(server.label) · \(server.username)", systemImage: "checkmark")
-                        } else {
-                            Text("\(server.label) · \(server.username)")
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 10) {
+                    Button("连接其他服务器…", systemImage: "plus") { session.addServer() }
+                        .buttonStyle(.bordered)
+                    Spacer()
+                    Button("退出当前服务器…", systemImage: "rectangle.portrait.and.arrow.right") {
+                        session.confirmLogout = true
+                    }
+                    .buttonStyle(.bordered)
+                    Button("删除当前服务器…", systemImage: "trash", role: .destructive) {
+                        if let current = session.servers.first(where: { $0.address == session.logicalServerAddress }) {
+                            session.serverToDelete = current
                         }
                     }
-                    .disabled(server.address == session.logicalServerAddress)
+                    .buttonStyle(.bordered)
+                    .tint(.red)
+                }
+                VStack(alignment: .leading, spacing: 10) {
+                    Button("连接其他服务器…", systemImage: "plus") { session.addServer() }
+                        .buttonStyle(.bordered)
+                    HStack(spacing: 10) {
+                        Button("退出当前服务器…", systemImage: "rectangle.portrait.and.arrow.right") {
+                            session.confirmLogout = true
+                        }
+                        .buttonStyle(.bordered)
+                        Button("删除当前服务器…", systemImage: "trash", role: .destructive) {
+                            if let current = session.servers.first(where: { $0.address == session.logicalServerAddress }) {
+                                session.serverToDelete = current
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(.red)
+                    }
                 }
             }
-            .fixedSize()
             .disabled(session.isBusy)
         }
-        Button("连接其他服务器…", systemImage: "plus") { session.addServer() }
-            .buttonStyle(.bordered)
-            .disabled(session.isBusy)
     }
 
     private func card<Content: View>(

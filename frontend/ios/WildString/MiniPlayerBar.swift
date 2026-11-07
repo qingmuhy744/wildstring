@@ -17,7 +17,7 @@ struct MiniPlayerBar: View {
                         HStack(spacing: 12) {
                             CoverImage(
                                 client: client,
-                                trackID: item.hasCover ? item.trackID : nil,
+                                trackID: item.coverTrackID,
                                 size: 42,
                                 circular: true
                             )

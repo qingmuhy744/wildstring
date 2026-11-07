@@ -65,8 +65,8 @@ class PodcastProgress @Inject constructor(
             flushAll()
         } }
     }
-    private fun modeForOwner() = prefs.getString("mode:${repository.session.storageScope()}", "ask").takeIf { it in listOf("ask", "auto", "restart") } ?: "ask"
-    fun mode(value: String) { require(value in listOf("ask", "auto", "restart")); prefs.edit().putString("mode:${repository.session.storageScope()}", value).apply(); mutableMode.value = value }
+    private fun modeForOwner() = prefs.getString("mode:${repository.session.storageScope()}", "auto").takeIf { it in listOf("auto", "restart", "ask") } ?: "auto"
+    fun mode(value: String) { require(value in listOf("auto", "restart", "ask")); prefs.edit().putString("mode:${repository.session.storageScope()}", value).apply(); mutableMode.value = value }
     fun answer(useRemote: Boolean?) { answer?.complete(useRemote) }
     fun leave() { active = null; activeConflicted = false }
     fun owns(id: String) = !activeConflicted && active?.let { it.first == repository.session.cacheScope() && it.second == id } == true
@@ -90,28 +90,21 @@ class PodcastProgress @Inject constructor(
             catch (error: IOException) { local?.remote ?: EpisodeProgress(id) }
         ownerValid(owner)
         val conflict = local?.conflictsWith(remote) == true
-        val localPosition = requestedMs ?: (local?.update?.positionSeconds ?: 0) * 1000
         var position = requestedMs ?: if (local?.dirty == true && !conflict) local.update.positionSeconds * 1000
             else if (remote.completed) 0 else remote.positionSeconds * 1000
-        if (conflict || (requestedMs == null && position > 0 && mode.value == "ask" && !automatic && !owns(id))) {
-            val deferred = CompletableDeferred<Boolean?>()
-            answer?.complete(null); answer = deferred
-            mutablePrompt.value = EpisodeProgressPrompt(title, if (remote.completed) 0 else remote.positionSeconds * 1000,
-                if (conflict) localPosition else 0, conflict)
-            val choice = try { deferred.await() } finally { if (answer === deferred) { answer = null; mutablePrompt.value = null } }
-            if (choice == null) return null
-            position = if (choice) { if (remote.completed) 0 else remote.positionSeconds * 1000 }
-                else if (conflict) localPosition else 0
-        } else if (requestedMs == null && mode.value == "restart") position = 0
+        if (requestedMs == null && mode.value == "restart") position = 0
+        if (conflict) {
+            mutableMessage.value = "这集在其他设备有更新的进度"
+        } else {
+            mutableMessage.value = null
+        }
         ownerValid(owner)
         val session = UUID.randomUUID().toString()
         val value = EpisodeCheckpoint(remote, PodcastProgressUpdate(session, device, remote.version, 1,
             (position / 1000).coerceAtLeast(0), (durationMs / 1000).coerceAtLeast(0), "play"))
-        stateLock.withLock { ownerValid(owner); save(owner, id, value); active = Triple(owner, id, session); activeConflicted = false }
-        mutableMessage.value = null
+        stateLock.withLock { ownerValid(owner); save(owner, id, value); active = Triple(owner, id, session); activeConflicted = conflict }
         flush(owner, id)
         ownerValid(owner)
-        if (stateLock.withLock { read(owner, id)?.conflict } == true) { leave(); return null }
         return position
     }
     fun checkpoint(id: String, positionMs: Long, durationMs: Long, event: String, force: Boolean = false) {

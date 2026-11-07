@@ -27,9 +27,9 @@ internal data class Atmosphere(val image: ImageBitmap, val tint: Color)
 @Composable internal fun artworkAtmosphere(vm: MusicViewModel, track: Track): Atmosphere? {
     val context = LocalContext.current
     val profile by vm.repository.session.profiles.collectAsStateWithLifecycle()
-    val atmosphere by produceState<Atmosphere?>(null, track.id, track.hasCover, track.podcast?.coverUrl, profile) {
+    val atmosphere by produceState<Atmosphere?>(null, track.id, track.mayHaveCover, track.podcast?.coverUrl, profile) {
         value = null
-        if (!track.hasCover || profile == null) return@produceState
+        if (!track.mayHaveCover || profile == null) return@produceState
         try {
             val result = vm.coverLoader(track.id).execute(ImageRequest.Builder(context).data(vm.repository.cover(track.id))
                 .memoryCacheKey("$profile:atmosphere:${vm.repository.cover(track.id)}").size(96).allowHardware(false).build())

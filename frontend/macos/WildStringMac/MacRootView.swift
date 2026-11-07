@@ -50,11 +50,7 @@ struct MacRootView: View {
         }
         .sheet(isPresented: Bindable(session).showRoutes) {
             if let routes = session.routes {
-                VStack {
-                    HStack { Text("服务器与线路").font(.title2); Spacer(); Button("完成") { session.showRoutes = false } }.padding()
-                    TextField("本机别名（留空使用服务器名称）", text: Binding(get: { session.servers.first { $0.address == session.logicalServerAddress }?.alias ?? "" }, set: { session.setServerAlias($0) })).padding(.horizontal)
-                    ServerRoutesEditor(routes: routes)
-                }.frame(width: 640, height: 620)
+                MacServerRoutesSheet(session: session, routes: routes)
             }
         }
         .confirmationDialog("退出当前服务器？", isPresented: Bindable(session).confirmLogout, titleVisibility: .visible) {
@@ -62,6 +58,24 @@ struct MacRootView: View {
             Button("取消", role: .cancel) {}
         } message: {
             Text("退出会停止当前播放。其他服务器的登录状态会保留。")
+        }
+        .confirmationDialog(
+            "删除服务器「\(session.serverToDelete?.label ?? "")」？",
+            isPresented: Binding(
+                get: { session.serverToDelete != nil },
+                set: { if !$0 { session.serverToDelete = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("删除服务器", role: .destructive) {
+                if let target = session.serverToDelete {
+                    session.serverToDelete = nil
+                    Task { await session.deleteServer(target) }
+                }
+            }
+            Button("取消", role: .cancel) { session.serverToDelete = nil }
+        } message: {
+            Text("将清除该服务器在本机的登录凭据、保存的线路、播放队列与本地缓存。")
         }
         .alert("无法切换服务器", isPresented: Binding(
             get: { session.serverSwitchError != nil },
@@ -72,6 +86,55 @@ struct MacRootView: View {
             Text(session.serverSwitchError ?? "")
         }
         .task { await session.restore() }
+    }
+}
+
+private struct MacServerRoutesSheet: View {
+    let session: MacSession
+    let routes: ServerRoutes
+
+    private var aliasBinding: Binding<String> {
+        Binding(
+            get: { session.servers.first { $0.address == session.logicalServerAddress }?.alias ?? "" },
+            set: { session.setServerAlias($0) }
+        )
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("服务器与线路").font(.title2)
+                Spacer()
+                Button("完成") { session.showRoutes = false }
+                    .keyboardShortcut(.defaultAction)
+            }
+            .padding([.horizontal, .top])
+            .padding(.bottom, 6)
+
+            TextField("本机别名（留空使用服务器名称）", text: aliasBinding)
+                .textFieldStyle(.roundedBorder)
+                .padding(.horizontal)
+                .padding(.bottom, 6)
+
+            ServerRoutesEditor(routes: routes)
+
+            Divider().padding(.top, 8)
+
+            HStack {
+                Button("删除此服务器…", systemImage: "trash", role: .destructive) {
+                    if let current = session.servers.first(where: { $0.address == session.logicalServerAddress }) {
+                        session.showRoutes = false
+                        session.serverToDelete = current
+                    }
+                }
+                .buttonStyle(.bordered)
+                .tint(.red)
+                Spacer()
+            }
+            .padding()
+        }
+        .frame(width: 620)
+        .frame(minHeight: 460, maxHeight: 680)
     }
 }
 
@@ -143,36 +206,49 @@ private struct MacLoginView: View {
                     ScrollView {
                         VStack(spacing: 6) {
                             ForEach(session.servers) { server in
-                                Button {
-                                    serverText = server.address
-                                    username = server.username
-                                    password = ""
-                                    allowInsecureHTTP = server.allowInsecureHTTP
-                                    Task { await session.switchServer(server) }
-                                } label: {
-                                    HStack(spacing: 10) {
-                                        Image(systemName: "server.rack").foregroundStyle(MacTheme.muted)
-                                        VStack(alignment: .leading, spacing: 3) {
-                                            Text(server.label).font(MacTheme.section(12)).lineLimit(1)
-                                            Text(server.username).font(MacTheme.caption).foregroundStyle(MacTheme.muted)
+                                HStack(spacing: 8) {
+                                    Button {
+                                        serverText = server.address
+                                        username = server.username
+                                        password = ""
+                                        allowInsecureHTTP = server.allowInsecureHTTP
+                                        Task { await session.switchServer(server) }
+                                    } label: {
+                                        HStack(spacing: 10) {
+                                            Image(systemName: "server.rack").foregroundStyle(MacTheme.muted)
+                                            VStack(alignment: .leading, spacing: 3) {
+                                                Text(server.label).font(MacTheme.section(12)).lineLimit(1)
+                                                Text(server.username).font(MacTheme.caption).foregroundStyle(MacTheme.muted)
+                                            }
+                                            Spacer()
+                                            if session.logicalServerAddress == server.address {
+                                                Text("当前连接").font(MacTheme.caption).foregroundStyle(MacTheme.muted)
+                                            } else {
+                                                Image(systemName: "arrow.right").foregroundStyle(MacTheme.accent)
+                                            }
                                         }
-                                        Spacer()
-                                        if session.logicalServerAddress == server.address {
-                                            Text("当前连接").font(MacTheme.caption).foregroundStyle(MacTheme.muted)
-                                        } else {
-                                            Image(systemName: "arrow.right").foregroundStyle(MacTheme.accent)
-                                        }
+                                        .contentShape(Rectangle())
                                     }
-                                    .padding(12)
-                                    .background(MacTheme.panel, in: RoundedRectangle(cornerRadius: 10))
-                                    .contentShape(Rectangle())
+                                    .buttonStyle(.plain)
+                                    .disabled(session.isBusy || session.logicalServerAddress == server.address)
+
+                                    Button {
+                                        session.serverToDelete = server
+                                    } label: {
+                                        Image(systemName: "trash")
+                                            .foregroundStyle(MacTheme.muted)
+                                            .padding(4)
+                                    }
+                                    .buttonStyle(.plain)
+                                    .help("删除服务器")
+                                    .disabled(session.isBusy)
                                 }
-                                .buttonStyle(.plain)
-                                .disabled(session.isBusy || session.logicalServerAddress == server.address)
+                                .padding(12)
+                                .background(MacTheme.panel, in: RoundedRectangle(cornerRadius: 10))
                             }
                         }
                     }
-                    .frame(height: CGFloat(min(session.servers.count, 2)) * 62)
+                    .frame(height: CGFloat(min(session.servers.count, 3)) * 62)
                 }
             }
             HStack(spacing: 12) {
@@ -503,6 +579,11 @@ private struct MacShellView: View {
             Divider()
             Button("退出当前服务器…", systemImage: "rectangle.portrait.and.arrow.right", role: .destructive) {
                 session.confirmLogout = true
+            }
+            Button("删除当前服务器…", systemImage: "trash", role: .destructive) {
+                if let current = session.servers.first(where: { $0.address == session.logicalServerAddress }) {
+                    session.serverToDelete = current
+                }
             }
         } label: {
             Text(session.serverLabel)

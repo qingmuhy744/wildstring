@@ -83,7 +83,7 @@ struct MacTransportBar: View {
                     if let item = playback.currentItem {
                         Button { session.showFullscreen = true } label: {
                             HStack(spacing: 12) {
-                                MacCover(client: client, trackID: item.hasCover || isPodcast ? item.trackID : nil, side: 48,
+                                MacCover(client: client, trackID: item.trackID, side: 48,
                                     placeholder: isPodcast ? "antenna.radiowaves.left.and.right" : "music.note")
                                 VStack(alignment: .leading, spacing: 3) {
                                     Text(item.title).font(.system(size: 13, weight: .semibold)).foregroundStyle(MacTheme.ink).lineLimit(1)
@@ -325,7 +325,7 @@ struct MacPlayerInspector: View {
             VStack(alignment: .leading, spacing: 14) {
                 if let item = playback.currentItem {
                     HStack(spacing: 10) {
-                        MacCover(client: client, trackID: item.hasCover ? item.trackID : nil, side: 48)
+                        MacCover(client: client, trackID: item.trackID, side: 48)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(item.title).font(.headline).lineLimit(1)
                             Text(item.artist).font(.caption).foregroundStyle(.secondary).lineLimit(1)
@@ -471,7 +471,7 @@ struct MenuBarPlayer: View {
                 }.font(.caption).foregroundStyle(.secondary)
                 Button { openPlayer() } label: {
                     HStack(alignment: .top, spacing: 12) {
-                        MacCover(client: client, trackID: item.hasCover || isPodcast ? item.trackID : nil, side: 56,
+                        MacCover(client: client, trackID: item.trackID, side: 56,
                             placeholder: isPodcast ? "antenna.radiowaves.left.and.right" : "music.note")
                         VStack(alignment: .leading, spacing: 5) {
                             Text(item.title).font(.system(size: 15, weight: .semibold)).lineLimit(3)

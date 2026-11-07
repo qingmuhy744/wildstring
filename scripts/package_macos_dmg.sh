@@ -1,10 +1,16 @@
 #!/bin/bash
-# Build output is expected at artifacts/macos-derived. Signing and notarization
+# Build output is expected at artifacts/macos-derived.noindex. Signing and notarization
 # run only when the corresponding environment variables are present.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-DERIVED="${MACOS_DERIVED_DATA:-$ROOT/artifacts/macos-derived}"
+if [[ -n "${MACOS_DERIVED_DATA:-}" ]]; then
+  DERIVED="$MACOS_DERIVED_DATA"
+elif [[ -d "$ROOT/artifacts/macos-derived.noindex" ]]; then
+  DERIVED="$ROOT/artifacts/macos-derived.noindex"
+else
+  DERIVED="$ROOT/artifacts/macos-derived"
+fi
 OUT="${MACOS_DMG_PATH:-$ROOT/artifacts/WildString-macOS.dmg}"
 APP="$(find "$DERIVED/Build/Products" -type d -name '*.app' -print -quit)"
 

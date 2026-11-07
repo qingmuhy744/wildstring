@@ -42,10 +42,10 @@
     <string name="podcast_resume_auto_value">Resume from the last position</string>
     <string name="podcast_resume_restart_value">Always start over</string>
     <string name="podcast_resume_ask_value">Ask before resuming</string>
-    <string name="podcast_resume_ask">Ask before playing (default)</string>
-    <string name="podcast_resume_auto">Resume automatically</string>
+    <string name="podcast_resume_ask">Ask before playing</string>
+    <string name="podcast_resume_auto">Resume automatically (default)</string>
     <string name="podcast_resume_restart">Start over</string>
-    <string name="podcast_resume_hint">Each episode\'s progress is saved separately. It syncs during playback and stays on this device while offline; you choose when devices conflict.</string>
+    <string name="podcast_resume_hint">Each episode\'s progress is saved separately. It syncs during playback and stays on this device while offline; conflicts are surfaced in the player.</string>
     <string name="settings_group_podcast_cache">Podcast playback cache</string>
     <string name="podcast_cache_saved">Podcast cache settings saved.</string>
     <string name="podcast_cache_failed">Couldn\'t save podcast cache settings. Reopen settings and try again.</string>
@@ -486,4 +486,13 @@
     <string name="recommendation_source_lastfm_similar">Last.fm similar</string>
     <string name="recommendation_source_lastfm_charts">Last.fm charts</string>
     <string name="recommendation_source_lastfm_tags">Last.fm tags</string>
+    <string name="settings_crash_reports">Crash reports &amp; diagnostics</string>
+    <string name="settings_crash_reports_summary">View, copy or export uncaught crash logs</string>
+    <string name="crash_reports_empty_title">No crash reports</string>
+    <string name="crash_reports_empty_desc">WildString is running smoothly. Uncaught exceptions will be captured here for troubleshooting.</string>
+    <string name="crash_detected_message">WildString exited unexpectedly last time</string>
+    <string name="crash_view_action">View log</string>
+    <string name="crash_reports_count">%1$d crash reports</string>
+    <string name="crash_share">Share</string>
+    <string name="crash_clear">Clear</string>
 </resources>

@@ -71,7 +71,7 @@ import kotlinx.coroutines.withContext
                     (offset.y + panChange.y).coerceIn(-maxPan, maxPan),
                 )
             }
-            Cover(vm, track.id.takeIf { track.hasCover }, track.title,
+            Cover(vm, track.coverId, track.title,
                 Modifier.padding(20.dp).size(imageSize)
                     .graphicsLayer {
                         scaleX = scale
@@ -82,7 +82,7 @@ import kotlinx.coroutines.withContext
                     .transformable(transformState)
                     .pointerInput(Unit) { detectTapGestures(onTap = {}) }, ContentScale.Fit)
             Row(Modifier.align(Alignment.TopEnd).padding(8.dp)) {
-                if (track.hasCover && !track.isPodcast) IconButton({ scope.launch {
+                if (track.mayHaveCover && !track.isPodcast) IconButton({ scope.launch {
                     busy = true; message = "正在准备封面…"
                     try {
                         val owner = checkNotNull(vm.repository.session.cacheScope())

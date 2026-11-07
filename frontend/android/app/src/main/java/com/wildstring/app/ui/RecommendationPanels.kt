@@ -184,7 +184,7 @@ internal fun recommendationIssue(code: String): String = when {
                     else if (active) PlaybackIndicator(current.playing, current.buffering)
                     else Text((entries.indexOf(item) + 1).toString().padStart(2, '0'), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                Cover(vm, track.id.takeIf { track.hasCover }, track.title, Modifier.size(48.dp).clip(RoundedCornerShape(8.dp)))
+                Cover(vm, track.coverId, track.title, Modifier.size(48.dp).clip(RoundedCornerShape(8.dp)))
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(track.title, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyLarge)
                     // The source label says why the song is here; the album fills in when no source is known.
@@ -238,11 +238,11 @@ internal fun recommendationIssue(code: String): String = when {
 /** A 2×2 grid of the first covers gives each day's batch its own face; fewer songs show one cover. */
 @Composable private fun DailyCoverMosaic(vm: MusicViewModel, tracks: List<Track>) {
     Surface(Modifier.size(76.dp), shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surfaceContainerHighest) {
-        if (tracks.size < 4) tracks.firstOrNull()?.let { Cover(vm, it.id.takeIf { _ -> it.hasCover }, it.title, Modifier.fillMaxSize()) }
+        if (tracks.size < 4) tracks.firstOrNull()?.let { Cover(vm, it.coverId, it.title, Modifier.fillMaxSize()) }
         else Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
             tracks.chunked(2).forEach { row ->
                 Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                    row.forEach { Cover(vm, it.id.takeIf { _ -> it.hasCover }, it.title, Modifier.weight(1f).fillMaxHeight()) }
+                    row.forEach { Cover(vm, it.coverId, it.title, Modifier.weight(1f).fillMaxHeight()) }
                 }
             }
         }
