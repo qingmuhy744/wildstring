@@ -27,7 +27,7 @@ function savedStyle(): PlaybackStyle {
   } catch {
     /* Storage is optional for playback. */
   }
-  return 'cover';
+  return 'vinyl';
 }
 let selected = savedStyle();
 window.addEventListener(preferencesChanged, () => {

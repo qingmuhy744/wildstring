@@ -14,7 +14,7 @@ struct SettingsView: View {
     @Environment(\.isAdmin) private var isAdmin
     @State private var limitMB = 512
     @State private var theme = ThemeChoice.system.rawValue
-    @State private var playerStyle = PlayerStyle.cover.rawValue
+    @State private var playerStyle = PlayerStyle.vinyl.rawValue
     @State private var songListSize = SongListSize.medium.rawValue
     @State private var hapticsEnabled = true
     @State private var playbackQuality = "original"
@@ -38,7 +38,7 @@ struct SettingsView: View {
         let stored = AccountPreferences(server: server, username: username)
         _limitMB = State(initialValue: stored.cacheLimitMB)
         _theme = State(initialValue: stored.string("appearanceTheme", default: ThemeChoice.system.rawValue))
-        _playerStyle = State(initialValue: stored.string("playerStyle", default: PlayerStyle.cover.rawValue))
+        _playerStyle = State(initialValue: (PlayerStyle(rawValue: stored.string("playerStyle", default: PlayerStyle.vinyl.rawValue)) ?? .vinyl).rawValue)
         _songListSize = State(initialValue: stored.string("songListSize", default: SongListSize.medium.rawValue))
         _hapticsEnabled = State(initialValue: stored.bool("hapticsEnabled", default: true))
         _playbackQuality = State(initialValue: stored.qualityRaw)
@@ -221,7 +221,7 @@ struct SettingsView: View {
         let stored = preferences
         limitMB = stored.cacheLimitMB
         theme = stored.string("appearanceTheme", default: ThemeChoice.system.rawValue)
-        playerStyle = stored.string("playerStyle", default: PlayerStyle.cover.rawValue)
+        playerStyle = (PlayerStyle(rawValue: stored.string("playerStyle", default: PlayerStyle.vinyl.rawValue)) ?? .vinyl).rawValue
         songListSize = stored.string("songListSize", default: SongListSize.medium.rawValue)
         hapticsEnabled = stored.bool("hapticsEnabled", default: true)
         playbackQuality = stored.qualityRaw

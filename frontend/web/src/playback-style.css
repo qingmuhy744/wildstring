@@ -41,18 +41,21 @@
   border-radius: 50%;
   transform: rotate(var(--spin));
   background:
-    repeating-radial-gradient(circle at center, #0000 0 2px, #bbb2 2.3px 2.8px, #0000 3px 4px),
-    radial-gradient(circle, #282b28 0 20%, #111310 21% 62%, #242622 69%, #10120f 72%);
-  box-shadow:
-    0 20px 36px #0007,
-    inset 0 0 0 2px #484c42;
+    repeating-radial-gradient(
+      circle at center,
+      transparent 0 4px,
+      rgb(187 193 173 / 8%) 4.3px 5px,
+      transparent 5px 8px
+    ),
+    radial-gradient(circle, #30352c, #11150f 65%, #252b20);
+  box-shadow: inset 0 0 0 1px #69715e8c;
 }
 .playback-visual.visual-vinyl .fullscreen-cover.cover {
-  width: 56%;
-  height: 56%;
+  width: 44%;
+  height: 44%;
   border-radius: 50%;
-  border: 3px solid #e7d5b933;
-  box-shadow: 0 0 0 7px #0004;
+  border: 0;
+  box-shadow: none;
   font-size: 32px;
 }
 .visual-vinyl .record-spindle {
@@ -60,8 +63,7 @@
   position: absolute;
   inset: 48.7%;
   border-radius: 50%;
-  background: #191b17;
-  box-shadow: 0 0 0 2px #e7d5b999;
+  background: #191c15;
 }
 .visual-vinyl .record-sheen {
   display: block;

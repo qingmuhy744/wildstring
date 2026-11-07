@@ -1296,7 +1296,7 @@ private fun PlayerScreen(vm: MusicViewModel, state: MusicState, wide: Boolean, l
                             ),
                         contentAlignment = Alignment.Center,
                     ) {
-                        val visualSize = minOf(360.dp, maxWidth, maxHeight)
+                        val visualSize = minOf(480.dp, maxWidth, maxHeight)
                         PlaybackVisual(
                             vm, track, preferences.playbackStyle, spinning, true, state.duration, rotation,
                             Modifier.size(visualSize), showArtwork,
@@ -1305,7 +1305,7 @@ private fun PlayerScreen(vm: MusicViewModel, state: MusicState, wide: Boolean, l
                     Spacer(Modifier.height(28.dp))
                     PlaybackControls(
                         vm, state, onQueue, onAlbum, onArtist,
-                        modifier = Modifier.widthIn(max = 420.dp).dismissPlayerSwipe(true, onDismiss, onUpdateDrag, thresholdTick, openQueueOnSwipeUp),
+                        modifier = Modifier.widthIn(max = 480.dp).dismissPlayerSwipe(true, onDismiss, onUpdateDrag, thresholdTick, openQueueOnSwipeUp),
                     )
                 }
                 Column(
@@ -1405,7 +1405,7 @@ private fun PlaybackControls(vm: MusicViewModel, state: MusicState, onQueue: () 
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = .08f),
                     modifier = Modifier.clickable { feedback(); qualityDialog = true }
                 ) {
-                    Text(state.playbackQuality, color = Muted, fontSize = 10.sp, maxLines = 1,
+                    Text(state.playbackQuality, color = Muted, fontFamily = FontFamily.Monospace, fontSize = 12.sp, maxLines = 1,
                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp).testTag("playback-quality"))
                 }
                 if (qualityDialog) {
@@ -1484,8 +1484,8 @@ internal fun PlaybackSeekSection(vm: MusicViewModel, duration: Long) {
             inactiveTrackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = .14f),
             activeTickColor = Color.Transparent, inactiveTickColor = Color.Transparent))
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-        Text(formatTime(scrub?.toLong() ?: position), color = Muted, fontSize = 11.sp)
-        Text(formatTime(duration), color = Muted, fontSize = 11.sp)
+        Text(formatTime(scrub?.toLong() ?: position), color = Muted, fontFamily = FontFamily.Monospace, fontSize = 11.sp)
+        Text(formatTime(duration), color = Muted, fontFamily = FontFamily.Monospace, fontSize = 11.sp)
     }
 }
 

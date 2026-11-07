@@ -201,6 +201,7 @@ export function NowPlaying({
         aria-modal="true"
         aria-label={isPodcast ? '播客全屏播放' : '全屏播放'}
         data-player-kind={isPodcast ? 'podcast' : 'music'}
+        data-music-style={isPodcast ? undefined : style}
         data-panel={panel || 'cover'}
         onPointerDown={(event) => {
           cancelHold();
@@ -270,7 +271,7 @@ export function NowPlaying({
           } as CSSProperties
         }
       >
-        {current && (
+        {current && (isPodcast || style !== 'vinyl') && (
           <div
             className="player-atmosphere"
             style={{ backgroundImage: `url("${coverUrl(current.id, 768, current.cover_url)}")` }}
@@ -842,7 +843,7 @@ function LyricsPanel({ player, onTogglePanel }: { player: Player; onTogglePanel:
                                 key={wordIndex}
                                 className="lyric-word"
                                 style={{
-                                  backgroundImage: `linear-gradient(90deg, var(--accent) ${progress}%, var(--muted) ${progress}%)`,
+                                  backgroundImage: `linear-gradient(90deg, var(--lyric-active-color, var(--accent)) ${progress}%, var(--muted) ${progress}%)`,
                                 }}
                               >
                                 {word.text}

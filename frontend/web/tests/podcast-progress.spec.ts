@@ -121,7 +121,8 @@ test('加入待播和刷新不抢占进度；默认自动接续开始收听', as
   await expect(page.locator('.app-shell')).toBeVisible();
   expect((await audio(page)).paused).toBe(true);
   expect(await state(page)).toEqual(saved);
-  await page.getByRole('button', { name: '播放', exact: true }).click();
+  await episodes(page);
+  await page.locator('.episode-play-btn').first().click();
   await expect.poll(async () => (await audio(page)).paused).toBe(false);
   await expect.poll(async () => (await audio(page)).time).toBeGreaterThanOrEqual(7);
   await page.getByRole('button', { name: '暂停', exact: true }).click();
@@ -145,7 +146,8 @@ test('配置为询问模式时，开始收听弹窗询问并接续', async ({ pa
   await expect(page.locator('.app-shell')).toBeVisible();
   expect((await audio(page)).paused).toBe(true);
   expect(await state(page)).toEqual(saved);
-  await page.getByRole('button', { name: '播放', exact: true }).click();
+  await episodes(page);
+  await page.locator('.episode-play-btn').first().click();
   const dialog = page.getByRole('dialog', { name: '播客单集进度' });
   await expect(dialog).toContainText('继续收听这集？');
   await dialog.getByRole('button', { name: '继续 0:07', exact: true }).click();

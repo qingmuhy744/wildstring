@@ -636,11 +636,11 @@
     repeating-linear-gradient(90deg, transparent 0 4px, #180c0a 4px 6px),
     linear-gradient(90deg, #d6b56f 0 68%, #f0a35e 82%, #ff6f45);
   opacity: 0.3;
-  transform: scaleX(0.18);
-  transform-origin: left;
+  clip-path: inset(0 82% 0 0);
   transition: opacity 600ms ease-out;
 }
 .retro-radio[data-live='true'] .retro-vu-window i {
+  clip-path: inset(0 40% 0 0);
   animation: receiver-level 1.4s steps(6) infinite alternate;
   opacity: 0.95;
   filter: drop-shadow(0 0 3px rgb(255 180 100 / 40%));
@@ -1230,16 +1230,16 @@
 }
 @keyframes receiver-level {
   0% {
-    transform: scaleX(0.28);
+    opacity: 0.45;
   }
   30% {
-    transform: scaleX(0.65);
+    opacity: 0.9;
   }
   65% {
-    transform: scaleX(0.45);
+    opacity: 0.6;
   }
   100% {
-    transform: scaleX(0.9);
+    opacity: 1;
   }
 }
 @media (min-width: 1000px) and (max-height: 820px) {
@@ -1423,7 +1423,7 @@
   }
   .retro-radio[data-live='true'] .retro-vu-window i {
     animation: none;
-    transform: scaleX(0.6);
+    opacity: 0.95;
   }
   .retro-radio *,
   .retro-radio *::before,

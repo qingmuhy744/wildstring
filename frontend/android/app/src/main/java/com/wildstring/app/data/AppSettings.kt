@@ -11,7 +11,7 @@ import kotlinx.coroutines.flow.asStateFlow
 
 data class Preferences(
     val metadataMb: Int = 32, val artworkMb: Int = 64, val audioMb: Int = 256, val haptics: Boolean = true, val appearance: String = "system", val aacBitrate: Int = 0,
-    val playbackStyle: String = "cover", val songListSize: SongListSize = SongListSize.MEDIUM,
+    val playbackStyle: String = "vinyl", val songListSize: SongListSize = SongListSize.MEDIUM,
     val lyricFollowSeconds: Int = 2, val lyricSize: LyricSize = LyricSize.MEDIUM,
     val orientation: String = "auto")
 
@@ -26,7 +26,7 @@ class AppSettings @Inject constructor(@param:ApplicationContext private val cont
         if (devicePrefs.contains("red_icon")) devicePrefs.edit().remove("red_icon").apply()
         return Preferences(
         prefs.getInt("metadata_mb", 32), prefs.getInt("artwork_mb", 64), prefs.getInt("audio_mb", 256), prefs.getBoolean("haptics", true), prefs.getString("appearance", "system") ?: "system", prefs.getInt("aac_bitrate", 0).takeIf { it in listOf(0, 128, 192, 256, 320) } ?: 0,
-        prefs.getString("playback_style", "cover").takeIf { it in listOf("cover", "vinyl", "cassette") } ?: "cover",
+        prefs.getString("playback_style", "vinyl").takeIf { it in listOf("cover", "vinyl", "cassette") } ?: "vinyl",
         SongListSize.fromStored(runCatching { prefs.getString("song_list_size", null) }.getOrNull()),
         prefs.getInt("lyric_follow_seconds", 2).takeIf { it in listOf(1, 2, 3, 5, 10) } ?: 2,
         LyricSize.fromStored(runCatching { prefs.getString("lyric_size", null) }.getOrNull()),

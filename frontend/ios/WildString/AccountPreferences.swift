@@ -85,7 +85,8 @@ struct AccountPreferences {
     /// Copies this account's appearance and playback choices onto the keys the live UI reads.
     func applyMirrors() {
         let theme = string("appearanceTheme", default: ThemeChoice.system.rawValue)
-        let style = string("playerStyle", default: PlayerStyle.cover.rawValue)
+        let storedStyle = string("playerStyle", default: PlayerStyle.vinyl.rawValue)
+        let style = (PlayerStyle(rawValue: storedStyle) ?? .vinyl).rawValue
         let size = string("songListSize", default: SongListSize.medium.rawValue)
         let quality = string("playbackQuality", default: "original")
         let sync = string("playbackSyncMode", default: "ask")
