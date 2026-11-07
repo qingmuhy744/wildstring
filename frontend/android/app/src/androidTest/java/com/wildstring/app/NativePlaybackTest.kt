@@ -541,30 +541,19 @@ class NativePlaybackTest {
             waitForDialogWindow("system choice")
             compose.onNode(hasText(compose.activity.getString(R.string.appearance_system)) and hasAnyAncestor(isDialog())).performClick()
             waitForActivityWindow()
-            compose.onNodeWithTag("setting-theme").performScrollTo().performClick()
-            waitForDialogWindow("theme choice")
-            compose.onNode(hasText(compose.activity.getString(R.string.theme_red_cloth)) and hasAnyAncestor(isDialog())).performClick()
-            waitForActivityWindow()
-            compose.onNodeWithTag("appearance-red-cloth").assertExists()
-            compose.onAllNodesWithText(compose.activity.getString(R.string.settings_day_night)).assertCountEquals(0)
-            compose.onNodeWithTag("setting-app-icon").performScrollTo().performClick()
-            waitForDialogWindow("icon choice")
-            compose.onNode(hasText(compose.activity.getString(R.string.icon_red)) and hasAnyAncestor(isDialog())).performClick()
-            waitForActivityWindow()
             compose.onNodeWithTag("settings-back").performClick()
             compose.onNodeWithTag("setting-category-storage").performClick()
             compose.onNodeWithTag("setting-audio-cache").performScrollTo().performClick()
             waitForDialogWindow("cache choice")
             compose.onNode(hasText("128 MB") and hasAnyAncestor(isDialog())).performClick()
             waitForActivityWindow()
-            compose.waitUntil { vm.settings.state.value.audioMb == 128 && vm.settings.state.value.redCloth && vm.settings.state.value.redIcon }
-            capture("red-cloth-settings.png")
+            compose.waitUntil { vm.settings.state.value.audioMb == 128 }
+            capture("appearance-settings.png")
             compose.onNodeWithTag("settings-back").performClick()
             compose.onNodeWithTag("settings-back").performClick()
-            compose.waitUntil(10_000) { compose.onAllNodesWithText(compose.activity.getString(R.string.theme_red_cloth)).fetchSemanticsNodes().isEmpty() }
             compose.onAllNodesWithText("接口测试歌曲").onLast().performClick()
             compose.onNodeWithTag("player-visual-stage").performTouchInput { click(androidx.compose.ui.geometry.Offset(4f, 4f)) }
-            capture("red-cloth-phone.png")
+            capture("player-phone-after-settings.png")
             for (iteration in 0..2) {
                 compose.onNodeWithTag("player-visual-stage").performTouchInput { click(androidx.compose.ui.geometry.Offset(4f, 4f)) }
                 compose.onNodeWithTag("player-visual-stage").performTouchInput { click(androidx.compose.ui.geometry.Offset(4f, 4f)) }
@@ -576,7 +565,7 @@ class NativePlaybackTest {
             try {
                 shellForTest("wm size 1600x1000"); shellForTest("wm density 160")
                 waitForConfigurationTag("player-tablet")
-                capture("red-cloth-tablet.png", resized = true)
+                capture("player-tablet-after-settings.png", resized = true)
                 for (style in listOf("vinyl", "cassette")) {
                     compose.runOnIdle { vm.settings.playbackStyle(style) }
                     compose.waitUntil(5_000) { compose.onAllNodesWithTag("playback-visual-$style").fetchSemanticsNodes().isNotEmpty() }

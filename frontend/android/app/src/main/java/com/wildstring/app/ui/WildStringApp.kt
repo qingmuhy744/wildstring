@@ -195,34 +195,24 @@ internal val classicDarkColors = darkColorScheme(
     surfaceContainer = Color(0xFF22241F), surfaceContainerHigh = Color(0xFF292B25),
     surfaceContainerHighest = Color(0xFF33362E),
 )
-internal val redColors = darkColorScheme(
-    primary = Color(0xFFFFF3E7), onPrimary = Color(0xFF9D0011), primaryContainer = Color(0xFF8E0010), onPrimaryContainer = Color(0xFFFFF3E7),
-    secondary = Color(0xFFFFD4C7), onSecondary = Color(0xFF7F000A), secondaryContainer = Color(0xFFD51A27), onSecondaryContainer = Color.White,
-    background = Color(0xFFAD0716), surface = Color(0xFFAD0716), surfaceVariant = Color(0xFFC81826),
-    onSurface = Color(0xFFFFF8F1), onSurfaceVariant = Color(0xFFFFE0D8),
-    surfaceContainerLowest = Color(0xFF87000D), surfaceContainerLow = Color(0xFF9D0413), surfaceContainer = Color(0xFFB40C1A),
-    surfaceContainerHigh = Color(0xFFC91825), surfaceContainerHighest = Color(0xFFDB2734),
-    outline = Color(0xFFF9B7AD), outlineVariant = Color(0xFFCC4F51),
-)
-
 @Composable
 fun WildStringApp(model: MusicViewModel) {
     val state by model.state.collectAsStateWithLifecycle()
     var servers by rememberSaveable { mutableStateOf(false) }
     val preferences by model.settings.state.collectAsStateWithLifecycle()
     val systemDark = isSystemInDarkTheme()
-    val dark = !preferences.redCloth && when (preferences.appearance) { "light" -> false; "dark" -> true; else -> systemDark }
+    val dark = when (preferences.appearance) { "light" -> false; "dark" -> true; else -> systemDark }
     val window = LocalActivity.current?.window
     val view = androidx.compose.ui.platform.LocalView.current
     SideEffect { window?.let { WindowCompat.getInsetsController(it, view).apply {
-        isAppearanceLightStatusBars = !dark && !preferences.redCloth
-        isAppearanceLightNavigationBars = !dark && !preferences.redCloth
+        isAppearanceLightStatusBars = !dark
+        isAppearanceLightNavigationBars = !dark
     } } }
-    CompositionLocalProvider(LocalDarkAppearance provides dark, LocalRedCloth provides preferences.redCloth,
+    CompositionLocalProvider(LocalDarkAppearance provides dark,
         LocalSongListSize provides preferences.songListSize,
         LocalTactileFeedback provides rememberTactileFeedback { model.settings.state.value.haptics }) {
-        MaterialTheme(colorScheme = if (preferences.redCloth) redColors else if (dark) classicDarkColors else classicLightColors) {
-            Surface(Modifier.fillMaxSize().testTag(if (preferences.redCloth) "appearance-red-cloth" else if (dark) "appearance-dark" else "appearance-light")) {
+        MaterialTheme(colorScheme = if (dark) classicDarkColors else classicLightColors) {
+            Surface(Modifier.fillMaxSize().testTag(if (dark) "appearance-dark" else "appearance-light")) {
                 key(state.serverSelection) { Crossfade(state.connected, animationSpec = tween(220), label = "connection") { connected ->
                     if (!connected) {
                         val routes by model.repository.session.routes.collectAsStateWithLifecycle()
@@ -1118,7 +1108,7 @@ private fun RowScope.BottomItems(state: MusicState, vm: MusicViewModel) {
 @Composable
 internal fun Cover(vm: MusicViewModel, id: String?, title: String, modifier: Modifier, contentScale: ContentScale = ContentScale.Crop) {
     val profile by vm.repository.session.profiles.collectAsStateWithLifecycle()
-    val fallback = painterResource(if (LocalRedCloth.current) R.drawable.ic_red_cloth else R.drawable.ic_wildstring)
+    val fallback = painterResource(R.drawable.ic_wildstring)
     AsyncImage(model = id?.let { ImageRequest.Builder(LocalContext.current).data(vm.repository.cover(it)).memoryCacheKey("${profile}:${vm.repository.cover(it)}").crossfade(180).build() }, imageLoader = vm.coverLoader(id), contentDescription = title,
         placeholder = fallback, error = fallback, fallback = fallback,
         contentScale = contentScale, modifier = modifier.clip(RoundedCornerShape(10.dp)))
@@ -1241,7 +1231,7 @@ private fun PlayerScreen(vm: MusicViewModel, state: MusicState, wide: Boolean, l
     val spinning = state.playing && !state.buffering && state.playbackError == null && !artworkPreview
     val thresholdTick = { feedback(TactileKind.Tap) }
     Box(playerModifier) {
-    ArtworkBackdrop(vm, track, LocalRedCloth.current)
+    ArtworkBackdrop(vm, track)
     Column(Modifier.testTag(if (wide) "player-tablet" else if (landscape) "player-landscape" else "player-phone")
         .fillMaxSize()
         .safeDrawingPadding()

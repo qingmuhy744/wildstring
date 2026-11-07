@@ -1,8 +1,6 @@
 @file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 package com.wildstring.app.ui
 
-import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.selection.selectable
@@ -23,10 +21,7 @@ import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import com.wildstring.app.data.CacheLimits
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.platform.LocalResources
@@ -237,14 +232,8 @@ internal enum class SettingsSection(@androidx.annotation.StringRes val title: In
                         val styles = playbackStyles.map { (id, _) -> id to resources.getString(playbackStyleLabel(id)) }
                         SettingsChoice(stringResource(R.string.settings_playback_style), styles.first { it.first == preferences.playbackStyle }.second, Icons.Default.Style,
                             styles, preferences.playbackStyle, change = vm.settings::playbackStyle, tag = "playback-style")
-                        SettingsChoice(stringResource(R.string.settings_theme), stringResource(if (preferences.redCloth) R.string.theme_red_cloth else R.string.theme_classic), Icons.Default.Palette,
-                            listOf(false to stringResource(R.string.theme_classic), true to stringResource(R.string.theme_red_cloth)), preferences.redCloth, change = { vm.settings.theme(it) }, tag = "theme")
-                        if (!preferences.redCloth) SettingsChoice(stringResource(R.string.settings_day_night), stringResource(when (preferences.appearance) { "light" -> R.string.appearance_light; "dark" -> R.string.appearance_dark; else -> R.string.appearance_system }), Icons.Default.BrightnessAuto,
+                        SettingsChoice(stringResource(R.string.settings_day_night), stringResource(when (preferences.appearance) { "light" -> R.string.appearance_light; "dark" -> R.string.appearance_dark; else -> R.string.appearance_system }), Icons.Default.BrightnessAuto,
                             listOf("system" to stringResource(R.string.appearance_system), "light" to stringResource(R.string.appearance_light), "dark" to stringResource(R.string.appearance_dark)), preferences.appearance, change = vm.settings::appearance, tag = "day-night")
-                        SettingsChoice(stringResource(R.string.settings_icon), stringResource(if (preferences.redIcon) R.string.icon_red else R.string.icon_classic), Icons.Default.Apps,
-                            listOf(false to stringResource(R.string.icon_classic), true to stringResource(R.string.icon_red)), preferences.redIcon, stringResource(R.string.settings_icon_hint), change = {
-                                runCatching { vm.settings.icon(it) }.onFailure { message = resources.getString(R.string.settings_icon_failed) }
-                            }, tag = "app-icon")
                         SettingsChoice(stringResource(R.string.settings_orientation), stringResource(when (preferences.orientation) { "portrait" -> R.string.orientation_portrait; "sensor" -> R.string.orientation_sensor; else -> R.string.orientation_auto }), Icons.Default.ScreenRotation,
                             listOf("auto" to stringResource(R.string.orientation_auto_option), "portrait" to stringResource(R.string.orientation_portrait), "sensor" to stringResource(R.string.orientation_sensor_option)), preferences.orientation,
                             stringResource(R.string.settings_orientation_hint), change = vm.settings::orientation)
@@ -480,31 +469,4 @@ internal enum class SettingsSection(@androidx.annotation.StringRes val title: In
     "vinyl" -> R.string.style_vinyl
     "cassette" -> R.string.style_cassette
     else -> R.string.style_cover
-}
-
-/** Static vector folds keep the theme inexpensive while music is playing. */
-@Composable internal fun RedClothBackdrop() {
-    Canvas(Modifier.fillMaxSize().background(Color(0xFFD21A25))) {
-        drawRect(Brush.linearGradient(listOf(Color(0xFFE3252B), Color(0xFFD11722), Color(0xFFB40816)),
-            start = Offset.Zero, end = Offset(size.width, size.height)))
-        // Broad vertical folds, with their own light/shadow gradient, read as draped fabric.
-        for (fold in 0..8) {
-            val x = size.width * (fold / 8f)
-            val width = size.width * .18f
-            val path = Path().apply {
-                moveTo(x - width * .55f, 0f)
-                cubicTo(x + width * .30f, size.height * .28f, x - width * .70f, size.height * .70f, x - width * .05f, size.height)
-                lineTo(x + width * .75f, size.height)
-                cubicTo(x + width * .10f, size.height * .70f, x + width * 1.10f, size.height * .28f, x + width * .25f, 0f)
-                close()
-            }
-            drawPath(path, Brush.horizontalGradient(listOf(Color(0x00FF6255), Color(0x66FF6255), Color(0x0090000A), Color(0x66800009), Color(0x0090000A)),
-                startX = x - width * .55f, endX = x + width * .9f))
-        }
-        // A faint stationary weave adds cloth texture without a continuously running animation.
-        for (thread in 0..100) {
-            val x = size.width * thread / 100f
-            drawLine(Color.White.copy(alpha = .018f), Offset(x, 0f), Offset(x, size.height), strokeWidth = 1f)
-        }
-    }
 }

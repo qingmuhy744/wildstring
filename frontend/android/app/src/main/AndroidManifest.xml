@@ -17,8 +17,9 @@
             android:exported="true" android:icon="@mipmap/ic_launcher" android:label="${appName}">
             <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
         </activity-alias>
+        <!-- Kept so an update can switch anyone still on this alias back to ClassicIcon. -->
         <activity-alias android:name=".RedClothIcon" android:targetActivity=".MainActivity" android:enabled="false"
-            android:exported="true" android:icon="@mipmap/ic_launcher_red" android:label="${appName}">
+            android:exported="true" android:icon="@mipmap/ic_launcher" android:label="${appName}">
             <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
         </activity-alias>
         <provider android:name="androidx.core.content.FileProvider" android:authorities="${applicationId}.updates"

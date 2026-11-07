@@ -59,13 +59,13 @@ class AccountPlaybackTest {
     }
     @Test fun aacAbsoluteTimelineEditedLyricsAndAccountIsolation() {
         val vm = compose.runOnIdle { ViewModelProvider(compose.activity)[MusicViewModel::class.java] }
-        compose.runOnIdle { vm.settings.quality(0); vm.settings.theme(false); vm.settings.appearance("system") }
+        compose.runOnIdle { vm.settings.quality(0); vm.settings.appearance("system") }
         try { exercise(vm) } catch (error: Throwable) {
             runCatching { capture("account-aac-failure.png") }
             runCatching { compose.onRoot(useUnmergedTree = true).printToLog("AccountPlaybackUI") }
             throw error
         } finally {
-            compose.runOnIdle { vm.settings.quality(0); vm.settings.theme(false); vm.settings.appearance("system"); vm.repository.session.invalidate() }
+            compose.runOnIdle { vm.settings.quality(0); vm.settings.appearance("system"); vm.repository.session.invalidate() }
         }
     }
     private fun exercise(vm: MusicViewModel) {

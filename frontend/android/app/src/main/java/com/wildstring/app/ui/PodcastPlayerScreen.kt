@@ -66,7 +66,7 @@ internal fun PodcastPlayerScreen(
     val swipeModifier = Modifier.dismissPlayerSwipe(dragEnabled, onDismiss, onDragOffset, thresholdTick)
     val dismissScroll = rememberPodcastDismissScroll(dragEnabled, onDismiss, onDragOffset, thresholdTick)
     Box(Modifier.fillMaxSize().testTag("podcast-player").nestedScroll(dismissScroll)) {
-        ArtworkBackdrop(vm, track, false)
+        ArtworkBackdrop(vm, track)
         Column(Modifier.fillMaxSize().safeDrawingPadding().padding(horizontal = if (wide) 24.dp else 20.dp)) {
             Row(Modifier.fillMaxWidth().then(swipeModifier), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onBack) { Icon(Icons.Default.KeyboardArrowDown, "返回单集列表") }

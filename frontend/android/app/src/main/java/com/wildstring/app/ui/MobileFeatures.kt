@@ -66,7 +66,7 @@ internal fun FeatureDialog(vm: MusicViewModel, route: String, track: Track? = nu
     }
     Dialog(onDismissRequest = dismiss, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         val view = androidx.compose.ui.platform.LocalView.current
-        val darkBars = LocalDarkAppearance.current || LocalRedCloth.current
+        val darkBars = LocalDarkAppearance.current
         // Dialog reapplies its platform window parameters in a SideEffect. Apply the
         // user's app theme afterwards so a system-light dialog cannot reset dark icons.
         LaunchedEffect(view, darkBars) {

@@ -48,19 +48,18 @@ internal data class Atmosphere(val image: ImageBitmap, val tint: Color)
     return atmosphere
 }
 
-@Composable internal fun ArtworkBackdrop(vm: MusicViewModel, track: Track, red: Boolean, includeTestTag: Boolean = true) {
+@Composable internal fun ArtworkBackdrop(vm: MusicViewModel, track: Track, includeTestTag: Boolean = true) {
     val dark = LocalDarkAppearance.current
     val surface = MaterialTheme.colorScheme.background
     val atmosphere = artworkAtmosphere(vm, track)
     Box(Modifier.fillMaxSize()) {
-        if (red) RedClothBackdrop()
-        else Box(Modifier.fillMaxSize().background(Brush.radialGradient(listOf(if (dark) Color(0xFF343F31) else Color(0xFFE7EBDD), surface))))
+        Box(Modifier.fillMaxSize().background(Brush.radialGradient(listOf(if (dark) Color(0xFF343F31) else Color(0xFFE7EBDD), surface))))
         Crossfade(atmosphere, animationSpec = tween(420), label = "cover-atmosphere") { art ->
             if (art != null) Box(Modifier.fillMaxSize().then(if (includeTestTag) Modifier.testTag("artwork-atmosphere") else Modifier)) {
                 Image(art.image, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop,
-                    alpha = if (red) .14f else if (dark) .40f else .30f, filterQuality = FilterQuality.Medium)
-                Box(Modifier.fillMaxSize().background(Brush.radialGradient(listOf(art.tint.copy(alpha = if (red) .06f else .18f), Color.Transparent))))
-                if (!red) Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(surface.copy(alpha = .16f), surface.copy(alpha = if (dark) .84f else .90f)))))
+                    alpha = if (dark) .40f else .30f, filterQuality = FilterQuality.Medium)
+                Box(Modifier.fillMaxSize().background(Brush.radialGradient(listOf(art.tint.copy(alpha = .18f), Color.Transparent))))
+                Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(surface.copy(alpha = .16f), surface.copy(alpha = if (dark) .84f else .90f)))))
             }
         }
     }
