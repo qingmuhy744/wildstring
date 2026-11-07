@@ -73,7 +73,8 @@ internal val playbackStyles = listOf("cover" to "封面", "vinyl" to "黑胶", "
 
 @Composable internal fun PlaybackVisual(vm: MusicViewModel, track: Track, style: String, playing: Boolean,
     visible: Boolean, duration: Long, phase: PlaybackRotation, modifier: Modifier, onArtwork: () -> Unit, onLyrics: () -> Unit) {
-    val moving = playing && visible && style != "cover" && playbackMotionAllowed()
+    val motionAllowed = playbackMotionAllowed()
+    val moving = playing && visible && style != "cover" && motionAllowed
     LaunchedEffect(moving) {
         if (!moving) return@LaunchedEffect
         var previous = 0L
@@ -84,7 +85,7 @@ internal val playbackStyles = listOf("cover" to "封面", "vinyl" to "黑胶", "
     }
     var settled by remember(track.id) { mutableStateOf(false) }
     LaunchedEffect(track.id) { delay(180); settled = true }
-    val arm by animateFloatAsState(if (playing && settled) 26f else 8f, tween(350), label = "tonearm")
+    val arm by animateFloatAsState(if (playing && settled) 26f else 8f, tween(if (motionAllowed) 350 else 0), label = "tonearm")
     Crossfade(style, modifier.testTag("playback-visual-$style").semantics {
         stateDescription = if (moving) "正在转动" else "静止"
     }.combinedClickable(
@@ -95,7 +96,7 @@ internal val playbackStyles = listOf("cover" to "封面", "vinyl" to "黑胶", "
         onLongClick = onArtwork,
         hapticFeedbackEnabled = false,
         onClick = onLyrics,
-    ), tween(200), label = "playback-style") { selection ->
+    ), tween(if (motionAllowed) 200 else 0), label = "playback-style") { selection ->
         BoxWithConstraints(Modifier.fillMaxSize()) {
             val side = minOf(maxWidth, maxHeight)
             when (selection) {
@@ -104,18 +105,18 @@ internal val playbackStyles = listOf("cover" to "封面", "vinyl" to "黑胶", "
                         Canvas(Modifier.fillMaxSize()) {
                             val radius = size.minDimension / 2
                             drawCircle(Brush.radialGradient(listOf(Color(0xFF30352C), Color(0xFF11150F), Color(0xFF252B20))))
-                            repeat(65) { groove -> drawCircle(Color(0xFFBBC1AD).copy(alpha = .14f), radius * (.46f + groove * .008f), style = Stroke(.65.dp.toPx())) }
-                            drawCircle(Color(0xFF69715E), radius - 1.dp.toPx(), style = Stroke(1.dp.toPx()))
+                            repeat(32) { groove -> drawCircle(Color(0xFFBBC1AD).copy(alpha = .08f), radius * (.46f + groove * .016f), style = Stroke(.65.dp.toPx())) }
+                            drawCircle(Color(0xFF69715E).copy(alpha = .55f), radius - 1.dp.toPx(), style = Stroke(1.dp.toPx()))
                         }
                         Cover(vm, track.coverId, track.title,
-                            Modifier.align(Alignment.Center).fillMaxSize(.56f).clip(CircleShape))
+                            Modifier.align(Alignment.Center).fillMaxSize(.44f).clip(CircleShape))
                         Box(Modifier.align(Alignment.Center).size(side * .023f).clip(CircleShape).background(Color(0xFF191C15)))
                     }
                     Canvas(Modifier.offset(side * .05f, side * .08f).size(side * .88f)) {
                         drawCircle(Brush.sweepGradient(listOf(Color.Transparent, Color.White.copy(alpha = .08f), Color.Transparent,
                             Color.Transparent, Color.White.copy(alpha = .08f), Color.Transparent)))
                     }
-                    Canvas(Modifier.offset(side * .84f, side * .06f).width(side * .028f).height(side * .48f)
+                    Canvas(Modifier.offset(side * .84f, side * .06f).width(side * .022f).height(side * .48f)
                         .graphicsLayer { rotationZ = arm; transformOrigin = TransformOrigin(.5f, .04f) }) {
                         val pivot = Offset(size.width / 2, size.height * .04f)
                         drawCircle(Color(0xFF272D22).copy(alpha = 0.55f), radius = size.width * 2.5f, center = pivot)

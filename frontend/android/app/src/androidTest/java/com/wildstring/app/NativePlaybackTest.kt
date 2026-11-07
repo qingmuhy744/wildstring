@@ -433,6 +433,14 @@ class NativePlaybackTest {
                 if (key != "cover") {
                     capture("player-$key-phone.png", style = key)
                 }
+                if (key == "vinyl") {
+                    changeSystemNightMode("yes")
+                    waitForConfigurationTag("appearance-dark")
+                    compose.onNodeWithTag("playback-visual-vinyl").assertIsDisplayed()
+                    capture("player-vinyl-dark-phone.png", style = key)
+                    changeSystemNightMode("no")
+                    waitForConfigurationTag("appearance-light")
+                }
                 stage("style complete $key")
             }
             assertEquals("Changing style must not reopen audio", styleStreams, requests.count { it.path?.contains("/stream") == true })

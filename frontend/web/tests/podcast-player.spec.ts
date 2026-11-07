@@ -349,6 +349,7 @@ test('切换接下来播放面板后左侧收音机仍保留', async ({ page }) 
 });
 
 test('昼夜主题、真实调谐和音量、时间码跳转、断点进度与屏幕边界', async ({ page }, info) => {
+  if (info.project.name === 'mobile') await page.setViewportSize({ width: 390, height: 844 });
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));
   await openRadio(page);
