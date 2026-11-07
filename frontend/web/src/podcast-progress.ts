@@ -39,9 +39,9 @@ export type EpisodeResumeMode = 'ask' | 'auto' | 'restart';
 export function episodeResumeMode(user: string): EpisodeResumeMode {
   try {
     const value = localStorage.getItem(`wildstring:podcast-resume:${user}`);
-    return value === 'ask' || value === 'restart' ? value : 'auto';
+    return value === 'auto' || value === 'restart' ? value : 'ask';
   } catch {
-    return 'auto';
+    return 'ask';
   }
 }
 

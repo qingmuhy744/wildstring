@@ -487,12 +487,12 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
     val mutationSnackbar = remember { SnackbarHostState() }
     val context = LocalContext.current
     var crashReportOpen by rememberSaveable { mutableStateOf(false) }
+    val crashDetectedMessage = stringResource(R.string.crash_detected_message)
+    val crashViewAction = stringResource(R.string.crash_view_action)
     LaunchedEffect(Unit) {
         if (com.wildstring.app.diagnostics.CrashHandler.hasNewCrash(context)) {
-            val message = context.getString(R.string.crash_detected_message)
-            val action = context.getString(R.string.crash_view_action)
             com.wildstring.app.diagnostics.CrashHandler.clearNewCrashFlag(context)
-            val result = mutationSnackbar.showSnackbar(message, action, duration = SnackbarDuration.Long)
+            val result = mutationSnackbar.showSnackbar(crashDetectedMessage, crashViewAction, duration = SnackbarDuration.Long)
             if (result == SnackbarResult.ActionPerformed) {
                 crashReportOpen = true
             }
