@@ -306,7 +306,10 @@ struct NowPlayingView: View {
                 Button {
                     showingQueue = true
                 } label: {
-                    Label("播放队列 · \(playback.items.count)", systemImage: "list.bullet")
+                    let count = (isPodcast && playback.podcastCloud != nil)
+                        ? (playback.podcastCloud?.items.count ?? playback.items.count)
+                        : playback.items.count
+                    Label("播放队列 · \(count)", systemImage: "list.bullet")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
@@ -409,15 +412,23 @@ private struct VinylArtwork: View {
             ZStack {
                 ZStack {
                     Circle().fill(RadialGradient(colors: [Color(red: 0.19, green: 0.21, blue: 0.17), Color(red: 0.067, green: 0.082, blue: 0.059), Color(red: 0.145, green: 0.169, blue: 0.125)], center: .center, startRadius: 0, endRadius: size / 2))
-                    ForEach(0..<7) { index in
+                    ForEach(0..<32, id: \.self) { index in
                         Circle()
-                            .stroke(Color(red: 0.73, green: 0.76, blue: 0.68).opacity(0.08), lineWidth: 1)
-                            .frame(width: size * (0.48 + CGFloat(index) * 0.075))
+                            .stroke(Color(red: 0.73, green: 0.76, blue: 0.68).opacity(0.08), lineWidth: 0.65)
+                            .frame(width: size * (0.46 + CGFloat(index) * 0.016))
+                    }
+                    ForEach([0.50, 0.67, 0.84], id: \.self) { ring in
+                        Circle()
+                            .stroke(Color(red: 0.024, green: 0.035, blue: 0.02).opacity(0.22), lineWidth: size * 0.02)
+                            .frame(width: size * ring)
                     }
                     CoverImage(client: client, trackID: trackID, size: size * 0.44, circular: true)
+                        .overlay(Circle().stroke(Color(red: 0.04, green: 0.05, blue: 0.03).opacity(0.65), lineWidth: 2))
+                        .overlay(Circle().inset(by: -2.5).stroke(Color(red: 0.86, green: 0.89, blue: 0.80).opacity(0.10), lineWidth: 1))
                     Circle().fill(Color(red: 0.098, green: 0.11, blue: 0.082)).frame(width: 8, height: 8)
                 }
                 .rotationEffect(.degrees(angle))
+                vinylSheen(side: size)
                 Path { path in
                     path.move(to: CGPoint(x: size * 0.87, y: size * 0.05))
                     path.addLine(to: CGPoint(x: size * (isPlaying ? 0.81 : 0.90), y: size * 0.31))
@@ -570,4 +581,27 @@ private struct ArtworkPreview: View {
             }
         }
     }
+}
+
+/// Fixed room-light wedges for the vinyl (DESIGN.md §6.7): point-symmetric, soft, never rotated with the platter.
+/// AngularGradient starts at 3 o'clock and runs clockwise: lower right 45°, upper left 225°.
+func vinylSheen(side: CGFloat) -> some View {
+    let warm = Color(red: 1, green: 0.957, blue: 0.878)
+    let profile: [(Double, Double)] = [(-23, 0), (-17, 0.02), (-9, 0.06), (0, 0.12), (9, 0.06), (17, 0.02), (23, 0)]
+    var stops: [Gradient.Stop] = [.init(color: warm.opacity(0), location: 0)]
+    for centre in [45.0, 225.0] {
+        for (offset, alpha) in profile {
+            stops.append(.init(color: warm.opacity(alpha), location: (centre + offset) / 360))
+        }
+    }
+    stops.append(.init(color: warm.opacity(0), location: 1))
+    return Circle()
+        .fill(AngularGradient(gradient: Gradient(stops: stops), center: .center))
+        .mask(
+            Circle().fill(RadialGradient(stops: [
+                .init(color: .clear, location: 0.46), .init(color: .black, location: 0.55),
+                .init(color: .black, location: 0.85), .init(color: .clear, location: 0.99),
+            ], center: .center, startRadius: 0, endRadius: side / 2))
+        )
+        .allowsHitTesting(false)
 }

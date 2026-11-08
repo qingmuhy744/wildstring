@@ -98,6 +98,30 @@ public struct PodcastEpisode: Decodable, Equatable, Sendable, Identifiable {
     public let durationSeconds: Int
     public let positionSeconds: Int
     public let pubDate: String
+    public let completed: Bool
+    public let loved: Bool
+
+    public init(
+        id: String,
+        podcastId: String,
+        title: String,
+        description: String = "",
+        durationSeconds: Int = 0,
+        positionSeconds: Int = 0,
+        pubDate: String = "",
+        completed: Bool = false,
+        loved: Bool = false
+    ) {
+        self.id = id
+        self.podcastId = podcastId
+        self.title = title
+        self.description = description
+        self.durationSeconds = durationSeconds
+        self.positionSeconds = positionSeconds
+        self.pubDate = pubDate
+        self.completed = completed
+        self.loved = loved
+    }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -108,10 +132,18 @@ public struct PodcastEpisode: Decodable, Equatable, Sendable, Identifiable {
         durationSeconds = try container.decodeIfPresent(Int.self, forKey: .durationSeconds) ?? 0
         positionSeconds = try container.decodeIfPresent(Int.self, forKey: .positionSeconds) ?? 0
         pubDate = try container.decodeIfPresent(String.self, forKey: .pubDate) ?? ""
+        completed = try container.decodeIfPresent(Bool.self, forKey: .completed) ?? false
+        if let lovedVal = try container.decodeIfPresent(Bool.self, forKey: .loved) {
+            loved = lovedVal
+        } else if let favVal = try container.decodeIfPresent(Bool.self, forKey: .favorite) {
+            loved = favVal
+        } else {
+            loved = false
+        }
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, title, description
+        case id, title, description, completed, loved, favorite
         case podcastId = "podcast_id"
         case durationSeconds = "duration_seconds"
         case positionSeconds = "position_seconds"
@@ -127,10 +159,13 @@ public struct PodcastDetail: Decodable, Equatable, Sendable {
 public struct PodcastProgressSnapshot: Decodable, Equatable, Sendable {
     public let version: Int
     public let positionSeconds: Int
+    public let durationSeconds: Int?
+    public let completed: Bool?
 
     enum CodingKeys: String, CodingKey {
-        case version
+        case version, completed
         case positionSeconds = "position_seconds"
+        case durationSeconds = "duration_seconds"
     }
 }
 
@@ -221,5 +256,45 @@ extension WildstringClient {
                 contentType: "application/json"
             )
         )
+    }
+
+    public func markPodcastEpisodeCompleted(episodeID: String, duration: Int = 0, completed: Bool) async throws {
+        let current = try? await podcastProgress(episodeId: episodeID)
+        let baseVersion = current?.version ?? 0
+        let effectiveDuration = max(1, duration > 0 ? duration : (current?.durationSeconds ?? 1))
+        let position = completed ? effectiveDuration : 0
+        let event = completed ? "ended" : "stop"
+        let session = "manual-" + UUID().uuidString
+        let write = PodcastProgressWrite(
+            sessionId: session,
+            deviceId: "wildstring-client",
+            baseVersion: baseVersion,
+            sequence: 1,
+            positionSeconds: position,
+            durationSeconds: effectiveDuration,
+            event: event
+        )
+        try await savePodcastProgress(episodeId: episodeID, write: write)
+    }
+
+    public func favoritePodcastEpisode(episodeID: String, loved: Bool) async throws {
+        struct Body: Encodable {
+            let favorite: Bool
+            let loved: Bool
+        }
+        _ = try await perform(
+            Request(
+                method: "PUT",
+                path: "api/v1/podcasts/episodes/\(episodeID)/favorite",
+                body: try JSONEncoder().encode(Body(favorite: loved, loved: loved)),
+                contentType: "application/json"
+            )
+        )
+    }
+
+    public func podcastEpisodeFavoriteIDs() async throws -> Set<String> {
+        struct Payload: Decodable { let ids: [String] }
+        let data = try await perform(Request(method: "GET", path: "api/v1/podcasts/favorites/ids"))
+        return Set(try JSONDecoder().decode(Payload.self, from: data).ids)
     }
 }

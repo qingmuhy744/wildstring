@@ -17,31 +17,52 @@ final class FavoritesModel {
     func load() async {
         guard !loaded else { return }
         do {
-            ids = try await client.favoriteIDs()
+            async let trackIDs = client.favoriteIDs()
+            async let podcastIDs = client.podcastEpisodeFavoriteIDs()
+            let (tracks, podcasts) = try await (trackIDs, podcastIDs)
+            ids = tracks.union(podcasts)
             loaded = true
         } catch {
             // Retry on the next screen appearance.
         }
     }
 
-    func isFavorite(_ trackID: String) -> Bool {
-        ids.contains(trackID)
+    func isFavorite(_ id: String) -> Bool {
+        if ids.contains(id) { return true }
+        if id.hasPrefix("podcast_ep_") {
+            let bare = String(id.dropFirst("podcast_ep_".count))
+            return ids.contains(bare)
+        }
+        return false
     }
 
-    func toggle(_ trackID: String) async {
-        let loved = !ids.contains(trackID)
+    func toggle(_ trackID: String, isPodcast: Bool = false) async {
+        let currentlyLoved = isFavorite(trackID)
+        let loved = !currentlyLoved
+        let podcast = isPodcast || trackID.hasPrefix("podcast_ep_")
+        let episodeID = podcast ? (trackID.hasPrefix("podcast_ep_") ? String(trackID.dropFirst("podcast_ep_".count)) : trackID) : nil
+        let targetID = episodeID ?? trackID
+
         if loved {
             ids.insert(trackID)
+            if let ep = episodeID { ids.insert(ep) }
         } else {
             ids.remove(trackID)
+            if let ep = episodeID { ids.remove(ep) }
         }
         do {
-            try await client.setFavorite(trackID: trackID, loved: loved)
+            if podcast, let ep = episodeID {
+                try await client.favoritePodcastEpisode(episodeID: ep, loved: loved)
+            } else {
+                try await client.setFavorite(trackID: trackID, loved: loved)
+            }
         } catch {
             if loved {
                 ids.remove(trackID)
+                if let ep = episodeID { ids.remove(ep) }
             } else {
                 ids.insert(trackID)
+                if let ep = episodeID { ids.insert(ep) }
             }
         }
     }

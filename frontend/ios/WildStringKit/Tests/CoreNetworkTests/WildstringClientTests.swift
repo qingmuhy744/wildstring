@@ -1506,7 +1506,7 @@ struct StubbedHTTPTests {
                 #expect(request.httpMethod == "PUT")
                 let body = try #require(StubURLProtocol.bodyData(of: request))
                 let json = try #require(try JSONSerialization.jsonObject(with: body) as? [String: Any])
-                #expect(json["default_action"] as? String == "inbox")
+                #expect(json["default_action"] as? String == "queue_last")
                 #expect(json["auto_limit"] as? Int == 3)
                 let shows = try #require(json["shows"] as? [String: [String: Any]])
                 #expect(shows["keep"]?["action"] as? String == "ignore")
@@ -1517,7 +1517,7 @@ struct StubbedHTTPTests {
                 return .json(
                     status: 200,
                     body: """
-                        {"default_action":"inbox","auto_limit":3,"shows":{"keep":{"action":"ignore","auto_limit":1,"order":"asc","skip_completed":true,"auto_continue":true},"edit":{"action":"queue_last","auto_limit":4,"order":"follow","skip_completed":false,"auto_continue":true}}}
+                        {"default_action":"queue_last","auto_limit":3,"shows":{"keep":{"action":"ignore","auto_limit":1,"order":"asc","skip_completed":true,"auto_continue":true},"edit":{"action":"queue_last","auto_limit":4,"order":"follow","skip_completed":false,"auto_continue":true}}}
                         """
                 )
             }

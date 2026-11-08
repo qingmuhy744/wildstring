@@ -38,9 +38,49 @@ public final class PodcastCloudQueue {
     public private(set) var preferenceError: String?
     public var notice: String?
 
+    public struct UnifiedPendingEpisode: Identifiable, Equatable, Sendable {
+        public enum Source: String, Sendable {
+            case queue
+            case inbox
+        }
+
+        public var id: String { episodeId }
+        public let episodeId: String
+        public let origin: String
+        public let source: Source
+        public let episode: PodcastEpisode?
+
+        public init(episodeId: String, origin: String, source: Source, episode: PodcastEpisode?) {
+            self.episodeId = episodeId
+            self.origin = origin
+            self.source = source
+            self.episode = episode
+        }
+    }
+
+    public struct ContinuationContext: Equatable, Sendable {
+        public var podcastID: String
+        public var episodes: [PodcastContinuation.Episode]
+        public var preference: PodcastContinuation.Preference
+
+        public init(
+            podcastID: String,
+            episodes: [PodcastContinuation.Episode],
+            preference: PodcastContinuation.Preference
+        ) {
+            self.podcastID = podcastID
+            self.episodes = episodes
+            self.preference = preference
+        }
+    }
+
     public let deviceID: String
+    public let accountKey: String?
 
     private let client: WildstringClient
+    private let defaults: UserDefaults
+    private var cachedPreferences: PodcastQueuePreferences?
+    var onPreferencesChanged: (@MainActor () -> Void)?
     private var tail: Task<Void, Never>?
     private var preferenceTail: Task<Void, Never>?
     private var hasLoaded = false
@@ -49,9 +89,22 @@ public final class PodcastCloudQueue {
     public static let conflictMessage =
         "队列在其他设备上有更新。本机队列已保留。可以选择使用服务器上的队列，或用本机覆盖。"
 
-    public init(client: WildstringClient, deviceID: String) {
+    public init(
+        client: WildstringClient,
+        deviceID: String,
+        accountKey: String? = nil,
+        defaults: UserDefaults = .standard
+    ) {
         self.client = client
         self.deviceID = deviceID
+        let normalizedKey = accountKey?.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.accountKey = (normalizedKey?.isEmpty == false) ? normalizedKey : nil
+        self.defaults = defaults
+        self.cachedPreferences = Self.loadCachedPreferences(accountKey: self.accountKey, defaults: defaults)
+    }
+
+    public var hasResolvedPreferences: Bool {
+        preferences != nil || cachedPreferences != nil
     }
 
     public func title(for episodeID: String) -> String {
@@ -66,10 +119,15 @@ public final class PodcastCloudQueue {
     }
 
     public func showPreference(_ podcastID: String) -> PodcastShowPreference {
-        if let show = preferences?.shows[podcastID] { return show }
+        let source = preferences ?? cachedPreferences
+        if !podcastID.isEmpty, let show = source?.shows[podcastID] { return show }
+        let accountAutoContinue = source?.autoContinue ?? true
         return PodcastShowPreference(
-            action: preferences?.defaultAction ?? "inbox",
-            autoLimit: preferences?.autoLimit ?? 3
+            action: source?.defaultAction ?? "inbox",
+            autoLimit: source?.autoLimit ?? 3,
+            order: accountAutoContinue ? "follow" : "off",
+            skipCompleted: true,
+            autoContinue: accountAutoContinue
         )
     }
 
@@ -100,10 +158,14 @@ public final class PodcastCloudQueue {
 
     public func refreshPreferences() async {
         do {
-            preferences = try await client.podcastQueuePreferences()
+            let loaded = try await client.podcastQueuePreferences()
+            preferences = loaded
+            saveCachedPreferences(loaded)
             preferenceError = nil
+            onPreferencesChanged?()
         } catch {
             preferenceError = "暂时读不到新集处理。\(Self.explain(error)) 可以重试。"
+            onPreferencesChanged?()
         }
     }
 
@@ -132,6 +194,52 @@ public final class PodcastCloudQueue {
             }
             self.notice = next ? "已加入待播 · 下一集播放" : "已加入待播"
         }
+    }
+
+    public func removeEpisode(_ episodeID: String) {
+        perform {
+            await self.edit { items in
+                items = PodcastQueueMerge.removing(episodeID, queue: items)
+            }
+            if self.inbox.items.contains(where: { $0.episodeId == episodeID }) {
+                await self.removeFromInbox(episodeID: episodeID)
+            }
+            self.notice = "已从待播清单移除"
+        }
+    }
+
+    public func isQueued(episodeID: String) -> Bool {
+        items.contains { $0.episodeId == episodeID }
+    }
+
+    public var unifiedPendingEpisodes: [UnifiedPendingEpisode] {
+        var result: [UnifiedPendingEpisode] = []
+        var seen = Set<String>()
+        for item in items {
+            seen.insert(item.episodeId)
+            result.append(
+                UnifiedPendingEpisode(
+                    episodeId: item.episodeId,
+                    origin: item.origin,
+                    source: .queue,
+                    episode: episodes[item.episodeId]
+                )
+            )
+        }
+        for item in inbox.items {
+            if !seen.contains(item.episodeId) {
+                seen.insert(item.episodeId)
+                result.append(
+                    UnifiedPendingEpisode(
+                        episodeId: item.episodeId,
+                        origin: "manual",
+                        source: .inbox,
+                        episode: inboxEpisodes[item.episodeId] ?? episodes[item.episodeId]
+                    )
+                )
+            }
+        }
+        return result
     }
 
     public func moveItems(from offsets: IndexSet, to destination: Int) {
@@ -215,7 +323,8 @@ public final class PodcastCloudQueue {
                     var prefs = try await self.client.podcastQueuePreferences()
                     var show = prefs.shows[podcastID] ?? PodcastShowPreference(
                         action: prefs.defaultAction,
-                        autoLimit: prefs.autoLimit
+                        autoLimit: prefs.autoLimit,
+                        autoContinue: prefs.autoContinue
                     )
                     show.action = action
                     show.autoLimit = min(100, max(0, autoLimit))
@@ -224,7 +333,9 @@ public final class PodcastCloudQueue {
                     prefs.shows[podcastID] = show
                     let saved = try await self.client.savePodcastQueuePreferences(prefs)
                     self.preferences = saved
+                    self.saveCachedPreferences(saved)
                     self.preferenceError = nil
+                    self.onPreferencesChanged?()
                 } catch {
                     self.preferenceError = "没能保存新集处理。\(Self.explain(error)) 可以重试。"
                 }
@@ -232,6 +343,85 @@ public final class PodcastCloudQueue {
             }
             preferenceTail = task
         }
+    }
+
+    public func updateAutoContinue(_ enabled: Bool) async {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            let previous = preferenceTail
+            let task = Task { @MainActor in
+                await previous?.value
+                do {
+                    var prefs = try await self.client.podcastQueuePreferences()
+                    prefs.autoContinue = enabled
+                    let saved = try await self.client.savePodcastQueuePreferences(prefs)
+                    self.preferences = saved
+                    self.saveCachedPreferences(saved)
+                    self.preferenceError = nil
+                    self.onPreferencesChanged?()
+                } catch {
+                    self.preferenceError = "没能保存新集处理。\(Self.explain(error)) 可以重试。"
+                }
+                continuation.resume()
+            }
+            preferenceTail = task
+        }
+    }
+
+    public func podcastID(forEpisodeID episodeID: String) async throws -> String {
+        if let cached = episodes[episodeID] ?? inboxEpisodes[episodeID] {
+            return cached.podcastId
+        }
+        let loaded = try await client.podcastEpisode(id: episodeID)
+        var copy = episodes
+        copy[episodeID] = loaded
+        episodes = copy
+        return loaded.podcastId
+    }
+
+    public func continuationContext(forEpisodeID episodeID: String) async throws -> ContinuationContext {
+        if !hasResolvedPreferences {
+            await refreshPreferences()
+        }
+        let showID = try await podcastID(forEpisodeID: episodeID)
+        let detail = try await client.podcast(id: showID)
+        let show = detail.podcast
+        let artist = show.author.isEmpty ? "电台" : show.author
+        let refs = detail.episodes.enumerated().map { index, ep in
+            PodcastContinuation.Episode(
+                id: ep.id,
+                title: ep.title,
+                artist: artist,
+                album: show.title,
+                chronologicalIndex: detail.episodes.count - 1 - index,
+                isCompleted: ep.positionSeconds > 0 && ep.durationSeconds > 0
+                    && ep.positionSeconds >= ep.durationSeconds
+            )
+        }
+        let preference = showPreference(show.id).continuation
+        return ContinuationContext(podcastID: show.id, episodes: refs, preference: preference)
+    }
+
+    private static func preferencesCacheKey(for accountKey: String?) -> String? {
+        guard let accountKey, !accountKey.isEmpty else { return nil }
+        return "wildstring.podcast.preferences.\(accountKey)"
+    }
+
+    private static func loadCachedPreferences(
+        accountKey: String?,
+        defaults: UserDefaults
+    ) -> PodcastQueuePreferences? {
+        guard let key = preferencesCacheKey(for: accountKey),
+              let data = defaults.data(forKey: key)
+        else { return nil }
+        return try? JSONDecoder().decode(PodcastQueuePreferences.self, from: data)
+    }
+
+    private func saveCachedPreferences(_ prefs: PodcastQueuePreferences) {
+        cachedPreferences = prefs
+        guard let key = Self.preferencesCacheKey(for: accountKey),
+              let data = try? JSONEncoder().encode(prefs)
+        else { return }
+        defaults.set(data, forKey: key)
     }
 
     public func adoptServerQueue() {

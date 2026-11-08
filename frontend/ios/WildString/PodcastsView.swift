@@ -20,7 +20,6 @@ struct PodcastsView: View {
     let client: WildstringClient
     let playback: PlaybackService
 
-    @State private var followedOnly = true
     @State private var shows: [PodcastSummary] = []
     @State private var isLoading = true
     @State private var message: String?
@@ -28,19 +27,36 @@ struct PodcastsView: View {
     var body: some View {
         NavigationStack {
             List {
+                let pendingCount = playback.podcastCloud?.unifiedPendingEpisodes.count ?? 0
                 NavigationLink {
-                    PodcastInboxView(playback: playback)
+                    PodcastUnifiedQueueView(client: client, playback: playback)
                 } label: {
-                    Label("稍后听", systemImage: "tray")
+                    HStack {
+                        Label("待播列表", systemImage: "list.bullet")
+                        Spacer()
+                        if pendingCount > 0 {
+                            Text("\(pendingCount)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                if pendingCount > 0 {
+                    Button {
+                        playPendingQueue()
+                    } label: {
+                        Label("播放待播 (\(pendingCount))", systemImage: "play.fill")
+                            .fontWeight(.semibold)
+                    }
                 }
                 if let cloud = playback.podcastCloud {
                     PodcastCloudStatusIOS(cloud: cloud)
                 }
                 if shows.isEmpty, !isLoading {
                     ContentUnavailableView(
-                        followedOnly ? "还没有订阅" : "没有节目",
+                        "还没有订阅",
                         systemImage: "antenna.radiowaves.left.and.right",
-                        description: Text(followedOnly ? "可以改看全部节目，或先在网页端添加订阅。" : "服务器上还没有播客。")
+                        description: Text("点左上角的“探索”添加节目。")
                     )
                 }
                 ForEach(shows) { show in
@@ -64,19 +80,19 @@ struct PodcastsView: View {
             }
             .navigationTitle("电台")
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Picker("范围", selection: $followedOnly) {
-                        Text("已订阅").tag(true)
-                        Text("全部").tag(false)
+                ToolbarItem(placement: .topBarLeading) {
+                    NavigationLink {
+                        PodcastDiscoverView(client: client, playback: playback)
+                    } label: {
+                        Label("探索", systemImage: "safari")
                     }
-                    .pickerStyle(.segmented)
                 }
             }
             .overlay {
                 if isLoading, shows.isEmpty { ProgressView() }
             }
             .miniPlayer(playback, client: client)
-            .task(id: followedOnly) {
+            .task {
                 await load()
                 await playback.podcastCloud?.refreshPreferences()
             }
@@ -86,17 +102,28 @@ struct PodcastsView: View {
 
     private func subtitle(_ show: PodcastSummary) -> String {
         let author = show.author.isEmpty ? "电台" : show.author
-        return "\(author) · \(show.unplayedEpisodes)/\(show.totalEpisodes) 未听完"
+        return show.unplayedEpisodes > 0
+            ? "\(author) · 还有 \(show.unplayedEpisodes) 集可听"
+            : "\(author) · 共 \(show.totalEpisodes) 集"
     }
 
     private func load() async {
         isLoading = shows.isEmpty
         defer { isLoading = false }
         do {
-            shows = try await client.podcasts(followed: followedOnly)
+            shows = try await client.podcasts(followed: true)
             message = nil
         } catch {
             message = ErrorText.message(for: error)
+        }
+    }
+
+    private func playPendingQueue() {
+        guard let first = playback.podcastCloud?.unifiedPendingEpisodes.first else { return }
+        Task {
+            if let item = await playback.podcastCloud?.playbackItem(for: first.episodeId) {
+                playback.playPodcastEpisode(item)
+            }
         }
     }
 }
@@ -107,10 +134,12 @@ private struct PodcastDetailView: View {
     let playback: PlaybackService
     let podcastID: String
 
+    @Environment(FavoritesModel.self) private var favorites
     @State private var detail: PodcastDetail?
     @State private var message: String?
     @State private var notice: String?
     @State private var resumeEpisode: PodcastEpisode?
+    @State private var episodeFilter = "all"
 
     var body: some View {
         List {
@@ -119,8 +148,19 @@ private struct PodcastDetailView: View {
                     Text(detail.podcast.description.isEmpty ? "没有简介" : detail.podcast.description)
                         .font(.footnote)
                         .foregroundStyle(.secondary)
-                    Button(detail.podcast.followed ? "取消订阅" : "订阅") {
-                        Task { await toggleFollow(detail.podcast) }
+                    HStack(spacing: 12) {
+                        Button(detail.podcast.followed ? "取消订阅" : "订阅") {
+                            Task { await toggleFollow(detail.podcast) }
+                        }
+                        let pendingQueueCount = playback.podcastCloud?.unifiedPendingEpisodes.count ?? 0
+                        if pendingQueueCount > 0 {
+                            Button {
+                                playPendingQueue()
+                            } label: {
+                                Label("播放待播 (\(pendingQueueCount))", systemImage: "play.fill")
+                                    .fontWeight(.semibold)
+                            }
+                        }
                     }
                 }
                 Section {
@@ -133,25 +173,81 @@ private struct PodcastDetailView: View {
                         PodcastCloudStatusIOS(cloud: cloud)
                     }
                 }
+                Section {
+                    Picker("单集筛选", selection: $episodeFilter) {
+                        Text("全部").tag("all")
+                        Text("未播").tag("unplayed")
+                        Text("已播").tag("completed")
+                        Text("收藏").tag("favorite")
+                    }
+                    .pickerStyle(.segmented)
+                }
                 Section("单集") {
-                    ForEach(detail.episodes) { episode in
+                    let displayedEpisodes = filteredEpisodes(detail.episodes)
+                    if displayedEpisodes.isEmpty {
+                        Text("暂无符合筛选条件的单集")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                    ForEach(displayedEpisodes) { episode in
+                        let isQueued = playback.podcastCloud?.isQueued(episodeID: episode.id) ?? false
+                        let completed = isCompleted(episode)
+                        let isFav = isFavorite(episode)
                         HStack(spacing: 8) {
+                            Button {
+                                if let cloud = playback.podcastCloud {
+                                    if isQueued {
+                                        cloud.removeEpisode(episode.id)
+                                    } else {
+                                        enqueue(episode, next: false)
+                                    }
+                                }
+                            } label: {
+                                Image(systemName: isQueued ? "checkmark.circle.fill" : "plus.circle")
+                                    .font(.title3)
+                                    .foregroundStyle(isQueued ? Color.secondary : Color.accentColor)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel(isQueued ? "从待播移除" : "加入待播")
+
                             Button {
                                 choose(episode, in: detail.episodes)
                             } label: {
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text(episode.title).lineLimit(2)
-                                    Text(progressText(episode))
+                                    HStack(alignment: .firstTextBaseline, spacing: 4) {
+                                        if completed {
+                                            Image(systemName: "checkmark")
+                                                .font(.caption2)
+                                                .foregroundStyle(.secondary)
+                                        }
+                                        Text(episode.title)
+                                            .lineLimit(2)
+                                            .foregroundStyle(completed ? .secondary : .primary)
+                                    }
+                                    Text(completed ? "已听完 · \(clock(max(episode.durationSeconds, 0)))" : progressText(episode))
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                 }
                                 .frame(maxWidth: .infinity, alignment: .leading)
                             }
                             .buttonStyle(.plain)
+
                             Menu {
                                 Button("下一集播放") { enqueue(episode, next: true) }
-                                Button("加入待播") { enqueue(episode, next: false) }
-                                Button("加入稍后听") { Task { await saveForLater(episode) } }
+                                Button(isQueued ? "从待播移除" : "加入待播") {
+                                    if isQueued {
+                                        playback.podcastCloud?.removeEpisode(episode.id)
+                                    } else {
+                                        enqueue(episode, next: false)
+                                    }
+                                }
+                                Divider()
+                                Button(completed ? "标为未听" : "标为已听完") {
+                                    Task { await toggleCompleted(episode) }
+                                }
+                                Button(isFav ? "取消收藏" : "单集收藏") {
+                                    Task { await toggleFavorite(episode) }
+                                }
                             } label: {
                                 Image(systemName: "ellipsis")
                                     .frame(width: 32, height: 32)
@@ -243,7 +339,11 @@ private struct PodcastDetailView: View {
         }
         let preference = playback.podcastCloud?.showPreference(show?.id ?? "").continuation
             ?? PodcastContinuation.Preference(autoContinue: playback.podcastAutoContinueEnabled)
-        playback.configurePodcastContinuation(episodes: refs, preference: preference)
+        playback.configurePodcastContinuation(
+            podcastID: show?.id,
+            episodes: refs,
+            preference: preference
+        )
     }
 
     private func enqueue(_ episode: PodcastEpisode, next: Bool) {
@@ -256,16 +356,49 @@ private struct PodcastDetailView: View {
         notice = next ? "已加入待播 · 下一集播放" : "已加入待播"
     }
 
-    private func saveForLater(_ episode: PodcastEpisode) async {
-        guard let cloud = playback.podcastCloud else {
-            message = "暂时无法加入稍后听。请重新登录后再试。"
-            return
+    private func isCompleted(_ episode: PodcastEpisode) -> Bool {
+        episode.completed || (episode.positionSeconds > 0 && episode.durationSeconds > 0
+            && episode.positionSeconds >= episode.durationSeconds)
+    }
+
+    private func isFavorite(_ episode: PodcastEpisode) -> Bool {
+        favorites.isFavorite(episode.id) || episode.loved
+    }
+
+    private func filteredEpisodes(_ episodes: [PodcastEpisode]) -> [PodcastEpisode] {
+        switch episodeFilter {
+        case "unplayed":
+            return episodes.filter { !isCompleted($0) }
+        case "completed":
+            return episodes.filter(isCompleted)
+        case "favorite":
+            return episodes.filter(isFavorite)
+        default:
+            return episodes
         }
-        if let error = await cloud.addToInbox(episodeID: episode.id) {
-            message = error
-        } else {
-            notice = "已加入稍后听"
-            message = nil
+    }
+
+    private func toggleCompleted(_ episode: PodcastEpisode) async {
+        let target = !isCompleted(episode)
+        do {
+            try await client.markPodcastEpisodeCompleted(episodeID: episode.id, duration: episode.durationSeconds, completed: target)
+            await load()
+        } catch {
+            message = "标记完成失败：\(ErrorText.message(for: error))"
+        }
+    }
+
+    private func toggleFavorite(_ episode: PodcastEpisode) async {
+        await favorites.toggle(episode.id, isPodcast: true)
+        await load()
+    }
+
+    private func playPendingQueue() {
+        guard let first = playback.podcastCloud?.unifiedPendingEpisodes.first else { return }
+        Task {
+            if let item = await playback.podcastCloud?.playbackItem(for: first.episodeId) {
+                playback.playPodcastEpisode(item)
+            }
         }
     }
 
@@ -320,21 +453,16 @@ private struct PodcastIntakeSettingsIOS: View {
     let podcastID: String
     var onSaved: () -> Void = {}
 
-    @State private var action = "inbox"
-    @State private var autoLimit = 3
+    @State private var action = "queue_last"
     @State private var order = "follow"
     @State private var ready = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Picker("新集处理", selection: $action) {
-                Text("稍后听").tag("inbox")
+            Picker("新集自动加入待播", selection: $action) {
+                Text("不处理").tag("ignore")
                 Text("加到队尾").tag("queue_last")
                 Text("插到当前之后").tag("queue_next")
-                Text("不处理").tag("ignore")
-            }
-            Stepper(value: $autoLimit, in: 0...100) {
-                Text("最多自动入队 \(autoLimit) 集").monospacedDigit()
             }
             Picker("自动续播", selection: $order) {
                 Text("跟随列表").tag("follow")
@@ -349,7 +477,6 @@ private struct PodcastIntakeSettingsIOS: View {
         }
         .task(id: podcastID) { await load() }
         .onChange(of: action) { _, _ in Task { await save() } }
-        .onChange(of: autoLimit) { _, _ in Task { await save() } }
         .onChange(of: order) { _, _ in Task { await save() } }
     }
 
@@ -357,66 +484,175 @@ private struct PodcastIntakeSettingsIOS: View {
         ready = false
         await playback.podcastCloud?.refreshPreferences()
         let show = playback.podcastCloud?.showPreference(podcastID)
-        action = show?.action ?? "inbox"
-        autoLimit = show?.autoLimit ?? 3
+        let rawAction = show?.action ?? "queue_last"
+        action = (rawAction == "inbox" || rawAction.isEmpty) ? "queue_last" : rawAction
         order = (show?.autoContinue == false || show?.order == "off") ? "off" : (show?.order ?? "follow")
         ready = true
     }
 
     private func save() async {
-        guard ready, let cloud = playback.podcastCloud, cloud.preferences != nil else { return }
+        guard ready, let cloud = playback.podcastCloud else { return }
+        if !cloud.hasResolvedPreferences {
+            await cloud.refreshPreferences()
+        }
         let current = cloud.showPreference(podcastID)
         let effective = (current.autoContinue == false || current.order == "off") ? "off" : current.order
-        guard current.action != action || current.autoLimit != autoLimit || effective != order else { return }
-        await cloud.updateShow(podcastID: podcastID, action: action, autoLimit: autoLimit, order: order)
+        guard cloud.preferenceError != nil || current.action != action || effective != order else { return }
+        await cloud.updateShow(podcastID: podcastID, action: action, autoLimit: current.autoLimit, order: order)
         onSaved()
     }
 }
 
-private struct PodcastInboxView: View {
+private struct PodcastUnifiedQueueView: View {
+    let client: WildstringClient
     let playback: PlaybackService
+    @State private var shows: [PodcastSummary] = []
+    @State private var loadingShows = false
 
     var body: some View {
         let cloud = playback.podcastCloud
         List {
             if let cloud {
-                if cloud.inboxLoading, cloud.inbox.items.isEmpty {
-                    HStack(spacing: 8) {
-                        ProgressView()
-                        Text("正在读取稍后听…").foregroundStyle(.secondary)
+                if cloud.conflict != nil {
+                    Section {
+                        PodcastCloudStatusIOS(cloud: cloud)
                     }
-                } else if let inboxError = cloud.inboxError, cloud.inbox.items.isEmpty {
-                    Text(inboxError).foregroundStyle(.secondary)
-                    Button("重试") { Task { await cloud.refreshInbox() } }
-                } else if cloud.inbox.items.isEmpty {
-                    ContentUnavailableView(
-                        "稍后听是空的",
-                        systemImage: "tray",
-                        description: Text("关注的节目更新后会出现在这里。返回节目列表可以浏览订阅。")
-                    )
-                } else {
-                    if let inboxError = cloud.inboxError {
-                        Text(inboxError).font(.footnote).foregroundStyle(.orange)
-                        Button("重试") { Task { await cloud.refreshInbox() } }
-                    }
-                    ForEach(cloud.inbox.items) { item in
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text(cloud.title(for: item.episodeId)).lineLimit(2)
-                            HStack(spacing: 12) {
-                                Button("加入待播") {
-                                    cloud.enqueueEpisode(item.episodeId, next: false, currentEpisodeID: nil)
-                                }
-                                Button("移除") { Task { await cloud.removeFromInbox(episodeID: item.episodeId) } }
+                }
+
+                Section("待播单集") {
+                    let items = cloud.unifiedPendingEpisodes
+                    if cloud.loading && items.isEmpty {
+                        HStack(spacing: 8) {
+                            ProgressView()
+                            Text("正在同步待播列表…").foregroundStyle(.secondary)
+                        }
+                    } else if items.isEmpty {
+                        ContentUnavailableView(
+                            "待播列表是空的",
+                            systemImage: "list.bullet",
+                            description: Text("从节目挑几集加入，或在下方开启新集自动加入待播。")
+                        )
+                    } else {
+                        HStack {
+                            Text("\(items.count) 集待播")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Button {
+                                playFirst(cloud)
+                            } label: {
+                                Label("播放全部", systemImage: "play.fill")
+                                    .font(.caption.weight(.semibold))
                             }
-                            .font(.caption)
+                        }
+                        ForEach(items) { item in
+                            HStack(spacing: 10) {
+                                Button {
+                                    play(item.episodeId, cloud: cloud)
+                                } label: {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(item.episode?.title ?? cloud.title(for: item.episodeId))
+                                            .lineLimit(2)
+                                            .foregroundStyle(Color.primary)
+                                        if item.source == .inbox {
+                                            Text("稍后听")
+                                                .font(.caption2)
+                                                .foregroundStyle(.secondary)
+                                        }
+                                    }
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                }
+                                .buttonStyle(.plain)
+
+                                Button {
+                                    cloud.removeEpisode(item.episodeId)
+                                } label: {
+                                    Image(systemName: "trash")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel("移除")
+                            }
+                        }
+                    }
+                }
+
+                Section("新集自动加入待播") {
+                    if loadingShows && shows.isEmpty {
+                        ProgressView()
+                    } else if shows.isEmpty {
+                        Text("暂无已关注节目").foregroundStyle(.secondary)
+                    } else {
+                        ForEach(shows) { show in
+                            PodcastDeliveryIOSRow(cloud: cloud, show: show)
                         }
                     }
                 }
             } else {
-                Text("暂时读不到稍后听。请重新登录后再试。").foregroundStyle(.secondary)
+                Text("暂时读不到待播列表。请重新登录后再试。").foregroundStyle(.secondary)
             }
         }
-        .navigationTitle("稍后听")
-        .task { await playback.podcastCloud?.refreshInbox() }
+        .navigationTitle("待播列表")
+        .task {
+            await playback.podcastCloud?.refreshInbox()
+            await playback.podcastCloud?.refreshQueue()
+            await playback.podcastCloud?.refreshPreferences()
+            loadingShows = true
+            do {
+                shows = try await client.podcasts(followed: true)
+            } catch {
+                // Ignore failure
+            }
+            loadingShows = false
+        }
+    }
+
+    private func play(_ episodeID: String, cloud: PodcastCloudQueue) {
+        Task {
+            if let item = await cloud.playbackItem(for: episodeID) {
+                playback.playPodcastEpisode(item)
+            }
+        }
+    }
+
+    private func playFirst(_ cloud: PodcastCloudQueue) {
+        guard let first = cloud.unifiedPendingEpisodes.first else { return }
+        play(first.episodeId, cloud: cloud)
+    }
+}
+
+private struct PodcastDeliveryIOSRow: View {
+    let cloud: PodcastCloudQueue
+    let show: PodcastSummary
+
+    var body: some View {
+        let pref = cloud.showPreference(show.id)
+        let currentAction = (pref.action == "inbox" || pref.action.isEmpty) ? "queue_last" : pref.action
+        HStack {
+            Text(show.title)
+                .lineLimit(1)
+                .font(.subheadline)
+            Spacer()
+            Picker("处理方式", selection: Binding(
+                get: { currentAction },
+                set: { newAction in
+                    Task {
+                        await cloud.updateShow(
+                            podcastID: show.id,
+                            action: newAction,
+                            autoLimit: pref.autoLimit,
+                            order: pref.order
+                        )
+                    }
+                }
+            )) {
+                Text("不处理").tag("ignore")
+                Text("加到队尾").tag("queue_last")
+                Text("插到当前之后").tag("queue_next")
+            }
+            .labelsHidden()
+            .pickerStyle(.menu)
+        }
     }
 }
