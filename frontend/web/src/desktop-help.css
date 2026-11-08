@@ -16,8 +16,8 @@
   box-sizing: border-box;
   border: 1px solid var(--border);
   border-radius: 9px;
-  background: var(--workspace-panel, #20211b);
-  color: var(--workspace-text, #eeeae2);
+  background: var(--workspace-panel, #211e1b);
+  color: var(--workspace-text, #e8e3d9);
   font:
     12px/1.7 Inter,
     -apple-system,

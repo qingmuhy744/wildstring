@@ -23,7 +23,7 @@ function apply(theme: Theme) {
   document.documentElement.dataset.theme = dark ? 'dark' : 'light';
   document
     .querySelector('meta[name="theme-color"]')
-    ?.setAttribute('content', dark ? '#171716' : '#f6f3ed');
+    ?.setAttribute('content', dark ? '#181614' : '#f6f3ed');
 }
 // Apply before React mounts; the small bootstrap in index.html also prevents a first-paint flash.
 apply(savedTheme());

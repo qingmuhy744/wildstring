@@ -132,11 +132,11 @@ test('服务器下载设置可保存重试选项，个人策略另设入口', as
     await item.hover();
     await expect(item).toHaveCSS(
       'color',
-      theme === 'light' ? 'rgb(42, 43, 37)' : 'rgb(238, 234, 226)',
+      theme === 'light' ? 'rgb(42, 43, 37)' : 'rgb(232, 227, 217)',
     );
     await expect(item).toHaveCSS(
       'background-color',
-      theme === 'light' ? 'rgb(230, 231, 220)' : 'rgb(48, 49, 43)',
+      theme === 'light' ? 'rgb(230, 231, 220)' : 'rgb(52, 48, 42)',
     );
     const contrast = await item.evaluate((element) => {
       const style = getComputedStyle(element);
@@ -457,7 +457,7 @@ test('昼夜主题、真实调谐和音量、时间码跳转、断点进度与�
     await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
     await expect(page.locator('.fullscreen-player')).toHaveCSS(
       'background-color',
-      theme === 'light' ? 'rgb(230, 225, 214)' : 'rgb(36, 38, 36)',
+      theme === 'light' ? 'rgb(230, 225, 214)' : 'rgb(38, 34, 31)',
     );
     const radio = await page.locator('.retro-radio').boundingBox();
     const paper = await page.locator('.radio-newspaper').boundingBox();
