@@ -124,8 +124,11 @@ class PodcastResources:
                 (user_id, identity),
             )
             db.execute(
-                "UPDATE podcast_resource_state SET zero_since=COALESCE(zero_since,?) WHERE episode_id=? AND NOT EXISTS(SELECT 1 FROM podcast_resource_refs WHERE episode_id=?)",
-                (time.time(), identity, identity),
+                """UPDATE podcast_resource_state SET zero_since=COALESCE(zero_since,?)
+                WHERE episode_id=?
+                  AND NOT EXISTS(SELECT 1 FROM podcast_resource_refs WHERE episode_id=?)
+                  AND NOT EXISTS(SELECT 1 FROM podcast_episode_favorites WHERE episode_id=?)""",
+                (time.time(), identity, identity, identity),
             )
         return {"id": identity, "saved": False, "status": "released"}
 
@@ -163,8 +166,11 @@ class PodcastResources:
             "INSERT OR IGNORE INTO podcast_resource_state(episode_id) VALUES (?)", (identity,)
         )
         db.execute(
-            "UPDATE podcast_resource_state SET zero_since=CASE WHEN EXISTS(SELECT 1 FROM podcast_resource_refs WHERE episode_id=?) THEN NULL ELSE ? END WHERE episode_id=?",
-            (identity, time.time(), identity),
+            """UPDATE podcast_resource_state SET zero_since=CASE
+            WHEN EXISTS(SELECT 1 FROM podcast_resource_refs WHERE episode_id=?)
+              OR EXISTS(SELECT 1 FROM podcast_episode_favorites WHERE episode_id=?) THEN NULL
+            ELSE ? END WHERE episode_id=?""",
+            (identity, identity, time.time(), identity),
         )
 
     def acquire(self, db, identity):
@@ -221,10 +227,17 @@ class PodcastResources:
             (stamp,),
         )
         db.execute(
-            "UPDATE podcast_resource_state SET zero_since=NULL WHERE zero_since IS NOT NULL AND EXISTS(SELECT 1 FROM podcast_resource_refs r WHERE r.episode_id=podcast_resource_state.episode_id)"
+            """UPDATE podcast_resource_state SET zero_since=NULL
+            WHERE zero_since IS NOT NULL AND (
+                EXISTS(SELECT 1 FROM podcast_resource_refs r WHERE r.episode_id=podcast_resource_state.episode_id)
+                OR EXISTS(SELECT 1 FROM podcast_episode_favorites f WHERE f.episode_id=podcast_resource_state.episode_id)
+            )"""
         )
         db.execute(
-            "UPDATE podcast_resource_state SET zero_since=COALESCE(zero_since,?) WHERE zero_since IS NULL AND NOT EXISTS(SELECT 1 FROM podcast_resource_refs r WHERE r.episode_id=podcast_resource_state.episode_id)",
+            """UPDATE podcast_resource_state SET zero_since=COALESCE(zero_since,?)
+            WHERE zero_since IS NULL
+              AND NOT EXISTS(SELECT 1 FROM podcast_resource_refs r WHERE r.episode_id=podcast_resource_state.episode_id)
+              AND NOT EXISTS(SELECT 1 FROM podcast_episode_favorites f WHERE f.episode_id=podcast_resource_state.episode_id)""",
             (stamp,),
         )
 
@@ -236,6 +249,7 @@ class PodcastResources:
                 """SELECT e.id,e.podcast_id,e.title,e.local_path,e.download_status,p.title AS podcast_title,
             COALESCE(s.protected,0) AS protected,s.zero_since,COALESCE(s.version,1) AS version,
             (SELECT count(*) FROM podcast_resource_refs r WHERE r.episode_id=e.id) AS reference_count,
+            (SELECT count(*) FROM podcast_episode_favorites f WHERE f.episode_id=e.id) AS favorite_count,
             EXISTS(SELECT 1 FROM podcast_resource_leases x WHERE x.episode_id=e.id AND x.expires_at>?) AS leased
             FROM podcast_episodes e JOIN podcasts p ON p.id=e.podcast_id LEFT JOIN podcast_resource_state s ON s.episode_id=e.id
             WHERE e.local_path IS NOT NULL AND e.local_path<>''
@@ -316,6 +330,7 @@ class PodcastResources:
                     continue
                 if any(
                     r["reference_count"]
+                    or r.get("favorite_count", 0)
                     or r["protected"]
                     or r["leased"]
                     or r["download_status"] in {"queued", "downloading"}

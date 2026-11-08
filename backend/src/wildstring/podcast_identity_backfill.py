@@ -632,6 +632,7 @@ class IdentityBackfill:
             "podcast_resource_refs",
             "podcast_resource_state",
             "podcast_resource_leases",
+            "podcast_episode_favorites",
         ):
             db.execute(
                 f"UPDATE OR IGNORE {table} SET episode_id=? WHERE episode_id=?",  # nosec B608
