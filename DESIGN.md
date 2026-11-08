@@ -198,17 +198,29 @@ Dark has no `--border-strong`; secondary button and input outlines use `--border
   - Header (`我的订阅` / `全部节目`), rounded search input (`搜索节目`), and subscribed show cards (`44×44` cover, title, author, `99 未听 · 100 集`, coral checkmark).
 - **Right Detail Header**:
   - `92×92` show artwork (`12px` radius), `24px` title, author, and positive availability copy: `共 100 集 · ` + coral `还有 99 集可听`.
+  - Header action buttons:
+    - Unified `待播列表` button opening the unified pending queue sheet/dialog (merging queued and inbox items into a single list with `▶ 播放全部` and item-level play/remove controls, alongside 3-option `新集自动待播` selector (`关闭（仅关注）`, `自动加到队尾`, `自动插到下一集`); redundant auto-limit spinbox/stepper is omitted from primary UI).
+    - Quick play action: `▶ 播放待播 (N)` rendered whenever queued episodes exist (`queuedSet.size > 0`), starting playback of queued episodes in sequence.
   - Primary coral pill button (`▶ 继续收听` or `▶ 播放最新一集`) paired with a circular `32×32` `⋯` button housing `分享节目` and destructive `取消订阅`.
   - Collapsible 2-line show description with `展开简介` link.
 - **Episode Filter, Sort & Grouping**:
-  - Filter pills: `全部` (solid dark pill when active), `未听 N`, `已听 N`.
+  - Filter pills: `全部`, `未听完`, and `已收藏` (solid dark pill when active; when `已收藏` is selected, only favorited episodes are shown).
   - Right-aligned sort dropdown (`从新到旧 ⌄` / `从旧到新 ⌄`).
   - Time section headers: `本周` and `更早`.
   - Automatic title cleanup strips redundant trailing show-name brackets (e.g., `【王局拍案播客】`).
 - **Episode Row States (Three Distinct Visual Tiers)**:
-  1. **Currently Playing (`current`)**: Full-row warm tint (`--accent-tint`), left animated/colored `waveform` icon, bold ink title, subtitle `日期 · N分钟 · 正在播放` (in coral).
-  2. **In Progress (`0 < position < duration`)**: Left bordered circular play button, normal ink title, subtitle `日期 · 剩 N 分钟` (coral highlight), and a slim `3.5px` coral progress bar at the bottom of the row.
-  3. **Completed (`position >= duration`)**: Muted grey play circle, **greyed-out title (`var(--faint)`)**, inline `checkmark.circle.fill` icon right after the title, muted subtitle `日期 · N分钟 · 已听完`, and **no bottom progress bar**.
+  1. **Currently Playing (`current`)**: Full-row warm tint (`--accent-tint`), left animated/colored `waveform` icon, bold ink title, subtitle `日期 · N分钟 · 正在播放` (in coral), inline queue button shows disabled `正在播放`.
+  2. **In Progress / Unplayed**: Left bordered circular play button, normal ink title, subtitle `日期 · 剩 N 分钟` (coral highlight), and a slim `3.5px` coral progress bar at the bottom of the row if in progress. Inline queue button displays `+ 待播` or `✓ 已待播` (accent pressed style; clicking toggles queue status).
+  3. **Completed (`completed` or `position >= duration`)**: Visual muting with row opacity `0.62`, muted grey play circle, **greyed-out title (`var(--podcast-subtle)` / `var(--faint)`)**, inline `✓ 已听完` status tag right after the title, muted subtitle `日期 · N分钟 · 已听完`, and **no bottom progress bar**.
+- **Episode Context Menu (`RowMenu`) & Dialog Actions**:
+  - `播放单集`, `下一集播放`, `加入待播` (or toggle via inline quick button).
+  - `标为已听完` / `标为未听`: manual completion toggle immediately persisting progress and toggling row muting.
+  - `单集收藏` / `取消收藏`: single-episode favorite toggle with heart icon (`<Icon name="heart" />`), updating favorited state and ensuring server audio cleanup protection.
+  - `保存到服务器` / `取消个人保存`.
+- **Podcast Episode Dialog (`PodcastEpisodeDialog`)**:
+  - Modal view with show cover, title, metadata (pub date, duration, online/downloaded availability), rich description, and action buttons (`播放单集`, `下一集播放`, `加入待播`, `下载音频`, `保存到服务器`, `单集收藏` / `取消收藏`).
+- **Podcast Discovery & Chart Caching**:
+  - 1-hour TTL in-memory caching and silent prefetch on idle (800ms debounce) for discovery charts, ensuring zero-latency reopen without loading flash.
 
 ### 6.4 Search (`搜索`)
 - Warm canvas header with result counter (`共 N 项匹配`), primary `播放歌曲` button when track matches exist, `10px`-radius elevated search input (`var(--surface-input)` with focus accent ring), and category filter capsules (`全部`, `歌曲`, `专辑`, `艺人` with counts).
