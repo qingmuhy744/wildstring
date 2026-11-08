@@ -24,3 +24,8 @@
 - Web、macOS、iOS、Android 四处播放器样式缺省从未设置统一为唱片；已显式选择封面或磁带的偏好保留。Web 与 macOS 的唱片视觉改为主题画布（不再铺全屏封面氛围层），iOS 接入默认唱片与主题底色，Android 黑胶页减淡唱纹、细化唱臂、衬线标题、等宽数字，宽屏播放视觉与控制上限放宽到 480dp。DESIGN.md §6.7 记录规则。
 - Web 播客收音机播放键新增可开关的合成咔嗒声（≤120ms，Web Audio 合成，无音频资产；默认关闭，按账号存浏览器，仅播客播放键触发）。规则记入 DESIGN.md §2「Honest Analog Tactility」。
 - 验证：Web 定向套件（playback-styles、personal-settings、podcast-player、bilingual-lyrics）通过；radio-click.spec.ts 覆盖默认关闭、开关持久化、仅播客触发。macOS/iOS 真机视觉仍未覆盖。
+
+## 补充：收音机 VU 表接入真实音频电平（2026-11-08）
+
+- 播客收音机 L/R 电平表从纯 CSS 装饰动画改为真实输出电平：在 `playback-gain` 已有播放图上挂 `AnalyserNode` 分支（`MediaElementSource` 每元素只能建一次的约束决定 tap 必须在建图处）。RMS 换算 −60 dBFS..0 dBFS 到 0..1，VU 弹道快攻慢放，单声道源经 `channelCount=2` 上混后 L/R 等值；暂停/缓冲/出错与减少动态效果时归零或冻结。样式用 `transform: translateX` 滑轨揭示电平（替代原 clip-path 动画，符合动效约束），`receiver-level` 关键帧移除。
+- Web 端实现；DESIGN.md §2 已补规则。radio-click 的 AudioContext stub 需同步支持 analyser 建图分支（try/catch 兜底，缺失时无声不影响播放）。

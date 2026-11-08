@@ -29,6 +29,7 @@
    - Fullscreen playback supports **Cover**, **Vinyl**, **Cassette** (for music), and **Retro Bakelite Radio + Broadsheet** (for podcasts).
    - Decorative motion (turntable rotation, tape reels, radio dial backlight) is strictly driven by real `isPlaying` state and respects `prefers-reduced-motion`.
    - The radio play control may pair with a short synthesized power-switch click (≤120 ms, Web Audio, no audio assets). It is strictly opt-in, off by default, and saved per account in the browser.
+   - The radio L/R VU meter reflects the real stereo output level from an `AnalyserNode` tap on the shared playback graph (RMS, −60 dBFS..0 dBFS mapped to 0..1, mono sources read equally on both channels). Use VU ballistics (fast attack, slow release) and stop decorative updates while inactive or when reduced motion is requested; the level is revealed by sliding the ramp under a clipping track (`transform` only, never `clip-path` animation).
 
 ---
 
