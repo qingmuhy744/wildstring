@@ -70,6 +70,9 @@ class PodcastProgress @Inject constructor(
     fun answer(useRemote: Boolean?) { answer?.complete(useRemote) }
     fun leave() { active = null; activeConflicted = false }
     fun owns(id: String) = !activeConflicted && active?.let { it.first == repository.session.cacheScope() && it.second == id } == true
+    fun recordManualProgress(id: String, progress: EpisodeProgress) {
+        mutablePositions.value = mutablePositions.value + (id to progress)
+    }
     private fun ownerValid(owner: String) { if (owner != repository.session.cacheScope()) throw CancellationException("会话已变化。") }
     // Requests use the ephemeral login generation; durable rows use the stable server/account key.
     private fun storageOwner(owner: String): String = repository.session.withStorageScope(owner) { it }

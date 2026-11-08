@@ -404,6 +404,7 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
     var queue by rememberSaveable { mutableStateOf(false) }
     var settings by rememberSaveable { mutableStateOf(false) }
     var feature by remember { mutableStateOf<String?>(null) }
+    var downloadTasks by remember { mutableStateOf(false) }
     var playerReturnFeature by remember { mutableStateOf<String?>(null) }
     var featureTrack by remember { mutableStateOf<Track?>(null) }
     var featurePlaylist by remember { mutableStateOf<Playlist?>(null) }
@@ -586,7 +587,8 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
                             notifications = { feature = "notifications" },
                             queue = if (showGlobalMore) ({ queue = true }) else null,
                             recent = if (showGlobalMore) vm::recent else null,
-                            offline = if (showGlobalMore) ({ feature = "offline" }) else null) },
+                            offline = if (showGlobalMore) ({ feature = "offline" }) else null,
+                            downloads = if (state.tab == "podcast" && state.account?.profile in listOf("owner", "librarian")) ({ downloadTasks = true }) else null) },
                         bottomBar = {
                             Surface(
                                 color = MaterialTheme.colorScheme.surfaceContainer,
@@ -850,6 +852,7 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
             }
         }
     }
+    if (downloadTasks) PodcastDownloadQueueDialog(vm = vm, onDismiss = { downloadTasks = false })
     feature?.let { route -> FeatureDialog(vm, route, featureTrack, featurePlaylist, albumId = featureAlbumId, dismiss = { feature = null; featureTrack = null; featurePlaylist = null; featureBatchId = null; featureAlbumId = null }, initialBatchId = featureBatchId, onOpenAction = ::openFeatureAction) }
     playlistActions?.let { playlist -> ModalBottomSheet(onDismissRequest = { playlistActions = null }) {
         Text(playlist.name, Modifier.padding(horizontal = 20.dp, vertical = 12.dp), style = MaterialTheme.typography.titleLarge)

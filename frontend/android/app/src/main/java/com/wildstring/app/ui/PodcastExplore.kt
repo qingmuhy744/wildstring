@@ -32,10 +32,11 @@ import kotlinx.coroutines.launch
     var query by remember { mutableStateOf("") }
     var region by remember { mutableStateOf("") }
     var regionMenu by remember { mutableStateOf(false) }
-    var page by remember { mutableStateOf<PodcastDirectoryPage?>(null) }
+    val initialCached = remember(region) { vm.repository.cachedPodcastDirectory(region) }
+    var page by remember { mutableStateOf<PodcastDirectoryPage?>(initialCached) }
     var selected by remember { mutableStateOf<PodcastDirectoryResult?>(null) }
     var preview by remember { mutableStateOf<PodcastFeedPreview?>(null) }
-    var loading by remember { mutableStateOf(true) }
+    var loading by remember { mutableStateOf(initialCached == null) }
     var previewing by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -52,9 +53,17 @@ import kotlinx.coroutines.launch
             loading = false; error = null; page = null; selected = null
             return@LaunchedEffect
         }
+        val cached = if (trimmedQuery.isBlank() && retry == 0) vm.repository.cachedPodcastDirectory(region) else null
+        if (cached != null) {
+            page = cached
+            loading = false
+            error = null
+            selected = null
+            return@LaunchedEffect
+        }
         loading = true; error = null; page = null; selected = null
-        delay(350)
-        try { page = vm.repository.podcastDirectory(trimmedQuery, region) }
+        if (trimmedQuery.isNotBlank()) delay(350)
+        try { page = vm.repository.podcastDirectory(trimmedQuery, region, forceRefresh = retry > 0) }
         catch (e: CancellationException) { throw e }
         catch (e: Exception) { error = friendlyError(e) }
         finally { loading = false }

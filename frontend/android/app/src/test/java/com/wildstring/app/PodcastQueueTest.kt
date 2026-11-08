@@ -236,4 +236,171 @@ class PodcastQueueTest {
         assertTrue(podcastAdvanceBlocked(repeatOne = false, repeatAll = false, shuffle = true))
         assertFalse(podcastAdvanceBlocked(repeatOne = false, repeatAll = false, shuffle = false))
     }
+
+    @Test fun crossShowQueueTransitionContinuesWithSecondShowPolicyWithoutWritingQueue() {
+        val showA = PodcastSummary(id = "show-a", title = "Show A", feedUrl = "https://example.test/a.xml")
+        val showB = PodcastSummary(id = "show-b", title = "Show B", feedUrl = "https://example.test/b.xml")
+        val a1 = episode("a1", podcastId = "show-a", pubDate = "2024-01-01T00:00:00Z")
+        val a2 = episode("a2", podcastId = "show-a", pubDate = "2024-01-02T00:00:00Z")
+        val b1 = episode("b1", podcastId = "show-b", pubDate = "2024-02-01T00:00:00Z")
+        val b2 = episode("b2", podcastId = "show-b", pubDate = "2024-02-02T00:00:00Z", completed = true)
+        val b3 = episode("b3", podcastId = "show-b", pubDate = "2024-02-03T00:00:00Z")
+        val detailA = PodcastDetail(showA, listOf(a2, a1))
+        val detailB = PodcastDetail(showB, listOf(b3, b2, b1))
+
+        val prefs = PodcastQueuePreferences(
+            autoContinue = false,
+            shows = mapOf(
+                "show-a" to PodcastShowQueuePreference(order = "follow", skipCompleted = true, autoContinue = true),
+                "show-b" to PodcastShowQueuePreference(order = "asc", skipCompleted = true, autoContinue = true),
+            ),
+        )
+        val cached = PodcastContinuePreference(autoContinue = false)
+
+        // Initial explicit queue has [a2, b1].
+        var queue = listOf(PodcastQueueItem("a2", "manual"), PodcastQueueItem("b1", "manual"))
+
+        // 1. a2 finishes -> remaining queue has [b1], so ADVANCE_QUEUE wins over Show A's continuation (a1).
+        queue = podcastQueueRemoveEpisode(queue, "a2")
+        val afterA2 = podcastEndPlan(
+            hasQueuedNext = queue.isNotEmpty(),
+            current = a2,
+            detail = detailA,
+            preference = podcastContinuePreferenceFor(prefs, "show-a", cached),
+        )
+        assertEquals(PodcastEndAction.ADVANCE_QUEUE, afterA2.action)
+        assertEquals(listOf("b1"), queue.map { it.episodeId })
+
+        // 2. b1 finishes -> queue becomes empty; continuation switches to Show B (asc, skipping completed b2 -> b3).
+        queue = podcastQueueRemoveEpisode(queue, "b1")
+        assertTrue(queue.isEmpty())
+        val afterB1 = podcastEndPlan(
+            hasQueuedNext = queue.isNotEmpty(),
+            current = b1,
+            detail = detailB,
+            preference = podcastContinuePreferenceFor(prefs, "show-b", cached),
+        )
+        assertEquals(PodcastEndAction.CONTINUE, afterB1.action)
+        assertEquals(b3, afterB1.episode)
+        // Auto-continue never writes back to the cloud queue.
+        assertTrue(queue.isEmpty())
+
+        // 3. b3 finishes at the end of Show B -> stops cleanly without wrapping around or crossing shows.
+        val afterB3 = podcastEndPlan(
+            hasQueuedNext = false,
+            current = b3,
+            detail = detailB,
+            preference = podcastContinuePreferenceFor(prefs, "show-b", cached),
+        )
+        assertEquals(PodcastEndAction.STOP, afterB3.action)
+        assertNull(afterB3.episode)
+    }
+
+    @Test fun normalizeDeliveryActionNormalizesLegacyInboxToQueueLast() {
+        assertEquals("queue_last", normalizeDeliveryAction("inbox"))
+        assertEquals("queue_last", normalizeDeliveryAction(""))
+        assertEquals("queue_last", normalizeDeliveryAction(null))
+        assertEquals("queue_last", normalizeDeliveryAction("unknown"))
+        assertEquals("queue_last", normalizeDeliveryAction("queue_last"))
+        assertEquals("queue_next", normalizeDeliveryAction("queue_next"))
+        assertEquals("ignore", normalizeDeliveryAction("ignore"))
+    }
+
+    @Test fun effectiveShowPreferenceNormalizesDeliveryAction() {
+        val prefs = PodcastQueuePreferences(
+            autoContinue = true,
+            shows = mapOf(
+                "legacy-show" to PodcastShowQueuePreference(action = "inbox", autoLimit = 5),
+                "next-show" to PodcastShowQueuePreference(action = "queue_next"),
+            ),
+        )
+        val legacy = effectiveShowPreference(prefs, "legacy-show")
+        assertEquals("queue_last", legacy.action)
+
+        val next = effectiveShowPreference(prefs, "next-show")
+        assertEquals("queue_next", next.action)
+
+        val defaultPref = effectiveShowPreference(prefs, "unconfigured-show")
+        assertEquals("queue_last", defaultPref.action)
+    }
+
+    @Test fun podcastEpisodeFavoriteFlagsReflectLovedAndFavorite() {
+        val defaultEp = episode("ep1")
+        assertFalse(defaultEp.loved)
+        assertFalse(defaultEp.favorite)
+        assertFalse(defaultEp.isFavorite)
+
+        val lovedEp = defaultEp.copy(loved = true)
+        assertTrue(lovedEp.loved)
+        assertTrue(lovedEp.isFavorite)
+
+        val favEp = defaultEp.copy(favorite = true)
+        assertTrue(favEp.favorite)
+        assertTrue(favEp.isFavorite)
+
+        val bothEp = defaultEp.copy(loved = true, favorite = true)
+        assertTrue(bothEp.isFavorite)
+    }
+
+    @Test fun discoveryCacheTTLIsOneHour() {
+        assertEquals(3600_000L, DISCOVERY_CACHE_TTL)
+    }
+
+    @Test fun normalizeDeliveryActionAdversarialInputs() {
+        val invalidInputs = listOf(
+            "INBOX", "QUEUE_LAST", "QUEUE_NEXT", "IGNORE",
+            "inbox", " inbox ", "  ", "\t\n", "undefined", "null",
+            "random_string", "12345", "queue_first", "later",
+        )
+        for (input in invalidInputs) {
+            assertEquals("Expected $input to normalize to queue_last", "queue_last", normalizeDeliveryAction(input))
+        }
+        assertEquals("queue_last", normalizeDeliveryAction(null))
+        assertEquals("queue_last", normalizeDeliveryAction(""))
+        assertEquals("queue_last", normalizeDeliveryAction("queue_last"))
+        assertEquals("queue_next", normalizeDeliveryAction("queue_next"))
+        assertEquals("ignore", normalizeDeliveryAction("ignore"))
+    }
+
+    @Test fun episodeFavoriteTruthTableExhaustive() {
+        val cases = listOf(
+            Triple(false, false, false),
+            Triple(true, false, true),
+            Triple(false, true, true),
+            Triple(true, true, true),
+        )
+        for ((loved, favorite, expected) in cases) {
+            val ep = episode("test").copy(loved = loved, favorite = favorite)
+            assertEquals("isFavorite mismatch for loved=$loved, favorite=$favorite", expected, ep.isFavorite)
+        }
+    }
+
+    @Test fun discoveryCacheTTLBoundarySimulation() {
+        val t0 = 1_000_000_000L
+        val ttl = DISCOVERY_CACHE_TTL
+
+        val isHit = { now: Long -> (now - t0) < ttl }
+
+        // Immediately after fetch (t0) -> Hit
+        assertTrue(isHit(t0))
+
+        // 3599 seconds later (t0 + 3599_000ms) -> Hit
+        assertTrue(isHit(t0 + 3599_000L))
+
+        // Exactly 3600 seconds later (t0 + 3600_000ms) -> Miss (expired)
+        assertFalse(isHit(t0 + 3600_000L))
+
+        // 3601 seconds later (t0 + 3601_000ms) -> Miss
+        assertFalse(isHit(t0 + 3601_000L))
+
+        // 2 hours later -> Miss
+        assertFalse(isHit(t0 + 7200_000L))
+    }
+
+    @Test fun downloadQueueAcceptsFractionalProgress() {
+        val json = """{"total_pending":1,"downloading":[{"episode_id":"e1","progress_pct":42.5}],"recent_completed":[{"episode_id":"e2","progress_pct":96.5}]}"""
+        val info = com.google.gson.Gson().fromJson(json, PodcastDownloadQueueInfo::class.java)
+        assertEquals(42.5, info.downloading.single().progressPct!!, 0.0)
+        assertEquals(96.5, info.recentCompleted.single().progressPct!!, 0.0)
+    }
 }

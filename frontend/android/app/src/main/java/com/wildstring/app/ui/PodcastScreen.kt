@@ -7,6 +7,7 @@ import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
@@ -54,6 +55,10 @@ import com.wildstring.app.data.EpisodeProgress
 import com.wildstring.app.data.effectiveShowPreference
 import com.wildstring.app.data.friendlyError
 import com.wildstring.app.data.podcastPublishedMillis
+import com.wildstring.app.data.normalizeDeliveryAction
+import com.wildstring.app.data.podcastEpisodeId
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.CancellationException
 
@@ -104,13 +109,13 @@ fun PodcastChannelPage(
         (selectedId !in browser.loadedDetails || selectedId in browser.loadingDetails))
     var showSubscribeDialog by remember(owner) { mutableStateOf(false) }
     var exploring by remember(owner) { mutableStateOf(false) }
+    var showQueueSheet by remember(owner) { mutableStateOf(false) }
     var autoDownloadPodcast by remember(owner) { mutableStateOf<PodcastSummary?>(null) }
     var statusMessage by remember { mutableStateOf<String?>(null) }
-    var followingOnly by rememberSaveable { mutableStateOf(true) }
-    val canBrowseCatalog = state.account?.profile in listOf("owner", "librarian")
-    val personalOnly = !canBrowseCatalog || followingOnly
     var canAddPodcast by remember(owner) { mutableStateOf(false) }
     val canEditPublisher = state.account?.profile in listOf("owner", "librarian", "editor")
+    val pendingCount = cloud.queue.size + cloud.inbox.size
+    val favoriteIds by vm.repository.podcastFavoriteIds.collectAsStateWithLifecycle()
     LaunchedEffect(owner, browser.listLoading) {
         try {
             val policy = vm.repository.podcastCatalogPolicy()
@@ -121,7 +126,12 @@ fun PodcastChannelPage(
     BackHandler(enabled = selectedId == null && selectedPublisher != null) { closePublisher() }
 
     LaunchedEffect(owner, browser.listLoaded) { vm.podcastBrowser.ensureList() }
-    LaunchedEffect(owner) { if (owner != null) vm.refreshPodcastCloud() }
+    LaunchedEffect(owner) {
+        if (owner != null) {
+            vm.refreshPodcastCloud()
+            vm.refreshPodcastFavoriteIds()
+        }
+    }
     LaunchedEffect(cloud.notice) {
         cloud.notice?.let { statusMessage = it; vm.clearPodcastQueueNotice() }
     }
@@ -146,7 +156,22 @@ fun PodcastChannelPage(
                     onQueueEpisode = { ep, next ->
                         vm.addPodcastEpisodeToQueue(ep, selectedPodcast, next)
                     },
-                    onAddToInbox = { ep -> vm.addPodcastEpisodeToInbox(ep) },
+                    onRemoveQueuedEpisode = { epId ->
+                        vm.removePodcastQueueEpisode(epId)
+                        vm.removePodcastInboxEpisode(epId)
+                    },
+                    totalPendingCount = pendingCount,
+                    onPlayPendingQueue = { vm.playPodcastPendingQueue() },
+                    onOpenQueueSheet = { showQueueSheet = true },
+                    isEpisodeQueued = { epId -> cloud.queue.any { it.episodeId == epId } || cloud.inbox.any { it.episodeId == epId } },
+                    isEpisodeActive = { epId -> val cur = state.current; cur?.isPodcast == true && podcastEpisodeId(cur.id) == epId },
+                    isEpisodeFavorite = { epId -> epId in favoriteIds },
+                    onToggleFavorite = { episodeId, loved ->
+                        vm.togglePodcastEpisodeFavorite(episodeId, loved)
+                    },
+                    onToggleCompleted = { episodeId, completed ->
+                        vm.markPodcastEpisodeCompleted(episodeId, completed)
+                    },
                     showPreference = cloud.preferences?.let { effectiveShowPreference(it, selectedPodcast.id) },
                     preferenceLoading = cloud.preferencesLoading && cloud.preferences == null,
                     preferenceError = cloud.preferencesError,
@@ -194,15 +219,11 @@ fun PodcastChannelPage(
                     }
                     vm.openPodcast(it.id)
                 },
-                personalOnly = personalOnly,
             )
         } else {
             pageStates.SaveableStateProvider("list") {
                 PodcastListView(
-                    podcasts = if (personalOnly) podcasts.filter { it.followed } else podcasts,
-                    followingOnly = personalOnly,
-                    canBrowseCatalog = canBrowseCatalog,
-                    onScope = { followingOnly = it; if (!it) vm.podcastBrowser.reloadList(synchronize = false) },
+                    podcasts = podcasts.filter { it.followed },
                     canManage = false,
                     canAdd = canAddPodcast,
                     onFollow = vm::togglePodcastFollow,
@@ -216,24 +237,12 @@ fun PodcastChannelPage(
                         vm.refreshPodcastCloud()
                     },
                     queueHeader = {
-                        PodcastCloudLists(
+                        PodcastUnifiedQueueBanner(
                             cloud = cloud,
-                            autoContinue = cloud.preferences?.autoContinue ?: vm.settings.podcastContinuePreference().autoContinue,
+                            pendingCount = pendingCount,
+                            onOpenQueue = { showQueueSheet = true },
+                            onPlayAll = { vm.playPodcastPendingQueue() },
                             onRetry = vm::retryPodcastQueueSync,
-                            onBrowse = { exploring = true },
-                            onPlay = { episodeId ->
-                                scope.launch {
-                                    try {
-                                        val episode = vm.repository.podcastEpisode(episodeId)
-                                        val detail = vm.repository.podcastDetail(episode.podcastId)
-                                        vm.playPodcastEpisode(episode, detail.podcast)
-                                    } catch (e: CancellationException) { throw e }
-                                    catch (e: Exception) { statusMessage = friendlyError(e) }
-                                }
-                            },
-                            onQueueInbox = vm::movePodcastInboxToQueue,
-                            onRemoveInbox = vm::removePodcastInboxEpisode,
-                            onRemoveQueue = vm::removePodcastQueueEpisode,
                         )
                     },
                     onDelete = { p ->
@@ -285,6 +294,33 @@ fun PodcastChannelPage(
                 },
             )
         }
+        if (showQueueSheet) {
+            PodcastUnifiedQueueSheet(
+                cloud = cloud,
+                followedShows = podcasts.filter { it.followed },
+                onDismiss = { showQueueSheet = false },
+                onPlayEpisode = { episodeId ->
+                    scope.launch {
+                        try {
+                            val episode = vm.repository.podcastEpisode(episodeId)
+                            val detail = vm.repository.podcastDetail(episode.podcastId)
+                            vm.playPodcastEpisode(episode, detail.podcast)
+                            showQueueSheet = false
+                        } catch (e: CancellationException) { throw e }
+                        catch (e: Exception) { statusMessage = friendlyError(e) }
+                    }
+                },
+                onPlayAll = {
+                    vm.playPodcastPendingQueue()
+                    showQueueSheet = false
+                },
+                onRemoveQueued = vm::removePodcastQueueEpisode,
+                onRemoveInbox = vm::removePodcastInboxEpisode,
+                onUpdateShowDelivery = { podcastId, action -> vm.updatePodcastShowPreference(podcastId, action, 3) },
+                onBrowse = { showQueueSheet = false; exploring = true },
+                onRetry = vm::retryPodcastQueueSync,
+            )
+        }
 
         statusMessage?.let { msg ->
             LaunchedEffect(msg) {
@@ -303,94 +339,415 @@ fun PodcastChannelPage(
 }
 
 @Composable
-private fun PodcastCloudLists(
+private fun PodcastUnifiedQueueBanner(
     cloud: PodcastCloudState,
-    autoContinue: Boolean,
+    pendingCount: Int,
+    onOpenQueue: () -> Unit,
+    onPlayAll: () -> Unit,
     onRetry: () -> Unit,
-    onBrowse: () -> Unit,
-    onPlay: (String) -> Unit,
-    onQueueInbox: (String) -> Unit,
-    onRemoveInbox: (String) -> Unit,
-    onRemoveQueue: (String) -> Unit,
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp)) {
         cloud.syncError?.let { message ->
             PodcastStatusCard(message, onRetry, stringResource(R.string.podcast_sync_retry), tag = "podcast-sync-error")
         }
-        PodcastQueueBlock(
-            title = stringResource(R.string.podcast_inbox_title),
-            loading = cloud.inboxLoading,
-            error = cloud.inboxError,
-            empty = stringResource(R.string.podcast_inbox_empty),
-            rows = cloud.inboxRows,
-            onRetry = onRetry,
-            tag = "podcast-inbox",
-            emptyAction = stringResource(R.string.podcast_browse_shows),
-            onEmptyAction = onBrowse,
-            onPlay = onPlay,
-            secondary = stringResource(R.string.podcast_add_queue) to onQueueInbox,
-            onRemove = onRemoveInbox,
-        )
-        PodcastQueueBlock(
-            title = stringResource(R.string.podcast_queue_title),
-            loading = cloud.queueLoading,
-            error = cloud.queueError,
-            empty = stringResource(if (autoContinue) R.string.podcast_queue_empty_on else R.string.podcast_queue_empty_off),
-            rows = cloud.queueRows,
-            onRetry = onRetry,
-            tag = "podcast-queue",
-            onPlay = onPlay,
-            secondary = null,
-            onRemove = onRemoveQueue,
-        )
+        Surface(
+            shape = RoundedCornerShape(12.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .clickable(onClick = onOpenQueue)
+                .testTag("podcast-queue-banner"),
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    Icons.AutoMirrored.Filled.QueueMusic,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(24.dp)
+                )
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(
+                            stringResource(R.string.podcast_queue_unified_title),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        if (pendingCount > 0) {
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = MaterialTheme.colorScheme.primaryContainer,
+                            ) {
+                                Text(
+                                    pendingCount.toString(),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+                    }
+                    Text(
+                        if (pendingCount > 0) "共 $pendingCount 集待播 · 点击查看" else "待播列表为空 · 点击设置新集规则",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                if (pendingCount > 0) {
+                    FilledTonalButton(
+                        onClick = onPlayAll,
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.height(34.dp).testTag("podcast-banner-play-all")
+                    ) {
+                        Text("▶ 播放", fontSize = 12.sp)
+                    }
+                } else {
+                    OutlinedButton(
+                        onClick = onOpenQueue,
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.height(34.dp)
+                    ) {
+                        Text("管理", fontSize = 12.sp)
+                    }
+                }
+            }
+        }
     }
 }
 
 @Composable
-private fun PodcastQueueBlock(
-    title: String,
-    loading: Boolean,
-    error: String?,
-    empty: String,
-    rows: List<PodcastQueueRow>,
+private fun PodcastUnifiedQueueSheet(
+    cloud: PodcastCloudState,
+    followedShows: List<PodcastSummary>,
+    onDismiss: () -> Unit,
+    onPlayEpisode: (String) -> Unit,
+    onPlayAll: () -> Unit,
+    onRemoveQueued: (String) -> Unit,
+    onRemoveInbox: (String) -> Unit,
+    onUpdateShowDelivery: (String, String) -> Unit,
+    onBrowse: () -> Unit,
     onRetry: () -> Unit,
-    tag: String,
-    emptyAction: String? = null,
-    onEmptyAction: () -> Unit = {},
-    onPlay: (String) -> Unit,
-    secondary: Pair<String, (String) -> Unit>?,
-    onRemove: (String) -> Unit,
 ) {
-    Column(Modifier.fillMaxWidth().testTag(tag), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-        when {
-            loading -> repeat(2) {
-                Box(
-                    Modifier.fillMaxWidth().height(44.dp).clip(RoundedCornerShape(12.dp))
-                        .background(MaterialTheme.colorScheme.surfaceContainerHigh),
+    val queuedEpisodeIds = remember(cloud.queueRows) { cloud.queueRows.map { it.episodeId }.toSet() }
+    val combinedPendingRows = remember(cloud.queueRows, cloud.inboxRows) {
+        val list = mutableListOf<Pair<PodcastQueueRow, Boolean>>()
+        for (row in cloud.queueRows) {
+            list.add(row to true)
+        }
+        for (row in cloud.inboxRows) {
+            if (!queuedEpisodeIds.contains(row.episodeId)) {
+                list.add(row to false)
+            }
+        }
+        list
+    }
+    var sheetTab by rememberSaveable { mutableStateOf("episodes") }
+    val sortedShows = remember(followedShows, cloud.preferences) {
+        followedShows.sortedBy { show ->
+            val pref = cloud.preferences?.let { effectiveShowPreference(it, show.id) }
+            when (normalizeDeliveryAction(pref?.action ?: "queue_last")) {
+                "queue_next" -> 0
+                "queue_last" -> 1
+                else -> 2
+            }
+        }
+    }
+
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Surface(
+            modifier = Modifier
+                .fillMaxSize()
+                .systemBarsPadding()
+                .testTag("podcast-unified-queue-dialog")
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .widthIn(max = 840.dp)
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.Default.Close, contentDescription = "关闭")
+                    }
+                    Text(
+                        text = stringResource(R.string.podcast_queue_unified_title),
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.weight(1f),
+                    )
+                    if (sheetTab == "episodes" && combinedPendingRows.isNotEmpty()) {
+                        FilledTonalButton(
+                            onClick = onPlayAll,
+                            shape = RoundedCornerShape(10.dp),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                            modifier = Modifier.height(34.dp).testTag("podcast-play-all-pending")
+                        ) {
+                            Text("▶ " + stringResource(R.string.podcast_play_all), fontSize = 13.sp, maxLines = 1, softWrap = false)
+                        }
+                    }
+                }
+
+                val tabs = listOf(
+                    Triple("episodes", "${stringResource(R.string.podcast_pending_episodes_title)} (${combinedPendingRows.size})", "podcast-queue-tab-episodes"),
+                    Triple("rules", "${stringResource(R.string.podcast_rules_tab)} (${followedShows.size})", "podcast-queue-tab-rules"),
                 )
-            }
-            error != null -> PodcastStatusCard(error, onRetry, stringResource(R.string.podcast_sync_retry), tag = "$tag-error")
-            rows.isEmpty() -> Column {
-                Text(empty, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                if (emptyAction != null) TextButton(onEmptyAction) { Text(emptyAction) }
-            }
-            else -> rows.forEach { row ->
-                Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surfaceContainer, modifier = Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text(
-                            if (row.unavailable) stringResource(R.string.podcast_episode_unavailable) else row.title.ifBlank { row.episodeId },
-                            style = MaterialTheme.typography.bodyMedium,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
+                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                    tabs.forEachIndexed { index, (key, label, tag) ->
+                        SegmentedButton(
+                            selected = sheetTab == key,
+                            onClick = { sheetTab = key },
+                            shape = SegmentedButtonDefaults.itemShape(index, tabs.size),
+                            label = { Text(label, maxLines = 1, softWrap = false) },
+                            modifier = Modifier.testTag(tag),
                         )
-                        if (row.showTitle.isNotBlank()) Text(row.showTitle, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                            if (!row.unavailable) TextButton({ onPlay(row.episodeId) }, contentPadding = PaddingValues(horizontal = 8.dp)) { Text(stringResource(R.string.podcast_play)) }
-                            secondary?.let { (label, action) ->
-                                TextButton({ action(row.episodeId) }, contentPadding = PaddingValues(horizontal = 8.dp)) { Text(label, maxLines = 1) }
+                    }
+                }
+
+                cloud.syncError?.let {
+                    PodcastStatusCard(it, onRetry, stringResource(R.string.podcast_sync_retry), tag = "podcast-sync-error")
+                }
+
+                LazyColumn(
+                    modifier = Modifier.fillMaxWidth().weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    if (sheetTab == "episodes") {
+                        if (combinedPendingRows.isEmpty()) {
+                            item {
+                                Surface(
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = MaterialTheme.colorScheme.surfaceContainerLow,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Column(
+                                        modifier = Modifier.padding(20.dp),
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Text(
+                                            text = stringResource(R.string.podcast_unified_queue_empty),
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            TextButton(onClick = onBrowse) {
+                                                Text(stringResource(R.string.podcast_browse_shows))
+                                            }
+                                            if (followedShows.isNotEmpty()) {
+                                                TextButton(onClick = { sheetTab = "rules" }) {
+                                                    Text("配置自动待播规则")
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
                             }
-                            TextButton({ onRemove(row.episodeId) }, contentPadding = PaddingValues(horizontal = 8.dp)) { Text(stringResource(R.string.podcast_remove)) }
+                        } else {
+                            items(combinedPendingRows, key = { it.first.episodeId }) { (row, isQueue) ->
+                                Surface(
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = MaterialTheme.colorScheme.surfaceContainerLow,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(12.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Column(Modifier.weight(1f)) {
+                                            Text(
+                                                text = row.title.ifBlank { "单集" },
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                fontWeight = FontWeight.Medium,
+                                                maxLines = 2,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                            if (row.showTitle.isNotBlank()) {
+                                                Text(
+                                                    text = row.showTitle,
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                )
+                                            }
+                                        }
+                                        Spacer(Modifier.width(8.dp))
+                                        FilledTonalButton(
+                                            onClick = { onPlayEpisode(row.episodeId) },
+                                            shape = RoundedCornerShape(8.dp),
+                                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                            modifier = Modifier.height(32.dp)
+                                        ) {
+                                            Text("播放", fontSize = 12.sp, maxLines = 1, softWrap = false)
+                                        }
+                                        Spacer(Modifier.width(6.dp))
+                                        IconButton(
+                                            onClick = {
+                                                if (isQueue) onRemoveQueued(row.episodeId) else onRemoveInbox(row.episodeId)
+                                            },
+                                            modifier = Modifier.size(32.dp)
+                                        ) {
+                                            Icon(
+                                                Icons.Default.Close,
+                                                contentDescription = "移除",
+                                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        if (sortedShows.isEmpty()) {
+                            item {
+                                Surface(
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = MaterialTheme.colorScheme.surfaceContainerLow,
+                                    modifier = Modifier.fillMaxWidth(),
+                                ) {
+                                    Column(
+                                        modifier = Modifier.padding(20.dp),
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                                    ) {
+                                        Text(
+                                            text = "暂无关注的节目",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                        TextButton(onClick = onBrowse) {
+                                            Text(stringResource(R.string.podcast_browse_shows))
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            items(sortedShows, key = { it.id }) { show ->
+                                val pref = cloud.preferences?.let { effectiveShowPreference(it, show.id) }
+                                val currentAction = normalizeDeliveryAction(pref?.action ?: "queue_last")
+                                var menuOpen by remember(show.id) { mutableStateOf(false) }
+                                val actionLabelRes = when (currentAction) {
+                                    "queue_next" -> R.string.podcast_action_queue_next_short
+                                    "ignore" -> R.string.podcast_action_ignore_short
+                                    else -> R.string.podcast_action_queue_last_short
+                                }
+                                val isActiveRule = currentAction != "ignore"
+                                Surface(
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = MaterialTheme.colorScheme.surfaceContainerLow,
+                                    modifier = Modifier.fillMaxWidth(),
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(40.dp)
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .background(MaterialTheme.colorScheme.surfaceContainerHighest),
+                                            contentAlignment = Alignment.Center,
+                                        ) {
+                                            if (show.coverUrl.isNotBlank()) {
+                                                AsyncImage(
+                                                    model = ImageRequest.Builder(LocalContext.current)
+                                                        .data(show.coverUrl)
+                                                        .crossfade(true)
+                                                        .build(),
+                                                    contentDescription = show.title,
+                                                    contentScale = ContentScale.Crop,
+                                                    modifier = Modifier.fillMaxSize(),
+                                                )
+                                            } else {
+                                                Icon(
+                                                    Icons.Default.Podcasts,
+                                                    contentDescription = null,
+                                                    tint = MaterialTheme.colorScheme.primary,
+                                                    modifier = Modifier.size(20.dp),
+                                                )
+                                            }
+                                        }
+                                        Spacer(Modifier.width(12.dp))
+                                        Column(Modifier.weight(1f)) {
+                                            Text(
+                                                text = show.title,
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                fontWeight = FontWeight.Medium,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                            )
+                                            if (show.author.isNotBlank()) {
+                                                Text(
+                                                    text = show.author,
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                )
+                                            }
+                                        }
+                                        Spacer(Modifier.width(8.dp))
+                                        Box {
+                                            if (isActiveRule) {
+                                                FilledTonalButton(
+                                                    onClick = { menuOpen = true },
+                                                    shape = RoundedCornerShape(8.dp),
+                                                    contentPadding = PaddingValues(start = 12.dp, end = 6.dp),
+                                                    modifier = Modifier.width(100.dp).height(36.dp),
+                                                ) {
+                                                    Text(stringResource(actionLabelRes), fontSize = 13.sp, maxLines = 1, softWrap = false, modifier = Modifier.weight(1f))
+                                                    Icon(Icons.Default.ArrowDropDown, contentDescription = null, modifier = Modifier.size(16.dp))
+                                                }
+                                            } else {
+                                                OutlinedButton(
+                                                    onClick = { menuOpen = true },
+                                                    shape = RoundedCornerShape(8.dp),
+                                                    contentPadding = PaddingValues(start = 12.dp, end = 6.dp),
+                                                    modifier = Modifier.width(100.dp).height(36.dp),
+                                                ) {
+                                                    Text(stringResource(actionLabelRes), fontSize = 13.sp, maxLines = 1, softWrap = false, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+                                                    Icon(Icons.Default.ArrowDropDown, contentDescription = null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                                }
+                                            }
+                                            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                                                listOf(
+                                                    "queue_last" to R.string.podcast_action_queue_last,
+                                                    "queue_next" to R.string.podcast_action_queue_next,
+                                                    "ignore" to R.string.podcast_action_ignore,
+                                                ).forEach { (action, labelRes) ->
+                                                    DropdownMenuItem(
+                                                        text = { Text(stringResource(labelRes)) },
+                                                        leadingIcon = if (currentAction == action) {
+                                                            { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp)) }
+                                                        } else null,
+                                                        onClick = {
+                                                            menuOpen = false
+                                                            onUpdateShowDelivery(show.id, action)
+                                                        },
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -418,6 +775,7 @@ private fun PodcastShowPreferenceSection(
     onRetry: () -> Unit,
 ) {
     val current = preference ?: PodcastShowQueuePreference()
+    val normalizedAction = normalizeDeliveryAction(current.action)
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp).testTag("podcast-new-episode"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(stringResource(R.string.podcast_new_episode_action), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
         when {
@@ -425,21 +783,20 @@ private fun PodcastShowPreferenceSection(
             error != null && preference == null -> PodcastStatusCard(error, onRetry, stringResource(R.string.podcast_sync_retry), tag = "podcast-pref-error")
             else -> {
                 if (error != null) PodcastStatusCard(error, onRetry, stringResource(R.string.podcast_sync_retry), tag = "podcast-pref-error")
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf(
-                        "inbox" to R.string.podcast_action_inbox,
-                        "queue_last" to R.string.podcast_action_queue_last,
-                        "queue_next" to R.string.podcast_action_queue_next,
-                        "ignore" to R.string.podcast_action_ignore,
-                    ).forEach { (action, label) ->
-                        FilterChip(selected = current.action == action, onClick = { onChange(action, current.autoLimit) }, label = { Text(stringResource(label), maxLines = 1) })
+                val options = listOf(
+                    "queue_last" to R.string.podcast_action_queue_last_short,
+                    "queue_next" to R.string.podcast_action_queue_next_short,
+                    "ignore" to R.string.podcast_action_ignore_short,
+                )
+                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                    options.forEachIndexed { index, (action, label) ->
+                        SegmentedButton(
+                            selected = normalizedAction == action,
+                            onClick = { onChange(action, current.autoLimit) },
+                            shape = SegmentedButtonDefaults.itemShape(index, options.size),
+                            label = { Text(stringResource(label), maxLines = 1, softWrap = false) },
+                        )
                     }
-                }
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(stringResource(R.string.podcast_auto_limit), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-                    IconButton({ onChange(current.action, (current.autoLimit - 1).coerceAtLeast(0)) }, enabled = current.autoLimit > 0) { Icon(Icons.Default.Remove, contentDescription = null) }
-                    Text(stringResource(R.string.podcast_auto_limit_value, current.autoLimit), style = MaterialTheme.typography.bodyMedium.copy(fontFeatureSettings = "tnum"))
-                    IconButton({ onChange(current.action, (current.autoLimit + 1).coerceAtMost(100)) }) { Icon(Icons.Default.Add, contentDescription = null) }
                 }
             }
         }
@@ -469,9 +826,6 @@ private fun PodcastRefreshBox(loading: Boolean, onRefresh: () -> Unit, tag: Stri
 @Composable
 private fun PodcastListView(
     podcasts: List<PodcastSummary>,
-    followingOnly: Boolean,
-    canBrowseCatalog: Boolean,
-    onScope: (Boolean) -> Unit,
     canManage: Boolean,
     canAdd: Boolean,
     onFollow: (PodcastSummary) -> Unit,
@@ -490,44 +844,22 @@ private fun PodcastListView(
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.weight(1f, fill = false),
-            ) {
-                FilterChip(
-                    selected = followingOnly,
-                    onClick = { onScope(true) },
-                    label = { Text("我的关注", maxLines = 1, softWrap = false) },
-                )
-                if (canBrowseCatalog) {
-                    FilterChip(
-                        selected = !followingOnly,
-                        onClick = { onScope(false) },
-                        label = { Text("本服节目", maxLines = 1, softWrap = false) },
-                    )
-                }
-            }
-            Spacer(Modifier.width(8.dp))
-            FilledTonalButton(
+            Text(
+                stringResource(R.string.podcast_my_follows),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.weight(1f),
+            )
+            FilledTonalIconButton(
                 onClick = onExplore,
-                modifier = Modifier.testTag("podcast-open-explore"),
-                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
-                shape = RoundedCornerShape(20.dp),
+                modifier = Modifier.size(40.dp).testTag("podcast-open-explore"),
             ) {
                 Icon(
                     if (canAdd) Icons.Default.Add else Icons.Default.Search,
-                    contentDescription = null,
-                    modifier = Modifier.size(16.dp),
-                )
-                Spacer(Modifier.width(4.dp))
-                Text(
-                    text = if (canAdd) "探索与添加" else "探索",
-                    fontSize = 13.sp,
-                    maxLines = 1,
-                    softWrap = false,
+                    contentDescription = if (canAdd) "探索与添加" else "探索",
+                    modifier = Modifier.size(22.dp),
                 )
             }
         }
@@ -543,11 +875,10 @@ private fun PodcastListView(
                     item { queueHeader() }
                     if (podcasts.isEmpty() && !loading) item {
                         Box(Modifier.fillParentMaxSize()) {
-                            if (followingOnly) Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
+                            Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
                                 Text("还没有关注的节目")
                                 TextButton(onExplore) { Text(if (canAdd) "探索或添加节目" else "探索热门播客") }
-                                if (canBrowseCatalog) TextButton({ onScope(false) }) { Text("浏览本服节目") }
-                            } else EmptyPodcastState(canAdd = canAdd, onPresetSelect = onAddClick)
+                            }
                         }
                     }
                     items(rows, key = { row -> row.first().id }) { row ->
@@ -671,18 +1002,12 @@ private fun PodcastCardItem(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     if (podcast.unplayedEpisodes > 0) {
-                        Surface(
-                            shape = RoundedCornerShape(6.dp),
-                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.14f),
-                        ) {
-                            Text(
-                                text = "${podcast.unplayedEpisodes} 未听",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.primary,
-                                fontWeight = FontWeight.SemiBold,
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp),
-                            )
-                        }
+                        Text(
+                            text = "还有 ${podcast.unplayedEpisodes} 集可听",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                        )
                     }
                 }
             }
@@ -826,7 +1151,15 @@ private fun PodcastDetailView(
     onRefresh: () -> Unit,
     onPlayEpisode: (PodcastEpisode) -> Unit,
     onQueueEpisode: (PodcastEpisode, Boolean) -> Unit,
-    onAddToInbox: (PodcastEpisode) -> Unit = {},
+    onRemoveQueuedEpisode: (String) -> Unit = {},
+    totalPendingCount: Int = 0,
+    onPlayPendingQueue: () -> Unit = {},
+    onOpenQueueSheet: () -> Unit = {},
+    isEpisodeQueued: (String) -> Boolean = { false },
+    isEpisodeActive: (String) -> Boolean = { false },
+    isEpisodeFavorite: (String) -> Boolean = { false },
+    onToggleFavorite: (String, Boolean) -> Unit = { _, _ -> },
+    onToggleCompleted: (String, Boolean) -> Unit = { _, _ -> },
     showPreference: PodcastShowQueuePreference? = null,
     preferenceLoading: Boolean = false,
     preferenceError: String? = null,
@@ -842,11 +1175,11 @@ private fun PodcastDetailView(
     var sortDescending by rememberSaveable(podcast.id) { mutableStateOf(true) }
     var showDescription by remember(podcast.id) { mutableStateOf(false) }
 
-    val sortedEpisodes = remember(detail?.episodes, sortDescending, episodeScope) {
+    val sortedEpisodes = remember(detail?.episodes, sortDescending, episodeScope, isEpisodeFavorite) {
         val list = detail?.episodes.orEmpty().filter {
             when (episodeScope) {
+                "favorite" -> it.loved || it.favorite || isEpisodeFavorite(it.id)
                 "saved" -> it.resourceSaved || it.resourceAutomatic || it.resourcePlaybackCached
-                "downloaded" -> it.downloadStatus == "downloaded"
                 else -> true
             }
         }
@@ -966,18 +1299,12 @@ private fun PodcastDetailView(
                                             )
                                         }
                                         if (podcast.unplayedEpisodes > 0) {
-                                            Surface(
-                                                shape = RoundedCornerShape(6.dp),
-                                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
-                                            ) {
-                                                Text(
-                                                    text = "${podcast.unplayedEpisodes} 未听",
-                                                    style = MaterialTheme.typography.labelSmall,
-                                                    color = MaterialTheme.colorScheme.primary,
-                                                    fontWeight = FontWeight.Bold,
-                                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                                                )
-                                            }
+                                            Text(
+                                                text = "还有 ${podcast.unplayedEpisodes} 集可听",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                maxLines = 1,
+                                            )
                                         }
                                     }
                                 }
@@ -986,36 +1313,48 @@ private fun PodcastDetailView(
 
                         Spacer(Modifier.height(14.dp))
 
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            FilledTonalButton(
-                                onClick = onFollow,
-                                shape = RoundedCornerShape(10.dp),
-                                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
-                                modifier = Modifier.height(36.dp),
-                            ) {
-                                Text(if (podcast.followed) "取消关注" else "关注节目", fontSize = 13.sp)
-                            }
-                            if (podcast.followed) {
-                                OutlinedButton(
-                                    onClick = onAutoDownload,
-                                    shape = RoundedCornerShape(10.dp),
-                                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
-                                    modifier = Modifier.height(36.dp),
-                                ) {
-                                    Text("自动下载", fontSize = 13.sp)
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            if (totalPendingCount > 0) {
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    FilledTonalButton(
+                                        onClick = onPlayPendingQueue,
+                                        shape = RoundedCornerShape(10.dp),
+                                        contentPadding = PaddingValues(horizontal = 12.dp),
+                                        modifier = Modifier.weight(1f).height(40.dp),
+                                    ) {
+                                        Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
+                                        Spacer(Modifier.width(4.dp))
+                                        Text(stringResource(R.string.podcast_play_queue_header, totalPendingCount), fontSize = 13.sp, maxLines = 1, softWrap = false)
+                                    }
+                                    OutlinedButton(
+                                        onClick = onOpenQueueSheet,
+                                        shape = RoundedCornerShape(10.dp),
+                                        contentPadding = PaddingValues(horizontal = 12.dp),
+                                        modifier = Modifier.weight(1f).height(40.dp),
+                                    ) {
+                                        Text(stringResource(R.string.podcast_queue_unified_title), fontSize = 13.sp, maxLines = 1, softWrap = false)
+                                    }
                                 }
                             }
-                            OutlinedButton(
-                                onClick = { showDescription = true },
-                                shape = RoundedCornerShape(10.dp),
-                                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
-                                modifier = Modifier.height(36.dp),
-                            ) {
-                                Text("节目介绍", fontSize = 13.sp)
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                FilledTonalButton(
+                                    onClick = onFollow,
+                                    shape = RoundedCornerShape(10.dp),
+                                    contentPadding = PaddingValues(horizontal = 12.dp),
+                                    modifier = Modifier.weight(1f).height(40.dp),
+                                ) {
+                                    Text(if (podcast.followed) "取消关注" else "关注节目", fontSize = 13.sp, maxLines = 1, softWrap = false)
+                                }
+                                if (podcast.followed) {
+                                    OutlinedButton(
+                                        onClick = onAutoDownload,
+                                        shape = RoundedCornerShape(10.dp),
+                                        contentPadding = PaddingValues(horizontal = 12.dp),
+                                        modifier = Modifier.weight(1f).height(40.dp),
+                                    ) {
+                                        Text("自动下载", fontSize = 13.sp, maxLines = 1, softWrap = false)
+                                    }
+                                }
                             }
                         }
 
@@ -1046,10 +1385,16 @@ private fun PodcastDetailView(
                         onChange = onShowPreference,
                         onRetry = onRetryPreference,
                     )
-                    Row(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        FilterChip(episodeScope == "saved", { episodeScope = "saved"; onReadDownloads() }, label = { Text("我的下载") })
-                        FilterChip(episodeScope == "downloaded", { episodeScope = "downloaded" }, label = { Text("服务器已有") })
-                        FilterChip(episodeScope == "all", { episodeScope = "all" }, label = { Text("全部单集") })
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState())
+                            .padding(horizontal = 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        FilterChip(episodeScope == "all", { episodeScope = "all" }, label = { Text("全部", maxLines = 1, softWrap = false) })
+                        FilterChip(episodeScope == "favorite", { episodeScope = "favorite" }, label = { Text(stringResource(R.string.podcast_filter_favorites), maxLines = 1, softWrap = false) })
+                        FilterChip(episodeScope == "saved", { episodeScope = "saved"; onReadDownloads() }, label = { Text("我的下载", maxLines = 1, softWrap = false) })
                     }
                     if (episodeScope == "saved") Text("包含你的手动下载、自动下载和播放缓存。播放缓存可按服务器清理规则回收。",
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
@@ -1094,8 +1439,8 @@ private fun PodcastDetailView(
                     item {
                         Box(Modifier.fillMaxWidth().padding(48.dp), contentAlignment = Alignment.Center) {
                             Text(when (episodeScope) {
+                                "favorite" -> stringResource(R.string.podcast_favorites_empty)
                                 "saved" -> "还没有你的下载，播放时缓存或选择保存后会显示在这里"
-                                "downloaded" -> "服务器还没有已下载单集"
                                 else -> "暂无单集"
                             }, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
@@ -1105,12 +1450,20 @@ private fun PodcastDetailView(
                         val ep = positions[episode.id]?.let { progress ->
                             episode.copy(positionSeconds = progress.positionSeconds.toInt(), completed = progress.completed)
                         } ?: episode
+                        val fav = ep.loved || ep.favorite || isEpisodeFavorite(ep.id)
+                        val queued = isEpisodeQueued(ep.id)
+                        val active = isEpisodeActive(ep.id)
                         EpisodeRowItem(
                             episode = ep,
+                            isQueued = queued,
+                            isActive = active,
+                            isFavorite = fav,
                             onPlay = { onPlayEpisode(ep) },
                             onPlayNext = { onQueueEpisode(ep, true) },
                             onAddToQueue = { onQueueEpisode(ep, false) },
-                            onAddToInbox = { onAddToInbox(ep) },
+                            onRemoveFromQueue = { onRemoveQueuedEpisode(ep.id) },
+                            onToggleFavorite = { loved -> onToggleFavorite(ep.id, loved) },
+                            onToggleCompleted = { completed -> onToggleCompleted(ep.id, completed) },
                             onSave = { onSaveEpisode(ep) },
                         )
                     }
@@ -1126,19 +1479,26 @@ private fun PodcastDetailView(
         confirmButton = { TextButton({ showDescription = false }) { Text("关闭") } })
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun EpisodeRowItem(
     episode: PodcastEpisode,
+    isQueued: Boolean = false,
+    isActive: Boolean = false,
+    isFavorite: Boolean = false,
     onPlay: () -> Unit,
     onPlayNext: () -> Unit,
     onAddToQueue: () -> Unit,
-    onAddToInbox: () -> Unit = {},
+    onRemoveFromQueue: () -> Unit = {},
+    onToggleFavorite: (Boolean) -> Unit = {},
+    onToggleCompleted: (Boolean) -> Unit = {},
     onSave: () -> Unit,
 ) {
     var details by remember(episode.id) { mutableStateOf(false) }
     var showMenu by remember(episode.id) { mutableStateOf(false) }
     val feedback = LocalTactileFeedback.current
     val durationText = formatDuration(episode.durationSeconds)
+    val shortDate = formatShortPubDate(episode.pubDate)
 
     Surface(
         modifier = Modifier
@@ -1149,106 +1509,233 @@ private fun EpisodeRowItem(
         shape = RoundedCornerShape(12.dp),
         color = MaterialTheme.colorScheme.surfaceContainerLow,
     ) {
-        Row(
-            modifier = Modifier.padding(14.dp),
-            verticalAlignment = Alignment.CenterVertically,
+        Column(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
         ) {
-            FilledIconButton(
-                onClick = onPlay,
-                modifier = Modifier.size(42.dp),
-                shape = CircleShape,
-                colors = IconButtonDefaults.filledIconButtonColors(
-                    containerColor = MaterialTheme.colorScheme.primaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                ),
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.Top,
             ) {
-                Icon(
-                    Icons.Default.PlayArrow,
-                    contentDescription = "播放单集",
-                    modifier = Modifier.size(22.dp),
-                )
-            }
+                FilledIconButton(
+                    onClick = tactile(onPlay),
+                    modifier = Modifier.size(38.dp),
+                    shape = CircleShape,
+                    colors = IconButtonDefaults.filledIconButtonColors(
+                        containerColor = MaterialTheme.colorScheme.primaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                    ),
+                ) {
+                    Icon(
+                        Icons.Default.PlayArrow,
+                        contentDescription = "播放单集",
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
 
-            Spacer(Modifier.width(14.dp))
+                Spacer(Modifier.width(12.dp))
 
-            Column(Modifier.weight(1f)) {
                 Text(
                     text = episode.title,
                     style = MaterialTheme.typography.bodyLarge,
                     fontWeight = FontWeight.Medium,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
-                    color = MaterialTheme.colorScheme.onSurface,
+                    color = if (episode.completed) MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f) else MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.weight(1f).padding(top = 2.dp),
                 )
-                Spacer(Modifier.height(4.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (episode.pubDate.isNotBlank()) {
+
+                Spacer(Modifier.width(4.dp))
+
+                Box {
+                    IconButton(
+                        onClick = { showMenu = true },
+                        modifier = Modifier.size(32.dp).testTag("podcast-episode-actions-${episode.id}"),
+                    ) {
+                        Icon(
+                            Icons.Default.MoreVert,
+                            contentDescription = "单集操作：${episode.title}",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
+                    DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.podcast_play_next)) },
+                            leadingIcon = { Icon(Icons.AutoMirrored.Filled.PlaylistPlay, null) },
+                            onClick = { showMenu = false; feedback(TactileKind.Tap); onPlayNext() },
+                            modifier = Modifier.testTag("podcast-episode-play-next-${episode.id}"),
+                        )
+                        if (isQueued) {
+                            DropdownMenuItem(
+                                text = { Text("从待播移除") },
+                                leadingIcon = { Icon(Icons.Default.DeleteOutline, null) },
+                                onClick = { showMenu = false; feedback(TactileKind.Tap); onRemoveFromQueue() },
+                            )
+                        } else {
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.podcast_add_queue)) },
+                                leadingIcon = { Icon(Icons.AutoMirrored.Filled.QueueMusic, null) },
+                                onClick = { showMenu = false; feedback(TactileKind.Tap); onAddToQueue() },
+                                modifier = Modifier.testTag("podcast-episode-enqueue-${episode.id}"),
+                            )
+                        }
+                        DropdownMenuItem(
+                            text = { Text(if (episode.completed) stringResource(R.string.podcast_mark_unplayed) else stringResource(R.string.podcast_mark_completed)) },
+                            leadingIcon = { Icon(if (episode.completed) Icons.Default.Replay else Icons.Default.CheckCircle, null) },
+                            onClick = { showMenu = false; feedback(TactileKind.Tap); onToggleCompleted(!episode.completed) },
+                        )
+                        DropdownMenuItem(
+                            text = { Text(if (isFavorite) stringResource(R.string.podcast_unfavorite_episode) else stringResource(R.string.podcast_favorite_episode)) },
+                            leadingIcon = { Icon(if (isFavorite) Icons.Default.FavoriteBorder else Icons.Default.Favorite, null) },
+                            onClick = { showMenu = false; feedback(TactileKind.Tap); onToggleFavorite(!isFavorite) },
+                        )
+                        DropdownMenuItem(
+                            text = { Text(if (episode.resourceSaved) "取消个人保存" else "保存到服务器") },
+                            leadingIcon = { Icon(if (episode.resourceSaved) Icons.Default.BookmarkRemove else Icons.Default.BookmarkAdd, null) },
+                            onClick = { showMenu = false; onSave() },
+                            modifier = Modifier.testTag("podcast-episode-save-${episode.id}"),
+                        )
+                        HorizontalDivider()
+                        DropdownMenuItem(
+                            text = { Text("单集详情") },
+                            leadingIcon = { Icon(Icons.Default.Info, null) },
+                            onClick = { showMenu = false; details = true },
+                        )
+                    }
+                }
+            }
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 50.dp, top = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                FlowRow(
+                    modifier = Modifier.weight(1f),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                    itemVerticalAlignment = Alignment.CenterVertically,
+                ) {
+                    if (episode.completed) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                Icons.Default.Check,
+                                contentDescription = null,
+                                modifier = Modifier.size(13.dp),
+                                tint = MaterialTheme.colorScheme.outline,
+                            )
+                            Spacer(Modifier.width(2.dp))
+                            Text(
+                                text = "已听完",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.outline,
+                                maxLines = 1,
+                                softWrap = false,
+                            )
+                        }
+                    }
+                    if (isFavorite) {
+                        Icon(
+                            Icons.Default.Favorite,
+                            contentDescription = "已收藏",
+                            modifier = Modifier.size(13.dp),
+                            tint = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                    if (shortDate.isNotBlank()) {
                         Text(
-                            text = episode.pubDate.take(16),
+                            text = shortDate,
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            softWrap = false,
                         )
-                        Spacer(Modifier.width(8.dp))
                     }
                     if (durationText.isNotBlank()) {
                         Text(
                             text = durationText,
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.primary,
+                            maxLines = 1,
+                            softWrap = false,
                         )
                     }
-                    if (episode.resourceSaved || episode.resourceAutomatic) { Spacer(Modifier.width(8.dp)); Text(if (episode.resourceSaved) "已保存" else "自动保存", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary) }
-                    else if (episode.resourcePlaybackCached) { Spacer(Modifier.width(8.dp)); Text("播放缓存", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                    if (episode.completed) {
-                        Spacer(Modifier.width(8.dp))
+                    if (episode.resourceSaved || episode.resourceAutomatic) {
                         Text(
-                            text = "已听完",
+                            text = if (episode.resourceSaved) "已保存" else "自动保存",
                             style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.outline,
+                            color = MaterialTheme.colorScheme.primary,
+                            maxLines = 1,
+                            softWrap = false,
+                        )
+                    } else if (episode.resourcePlaybackCached) {
+                        Text(
+                            text = "播放缓存",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            softWrap = false,
+                        )
+                    }
+                    if (!episode.completed && episode.positionSeconds > 0) {
+                        Text(
+                            text = "已听至 ${episode.positionSeconds / 60}:${(episode.positionSeconds % 60).toString().padStart(2, '0')}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            maxLines = 1,
+                            softWrap = false,
                         )
                     }
                 }
-                if (!episode.completed && episode.positionSeconds > 0) {
-                    Text(text = "已听至 ${episode.positionSeconds / 60}:${(episode.positionSeconds % 60).toString().padStart(2, '0')}",
-                        style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.padding(top = 4.dp))
-                }
-            }
-            Box {
-                IconButton(onClick = { showMenu = true }, modifier = Modifier.testTag("podcast-episode-actions-${episode.id}")) {
-                    Icon(Icons.Default.MoreVert, contentDescription = "单集操作：${episode.title}", tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
-                    DropdownMenuItem(
-                        text = { Text(stringResource(R.string.podcast_play_next)) },
-                        leadingIcon = { Icon(Icons.AutoMirrored.Filled.PlaylistPlay, null) },
-                        onClick = { showMenu = false; feedback(TactileKind.Tap); onPlayNext() },
-                        modifier = Modifier.testTag("podcast-episode-play-next-${episode.id}"),
-                    )
-                    DropdownMenuItem(
-                        text = { Text(stringResource(R.string.podcast_add_queue)) },
-                        leadingIcon = { Icon(Icons.AutoMirrored.Filled.QueueMusic, null) },
-                        onClick = { showMenu = false; feedback(TactileKind.Tap); onAddToQueue() },
-                        modifier = Modifier.testTag("podcast-episode-enqueue-${episode.id}"),
-                    )
-                    DropdownMenuItem(
-                        text = { Text(stringResource(R.string.podcast_add_inbox)) },
-                        leadingIcon = { Icon(Icons.Default.Inbox, null) },
-                        onClick = { showMenu = false; feedback(TactileKind.Tap); onAddToInbox() },
-                        modifier = Modifier.testTag("podcast-episode-inbox-${episode.id}"),
-                    )
-                    DropdownMenuItem(
-                        text = { Text(if (episode.resourceSaved) "取消个人保存" else "保存到服务器") },
-                        leadingIcon = { Icon(if (episode.resourceSaved) Icons.Default.BookmarkRemove else Icons.Default.BookmarkAdd, null) },
-                        onClick = { showMenu = false; onSave() },
-                        modifier = Modifier.testTag("podcast-episode-save-${episode.id}"),
-                    )
-                    HorizontalDivider()
-                    DropdownMenuItem(
-                        text = { Text("单集详情") },
-                        leadingIcon = { Icon(Icons.Default.Info, null) },
-                        onClick = { showMenu = false; details = true },
-                    )
+
+                Spacer(Modifier.width(8.dp))
+
+                if (isActive) {
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                    ) {
+                        Text(
+                            text = stringResource(R.string.podcast_playing),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            fontWeight = FontWeight.Medium,
+                            maxLines = 1,
+                            softWrap = false,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        )
+                    }
+                } else if (isQueued) {
+                    OutlinedButton(
+                        onClick = { feedback(TactileKind.Tap); onRemoveFromQueue() },
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                        modifier = Modifier.height(26.dp),
+                    ) {
+                        Text(
+                            text = stringResource(R.string.podcast_queue_added),
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.primary,
+                            maxLines = 1,
+                            softWrap = false,
+                        )
+                    }
+                } else {
+                    FilledTonalButton(
+                        onClick = { feedback(TactileKind.Tap); onAddToQueue() },
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                        modifier = Modifier.height(26.dp),
+                    ) {
+                        Text(
+                            text = stringResource(R.string.podcast_queue_add),
+                            fontSize = 11.sp,
+                            maxLines = 1,
+                            softWrap = false,
+                        )
+                    }
                 }
             }
         }
@@ -1268,6 +1755,14 @@ private fun EpisodeRowItem(
             dismissButton = { TextButton(onClick = { details = false }) { Text("关闭") } },
         )
     }
+}
+
+private fun formatShortPubDate(raw: String): String {
+    val trimmed = raw.trim()
+    if (trimmed.isEmpty()) return ""
+    // Strip RFC2822 weekday prefix like "Mon, 25 Aug 2025 ..." -> "25 Aug 2025"
+    val withoutDay = trimmed.replace(Regex("^[A-Za-z]{3},\\s*"), "")
+    return withoutDay.take(11).trim()
 }
 
 private fun formatDuration(seconds: Int): String {
