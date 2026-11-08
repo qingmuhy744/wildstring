@@ -34,9 +34,7 @@ struct NowPlayingView: View {
     var body: some View {
         ZStack {
             if playerStyle == .vinyl && !isPodcast {
-                (colorScheme == .dark
-                    ? Color(red: 0.094, green: 0.086, blue: 0.078)
-                    : Color(red: 0.965, green: 0.953, blue: 0.929))
+                Color.playerCanvas
                     .ignoresSafeArea()
             } else {
                 ArtworkBackdrop(client: client, trackID: playback.currentItem?.trackID)
