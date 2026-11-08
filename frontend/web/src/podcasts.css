@@ -1650,12 +1650,12 @@
    of WildString. The original podcast rules predate the shared theme tokens
    and fell back to a blue-gray surface in light mode. */
 :is(.podcasts-page, .podcast-download-content, .podcast-download-modal, .podcast-cleanup-dialog) {
-  --podcast-panel: #211e1b;
-  --podcast-panel-raised: #2a2622;
-  --podcast-panel-hover: #34302a;
-  --podcast-ink: #e8e3d9;
-  --podcast-subtle: #aaa59a;
-  --podcast-line: #3a352f;
+  --podcast-panel: var(--surface);
+  --podcast-panel-raised: var(--surface-subtle);
+  --podcast-panel-hover: var(--bg-hover);
+  --podcast-ink: var(--text);
+  --podcast-subtle: var(--muted);
+  --podcast-line: var(--border);
   --podcast-accent-soft: color-mix(in srgb, var(--accent) 15%, transparent);
   color: var(--podcast-ink);
 }
@@ -1674,12 +1674,12 @@
 
 :root[data-theme='dark']
   :is(.podcasts-page, .podcast-download-content, .podcast-download-modal, .podcast-cleanup-dialog) {
-  --podcast-panel: #211e1b;
-  --podcast-panel-raised: #2a2622;
-  --podcast-panel-hover: #34302a;
-  --podcast-ink: #e8e3d9;
-  --podcast-subtle: #aaa59a;
-  --podcast-line: #3a352f;
+  --podcast-panel: var(--surface);
+  --podcast-panel-raised: var(--surface-subtle);
+  --podcast-panel-hover: var(--bg-hover);
+  --podcast-ink: var(--text);
+  --podcast-subtle: var(--muted);
+  --podcast-line: var(--border);
   --podcast-accent-soft: color-mix(in srgb, var(--accent) 15%, transparent);
   color: var(--podcast-ink);
 }
