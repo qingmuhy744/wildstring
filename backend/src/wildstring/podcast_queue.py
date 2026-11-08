@@ -319,6 +319,19 @@ def routes(router: APIRouter, auth: Any, database: Any) -> None:
     @router.put("/queue/preferences", dependencies=[Depends(auth.require_client)])
     def put_preferences(body: PreferencesUpdate, user: Annotated[dict, Depends(session)]):
         with database.connect(write=True) as connection:
+            valid_shows: list[tuple[str, ShowPreference]] = []
+            for podcast_id, preference in body.shows.items():
+                if not podcast_id:
+                    continue
+                try:
+                    require_programme(connection, user["id"], podcast_id)
+                except HTTPException as error:
+                    raise HTTPException(422, "podcast_unavailable") from error
+                valid_shows.append((podcast_id, preference))
+            connection.execute(
+                "DELETE FROM podcast_queue_prefs WHERE user_id=? AND podcast_id<>?",
+                (user["id"], GLOBAL_SHOW),
+            )
             _write_pref(
                 connection,
                 user["id"],
@@ -329,12 +342,6 @@ def routes(router: APIRouter, auth: Any, database: Any) -> None:
                     auto_continue=body.auto_continue,
                 ),
             )
-            for podcast_id, preference in body.shows.items():
-                if not podcast_id:
-                    continue
-                try:
-                    require_programme(connection, user["id"], podcast_id)
-                except HTTPException as error:
-                    raise HTTPException(422, "podcast_unavailable") from error
+            for podcast_id, preference in valid_shows:
                 _write_pref(connection, user["id"], podcast_id, preference)
             return _read_prefs(connection, user["id"])
