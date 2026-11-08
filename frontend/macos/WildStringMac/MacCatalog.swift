@@ -13,29 +13,54 @@ final class MacFavorites {
   }
 
   func load() async {
-    if let loaded = try? await client.favoriteIDs() {
-      ids = loaded
+    async let tracks = try? client.favoriteIDs()
+    async let podcasts = try? client.podcastEpisodeFavoriteIDs()
+    let loadedTracks = await tracks ?? []
+    let loadedPodcasts = await podcasts ?? []
+    var combined = loadedTracks
+    for p in loadedPodcasts {
+      combined.insert(p)
+      combined.insert("podcast_ep_\(p)")
     }
+    ids = combined
   }
 
   func isFavorite(_ trackID: String) -> Bool {
-    ids.contains(trackID)
+    if ids.contains(trackID) { return true }
+    if let epID = PlaybackService.podcastEpisodeID(trackID) {
+      return ids.contains(epID)
+    }
+    return false
   }
 
-  func toggle(_ trackID: String) async {
-    let loved = !ids.contains(trackID)
+  func toggle(_ trackID: String, isPodcast: Bool = false) async {
+    let currentlyLoved = isFavorite(trackID)
+    let loved = !currentlyLoved
+    let podcast = isPodcast || trackID.hasPrefix("podcast_ep_")
+    let episodeID = podcast ? (PlaybackService.podcastEpisodeID(trackID) ?? trackID) : nil
+    let targetID = episodeID ?? trackID
+
     if loved {
       ids.insert(trackID)
+      if let ep = episodeID { ids.insert(ep) }
     } else {
       ids.remove(trackID)
+      if let ep = episodeID { ids.remove(ep) }
     }
+
     do {
-      try await client.setFavorite(trackID: trackID, loved: loved)
+      if isPodcast || episodeID != nil {
+        try await client.favoritePodcastEpisode(episodeID: targetID, loved: loved)
+      } else {
+        try await client.setFavorite(trackID: trackID, loved: loved)
+      }
     } catch {
       if loved {
         ids.remove(trackID)
+        if let ep = episodeID { ids.remove(ep) }
       } else {
         ids.insert(trackID)
+        if let ep = episodeID { ids.insert(ep) }
       }
     }
   }

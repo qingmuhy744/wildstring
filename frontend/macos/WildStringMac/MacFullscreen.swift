@@ -153,7 +153,7 @@ struct MacFullscreenPlayer: View {
                             Text([item.artist, item.album ?? ""].filter { !$0.isEmpty }.joined(separator: " · "))
                                 .font(.callout).foregroundStyle(MacTheme.muted).lineLimit(2)
                         }.frame(maxWidth: .infinity, alignment: .leading)
-                        if let favorites = session.favorites, !isPodcast {
+                        if let favorites = session.favorites {
                             Button { Task { await favorites.toggle(item.trackID) } } label: {
                                 Image(systemName: favorites.isFavorite(item.trackID) ? "heart.fill" : "heart")
                                     .font(.title3).frame(width: 28, height: 30)
@@ -195,20 +195,19 @@ struct MacFullscreenPlayer: View {
                     Circle().strokeBorder(Color(red: 0.73, green: 0.76, blue: 0.68).opacity(index.isMultiple(of: 4) ? 0.08 : 0.04), lineWidth: 1)
                         .padding(CGFloat(index) * side * 0.018 + side * 0.025)
                 }
+                ForEach([0.50, 0.67, 0.84], id: \.self) { ring in
+                    Circle().strokeBorder(Color(red: 0.024, green: 0.035, blue: 0.02).opacity(0.22), lineWidth: side * 0.02)
+                        .frame(width: side * ring, height: side * ring)
+                }
                 MacCover(client: client, trackID: item.trackID, side: side * 0.44, cornerRadius: side * 0.22)
                     .clipShape(Circle())
-                Circle().fill(Color(red: 0.098, green: 0.110, blue: 0.082)).frame(width: 7, height: 7)
+                    .overlay(Circle().stroke(Color(red: 0.04, green: 0.05, blue: 0.03).opacity(0.65), lineWidth: 2))
+                    .overlay(Circle().inset(by: -2.5).stroke(Color(red: 0.86, green: 0.89, blue: 0.80).opacity(0.10), lineWidth: 1))
             }
             .rotationEffect(.degrees(reduceMotion ? 0 : playback.currentTime * 30))
             .animation(engaged && !reduceMotion ? .linear(duration: 1) : nil, value: playback.currentTime)
             // Room-light sheen stays fixed while the disc rotates beneath it.
-            Circle().fill(AngularGradient(gradient: Gradient(stops: [
-                .init(color: .white.opacity(0.12), location: 0.04),
-                .init(color: .clear, location: 0.15),
-                .init(color: .clear, location: 0.55),
-                .init(color: .white.opacity(0.08), location: 0.67),
-                .init(color: .clear, location: 0.78),
-            ]), center: .center))
+            vinylSheen(side: side)
             tonearm(side: side, engaged: engaged)
         }
         .frame(width: side, height: side)
@@ -216,14 +215,15 @@ struct MacFullscreenPlayer: View {
     }
 
     private func tonearm(side: CGFloat, engaged: Bool) -> some View {
-        let pivotX = side * 0.84, pivotY = side * 0.08
+        // Pivot sits outside the platter; at rest the stylus clears the rim (~104% radius), engaged it lands ~66%.
+        let pivotX = side * 0.92, pivotY = side * 0.10
         return ZStack {
             ZStack(alignment: .top) {
                 Capsule()
                     .fill(LinearGradient(colors: [Color(red: 0.42, green: 0.44, blue: 0.41),
                         Color(red: 0.91, green: 0.90, blue: 0.86), Color(red: 0.61, green: 0.62, blue: 0.58),
                         Color(red: 0.33, green: 0.35, blue: 0.32)], startPoint: .leading, endPoint: .trailing))
-                    .frame(width: max(3.5, side * 0.014), height: side * 0.40)
+                    .frame(width: max(3.5, side * 0.014), height: side * 0.46)
                     .shadow(color: .black.opacity(0.25), radius: 2, y: 1)
                 RoundedRectangle(cornerRadius: 3, style: .continuous)
                     .fill(Color(red: 0.16, green: 0.18, blue: 0.14))
@@ -235,10 +235,12 @@ struct MacFullscreenPlayer: View {
                             .padding(.bottom, 1)
                     }
                     .frame(width: side * 0.056, height: side * 0.078)
-                    .offset(x: -side * 0.008, y: side * 0.385)
+                    .offset(x: -side * 0.008, y: side * 0.445)
             }
-            .rotationEffect(.degrees(engaged ? 16 : -10), anchor: .top)
-            .position(x: pivotX, y: pivotY)
+            // Fixed arm frame so the rotation anchor (top) sits exactly on the pivot disc.
+            .frame(width: side * 0.056, height: side * 0.46, alignment: .top)
+            .rotationEffect(.degrees(engaged ? 12 : -10), anchor: .top)
+            .position(x: pivotX, y: pivotY + side * 0.23)
             Circle()
                 .fill(RadialGradient(colors: [Color(red: 0.64, green: 0.66, blue: 0.62),
                     Color(red: 0.28, green: 0.30, blue: 0.26), Color(red: 0.71, green: 0.72, blue: 0.67)],
@@ -362,4 +364,27 @@ struct MacFullscreenPlayer: View {
             lyricPhase = .failed
         }
     }
+}
+
+/// Fixed room-light wedges for the vinyl (DESIGN.md §6.7): point-symmetric, soft, never rotated with the platter.
+/// AngularGradient starts at 3 o'clock and runs clockwise: lower right 45°, upper left 225°.
+func vinylSheen(side: CGFloat) -> some View {
+    let warm = Color(red: 1, green: 0.957, blue: 0.878)
+    let profile: [(Double, Double)] = [(-23, 0), (-17, 0.02), (-9, 0.06), (0, 0.12), (9, 0.06), (17, 0.02), (23, 0)]
+    var stops: [Gradient.Stop] = [.init(color: warm.opacity(0), location: 0)]
+    for centre in [45.0, 225.0] {
+        for (offset, alpha) in profile {
+            stops.append(.init(color: warm.opacity(alpha), location: (centre + offset) / 360))
+        }
+    }
+    stops.append(.init(color: warm.opacity(0), location: 1))
+    return Circle()
+        .fill(AngularGradient(gradient: Gradient(stops: stops), center: .center))
+        .mask(
+            Circle().fill(RadialGradient(stops: [
+                .init(color: .clear, location: 0.46), .init(color: .black, location: 0.55),
+                .init(color: .black, location: 0.85), .init(color: .clear, location: 0.99),
+            ], center: .center, startRadius: 0, endRadius: side / 2))
+        )
+        .allowsHitTesting(false)
 }

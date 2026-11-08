@@ -475,7 +475,7 @@ private struct MacShellView: View {
         case .discover:
             MacDiscoverView(client: client, playback: playback, favorites: session.favorites)
         case .podcasts:
-            MacPodcastsView(client: client, playback: playback)
+            MacPodcastsView(client: client, playback: playback, favorites: session.favorites)
         case .assistant:
             if let assistant = session.assistant {
                 MacAssistantView(model: assistant, playback: playback)

@@ -98,7 +98,7 @@ struct MacTransportBar: View {
                                 }.frame(maxWidth: .infinity, alignment: .leading)
                             }
                         }.buttonStyle(.plain).help("全屏播放")
-                        if let favorites = session.favorites, !isPodcast {
+                        if let favorites = session.favorites {
                             Button { Task { await favorites.toggle(item.trackID) } } label: {
                                 Image(systemName: favorites.isFavorite(item.trackID) ? "heart.fill" : "heart")
                                     .foregroundStyle(favorites.isFavorite(item.trackID) ? MacTheme.accentDeep : Color.secondary)

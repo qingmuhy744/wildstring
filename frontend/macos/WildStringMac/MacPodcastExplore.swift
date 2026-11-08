@@ -91,10 +91,19 @@ struct MacPodcastExplore: View {
         }.padding(24).frame(width: 840, height: 620)
         .task { do { canAdd = try await client.canAddPodcasts() } catch { self.error = MacErrorText.message(for: error) } }
         .task(id: "\(query)|\(region)|\(retry)") {
+            let cleanQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+            if cleanQuery.isEmpty, let cached = PodcastDiscoveryCache.shared.get(region: region) {
+                page = cached
+                loading = false
+                error = nil
+                return
+            }
             page = nil; error = nil; loading = true; selected = nil
             do {
-                try await Task.sleep(for: .milliseconds(350))
-                let result = try await client.podcastDirectory(query: query.trimmingCharacters(in: .whitespacesAndNewlines), region: region)
+                if !cleanQuery.isEmpty {
+                    try await Task.sleep(for: .milliseconds(350))
+                }
+                let result = try await client.podcastDirectory(query: cleanQuery, region: region)
                 guard !Task.isCancelled else { return }
                 page = result; loading = false
             } catch {

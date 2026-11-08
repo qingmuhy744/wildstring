@@ -307,7 +307,8 @@ private struct MacLyricScrollWatch: NSViewRepresentable {
         context.coordinator.attach(nsView)
     }
 
-    final class Coordinator: NSObject, @unchecked Sendable {
+    @MainActor
+    final class Coordinator: NSObject {
         var onBegan: () -> Void
         var onEnded: () -> Void
         private weak var scroll: NSScrollView?
@@ -320,23 +321,32 @@ private struct MacLyricScrollWatch: NSViewRepresentable {
         deinit { NotificationCenter.default.removeObserver(self) }
 
         func attach(_ view: NSView) {
-            let bind = { [weak self, weak view] in
-                guard let self, let scroll = view?.enclosingScrollView, scroll !== self.scroll else { return }
-                self.scroll = scroll
-                NotificationCenter.default.addObserver(
-                    self, selector: #selector(self.began(_:)),
-                    name: NSScrollView.willStartLiveScrollNotification, object: scroll
+            bind(view)
+            guard view.enclosingScrollView == nil else { return }
+            DispatchQueue.main.async { [weak self, weak view] in
+                self?.bind(view)
+            }
+        }
+
+        private func bind(_ view: NSView?) {
+            guard let scroll = view?.enclosingScrollView, scroll !== self.scroll else { return }
+            if let previous = self.scroll {
+                NotificationCenter.default.removeObserver(
+                    self, name: NSScrollView.willStartLiveScrollNotification, object: previous
                 )
-                NotificationCenter.default.addObserver(
-                    self, selector: #selector(self.ended(_:)),
-                    name: NSScrollView.didEndLiveScrollNotification, object: scroll
+                NotificationCenter.default.removeObserver(
+                    self, name: NSScrollView.didEndLiveScrollNotification, object: previous
                 )
             }
-            if Thread.isMainThread {
-                bind()
-            } else {
-                DispatchQueue.main.async(execute: bind)
-            }
+            self.scroll = scroll
+            NotificationCenter.default.addObserver(
+                self, selector: #selector(self.began(_:)),
+                name: NSScrollView.willStartLiveScrollNotification, object: scroll
+            )
+            NotificationCenter.default.addObserver(
+                self, selector: #selector(self.ended(_:)),
+                name: NSScrollView.didEndLiveScrollNotification, object: scroll
+            )
         }
 
         @objc private func began(_ notification: Notification) { onBegan() }
