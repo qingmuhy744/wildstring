@@ -35,7 +35,7 @@ struct NowPlayingView: View {
         ZStack {
             if playerStyle == .vinyl && !isPodcast {
                 (colorScheme == .dark
-                    ? Color(red: 0.09, green: 0.09, blue: 0.086)
+                    ? Color(red: 0.094, green: 0.086, blue: 0.078)
                     : Color(red: 0.965, green: 0.953, blue: 0.929))
                     .ignoresSafeArea()
             } else {
@@ -411,10 +411,10 @@ private struct VinylArtwork: View {
             let angle = (baseAngle + live).truncatingRemainder(dividingBy: 360)
             ZStack {
                 ZStack {
-                    Circle().fill(RadialGradient(colors: [Color(red: 0.19, green: 0.21, blue: 0.17), Color(red: 0.067, green: 0.082, blue: 0.059), Color(red: 0.145, green: 0.169, blue: 0.125)], center: .center, startRadius: 0, endRadius: size / 2))
+                    Circle().fill(RadialGradient(colors: [Color(red: 0.18, green: 0.165, blue: 0.145), Color(red: 0.059, green: 0.051, blue: 0.043), Color(red: 0.133, green: 0.118, blue: 0.102)], center: .center, startRadius: 0, endRadius: size / 2))
                     ForEach(0..<32, id: \.self) { index in
                         Circle()
-                            .stroke(Color(red: 0.73, green: 0.76, blue: 0.68).opacity(0.08), lineWidth: 0.65)
+                            .stroke(Color(red: 0.784, green: 0.749, blue: 0.698).opacity(0.08), lineWidth: 0.65)
                             .frame(width: size * (0.46 + CGFloat(index) * 0.016))
                     }
                     ForEach([0.50, 0.67, 0.84], id: \.self) { ring in
@@ -425,7 +425,7 @@ private struct VinylArtwork: View {
                     CoverImage(client: client, trackID: trackID, size: size * 0.44, circular: true)
                         .overlay(Circle().stroke(Color(red: 0.04, green: 0.05, blue: 0.03).opacity(0.65), lineWidth: 2))
                         .overlay(Circle().inset(by: -2.5).stroke(Color(red: 0.86, green: 0.89, blue: 0.80).opacity(0.10), lineWidth: 1))
-                    Circle().fill(Color(red: 0.098, green: 0.11, blue: 0.082)).frame(width: 8, height: 8)
+                    Circle().fill(Color(red: 0.102, green: 0.09, blue: 0.078)).frame(width: 8, height: 8)
                 }
                 .rotationEffect(.degrees(angle))
                 vinylSheen(side: size)
