@@ -17,22 +17,20 @@ export type GainRecord = {
   analysis: { status: string; error: string | null };
 };
 
-type Meter = { left: AnalyserNode; right: AnalyserNode; buffer: Float32Array<ArrayBuffer> };
+type Meter = { analyser: AnalyserNode; buffer: Float32Array<ArrayBuffer> };
 let meter: Meter | null = null;
 
-function rms(node: AnalyserNode, buffer: Float32Array<ArrayBuffer>) {
-  node.getFloatTimeDomainData(buffer);
-  let sum = 0;
-  for (const sample of buffer) sum += sample * sample;
-  return Math.sqrt(sum / buffer.length);
-}
-
-/** Real L/R output level in 0..1 (-60 dBFS..0 dBFS); [0, 0] while no graph exists. */
-export function readAudioLevels(): [number, number] {
-  if (!meter) return [0, 0];
-  const scale = (value: number) =>
-    value > 0 ? Math.max(0, Math.min(1, (20 * Math.log10(value) + 60) / 60)) : 0;
-  return [scale(rms(meter.left, meter.buffer)), scale(rms(meter.right, meter.buffer))];
+/** Output sample peak in 0..1 (-60..0 dBFS), plus a sampled full-scale warning. */
+export function readAudioPeak(): [number, boolean] {
+  if (!meter) return [0, false];
+  meter.analyser.getFloatTimeDomainData(meter.buffer);
+  let peak = 0;
+  for (const sample of meter.buffer) {
+    const magnitude = Math.abs(sample);
+    if (magnitude > peak) peak = magnitude;
+  }
+  const level = peak > 0 ? Math.max(0, Math.min(1, (20 * Math.log10(peak) + 60) / 60)) : 0;
+  return [level, peak >= 1];
 }
 
 export function usePlaybackGain(
@@ -68,19 +66,11 @@ export function usePlaybackGain(
         context.createMediaElementSource(audio.current).connect(gain);
         gain.connect(context.destination);
         try {
-          // Analysis branch: force stereo so mono sources read equally on L and R.
-          const stereo = context.createGain();
-          stereo.channelCount = 2;
-          stereo.channelCountMode = 'explicit';
-          stereo.channelInterpretation = 'speakers';
-          const splitter = context.createChannelSplitter(2);
-          const left = context.createAnalyser(),
-            right = context.createAnalyser();
-          left.fftSize = right.fftSize = 1024;
-          gain.connect(stereo).connect(splitter);
-          splitter.connect(left, 0);
-          splitter.connect(right, 1);
-          meter = { left, right, buffer: new Float32Array(left.fftSize) };
+          // Analysis tap: a single analyser down-mixes to the mono signal.
+          const analyser = context.createAnalyser();
+          analyser.fftSize = 1024;
+          gain.connect(analyser);
+          meter = { analyser, buffer: new Float32Array(analyser.fftSize) };
         } catch {
           /* Metering is optional; playback must not depend on it. */
         }

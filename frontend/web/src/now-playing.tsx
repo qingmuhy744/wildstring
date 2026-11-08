@@ -107,6 +107,10 @@ export function NowPlaying({
     landscape ? null : 'lyrics',
   );
   const [notice, setNotice] = useState('');
+  // Music queue is a floating popover over the stage (like Apple Music); podcasts keep the docked list.
+  const [queueOpen, setQueueOpen] = useState(false);
+  const queueOpenRef = useRef(false);
+  queueOpenRef.current = queueOpen;
   const current = player.current;
   const isPodcast = current?.id.startsWith('podcast_ep_') || false;
   const style = usePlaybackStyle();
@@ -137,6 +141,7 @@ export function NowPlaying({
   useEffect(() => {
     if (!active) {
       setArtwork(false);
+      setQueueOpen(false);
       return;
     }
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -147,6 +152,11 @@ export function NowPlaying({
       if (artworkDialog.current?.open) return;
       if (event.key === 'Escape') {
         event.preventDefault();
+        if (queueOpenRef.current) {
+          setQueueOpen(false);
+          queueToggle.current?.focus({ preventScroll: true });
+          return;
+        }
         onClose();
       } else if (event.key === 'Tab') {
         const controls = Array.from(
@@ -188,8 +198,20 @@ export function NowPlaying({
     }
   }, [current?.id, active]);
   useEffect(() => {
-    if (isPodcast) setPanel('queue');
+    if (isPodcast) {
+      setPanel('queue');
+      setQueueOpen(false);
+    }
   }, [current?.id, isPodcast]);
+  useEffect(() => {
+    if (!isPodcast && panel === 'queue') setPanel('lyrics');
+  }, [isPodcast, panel]);
+  useEffect(() => {
+    if (queueOpen)
+      dialog.current
+        ?.querySelector<HTMLElement>('.fullscreen-queue-popover button')
+        ?.focus({ preventScroll: true });
+  }, [queueOpen]);
 
   return (
     <>
@@ -313,7 +335,7 @@ export function NowPlaying({
                     player.playing &&
                     !player.buffering &&
                     !player.error &&
-                    !(landscape && panel) &&
+                    !(landscape && (panel || queueOpen)) &&
                     !artwork
                   }
                   position={player.position}
@@ -396,6 +418,28 @@ export function NowPlaying({
         ) : (
           <p className="lyric-empty">先播放一首喜欢的歌。</p>
         )}
+        {current && !isPodcast && queueOpen && (
+          <>
+            <button
+              type="button"
+              className="fullscreen-queue-scrim"
+              aria-label="关闭播放队列"
+              tabIndex={-1}
+              onClick={() => setQueueOpen(false)}
+            />
+            <div className="fullscreen-queue-popover">
+              <QueuePanel
+                player={player}
+                embedded
+                onNotice={setNotice}
+                onClose={() => {
+                  setQueueOpen(false);
+                  queueToggle.current?.focus({ preventScroll: true });
+                }}
+              />
+            </div>
+          </>
+        )}
         <footer className="fullscreen-controls">
           <div className="fullscreen-quality">
             {current && <span className="format">{current.format.toUpperCase()}</span>}
@@ -427,9 +471,13 @@ export function NowPlaying({
               <button
                 ref={queueToggle}
                 aria-label={isPodcast ? '显示接下来播放' : '显示播放队列'}
-                aria-pressed={panel === 'queue'}
+                aria-pressed={isPodcast ? panel === 'queue' : queueOpen}
                 data-help={isPodcast ? '查看接下来播放' : '查看播放队列'}
-                onClick={() => setPanel((current) => (current === 'queue' ? null : 'queue'))}
+                onClick={() =>
+                  isPodcast
+                    ? setPanel((current) => (current === 'queue' ? null : 'queue'))
+                    : setQueueOpen((open) => !open)
+                }
               >
                 <svg
                   viewBox="0 0 24 24"
@@ -843,7 +891,7 @@ function LyricsPanel({ player, onTogglePanel }: { player: Player; onTogglePanel:
                                 key={wordIndex}
                                 className="lyric-word"
                                 style={{
-                                  backgroundImage: `linear-gradient(90deg, var(--lyric-active-color, var(--accent)) ${progress}%, var(--muted) ${progress}%)`,
+                                  backgroundImage: `linear-gradient(90deg, var(--lyric-active-color, var(--accent)) ${progress}%, var(--lyric-muted, var(--muted)) ${progress}%)`,
                                 }}
                               >
                                 {word.text}

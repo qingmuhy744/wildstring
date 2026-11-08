@@ -66,6 +66,38 @@ export const isFeedAddress = (value: string) => /^https?:\/\//i.test(value.trim(
 
 const SEARCH_DEBOUNCE_MS = 400;
 
+let cachedAvailableRegions: string[] | null = null;
+const discoverCache = new Map<string, PodcastSearchResponse>();
+const inflightDiscover = new Map<string, Promise<PodcastSearchResponse>>();
+
+export function invalidatePodcastDiscoverCache() {
+  discoverCache.clear();
+}
+
+export function prefetchPodcastDiscover(region = '') {
+  if (!cachedAvailableRegions) {
+    void api<{ regions: string[] }>('/podcasts/search-settings')
+      .then((settings) => {
+        cachedAvailableRegions = settings.regions;
+      })
+      .catch(() => {});
+  }
+  if (discoverCache.has(region) || inflightDiscover.has(region)) return;
+  const request = api<PodcastSearchResponse>(
+    `/podcasts/discover${region ? `?region=${encodeURIComponent(region)}` : ''}`,
+    { timeoutMs: 30000 },
+  )
+    .then((value) => {
+      discoverCache.set(region, value);
+      return value;
+    })
+    .finally(() => {
+      inflightDiscover.delete(region);
+    });
+  inflightDiscover.set(region, request);
+  void request.catch(() => {});
+}
+
 type Selection = { kind: 'result'; result: PodcastSearchResult } | { kind: 'url'; feedUrl: string };
 
 interface ErrorState {
@@ -137,8 +169,12 @@ export function PodcastSearchPage({
   const [query, setQuery] = useState(initialQuery);
   const [explore, setExplore] = useState(initialExplore);
   const [region, setRegion] = useState('');
-  const [availableRegions, setAvailableRegions] = useState<string[]>([]);
-  const [response, setResponse] = useState<PodcastSearchResponse | null>(null);
+  const [availableRegions, setAvailableRegions] = useState<string[]>(
+    () => cachedAvailableRegions ?? [],
+  );
+  const [response, setResponse] = useState<PodcastSearchResponse | null>(() =>
+    !initialQuery.trim() ? (discoverCache.get('') ?? null) : null,
+  );
   const [searching, setSearching] = useState(false);
   const [error, setError] = useState<ErrorState | null>(null);
   const [selection, setSelection] = useState<Selection | null>(null);
@@ -164,6 +200,7 @@ export function PodcastSearchPage({
     const controller = new AbortController();
     void api<{ regions: string[] }>('/podcasts/search-settings', { signal: controller.signal })
       .then((settings) => {
+        cachedAvailableRegions = settings.regions;
         if (!controller.signal.aborted) setAvailableRegions(settings.regions);
       })
       .catch(() => {});
@@ -195,21 +232,32 @@ export function PodcastSearchPage({
       );
       return () => window.clearTimeout(timer);
     }
+    if (!term && submitted === 0 && discoverCache.has(region)) {
+      setResponse(discoverCache.get(region)!);
+      setSearching(false);
+      setSelection((current) => (current?.kind === 'url' ? null : current));
+      return;
+    }
     const controller = new AbortController();
     searchAbort.current = controller;
     setSearching(true);
     const delayMs = submitted || (!term && explore) ? 0 : SEARCH_DEBOUNCE_MS;
     const timer = window.setTimeout(() => {
-      api<PodcastSearchResponse>(
-        term
-          ? `/podcasts/search?q=${encodeURIComponent(term)}`
-          : `/podcasts/discover${region ? `?region=${encodeURIComponent(region)}` : ''}`,
-        {
-          signal: controller.signal,
-          timeoutMs: 30000,
-        },
-      )
+      const request =
+        !term && submitted === 0 && inflightDiscover.has(region)
+          ? inflightDiscover.get(region)!
+          : api<PodcastSearchResponse>(
+              term
+                ? `/podcasts/search?q=${encodeURIComponent(term)}`
+                : `/podcasts/discover${region ? `?region=${encodeURIComponent(region)}` : ''}`,
+              {
+                signal: controller.signal,
+                timeoutMs: 30000,
+              },
+            );
+      request
         .then((value) => {
+          if (!term) discoverCache.set(region, value);
           if (controller.signal.aborted) return;
           setResponse(value);
           setSelection((current) => (current?.kind === 'url' ? null : current));
@@ -296,6 +344,7 @@ export function PodcastSearchPage({
             body: JSON.stringify({ followed: true }),
           });
         }
+        invalidatePodcastDiscoverCache();
         await onSubscribed(state.podcastId, preview?.title || result?.title || '');
         return;
       }
@@ -307,6 +356,7 @@ export function PodcastSearchPage({
         }),
         timeoutMs: 60000,
       });
+      invalidatePodcastDiscoverCache();
       await onSubscribed(detail.podcast.id, detail.podcast.title);
     } catch (reason) {
       setActionError(describeError(reason).message);

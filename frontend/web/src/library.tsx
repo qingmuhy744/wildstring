@@ -284,6 +284,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
   );
   const [manageOpen, setManageOpen] = useState(false);
   const [managementTab, setManagementTab] = useState<ManagementTab>('home');
+  const [focusPodcastId, setFocusPodcastId] = useState<string | null>(null);
   const [editingTrack, setEditingTrack] = useState<Track | null>(null);
   const [metadataRefresh, setMetadataRefresh] = useState<RefreshTarget | null>(null);
   useEffect(() => {
@@ -1131,6 +1132,10 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
             onChanged={refreshLibrary}
             onRefresh={() => setMetadataRefresh({ scope: 'library', label: '整个曲库' })}
             onOpenConnections={openModelConnections}
+            onViewPodcast={(id) => {
+              setFocusPodcastId(id);
+              switchView('podcasts');
+            }}
             profile={profile}
             initialAction={managementAction}
           />
@@ -1259,7 +1264,13 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
                 canEditPublishers={canManage}
                 canManageSources={canImport}
                 canManageResources={currentUser.profile === 'owner'}
-                onManage={openManagement}
+                currentEpisodeId={
+                  player.current?.podcast_id ? player.current.id.replace(/^podcast_ep_/, '') : null
+                }
+                isPlayingPodcast={Boolean(player.current?.podcast_id && player.playing)}
+                queuedEpisodeIds={player.podcastQueueItems.map((item) => item.episode_id)}
+                focusPodcastId={focusPodcastId}
+                onFocusHandled={() => setFocusPodcastId(null)}
                 onQueueTrack={(track, next) => {
                   if (next) return player.playNext(track);
                   if (!player.current) return player.playPodcastEpisode(track, false);
@@ -1268,6 +1279,12 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
                 onPlayTrack={(track) => {
                   void player.playPodcastEpisode(track);
                   setNotice(`正在播放播客《${track.title}》`);
+                }}
+                onPlayQueue={() => {
+                  void player.playPodcastQueue();
+                }}
+                onRemoveQueuedEpisode={(id) => {
+                  player.removePodcastQueueEpisode(id);
                 }}
               />
             )}

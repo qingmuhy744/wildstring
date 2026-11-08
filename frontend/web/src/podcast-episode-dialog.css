@@ -192,11 +192,28 @@
   font-size: 0.75rem;
 }
 
-.episode-dialog-files > button {
+.episode-dialog-files > .episode-save-btn {
   margin-left: auto;
   border-color: transparent;
   background: transparent;
   color: var(--podcast-subtle);
+}
+
+.episode-dialog-files > .episode-favorite-btn {
+  border: 1px solid var(--podcast-line);
+  background: var(--podcast-panel);
+  color: var(--podcast-ink);
+}
+
+.episode-dialog-files > .episode-favorite-btn:hover {
+  background: var(--podcast-panel-hover);
+  border-color: var(--accent);
+}
+
+.episode-dialog-files > .episode-favorite-btn.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--podcast-accent-soft, rgba(188, 84, 56, 0.12));
 }
 
 @media (max-width: 600px) {

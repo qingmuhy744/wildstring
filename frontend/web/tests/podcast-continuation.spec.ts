@@ -1,5 +1,11 @@
 import { expect, test } from '@playwright/test';
-import { previewPodcastTracks } from '../src/podcast-continuation';
+import {
+  previewPodcastTracks,
+  readPodcastPreference,
+  resolvePodcastPreference,
+  savePodcastPreference,
+  syncPodcastPreferenceCache,
+} from '../src/podcast-continuation';
 import { podcastEpisodeToTrack } from '../src/podcast-track';
 import type { PodcastDetail } from '../src/podcasts';
 
@@ -97,4 +103,80 @@ test('当前单集不在这个节目里时不猜测下一集', () => {
       new Set(),
     ),
   ).toEqual([]);
+});
+
+test('节目设置优先于账号默认值，离线缓存按账号隔离', () => {
+  const storage = new Map<string, string>();
+  const previousStorage = (globalThis as { localStorage?: Storage }).localStorage;
+  Object.defineProperty(globalThis, 'localStorage', {
+    configurable: true,
+    value: {
+      getItem: (key: string) => storage.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        storage.set(key, value);
+      },
+      removeItem: (key: string) => {
+        storage.delete(key);
+      },
+    },
+  });
+  try {
+    // 1. Account auto_continue is false and show-a has no per-show override: inherits off.
+    const remotePrefs = {
+      auto_continue: false,
+      shows: {
+        'show-b': { order: 'asc' as const, skip_completed: false, auto_continue: true },
+      },
+    };
+    const showA = syncPodcastPreferenceCache('alice', 'show-a', remotePrefs);
+    expect(showA).toEqual({ order: 'off', skipCompleted: true, autoContinue: false });
+    expect(previewPodcastTracks(track(3), detail, showA, new Set())).toEqual([]);
+
+    // 2. show-b has explicit per-show override: overrides account auto_continue=false.
+    const showB = syncPodcastPreferenceCache('alice', 'show-b', remotePrefs);
+    expect(showB).toEqual({ order: 'asc', skipCompleted: false, autoContinue: true });
+
+    // 3. Offline fallback uses Alice's cached account/show preferences, while Bob's account is isolated.
+    expect(readPodcastPreference('alice', 'show-a')).toEqual({
+      order: 'off',
+      skipCompleted: true,
+      autoContinue: false,
+    });
+    expect(readPodcastPreference('alice', 'show-b')).toEqual({
+      order: 'asc',
+      skipCompleted: false,
+      autoContinue: true,
+    });
+    expect(readPodcastPreference('bob', 'show-a')).toEqual({
+      order: 'follow',
+      skipCompleted: true,
+      autoContinue: true,
+    });
+
+    // 4. Stale per-show local cache is cleared if server no longer has a show override.
+    savePodcastPreference('alice', 'show-c', {
+      order: 'desc',
+      skipCompleted: true,
+      autoContinue: true,
+    });
+    const showCAfterSync = syncPodcastPreferenceCache('alice', 'show-c', remotePrefs);
+    expect(showCAfterSync).toEqual({ order: 'off', skipCompleted: true, autoContinue: false });
+    expect(readPodcastPreference('alice', 'show-c')).toEqual({
+      order: 'off',
+      skipCompleted: true,
+      autoContinue: false,
+    });
+    expect(resolvePodcastPreference(null, 'show-c', showCAfterSync)).toEqual({
+      order: 'off',
+      skipCompleted: true,
+      autoContinue: false,
+    });
+  } finally {
+    if (previousStorage) {
+      Object.defineProperty(globalThis, 'localStorage', {
+        configurable: true,
+        value: previousStorage,
+      });
+    }
+  }
 });

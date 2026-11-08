@@ -49,6 +49,7 @@ import {
   podcastAutoContinues,
   readPodcastPreference,
   savePodcastPreference,
+  syncPodcastPreferenceCache,
   defaultPodcastPreference,
   type PodcastPreference,
 } from './podcast-continuation';
@@ -219,16 +220,19 @@ export function usePlayer(userId: string) {
     loaded: false,
     hold: false,
   });
+  const [podcastQueueItems, setPodcastQueueItems] = useState<RemoteQueueItem[]>([]);
   const queueLoad = useRef<Promise<void> | null>(null);
   const commitChain = useRef(Promise.resolve());
   const preferenceSave = useRef<Promise<unknown>>(Promise.resolve());
   const conflictVersion = useRef<number | null>(null);
   const [podcastSync, setPodcastSync] = useState<'ready' | 'error' | 'conflict'>('ready');
   const preferenceRev = useRef(0);
+  const preferenceShowRef = useRef<string | null>(null);
   playbackRateRef.current = podcastPlaybackRate;
   useEffect(() => {
     const show = current?.podcast_id;
     setPodcastDetail(null);
+    preferenceShowRef.current = null;
     if (!show) return;
     const revision = ++preferenceRev.current;
     setPodcastPreference(readPodcastPreference(userId, show));
@@ -246,19 +250,43 @@ export function usePlayer(userId: string) {
     void getQueuePreferences()
       .then((prefs) => {
         if (controller.signal.aborted || revision !== preferenceRev.current) return;
-        const saved = prefs.shows[show];
-        if (!saved) return;
-        const value: PodcastPreference = {
-          order: saved.auto_continue ? saved.order : 'off',
-          skipCompleted: saved.skip_completed,
-          autoContinue: saved.auto_continue && saved.order !== 'off',
-        };
-        savePodcastPreference(userId, show, value);
+        const value = syncPodcastPreferenceCache(userId, show, prefs);
+        preferenceShowRef.current = show;
         setPodcastPreference(value);
       })
-      .catch(() => {});
+      .catch(() => {
+        if (!controller.signal.aborted && revision === preferenceRev.current) {
+          preferenceShowRef.current = show;
+        }
+      });
     return () => controller.abort();
   }, [current?.id, current?.podcast_id, userId]);
+  useEffect(() => {
+    const updated = (event: Event) => {
+      const progress = (
+        event as CustomEvent<{ episode_id: string; position_seconds: number; completed: boolean }>
+      ).detail;
+      if (!progress) return;
+      setPodcastDetail((detail) =>
+        detail
+          ? {
+              ...detail,
+              episodes: detail.episodes.map((episode) =>
+                episode.id === progress.episode_id
+                  ? {
+                      ...episode,
+                      position_seconds: progress.position_seconds,
+                      completed: progress.completed,
+                    }
+                  : episode,
+              ),
+            }
+          : detail,
+      );
+    };
+    window.addEventListener('wildstring:podcast-progress-updated', updated);
+    return () => window.removeEventListener('wildstring:podcast-progress-updated', updated);
+  }, []);
   const podcastPreview = useMemo(() => {
     if (!current?.podcast_id || podcastDetail?.podcast.id !== current.podcast_id) return [];
     const exclude = new Set<string>();
@@ -606,6 +634,7 @@ export function usePlayer(userId: string) {
             remoteQueue.current.version = remote.version;
             remoteQueue.current.items = remote.items;
             remoteQueue.current.loaded = true;
+            setPodcastQueueItems(remote.items);
           }
         })
         .catch((error) => {
@@ -616,12 +645,16 @@ export function usePlayer(userId: string) {
     return queueLoad.current;
   }
   useEffect(() => {
+    remoteQueue.current = { version: 0, items: [], loaded: false, hold: false };
+    queueLoad.current = null;
+    setPodcastQueueItems([]);
     void ensureRemoteQueue().catch(() => {});
   }, [userId]);
 
   function commitQueue(items: RemoteQueueItem[]) {
     remoteQueue.current.items = items;
     remoteQueue.current.loaded = true;
+    setPodcastQueueItems(items);
     if (remoteQueue.current.hold) {
       setPodcastSync('conflict');
       return;
@@ -635,6 +668,7 @@ export function usePlayer(userId: string) {
           remoteQueue.current.version = saved.version;
           if (JSON.stringify(remoteQueue.current.items) !== snapshot) continue;
           remoteQueue.current.items = saved.items;
+          setPodcastQueueItems(saved.items);
           setPodcastSync('ready');
           return;
         } catch (error) {
@@ -712,20 +746,64 @@ export function usePlayer(userId: string) {
         start(without, at < 0 ? 0 : at, undefined, true, true);
         return;
       }
-      const upcoming = nextPodcastPreview(
-        current.id,
-        podcastDetail,
-        podcastPreference,
-        dismissedEpisodes.current,
-        {
-          listOrder: current.podcast_list_order,
-          excludeIds: new Set(
-            remoteQueue.current.items.map((item) => `podcast_ep_${item.episode_id}`),
-          ),
-        },
-      )[0];
-      if (upcoming && podcastAutoContinues(podcastPreference))
-        start([{ ...upcoming, podcast_queue_origin: 'auto' }], 0, undefined, true, true);
+      const activeTrack = current;
+      const activeShow = activeTrack.podcast_id!;
+      const excludeIds = new Set(
+        remoteQueue.current.items.map((item) => `podcast_ep_${item.episode_id}`),
+      );
+      if (podcastDetail?.podcast.id === activeShow && preferenceShowRef.current === activeShow) {
+        const upcoming = nextPodcastPreview(
+          activeTrack.id,
+          podcastDetail,
+          podcastPreference,
+          dismissedEpisodes.current,
+          {
+            listOrder: activeTrack.podcast_list_order,
+            excludeIds,
+          },
+        )[0];
+        if (upcoming && podcastAutoContinues(podcastPreference))
+          start([{ ...upcoming, podcast_queue_origin: 'auto' }], 0, undefined, true, true);
+        return;
+      }
+      const intentSnapshot = podcastIntent.current;
+      void (async () => {
+        let resolvedPref = readPodcastPreference(userId, activeShow);
+        try {
+          const prefs = await getQueuePreferences();
+          resolvedPref = syncPodcastPreferenceCache(userId, activeShow, prefs);
+          preferenceShowRef.current = activeShow;
+          setPodcastPreference(resolvedPref);
+        } catch {
+          preferenceShowRef.current = activeShow;
+        }
+        if (!podcastAutoContinues(resolvedPref) || intentSnapshot !== podcastIntent.current) return;
+        try {
+          const detail =
+            podcastDetail?.podcast.id === activeShow
+              ? podcastDetail
+              : await api<PodcastDetail>(`/podcasts/${encodeURIComponent(activeShow)}`);
+          if (intentSnapshot !== podcastIntent.current) return;
+          setPodcastDetail(detail);
+          setPodcastQueueStatus('ready');
+          const upcoming = nextPodcastPreview(
+            activeTrack.id,
+            detail,
+            resolvedPref,
+            dismissedEpisodes.current,
+            {
+              listOrder: activeTrack.podcast_list_order,
+              excludeIds,
+            },
+          )[0];
+          if (upcoming && podcastAutoContinues(resolvedPref))
+            start([{ ...upcoming, podcast_queue_origin: 'auto' }], 0, undefined, true, true);
+        } catch {
+          if (intentSnapshot === podcastIntent.current) {
+            setPodcastQueueStatus('error');
+          }
+        }
+      })();
       return;
     }
     if (current?.podcast_id && direction < 0) {
@@ -1042,6 +1120,7 @@ export function usePlayer(userId: string) {
     playbackRate,
     podcastPreference,
     podcastQueueStatus,
+    podcastQueueItems,
     podcastPreview,
     podcastSync,
     retryPodcastQueue: () => {
@@ -1057,6 +1136,7 @@ export function usePlayer(userId: string) {
           loaded: true,
           hold: false,
         };
+        setPodcastQueueItems(remote.items);
         conflictVersion.current = null;
         const tracks = remote.items.length ? await resolveQueuedTracks(remote.items) : [];
         const { queue: audible, index: at } = accessQueue.current;
@@ -1089,6 +1169,7 @@ export function usePlayer(userId: string) {
     setPodcastPreference: (value: PodcastPreference) => {
       if (!current?.podcast_id) return;
       preferenceRev.current += 1;
+      preferenceShowRef.current = current.podcast_id;
       const next = { ...value, autoContinue: value.order !== 'off' };
       savePodcastPreference(userId, current.podcast_id, next);
       setPodcastPreference(next);
@@ -1123,6 +1204,55 @@ export function usePlayer(userId: string) {
         : '原音直放',
     start,
     playPodcastEpisode,
+    playPodcastQueue: async () => {
+      try {
+        await ensureRemoteQueue();
+      } catch {
+        setPodcastSync('error');
+      }
+      const items = remoteQueue.current.items;
+      if (!items.length) {
+        if (current?.podcast_id) start(queue, index, undefined, true);
+        return;
+      }
+      const known = audibleFromItems(items, []);
+      if (known.length === items.length) {
+        start(known, 0, undefined, true);
+        return;
+      }
+      try {
+        const tracks = await resolveQueuedTracks(items);
+        if (!tracks.length) return;
+        start(tracks, 0, undefined, true);
+      } catch {
+        setPodcastSync('error');
+      }
+    },
+    removePodcastQueueEpisode: (id: string) => {
+      const cleanId = episodeId(id) ?? id;
+      const nextItems = remoteQueue.current.items.filter((item) => item.episode_id !== cleanId);
+      void commitQueue(nextItems);
+      const trackId = `podcast_ep_${cleanId}`;
+      const target = queue.findIndex((item) => item.id === trackId);
+      if (target < 0) return;
+      if (target !== index) {
+        setQueue((items) => items.filter((_, i) => i !== target));
+        if (target < index) setIndex(index - 1);
+        return;
+      }
+      if (!playing) {
+        const remaining = queue.filter((_, i) => i !== target);
+        if (remaining.length) {
+          start(remaining, 0, undefined, false);
+        } else {
+          audio.current?.pause();
+          audio.current?.removeAttribute('src');
+          audio.current?.load();
+          setQueue([]);
+          setIndex(-1);
+        }
+      }
+    },
     step,
     seek,
     toggle,
@@ -1291,16 +1421,18 @@ export function PlayerBar({
         {!current?.podcast_id && <QualityControl player={player} />}
         {!current?.podcast_id && <GainControls trackId={current?.id} />}
         {current && !current.podcast_id && <FavoriteButton track={current} favorites={favorites} />}
-        <button
-          className={`lyrics-toggle icon-button ${lyricsOpen ? 'active' : ''}`}
-          onClick={onLyrics}
-          aria-expanded={lyricsOpen}
-          disabled={!current}
-          aria-label={current?.podcast_id ? '显示播客详情' : '显示歌词'}
-          data-help={current?.podcast_id ? '查看播客详情与续播' : '查看同步歌词'}
-        >
-          {current?.podcast_id ? '报' : '词'}
-        </button>
+        {!current?.podcast_id && (
+          <button
+            className={`lyrics-toggle icon-button ${lyricsOpen ? 'active' : ''}`}
+            onClick={onLyrics}
+            aria-expanded={lyricsOpen}
+            disabled={!current}
+            aria-label="显示歌词"
+            data-help="查看同步歌词"
+          >
+            词
+          </button>
+        )}
         <VolumeControl player={player} />
         <button
           className={`icon-button ${queueOpen ? 'active' : ''}`}

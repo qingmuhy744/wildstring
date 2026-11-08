@@ -144,26 +144,28 @@ export function PodcastDownloadDialog({
               </fieldset>
               <fieldset className="storage-policy-group" disabled={busy || !value.active}>
                 <legend>听完后</legend>
-                {(
-                  [
-                    ['keep', '保留自动保存'],
-                    ['delete_after_played', '释放我的自动保存'],
-                  ] as const
-                ).map(([key, label]) => (
-                  <label className="storage-choice" key={key}>
-                    <input
-                      type="radio"
-                      name="personal-download-retention"
-                      checked={value.retention_policy === key}
-                      onChange={() => setValue({ ...value, retention_policy: key })}
-                    />
-                    <span>{label}</span>
-                  </label>
-                ))}
+                <div className="storage-policy-options">
+                  {(
+                    [
+                      ['keep', '保留自动保存'],
+                      ['delete_after_played', '释放我的自动保存'],
+                    ] as const
+                  ).map(([key, label]) => (
+                    <label className="storage-choice" key={key}>
+                      <input
+                        type="radio"
+                        name="personal-download-retention"
+                        checked={value.retention_policy === key}
+                        onChange={() => setValue({ ...value, retention_policy: key })}
+                      />
+                      <span>{label}</span>
+                    </label>
+                  ))}
+                </div>
+                <p className="podcast-settings-desc">
+                  关闭自动下载、取消关注或移出范围会释放自动引用。手动保存继续保留；文件只有在无人引用时才进入服务器清理规则。
+                </p>
               </fieldset>
-              <p className="podcast-settings-desc">
-                关闭自动下载、取消关注或移出范围会释放自动引用。手动保存继续保留；文件只有在无人引用时才进入服务器清理规则。
-              </p>
             </>
           )}
           {error && (

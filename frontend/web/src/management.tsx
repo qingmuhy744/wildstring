@@ -171,6 +171,7 @@ export function Management({
   onChanged,
   onRefresh,
   onOpenConnections,
+  onViewPodcast,
   profile,
   initialAction,
   initialTab = 'home',
@@ -182,6 +183,7 @@ export function Management({
   onChanged: () => void;
   onRefresh: () => void;
   onOpenConnections: () => void;
+  onViewPodcast: (podcastId: string) => void;
   profile: User['profile'];
   initialAction?: { type: 'metadata-center'; batchId?: string } | null;
   initialTab?: ManagementTab;
@@ -191,6 +193,27 @@ export function Management({
   const canImport = profile === 'owner' || profile === 'librarian';
   const canPodcastAdmin = canImport;
   const [tab, updateTab] = useState<ManagementTab>(initialTab);
+  const [downloadQueue, setDownloadQueue] = useState<{
+    total_pending: number;
+    failed_count: number;
+  } | null>(null);
+  const downloadPending = downloadQueue?.total_pending ?? 0;
+  useEffect(() => {
+    if (!canPodcastAdmin) return;
+    let cancelled = false;
+    const load = () =>
+      api<{ total_pending: number; failed_count: number }>('/podcasts/downloads/queue')
+        .then((queue) => {
+          if (!cancelled) setDownloadQueue(queue);
+        })
+        .catch(() => undefined);
+    void load();
+    const timer = setInterval(load, downloadPending > 0 ? 5000 : 12000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [canPodcastAdmin, downloadPending]);
   function setTab(value: ManagementTab) {
     updateTab(value);
     onTabChanged?.(value);
@@ -336,7 +359,15 @@ export function Management({
               { id: 'programmes' as const, label: '全服节目' },
               { id: 'search' as const, label: '目录搜索' },
               { id: 'identity' as const, label: '重复节目' },
-              { id: 'downloads' as const, label: '下载管理' },
+              {
+                id: 'downloads' as const,
+                label:
+                  downloadPending > 0
+                    ? `下载管理 (${downloadPending})`
+                    : downloadQueue && downloadQueue.failed_count > 0
+                      ? `下载管理 (${downloadQueue.failed_count} 失败)`
+                      : '下载管理',
+              },
               ...(canOwner
                 ? [
                     { id: 'catalog' as const, label: '节目准入' },
@@ -685,7 +716,7 @@ export function Management({
               )}
               {tab === 'libraries' && canOwner && <MusicLibraryManager />}
               {tab === 'programmes' && canPodcastAdmin && (
-                <PodcastProgrammesAdmin canCleanResources={canOwner} />
+                <PodcastProgrammesAdmin canCleanResources={canOwner} onView={onViewPodcast} />
               )}
               {tab === 'catalog' && canOwner && <PodcastCatalogSettings />}
               {tab === 'search' && canPodcastAdmin && <PodcastSearchSettings />}

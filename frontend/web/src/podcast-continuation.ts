@@ -14,17 +14,73 @@ export const defaultPodcastPreference: PodcastPreference = {
   autoContinue: true,
 };
 const preferenceKey = (user: string, show: string) => `wildstring:podcast-order:${user}:${show}`;
+const accountPreferenceKey = (user: string) => `wildstring:podcast-account:${user}`;
 const PREVIEW_LIMIT = 3;
+
+export interface RemoteShowPreferenceLike {
+  order?: PodcastOrder;
+  skip_completed?: boolean;
+  auto_continue?: boolean;
+}
+
+export interface RemotePreferencesLike {
+  auto_continue?: boolean;
+  shows?: Record<string, RemoteShowPreferenceLike>;
+}
+
+export function resolvePodcastPreference(
+  prefs: RemotePreferencesLike | null | undefined,
+  show: string,
+  cached?: PodcastPreference,
+): PodcastPreference {
+  if (!prefs) return cached ? { ...cached } : { ...defaultPodcastPreference };
+  const saved = prefs.shows?.[show];
+  if (saved) {
+    const order =
+      saved.order && ['follow', 'asc', 'desc', 'off'].includes(saved.order)
+        ? saved.order
+        : 'follow';
+    const enabled = saved.auto_continue !== false && order !== 'off';
+    return {
+      order: enabled ? order : 'off',
+      skipCompleted: saved.skip_completed !== false,
+      autoContinue: enabled,
+    };
+  }
+  const accountAuto = prefs.auto_continue !== false;
+  return {
+    order: accountAuto ? 'follow' : 'off',
+    skipCompleted: true,
+    autoContinue: accountAuto,
+  };
+}
 
 export function readPodcastPreference(user: string, show: string): PodcastPreference {
   try {
-    const value = JSON.parse(localStorage.getItem(preferenceKey(user, show)) || 'null');
-    const order = ['follow', 'asc', 'desc', 'off'].includes(value?.order) ? value.order : 'follow';
-    return {
-      order,
-      skipCompleted: value?.skipCompleted !== false,
-      autoContinue: order !== 'off' && value?.autoContinue !== false,
-    };
+    const showRaw = localStorage.getItem(preferenceKey(user, show));
+    if (showRaw) {
+      const value = JSON.parse(showRaw);
+      const order = ['follow', 'asc', 'desc', 'off'].includes(value?.order)
+        ? value.order
+        : 'follow';
+      return {
+        order,
+        skipCompleted: value?.skipCompleted !== false,
+        autoContinue: order !== 'off' && value?.autoContinue !== false,
+      };
+    }
+    const accountRaw = localStorage.getItem(accountPreferenceKey(user));
+    if (accountRaw) {
+      const account = JSON.parse(accountRaw);
+      if (typeof account?.autoContinue === 'boolean') {
+        return {
+          order: account.autoContinue ? 'follow' : 'off',
+          skipCompleted: true,
+          autoContinue: account.autoContinue,
+        };
+      }
+    }
+    return { ...defaultPodcastPreference };
   } catch {
     return { ...defaultPodcastPreference };
   }
@@ -36,6 +92,28 @@ export function savePodcastPreference(user: string, show: string, value: Podcast
   } catch {
     // Playback remains available when device storage is disabled.
   }
+}
+
+export function syncPodcastPreferenceCache(
+  user: string,
+  show: string,
+  prefs: RemotePreferencesLike,
+): PodcastPreference {
+  const resolved = resolvePodcastPreference(prefs, show);
+  try {
+    localStorage.setItem(
+      accountPreferenceKey(user),
+      JSON.stringify({ autoContinue: prefs.auto_continue !== false }),
+    );
+    if (prefs.shows?.[show]) {
+      localStorage.setItem(preferenceKey(user, show), JSON.stringify(resolved));
+    } else {
+      localStorage.removeItem(preferenceKey(user, show));
+    }
+  } catch {
+    // Playback remains available when device storage is disabled.
+  }
+  return resolved;
 }
 
 export function podcastAutoContinues(preference: PodcastPreference) {

@@ -26,6 +26,8 @@ function findHelp(target: EventTarget | null): Target | null {
     return { source, anchor: source, owner: field || source, text: source.dataset.help };
   const button = target.closest<HTMLElement>('button[aria-label],summary[aria-label]');
   // Give icon-only controls the same readable name they already expose to assistive technology.
+  // Full-area dismiss layers are not controls worth labelling on hover.
+  if (button?.matches('.fullscreen-queue-scrim,.queue-dismiss-scrim')) return null;
   if (button && !/[\p{L}]/u.test(button.textContent || '') && button.getAttribute('aria-label'))
     return {
       source: button,
