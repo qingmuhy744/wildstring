@@ -143,6 +143,22 @@ public struct PodcastInbox: Decodable, Equatable, Sendable {
     }
 }
 
+public func normalizeDeliveryAction(_ action: String?) -> String {
+    guard let action = action, !action.isEmpty else { return "queue_last" }
+    switch action {
+    case "ignore":
+        return "ignore"
+    case "queue_next":
+        return "queue_next"
+    case "queue_last":
+        return "queue_last"
+    case "inbox":
+        return "queue_last"
+    default:
+        return "queue_last"
+    }
+}
+
 public struct PodcastShowPreference: Codable, Equatable, Sendable {
     public var action: String
     public var autoLimit: Int
@@ -151,13 +167,13 @@ public struct PodcastShowPreference: Codable, Equatable, Sendable {
     public var autoContinue: Bool
 
     public init(
-        action: String = "inbox",
+        action: String = "queue_last",
         autoLimit: Int = 3,
         order: String = "follow",
         skipCompleted: Bool = true,
         autoContinue: Bool = true
     ) {
-        self.action = action
+        self.action = normalizeDeliveryAction(action)
         self.autoLimit = min(100, max(0, autoLimit))
         self.order = order
         self.skipCompleted = skipCompleted
@@ -183,7 +199,8 @@ public struct PodcastShowPreference: Codable, Equatable, Sendable {
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        let action = try container.decodeIfPresent(String.self, forKey: .action) ?? "inbox"
+        let rawAction = try container.decodeIfPresent(String.self, forKey: .action)
+        let action = normalizeDeliveryAction(rawAction)
         let autoLimit = try container.decodeIfPresent(Int.self, forKey: .autoLimit) ?? 3
         let order = try container.decodeIfPresent(String.self, forKey: .order) ?? "follow"
         let skipCompleted = try container.decodeIfPresent(Bool.self, forKey: .skipCompleted) ?? true
@@ -201,15 +218,18 @@ public struct PodcastShowPreference: Codable, Equatable, Sendable {
 public struct PodcastQueuePreferences: Codable, Equatable, Sendable {
     public var defaultAction: String
     public var autoLimit: Int
+    public var autoContinue: Bool
     public var shows: [String: PodcastShowPreference]
 
     public init(
-        defaultAction: String = "inbox",
+        defaultAction: String = "queue_last",
         autoLimit: Int = 3,
+        autoContinue: Bool = true,
         shows: [String: PodcastShowPreference] = [:]
     ) {
-        self.defaultAction = defaultAction
+        self.defaultAction = normalizeDeliveryAction(defaultAction)
         self.autoLimit = autoLimit
+        self.autoContinue = autoContinue
         self.shows = shows
     }
 
@@ -217,19 +237,23 @@ public struct PodcastQueuePreferences: Codable, Equatable, Sendable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(defaultAction, forKey: .defaultAction)
         try container.encode(autoLimit, forKey: .autoLimit)
+        try container.encode(autoContinue, forKey: .autoContinue)
         try container.encode(shows, forKey: .shows)
     }
 
     enum CodingKeys: String, CodingKey {
         case defaultAction = "default_action"
         case autoLimit = "auto_limit"
+        case autoContinue = "auto_continue"
         case shows
     }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        defaultAction = try container.decodeIfPresent(String.self, forKey: .defaultAction) ?? "inbox"
+        let rawAction = try container.decodeIfPresent(String.self, forKey: .defaultAction)
+        defaultAction = normalizeDeliveryAction(rawAction)
         autoLimit = try container.decodeIfPresent(Int.self, forKey: .autoLimit) ?? 3
+        autoContinue = try container.decodeIfPresent(Bool.self, forKey: .autoContinue) ?? true
         shows = try container.decodeIfPresent([String: PodcastShowPreference].self, forKey: .shows) ?? [:]
     }
 }
@@ -271,6 +295,11 @@ public enum PodcastQueueMerge {
             }
         }
         return queue + [PodcastQueueItem(episodeId: episodeID, origin: "manual")]
+    }
+
+    /// Drop the episode from the queue.
+    public static func removing(_ episodeID: String, queue: [PodcastQueueItem]) -> [PodcastQueueItem] {
+        queue.filter { $0.episodeId != episodeID }
     }
 
     /// Drop the episode that just finished. Other entries, including ones not played, stay.

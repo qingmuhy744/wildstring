@@ -271,4 +271,302 @@ struct PlaybackServiceTests {
         await service.flushPersistence()
         #expect(try await store.load() == nil)
     }
+
+    @Test func musicRepeatAndShuffleDoNotInterceptPodcastEndingOrPreview() async throws {
+        let service = try makeService(store: InMemoryQueueStore())
+        defer { service.shutdown() }
+
+        let music = [
+            PlaybackService.Item(trackID: "m1", title: "Song 1", artist: "Artist", streamPath: "api/v1/tracks/m1/stream"),
+            PlaybackService.Item(trackID: "m2", title: "Song 2", artist: "Artist", streamPath: "api/v1/tracks/m2/stream"),
+        ]
+        service.play(items: music, startingAt: 0)
+        service.cycleRepeatMode()
+        service.cycleRepeatMode()
+        #expect(service.repeatMode == .one)
+        service.toggleShuffle()
+        #expect(service.isShuffled)
+
+        let showEpisodes = [
+            PodcastContinuation.Episode(id: "ep3", title: "Ep 3", chronologicalIndex: 2, isCompleted: false),
+            PodcastContinuation.Episode(id: "ep2", title: "Ep 2", chronologicalIndex: 1, isCompleted: false),
+            PodcastContinuation.Episode(id: "ep1", title: "Ep 1", chronologicalIndex: 0, isCompleted: false),
+        ]
+        service.configurePodcastContinuation(
+            podcastID: "show-a",
+            episodes: showEpisodes,
+            preference: .init(order: .follow, skipCompleted: true, autoContinue: true)
+        )
+
+        let ep2 = PlaybackService.Item(
+            trackID: "podcast_ep_ep2",
+            title: "Ep 2",
+            artist: "Show A",
+            streamPath: "api/v1/podcasts/episodes/ep2/stream"
+        )
+        service.playPodcastEpisode(ep2)
+        #expect(service.currentItem?.trackID == "podcast_ep_ep2")
+        // Preview must ignore trailing music tracks in local queue.
+        #expect(service.podcastAutoPreview().map(\.trackID) == ["podcast_ep_ep1"])
+
+        // Ending ep2 while repeatMode == .one must NOT replay ep2 or jump to music;
+        // it must follow the podcast continuation rule to ep1.
+        service.handleItemEnded()
+        #expect(service.currentItem?.trackID == "podcast_ep_ep1")
+        #expect(!service.items.contains { $0.trackID == "podcast_ep_ep1" })
+
+        // Even with repeatMode == .all, reaching the end of the show stops cleanly.
+        service.cycleRepeatMode()
+        service.cycleRepeatMode()
+        #expect(service.repeatMode == .all)
+        service.handleItemEnded()
+        #expect(service.didFinishQueue)
+        #expect(!service.isPlaying)
+    }
+
+    @Test func accountAutoContinueDisabledIsHonoredAndPreservedWhenSavingShowSetting() async throws {
+        defer { StubURLProtocol.reset() }
+        let suiteName = "wildstring.podcast.prefs.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        final class ServerState: @unchecked Sendable {
+            let lock = NSLock()
+            var prefsJSON: [String: Any] = [
+                "default_action": "inbox",
+                "auto_limit": 3,
+                "auto_continue": false,
+                "shows": [String: Any](),
+            ]
+            var offline = false
+        }
+        let state = ServerState()
+
+        StubURLProtocol.respond { request in
+            let url = try #require(request.url)
+            let failing = state.lock.withLock { state.offline }
+            if failing {
+                throw URLError(.notConnectedToInternet)
+            }
+            if url.path == "/api/v1/podcasts/queue/preferences" {
+                if request.httpMethod == "PUT",
+                   let body = StubURLProtocol.bodyData(of: request),
+                   let incoming = try JSONSerialization.jsonObject(with: body) as? [String: Any]
+                {
+                    state.lock.withLock { state.prefsJSON = incoming }
+                }
+                let payload = try state.lock.withLock {
+                    try JSONSerialization.data(withJSONObject: state.prefsJSON)
+                }
+                return StubURLProtocol.Stub(statusCode: 200, headers: [:], body: payload)
+            }
+            if url.path == "/api/v1/podcasts/queue" {
+                return .json(body: #"{"version":1,"device_id":"d1","items":[]}"#)
+            }
+            return .empty(status: 404)
+        }
+
+        let server = try ServerAddress(input: "music.example.com")
+        let client = WildstringClient(
+            server: server,
+            store: InMemorySessionStore(),
+            configuration: StubURLProtocol.configuration()
+        )
+        let cloud = PodcastCloudQueue(
+            client: client,
+            deviceID: "ios-1",
+            accountKey: "https://music.example.com|alice",
+            defaults: defaults
+        )
+        let service = try makeService(store: InMemoryQueueStore())
+        defer { service.shutdown() }
+        service.podcastCloud = cloud
+
+        let showAEpisodes = [
+            PodcastContinuation.Episode(id: "a2", title: "A2", chronologicalIndex: 1, isCompleted: false),
+            PodcastContinuation.Episode(id: "a1", title: "A1", chronologicalIndex: 0, isCompleted: false),
+        ]
+        await cloud.refreshPreferences()
+        // Show A has no per-show setting; it must inherit account auto_continue == false.
+        #expect(cloud.showPreference("show-a").autoContinue == false)
+        #expect(cloud.showPreference("show-a").continuation.autoContinue == false)
+        service.configurePodcastContinuation(
+            podcastID: "show-a",
+            episodes: showAEpisodes,
+            preference: cloud.showPreference("show-a").continuation
+        )
+        #expect(service.podcastAutoContinueEnabled == false)
+        #expect(service.podcastAutoPreview().isEmpty)
+
+        // Saving a setting for Show B must preserve account-level auto_continue == false.
+        await cloud.updateShow(podcastID: "show-b", action: "queue_last", autoLimit: 2, order: "asc")
+        let savedAutoContinue = state.lock.withLock { state.prefsJSON["auto_continue"] as? Bool }
+        #expect(savedAutoContinue == false)
+        #expect(cloud.showPreference("show-a").continuation.autoContinue == false)
+        #expect(cloud.showPreference("show-b").continuation.autoContinue == true)
+        #expect(cloud.showPreference("show-b").continuation.order == .oldestFirst)
+
+        // Offline fallback uses Alice's cached preferences, while Bob's account is isolated.
+        state.lock.withLock { state.offline = true }
+        let aliceOffline = PodcastCloudQueue(
+            client: client,
+            deviceID: "ios-1",
+            accountKey: "https://music.example.com|alice",
+            defaults: defaults
+        )
+        await aliceOffline.refreshPreferences()
+        #expect(aliceOffline.showPreference("show-a").continuation.autoContinue == false)
+        #expect(aliceOffline.showPreference("show-b").continuation.order == .oldestFirst)
+
+        let bobOffline = PodcastCloudQueue(
+            client: client,
+            deviceID: "ios-1",
+            accountKey: "https://music.example.com|bob",
+            defaults: defaults
+        )
+        await bobOffline.refreshPreferences()
+        #expect(bobOffline.showPreference("show-a").continuation.autoContinue == true)
+    }
+
+    @Test func crossShowQueueTransitionUpdatesContinuationContextToShowBAndHandlesLoadFailure() async throws {
+        defer { StubURLProtocol.reset() }
+
+        final class QueueServer: @unchecked Sendable {
+            let lock = NSLock()
+            var version = 1
+            var items: [[String: String]] = [
+                ["episode_id": "ep-a1", "origin": "manual"],
+                ["episode_id": "ep-b1", "origin": "manual"],
+            ]
+            var failShowBDetail = false
+        }
+        let serverState = QueueServer()
+
+        StubURLProtocol.respond { request in
+            let url = try #require(request.url)
+            switch url.path {
+            case "/api/v1/podcasts/queue":
+                if request.httpMethod == "PUT",
+                   let body = StubURLProtocol.bodyData(of: request),
+                   let payload = try JSONSerialization.jsonObject(with: body) as? [String: Any],
+                   let incoming = payload["items"] as? [[String: String]]
+                {
+                    serverState.lock.withLock {
+                        serverState.version += 1
+                        serverState.items = incoming
+                    }
+                }
+                let data = try serverState.lock.withLock {
+                    try JSONSerialization.data(withJSONObject: [
+                        "version": serverState.version,
+                        "device_id": "ios-1",
+                        "items": serverState.items,
+                    ])
+                }
+                return StubURLProtocol.Stub(statusCode: 200, headers: [:], body: data)
+            case "/api/v1/podcasts/queue/preferences":
+                return .json(body: #"""
+                {
+                  "default_action": "inbox",
+                  "auto_limit": 3,
+                  "auto_continue": true,
+                  "shows": {
+                    "show-a": {"action": "inbox", "auto_limit": 3, "order": "follow", "skip_completed": true, "auto_continue": true},
+                    "show-b": {"action": "inbox", "auto_limit": 3, "order": "asc", "skip_completed": true, "auto_continue": true}
+                  }
+                }
+                """#)
+            case "/api/v1/podcasts/episodes/ep-a1":
+                return .json(body: #"{"id":"ep-a1","podcast_id":"show-a","title":"Show A Ep 1","pub_date":"2026-11-01","duration_seconds":600,"position_seconds":0,"completed":false}"#)
+            case "/api/v1/podcasts/episodes/ep-b1":
+                return .json(body: #"{"id":"ep-b1","podcast_id":"show-b","title":"Show B Ep 1","pub_date":"2026-11-01","duration_seconds":600,"position_seconds":0,"completed":false}"#)
+            case "/api/v1/podcasts/show-b":
+                if serverState.lock.withLock({ serverState.failShowBDetail }) {
+                    return .json(status: 500, body: #"{"detail":"server_error"}"#)
+                }
+                // Newest-first from server: ep-b3 (unplayed), ep-b2 (completed), ep-b1 (oldest, currently playing).
+                // With Show B order == "asc" and skip_completed == true, after ep-b1 finishes, ep-b2 is skipped and ep-b3 plays!
+                return .json(body: #"""
+                {
+                  "podcast": {"id":"show-b","title":"Show B","author":"Host B","description":"","feed_url":"https://example.com/b.xml","followed":true,"total_episodes":3,"unplayed_episodes":2},
+                  "episodes": [
+                    {"id":"ep-b3","podcast_id":"show-b","title":"Show B Ep 3","pub_date":"2026-11-03","duration_seconds":600,"position_seconds":0},
+                    {"id":"ep-b2","podcast_id":"show-b","title":"Show B Ep 2","pub_date":"2026-11-02","duration_seconds":600,"position_seconds":600},
+                    {"id":"ep-b1","podcast_id":"show-b","title":"Show B Ep 1","pub_date":"2026-11-01","duration_seconds":600,"position_seconds":0}
+                  ]
+                }
+                """#)
+            default:
+                return .empty(status: 404)
+            }
+        }
+
+        let server = try ServerAddress(input: "music.example.com")
+        let client = WildstringClient(
+            server: server,
+            store: InMemorySessionStore(),
+            configuration: StubURLProtocol.configuration()
+        )
+        let cloud = PodcastCloudQueue(client: client, deviceID: "ios-1")
+        await cloud.refresh()
+        #expect(cloud.items.map(\.episodeId) == ["ep-a1", "ep-b1"])
+
+        let service = try makeService(store: InMemoryQueueStore())
+        defer { service.shutdown() }
+        service.podcastCloud = cloud
+
+        // Configure Show A initially and start playing ep-a1.
+        service.configurePodcastContinuation(
+            podcastID: "show-a",
+            episodes: [
+                PodcastContinuation.Episode(id: "ep-a1", title: "Show A Ep 1", chronologicalIndex: 1, isCompleted: false),
+                PodcastContinuation.Episode(id: "ep-a0", title: "Show A Ep 0", chronologicalIndex: 0, isCompleted: false),
+            ],
+            preference: .init(order: .follow, skipCompleted: true, autoContinue: true)
+        )
+        let itemA1 = try #require(await cloud.playbackItem(for: "ep-a1"))
+        service.playPodcastEpisode(itemA1)
+        await service.waitForPodcastTasks()
+        #expect(service.currentItem?.trackID == "podcast_ep_ep-a1")
+
+        // 1. ep-a1 ends -> explicit queue has ep-b1 (Show B), so ep-b1 plays instead of Show A's ep-a0.
+        service.handleItemEnded()
+        await service.waitForPodcastTasks()
+        #expect(service.currentItem?.trackID == "podcast_ep_ep-b1")
+        #expect(cloud.items.map(\.episodeId) == ["ep-b1"])
+        // Preview is already updated to Show B's next episode (ep-b3, skipping completed ep-b2 in asc order).
+        #expect(service.podcastAutoPreview().map(\.trackID) == ["podcast_ep_ep-b3"])
+
+        // 2. ep-b1 ends -> explicit queue is now empty; Show B's continuation (asc, skip ep-b2) plays ep-b3!
+        service.handleItemEnded()
+        await service.waitForPodcastTasks()
+        #expect(service.currentItem?.trackID == "podcast_ep_ep-b3")
+        // Auto-continued episode is never written to the cloud queue.
+        #expect(cloud.items.isEmpty)
+
+        // 3. ep-b3 is the end of Show B -> stops cleanly without wrapping around.
+        service.handleItemEnded()
+        await service.waitForPodcastTasks()
+        #expect(service.didFinishQueue)
+        #expect(!service.isPlaying)
+
+        // 4. Verify show detail load failure preserves state and reports a calm retryable error.
+        serverState.lock.withLock {
+            serverState.items = [["episode_id": "ep-b1", "origin": "manual"]]
+            serverState.failShowBDetail = true
+        }
+        await cloud.refreshQueue()
+        service.configurePodcastContinuation(
+            podcastID: "show-a",
+            episodes: [PodcastContinuation.Episode(id: "ep-a1", title: "Show A Ep 1", chronologicalIndex: 0, isCompleted: false)],
+            preference: .init(order: .follow, skipCompleted: true, autoContinue: true)
+        )
+        let itemB1 = try #require(await cloud.playbackItem(for: "ep-b1"))
+        service.playPodcastEpisode(itemB1)
+        await service.waitForPodcastTasks()
+        service.handleItemEnded()
+        await service.waitForPodcastTasks()
+        #expect(service.didFinishQueue)
+        #expect(service.errorMessage?.contains("暂时读不到节目单集") == true)
+    }
 }

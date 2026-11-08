@@ -381,7 +381,8 @@ final class ConnectionModel {
         playback.podcastDeviceID = podcastDeviceID
         playback.podcastCloud = PodcastCloudQueue(
             client: client,
-            deviceID: WildstringDeviceID.resolve(preferred: podcastDeviceID)
+            deviceID: WildstringDeviceID.resolve(preferred: podcastDeviceID),
+            accountKey: "\(primary.description)|\(username)"
         )
         playback.submitListening = { [weak client] report in
             guard let client else { return false }

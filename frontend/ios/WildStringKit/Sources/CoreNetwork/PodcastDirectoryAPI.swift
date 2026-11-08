@@ -49,12 +49,61 @@ public struct PodcastFeedPreview: Decodable, Sendable {
     }
 }
 
+public final class PodcastDiscoveryCache: @unchecked Sendable {
+    public static let shared = PodcastDiscoveryCache()
+
+    private let ttl: TimeInterval
+    private let lock = NSLock()
+    private var entries: [String: (timestamp: Date, page: PodcastDirectoryPage)] = [:]
+
+    public init(ttl: TimeInterval = 3600) {
+        self.ttl = ttl
+    }
+
+    public func get(region: String) -> PodcastDirectoryPage? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let entry = entries[region] else { return nil }
+        if Date().timeIntervalSince(entry.timestamp) > ttl {
+            entries.removeValue(forKey: region)
+            return nil
+        }
+        return entry.page
+    }
+
+    public func set(region: String, page: PodcastDirectoryPage) {
+        lock.lock()
+        defer { lock.unlock() }
+        entries[region] = (timestamp: Date(), page: page)
+    }
+
+    public func clear() {
+        lock.lock()
+        defer { lock.unlock() }
+        entries.removeAll()
+    }
+}
+
 extension WildstringClient {
+    public func prefetchPodcastDirectory(region: String) async {
+        if PodcastDiscoveryCache.shared.get(region: region) != nil {
+            return
+        }
+        _ = try? await podcastDirectory(query: "", region: region)
+    }
+
     public func podcastDirectory(query: String, region: String) async throws -> PodcastDirectoryPage {
         let searching = !query.isEmpty
+        if !searching, let cached = PodcastDiscoveryCache.shared.get(region: region) {
+            return cached
+        }
         let data = try await perform(Request(method: "GET", path: searching ? "api/v1/podcasts/search" : "api/v1/podcasts/discover",
             queryItems: searching ? [URLQueryItem(name: "q", value: query)] : region.isEmpty ? [] : [URLQueryItem(name: "region", value: region)]))
-        return try JSONDecoder().decode(PodcastDirectoryPage.self, from: data)
+        let page = try JSONDecoder().decode(PodcastDirectoryPage.self, from: data)
+        if !searching {
+            PodcastDiscoveryCache.shared.set(region: region, page: page)
+        }
+        return page
     }
 
     public func previewPodcast(feedURL: String) async throws -> PodcastFeedPreview {
