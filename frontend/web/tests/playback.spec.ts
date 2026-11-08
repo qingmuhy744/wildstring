@@ -285,8 +285,9 @@ test('全屏展开收起连续播放、切歌、焦点边界与 Esc 返回', asy
   await expect(lyricsToggle).toHaveAttribute('aria-pressed', 'true');
   await queueToggle.click();
   await expect(queueToggle).toHaveAttribute('aria-pressed', 'true');
-  await expect(lyricsToggle).toHaveAttribute('aria-pressed', 'false');
-  await expect(dialog.getByRole('list', { name: '歌词', exact: true })).toHaveCount(0);
+  // The queue floats over the stage: lyrics stay on and the layout behind it does not move.
+  await expect(lyricsToggle).toHaveAttribute('aria-pressed', 'true');
+  await expect(dialog.locator('.fullscreen-content')).not.toHaveClass(/is-cover-only/);
   const fullQueue = dialog.getByRole('complementary', { name: '播放队列', exact: true });
   await expect(fullQueue.getByRole('listitem')).toHaveCount(2);
   await fullQueue.getByRole('button', { name: '下移队列第 1 首', exact: true }).click();
@@ -298,6 +299,22 @@ test('全屏展开收起连续播放、切歌、焦点边界与 Esc 返回', asy
   await fullQueue.getByRole('button', { name: '关闭队列', exact: true }).click();
   await expect(queueToggle).toHaveAttribute('aria-pressed', 'false');
   await expect(queueToggle).toBeFocused();
+  await queueToggle.click();
+  await expect(fullQueue).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(fullQueue).toHaveCount(0);
+  await expect(dialog).toBeVisible();
+  await queueToggle.click();
+  if (testInfo.project.name === 'mobile') {
+    await fullQueue.getByRole('button', { name: '关闭队列' }).click();
+  } else {
+    await dialog
+      .getByRole('button', { name: '关闭播放队列', exact: true })
+      .click({ position: { x: 24, y: 120 } });
+  }
+  await expect(fullQueue).toHaveCount(0);
+  await lyricsToggle.click();
+  await expect(lyricsToggle).toHaveAttribute('aria-pressed', 'false');
   await expect(dialog.locator('.fullscreen-content')).toHaveClass(/is-cover-only/);
   await page.screenshot({ path: `../../artifacts/fullscreen-cover-${testInfo.project.name}.png` });
   await lyricsToggle.click();

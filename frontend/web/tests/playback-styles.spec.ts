@@ -51,7 +51,11 @@ test('三种样式共用音频，暂停保留进度，开关歌词不重开串�
   await expect(visual).toHaveAttribute('data-moving', 'true');
   const phase = () => visual.evaluate((node) => node.style.getPropertyValue('--spin'));
   const initial = await phase();
+  const sheen = visual.locator('.record-sheen');
+  const lightTransform = await sheen.evaluate((node) => getComputedStyle(node).transform);
   await expect.poll(phase).not.toBe(initial);
+  expect(await sheen.evaluate((node) => getComputedStyle(node).transform)).toBe(lightTransform);
+  await expect(sheen).toHaveCSS('transform', 'none');
   await chooseStyle(page, 'cassette');
   await expect(visual).toHaveAttribute('data-moving', 'true');
   await page.screenshot({ path: `../../artifacts/player-cassette-${info.project.name}.png` });

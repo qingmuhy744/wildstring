@@ -58,9 +58,22 @@ export async function audio(page: Page) {
   }));
 }
 
+/** 电台页只显示本人关注的节目；先关注固定装置里的全部节目，再打开电台页。 */
 export async function podcastCatalog(page: Page) {
+  const headers = { 'X-Wildstring-Client': 'web' };
+  const response = await page.request.get('/api/v1/podcasts');
+  const shows: { id: string; followed: boolean }[] = response.ok() ? await response.json() : [];
+  let changed = false;
+  for (const show of shows) {
+    if (show.followed) continue;
+    await page.request.put(`/api/v1/podcasts/${encodeURIComponent(show.id)}/follow`, {
+      headers,
+      data: { followed: true },
+    });
+    changed = true;
+  }
+  if (changed) await page.reload();
   await section(page, '电台 · 播客');
-  await page.getByRole('button', { name: '本服节目', exact: true }).click();
 }
 
 export async function leaveSettings(page: Page) {

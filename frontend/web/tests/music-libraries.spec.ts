@@ -62,12 +62,11 @@ test('切换音乐库保留获授权的播放，跨库歌单统一显示', async
   await expect(page.getByRole('region', { name: '音乐播放器', exact: true })).toContainText(
     '晴天测试曲',
   );
-  await section(page, '电台 · 播客');
+  await podcastCatalog(page);
   await expect(page.getByRole('button', { name: '我的关注', exact: true })).toHaveAttribute(
     'aria-pressed',
     'true',
   );
-  await page.getByRole('button', { name: '本服节目', exact: true }).click();
   await expect(page.getByRole('heading', { name: '电台 · 播客', exact: true })).toBeVisible();
   await expect(page.getByLabel('选择音乐库', { exact: true })).toBeHidden();
   await expect(page.getByRole('search')).toHaveCount(0);
@@ -402,8 +401,7 @@ test('个人保存复用共享音频，管理员预览后清理零引用', async
   await expect(page.getByRole('status').filter({ hasText: '已复用服务器已有音频' })).toBeVisible();
   await page.getByRole('button', { name: '我的下载', exact: false }).click();
   await expect(page.locator('.podcast-episode-row')).toHaveCount(1);
-  await page.locator('.podcasts-more-trigger').click();
-  await page.getByRole('button', { name: '共享音频管理', exact: true }).click();
+  await manageTab(page, '共享音频管理');
   const manager = page.getByRole('region', { name: '共享音频管理', exact: true });
   await expect(manager).toContainText('1 份引用');
   for (const theme of ['light', 'dark']) {

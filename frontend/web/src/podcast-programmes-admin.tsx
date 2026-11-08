@@ -16,7 +16,13 @@ function formatSyncTime(value: string | null): string {
   });
 }
 
-export function PodcastProgrammesAdmin({ canCleanResources }: { canCleanResources: boolean }) {
+export function PodcastProgrammesAdmin({
+  canCleanResources,
+  onView,
+}: {
+  canCleanResources: boolean;
+  onView: (podcastId: string) => void;
+}) {
   const [podcasts, setPodcasts] = useState<PodcastSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [filterScope, setFilterScope] = useState<FilterScope>('all');
@@ -291,6 +297,9 @@ export function PodcastProgrammesAdmin({ canCleanResources }: { canCleanResource
                       查看占用
                     </button>
                   )}
+                  <button type="button" onClick={() => onView(podcast.id)}>
+                    查看单集
+                  </button>
                   <button
                     type="button"
                     disabled={isBusy}

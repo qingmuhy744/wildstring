@@ -268,3 +268,74 @@ export class PodcastProgressStore {
     }
   }
 }
+
+export async function setEpisodeCompleted(
+  user: string,
+  id: string,
+  durationSeconds: number,
+  completed: boolean,
+): Promise<EpisodeProgress> {
+  const prefix = `wildstring:podcast-progress:${user}:`;
+  const deviceKey = `wildstring:device:${user}`;
+  let device = eventId();
+  try {
+    device = localStorage.getItem(deviceKey) || device;
+    localStorage.setItem(deviceKey, device);
+  } catch {
+    /* Playback remains available when storage is disabled. */
+  }
+  const currentResp = await fetch(`/api/v1/podcasts/episodes/${encodeURIComponent(id)}/progress`, {
+    method: 'GET',
+    credentials: 'same-origin',
+    headers: {
+      'X-Wildstring-Client': 'web',
+      'X-Wildstring-Account': user,
+    },
+  });
+  if (!currentResp.ok) throw new Error(`progress_${currentResp.status}`);
+  const current: EpisodeProgress = await currentResp.json();
+  const duration = Math.max(1, Math.floor(durationSeconds || current.duration_seconds || 1));
+  const position = completed ? duration : 0;
+  const event: PodcastProgressEvent = completed ? 'ended' : 'stop';
+  const sessionId = eventId();
+  const saveResp = await fetch(`/api/v1/podcasts/episodes/${encodeURIComponent(id)}/progress`, {
+    method: 'PUT',
+    credentials: 'same-origin',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Wildstring-Client': 'web',
+      'X-Wildstring-Account': user,
+    },
+    body: JSON.stringify({
+      session_id: sessionId,
+      device_id: device,
+      base_version: current.version,
+      sequence: 1,
+      position_seconds: position,
+      duration_seconds: duration,
+      event,
+    }),
+  });
+  if (!saveResp.ok) throw new Error(`progress_${saveResp.status}`);
+  const saved: EpisodeProgress = await saveResp.json();
+  try {
+    localStorage.setItem(
+      prefix + id,
+      JSON.stringify({
+        remote: saved,
+        session_id: sessionId,
+        base_version: saved.version,
+        sequence: 1,
+        position_seconds: saved.position_seconds,
+        duration_seconds: saved.duration_seconds,
+        event,
+        dirty: false,
+        conflict: false,
+      } satisfies EpisodeCheckpoint),
+    );
+  } catch {
+    /* Ignore local storage errors. */
+  }
+  window.dispatchEvent(new CustomEvent('wildstring:podcast-progress-updated', { detail: saved }));
+  return saved;
+}

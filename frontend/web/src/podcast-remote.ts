@@ -36,6 +36,7 @@ export interface ShowQueuePreference {
 export interface QueuePreferences {
   default_action: NewEpisodeAction;
   auto_limit: number;
+  auto_continue?: boolean;
   shows: Record<string, ShowQueuePreference>;
 }
 
@@ -76,6 +77,19 @@ export function removeInbox(episodeId: string) {
   return api(`/podcasts/inbox/items/${encodeURIComponent(episodeId)}`, { method: 'DELETE' });
 }
 
+export interface EpisodeFavoriteResponse {
+  episode_id: string;
+  favorite: boolean;
+  loved: boolean;
+}
+
+export function favoritePodcastEpisode(id: string, loved: boolean) {
+  return api<EpisodeFavoriteResponse>(`/podcasts/episodes/${encodeURIComponent(id)}/favorite`, {
+    method: 'PUT',
+    body: JSON.stringify({ favorite: loved, loved }),
+  });
+}
+
 export function getQueuePreferences() {
   return api<QueuePreferences>('/podcasts/queue/preferences');
 }
@@ -87,34 +101,43 @@ export function putQueuePreferences(body: QueuePreferences) {
   });
 }
 
-export async function saveShowPlaybackPreference(showId: string, preference: PodcastPreference) {
-  const current = await getQueuePreferences();
-  const previous = current.shows[showId];
-  current.shows[showId] = {
-    action: previous?.action ?? current.default_action,
-    auto_limit: previous?.auto_limit ?? current.auto_limit,
-    order: preference.order,
-    skip_completed: preference.skipCompleted,
-    auto_continue: preference.order !== 'off',
-  };
-  return putQueuePreferences(current);
+let preferenceWriteChain: Promise<unknown> = Promise.resolve();
+
+function serializePreferenceWrite<T>(task: () => Promise<T>): Promise<T> {
+  const next = preferenceWriteChain.then(task, task);
+  preferenceWriteChain = next.catch(() => {});
+  return next;
 }
 
-export async function saveShowDelivery(
-  showId: string,
-  action: NewEpisodeAction,
-  autoLimit: number,
-) {
-  const current = await getQueuePreferences();
-  const previous = current.shows[showId];
-  current.shows[showId] = {
-    action,
-    auto_limit: autoLimit,
-    order: previous?.order ?? 'follow',
-    skip_completed: previous?.skip_completed ?? true,
-    auto_continue: previous?.auto_continue ?? true,
-  };
-  return putQueuePreferences(current);
+export function saveShowPlaybackPreference(showId: string, preference: PodcastPreference) {
+  return serializePreferenceWrite(async () => {
+    const current = await getQueuePreferences();
+    const previous = current.shows[showId];
+    current.shows[showId] = {
+      action: previous?.action ?? current.default_action,
+      auto_limit: previous?.auto_limit ?? current.auto_limit,
+      order: preference.order,
+      skip_completed: preference.skipCompleted,
+      auto_continue: preference.order !== 'off',
+    };
+    return putQueuePreferences(current);
+  });
+}
+
+export function saveShowDelivery(showId: string, action: NewEpisodeAction, autoLimit: number) {
+  return serializePreferenceWrite(async () => {
+    const current = await getQueuePreferences();
+    const previous = current.shows[showId];
+    const accountAutoContinue = current.auto_continue !== false;
+    current.shows[showId] = {
+      action,
+      auto_limit: autoLimit,
+      order: previous?.order ?? (accountAutoContinue ? 'follow' : 'off'),
+      skip_completed: previous?.skip_completed ?? true,
+      auto_continue: previous?.auto_continue ?? accountAutoContinue,
+    };
+    return putQueuePreferences(current);
+  });
 }
 
 export async function removeQueuedEpisode(episodeId: string) {
@@ -139,11 +162,13 @@ export function queueConflictVersion(error: unknown) {
   return typeof version === 'number' ? version : null;
 }
 
-export async function saveQueueDefaults(action: NewEpisodeAction, autoLimit: number) {
-  const current = await getQueuePreferences();
-  current.default_action = action;
-  current.auto_limit = Math.max(0, Math.min(100, autoLimit));
-  return putQueuePreferences(current);
+export function saveQueueDefaults(action: NewEpisodeAction, autoLimit: number) {
+  return serializePreferenceWrite(async () => {
+    const current = await getQueuePreferences();
+    current.default_action = action;
+    current.auto_limit = Math.max(0, Math.min(100, autoLimit));
+    return putQueuePreferences(current);
+  });
 }
 
 export async function resolveQueuedTracks(items: RemoteQueueItem[]): Promise<Track[]> {

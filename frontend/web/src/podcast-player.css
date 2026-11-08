@@ -611,47 +611,113 @@
 .retro-vu {
   display: grid;
   min-width: 0;
+  container-type: inline-size;
 }
 .retro-vu-window {
-  display: grid;
-  grid-template-columns: 8px 1fr;
-  align-items: center;
-  gap: 7px 8px;
-  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  min-width: 0;
+  padding: 6px 10px;
   border: 1px solid rgb(0 0 0 / 45%);
   border-radius: 6px;
   background: radial-gradient(120% 160% at 50% 120%, #3a2318, #1a0e0b 70%);
   box-shadow: var(--panel-recess);
-}
-.retro-vu-window span {
-  color: #b89c6e;
+  color: #d6b56f;
   font:
-    10px 'SFMono-Regular',
+    11px 'SFMono-Regular',
     monospace;
+  font-variant-numeric: tabular-nums;
 }
-/* Real L/R level: the ramp slides under a clipping track, so it is revealed, not squashed. */
-.retro-vu-window i {
+.retro-vu-heading {
+  display: flex;
+  justify-content: space-between;
+}
+.retro-vu-meter {
+  min-width: 0;
+  clip-path: inset(-2px 0);
+  padding-right: 1px;
+}
+.retro-vu-scale {
+  position: relative;
+  height: 15px;
+}
+.retro-vu-tick {
+  position: absolute;
+  bottom: 0;
+  width: 1px;
+  height: 3px;
+  background: currentColor;
+  transform: translateX(-50%);
+}
+.retro-vu-tick span {
+  position: absolute;
+  bottom: 4px;
+  left: 50%;
+  line-height: 11px;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+.retro-vu-tick:nth-child(1) {
+  left: 33.333%;
+}
+.retro-vu-tick:nth-child(2) {
+  left: 66.667%;
+}
+.retro-vu-tick:nth-child(3) {
+  left: 83.333%;
+}
+.retro-vu-tick:nth-child(4) {
+  left: 95%;
+}
+.retro-vu-tick:nth-child(5) {
+  left: 100%;
+}
+.retro-vu-tick:last-child span {
+  transform: translateX(-100%);
+}
+@container (max-width: 152px) {
+  .retro-vu-tick:nth-child(3) span {
+    display: none;
+  }
+}
+.retro-vu-track {
   position: relative;
   height: 5px;
-  overflow: hidden;
-  opacity: 0.55;
-  transition: opacity 600ms ease-out;
+  background: #35221a;
 }
-.retro-vu-window i::before {
+.retro-vu-track i {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+.retro-vu-track i::before {
   content: '';
   position: absolute;
   inset: 0;
-  background:
-    repeating-linear-gradient(90deg, transparent 0 4px, #180c0a 4px 6px),
-    linear-gradient(90deg, #d6b56f 0 68%, #f0a35e 82%, #ff6f45);
-  transform: translateX(calc((var(--level-l, 0) - 1) * 100%));
+  background: linear-gradient(90deg, #d6b56f 0 64%, #f0a35e 84%, #ff6f45 93% 100%);
+  transform: translateX(calc((var(--level-current, 0) - 1) * 100%));
 }
-.retro-vu-window i:last-child::before {
-  transform: translateX(calc((var(--level-r, 0) - 1) * 100%));
+.retro-vu-track b {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  left: 0;
+  width: 100%;
+  pointer-events: none;
+  transform: translateX(calc(var(--level-peak, 0) * 100%));
 }
-.retro-radio[data-live='true'] .retro-vu-window i {
-  opacity: 0.95;
-  filter: drop-shadow(0 0 3px rgb(255 180 100 / 40%));
+.retro-vu-track b::before {
+  content: '';
+  display: block;
+  width: 2px;
+  height: 100%;
+  background: #ffedbb;
+  transform: translateX(-1px);
+}
+.retro-vu-window[data-clipped='true'] .retro-vu-track b::before {
+  background: #ff493b;
 }
 .retro-volume {
   display: grid;
@@ -1403,6 +1469,20 @@
   }
   .fullscreen-player[data-player-kind='podcast'] .podcast-transport {
     --transport-play-size: 46px;
+  }
+}
+@media (max-width: 760px) {
+  .retro-vu-tick:nth-child(3) span {
+    display: none;
+  }
+}
+@media (max-width: 380px) {
+  .retro-deck {
+    grid-template-columns: 1.3fr 1fr 48px;
+    gap: 8px;
+  }
+  .retro-vu-window {
+    padding-inline: 6px;
   }
 }
 @media (prefers-reduced-motion: reduce) {

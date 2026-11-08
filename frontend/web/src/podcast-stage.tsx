@@ -1,7 +1,7 @@
 import { useEffect, useRef, type CSSProperties } from 'react';
 import { time } from './api';
 import { Cover } from './cover';
-import { readAudioLevels } from './playback-gain';
+import { readAudioPeak } from './playback-gain';
 import { PodcastSkipButton, type Player } from './player';
 import { maybePlayRadioClick } from './radio-click';
 import type { PodcastOrder } from './podcast-continuation';
@@ -26,27 +26,55 @@ function Radio({ player, onPreview }: { player: Player; onPreview: () => void })
   useEffect(() => {
     const element = vu.current;
     if (!element) return;
-    const set = (left: number, right: number) => {
-      element.style.setProperty('--level-l', left.toFixed(3));
-      element.style.setProperty('--level-r', right.toFixed(3));
+    const set = (level: number, peak: number, clipped = false) => {
+      element.style.setProperty('--level-current', level.toFixed(3));
+      element.style.setProperty('--level-peak', peak.toFixed(3));
+      element.dataset.clipped = String(clipped);
     };
-    if (!live || window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      set(0, 0);
-      return;
-    }
+    const motion = window.matchMedia('(prefers-reduced-motion: reduce)');
     let frame = 0,
-      left = 0,
-      right = 0;
-    const tick = () => {
-      const [l, r] = readAudioLevels();
-      // Fast attack, slow release, like a real meter ballistics.
-      left = l > left ? l : left * 0.9 + l * 0.1;
-      right = r > right ? r : right * 0.9 + r * 0.1;
-      set(left, right);
+      level = 0,
+      peak = 0,
+      lastTime = 0,
+      holdUntil = 0,
+      clippedUntil = 0;
+    const tick = (time: number) => {
+      const elapsed = lastTime ? (time - lastTime) / 1000 : 0;
+      lastTime = time;
+      const [instantaneous, clipped] = readAudioPeak();
+      // The bar attacks instantly and releases smoothly toward the current sample peak.
+      level =
+        instantaneous > level
+          ? instantaneous
+          : instantaneous + (level - instantaneous) * Math.pow(0.9, elapsed * 60);
+      // Hold the bar's high point, then decay without crossing into the bar.
+      if (level >= peak) {
+        peak = level;
+        holdUntil = time + 500;
+      } else if (time > holdUntil) {
+        peak = Math.max(
+          level,
+          peak * Math.pow(0.995, Math.min(elapsed, (time - holdUntil) / 1000) * 60),
+        );
+      }
+      if (clipped) clippedUntil = time + 1000;
+      set(level, peak, time < clippedUntil);
       frame = requestAnimationFrame(tick);
     };
-    frame = requestAnimationFrame(tick);
+    const update = () => {
+      cancelAnimationFrame(frame);
+      level = 0;
+      peak = 0;
+      lastTime = 0;
+      holdUntil = 0;
+      clippedUntil = 0;
+      set(0, 0);
+      if (live && !motion.matches) frame = requestAnimationFrame(tick);
+    };
+    motion.addEventListener('change', update);
+    update();
     return () => {
+      motion.removeEventListener('change', update);
       cancelAnimationFrame(frame);
       set(0, 0);
     };
@@ -136,10 +164,31 @@ function Radio({ player, onPreview }: { player: Player; onPreview: () => void })
         </div>
         <div className="retro-vu" aria-hidden="true">
           <div className="retro-vu-window" ref={vu}>
-            <span>L</span>
-            <i />
-            <span>R</span>
-            <i />
+            <div className="retro-vu-heading">
+              <span>LEVEL</span>
+              <span>dBFS</span>
+            </div>
+            <div className="retro-vu-meter">
+              <div className="retro-vu-scale">
+                <span className="retro-vu-tick">
+                  <span>−40</span>
+                </span>
+                <span className="retro-vu-tick">
+                  <span>−20</span>
+                </span>
+                <span className="retro-vu-tick">
+                  <span>−10</span>
+                </span>
+                <span className="retro-vu-tick" />
+                <span className="retro-vu-tick">
+                  <span>0</span>
+                </span>
+              </div>
+              <div className="retro-vu-track">
+                <i />
+                <b />
+              </div>
+            </div>
           </div>
         </div>
         <label className="retro-volume">

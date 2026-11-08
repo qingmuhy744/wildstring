@@ -185,7 +185,7 @@ test('同一浏览器切换账号时，界面和离线偏好各自恢复，旧�
   await page.addInitScript(() => {
     if (!localStorage.getItem('wildstring:preferences-legacy-owner')) {
       localStorage.setItem('wildstring-theme', 'dark');
-      localStorage.setItem('wildstring-playback-style', 'vinyl');
+      localStorage.setItem('wildstring-playback-style', 'cassette');
       localStorage.setItem('wildstring:track-list-size', 'large');
       localStorage.setItem('wildstring:download-bitrate', '192');
     }
@@ -202,7 +202,7 @@ test('同一浏览器切换账号时，界面和离线偏好各自恢复，旧�
   await expect(settings.getByLabel('外观模式')).toHaveValue('dark');
   await expect(settings.getByLabel('歌曲列表大小')).toHaveValue('large');
   await personalCategory(page, 'playback');
-  await expect(settings.getByLabel('播放样式')).toHaveValue('vinyl');
+  await expect(settings.getByLabel('播放样式')).toHaveValue('cassette');
   await personalCategory(page, 'downloads');
   await expect(page.getByLabel('默认下载音质', { exact: true })).toHaveValue('192');
   await leaveSettings(page);
@@ -213,8 +213,8 @@ test('同一浏览器切换账号时，界面和离线偏好各自恢复，旧�
   await expect(settings.getByLabel('歌曲列表大小')).toHaveValue('medium');
   await settings.getByLabel('外观模式').selectOption('light');
   await personalCategory(page, 'playback');
-  await expect(settings.getByLabel('播放样式')).toHaveValue('cover');
-  await settings.getByLabel('播放样式').selectOption('cassette');
+  await expect(settings.getByLabel('播放样式')).toHaveValue('vinyl');
+  await settings.getByLabel('播放样式').selectOption('cover');
   await personalCategory(page, 'downloads');
   await expect(page.getByLabel('默认下载音质', { exact: true })).toHaveValue('0');
   await page.getByLabel('默认下载音质', { exact: true }).selectOption('320');
@@ -225,7 +225,7 @@ test('同一浏览器切换账号时，界面和离线偏好各自恢复，旧�
   await expect(settings.getByLabel('外观模式')).toHaveValue('dark');
   await expect(settings.getByLabel('歌曲列表大小')).toHaveValue('large');
   await personalCategory(page, 'playback');
-  await expect(settings.getByLabel('播放样式')).toHaveValue('vinyl');
+  await expect(settings.getByLabel('播放样式')).toHaveValue('cassette');
   await personalCategory(page, 'downloads');
   await expect(page.getByLabel('默认下载音质', { exact: true })).toHaveValue('192');
   await page.request.delete(`/api/v1/manage/users/${created.id}`, { headers });

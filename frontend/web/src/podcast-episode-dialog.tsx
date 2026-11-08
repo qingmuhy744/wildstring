@@ -14,6 +14,7 @@ export function PodcastEpisodeDialog({
   onPlay,
   onQueue,
   onSave,
+  onToggleFavorite,
 }: {
   episode: PodcastEpisode;
   podcast: PodcastSummary;
@@ -23,6 +24,7 @@ export function PodcastEpisodeDialog({
   onPlay: () => void;
   onQueue: (next: boolean) => void;
   onSave: () => void;
+  onToggleFavorite?: () => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => {
@@ -37,6 +39,7 @@ export function PodcastEpisodeDialog({
   const extension = new URL(episode.audio_url).pathname.match(
     /\.(mp3|m4a|aac|ogg|opus|flac|wav|webm)$/i,
   )?.[1];
+  const isFavorited = Boolean(episode.favorite || episode.favorited || episode.loved);
   return (
     <dialog
       ref={dialog}
@@ -104,7 +107,18 @@ export function PodcastEpisodeDialog({
             {extension ? `下载 ${extension.toUpperCase()}` : '下载音频'}
           </a>
           <span>保存到此设备</span>
-          <button type="button" onClick={onSave}>
+          {onToggleFavorite && (
+            <button
+              type="button"
+              className={`episode-favorite-btn${isFavorited ? ' active' : ''}`}
+              onClick={onToggleFavorite}
+              title={isFavorited ? '取消收藏该单集' : '收藏该单集'}
+            >
+              <Icon name="heart" />
+              {isFavorited ? '取消收藏' : '单集收藏'}
+            </button>
+          )}
+          <button type="button" className="episode-save-btn" onClick={onSave}>
             {episode.resource_saved ? '取消个人保存' : '保存到服务器'}
           </button>
         </div>

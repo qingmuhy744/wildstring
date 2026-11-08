@@ -1952,7 +1952,7 @@ a {
   overscroll-behavior: contain;
   scrollbar-width: none;
   padding: 0 6px;
-  mask-image: linear-gradient(transparent, #000 16%, #000 84%, transparent);
+  mask-image: linear-gradient(transparent, #000 24px, #000 84%, transparent);
 }
 .lyric-viewport {
   position: relative;
@@ -6025,7 +6025,7 @@ textarea {
 }
 .fullscreen-player[data-music-style='vinyl']
   :is(.lyric-line, .lyric-translation, .lyric-romanization) {
-  color: var(--muted);
+  color: var(--lyric-muted, var(--muted));
 }
 .fullscreen-player[data-music-style='vinyl']
   :is(.lyric-line, .player-meta-link, .player-artist-link) {
@@ -6087,4 +6087,129 @@ textarea {
 }
 .fullscreen-player[data-music-style='vinyl'] .embedded-queue li.is-dragging {
   background: var(--bg-hover);
+}
+
+/* Music fullscreen: queue floats over the stage instead of replacing lyrics (DESIGN.md §6.6). */
+.fullscreen-queue-scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  cursor: default;
+}
+.fullscreen-player:has(.fullscreen-queue-scrim) .fullscreen-controls {
+  position: relative;
+  z-index: 6;
+}
+.fullscreen-queue-popover {
+  position: absolute;
+  z-index: 5;
+  right: 36px;
+  bottom: 126px;
+  display: flex;
+  flex-direction: column;
+  width: min(360px, calc(100% - 32px));
+  max-height: min(520px, calc(100% - 200px));
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 18px 48px rgb(0 0 0 / 22%);
+  animation: queue-popover-in 0.18s ease-out;
+}
+.fullscreen-player .fullscreen-queue-popover .embedded-queue {
+  flex: 1;
+  height: auto;
+  min-height: 0;
+  padding: 16px 18px;
+  overflow: auto;
+  color: inherit;
+}
+.fullscreen-queue-popover .embedded-queue :is(.queue-heading, li) {
+  border-color: var(--border);
+}
+.fullscreen-queue-popover .embedded-queue .track-title small,
+.fullscreen-queue-popover .embedded-queue .queue-grip.icon-button {
+  color: var(--muted);
+}
+.fullscreen-queue-popover .embedded-queue li.is-dragging {
+  background: var(--bg-hover);
+}
+@keyframes queue-popover-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .fullscreen-queue-popover {
+    animation: none;
+  }
+}
+@media (max-width: 760px) {
+  .fullscreen-queue-popover {
+    right: 16px;
+    left: 16px;
+    bottom: 188px;
+    width: auto;
+    max-height: calc(100% - 260px);
+  }
+}
+/* Use the stage: wider canvas, larger disc/cover and a tighter gutter on desktop. */
+@media (min-width: 761px) and (min-height: 541px) {
+  .fullscreen-player[data-player-kind='music'] .fullscreen-content {
+    width: min(1440px, 100%);
+    padding: 24px clamp(32px, 5vw, 80px) 32px;
+    gap: clamp(40px, 6vw, 96px);
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
+  }
+  .fullscreen-player[data-player-kind='music'] :is(.playback-visual, .fullscreen-metadata) {
+    width: min(100%, 560px, 52vh);
+  }
+}
+/* Vinyl: align the title block to the disc footprint (7% inset each side) in both lyric and cover-only modes. */
+@media (min-width: 761px) and (min-height: 541px) {
+  .fullscreen-player[data-player-kind='music'][data-music-style='vinyl'] .fullscreen-metadata {
+    width: calc(min(100%, 560px, 52vh) * 0.86);
+    text-align: left;
+  }
+  .fullscreen-player[data-player-kind='music'][data-music-style='vinyl']
+    .fullscreen-metadata
+    > .favorite-button {
+    right: -12px;
+  }
+}
+/* Vinyl lyrics: dim non-current lines further so the current line stands apart (large text, ≥3:1). */
+.fullscreen-player[data-music-style='vinyl'] {
+  --lyric-muted: #86837b;
+}
+:root[data-theme='light'] .fullscreen-player[data-music-style='vinyl'] {
+  --lyric-muted: #7c7f70;
+}
+/* The dismiss layer must stay invisible; the global button:hover fill would otherwise cover the stage. */
+.fullscreen-queue-scrim,
+.fullscreen-queue-scrim:hover,
+.fullscreen-queue-scrim:focus-visible,
+.fullscreen-queue-scrim:active {
+  background: transparent !important;
+  border: 0 !important;
+  outline: none !important;
+  box-shadow: none !important;
+}
+/* With the queue open, blank space in the control strip also dismisses it; only real controls stay clickable. */
+.fullscreen-player:has(.fullscreen-queue-scrim) .fullscreen-controls {
+  pointer-events: none;
+}
+.fullscreen-player:has(.fullscreen-queue-scrim)
+  .fullscreen-controls
+  :is(button, input, select, label, a, [role='slider']) {
+  pointer-events: auto;
 }
