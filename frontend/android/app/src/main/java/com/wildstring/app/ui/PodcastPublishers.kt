@@ -99,7 +99,7 @@ internal fun PodcastPublisherPage(vm: MusicViewModel, publisher: PodcastPublishe
             items(shows, key = { it.id }) { podcast ->
                 Surface(Modifier.fillMaxWidth().clickable { onSelect(podcast) }, shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceContainerLow) {
                     ListItem(headlineContent = { Text(podcast.title, maxLines = 2, overflow = TextOverflow.Ellipsis) },
-                        supportingContent = { Text("${podcast.totalEpisodes} 集 · ${podcast.unplayedEpisodes} 未听") },
+                        supportingContent = { Text("${podcast.totalEpisodes} 集 · 还有 ${podcast.unplayedEpisodes} 集可听") },
                         leadingContent = { Icon(Icons.Default.Podcasts, null) },
                         colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow))
                 }

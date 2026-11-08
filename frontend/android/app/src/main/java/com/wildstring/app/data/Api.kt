@@ -88,6 +88,10 @@ interface Api {
     @PUT("api/v1/podcasts/episodes/{id}/progress") suspend fun updatePodcastProgress(@Path("id") id: String, @Body body: PodcastProgressUpdate, @Tag owner: RequestOwner): EpisodeProgress
     @GET("api/v1/podcasts/{id}/download-settings") suspend fun podcastDownloadSettings(@Path("id") id: String, @Tag owner: RequestOwner): PodcastDownloadSettings
     @PUT("api/v1/podcasts/{id}/download-settings") suspend fun updatePodcastDownloadSettings(@Path("id") id: String, @Body body: PodcastDownloadSettingsUpdate, @Tag owner: RequestOwner): PodcastDownloadSettings
+    @PUT("api/v1/podcasts/{id}/settings") suspend fun updatePodcastServerSettings(@Path("id") id: String, @Body body: PodcastServerSettingsUpdate, @Tag owner: RequestOwner): PodcastDetail
+    @GET("api/v1/podcasts/downloads/queue") suspend fun podcastDownloadQueue(@Tag owner: RequestOwner): PodcastDownloadQueueInfo
+    @POST("api/v1/podcasts/downloads/retry-failed") suspend fun retryFailedPodcastDownloads(@Tag owner: RequestOwner): PodcastRetryFailedResult
+    @POST("api/v1/podcasts/downloads/clear-completed") suspend fun clearCompletedPodcastDownloads(@Tag owner: RequestOwner): JsonObject
     @GET("api/v1/podcasts/playback-settings") suspend fun podcastPlaybackSettings(@Tag owner: RequestOwner): PodcastPlaybackSettings
     @PUT("api/v1/podcasts/playback-settings") suspend fun updatePodcastPlaybackSettings(@Body body: PodcastPlaybackSettingsUpdate, @Tag owner: RequestOwner): PodcastPlaybackSettings
     @GET("api/v1/podcasts/inbox") suspend fun podcastInbox(@Tag owner: RequestOwner): PodcastInboxSnapshot
@@ -97,5 +101,7 @@ interface Api {
     @PUT("api/v1/podcasts/queue") suspend fun replacePodcastQueue(@Body body: PodcastQueueUpdate, @Tag owner: RequestOwner): PodcastQueueSnapshot
     @GET("api/v1/podcasts/queue/preferences") suspend fun podcastQueuePreferences(@Tag owner: RequestOwner): PodcastQueuePreferences
     @PUT("api/v1/podcasts/queue/preferences") suspend fun savePodcastQueuePreferences(@Body body: PodcastQueuePreferences, @Tag owner: RequestOwner): PodcastQueuePreferences
+    @PUT("api/v1/podcasts/episodes/{episode_id}/favorite") suspend fun favoritePodcastEpisode(@Path("episode_id") episodeId: String, @Body body: PodcastFavoriteRequest, @Tag owner: RequestOwner): PodcastFavoriteResponse
+    @GET("api/v1/podcasts/favorites/ids") suspend fun podcastFavoriteIds(@Tag owner: RequestOwner): PodcastFavoriteIdsResponse
     @POST("api/v1/ai/catalog-gaps") suspend fun catalogGaps(@Body body: JsonObject): JsonObject
 }

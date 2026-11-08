@@ -46,6 +46,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import kotlin.math.abs
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.Surface
+import androidx.compose.ui.text.font.FontWeight
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -57,6 +61,10 @@ internal fun QueuePanel(
     headerModifier: Modifier = Modifier,
     onClose: (() -> Unit)? = null,
 ) {
+    if (state.current?.isPodcast == true) {
+        PodcastQueuePanel(vm, state, modifier, headerModifier, onClose)
+        return
+    }
     val feedback = LocalTactileFeedback.current
     QueueList(state.queue, state.entryId, modifier,
         onPlay = { feedback(TactileKind.Tap); vm.playQueue(it.index) },
@@ -65,6 +73,178 @@ internal fun QueuePanel(
         onClear = if (state.queue.isNotEmpty()) ({ feedback(TactileKind.Tap); vm.clearQueue() }) else null,
         headerModifier = headerModifier,
         onClose = onClose)
+}
+
+@Composable
+internal fun PodcastQueuePanel(
+    vm: MusicViewModel,
+    state: MusicState,
+    modifier: Modifier = Modifier,
+    headerModifier: Modifier = Modifier,
+    onClose: (() -> Unit)? = null,
+) {
+    val cloud by vm.podcastCloud.collectAsState()
+    val feedback = LocalTactileFeedback.current
+    val autoContinue = cloud.preferences?.autoContinue ?: vm.settings.podcastContinuePreference().autoContinue
+
+    LaunchedEffect(Unit) {
+        vm.refreshPodcastCloud()
+        vm.refreshPodcastAutoPreview()
+    }
+
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .testTag("podcast-player-queue")
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp)
+                .then(headerModifier),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = "待播队列 (${cloud.queueRows.size})",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+            )
+            if (onClose != null) {
+                IconButton(onClick = onClose) {
+                    Icon(Icons.Default.Close, contentDescription = "关闭")
+                }
+            }
+        }
+
+        LazyColumn(
+            modifier = Modifier.fillMaxWidth().weight(1f, fill = false),
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            if (cloud.queueRows.isEmpty()) {
+                item {
+                    Text(
+                        text = stringResource(if (autoContinue) R.string.podcast_queue_empty_on else R.string.podcast_queue_empty_off),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(vertical = 12.dp)
+                    )
+                }
+            } else {
+                items(cloud.queueRows, key = { it.episodeId }) { row ->
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainerLow,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    text = row.title,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Medium,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                if (row.showTitle.isNotBlank()) {
+                                    Text(
+                                        text = row.showTitle,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
+                            Spacer(Modifier.width(8.dp))
+                            IconButton(
+                                onClick = {
+                                    feedback(TactileKind.Tap)
+                                    vm.removePodcastQueueEpisode(row.episodeId)
+                                },
+                                modifier = Modifier.size(32.dp),
+                            ) {
+                                Icon(
+                                    Icons.Default.Close,
+                                    contentDescription = "从待播移除",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(18.dp),
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (cloud.autoPreview.isNotEmpty()) {
+                item {
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = "自动续播",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(top = 8.dp, bottom = 4.dp),
+                    )
+                }
+                items(cloud.autoPreview, key = { "preview-${it.episodeId}" }) { item ->
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    text = item.title,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                if (item.showTitle.isNotBlank()) {
+                                    Text(
+                                        text = item.showTitle,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.outline,
+                                    )
+                                }
+                            }
+                            Spacer(Modifier.width(8.dp))
+                            FilledTonalButton(
+                                onClick = {
+                                    feedback(TactileKind.Tap)
+                                    vm.addPodcastEpisodeToQueue(item.episode, item.summary, next = false)
+                                },
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.height(32.dp),
+                            ) {
+                                Text("加入待播", style = MaterialTheme.typography.labelSmall)
+                            }
+                        }
+                    }
+                }
+                item {
+                    Text(
+                        text = "不会写入待播队列",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.outline,
+                        modifier = Modifier.padding(top = 4.dp, bottom = 8.dp),
+                    )
+                }
+            }
+        }
+    }
 }
 
 /** Only the handle starts a reorder; the rest of the row keeps ordinary tap/scroll behavior. */

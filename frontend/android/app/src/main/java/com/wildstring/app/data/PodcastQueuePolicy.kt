@@ -182,12 +182,24 @@ fun podcastPreferencesUpdatingAutoContinue(current: PodcastQueuePreferences, ena
     return current.copy(autoContinue = enabled, shows = shows)
 }
 
-fun effectiveShowPreference(current: PodcastQueuePreferences, podcastId: String): PodcastShowQueuePreference =
-    current.shows.orEmpty()[podcastId] ?: PodcastShowQueuePreference(
-        action = current.defaultAction.ifBlank { "inbox" },
+fun normalizeDeliveryAction(action: String?): String = when (action) {
+    "ignore" -> "ignore"
+    "queue_next" -> "queue_next"
+    "queue_last", "inbox" -> "queue_last"
+    else -> "queue_last"
+}
+
+fun effectiveShowPreference(current: PodcastQueuePreferences, podcastId: String): PodcastShowQueuePreference {
+    val show = current.shows.orEmpty()[podcastId]
+    if (show != null) {
+        return show.copy(action = normalizeDeliveryAction(show.action))
+    }
+    return PodcastShowQueuePreference(
+        action = normalizeDeliveryAction(current.defaultAction),
         autoLimit = current.autoLimit,
         autoContinue = current.autoContinue,
     )
+}
 
 fun podcastContinueOrderFromApi(value: String?): PodcastContinueOrder = when (value) {
     "asc", "oldest" -> PodcastContinueOrder.OLDEST_FIRST

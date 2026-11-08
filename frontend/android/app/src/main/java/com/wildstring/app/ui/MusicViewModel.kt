@@ -134,10 +134,12 @@ class MusicViewModel @Inject constructor(
         override fun onEvents(player: Player, events: Player.Events) {
             if (events.contains(Player.EVENT_TIMELINE_CHANGED) || events.contains(Player.EVENT_MEDIA_ITEM_TRANSITION) || events.contains(Player.EVENT_MEDIA_METADATA_CHANGED)) {
                 rebuildQueue()
+                podcastQueues.refreshAutoPreview()
             }
             refreshPlayer()
         }
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+            podcastQueues.refreshAutoPreview()
             if (reason != Player.MEDIA_ITEM_TRANSITION_REASON_AUTO || mediaItem == null) return
             val c = controller ?: return
             val index = c.currentMediaItemIndex
@@ -146,6 +148,7 @@ class MusicViewModel @Inject constructor(
             if (podcastEpisodeId(mediaItem.mediaMetadata.extras?.getString("track_id")) == null) return
             // Media3 already moved on. Drop the finished episode from the cloud queue only.
             podcastQueues.onEpisodeFinished(previousId, advanceLocally = false)
+            podcastQueues.refreshAutoPreview()
         }
         override fun onPlaybackStateChanged(playbackState: Int) {
             // STATE_ENDED only arrives when nothing is queued after the current episode.
@@ -513,15 +516,67 @@ class MusicViewModel @Inject constructor(
 
     fun refreshPodcastCloud() = podcastQueues.refresh()
     fun refreshPodcastQueuePreferences() = podcastQueues.refreshPreferences()
+    fun refreshPodcastAutoPreview() = podcastQueues.refreshAutoPreview()
     fun retryPodcastQueueSync() = podcastQueues.retry()
     fun resolvePodcastQueueConflict(choice: PodcastQueueConflictChoice) = podcastQueues.resolveConflict(choice)
     fun addPodcastEpisodeToInbox(episode: PodcastEpisode) = podcastQueues.addInbox(episode)
     fun removePodcastInboxEpisode(episodeId: String) = podcastQueues.removeInbox(episodeId)
     fun removePodcastQueueEpisode(episodeId: String) = podcastQueues.removeQueued(episodeId)
     fun movePodcastInboxToQueue(episodeId: String) = podcastQueues.moveInboxToQueue(episodeId)
-    fun updatePodcastShowPreference(podcastId: String, action: String, autoLimit: Int) = podcastQueues.updateShow(podcastId, action, autoLimit)
+    fun updatePodcastShowPreference(podcastId: String, action: String, autoLimit: Int = 3) = podcastQueues.updateShow(podcastId, action, autoLimit)
     fun updatePodcastAutoContinue(enabled: Boolean) = podcastQueues.updateAutoContinue(enabled)
     fun clearPodcastQueueNotice() = podcastQueues.clearNotice()
+
+    fun togglePodcastEpisodeFavorite(episodeId: String, loved: Boolean) = viewModelScope.launch {
+        try {
+            repository.favoritePodcastEpisode(episodeId, loved)
+            val episode = repository.cachedPodcastEpisode(episodeId)
+            val podcastId = episode?.podcastId
+            if (podcastId != null) {
+                val detail = repository.cachedPodcastDetail(podcastId)
+                if (detail != null) {
+                    podcastBrowser.remember(detail.copy(episodes = detail.episodes.map {
+                        if (it.id == episodeId) it.copy(loved = loved, favorite = loved) else it
+                    }))
+                }
+            }
+        } catch (e: CancellationException) { throw e }
+        catch (e: Exception) { notify(friendlyError(e)) }
+    }
+
+    fun markPodcastEpisodeCompleted(episodeId: String, completed: Boolean, durationSeconds: Int = 0) = viewModelScope.launch {
+        try {
+            val progress = repository.savePodcastProgress(episodeId, completed, durationSeconds)
+            podcastProgress.recordManualProgress(episodeId, progress)
+            val episode = repository.cachedPodcastEpisode(episodeId)
+            val podcastId = episode?.podcastId
+            if (podcastId != null) {
+                val detail = repository.cachedPodcastDetail(podcastId)
+                if (detail != null) {
+                    podcastBrowser.remember(detail.copy(episodes = detail.episodes.map {
+                        if (it.id == episodeId) it.copy(completed = completed, positionSeconds = progress.positionSeconds.toInt()) else it
+                    }))
+                }
+            }
+        } catch (e: CancellationException) { throw e }
+        catch (e: Exception) { notify(friendlyError(e)) }
+    }
+
+    fun refreshPodcastFavoriteIds() = viewModelScope.launch {
+        try { repository.getPodcastFavoriteIds() } catch (_: Exception) {}
+    }
+
+    fun playPodcastPendingQueue() = viewModelScope.launch {
+        val cloud = podcastCloud.value
+        val firstQueueId = cloud.queue.firstOrNull()?.episodeId
+        val targetId = firstQueueId ?: cloud.inbox.firstOrNull()?.episodeId ?: return@launch
+        try {
+            val episode = repository.podcastEpisode(targetId)
+            val detail = repository.podcastDetail(episode.podcastId)
+            playPodcastEpisode(episode, detail.podcast)
+        } catch (e: CancellationException) { throw e }
+        catch (e: Exception) { notify(friendlyError(e)) }
+    }
 
     /** Inserts the episode at the head of the cloud queue and plays that queue. [preserveQueue] is retained for callers; the show is never bulk-loaded. */
     fun playPodcastEpisode(episode: PodcastEpisode, podcast: PodcastSummary, positionMs: Long? = null, @Suppress("UNUSED_PARAMETER") preserveQueue: Boolean = true) {

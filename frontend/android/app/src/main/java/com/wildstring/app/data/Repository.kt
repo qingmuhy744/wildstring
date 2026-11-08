@@ -25,6 +25,8 @@ import retrofit2.HttpException
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 
+const val DISCOVERY_CACHE_TTL = 3600_000L
+
 data class CatalogQuery(val tab: String = "search", val kind: String = "discover", val title: String = "发现",
     val query: String = "", val offset: Int = 0, val collection: String? = null, val collectionId: String? = null,
     val playlist: Playlist? = null, val role: String = "album_artist", val sort: String = "title", val albumFilter: String? = null, val order: String = "asc",
@@ -73,6 +75,20 @@ class Repository @Inject constructor(@param:ApplicationContext private val conte
     val knownTracks = java.util.concurrent.ConcurrentHashMap<String, Track>()
     private val favoriteClock = java.util.concurrent.atomic.AtomicLong()
     private val favoriteVersions = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    private val discoveryCache = java.util.concurrent.ConcurrentHashMap<String, Pair<Long, PodcastDirectoryPage>>()
+    val podcastFavoriteIds = kotlinx.coroutines.flow.MutableStateFlow<Set<String>>(emptySet())
+
+    fun cachedPodcastDirectory(region: String = ""): PodcastDirectoryPage? {
+        val key = region.trim()
+        val entry = discoveryCache[key] ?: return null
+        if (System.currentTimeMillis() - entry.first < DISCOVERY_CACHE_TTL) {
+            return entry.second
+        }
+        discoveryCache.remove(key)
+        return null
+    }
+
+    fun isPodcastEpisodeFavorite(episodeId: String): Boolean = podcastFavoriteIds.value.contains(episodeId)
     @Synchronized private fun rememberTrack(track: Track, snapshot: Long? = null): Track {
         val previous = knownTracks[track.id]
         val merged = if (previous != null && (snapshot == null || (favoriteVersions[track.id] ?: 0L) > snapshot))
@@ -202,10 +218,18 @@ class Repository @Inject constructor(@param:ApplicationContext private val conte
         val owner = session.cacheScope(); requireProfile(owner)
         return api().subscribePodcast(PodcastSubscribeRequest(feedUrl, itunesId), RequestOwner(owner)).also { requireProfile(owner) }
     }
-    suspend fun podcastDirectory(query: String, region: String): PodcastDirectoryPage {
-        val parameters = if (query.isNotBlank()) mapOf("q" to query) else if (region.isNotEmpty()) mapOf("region" to region) else emptyMap()
-        val data = feature(if (query.isBlank()) "podcasts/discover" else "podcasts/search", query = parameters)
-        return gson.fromJson(data, PodcastDirectoryPage::class.java)
+    suspend fun podcastDirectory(query: String, region: String, forceRefresh: Boolean = false): PodcastDirectoryPage {
+        val trimmedQuery = query.trim()
+        if (trimmedQuery.isBlank() && !forceRefresh) {
+            cachedPodcastDirectory(region)?.let { return it }
+        }
+        val parameters = if (trimmedQuery.isNotBlank()) mapOf("q" to trimmedQuery) else if (region.isNotEmpty()) mapOf("region" to region) else emptyMap()
+        val data = feature(if (trimmedQuery.isBlank()) "podcasts/discover" else "podcasts/search", query = parameters)
+        val page = gson.fromJson(data, PodcastDirectoryPage::class.java)
+        if (trimmedQuery.isBlank()) {
+            discoveryCache[region.trim()] = Pair(System.currentTimeMillis(), page)
+        }
+        return page
     }
     suspend fun previewPodcast(feedUrl: String): PodcastFeedPreview {
         val data = feature("podcasts/preview", "POST", com.google.gson.JsonObject().apply { addProperty("feed_url", feedUrl) })
@@ -260,6 +284,25 @@ class Repository @Inject constructor(@param:ApplicationContext private val conte
         val owner = expectedOwner; requireProfile(owner)
         return api().updatePodcastDownloadSettings(id, PodcastDownloadSettingsUpdate(settings.version, settings.downloadPolicy, settings.retentionPolicy), RequestOwner(owner)).also { requireProfile(owner) }
     }
+    suspend fun updatePodcastServerSettings(id: String, slowDownload: Boolean, maxRetries: Int, retryBackoffBase: Int, expectedOwner: String? = session.cacheScope()): PodcastDetail {
+        val owner = expectedOwner; requireProfile(owner)
+        return api().updatePodcastServerSettings(id, PodcastServerSettingsUpdate(slowDownload, maxRetries, retryBackoffBase), RequestOwner(owner)).also { detail ->
+            requireProfile(owner); save("podcast:$id", detail, owner)
+        }
+    }
+    suspend fun podcastDownloadQueue(): PodcastDownloadQueueInfo {
+        val owner = session.cacheScope(); requireProfile(owner)
+        return api().podcastDownloadQueue(RequestOwner(owner)).also { requireProfile(owner) }
+    }
+    suspend fun retryFailedPodcastDownloads(): PodcastRetryFailedResult {
+        val owner = session.cacheScope(); requireProfile(owner)
+        return api().retryFailedPodcastDownloads(RequestOwner(owner)).also { requireProfile(owner) }
+    }
+    suspend fun clearCompletedPodcastDownloads() {
+        val owner = session.cacheScope(); requireProfile(owner)
+        api().clearCompletedPodcastDownloads(RequestOwner(owner))
+        requireProfile(owner)
+    }
     suspend fun podcastPlaybackSettings(): PodcastPlaybackSettings {
         val owner = session.cacheScope(); requireProfile(owner)
         return api().podcastPlaybackSettings(RequestOwner(owner)).also { requireProfile(owner) }
@@ -301,6 +344,62 @@ class Repository @Inject constructor(@param:ApplicationContext private val conte
     suspend fun savePodcastQueuePreferences(body: PodcastQueuePreferences): PodcastQueuePreferences {
         val owner = session.cacheScope(); requireProfile(owner)
         return api().savePodcastQueuePreferences(body.forUpload(), RequestOwner(owner)).forUpload().also { requireProfile(owner) }
+    }
+    suspend fun favoritePodcastEpisode(episodeId: String, loved: Boolean): PodcastFavoriteResponse {
+        val owner = session.cacheScope(); requireProfile(owner)
+        val response = api().favoritePodcastEpisode(episodeId, PodcastFavoriteRequest(favorite = loved, loved = loved), RequestOwner(owner))
+        if (loved) podcastFavoriteIds.value = podcastFavoriteIds.value + episodeId else podcastFavoriteIds.value = podcastFavoriteIds.value - episodeId
+        cachedPodcastEpisode(episodeId)?.let { ep ->
+            val updated = ep.copy(loved = loved, favorite = loved)
+            save("podcast-episode:$episodeId", updated, owner)
+        }
+        val cachedEp = cachedPodcastEpisode(episodeId)
+        val podcastId = cachedEp?.podcastId
+        if (podcastId != null) {
+            cachedPodcastDetail(podcastId)?.let { detail ->
+                val updatedDetail = detail.copy(episodes = detail.episodes.map { if (it.id == episodeId) it.copy(loved = loved, favorite = loved) else it })
+                save("podcast:$podcastId", updatedDetail, owner)
+            }
+        }
+        requireProfile(owner)
+        return response
+    }
+    suspend fun getPodcastFavoriteIds(): Set<String> {
+        val owner = session.cacheScope(); requireProfile(owner)
+        return try {
+            val ids = api().podcastFavoriteIds(RequestOwner(owner)).ids.toSet()
+            podcastFavoriteIds.value = ids
+            requireProfile(owner)
+            ids
+        } catch (_: Exception) {
+            podcastFavoriteIds.value
+        }
+    }
+    suspend fun savePodcastProgress(episodeId: String, completed: Boolean, durationSeconds: Int = 0): EpisodeProgress {
+        val owner = session.cacheScope(); requireProfile(owner)
+        val current = try { api().podcastProgress(episodeId, RequestOwner(owner)) } catch (_: Exception) { null }
+        val baseVersion = current?.version ?: 0L
+        val currentDuration = current?.durationSeconds?.toInt() ?: 1
+        val effectiveDuration = maxOf(1, if (durationSeconds > 0) durationSeconds else currentDuration)
+        val position = if (completed) effectiveDuration else 0
+        val event = if (completed) "ended" else "stop"
+        val sessionToken = "manual-" + java.util.UUID.randomUUID().toString()
+        val write = PodcastProgressUpdate(
+            sessionId = sessionToken,
+            deviceId = "wildstring-android",
+            baseVersion = baseVersion,
+            sequence = 1,
+            positionSeconds = position.toLong(),
+            durationSeconds = effectiveDuration.toLong(),
+            event = event,
+        )
+        val result = api().updatePodcastProgress(episodeId, write, RequestOwner(owner))
+        cachedPodcastEpisode(episodeId)?.let { ep ->
+            val updated = ep.copy(completed = completed, positionSeconds = position)
+            save("podcast-episode:$episodeId", updated, owner)
+        }
+        requireProfile(owner)
+        return result
     }
     private fun podcastQueueConflict(error: HttpException): PodcastQueueConflictException? {
         val raw = error.response()?.errorBody()?.string().orEmpty()

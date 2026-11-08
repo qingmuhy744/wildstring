@@ -228,11 +228,15 @@ data class PodcastEpisode(
     @SerializedName("created_at") val createdAt: String = "",
     @SerializedName("position_seconds") val positionSeconds: Int = 0,
     val completed: Boolean = false,
+    val loved: Boolean = false,
+    val favorite: Boolean = false,
     @SerializedName("resource_saved") val resourceSaved: Boolean = false,
     @SerializedName("resource_automatic") val resourceAutomatic: Boolean = false,
     @SerializedName("resource_playback_cached") val resourcePlaybackCached: Boolean = false,
     @SerializedName("download_status") val downloadStatus: String = "none",
 ) {
+    val isFavorite: Boolean get() = loved || favorite
+
     fun toTrack(podcast: PodcastSummary): Track = Track(
         id = "podcast_ep_$id",
         title = title,
@@ -245,6 +249,21 @@ data class PodcastEpisode(
         podcast = PodcastTrackInfo(podcast.id, podcastArtworkUrl(podcast.coverUrl).orEmpty()),
     )
 }
+
+data class PodcastFavoriteRequest(
+    val favorite: Boolean = true,
+    val loved: Boolean = true,
+)
+
+data class PodcastFavoriteResponse(
+    @SerializedName("episode_id") val episodeId: String = "",
+    val favorite: Boolean = false,
+    val loved: Boolean = false,
+)
+
+data class PodcastFavoriteIdsResponse(
+    val ids: List<String> = emptyList(),
+)
 
 data class PodcastDetail(
     val podcast: PodcastSummary,
@@ -370,4 +389,42 @@ data class PodcastQueueConflictEnvelope(val detail: PodcastQueueConflictDetail =
 data class PodcastQueueConflictDetail(
     val code: String = "",
     val current: PodcastQueueSnapshot = PodcastQueueSnapshot(),
+)
+
+data class PodcastServerSettingsUpdate(
+    @SerializedName("slow_download") val slowDownload: Boolean,
+    @SerializedName("max_retries") val maxRetries: Int = 3,
+    @SerializedName("retry_backoff_base") val retryBackoffBase: Int = 5,
+)
+
+data class PodcastDownloadTaskItem(
+    @SerializedName("episode_id") val episodeId: String = "",
+    @SerializedName("podcast_id") val podcastId: String = "",
+    @SerializedName("episode_title") val episodeTitle: String = "",
+    @SerializedName("podcast_title") val podcastTitle: String = "",
+    val status: String = "",
+    @SerializedName("progress_pct") val progressPct: Double? = null,
+    @SerializedName("downloaded_human") val downloadedHuman: String? = null,
+    @SerializedName("total_human") val totalHuman: String? = null,
+    @SerializedName("speed_human") val speedHuman: String? = null,
+    @SerializedName("slow_mode") val slowMode: Boolean = false,
+    val attempt: Int? = null,
+    @SerializedName("max_retries") val maxRetries: Int? = null,
+    val error: String? = null,
+)
+
+data class PodcastDownloadQueueInfo(
+    @SerializedName("active_count") val activeCount: Int = 0,
+    @SerializedName("queued_count") val queuedCount: Int = 0,
+    @SerializedName("failed_count") val failedCount: Int = 0,
+    @SerializedName("total_pending") val totalPending: Int = 0,
+    val downloading: List<PodcastDownloadTaskItem> = emptyList(),
+    val queued: List<PodcastDownloadTaskItem> = emptyList(),
+    @SerializedName("recent_completed") val recentCompleted: List<PodcastDownloadTaskItem> = emptyList(),
+    val failed: List<PodcastDownloadTaskItem> = emptyList(),
+)
+
+data class PodcastRetryFailedResult(
+    val status: String = "ok",
+    @SerializedName("retried_count") val retriedCount: Int = 0,
 )

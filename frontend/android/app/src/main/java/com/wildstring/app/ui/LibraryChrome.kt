@@ -24,7 +24,7 @@ import androidx.compose.ui.unit.dp
 
 @Composable internal fun CatalogTopBar(state: MusicState, back: () -> Unit, settings: () -> Unit, compact: Boolean = false,
     unread: Int = 0, notifications: (() -> Unit)? = null, queue: (() -> Unit)? = null,
-    recent: (() -> Unit)? = null, offline: (() -> Unit)? = null) {
+    recent: (() -> Unit)? = null, offline: (() -> Unit)? = null, downloads: (() -> Unit)? = null) {
     var menu by remember(state.contentKey) { mutableStateOf(false) }
     val title: @Composable () -> Unit = { Text(catalogTitle(state), maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis) }
     val actions: @Composable RowScope.() -> Unit = {
@@ -32,7 +32,7 @@ import androidx.compose.ui.unit.dp
             BadgedBox(badge = { if (unread > 0) Badge { Text(if (unread > 99) "99+" else unread.toString()) } }) { Icon(Icons.Default.NotificationsNone, stringResource(R.string.notifications)) }
         } }
         IconButton(settings) { Icon(Icons.Default.Settings, stringResource(R.string.settings_title)) }
-        if (queue != null || recent != null || offline != null) Box {
+        if (queue != null || recent != null || offline != null || downloads != null) Box {
             IconButton({ menu = true }, Modifier.testTag("catalog-global-more")) { Icon(Icons.Default.MoreVert, stringResource(R.string.more_options)) }
             DropdownMenu(menu, { menu = false }) {
                 queue?.let { open -> DropdownMenuItem(text = { Text(stringResource(R.string.play_queue)) }, modifier = Modifier.testTag("catalog-open-queue"),
@@ -41,6 +41,8 @@ import androidx.compose.ui.unit.dp
                     leadingIcon = { Icon(Icons.Default.History, null) }, onClick = { menu = false; open() }) }
                 offline?.let { open -> DropdownMenuItem(text = { Text(stringResource(R.string.offline_music)) }, modifier = Modifier.testTag("catalog-open-offline"),
                     leadingIcon = { Icon(Icons.Default.Download, null) }, onClick = { menu = false; open() }) }
+                downloads?.let { open -> DropdownMenuItem(text = { Text(stringResource(R.string.podcast_download_tasks)) }, modifier = Modifier.testTag("catalog-open-download-tasks"),
+                    leadingIcon = { Icon(Icons.Default.Downloading, null) }, onClick = { menu = false; open() }) }
             }
         }
     }

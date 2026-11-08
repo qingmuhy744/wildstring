@@ -20,6 +20,16 @@ data class PodcastQueueRow(
     val unavailable: Boolean = false,
 )
 
+data class PodcastAutoPreviewItem(
+    val episodeId: String,
+    val podcastId: String,
+    val title: String,
+    val showTitle: String,
+    val durationSeconds: Int = 0,
+    val episode: PodcastEpisode,
+    val summary: PodcastSummary,
+)
+
 data class PodcastQueueConflictState(
     val localItems: List<PodcastQueueItem>,
     val serverVersion: Int,
@@ -39,6 +49,7 @@ data class PodcastCloudState(
     val inboxRows: List<PodcastQueueRow> = emptyList(),
     val queue: List<PodcastQueueItem> = emptyList(),
     val queueRows: List<PodcastQueueRow> = emptyList(),
+    val autoPreview: List<PodcastAutoPreviewItem> = emptyList(),
     val preferences: PodcastQueuePreferences? = null,
     val conflict: PodcastQueueConflictState? = null,
 )
@@ -131,11 +142,12 @@ class PodcastQueueController(
         catch (error: Exception) { mutable.update { it.copy(queueError = podcastListFailure(friendlyError(error))) } }
     }
 
-    fun updateShow(podcastId: String, action: String, autoLimit: Int) = scope.launch {
-        if (action !in SHOW_ACTIONS || autoLimit !in 0..100) return@launch
+    fun updateShow(podcastId: String, action: String, autoLimit: Int = 3) = scope.launch {
+        val normalized = normalizeDeliveryAction(action)
+        if (normalized !in SHOW_ACTIONS || autoLimit !in 0..100) return@launch
         preferenceWrite += 1
-        retry = { updateShowNow(podcastId, action, autoLimit) }
-        updateShowNow(podcastId, action, autoLimit)
+        retry = { updateShowNow(podcastId, normalized, autoLimit) }
+        updateShowNow(podcastId, normalized, autoLimit)
     }
 
     fun updateAutoContinue(enabled: Boolean) = scope.launch {
@@ -320,16 +332,26 @@ class PodcastQueueController(
             next
         }
         if (!advanceLocally) return
-        if (episode == null || detail == null) return
-        val plan = podcastEndPlan(remaining.isNotEmpty(), episode, detail, positions(), preferenceFor(episode.podcastId))
-        when (plan.action) {
-            PodcastEndAction.ADVANCE_QUEUE -> {
-                val tracks = resolveTracks(remaining, null)
-                if (tracks.isNotEmpty()) {
-                    prepareAdvance()
-                    play(tracks, 0, null, true)
-                }
+        if (!preferencesLoaded) {
+            runCatching { repository.podcastQueuePreferences() }.onSuccess {
+                mutex.withLock { applyPreferences(it) }
             }
+        }
+        if (remaining.isNotEmpty()) {
+            val tracks = resolveTracks(remaining, null)
+            if (tracks.isNotEmpty()) {
+                prepareAdvance()
+                play(tracks, 0, null, true)
+            }
+            return
+        }
+        if (episode == null || detail == null) {
+            mutable.update { it.copy(queueError = podcastListFailure(context.getString(R.string.podcast_preferences_failed))) }
+            return
+        }
+        val plan = podcastEndPlan(false, episode, detail, positions(), preferenceFor(episode.podcastId))
+        when (plan.action) {
+            PodcastEndAction.ADVANCE_QUEUE -> Unit
             PodcastEndAction.CONTINUE -> {
                 val next = plan.episode ?: return
                 // Derived playback only. podcastQueueAutoContinue must not be uploaded.
@@ -506,7 +528,44 @@ class PodcastQueueController(
 
     private suspend fun publishQueueRows(items: List<PodcastQueueItem>) {
         val rows = describe(items.map { it.episodeId to "" })
-        mutable.update { it.copy(queueRows = rows, queueLoading = false) }
+        val preview = computeAutoPreview(items)
+        mutable.update { it.copy(queueRows = rows, queueLoading = false, autoPreview = preview) }
+    }
+
+    fun refreshAutoPreview() = scope.launch {
+        val preview = computeAutoPreview(snapshot.items)
+        mutable.update { it.copy(autoPreview = preview) }
+    }
+
+    private suspend fun computeAutoPreview(queue: List<PodcastQueueItem>): List<PodcastAutoPreviewItem> {
+        val currentEpId = playingEpisodeId() ?: return emptyList()
+        val anchorId = queue.lastOrNull()?.episodeId ?: currentEpId
+        val anchorEpisode = repository.cachedPodcastEpisode(anchorId) ?: runCatching { repository.podcastEpisode(anchorId) }.getOrNull() ?: return emptyList()
+        val detail = repository.cachedPodcastDetail(anchorEpisode.podcastId) ?: runCatching { repository.podcastDetail(anchorEpisode.podcastId) }.getOrNull() ?: return emptyList()
+        val pref = preferenceFor(anchorEpisode.podcastId)
+        if (!pref.enabled) return emptyList()
+
+        val previewList = mutableListOf<PodcastAutoPreviewItem>()
+        var currentAnchor = anchorEpisode
+        val queuedIds = (queue.map { it.episodeId } + listOfNotNull(currentEpId)).toSet()
+        for (step in 0 until 3) {
+            val next = nextEpisode(currentAnchor, detail, positions(), pref) ?: break
+            if (!queuedIds.contains(next.id) && previewList.none { it.episodeId == next.id }) {
+                previewList.add(
+                    PodcastAutoPreviewItem(
+                        episodeId = next.id,
+                        podcastId = next.podcastId,
+                        title = next.title,
+                        showTitle = detail.podcast.title,
+                        durationSeconds = next.durationSeconds,
+                        episode = next,
+                        summary = detail.podcast,
+                    )
+                )
+            }
+            currentAnchor = next
+        }
+        return previewList
     }
 
     private suspend fun describe(pairs: List<Pair<String, String>>): List<PodcastQueueRow> {
