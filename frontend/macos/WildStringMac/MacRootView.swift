@@ -334,41 +334,18 @@ private struct MacShellView: View {
     @State private var navigationPath = NavigationPath()
     @Environment(\.colorScheme) private var colorScheme
 
-    private var sidebarBackground: Color {
-        colorScheme == .dark
-            ? Color(red: 0x1D / 255, green: 0x1A / 255, blue: 0x18 / 255)
-            : Color(red: 0xEE / 255, green: 0xEE / 255, blue: 0xE5 / 255)
-    }
-    private var sidebarInk: Color {
-        colorScheme == .dark
-            ? Color(red: 0xE8 / 255, green: 0xE3 / 255, blue: 0xD9 / 255)
-            : Color(red: 0x2A / 255, green: 0x2B / 255, blue: 0x25 / 255)
-    }
-    private var sidebarMuted: Color {
-        colorScheme == .dark
-            ? Color(red: 0xAA / 255, green: 0xA5 / 255, blue: 0x9A / 255)
-            : Color(red: 0x62 / 255, green: 0x64 / 255, blue: 0x57 / 255)
-    }
+    // Alias MacTheme tokens; the sidebar owns no colours of its own except faint.
+    private var sidebarBackground: Color { MacTheme.sidebar }
+    private var sidebarInk: Color { MacTheme.ink }
+    private var sidebarMuted: Color { MacTheme.muted }
     private var sidebarFaint: Color {
         colorScheme == .dark
             ? Color(red: 0x9A / 255, green: 0x94 / 255, blue: 0x8A / 255)
             : Color(red: 0x8A / 255, green: 0x8E / 255, blue: 0x7D / 255)
     }
-    private var sidebarAccent: Color {
-        colorScheme == .dark
-            ? Color(red: 0xE9 / 255, green: 0x8A / 255, blue: 0x6D / 255)
-            : Color(red: 0x9F / 255, green: 0x42 / 255, blue: 0x2B / 255)
-    }
-    private var sidebarAccentSoft: Color {
-        colorScheme == .dark
-            ? Color(red: 0x2E / 255, green: 0x29 / 255, blue: 0x24 / 255)
-            : Color(red: 0xDD / 255, green: 0xE2 / 255, blue: 0xD0 / 255)
-    }
-    private var sidebarBorder: Color {
-        colorScheme == .dark
-            ? Color(red: 0x3A / 255, green: 0x35 / 255, blue: 0x2F / 255)
-            : Color(red: 0xDE / 255, green: 0xDE / 255, blue: 0xD2 / 255)
-    }
+    private var sidebarAccent: Color { MacTheme.accentDeep }
+    private var sidebarAccentSoft: Color { MacTheme.oliveSoft }
+    private var sidebarBorder: Color { MacTheme.border }
 
     var body: some View {
         VStack(spacing: 0) {
