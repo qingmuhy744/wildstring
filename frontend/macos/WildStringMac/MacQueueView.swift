@@ -11,6 +11,16 @@ struct MacQueueView: View {
 
     private var entries: [PlaybackService.Item] { playback.playbackItems }
     private var podcastsOnly: Bool { !entries.isEmpty && entries.allSatisfy { $0.trackID.hasPrefix("podcast_ep_") } }
+    private var autoPreview: [PlaybackService.Item] {
+        let cur = PlaybackService.podcastEpisodeID(playback.currentItem?.trackID ?? "")
+        let anchor: String?
+        if let last = playback.podcastCloud?.upcoming(after: cur).last {
+            anchor = "podcast_ep_\(last.episodeId)"
+        } else {
+            anchor = playback.currentItem?.trackID
+        }
+        return playback.podcastAutoPreview(limit: 3, anchorTrackID: anchor)
+    }
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -48,13 +58,14 @@ struct MacQueueView: View {
                 }
                 Text(playback.isShuffled ? "随机播放顺序 · 拖动可调整" : "拖动调整顺序 · 双击播放")
                     .font(MacTheme.micro).foregroundStyle(MacTheme.muted)
-                List(selection: $selection) {
+                // No native List selection: its square grey highlight ignores the row's rounded shape.
+                List {
                     ForEach(Array(entries.enumerated()), id: \.element.id) { position, item in
                         row(item, position: position)
-                            .tag(item.id)
                             .id(item.id)
                             .contentShape(Rectangle())
                             .onTapGesture(count: 2) { play(item) }
+                            .onTapGesture { selection = item.id }
                             .contextMenu { actions(item, position: position) }
                             .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
                             .listRowBackground(Color.clear)
@@ -69,15 +80,59 @@ struct MacQueueView: View {
                 .overlay {
                     if entries.isEmpty {
                         ContentUnavailableView("队列是空的", systemImage: "text.line.first.and.arrowtriangle.forward",
-                            description: Text("从曲库或每日推荐挑几首歌加入。"))
+                            description: Text(podcastsOnly ? "从电台单集挑几集加入。" : "从曲库或每日推荐挑几首歌加入。"))
                     }
+                }
+
+                if (podcastsOnly || playback.currentItem?.trackID.hasPrefix("podcast_ep_") == true), !autoPreview.isEmpty {
+                    continuationSection
                 }
             }
         }
     }
 
+    private var continuationSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text("自动续播")
+                    .font(MacTheme.section(12))
+                    .foregroundStyle(MacTheme.ink)
+                Text("按规则续播 · 不会写入云端待播")
+                    .font(MacTheme.micro)
+                    .foregroundStyle(MacTheme.muted)
+            }
+            .padding(.top, 4)
+            .padding(.horizontal, 8)
+
+            ForEach(autoPreview) { item in
+                HStack(spacing: 8) {
+                    Text(item.title)
+                        .font(MacTheme.caption)
+                        .foregroundStyle(MacTheme.muted)
+                        .lineLimit(1)
+                    Spacer()
+                    Button("+ 待播") {
+                        if let epID = PlaybackService.podcastEpisodeID(item.trackID) {
+                            let curID = PlaybackService.podcastEpisodeID(playback.currentItem?.trackID ?? "")
+                            playback.podcastCloud?.enqueueEpisode(epID, next: false, currentEpisodeID: curID)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .font(MacTheme.micro)
+                    .foregroundStyle(MacTheme.accentDeep)
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+            }
+        }
+        .padding(.vertical, 4)
+        .background(MacTheme.panel, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(MacTheme.border, lineWidth: 1))
+    }
+
     private func row(_ item: PlaybackService.Item, position: Int) -> some View {
         let current = item.id == playback.currentItem?.id
+        let selected = selection == item.id
         return HStack(spacing: 9) {
             Image(systemName: "line.3.horizontal")
                 .font(.caption2).foregroundStyle(.tertiary)
@@ -113,7 +168,7 @@ struct MacQueueView: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 7)
-        .background(current ? MacTheme.accentSoft : Color.clear,
+        .background(current ? MacTheme.accentSoft : (selected ? MacTheme.oliveSoft : Color.clear),
             in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         .overlay(alignment: .leading) {
             if current {

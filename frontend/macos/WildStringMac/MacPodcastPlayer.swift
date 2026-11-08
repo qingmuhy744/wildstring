@@ -293,6 +293,25 @@ struct MacPodcastPlayer: View {
             let detail = try await client.podcast(id: loaded.podcastId)
             guard !Task.isCancelled, playback.currentItem?.trackID == trackID else { return }
             show = detail.podcast
+            let artist = detail.podcast.author.isEmpty ? "电台" : detail.podcast.author
+            let refs = detail.episodes.enumerated().map { index, ep in
+                PodcastContinuation.Episode(
+                    id: ep.id,
+                    title: ep.title,
+                    artist: artist,
+                    album: detail.podcast.title,
+                    chronologicalIndex: detail.episodes.count - 1 - index,
+                    isCompleted: ep.positionSeconds > 0 && ep.durationSeconds > 0
+                        && ep.positionSeconds >= ep.durationSeconds
+                )
+            }
+            let pref = cloud?.showPreference(detail.podcast.id).continuation
+                ?? PodcastContinuation.Preference(autoContinue: playback.podcastAutoContinueEnabled)
+            playback.configurePodcastContinuation(
+                podcastID: detail.podcast.id,
+                episodes: refs,
+                preference: pref
+            )
         } catch {
             guard !Task.isCancelled, playback.currentItem?.trackID == trackID else { return }
             self.error = MacErrorText.message(for: error)

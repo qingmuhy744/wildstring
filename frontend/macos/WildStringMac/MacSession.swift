@@ -477,7 +477,9 @@ final class MacSession {
         playback.podcastDeviceID = podcastDeviceID
         playback.podcastCloud = PodcastCloudQueue(
             client: client,
-            deviceID: WildstringDeviceID.resolve(preferred: podcastDeviceID)
+            deviceID: WildstringDeviceID.resolve(preferred: podcastDeviceID, defaults: defaults),
+            accountKey: "\(primary.description)|\(username)",
+            defaults: defaults
         )
         let libraryKey = "mac.library.\(primary.description)|\(username)"
         if let library = defaults.string(forKey: libraryKey), !library.isEmpty {

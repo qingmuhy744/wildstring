@@ -5,11 +5,13 @@ import SwiftUI
 struct MacPodcastsView: View {
     let client: WildstringClient
     let playback: PlaybackService
+    var favorites: MacFavorites? = nil
+
+    private var cloud: PodcastCloudQueue? { playback.podcastCloud }
 
     @State private var shows: [PodcastSummary] = []
     @State private var detail: PodcastDetail?
     @State private var resume: PodcastEpisode?
-    @State private var followedOnly = true
     @State private var message: String?
     @State private var detailMessage: String?
     @State private var selectedShowID: String?
@@ -48,12 +50,6 @@ struct MacPodcastsView: View {
         .toolbar {
             ToolbarItemGroup {
                 Button { exploring = true } label: { Label("探索", systemImage: "safari") }
-                Picker("范围", selection: $followedOnly) {
-                    Text("已订阅").tag(true)
-                    Text("全部").tag(false)
-                }
-                .pickerStyle(.segmented)
-                .frame(width: 138)
                 Button {
                     Task { await loadShows() }
                 } label: {
@@ -63,7 +59,7 @@ struct MacPodcastsView: View {
                 .disabled(loadingShows)
             }
         }
-        .task(id: followedOnly) {
+        .task {
             await loadShows()
             await playback.podcastCloud?.refreshPreferences()
         }
@@ -72,7 +68,6 @@ struct MacPodcastsView: View {
         }
         .sheet(isPresented: $exploring) {
             MacPodcastExplore(client: client) { id in
-                followedOnly = true
                 selectedShowID = id
                 Task { await loadShows() }
             }
@@ -111,7 +106,7 @@ struct MacPodcastsView: View {
     private var showList: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Text(followedOnly ? "我的订阅" : "全部节目")
+                Text("我的订阅")
                     .font(MacTheme.micro)
                     .foregroundStyle(MacTheme.muted)
                 Spacer()
@@ -151,17 +146,23 @@ struct MacPodcastsView: View {
             )
             .padding(.horizontal, 14)
             .padding(.bottom, 8)
+            let pendingCount = cloud?.unifiedPendingEpisodes.count ?? 0
             Button {
                 showingInbox = true
                 choosingShow = false
             } label: {
                 HStack(spacing: 8) {
-                    Image(systemName: "tray")
+                    Image(systemName: "list.bullet")
                         .foregroundStyle(showingInbox ? MacTheme.accentDeep : MacTheme.muted)
-                    Text("稍后听")
+                    Text("待播列表")
                         .font(.system(size: 13, weight: showingInbox ? .semibold : .medium))
                         .foregroundStyle(MacTheme.ink)
                     Spacer(minLength: 0)
+                    if pendingCount > 0 {
+                        Text("\(pendingCount)")
+                            .font(MacTheme.mono(11))
+                            .foregroundStyle(MacTheme.muted)
+                    }
                 }
                 .padding(.horizontal, 10)
                 .padding(.vertical, 8)
@@ -184,9 +185,9 @@ struct MacPodcastsView: View {
 
             if shows.isEmpty, !loadingShows {
                 ContentUnavailableView(
-                    followedOnly ? "还没有订阅" : "没有节目",
+                    "还没有订阅",
                     systemImage: "antenna.radiowaves.left.and.right",
-                    description: Text(followedOnly ? "切换到“全部”查看可用节目。" : "可以先在网页端添加节目。")
+                    description: Text("点工具栏的“探索”添加节目。")
                 )
                 .frame(maxHeight: .infinity)
             } else {
@@ -214,7 +215,7 @@ struct MacPodcastsView: View {
     @ViewBuilder
     private var detailPane: some View {
         if showingInbox {
-            MacPodcastInbox(playback: playback) {
+            MacPodcastUnifiedQueue(client: client, playback: playback, shows: shows.filter { $0.followed }) {
                 showingInbox = false
             }
         } else if loadingDetail {
@@ -224,6 +225,7 @@ struct MacPodcastsView: View {
         } else if let detail {
             let completedCount = detail.episodes.filter(isCompleted).count
             let unplayedCount = max(0, detail.episodes.count - completedCount)
+            let favoriteCount = detail.episodes.filter { isFavorite($0) }.count
             let visibleEpisodes = filteredEpisodes(from: detail.episodes)
             let groups = groupedEpisodes(from: visibleEpisodes)
 
@@ -233,7 +235,7 @@ struct MacPodcastsView: View {
                     Rectangle().fill(MacTheme.border).frame(height: 1)
                     HStack(spacing: 12) {
                         HStack(alignment: .firstTextBaseline, spacing: 6) {
-                            Text("全部单集")
+                            Text("单集")
                                 .font(MacTheme.section(15))
                                 .foregroundStyle(MacTheme.ink)
                             Text("\(detail.episodes.count)")
@@ -242,8 +244,9 @@ struct MacPodcastsView: View {
                         }
                         HStack(spacing: 6) {
                             filterPill("全部", id: "all")
-                            filterPill("未听 \(unplayedCount)", id: "unplayed")
+                            filterPill("可听 \(unplayedCount)", id: "unplayed")
                             filterPill("已听 \(completedCount)", id: "completed")
+                            filterPill("收藏 \(favoriteCount)", id: "favorite")
                         }
                         .padding(.leading, 6)
 
@@ -267,8 +270,8 @@ struct MacPodcastsView: View {
                     }
                     if visibleEpisodes.isEmpty {
                         ContentUnavailableView(
-                            episodeFilter == "completed" ? "还没有已听完的单集" : (episodeFilter == "unplayed" ? "全部单集都已听完" : "还没有单集"),
-                            systemImage: "waveform"
+                            episodeFilter == "completed" ? "还没有已听完的单集" : (episodeFilter == "unplayed" ? "全部单集都已听完" : (episodeFilter == "favorite" ? "还没有收藏的单集" : "还没有单集")),
+                            systemImage: episodeFilter == "favorite" ? "heart" : "waveform"
                         )
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 28)
@@ -289,6 +292,8 @@ struct MacPodcastsView: View {
                                         showTitle: detail.podcast.title,
                                         current: playback.currentItem?.trackID == "podcast_ep_\(episode.id)",
                                         playing: playback.isPlaying,
+                                        isQueued: cloud?.isQueued(episodeID: episode.id) ?? false,
+                                        isFavorite: isFavorite(episode),
                                         action: {
                                             if playback.currentItem?.trackID == "podcast_ep_\(episode.id)" {
                                                 playback.togglePlayPause()
@@ -298,7 +303,18 @@ struct MacPodcastsView: View {
                                         },
                                         next: { enqueue(episode, in: detail.podcast, next: true) },
                                         append: { enqueue(episode, in: detail.podcast, next: false) },
-                                        save: { Task { await saveForLater(episode) } }
+                                        save: {},
+                                        toggleQueue: {
+                                            if let c = cloud {
+                                                if c.isQueued(episodeID: episode.id) {
+                                                    c.removeEpisode(episode.id)
+                                                } else {
+                                                    enqueue(episode, in: detail.podcast, next: false)
+                                                }
+                                            }
+                                        },
+                                        toggleCompleted: { Task { await toggleEpisodeCompleted(episode) } },
+                                        toggleFavorite: { Task { await toggleEpisodeFavorite(episode) } }
                                     )
                                 }
                             }
@@ -381,6 +397,19 @@ struct MacPodcastsView: View {
                             }
                             .buttonStyle(.plain)
                         }
+                        let pendingQueueCount = cloud?.unifiedPendingEpisodes.count ?? 0
+                        if pendingQueueCount > 0 {
+                            Button { playPendingQueue() } label: {
+                                Label("播放待播 (\(pendingQueueCount))", systemImage: "play.fill")
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .foregroundStyle(MacTheme.ink)
+                                    .padding(.horizontal, 14)
+                                    .padding(.vertical, 8)
+                                    .background(MacTheme.panel, in: Capsule())
+                                    .overlay(Capsule().strokeBorder(MacTheme.border, lineWidth: 1))
+                            }
+                            .buttonStyle(.plain)
+                        }
                         if detail.podcast.followed {
                             Menu {
                                 Button {
@@ -458,8 +487,15 @@ struct MacPodcastsView: View {
     }
 
     private func isCompleted(_ episode: PodcastEpisode) -> Bool {
-        episode.positionSeconds > 0 && episode.durationSeconds > 0 &&
-            episode.positionSeconds >= episode.durationSeconds
+        episode.completed || (episode.positionSeconds > 0 && episode.durationSeconds > 0 &&
+            episode.positionSeconds >= episode.durationSeconds)
+    }
+
+    private func isFavorite(_ episode: PodcastEpisode) -> Bool {
+        if let fav = favorites {
+            return fav.isFavorite(episode.id) || fav.isFavorite("podcast_ep_\(episode.id)")
+        }
+        return episode.loved
     }
 
     private func filteredEpisodes(from episodes: [PodcastEpisode]) -> [PodcastEpisode] {
@@ -469,6 +505,8 @@ struct MacPodcastsView: View {
             filtered = episodes.filter { !isCompleted($0) }
         case "completed":
             filtered = episodes.filter(isCompleted)
+        case "favorite":
+            filtered = episodes.filter { isFavorite($0) }
         default:
             filtered = episodes
         }
@@ -501,7 +539,7 @@ struct MacPodcastsView: View {
     private func loadShows() async {
         loadingShows = true
         do {
-            let loaded = try await client.podcasts(followed: followedOnly)
+            let loaded = try await client.podcasts(followed: true)
             guard !Task.isCancelled else { return }
             shows = loaded
             message = nil
@@ -594,7 +632,11 @@ struct MacPodcastsView: View {
                 skipCompleted: true,
                 autoContinue: playback.podcastAutoContinueEnabled
             )
-        playback.configurePodcastContinuation(episodes: refs, preference: preference)
+        playback.configurePodcastContinuation(
+            podcastID: show?.id,
+            episodes: refs,
+            preference: preference
+        )
     }
 
     private func enqueue(_ episode: PodcastEpisode, in show: PodcastSummary, next: Bool) {
@@ -624,6 +666,39 @@ struct MacPodcastsView: View {
             detailMessage = error
         } else {
             detailMessage = "已加入稍后听"
+        }
+    }
+
+    private func playPendingQueue() {
+        guard let first = cloud?.unifiedPendingEpisodes.first else { return }
+        Task {
+            if let item = await cloud?.playbackItem(for: first.episodeId) {
+                playback.playPodcastEpisode(item)
+            }
+        }
+    }
+
+    private func toggleEpisodeCompleted(_ episode: PodcastEpisode) async {
+        let target = !isCompleted(episode)
+        do {
+            try await client.markPodcastEpisodeCompleted(episodeID: episode.id, duration: episode.durationSeconds, completed: target)
+            await open(episode.podcastId)
+        } catch {
+            detailMessage = "标记完成失败：\(MacErrorText.message(for: error))"
+        }
+    }
+
+    private func toggleEpisodeFavorite(_ episode: PodcastEpisode) async {
+        if let fav = favorites {
+            await fav.toggle(episode.id, isPodcast: true)
+            await open(episode.podcastId)
+        } else {
+            do {
+                try await client.favoritePodcastEpisode(episodeID: episode.id, loved: !isFavorite(episode))
+                await open(episode.podcastId)
+            } catch {
+                detailMessage = "收藏操作失败：\(MacErrorText.message(for: error))"
+            }
         }
     }
 }
@@ -665,7 +740,7 @@ private struct MacPodcastShowRow: View {
                         .font(MacTheme.caption)
                         .foregroundStyle(MacTheme.muted)
                         .lineLimit(1)
-                    Text("\(show.unplayedEpisodes) 未听 · \(show.totalEpisodes) 集")
+                    Text(show.unplayedEpisodes > 0 ? "共 \(show.totalEpisodes) 集 · 还有 \(show.unplayedEpisodes) 集可听" : "共 \(show.totalEpisodes) 集")
                         .font(.system(size: 11))
                         .foregroundStyle(MacTheme.faint)
                 }
@@ -691,16 +766,21 @@ private struct MacPodcastShowRow: View {
 struct MacPodcastEpisodeRow: View {
     let episode: PodcastEpisode
     var showTitle: String? = nil
-    let current: Bool
-    let playing: Bool
-    let action: () -> Void
-    let next: () -> Void
-    let append: () -> Void
+    var current: Bool = false
+    var playing: Bool = false
+    var isQueued: Bool = false
+    var isFavorite: Bool = false
+    var action: () -> Void = {}
+    var next: () -> Void = {}
+    var append: () -> Void = {}
     var save: () -> Void = {}
+    var toggleQueue: (() -> Void)? = nil
+    var toggleCompleted: (() -> Void)? = nil
+    var toggleFavorite: (() -> Void)? = nil
 
     private var completed: Bool {
-        episode.positionSeconds > 0 && episode.durationSeconds > 0 &&
-            episode.positionSeconds >= episode.durationSeconds
+        episode.completed || (episode.positionSeconds > 0 && episode.durationSeconds > 0 &&
+            episode.positionSeconds >= episode.durationSeconds)
     }
 
     private var inProgress: Bool {
@@ -712,7 +792,7 @@ struct MacPodcastEpisodeRow: View {
     }
 
     var body: some View {
-        HStack(spacing: 0) {
+        HStack(spacing: 8) {
             Button(action: action) {
                 HStack(spacing: 14) {
                     leadingControl
@@ -753,10 +833,24 @@ struct MacPodcastEpisodeRow: View {
                 .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
             .buttonStyle(.plain)
+
+            inlineQueueButton
+
             Menu {
                 Button("下一集播放", action: next)
-                Button("加入待播", action: append)
-                Button("加入稍后听", action: save)
+                Button(isQueued ? "移出待播" : "加入待播") {
+                    if let toggleQueue {
+                        toggleQueue()
+                    } else if !isQueued {
+                        append()
+                    }
+                }
+                if let toggleCompleted {
+                    Button(completed ? "标为未听" : "标为已听完", action: toggleCompleted)
+                }
+                if let toggleFavorite {
+                    Button(isFavorite ? "取消收藏" : "单集收藏", action: toggleFavorite)
+                }
             } label: {
                 Image(systemName: "ellipsis")
                     .foregroundStyle(completed && !current ? MacTheme.faint : MacTheme.muted)
@@ -780,6 +874,49 @@ struct MacPodcastEpisodeRow: View {
                     .frame(height: 1)
                     .padding(.leading, 60)
             }
+        }
+    }
+
+    @ViewBuilder
+    private var inlineQueueButton: some View {
+        if current {
+            Text("正在播放")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(MacTheme.accentDeep)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(MacTheme.accent.opacity(0.12), in: Capsule())
+        } else if isQueued {
+            Button {
+                toggleQueue?()
+            } label: {
+                Text("✓ 已待播")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(MacTheme.accentDeep)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(MacTheme.accent.opacity(0.12), in: Capsule())
+            }
+            .buttonStyle(.plain)
+            .help("从待播列表移除")
+        } else {
+            Button {
+                if let toggleQueue {
+                    toggleQueue()
+                } else {
+                    append()
+                }
+            } label: {
+                Text("+ 待播")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(MacTheme.muted)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(MacTheme.panel, in: Capsule())
+                    .overlay(Capsule().strokeBorder(MacTheme.border, lineWidth: 1))
+            }
+            .buttonStyle(.plain)
+            .help("加入待播列表")
         }
     }
 
@@ -903,8 +1040,7 @@ private struct PodcastIntakeSettings: View {
     let podcastID: String
     var onSaved: () -> Void = {}
 
-    @State private var action = "inbox"
-    @State private var autoLimit = 3
+    @State private var action = "queue_last"
     @State private var order = "follow"
     @State private var ready = false
 
@@ -915,21 +1051,11 @@ private struct PodcastIntakeSettings: View {
                     .font(MacTheme.caption)
                     .foregroundStyle(MacTheme.muted)
                 Picker("新集处理", selection: $action) {
-                    Text("稍后听").tag("inbox")
-                    Text("加到队尾").tag("queue_last")
-                    Text("插到当前之后").tag("queue_next")
-                    Text("不处理").tag("ignore")
+                    Text("自动加到队尾").tag("queue_last")
+                    Text("自动插到下一集").tag("queue_next")
+                    Text("关闭（仅关注）").tag("ignore")
                 }
                 .pickerStyle(.menu)
-                .fixedSize()
-                Text("最多自动入队")
-                    .font(MacTheme.caption)
-                    .foregroundStyle(MacTheme.muted)
-                Stepper(value: $autoLimit, in: 0...100) {
-                    Text("\(autoLimit) 集")
-                        .font(MacTheme.mono(12))
-                        .monospacedDigit()
-                }
                 .fixedSize()
             }
             HStack(spacing: 12) {
@@ -954,7 +1080,6 @@ private struct PodcastIntakeSettings: View {
         }
         .task(id: podcastID) { await load() }
         .onChange(of: action) { _, _ in Task { await save() } }
-        .onChange(of: autoLimit) { _, _ in Task { await save() } }
         .onChange(of: order) { _, _ in Task { await save() } }
     }
 
@@ -962,70 +1087,46 @@ private struct PodcastIntakeSettings: View {
         ready = false
         await playback.podcastCloud?.refreshPreferences()
         let show = playback.podcastCloud?.showPreference(podcastID)
-        action = show?.action ?? "inbox"
-        autoLimit = show?.autoLimit ?? 3
+        action = normalizeDeliveryAction(show?.action)
         order = (show?.autoContinue == false || show?.order == "off") ? "off" : (show?.order ?? "follow")
         ready = true
     }
 
     private func save() async {
-        guard ready, let cloud = playback.podcastCloud, cloud.preferences != nil else { return }
+        guard ready, let cloud = playback.podcastCloud else { return }
+        if !cloud.hasResolvedPreferences {
+            await cloud.refreshPreferences()
+        }
         let current = cloud.showPreference(podcastID)
         let effective = (current.autoContinue == false || current.order == "off") ? "off" : current.order
-        guard current.action != action || current.autoLimit != autoLimit || effective != order else { return }
-        await cloud.updateShow(podcastID: podcastID, action: action, autoLimit: autoLimit, order: order)
+        guard cloud.preferenceError != nil || current.action != action || effective != order else { return }
+        await cloud.updateShow(podcastID: podcastID, action: action, autoLimit: current.autoLimit, order: order)
         onSaved()
     }
 }
 
-private struct MacPodcastInbox: View {
+private struct MacPodcastUnifiedQueue: View {
+    let client: WildstringClient
     let playback: PlaybackService
+    let shows: [PodcastSummary]
     var browseShows: () -> Void
 
     var body: some View {
         let cloud = playback.podcastCloud
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                Text("稍后听").font(.system(size: 24, weight: .semibold))
+            VStack(alignment: .leading, spacing: 24) {
+                Text("待播列表")
+                    .font(.system(size: 24, weight: .semibold))
+                    .foregroundStyle(MacTheme.ink)
+
                 if let cloud {
-                    if cloud.inboxLoading, cloud.inbox.items.isEmpty {
-                        HStack(spacing: 8) {
-                            ProgressView().controlSize(.small)
-                            Text("正在读取稍后听…").foregroundStyle(.secondary)
-                        }
-                    } else if let inboxError = cloud.inboxError, cloud.inbox.items.isEmpty {
-                        Text(inboxError).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                        Button("重试") { Task { await cloud.refreshInbox() } }
-                    } else if cloud.inbox.items.isEmpty {
-                        ContentUnavailableView(
-                            "稍后听是空的",
-                            systemImage: "tray",
-                            description: Text("关注的节目更新后会出现在这里。")
-                        )
-                        Button("去看看节目", action: browseShows)
-                    } else {
-                        if let inboxError = cloud.inboxError {
-                            Text(inboxError).font(.callout).foregroundStyle(.orange)
-                            Button("重试") { Task { await cloud.refreshInbox() } }
-                        }
-                        ForEach(cloud.inbox.items) { item in
-                            HStack(alignment: .firstTextBaseline, spacing: 12) {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(cloud.title(for: item.episodeId)).lineLimit(2)
-                                    Text(macPodcastDate(item.addedAt))
-                                        .font(.caption.monospacedDigit())
-                                        .foregroundStyle(.secondary)
-                                }
-                                Spacer(minLength: 8)
-                                Button("加入待播") {
-                                    cloud.enqueueEpisode(item.episodeId, next: false, currentEpisodeID: nil)
-                                }
-                                Button("移除") { Task { await cloud.removeFromInbox(episodeID: item.episodeId) } }
-                            }
-                        }
-                    }
+                    pendingEpisodesSection(cloud)
+
+                    Rectangle().fill(MacTheme.border).frame(height: 1)
+
+                    autoIntakeSection(cloud)
                 } else {
-                    Text("暂时读不到稍后听。请重新登录后再试。").foregroundStyle(.secondary)
+                    Text("暂时读不到待播列表。请重新登录后再试。").foregroundStyle(.secondary)
                 }
             }
             .frame(maxWidth: 720, alignment: .leading)
@@ -1033,5 +1134,174 @@ private struct MacPodcastInbox: View {
             .frame(maxWidth: .infinity, alignment: .topLeading)
         }
         .background(MacTheme.canvas)
+    }
+
+    private func pendingEpisodesSection(_ cloud: PodcastCloudQueue) -> some View {
+        let items = cloud.unifiedPendingEpisodes
+        return VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .firstTextBaseline) {
+                HStack(spacing: 6) {
+                    Text("待播单集")
+                        .font(MacTheme.section(16))
+                        .foregroundStyle(MacTheme.ink)
+                    Text("\(items.count)")
+                        .font(MacTheme.mono(12))
+                        .foregroundStyle(MacTheme.muted)
+                }
+                Spacer()
+                if !items.isEmpty {
+                    Button {
+                        playFirst(cloud)
+                    } label: {
+                        Label("播放全部", systemImage: "play.fill")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(MacTheme.onAccent)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(MacTheme.accent, in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            if cloud.loading && items.isEmpty {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text("正在同步待播列表…").foregroundStyle(.secondary)
+                }
+            } else if items.isEmpty {
+                ContentUnavailableView(
+                    "待播单集是空的",
+                    systemImage: "list.bullet",
+                    description: Text("关注的节目有更新或手动加入待播的单集会显示在这里。")
+                )
+                .padding(.vertical, 20)
+            } else {
+                VStack(spacing: 6) {
+                    ForEach(items) { item in
+                        HStack(alignment: .center, spacing: 12) {
+                            Button {
+                                play(item.episodeId, cloud: cloud)
+                            } label: {
+                                Image(systemName: "play.fill")
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .foregroundStyle(MacTheme.ink)
+                                    .frame(width: 28, height: 28)
+                                    .background(MacTheme.panel, in: Circle())
+                                    .overlay(Circle().strokeBorder(MacTheme.border, lineWidth: 1))
+                            }
+                            .buttonStyle(.plain)
+
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(item.episode?.title ?? cloud.title(for: item.episodeId))
+                                    .font(.system(size: 13, weight: .medium))
+                                    .foregroundStyle(MacTheme.ink)
+                                    .lineLimit(2)
+                                if item.origin == "rule" {
+                                    Text("新集自动加入")
+                                        .font(MacTheme.micro)
+                                        .foregroundStyle(MacTheme.accentDeep)
+                                }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+
+                            Button("移除") {
+                                cloud.removeEpisode(item.episodeId)
+                            }
+                            .buttonStyle(.borderless)
+                            .font(MacTheme.caption)
+                            .foregroundStyle(MacTheme.muted)
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(MacTheme.panel, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(MacTheme.border, lineWidth: 1))
+                    }
+                }
+            }
+        }
+    }
+
+    private func autoIntakeSection(_ cloud: PodcastCloudQueue) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("新集自动加入待播")
+                .font(MacTheme.section(16))
+                .foregroundStyle(MacTheme.ink)
+
+            if shows.isEmpty {
+                Text("还没有订阅的节目。订阅节目后可在这里设置新集入队规则。")
+                    .font(MacTheme.caption)
+                    .foregroundStyle(MacTheme.muted)
+            } else {
+                VStack(spacing: 8) {
+                    ForEach(shows) { show in
+                        MacShowDeliveryRow(cloud: cloud, show: show)
+                    }
+                }
+            }
+        }
+    }
+
+    private func play(_ episodeID: String, cloud: PodcastCloudQueue) {
+        Task {
+            if let item = await cloud.playbackItem(for: episodeID) {
+                playback.playPodcastEpisode(item)
+            }
+        }
+    }
+
+    private func playFirst(_ cloud: PodcastCloudQueue) {
+        guard let first = cloud.unifiedPendingEpisodes.first else { return }
+        play(first.episodeId, cloud: cloud)
+    }
+}
+
+private struct MacShowDeliveryRow: View {
+    let cloud: PodcastCloudQueue
+    let show: PodcastSummary
+
+    @State private var action: String = "queue_last"
+
+    var body: some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(show.title)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(MacTheme.ink)
+                    .lineLimit(1)
+                Text(show.author.isEmpty ? "电台" : show.author)
+                    .font(MacTheme.caption)
+                    .foregroundStyle(MacTheme.muted)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Picker("新集规则", selection: $action) {
+                Text("关闭（仅关注）").tag("ignore")
+                Text("自动加到队尾").tag("queue_last")
+                Text("自动插到下一集").tag("queue_next")
+            }
+            .pickerStyle(.menu)
+            .fixedSize()
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(MacTheme.panel, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(MacTheme.border, lineWidth: 1))
+        .onAppear {
+            let pref = cloud.showPreference(show.id)
+            action = normalizeDeliveryAction(pref.action)
+        }
+        .onChange(of: action) { _, newAction in
+            let pref = cloud.showPreference(show.id)
+            Task {
+                await cloud.updateShow(
+                    podcastID: show.id,
+                    action: newAction,
+                    autoLimit: pref.autoLimit,
+                    order: pref.order
+                )
+            }
+        }
     }
 }
