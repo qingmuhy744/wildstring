@@ -101,34 +101,54 @@ internal val playbackStyles = listOf("cover" to "封面", "vinyl" to "黑胶", "
             val side = minOf(maxWidth, maxHeight)
             when (selection) {
                 "vinyl" -> {
+                    Canvas(Modifier.offset(side * .05f, side * .08f).size(side * .88f)) {
+                        val radius = size.minDimension / 2
+                        val shadowCenter = center + Offset(radius * .035f, radius * .05f)
+                        drawCircle(Brush.radialGradient(.90f to Color.Black.copy(alpha = .42f), 1.04f to Color.Transparent, center = shadowCenter, radius = radius * 1.05f),
+                            radius * 1.05f, shadowCenter)
+                    }
                     Box(Modifier.offset(side * .05f, side * .08f).size(side * .88f).graphicsLayer { rotationZ = phase.angle }) {
                         Canvas(Modifier.fillMaxSize()) {
                             val radius = size.minDimension / 2
-                            drawCircle(Brush.radialGradient(listOf(Color(0xFF30352C), Color(0xFF11150F), Color(0xFF252B20))))
-                            repeat(32) { groove -> drawCircle(Color(0xFFBBC1AD).copy(alpha = .08f), radius * (.46f + groove * .016f), style = Stroke(.65.dp.toPx())) }
-                            drawCircle(Color(0xFF69715E).copy(alpha = .55f), radius - 1.dp.toPx(), style = Stroke(1.dp.toPx()))
+                            drawCircle(Brush.radialGradient(listOf(Color(0xFF2E2A25), Color(0xFF0F0D0B), Color(0xFF221E1A))))
+                            // Irregular hairline grooves: alpha and spacing drift so the disc reads as pressed, not printed.
+                            repeat(64) { groove ->
+                                val fine = ((groove * 37) % 11) / 10f
+                                drawCircle(Color(0xFFC8BFB2).copy(alpha = .028f + fine * .05f), radius * (.455f + groove * .0082f + fine * .0012f), style = Stroke(.5.dp.toPx()))
+                            }
+                            listOf(.50f, .67f, .84f).forEach { ring -> drawCircle(Color(0xFF060905).copy(alpha = .22f), radius * ring, style = Stroke(radius * .04f)) }
+                            drawCircle(Color(0xFF0A0D08).copy(alpha = .65f), radius * .44f + 1.dp.toPx(), style = Stroke(2.dp.toPx()))
+                            drawCircle(Color(0xFFDCE2CD).copy(alpha = .10f), radius * .44f + 2.5.dp.toPx(), style = Stroke(1.dp.toPx()))
+                            drawCircle(Color(0xFF0A0D08).copy(alpha = .55f), radius - 1.5.dp.toPx(), style = Stroke(3.dp.toPx()))
+                            drawCircle(Color(0xFFC8BFB2).copy(alpha = .10f), radius - .5.dp.toPx(), style = Stroke(.75.dp.toPx()))
                         }
                         Cover(vm, track.coverId, track.title,
                             Modifier.align(Alignment.Center).fillMaxSize(.44f).clip(CircleShape))
                         Box(Modifier.align(Alignment.Center).size(side * .023f).clip(CircleShape).background(Color(0xFF191C15)))
                     }
-                    Canvas(Modifier.offset(side * .05f, side * .08f).size(side * .88f)) {
-                        drawCircle(Brush.sweepGradient(listOf(Color.Transparent, Color.White.copy(alpha = .08f), Color.Transparent,
-                            Color.Transparent, Color.White.copy(alpha = .08f), Color.Transparent)))
+                    // Fixed room light: two point-symmetric soft wedges (DESIGN.md §6.7), never rotated with the platter.
+                    Canvas(Modifier.offset(side * .05f, side * .08f).size(side * .88f).graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }) {
+                        val radius = size.minDimension / 2
+                        drawCircle(Brush.sweepGradient(colorStops = vinylSheenStops))
+                        drawCircle(Brush.radialGradient(
+                            0f to Color.Transparent, .46f to Color.Transparent, .55f to Color.Black, .85f to Color.Black, .99f to Color.Transparent,
+                            center = center, radius = radius,
+                        ), blendMode = BlendMode.DstIn)
                     }
                     Canvas(Modifier.offset(side * .84f, side * .06f).width(side * .022f).height(side * .48f)
                         .graphicsLayer { rotationZ = arm; transformOrigin = TransformOrigin(.5f, .04f) }) {
                         val pivot = Offset(size.width / 2, size.height * .04f)
-                        drawCircle(Color(0xFF272D22).copy(alpha = 0.55f), radius = size.width * 2.5f, center = pivot)
-                        drawCircle(Color(0xFF8A927E), radius = size.width * 2.1f, center = pivot, style = Stroke(1.5.dp.toPx()))
+                        drawCircle(Color(0xFF0C0A09).copy(alpha = 0.45f), radius = size.width * 2.6f, center = pivot + Offset(size.width * .35f, size.width * .5f))
+                        drawCircle(Color(0xFF26221F), radius = size.width * 2.4f, center = pivot)
+                        drawCircle(Color(0xFF6B635A).copy(alpha = .8f), radius = size.width * 2.0f, center = pivot, style = Stroke(.75.dp.toPx()))
                         drawRoundRect(
-                            Brush.horizontalGradient(listOf(Color(0xFF606A59), Color(0xFFE0E1D7), Color(0xFF727B67))),
-                            topLeft = Offset(0f, -size.height * .04f),
-                            size = Size(size.width, size.height * .90f),
-                            cornerRadius = CornerRadius(4.dp.toPx()),
+                            Brush.horizontalGradient(listOf(Color(0xFF4A443D), Color(0xFFB4AA9C), Color(0xFF5A534A))),
+                            topLeft = Offset(size.width * .2f, -size.height * .04f),
+                            size = Size(size.width * .6f, size.height * .90f),
+                            cornerRadius = CornerRadius(2.dp.toPx()),
                         )
-                        drawCircle(Brush.radialGradient(listOf(Color(0xFFB2B9A4), Color(0xFF414C37))), radius = size.width * 1.55f, center = pivot)
-                        drawRoundRect(Brush.horizontalGradient(listOf(Color(0xFF303B27), Color(0xFF67765B), Color(0xFF27321F))),
+                        drawCircle(Brush.radialGradient(listOf(Color(0xFFA89F92), Color(0xFF3E3832))), radius = size.width * 1.4f, center = pivot)
+                        drawRoundRect(Brush.horizontalGradient(listOf(Color(0xFF2B2723), Color(0xFF5A524A), Color(0xFF231F1C))),
                             topLeft = Offset(-size.width * .75f, size.height * .82f), size = Size(size.width * 2.5f, size.height * .19f), cornerRadius = CornerRadius(3.dp.toPx()))
                         drawLine(Color(0xFFE98A6D), Offset(-size.width * .65f, size.height * 1.0f), Offset(size.width * 1.65f, size.height * 1.0f), 2.dp.toPx())
                     }
@@ -197,4 +217,17 @@ internal val playbackStyles = listOf("cover" to "封面", "vinyl" to "黑胶", "
         }
         drawLine(Color(0xFF756044), Offset(w * .22f, h * .91f), Offset(w * .78f, h * .91f), 1.dp.toPx())
     }
+}
+
+/** Sweep stops start at 3 o'clock and run clockwise; wedges sit at 45° (lower right) and 225° (upper left). */
+private val vinylSheenStops: Array<Pair<Float, Color>> = run {
+    val warm = Color(0xFFFFF4E0)
+    val clear = warm.copy(alpha = 0f)
+    val wedge = listOf(-23f to 0f, -17f to .02f, -9f to .06f, 0f to .12f, 9f to .06f, 17f to .02f, 23f to 0f)
+    val stops = mutableListOf(0f to clear)
+    listOf(45f, 225f).forEach { centre ->
+        wedge.forEach { (offset, alpha) -> stops += ((centre + offset) / 360f) to warm.copy(alpha = alpha) }
+    }
+    stops += 1f to clear
+    stops.toTypedArray()
 }

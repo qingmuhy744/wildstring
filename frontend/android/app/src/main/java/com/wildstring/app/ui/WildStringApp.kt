@@ -187,14 +187,14 @@ internal fun Modifier.dismissPlayerSwipe(
     )
 }
 internal val classicDarkColors = darkColorScheme(
-    primary = Color(0xFFE98A6D), onPrimary = Color(0xFF291E17), primaryContainer = Color(0xFF5A2E22), onPrimaryContainer = Color(0xFFFFDBCC),
-    secondary = Color(0xFFBCC6B0), onSecondary = Color(0xFF263020), secondaryContainer = Color(0xFF353A2F), onSecondaryContainer = Color(0xFFDDE5D2),
-    outline = Color(0xFF8D9183), outlineVariant = Color(0xFF43473D),
-    background = Color(0xFF191A17), surface = Color(0xFF191A17),
-    surfaceVariant = Color(0xFF2B2E25), onSurface = Color(0xFFEEEAE2), onSurfaceVariant = Color(0xFFA8AA9D),
-    surfaceContainerLowest = Color(0xFF141512), surfaceContainerLow = Color(0xFF1D1E1A),
-    surfaceContainer = Color(0xFF22241F), surfaceContainerHigh = Color(0xFF292B25),
-    surfaceContainerHighest = Color(0xFF33362E),
+    primary = Color(0xFFE98A6D), onPrimary = Color(0xFF291E17), primaryContainer = Color(0xFF43302A), onPrimaryContainer = Color(0xFFFFDBCC),
+    secondary = Color(0xFFBCC6B0), onSecondary = Color(0xFF263020), secondaryContainer = Color(0xFF2E2924), onSecondaryContainer = Color(0xFFE3DDD0),
+    outline = Color(0xFF9A9288), outlineVariant = Color(0xFF3A352F),
+    background = Color(0xFF181614), surface = Color(0xFF181614),
+    surfaceVariant = Color(0xFF2E2924), onSurface = Color(0xFFE8E3D9), onSurfaceVariant = Color(0xFFAAA59A),
+    surfaceContainerLowest = Color(0xFF131110), surfaceContainerLow = Color(0xFF1D1A18),
+    surfaceContainer = Color(0xFF211E1B), surfaceContainerHigh = Color(0xFF2A2622),
+    surfaceContainerHighest = Color(0xFF34302A),
 )
 @Composable
 fun WildStringApp(model: MusicViewModel) {
