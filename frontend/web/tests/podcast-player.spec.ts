@@ -415,6 +415,7 @@ test('昼夜主题、真实调谐和音量、时间码跳转、断点进度与�
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.getByRole('button', { name: '收音机播放' }).click();
   await expect(page.locator('.retro-vu-window i').first()).toHaveCSS('animation-name', 'none');
+  await expect(page.locator('.retro-vu-window')).toHaveCSS('--level-l', '0.000');
   expect(errors).toEqual([]);
 });
 
