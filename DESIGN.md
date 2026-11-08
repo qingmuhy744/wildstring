@@ -226,6 +226,13 @@ Dark has no `--border-strong`; secondary button and input outlines use `--border
 - On a wide Android player, let the visual and controls use available space up to 480dp, with lyrics or queue alongside; preserve the safe area and adapt to shorter windows without fixed-height filler.
 - The disc and arm reflect actual playback, including buffering and failure; stop decorative motion while inactive or when reduced motion is requested. Keep cover preview, lyrics, queue, transport and existing style choices accessible in the native layout.
 - Other music styles may retain their artwork atmosphere. Do not add a full-screen blurred artwork layer to Vinyl; let the disc and theme canvas provide the visual hierarchy.
+- A fixed room-light sheen stays on the disc while the grooves rotate beneath it; the arm is a slim metallic capsule with a dark headshell carrying a theme-accent stylus tip, pivoting between rest (off the record) and engaged (over the outer grooves).
+
+### 6.8 macOS Fullscreen Player
+
+- Layout: header (collapse, center status, player-style menu), stage (disc left, lyrics/queue alongside or centered disc when both panels close), bottom transport. Wide breakpoint `1050pt`; stage max-width `1440pt`; transport max-width `980pt`.
+- The disc takes up to `500pt` centered or `400pt` beside a panel (`33%` of stage width, capped by window height minus `150pt`); track title `26pt` display face below the disc with favorite beside it.
+- The queue toggle lives in the bottom transport (with lyrics toggle, sleep timer, desktop-lyrics switch), not in the header. The queue opens as a floating bottom-trailing panel (`≤360×520pt`, `18pt` radius, themed panel surface with border and a soft shadow, `36pt` from the trailing edge and `126pt` from the bottom so it never covers the transport); a click on the dimmed canvas or `Esc` closes it. The queue must not shift or resize the stage and transport behind it.
 
 ---
 

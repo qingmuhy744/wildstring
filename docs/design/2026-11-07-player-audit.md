@@ -29,3 +29,10 @@
 
 - 播客收音机 L/R 电平表从纯 CSS 装饰动画改为真实输出电平：在 `playback-gain` 已有播放图上挂 `AnalyserNode` 分支（`MediaElementSource` 每元素只能建一次的约束决定 tap 必须在建图处）。RMS 换算 −60 dBFS..0 dBFS 到 0..1，VU 弹道快攻慢放，单声道源经 `channelCount=2` 上混后 L/R 等值；暂停/缓冲/出错与减少动态效果时归零或冻结。样式用 `transform: translateX` 滑轨揭示电平（替代原 clip-path 动画，符合动效约束），`receiver-level` 关键帧移除。
 - Web 端实现；DESIGN.md §2 已补规则。radio-click 的 AudioContext stub 需同步支持 analyser 建图分支（try/catch 兜底，缺失时无声不影响播放）。
+
+## 补充：macOS 全屏播放器重排（2026-11-08）
+
+- 队列开关从顶部胶囊移至底部传输条（右侧与歌词、定时、桌面歌词同组，对齐 Web 与 Apple Music 惯例）；队列改为底右锚定浮层（≤360×520pt、18pt 圆角、主题面板底+描边+柔和投影，距右边 36pt、距底 126pt），不再推移舞台与传输条，Esc 或点击画布空白关闭。
+- 舞台加宽：居中唱片上限 500pt、带面板 400pt（33% 舞台宽、窗口高−150 上限），曲目标题 26pt 衬线显示字；传输条最大宽度 980pt。
+- 唱片质感：盘面叠加固定房间光泽（AngularGradient，不随盘转）、唱臂改为金属胶囊臂+深色唱头壳+珊瑚色针尖、枢轴径向渐变。规则记入 DESIGN.md §6.7 与新增 §6.8。
+- 验证：新增 `MacFullscreenRenderingTests` 渲染四态（宽/窄×浅/深+队列展开）写 PNG 逐张查看；`make macos-test` 37 项通过。真机与正式签名包未验收。
