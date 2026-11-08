@@ -47,6 +47,7 @@ SUPPORTED_REGIONS = frozenset(
 )
 MAX_REGIONS = 5
 RESULT_TTL_SECONDS = 600
+CHART_TTL_SECONDS = 3600
 PREVIEW_TTL_SECONDS = 300
 UPSTREAM_CALLS_PER_MINUTE = 18
 USER_SEARCHES_PER_MINUTE = 30
@@ -379,8 +380,8 @@ class PodcastSearch:
             self.cache.move_to_end(key)
             return hit[1]
 
-    def _store(self, key, items):
-        expires = self.clock() + RESULT_TTL_SECONDS
+    def _store(self, key, items, ttl: int = RESULT_TTL_SECONDS):
+        expires = self.clock() + ttl
         with self.lock:
             self.cache[key] = (expires, items)
             self.cache.move_to_end(key)
@@ -589,7 +590,7 @@ class PodcastSearch:
                     }
                     results = [by_id[value] for value in ids if value in by_id]
                 items = merge_regions([(region, results)])
-                self._store(key, items)
+                self._store(key, items, ttl=CHART_TTL_SECONDS)
             except UpstreamFailure as exc:
                 if exc.code == "upstream_rate_limited":
                     retry = max(THROTTLE_COOLDOWN_SECONDS, exc.retry_after or 0)
