@@ -14,7 +14,7 @@
 
 1. **Warm Archival Paper & Olive Ink (Not Cold Tech SaaS)**
    - Rejects pure `#000000` / `#FFFFFF` and generic neon purple/blue streaming aesthetics.
-   - Uses warm unbleached paper (`#F6F3ED`), soft olive-grey stone (`#EEEEE5`), deep charcoal-olive (`#171716` / `#22251E`), and terracotta coral (`#BC5438` / `#E98A6D`).
+   - Uses warm unbleached paper (`#F6F3ED`), soft olive-grey stone (`#EEEEE5`), warm carbon (`#181614` / `#211E1B`), and terracotta coral (`#BC5438` / `#E98A6D`).
 2. **Editorial Hierarchy**
    - Page titles, album headers, and daily curation titles use a refined Serif display voice (`Songti SC`, `Source Han Serif SC`, `Newsreader`, `Iowan Old Style`) to evoke printed liner notes and broadsheets.
    - Catalog tables, controls, and metadata use crisp system Sans-Serif with strict tabular numerals (`font-variant-numeric: tabular-nums`) for timestamps, track numbers, and audio specs.
@@ -64,32 +64,37 @@ WildString supports two themes: **Light (Warm Paper — Daylight)** and **Dark (
 | `--accent-hover` | `#A8472E` | Hover state for primary accent controls |
 | `--accent-tint` | `--accent` at 14% | Currently playing podcast episode row fill |
 
-### 3.2 Dark Theme (Charcoal Olive & Warm Coral)
+### 3.2 Dark Theme (Warm Carbon & Warm Coral)
+
+Dark shares the hue family of Light: every neutral sits at hue 25°–35° with 6%–10% saturation (warm brown-black), matching the terracotta accent. Olive/sage appears only as a text colour, never as a surface fill — an olive fill at night reads as muddy grey-green.
 
 | Token | Hex | Role & Usage |
 | :--- | :--- | :--- |
-| `--bg` / `canvas` | `#171716` | Primary page canvas (warm carbon black) |
-| `--sidebar` | `#1C1E18` | Left navigation sidebar & right inspector background |
-| `--surface` / `panel` | `#22251E` | Cards, track rows, hero panels, bottom transport bar |
-| `--surface-subtle` / `raised` | `#292C24` | Elevated cards, hover surfaces |
-| `--surface-input` | `#191D17` | Search inputs and form fields |
-| `--bg-hover` | `#30332B` | Hover state for rows and secondary controls |
-| `--row-active` / `accentSoft` | `#262B21` | Currently playing track row fill |
-| `--nav-active` / `oliveSoft` / `--tag-bg` | `#30352A` | Selected sidebar navigation pill, AI badge and neutral tag fill |
-| `--border` | `#33342E` | Hairline dividers (`1px`) and card strokes |
-| `--text` / `ink` | `#EEEAE2` | Primary warm parchment text |
-| `--muted` | `#A8A59C` | Secondary metadata text (artist, album, descriptions) |
-| `--faint` | `#8E9284` | Timestamps, disabled/completed episode text, section kickers |
+| `--bg` / `canvas` | `#181614` | Primary page canvas (warm carbon black) |
+| `--sidebar` | `#1D1A18` | Left navigation sidebar & right inspector background |
+| `--surface` / `panel` | `#211E1B` | Cards, track rows, hero panels, bottom transport bar |
+| `--surface-subtle` / `raised` | `#2A2622` | Elevated cards, menus, dialogs |
+| `--surface-input` | `#131110` | Search inputs and form fields (recessed below the canvas) |
+| `--bg-hover` | `#34302A` | Hover state for rows and secondary controls |
+| `--row-active` / `accentSoft` | `#2B2521` | Currently playing track row fill |
+| `--nav-active` / `oliveSoft` / `--tag-bg` | `#2E2924` | Selected sidebar navigation pill, selected chip, AI badge and neutral tag fill (warm taupe) |
+| `--border` | `#3A352F` | Hairline dividers (`1px`) and card strokes |
+| `--text` / `ink` | `#E8E3D9` | Primary warm parchment text |
+| `--muted` | `#AAA59A` | Secondary metadata text (artist, album, descriptions) |
+| `--faint` | `#9A948A` | Timestamps, disabled/completed episode text, section kickers (≥ 4.5:1 on canvas, sidebar, panel, raised, row-active and tag; use `--muted` on `--bg-hover`) |
 | `--accent` / `--accent-text` / `accentDeep` | `#E98A6D` | Warm coral accent for buttons, active waveform, and progress bars |
 | `--accent-hover` | `#F0A48A` | Hover highlight for primary accent controls |
-| `--olive` | `#B4C09E` | Soft sage-olive text for recommendation reasons (`reason`) |
+| `--accent-container` | `#43302A` | Tonal accent fill (queue/play-all buttons, accent badges); text on it uses `#FFDBCC` (9.6:1). Replaces the solid maroon `#5A2E22` |
+| `--olive` | `#B4C09E` | Soft sage-olive **text** for recommendation reasons (`reason`) |
 | `--on-accent` | `#211B17` | Dark ink icon/text on `--accent` primary buttons |
 | `--success` | `#B2C69A` | Success status text and icons |
 | `--warning` | `#E5BD7C` | Warning status text and icons |
 | `--danger` | `#F2A392` | Error banners and destructive menu items |
-| `--accent-tint` | `--accent` at 14% | Currently playing podcast episode row fill |
+| `--accent-tint` | `--accent` at 14% | Currently playing podcast episode row fill and selected states that need warmth |
 
-Dark has no `--border-strong`; secondary button and input outlines use `--border`.
+Dark has no `--border-strong`; secondary button and input outlines use `--border`. Verified contrast: `--text` ≥ 10.2:1, `--muted` ≥ 5.3:1 and `--olive` ≥ 6.8:1 on every surface above; `--accent` ≥ 5.2:1.
+
+**Android Material mapping**: `background`/`surface` = `canvas`; `surfaceContainerLowest` = `--surface-input`; `surfaceContainerLow` = `--sidebar`; `surfaceContainer` = `panel`; `surfaceContainerHigh` = `raised`; `surfaceContainerHighest` = `--bg-hover`; `surfaceVariant` and `secondaryContainer` = `--nav-active`; `primaryContainer` = `--accent-container`; `outlineVariant` = `--border`; `onSurface` = `--text`; `onSurfaceVariant` = `--muted`.
 
 ---
 
@@ -222,11 +227,11 @@ Dark has no `--border-strong`; secondary button and input outlines use `--border
 ### 6.7 Music Vinyl Player
 
 - With no valid saved music player style, default to Vinyl. Preserve an existing explicit Cover, Vinyl, or Cassette choice; changing this default must not overwrite it. Podcast playback keeps its own presentation.
-- Vinyl sits on the theme canvas from §3, with restrained dark olive grooves and a slender tonearm. The disc uses `#30352C`, `#11150F`, and `#252B20`, with `#BBC1AD` grooves at 8% opacity and a `#191C15` spindle. The circular artwork occupies approximately 44% of the disc diameter. Use the display face for the track title, tabular figures for time and audio quality, and the theme accent for the primary play control.
+- Vinyl sits on the theme canvas from §3, with restrained dark olive grooves and a slender tonearm. The disc uses `#2E2A25`, `#0F0D0B`, and `#221E1A` (warm black), with warm `#C8BFB2` hairline grooves whose opacity drifts between 3% and 8% so the disc reads as pressed rather than printed, and a `#1A1714` spindle. The circular artwork occupies approximately 44% of the disc diameter. Use the display face for the track title, tabular figures for time and audio quality, and the theme accent for the primary play control.
 - On a wide Android player, let the visual and controls use available space up to 480dp, with lyrics or queue alongside; preserve the safe area and adapt to shorter windows without fixed-height filler.
 - The disc and arm reflect actual playback, including buffering and failure; stop decorative motion while inactive or when reduced motion is requested. Keep cover preview, lyrics, queue, transport and existing style choices accessible in the native layout.
 - Other music styles may retain their artwork atmosphere. Do not add a full-screen blurred artwork layer to Vinyl; let the disc and theme canvas provide the visual hierarchy.
-- A fixed room-light sheen stays on the disc while the grooves rotate beneath it; the arm is a slim metallic capsule with a dark headshell carrying a theme-accent stylus tip, pivoting between rest (off the record) and engaged (over the outer grooves).
+- A fixed room-light sheen rests on the disc while the grooves rotate beneath it, as two point-symmetric soft wedges, each about 30° wide with a smooth rise and fall (0% at the edges, at most 12% warm white on the centre line, no hard edges or hairlines). Radially they fade out near the label and at the rim, peaking between 55% and 85% of the disc radius; the disc fill carries no second static highlight, so the wedges are the only light source. The wedges never rotate with the platter. Three irregular smooth dark track-separation rings interrupt the grooves, each spanning approximately 4% of the disc radius. A 2px dark pressed rim and 1px faint bright edge seat the centre artwork into the label area; the disc edge stays subdued instead of looking moulded. Light falls from the upper left, with the arm and pivot casting restrained shadows 3px toward the lower right. The arm is a slim matte warm-metal bar (`#4A443D` → `#B4AA9C` → `#5A534A`, soft centre highlight, never chrome or green) or capsule on a warm-black pivot (`#26221F`) with a warm-black headshell (`#2B2723` → `#5A524A`) carrying a theme-accent stylus tip, pivoting between rest and engaged over the outer grooves. A soft contact shadow sits under the disc and does not rotate; the disc rim is a dark pressed edge with at most a 10% hairline highlight, never a bright ring.
 
 ### 6.8 macOS Fullscreen Player
 
@@ -238,12 +243,13 @@ Dark has no `--border-strong`; secondary button and input outlines use `--border
 
 ## 7. Guardrails for UI Generation (Do's & Don'ts)
 
-- **DO** use the exact warm paper (`#F6F3ED`) / olive stone (`#EEEEE5`) / charcoal olive (`#171716`) / terracotta (`#BC5438` & `#E98A6D`) palette across all screens.
+- **DO** use the exact warm paper (`#F6F3ED`) / olive stone (`#EEEEE5`) / warm carbon (`#181614`) / terracotta (`#BC5438` & `#E98A6D`) palette across all screens.
 - **DO** keep border radii consistent: `16px` for hero panels, `14px` for cards, `10px–12px` for track/episode rows, `999px` (capsule) for filter chips and primary pill CTAs. When nesting rounded shapes with `gap < 32px`, follow `inner radius = outer radius - gap` (for values `> 2px`) so concentric corners align cleanly.
 - **DO** maintain strict visual and baseline alignment across side-by-side cards, table columns, and action bars; apply `1px–2px` optical centering adjustments for play triangles inside circles and icons beside text.
 - **DO** ship every interactive surface with complete states (`Hover`, `Active`, visible keyboard `Focus`, layout-matched `Loading`, actionable `Empty`, and inline `Error` / permission feedback). System and error messages must stay calm and specific ("what failed + what to do next"), without exclamation marks or filler copy.
 - **DO** grey out completed podcast episodes and hide their progress bars so only partially played episodes show progress bars.
 - **DON'T** clutter high-frequency listening views with marketing slogans, redundant helper paragraphs, or decorative secondary badges—if a screen needs explanatory text to be understood, fix the layout hierarchy instead.
 - **DON'T** introduce cold blue, neon purple, or pure black (`#000000`) backgrounds, or stack heavy drop shadows on bordered cards; rely on spacing, `1px solid var(--border)` strokes, and subtle surface tonal shifts for depth.
+- **DON'T** use olive or sage as a surface, chip or button fill in the dark theme; use `--nav-active`, `--accent-container` or `--accent-tint`. Olive remains a text colour.
 - **DON'T** animate layout properties (`top`, `left`, `width`, `height`) or attach unthrottled scroll listeners; animate only `transform` and `opacity` and always respect `prefers-reduced-motion`.
 - **DON'T** place destructive buttons (`取消订阅`, `删除`) next to primary `播放` / `继续收听` buttons; always place them inside the `⋯` menu.
