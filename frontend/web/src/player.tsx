@@ -727,7 +727,15 @@ export function usePlayer(userId: string) {
       setIndex(0);
       return;
     }
-    if (!currentTrack?.podcast_id) return;
+    if (!currentTrack?.podcast_id) {
+      // Idle player: adopt queued episodes as the current item without
+      // autoplay, so add-to-queue survives reload and Play stays enabled.
+      if (at < 0 && audible.length) {
+        setQueue(audible);
+        setIndex(0);
+      }
+      return;
+    }
     const found = audible.findIndex((track) => track.id === currentTrack.id);
     setQueue(found >= 0 ? audible : [currentTrack, ...audible]);
     setIndex(found >= 0 ? found : 0);
