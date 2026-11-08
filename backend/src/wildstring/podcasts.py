@@ -454,6 +454,37 @@ class PodcastEpisodeResponse(BaseModel):
     resource_saved: bool = False
     resource_automatic: bool = False
     resource_playback_cached: bool = False
+    favorite: bool = False
+    loved: bool = False
+
+
+class EpisodeFavoriteUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    loved: bool | None = None
+    favorite: bool | None = None
+
+    @property
+    def target_state(self) -> bool:
+        if self.favorite is not None:
+            return self.favorite
+        if self.loved is not None:
+            return self.loved
+        return True
+
+
+class EpisodeFavoriteResponse(BaseModel):
+    episode_id: str
+    favorite: bool
+    loved: bool
+
+
+class PodcastFavoriteEpisodeResponse(PodcastEpisodeResponse):
+    favorite: bool = True
+    loved: bool = True
+    podcast_title: str
+    cover_url: str
+    author: str
+    favorited_at: str
 
 
 class PodcastSummaryResponse(BaseModel):
@@ -2048,6 +2079,7 @@ class PodcastManager:
         saved = self.resources.saved_ids(user_id)
         automatic = self.resources.automatic_ids(user_id)
         playback = self.resources.playback_ids(user_id)
+        favorites = set(self.favorite_ids(user_id)) if user_id is not None else set()
         policy = self.auto_downloads.settings(user_id, podcast_id)
         with self.database.connect() as conn:
             if user_id is not None:
@@ -2168,6 +2200,8 @@ class PodcastManager:
                         "resource_saved": ep["id"] in saved,
                         "resource_automatic": ep["id"] in automatic,
                         "resource_playback_cached": ep["id"] in playback,
+                        "favorite": ep["id"] in favorites,
+                        "loved": ep["id"] in favorites,
                     }
                     for ep in sorted_ep_rows
                 ],
@@ -2225,6 +2259,13 @@ class PodcastManager:
             if not row:
                 return None
             require_episode(conn, user_id, episode_id)
+            favorited = (
+                conn.execute(
+                    "SELECT 1 FROM podcast_episode_favorites WHERE user_id=? AND episode_id=?",
+                    (user_id, episode_id),
+                ).fetchone()
+                is not None
+            )
             return {
                 "id": row["id"],
                 "podcast_id": row["podcast_id"],
@@ -2244,7 +2285,105 @@ class PodcastManager:
                 "resource_saved": episode_id in self.resources.saved_ids(user_id),
                 "resource_automatic": episode_id in self.resources.automatic_ids(user_id),
                 "resource_playback_cached": episode_id in self.resources.playback_ids(user_id),
+                "favorite": favorited,
+                "loved": favorited,
             }
+
+    def favorite_ids(self, user_id: str) -> list[str]:
+        with self.database.connect() as conn:
+            rows = conn.execute(
+                "SELECT episode_id FROM podcast_episode_favorites WHERE user_id = ? ORDER BY created_at DESC",
+                (user_id,),
+            ).fetchall()
+            return [r[0] for r in rows]
+
+    def list_favorites(self, user_id: str) -> list[dict[str, Any]]:
+        with self.database.connect() as conn:
+            visible = None if catalog_manager(conn, user_id) else personal_ids(conn, user_id)
+            query = """
+                SELECT
+                    e.id, e.podcast_id, e.guid, e.title, e.description, e.audio_url,
+                    e.duration_seconds, e.pub_date, e.episode_number, e.season_number, e.created_at,
+                    COALESCE(e.download_status, 'none') AS download_status,
+                    p.title AS podcast_title, p.cover_url, p.author,
+                    COALESCE(pr.position_seconds, 0) AS position_seconds,
+                    COALESCE(pr.completed, 0) AS completed,
+                    f.created_at AS favorited_at
+                FROM podcast_episode_favorites f
+                JOIN podcast_episodes e ON e.id = f.episode_id
+                JOIN podcasts p ON p.id = e.podcast_id
+                LEFT JOIN podcast_progress pr ON pr.episode_id = e.id AND pr.user_id = f.user_id
+                WHERE f.user_id = ?
+                ORDER BY f.created_at DESC
+            """
+            rows = conn.execute(query, (user_id,)).fetchall()
+            saved = self.resources.saved_ids(user_id)
+            automatic = self.resources.automatic_ids(user_id)
+            playback = self.resources.playback_ids(user_id)
+            return [
+                {
+                    "id": r["id"],
+                    "podcast_id": r["podcast_id"],
+                    "guid": r["guid"],
+                    "title": r["title"],
+                    "description": r["description"],
+                    "audio_url": r["audio_url"],
+                    "duration_seconds": r["duration_seconds"],
+                    "pub_date": r["pub_date"],
+                    "episode_number": r["episode_number"],
+                    "season_number": r["season_number"],
+                    "created_at": r["created_at"],
+                    "position_seconds": r["position_seconds"],
+                    "completed": bool(r["completed"]),
+                    "local_path": None,
+                    "download_status": r["download_status"] or "none",
+                    "resource_saved": r["id"] in saved,
+                    "resource_automatic": r["id"] in automatic,
+                    "resource_playback_cached": r["id"] in playback,
+                    "favorite": True,
+                    "loved": True,
+                    "podcast_title": r["podcast_title"],
+                    "cover_url": r["cover_url"],
+                    "author": r["author"],
+                    "favorited_at": r["favorited_at"],
+                }
+                for r in rows
+                if visible is None or r["podcast_id"] in visible
+            ]
+
+    def set_episode_favorite(self, episode_id: str, user_id: str, favorite: bool) -> dict[str, Any]:
+        with self.database.connect(write=True) as db:
+            db.execute("BEGIN IMMEDIATE")
+            self.resources._episode(db, episode_id)
+            podcast_id = require_episode(db, user_id, episode_id)
+            if favorite:
+                admit(db, user_id, podcast_id)
+                db.execute(
+                    "INSERT OR IGNORE INTO podcast_episode_favorites(user_id, episode_id, created_at) VALUES (?, ?, ?)",
+                    (user_id, episode_id, datetime.now(UTC).isoformat()),
+                )
+                db.execute(
+                    "INSERT OR IGNORE INTO podcast_resource_state(episode_id) VALUES (?)",
+                    (episode_id,),
+                )
+                db.execute(
+                    "UPDATE podcast_resource_state SET zero_since=NULL WHERE episode_id=?",
+                    (episode_id,),
+                )
+            else:
+                db.execute(
+                    "DELETE FROM podcast_episode_favorites WHERE user_id=? AND episode_id=?",
+                    (user_id, episode_id),
+                )
+                stamp = time.time()
+                db.execute(
+                    """UPDATE podcast_resource_state SET zero_since=COALESCE(zero_since, ?)
+                    WHERE episode_id=?
+                      AND NOT EXISTS(SELECT 1 FROM podcast_resource_refs WHERE episode_id=?)
+                      AND NOT EXISTS(SELECT 1 FROM podcast_episode_favorites WHERE episode_id=?)""",
+                    (stamp, episode_id, episode_id, episode_id),
+                )
+        return {"episode_id": episode_id, "favorite": favorite, "loved": favorite}
 
 
 def podcast_router(
@@ -2522,6 +2661,14 @@ def podcast_router(
         manager.clear_recent_completed()
         return {"status": "ok"}
 
+    @router.get("/favorites/ids")
+    def get_favorite_ids(user: Annotated[dict, Depends(auth.require_session)]):
+        return {"ids": manager.favorite_ids(user["id"])}
+
+    @router.get("/favorites", response_model=list[PodcastFavoriteEpisodeResponse])
+    def get_favorites(user: Annotated[dict, Depends(auth.require_session)]):
+        return manager.list_favorites(user["id"])
+
     @router.get("/{podcast_id}/download-settings")
     def get_download_settings(
         podcast_id: str, user: Annotated[dict, Depends(auth.require_session)]
@@ -2630,6 +2777,19 @@ def podcast_router(
     @router.delete("/episodes/{episode_id}/download", dependencies=[Depends(auth.require_client)])
     def release_episode(episode_id: str, user: Annotated[dict, Depends(auth.require_session)]):
         return manager.resources.release(episode_id, user["id"])
+
+    @router.put(
+        "/episodes/{episode_id}/favorite",
+        response_model=EpisodeFavoriteResponse,
+        dependencies=[Depends(auth.require_client)],
+    )
+    def set_episode_favorite(
+        episode_id: str,
+        user: Annotated[dict, Depends(auth.require_session)],
+        body: EpisodeFavoriteUpdate | None = None,
+    ):
+        target = (body or EpisodeFavoriteUpdate()).target_state
+        return manager.set_episode_favorite(episode_id, user["id"], target)
 
     @router.get("/episodes/{episode_id}/progress", response_model=ProgressState)
     def read_progress(

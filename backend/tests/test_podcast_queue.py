@@ -92,7 +92,7 @@ def deliver(database, episode_ids):
 
 def test_schema_49_migrates_and_backfills_baselines(context):
     client, database = context
-    assert SCHEMA_VERSION == 49
+    assert SCHEMA_VERSION >= 49
     assert follow(client).status_code == 200
     with database.connect() as db:
         tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
