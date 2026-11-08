@@ -225,6 +225,14 @@ def test_default_auto_continue_round_trip(context):
     assert kept.json()["auto_continue"] is False
     assert kept.json()["shows"][SHOW]["action"] == "ignore"
     assert kept.json()["shows"][SHOW]["order"] == "asc"
+    cleared = client.put(
+        "/api/v1/podcasts/queue/preferences",
+        headers=HEADERS,
+        json={"default_action": "inbox", "auto_limit": 3, "auto_continue": False, "shows": {}},
+    )
+    assert cleared.status_code == 200, cleared.text
+    assert cleared.json()["auto_continue"] is False
+    assert cleared.json()["shows"] == {}
 
 
 def test_unavailable_episode_rejected(context):
