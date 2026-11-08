@@ -35,10 +35,12 @@
 
 | 端 | 状态 | 需要改的位置 |
 | --- | --- | --- |
-| Android | 已按规范实现，**未做截图验收**：只在一台真机看过发现页，没有逐页走查 | `ui/WildStringApp.kt` 的 `classicDarkColors`；`ui/PlaybackVisual.kt` 黑胶；`res/values/styles.xml` 窗口背景 |
-| Web | 未做 | `src/style.css`、`src/theme.tsx`、`index.html`（`theme-color` 与首屏背景）、`src/workspace.css`、`src/podcasts.css`、`src/completion.css`、`src/desktop-help.css`、`src/playback-style.css`（黑胶、唱臂） |
-| macOS | 未做 | `WildStringMac/MacChrome.swift` 的 `MacTheme` 暗色分量；黑胶若有绘制，同步 §6.7 |
-| iOS | 未做 | `WildString/Appearance.swift` 与 `Assets.xcassets`；暗色目前依赖系统色的位置需要核对是否应改为 `canvas` 等令牌 |
+| Android | 已按规范实现并提交，**未做截图验收**：只在一台真机看过发现页，没有逐页走查 | `ui/WildStringApp.kt` 的 `classicDarkColors`；`ui/PlaybackVisual.kt` 黑胶；`res/values/styles.xml` 窗口背景 |
+| Web | 已实现（2026-11-09）：令牌、散落暗色值、黑胶盘面/纹路/唱臂/枢轴、`theme-color` 全部换暖；`podcast-player.spec.ts` 两处旧色断言同步更新 | `src/style.css`、`src/theme.tsx`、`index.html`、`src/workspace.css`、`src/podcasts.css`、`src/completion.css`、`src/browse.css`、`src/desktop-help.css`、`src/podcast-player.css`、`src/playback-style.css`、`tests/podcast-player.spec.ts` |
+| macOS | 已实现（2026-11-09）：`MacTheme` 与 `MacRootView` 侧栏的暗色分量全量换暖；黑胶盘面、纹路、唱臂、唱头、枢轴同步 §6.7 | `WildStringMac/MacChrome.swift`、`WildStringMac/MacRootView.swift`、`WildStringMac/MacFullscreen.swift` |
+| iOS | 已实现（2026-11-09）：仅播放器自定义绘制面（背景画布、黑胶盘面/纹路/轴心）换暖；列表等系统色界面保持 iOS 原生外观，未引入令牌 | `WildString/NowPlayingView.swift` |
+
+例外（按约定保留）：电台节目占位封面插画（`podcasts.css` 收音机拨盘一带）与应用图标仍为旧橄榄插画色，属美术资产而非主题面，另议；`podcast-search.css` 中 `var(--muted, #9ca3af)` 等回退值在 `:root` 恒有定义、永不渲染，未改动。
 
 应用图标（`app-icon.svg`、`ic_wildstring.xml`、`icon_colors.xml`）含旧橄榄色，**不在本次范围**，需要时单独决定。
 
@@ -58,6 +60,14 @@
 - 状态：Loading / Empty / Error / 权限不足 在暗色下可读。
 - 走通：播放、切页、返回；播放器各样式（封面、黑胶、磁带）切换。
 - 命令：Web `make test-affected-desktop`；macOS `make macos-test`；iOS `make ios-test`；Android `make android-ci`。发布前 `make ci`。
+
+## 7. 迁移执行记录（2026-11-09，Web/macOS/iOS）
+
+- 已验证：`make check` 全绿（含 Web format/typecheck/i18n）；`make test-affected` 全绿（backend + Playwright，含同步后的 `podcast-player` 30 项）；`make macos-test` 37 项通过；`make ios-test` 105 项通过；`make ios-build` 编译 app target 确认 `NowPlayingView` 可构建。全仓 `git grep` 契约 §2 旧值清零（图标与插画例外除外）。
+- 对比度：新令牌在 `canvas/sidebar/panel/raised/row-active/nav-active` 上 `--text`≥10.2、`--muted`≥5.3、`--faint`≥4.5、`--olive`≥6.8、`--accent`≥5.2；`--faint` 在 `--bg-hover` 上 4.35:1，规范已限定该面用 `--muted`；`--on-accent` 6.7、`#FFDBCC` 9.6。
+- 视觉（已逐张查看）：Web 桌面 1360 与 390px、浅深各一轮——库列表、电台页（含空态）、节目详情、管理中心、黑胶全屏播放器、迷你播放条与正在播放行；macOS 渲染测试 PNG——全屏宽/窄×浅深、队列浮层浅色。浅色主题确认未受影响。
+- 未覆盖：Android 仍无逐页截图走查；iOS 未做模拟器渲染截图（仅单元测试 + 编译）；Web 的 Loading/Error 边界状态、播放器样式切换（封面/磁带）与真实播放走查未逐项执行；`make ci` 未跑（发布前需要）。
+- 实现方式备忘：Web 在令牌精确映射之外，对残留的暗色橄榄色相写死值做了保明度、色相归 30° 的程序化转换（限暗色作用域，饱和度封顶 22%），使历史漂移的表面/边框色保持层级地并入暖色族；磁带外壳随动换暖，浅色作用域与语义绿（成功/在线）不参与。
 
 ## 6. 已知风险
 
