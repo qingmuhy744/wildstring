@@ -1,7 +1,7 @@
 [versions]
 agp = "9.5.1"
 kotlin = "2.4.21"
-ksp = "2.3.12"
+ksp = "2.3.13"
 hilt = "2.60.1"
 compose = "2026.09.00"
 activity = "1.11.0"
@@ -20,8 +20,8 @@ espresso = "3.7.0"
 
 [libraries]
 core = { module = "androidx.core:core-ktx", version.ref = "core" }
-commonmark = { module = "org.commonmark:commonmark", version = "0.31.0" }
-commonmark-tables = { module = "org.commonmark:commonmark-ext-gfm-tables", version = "0.31.0" }
+commonmark = { module = "org.commonmark:commonmark", version = "0.32.0" }
+commonmark-tables = { module = "org.commonmark:commonmark-ext-gfm-tables", version = "0.32.0" }
 compose-bom = { module = "androidx.compose:compose-bom", version.ref = "compose" }
 compose-ui = { module = "androidx.compose.ui:ui" }
 compose-tooling = { module = "androidx.compose.ui:ui-tooling" }
