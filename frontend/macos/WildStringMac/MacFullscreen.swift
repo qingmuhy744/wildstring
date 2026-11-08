@@ -188,11 +188,11 @@ struct MacFullscreenPlayer: View {
         let engaged = playback.isPlaying && !playback.isBuffering && playback.errorMessage == nil
         return ZStack(alignment: .topTrailing) {
             ZStack {
-                Circle().fill(RadialGradient(colors: [Color(red: 0.19, green: 0.21, blue: 0.17),
-                    Color(red: 0.07, green: 0.08, blue: 0.06), Color(red: 0.15, green: 0.17, blue: 0.13)],
+                Circle().fill(RadialGradient(colors: [Color(red: 0.18, green: 0.165, blue: 0.145),
+                    Color(red: 0.059, green: 0.051, blue: 0.043), Color(red: 0.133, green: 0.118, blue: 0.102)],
                     center: .center, startRadius: 0, endRadius: side / 2))
                 ForEach(0..<16, id: \.self) { index in
-                    Circle().strokeBorder(Color(red: 0.73, green: 0.76, blue: 0.68).opacity(index.isMultiple(of: 4) ? 0.08 : 0.04), lineWidth: 1)
+                    Circle().strokeBorder(Color(red: 0.784, green: 0.749, blue: 0.698).opacity(index.isMultiple(of: 4) ? 0.08 : 0.04), lineWidth: 1)
                         .padding(CGFloat(index) * side * 0.018 + side * 0.025)
                 }
                 ForEach([0.50, 0.67, 0.84], id: \.self) { ring in
@@ -220,13 +220,13 @@ struct MacFullscreenPlayer: View {
         return ZStack {
             ZStack(alignment: .top) {
                 Capsule()
-                    .fill(LinearGradient(colors: [Color(red: 0.42, green: 0.44, blue: 0.41),
-                        Color(red: 0.91, green: 0.90, blue: 0.86), Color(red: 0.61, green: 0.62, blue: 0.58),
-                        Color(red: 0.33, green: 0.35, blue: 0.32)], startPoint: .leading, endPoint: .trailing))
+                    .fill(LinearGradient(colors: [Color(red: 0.29, green: 0.267, blue: 0.239),
+                        Color(red: 0.706, green: 0.667, blue: 0.612), Color(red: 0.541, green: 0.502, blue: 0.455),
+                        Color(red: 0.353, green: 0.325, blue: 0.29)], startPoint: .leading, endPoint: .trailing))
                     .frame(width: max(3.5, side * 0.014), height: side * 0.46)
                     .shadow(color: .black.opacity(0.25), radius: 2, y: 1)
                 RoundedRectangle(cornerRadius: 3, style: .continuous)
-                    .fill(Color(red: 0.16, green: 0.18, blue: 0.14))
+                    .fill(Color(red: 0.169, green: 0.153, blue: 0.137))
                     .overlay(alignment: .bottom) {
                         Capsule()
                             .fill(MacTheme.accent)
@@ -242,8 +242,8 @@ struct MacFullscreenPlayer: View {
             .rotationEffect(.degrees(engaged ? 12 : -10), anchor: .top)
             .position(x: pivotX, y: pivotY + side * 0.23)
             Circle()
-                .fill(RadialGradient(colors: [Color(red: 0.64, green: 0.66, blue: 0.62),
-                    Color(red: 0.28, green: 0.30, blue: 0.26), Color(red: 0.71, green: 0.72, blue: 0.67)],
+                .fill(RadialGradient(colors: [Color(red: 0.659, green: 0.624, blue: 0.573),
+                    Color(red: 0.243, green: 0.22, blue: 0.196), Color(red: 0.706, green: 0.667, blue: 0.612)],
                     center: .center, startRadius: 1, endRadius: side * 0.03))
                 .frame(width: side * 0.056, height: side * 0.056)
                 .position(x: pivotX, y: pivotY)
