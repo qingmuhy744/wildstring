@@ -21,7 +21,7 @@ class CrashHandlerTest {
             os = "14 (API 34)",
             abis = "arm64-v8a",
             threadName = "main",
-            threadId = 1L,
+            threadTid = 1L,
             threadPriority = 5,
             freeMb = 128L,
             totalMb = 256L,
@@ -34,7 +34,7 @@ class CrashHandlerTest {
         assertTrue(report.contains("Package: com.wildstring.app"))
         assertTrue(report.contains("Version: 0.8.6 (42)"))
         assertTrue(report.contains("Device: Google Pixel 8 (shiba)"))
-        assertTrue(report.contains("Thread: main (id: 1, priority: 5)"))
+        assertTrue(report.contains("Thread: main (tid: 1, priority: 5)"))
         assertTrue(report.contains("Heap Memory: Free 128MB / Total 256MB / Max 512MB"))
         assertTrue(report.contains("Type: java.lang.IllegalStateException"))
         assertTrue(report.contains("Message: synthetic state error"))

@@ -3,6 +3,7 @@ package com.wildstring.app.diagnostics
 import android.content.Context
 import android.content.SharedPreferences
 import android.os.Build
+import android.os.Process
 import android.util.Log
 import com.wildstring.app.BuildConfig
 import java.io.File
@@ -169,7 +170,9 @@ object CrashHandler {
             os = "${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})",
             abis = Build.SUPPORTED_ABIS.joinToString(", "),
             threadName = thread.name,
-            threadId = thread.id,
+            // The handler runs on the crashing thread, so the OS tid identifies it
+            // and matches logcat/ANR traces. Thread.getId() is deprecated on API 35+.
+            threadTid = Process.myTid().toLong(),
             threadPriority = thread.priority,
             freeMb = freeMemory,
             totalMb = totalMemory,
@@ -188,7 +191,7 @@ object CrashHandler {
         os: String,
         abis: String,
         threadName: String,
-        threadId: Long,
+        threadTid: Long,
         threadPriority: Int,
         freeMb: Long,
         totalMb: Long,
@@ -212,7 +215,7 @@ object CrashHandler {
             appendLine("Device: $device")
             appendLine("Android: $os")
             appendLine("ABIs: $abis")
-            appendLine("Thread: $threadName (id: $threadId, priority: $threadPriority)")
+            appendLine("Thread: $threadName (tid: $threadTid, priority: $threadPriority)")
             appendLine("Heap Memory: Free ${freeMb}MB / Total ${totalMb}MB / Max ${maxMb}MB")
             appendLine()
             appendLine("=== Exception ===")
