@@ -108,7 +108,7 @@
 .fullscreen-player[data-player-kind='podcast'] {
   --desk: #26221f;
   --desk-glow: #403b36;
-  --paper: #211e1b;
+  --paper: var(--surface);
   --paper-ink: #e6ddca;
   --paper-body: #c5bfaf;
   --paper-muted: #a5a08e;

@@ -5,7 +5,7 @@
     system-ui, sans-serif;
   --font-mono: 'SF Mono', 'JetBrains Mono', ui-monospace, Menlo, monospace;
   font-family: var(--font-sans);
-  color: #e8e3d9;
+  color: var(--text);
   --bg: #181614;
   background: var(--bg);
   font-synthesis: none;
@@ -13,6 +13,7 @@
   --accent: #e98a6d;
   --accent-text: #e98a6d;
   --muted: #aaa59a;
+  --faint: #9a948a;
   --border: #3a352f;
   --text: #e8e3d9;
   --surface: #211e1b;
@@ -492,7 +493,7 @@ a {
   align-items: center;
   border: 1px solid #423e39;
   border-radius: 8px;
-  background: #211e1b;
+  background: var(--surface);
   width: 320px;
   padding-left: 14px;
   gap: 8px;
@@ -591,12 +592,12 @@ a {
 }
 .track-header {
   height: 44px;
-  color: #9a948a;
+  color: var(--faint);
   font-size: 10px;
 }
 .track-row {
   min-height: 74px;
-  border-bottom: 1px solid #3a352f;
+  border-bottom: 1px solid var(--border);
   font-size: 12px;
   padding: 10px 0;
   cursor: pointer;
@@ -866,8 +867,8 @@ a {
   bottom: 112px;
   width: 350px;
   z-index: 3;
-  background: #211e1b;
-  border-left: 1px solid #3a352f;
+  background: var(--surface);
+  border-left: 1px solid var(--border);
   box-shadow: -18px 0 45px #0003;
   padding: 28px 22px;
   overflow: auto;
@@ -945,7 +946,7 @@ a {
   left: 0;
   right: 0;
   min-height: 112px;
-  background: #211e1b;
+  background: var(--surface);
   border-top: 1px solid #474039;
   z-index: 5;
   display: grid;
@@ -1356,7 +1357,7 @@ a {
     max(24px, env(safe-area-inset-bottom)) max(24px, env(safe-area-inset-left));
   border: 0;
   background: #11100f;
-  color: #e8e3d9;
+  color: var(--text);
 }
 .artwork-preview[open] {
   display: grid;
@@ -1394,7 +1395,7 @@ a {
   right: max(64px, calc(env(safe-area-inset-right) + 56px));
   padding: 8px 12px;
   color: inherit;
-  border: 1px solid #e8e3d966;
+  border: 1px solid color-mix(in srgb, var(--text) 40%, transparent);
   border-radius: 8px;
   text-decoration: none;
 }
@@ -2582,7 +2583,7 @@ textarea {
   padding: 8px 9px;
   font-size: 11px;
   color: var(--muted);
-  border-top: 1px solid #3a352f;
+  border-top: 1px solid var(--border);
   margin-top: 4px;
 }
 .track-popover select {
@@ -2593,7 +2594,7 @@ textarea {
 .playlist-move {
   display: flex;
   flex-direction: column;
-  border-top: 1px solid #3a352f;
+  border-top: 1px solid var(--border);
   padding-top: 4px;
 }
 .danger-text {
@@ -2682,7 +2683,7 @@ textarea {
   border: 1px solid #554e48;
   border-radius: 14px;
   color: #eee7d7;
-  background: #211e1b;
+  background: var(--surface);
   box-shadow: 0 30px 100px #0008;
 }
 .playlist-editor::backdrop {
@@ -2717,12 +2718,12 @@ textarea {
   display: flex;
   justify-content: flex-end;
   gap: 12px;
-  border-top: 1px solid #3a352f;
+  border-top: 1px solid var(--border);
   padding-top: 22px;
   margin-top: 24px;
 }
 .smart-builder {
-  border: 1px solid #3a352f;
+  border: 1px solid var(--border);
   border-radius: 8px;
   padding: 16px;
   min-width: 0;
@@ -2767,7 +2768,7 @@ textarea {
   display: grid;
   grid-template-columns: 1.2fr 1fr 1fr;
   gap: 12px;
-  border-top: 1px solid #3a352f;
+  border-top: 1px solid var(--border);
   padding-top: 16px;
   margin-top: 14px;
   align-items: end;
@@ -2903,7 +2904,7 @@ textarea {
   .rule-row {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 24px;
     gap: 8px;
-    border-bottom: 1px solid #3a352f;
+    border-bottom: 1px solid var(--border);
     padding: 10px 0;
   }
   .rule-row > input {
@@ -2996,7 +2997,7 @@ textarea {
   font-size: 12px;
 }
 .management-card {
-  background: #211e1b;
+  background: var(--surface);
   border: 1px solid #3e372f;
   border-radius: 12px;
   padding: 28px;
@@ -3085,7 +3086,7 @@ textarea {
   gap: 7px;
   min-width: 112px;
   padding: 12px 14px;
-  border: 1px solid #3a352f;
+  border: 1px solid var(--border);
   border-radius: 9px;
   background: color-mix(in srgb, var(--workspace-bg) 72%, transparent);
 }
@@ -3121,9 +3122,9 @@ textarea {
   flex: 1;
   min-width: 0;
   padding: 11px 12px;
-  border: 1px solid #3a352f;
+  border: 1px solid var(--border);
   border-radius: 7px;
-  background: #131110;
+  background: var(--surface-input);
   color: inherit;
 }
 [data-theme='light'] .folder-metadata-toolbar input {
@@ -3195,7 +3196,7 @@ textarea {
 .folder-metadata-editor {
   min-height: 260px;
   padding: 20px;
-  border: 1px solid #3a352f;
+  border: 1px solid var(--border);
   border-radius: 10px;
   background: color-mix(in srgb, var(--workspace-bg) 78%, transparent);
 }
@@ -3237,7 +3238,7 @@ textarea {
   color: var(--muted);
 }
 .run-counters b {
-  color: #e8e3d9;
+  color: var(--text);
   font-weight: 600;
   margin-left: 6px;
 }
@@ -3337,9 +3338,9 @@ textarea {
 .library-settings-form input {
   min-width: 0;
   padding: 12px;
-  border: 1px solid #3a352f;
+  border: 1px solid var(--border);
   border-radius: 6px;
-  background: #131110;
+  background: var(--surface-input);
   color: inherit;
 }
 .manage-search button {
@@ -3354,7 +3355,7 @@ textarea {
   align-items: center;
   justify-content: space-between;
   gap: 14px;
-  border-top: 1px solid #3a352f;
+  border-top: 1px solid var(--border);
   padding: 20px 0;
 }
 .manage-track-list li > div {
@@ -3398,7 +3399,7 @@ textarea {
   grid-template-columns: 120px minmax(0, 1fr);
   gap: 12px;
   padding: 14px 0;
-  border-bottom: 1px solid #3a352f;
+  border-bottom: 1px solid var(--border);
   font-size: 13px;
 }
 .management-settings dt {
@@ -3439,7 +3440,7 @@ textarea {
   border-radius: 6px;
   background: #1c1815;
   color: inherit;
-  border: 1px solid #3a352f;
+  border: 1px solid var(--border);
   width: 100%;
   font: inherit;
   font-size: 14px;
@@ -3823,8 +3824,8 @@ textarea {
   width: 100%;
   font: inherit;
   color: inherit;
-  background: #131110;
-  border: 1px solid #3a352f;
+  background: var(--surface-input);
+  border: 1px solid var(--border);
   border-radius: 6px;
   padding: 12px;
 }
@@ -4207,6 +4208,7 @@ textarea {
   --bg: #f6f3ed;
   background: var(--bg);
   --muted: #626457;
+  --faint: #6a6e5b;
   --border: #deded2;
   --accent: #bc5438;
   --accent-text: #9f422b;
@@ -4497,7 +4499,7 @@ textarea {
   background-color: #fff4df20;
 }
 .fullscreen-options .playback-rate-control option {
-  color: #e8e3d9;
+  color: var(--text);
   background: #25241f;
 }
 .fullscreen-options .quality-control select {
@@ -4513,7 +4515,7 @@ textarea {
   background-color: #fff4df20;
 }
 .fullscreen-options .quality-control option {
-  color: #e8e3d9;
+  color: var(--text);
   background: #25241f;
 }
 .quality-passthrough-hint {
@@ -4747,8 +4749,8 @@ textarea {
   padding: 24px;
   border: 1px solid var(--border);
   border-radius: 16px;
-  background: #211e1b;
-  color: #e8e3d9;
+  background: var(--surface);
+  color: var(--text);
 }
 .metadata-refresh-dialog::backdrop {
   background: #0009;
@@ -4781,7 +4783,7 @@ textarea {
 }
 .metadata-refresh-dialog select {
   width: 100%;
-  color: #e8e3d9;
+  color: var(--text);
 }
 .metadata-refresh-dialog select:disabled {
   opacity: 0.75;
