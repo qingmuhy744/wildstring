@@ -1,5 +1,5 @@
 :root {
-  --browse-rail-surface: #171815;
+  --browse-rail-surface: #181615;
 }
 [data-theme='light'] {
   --browse-rail-surface: #f6f3ed;
@@ -115,7 +115,7 @@
   min-width: 220px;
   padding: 6px;
   display: grid;
-  background: var(--panel, #24251f);
+  background: var(--panel, #211e1b);
   border: 1px solid var(--border);
   border-radius: 12px;
   box-shadow: 0 8px 32px #0003;

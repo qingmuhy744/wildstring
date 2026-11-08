@@ -28,7 +28,7 @@
   width: var(--transport-play-size);
   height: var(--transport-play-size);
   background: #ece3ce;
-  color: #1f2619;
+  color: #262019;
 }
 .podcast-transport > .icon-button:hover:not(:disabled),
 .podcast-transport > .play-button:hover:not(:disabled) {
@@ -106,13 +106,13 @@
   line-height: 1.5;
 }
 .fullscreen-player[data-player-kind='podcast'] {
-  --desk: #242624;
-  --desk-glow: #3c4036;
-  --paper: #24251f;
+  --desk: #26221f;
+  --desk-glow: #403b36;
+  --paper: #211e1b;
   --paper-ink: #e6ddca;
   --paper-body: #c5bfaf;
   --paper-muted: #a5a08e;
-  --paper-line: #4b4c40;
+  --paper-line: #463f38;
   --device-top: #79513c;
   --device-bottom: #492e25;
   --device-ink: #fff0cf;

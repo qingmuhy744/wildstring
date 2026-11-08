@@ -1,8 +1,8 @@
 :root {
-  --workspace-panel: #20211b;
-  --workspace-selected: #34372a;
-  --workspace-bg: #191a16;
-  --workspace-text: #eeeae2;
+  --workspace-panel: #211e1b;
+  --workspace-selected: #2e2924;
+  --workspace-bg: #1d1a18;
+  --workspace-text: #e8e3d9;
 }
 :root[data-theme='light'] {
   --workspace-panel: #faf9f4;

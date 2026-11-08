@@ -92,8 +92,8 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
-  background: var(--podcast-panel, #20221c);
-  border: 1px solid var(--podcast-line, #33342e);
+  background: var(--podcast-panel, #211e1b);
+  border: 1px solid var(--podcast-line, #3a352f);
   border-radius: 12px;
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.24);
 }
@@ -108,7 +108,7 @@
   border: 0;
   border-radius: 8px;
   background: transparent;
-  color: var(--podcast-ink, #eeeae2);
+  color: var(--podcast-ink, #e8e3d9);
   font-size: 0.85rem;
   font-weight: 450;
   text-align: left;
@@ -118,14 +118,14 @@
 }
 
 .podcasts-more-item:hover {
-  background: var(--podcast-panel-hover, #30312b);
-  color: var(--podcast-ink, #eeeae2);
+  background: var(--podcast-panel-hover, #34302a);
+  color: var(--podcast-ink, #e8e3d9);
 }
 
 .podcasts-more-divider {
   height: 1px;
   margin: 4px 6px;
-  background: var(--podcast-line, #33342e);
+  background: var(--podcast-line, #3a352f);
 }
 
 .podcasts-action-btn {
@@ -1502,9 +1502,9 @@
   width: min(620px, calc(100vw - 2rem));
   transform: translate(-50%, -50%);
   padding: 0;
-  border: 1px solid var(--border, #3a4038);
+  border: 1px solid var(--border, #403c38);
   border-radius: 20px;
-  background: var(--surface, #1b201d);
+  background: var(--surface, #211e1b);
   color: var(--text, #f4f1e9);
   box-shadow: 0 24px 80px rgb(0 0 0 / 42%);
 }
@@ -1650,12 +1650,12 @@
    of WildString. The original podcast rules predate the shared theme tokens
    and fell back to a blue-gray surface in light mode. */
 :is(.podcasts-page, .podcast-download-content, .podcast-download-modal, .podcast-cleanup-dialog) {
-  --podcast-panel: #20221c;
-  --podcast-panel-raised: #292b24;
-  --podcast-panel-hover: #30312b;
-  --podcast-ink: #eeeae2;
-  --podcast-subtle: #a8a59c;
-  --podcast-line: #33342e;
+  --podcast-panel: #211e1b;
+  --podcast-panel-raised: #2a2622;
+  --podcast-panel-hover: #34302a;
+  --podcast-ink: #e8e3d9;
+  --podcast-subtle: #aaa59a;
+  --podcast-line: #3a352f;
   --podcast-accent-soft: color-mix(in srgb, var(--accent) 15%, transparent);
   color: var(--podcast-ink);
 }
@@ -1674,12 +1674,12 @@
 
 :root[data-theme='dark']
   :is(.podcasts-page, .podcast-download-content, .podcast-download-modal, .podcast-cleanup-dialog) {
-  --podcast-panel: #20221c;
-  --podcast-panel-raised: #292b24;
-  --podcast-panel-hover: #30312b;
-  --podcast-ink: #eeeae2;
-  --podcast-subtle: #a8a59c;
-  --podcast-line: #33342e;
+  --podcast-panel: #211e1b;
+  --podcast-panel-raised: #2a2622;
+  --podcast-panel-hover: #34302a;
+  --podcast-ink: #e8e3d9;
+  --podcast-subtle: #aaa59a;
+  --podcast-line: #3a352f;
   --podcast-accent-soft: color-mix(in srgb, var(--accent) 15%, transparent);
   color: var(--podcast-ink);
 }
@@ -1720,7 +1720,7 @@
   overflow: hidden;
   background: linear-gradient(145deg, var(--podcast-panel-raised), var(--podcast-panel));
   border: 1px solid var(--podcast-line);
-  box-shadow: 0 18px 42px rgb(42 43 37 / 7%);
+  box-shadow: 0 18px 42px rgb(43 40 37 / 7%);
 }
 
 :root[data-theme='dark'] .podcasts-page .podcasts-empty-state {
@@ -1874,7 +1874,7 @@
 }
 
 .podcast-download-modal::backdrop {
-  background: rgb(25 25 22 / 42%);
+  background: rgb(25 24 22 / 42%);
   backdrop-filter: blur(6px);
 }
 
@@ -2215,7 +2215,7 @@
 }
 
 .podcast-storage-modal::backdrop {
-  background: rgb(25 25 22 / 42%);
+  background: rgb(25 24 22 / 42%);
   backdrop-filter: blur(6px);
 }
 
@@ -3541,7 +3541,7 @@
   padding: 0;
 }
 .podcast-resource-modal::backdrop {
-  background: #17171380;
+  background: #17151380;
 }
 .podcast-resource-manager {
   padding: clamp(16px, 2.5vw, 28px);
@@ -3633,7 +3633,7 @@
 }
 
 .podcast-cleanup-dialog::backdrop {
-  background: rgb(20 22 17 / 52%);
+  background: rgb(22 20 17 / 52%);
   backdrop-filter: blur(8px);
 }
 
@@ -4137,7 +4137,7 @@
 .queue-podcast-continuation {
   margin-top: 18px;
   padding-top: 16px;
-  border-top: 1px solid var(--border, #414437);
+  border-top: 1px solid var(--border, #443e37);
 }
 
 .queue-continuation-header {
@@ -4156,7 +4156,7 @@
 .queue-continuation-header select {
   padding: 4px 8px;
   border-radius: 6px;
-  border: 1px solid var(--border, #484a3d);
+  border: 1px solid var(--border, #3a352f);
   background: var(--surface-input, transparent);
   color: inherit;
   font-size: 0.78rem;
@@ -4173,7 +4173,7 @@
   gap: 7px;
   align-items: center;
   padding: 10px 0;
-  border-bottom: 1px solid var(--border, #34392c);
+  border-bottom: 1px solid var(--border, #39332c);
 }
 
 .queue-continuation-empty {
