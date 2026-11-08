@@ -1,6 +1,7 @@
-import type { CSSProperties } from 'react';
+import { useEffect, useRef, type CSSProperties } from 'react';
 import { time } from './api';
 import { Cover } from './cover';
+import { readAudioLevels } from './playback-gain';
 import { PodcastSkipButton, type Player } from './player';
 import { maybePlayRadioClick } from './radio-click';
 import type { PodcastOrder } from './podcast-continuation';
@@ -21,6 +22,35 @@ function Radio({ player, onPreview }: { player: Player; onPreview: () => void })
   const track = player.current!;
   const live = player.playing && !player.buffering && !player.error;
   const progress = player.duration > 0 ? player.position / player.duration : 0;
+  const vu = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const element = vu.current;
+    if (!element) return;
+    const set = (left: number, right: number) => {
+      element.style.setProperty('--level-l', left.toFixed(3));
+      element.style.setProperty('--level-r', right.toFixed(3));
+    };
+    if (!live || window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      set(0, 0);
+      return;
+    }
+    let frame = 0,
+      left = 0,
+      right = 0;
+    const tick = () => {
+      const [l, r] = readAudioLevels();
+      // Fast attack, slow release, like a real meter ballistics.
+      left = l > left ? l : left * 0.9 + l * 0.1;
+      right = r > right ? r : right * 0.9 + r * 0.1;
+      set(left, right);
+      frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => {
+      cancelAnimationFrame(frame);
+      set(0, 0);
+    };
+  }, [live]);
   return (
     <section
       className="retro-radio"
@@ -105,7 +135,7 @@ function Radio({ player, onPreview }: { player: Player; onPreview: () => void })
           <PodcastSkipButton player={player} seconds={30} direction="forward" variant="retro" />
         </div>
         <div className="retro-vu" aria-hidden="true">
-          <div className="retro-vu-window">
+          <div className="retro-vu-window" ref={vu}>
             <span>L</span>
             <i />
             <span>R</span>

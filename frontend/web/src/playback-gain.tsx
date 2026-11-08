@@ -17,6 +17,24 @@ export type GainRecord = {
   analysis: { status: string; error: string | null };
 };
 
+type Meter = { left: AnalyserNode; right: AnalyserNode; buffer: Float32Array<ArrayBuffer> };
+let meter: Meter | null = null;
+
+function rms(node: AnalyserNode, buffer: Float32Array<ArrayBuffer>) {
+  node.getFloatTimeDomainData(buffer);
+  let sum = 0;
+  for (const sample of buffer) sum += sample * sample;
+  return Math.sqrt(sum / buffer.length);
+}
+
+/** Real L/R output level in 0..1 (-60 dBFS..0 dBFS); [0, 0] while no graph exists. */
+export function readAudioLevels(): [number, number] {
+  if (!meter) return [0, 0];
+  const scale = (value: number) =>
+    value > 0 ? Math.max(0, Math.min(1, (20 * Math.log10(value) + 60) / 60)) : 0;
+  return [scale(rms(meter.left, meter.buffer)), scale(rms(meter.right, meter.buffer))];
+}
+
 export function usePlaybackGain(
   audio: RefObject<HTMLAudioElement | null>,
   trackId: string | undefined,
@@ -49,6 +67,23 @@ export function usePlaybackGain(
         const gain = context.createGain();
         context.createMediaElementSource(audio.current).connect(gain);
         gain.connect(context.destination);
+        try {
+          // Analysis branch: force stereo so mono sources read equally on L and R.
+          const stereo = context.createGain();
+          stereo.channelCount = 2;
+          stereo.channelCountMode = 'explicit';
+          stereo.channelInterpretation = 'speakers';
+          const splitter = context.createChannelSplitter(2);
+          const left = context.createAnalyser(),
+            right = context.createAnalyser();
+          left.fftSize = right.fftSize = 1024;
+          gain.connect(stereo).connect(splitter);
+          splitter.connect(left, 0);
+          splitter.connect(right, 1);
+          meter = { left, right, buffer: new Float32Array(left.fftSize) };
+        } catch {
+          /* Metering is optional; playback must not depend on it. */
+        }
         graph.current = { context, gain };
         apply();
       } catch {
@@ -87,6 +122,7 @@ export function usePlaybackGain(
   }, [trackId, userId]);
   useEffect(
     () => () => {
+      meter = null;
       void graph.current?.context.close().catch(() => {});
     },
     [],
