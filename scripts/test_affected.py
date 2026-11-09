@@ -114,6 +114,8 @@ IGNORE_STRINGS = {
     "application/json",
     "zh-CN",
     "en-US",
+    # Synthetic podcast title used as search data in specs, not interface copy.
+    "声东击西",
 }
 
 
