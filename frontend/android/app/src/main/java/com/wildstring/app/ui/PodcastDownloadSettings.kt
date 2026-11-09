@@ -383,7 +383,7 @@ fun PodcastDownloadQueueDialog(
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                             )
                                             Text(
-                                                text = if (!task.downloadedHuman.isNullOrBlank()) "${task.downloadedHuman} / ${task.totalHuman ?: stringResource(R.string.pod_dl_unknown_total)}" else stringResource(R.string.pod_dl_connecting),
+                                                text = if (!task.downloadedHuman.isNullOrBlank()) "${task.downloadedHuman} / ${task.totalHuman?.takeUnless { it == "未知大小" } ?: stringResource(R.string.pod_dl_unknown_total)}" else stringResource(R.string.pod_dl_connecting),
                                                 style = MaterialTheme.typography.labelSmall,
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                             )
@@ -511,7 +511,7 @@ fun PodcastDownloadQueueDialog(
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                             )
                                             Text(
-                                                text = task.error?.takeIf { it.isNotBlank() } ?: stringResource(R.string.pod_dl_default_error),
+                                                text = localizePodcastTaskError(task.error),
                                                 style = MaterialTheme.typography.bodySmall,
                                                 color = MaterialTheme.colorScheme.error,
                                             )
@@ -634,4 +634,35 @@ fun PodcastDownloadQueueDialog(
             }
         }
     }
+}
+
+internal fun localizePodcastTaskError(raw: String?): String {
+    val error = raw?.trim().orEmpty()
+    if (error.isEmpty() || error == "下载失败") return AppLanguage.string(R.string.pod_dl_default_error)
+    when (error) {
+        "下载任务已取消", "下载已被停止" -> return AppLanguage.string(R.string.pod_dl_err_cancelled)
+        "音频超过大小限制", "播客音频超过大小限制" -> return AppLanguage.string(R.string.pod_dl_err_size_exceeded)
+        "音频文件为空" -> return AppLanguage.string(R.string.pod_dl_err_empty_file)
+        "源站域名被解析为 fake-ip 地址（198.18.0.0/15），请在服务端开启 WILDSTRING_PODCAST_ALLOW_FAKE_IP 或配置出站代理" -> return AppLanguage.string(R.string.pod_dl_err_fake_ip)
+        "播客音频地址指向非公网资源" -> return AppLanguage.string(R.string.pod_dl_err_non_public_url)
+        "源站频繁请求限流 (HTTP 429 Too Many Requests)，已启动防限流冷却" -> return AppLanguage.string(R.string.pod_dl_err_http_429)
+        "源站防盗链或拒绝访问 (HTTP 403 Forbidden)" -> return AppLanguage.string(R.string.pod_dl_err_http_403)
+        "音频资源文件不存在 (HTTP 404 Not Found)" -> return AppLanguage.string(R.string.pod_dl_err_http_404)
+        "源站服务过载不可用 (HTTP 503)" -> return AppLanguage.string(R.string.pod_dl_err_http_503)
+        "网络连接超时，源站响应过慢", "网络请求超时，源站响应过慢" -> return AppLanguage.string(R.string.pod_dl_err_timeout)
+        "源站 SSL 证书校验失败" -> return AppLanguage.string(R.string.pod_dl_err_ssl)
+    }
+    Regex("^第 (\\d+)/(\\d+) 次重试等待中 \\((\\d+)s\\): (.+)$").matchEntire(error)?.let {
+        return AppLanguage.string(R.string.pod_dl_err_retry_waiting, it.groupValues[1].toInt(), it.groupValues[2].toInt(), it.groupValues[3].toInt(), localizePodcastTaskError(it.groupValues[4]))
+    }
+    Regex("^源站 HTTP 请求失败 \\((\\d+)\\)$").matchEntire(error)?.let {
+        return AppLanguage.string(R.string.pod_dl_err_upstream_http, it.groupValues[1].toInt())
+    }
+    Regex("^网络连接失败 \\((.+)\\)$").matchEntire(error)?.let {
+        return AppLanguage.string(R.string.pod_dl_err_network_reason, it.groupValues[1])
+    }
+    Regex("^下载遇到异常: (.+)$").matchEntire(error)?.let {
+        return AppLanguage.string(R.string.pod_dl_err_exception_reason, it.groupValues[1])
+    }
+    return error
 }

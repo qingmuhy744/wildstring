@@ -46,6 +46,25 @@ import java.time.format.DateTimeFormatter
 internal val recommendationSourceLabels = linkedMapOf("personal" to R.string.recommendation_source_personal, "community" to R.string.recommendation_source_community,
     "discovery" to R.string.recommendation_source_discovery, "revisit" to R.string.recommendation_source_revisit,
     "lastfm_similar" to R.string.recommendation_source_lastfm_similar, "lastfm_charts" to R.string.recommendation_source_lastfm_charts, "lastfm_tags" to R.string.recommendation_source_lastfm_tags)
+internal fun localizeDiscoveryTitle(title: String): String = when (title) {
+    "曲库里的发现" -> AppLanguage.string(R.string.rec_panel_discover_title_library)
+    "为你选的歌" -> AppLanguage.string(R.string.rec_panel_discover_title_for_you)
+    "曲库中没有可推荐的歌曲" -> AppLanguage.string(R.string.rec_panel_discover_title_empty)
+    else -> title
+}
+internal fun localizeRecommendationReason(reason: String): String = when (reason) {
+    "来自你的收藏" -> AppLanguage.string(R.string.rec_panel_reason_favorite)
+    "根据你之前的收听反馈" -> AppLanguage.string(R.string.rec_panel_reason_feedback)
+    "来自你听过或收藏的艺人" -> AppLanguage.string(R.string.rec_panel_reason_artist)
+    "重听曲库里的熟悉旋律" -> AppLanguage.string(R.string.rec_panel_reason_familiar)
+    "探索曲库中尚未听过的歌曲", "探索本曲库中你尚未听过的歌曲" -> AppLanguage.string(R.string.rec_panel_reason_unplayed)
+    "来自曲库用户近30天的实际收听热度" -> AppLanguage.string(R.string.rec_panel_reason_community_30d)
+    "你已超过30天没有重听这首歌" -> AppLanguage.string(R.string.rec_panel_reason_revisit_30d)
+    "Last.fm 公共来源中找到与本库标题、艺人一致的歌曲" -> AppLanguage.string(R.string.rec_panel_reason_lastfm_public)
+    "根据你听过或收藏歌曲的 Last.fm 相似关系，在本地曲库找到" -> AppLanguage.string(R.string.rec_panel_reason_lastfm_similar)
+    "从本地曲库中选取" -> AppLanguage.string(R.string.rec_panel_reason_local_pick)
+    else -> reason
+}
 @Composable internal fun recommendationSource(id: String): String = recommendationSourceLabels[id]?.let { stringResource(it) } ?: if (id == "ai") "AI" else id
 internal fun recommendationIssue(code: String): String = when {
     code.contains("budget") -> AppLanguage.string(R.string.rec_panel_issue_budget)
@@ -325,7 +344,7 @@ internal fun recommendationIssue(code: String): String = when {
         AgentConnectionChoice(connections, connection, !action.busy) { connection = it }
         connectionError?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
         OutlinedTextField(prompt, { prompt = it.take(2000) }, Modifier.fillMaxWidth(), label = { Text(stringResource(R.string.rec_panel_ai_prompt_label)) }, placeholder = { Text(stringResource(R.string.rec_panel_ai_prompt_placeholder)) }, minLines = 2)
-        Button({ keyboard?.hide(); scope.launch { action.run { result = vm.repository.agentApi().discover(DiscoveryRequest(prompt, connectionId = connection ?: "local")); draftName = result!!.title; excluded = emptySet(); action.message = if (result?.mode == "local") AppLanguage.string(R.string.rec_panel_ai_local_search) else AppLanguage.string(R.string.rec_panel_ai_candidates_ready) } } }, enabled = !action.busy && prompt.isNotBlank()) { Text(if (action.busy) stringResource(R.string.rec_panel_ai_finding_music) else stringResource(R.string.rec_panel_ai_generate_candidates)) }
+        Button({ keyboard?.hide(); scope.launch { action.run { result = vm.repository.agentApi().discover(DiscoveryRequest(prompt, connectionId = connection ?: "local")); draftName = localizeDiscoveryTitle(result!!.title); excluded = emptySet(); action.message = if (result?.mode == "local") AppLanguage.string(R.string.rec_panel_ai_local_search) else AppLanguage.string(R.string.rec_panel_ai_candidates_ready) } } }, enabled = !action.busy && prompt.isNotBlank()) { Text(if (action.busy) stringResource(R.string.rec_panel_ai_finding_music) else stringResource(R.string.rec_panel_ai_generate_candidates)) }
         ActionStatus(action)
         result?.let { draft ->
             val selected = draft.items.filter { it.track.id !in excluded }
@@ -336,7 +355,7 @@ internal fun recommendationIssue(code: String): String = when {
                 TextButton({ vm.play(selected.map { it.track }) }, enabled = selected.isNotEmpty()) { Text(stringResource(R.string.rec_panel_preview_candidates)) }
                 TextButton({ scope.launch { action.run { saveRecommendations(vm, draftName, selected); action.message = AppLanguage.string(R.string.rec_panel_playlist_saved) } } }, enabled = !action.busy && selected.isNotEmpty() && draftName.isNotBlank()) { Text(stringResource(R.string.rec_panel_confirm_save_playlist)) }
             }
-            LazyColumn(Modifier.weight(1f)) { items(draft.items, key = { it.track.id }) { item -> ListItem(headlineContent = { Text(item.track.title) }, supportingContent = { Text(item.track.artist + " · " + item.reason) }, leadingContent = { Checkbox(item.track.id !in excluded, { checked -> excluded = if (checked) excluded - item.track.id else excluded + item.track.id }) }) } }
+            LazyColumn(Modifier.weight(1f)) { items(draft.items, key = { it.track.id }) { item -> ListItem(headlineContent = { Text(item.track.title) }, supportingContent = { Text(item.track.artist + " · " + localizeRecommendationReason(item.reason)) }, leadingContent = { Checkbox(item.track.id !in excluded, { checked -> excluded = if (checked) excluded - item.track.id else excluded + item.track.id }) }) } }
         }
     }
 }

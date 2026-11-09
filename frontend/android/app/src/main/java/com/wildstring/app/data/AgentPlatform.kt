@@ -37,6 +37,12 @@ internal fun diagnosticId(value: String?): String? = value?.takeIf { it.matches(
 internal fun agentError(status: Int, code: String, traceId: String?): String {
     val description = when {
         code == "podcast_subscriptions_disabled" -> AppLanguage.string(R.string.agent_plat_err_podcast_subscriptions_disabled)
+        code == "podcast_not_found" -> AppLanguage.string(R.string.agent_plat_err_podcast_not_found)
+        code == "podcast_publisher_not_found" -> AppLanguage.string(R.string.agent_plat_err_podcast_publisher_not_found)
+        code == "podcast_publisher_conflict" -> AppLanguage.string(R.string.agent_plat_err_podcast_publisher_conflict)
+        code == "podcast_playback_settings_not_found" -> AppLanguage.string(R.string.agent_plat_err_podcast_playback_settings_not_found)
+        code == "episode_not_found" -> AppLanguage.string(R.string.agent_plat_err_episode_not_found)
+        code == "episode_unavailable" -> AppLanguage.string(R.string.agent_plat_err_episode_unavailable)
         code == "podcast_search_upstream_rate_limited" -> AppLanguage.string(R.string.agent_plat_err_podcast_search_upstream_rate_limited)
         code == "podcast_search_rate_limited" -> AppLanguage.string(R.string.agent_plat_err_podcast_search_rate_limited)
         code in listOf("podcast_search_timeout", "podcast_search_upstream_failed") -> AppLanguage.string(R.string.agent_plat_err_podcast_search_failed)

@@ -148,10 +148,10 @@ internal fun SimpleNotificationsSheet(
             AgentCard {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     if (notice.text("read_at").isBlank()) Icon(Icons.Default.Circle, stringResource(R.string.agent_ws_unread_badge), Modifier.padding(end = 8.dp).size(8.dp), tint = MaterialTheme.colorScheme.primary)
-                    Text(notice.text("title"), fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                    Text(localizeNoticeTitle(notice.text("title")), fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
                     if (notice.text("severity") != "info") Icon(Icons.Default.Info, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.error)
                 }
-                Text(notice.text("summary")); Text(localAgentTime(notice.text("created_at")), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(localizeNoticeSummary(notice.text("summary"))); Text(localAgentTime(notice.text("created_at")), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 AgentTrace(notice)
                 Row {
                     notice.text("draft_id").takeIf { it.isNotBlank() }?.let { TextButton({ open("drafts", it) }) { Text(stringResource(R.string.agent_ws_view_draft)) } }
@@ -159,7 +159,7 @@ internal fun SimpleNotificationsSheet(
                     notice.objects("actions").forEach { actionItem ->
                         val target = actionItem.text("target")
                         if (target.isNotBlank()) TextButton({ openAction(target, actionItem.objectOrNull("params")) }) {
-                            Text(actionItem.text("label").ifBlank { stringResource(R.string.agent_ws_view_result) })
+                            Text(localizeNoticeActionLabel(actionItem.text("label")).ifBlank { stringResource(R.string.agent_ws_view_result) })
                         }
                     }
                     if (notice.text("read_at").isBlank()) TextButton({ scope.launch { action.run { vm.agent.readNotification(notice.text("id")) } } }, enabled = !action.busy,
@@ -243,7 +243,7 @@ internal fun displayValue(value: com.google.gson.JsonElement?): String = when { 
             if (draft.text("kind") == "intake") Text(stringResource(R.string.agent_ws_intake_source_hint, before.text("source_path")))
             if (draft.text("kind") == "lyrics") {
                 Text(stringResource(R.string.agent_ws_lyrics_song_source, before.text("title"), before.text("provider")))
-                Text(stringResource(R.string.agent_ws_quality_change, before.getAsJsonObject("current_quality")?.text("label").orEmpty(), before.getAsJsonObject("candidate_quality")?.text("label").orEmpty()))
+                Text(stringResource(R.string.agent_ws_quality_change, lyricLevelLabel(before.objectOrNull("current_quality")).orEmpty(), lyricLevelLabel(before.objectOrNull("candidate_quality")).orEmpty()))
                 Text(stringResource(R.string.agent_ws_offset_ms, payload.number("offset_ms")))
                 Text(stringResource(R.string.agent_ws_match_basis, before.text("match")), style = MaterialTheme.typography.bodySmall)
                 Text(stringResource(R.string.agent_ws_current_lyrics_preview), fontWeight = FontWeight.Medium)
@@ -909,11 +909,11 @@ internal fun connectionBudget(connection: JsonObject): String {
                 task.objects("results").forEach { result ->
                     if (result.text("analysis").isNotBlank()) {
                         Text(if (result.flag("ai_skipped")) stringResource(R.string.agent_ws_rule_check_desc) else stringResource(R.string.agent_ws_ai_analysis_result), fontWeight = FontWeight.Medium)
-                        Text(result.text("analysis"))
+                        Text(localizeInspectionAnalysis(result.text("analysis")))
                     } else {
                         Text(result.text("title"), fontWeight = FontWeight.Medium)
-                        result.objects("findings").forEach { finding -> Text(finding.text("summary"), style = MaterialTheme.typography.bodySmall) }
-                        Text(result.getAsJsonArray("issues")?.joinToString(" · ") { issue -> mapOf("missing_album" to AppLanguage.string(R.string.agent_ws_issue_missing_album), "missing_cover" to AppLanguage.string(R.string.agent_ws_issue_missing_cover), "missing_lyrics" to AppLanguage.string(R.string.agent_ws_issue_missing_lyrics), "missing_track_number" to AppLanguage.string(R.string.agent_ws_issue_missing_track_number), "track_number_conflict" to AppLanguage.string(R.string.agent_ws_issue_track_number_conflict), "track_number_out_of_range" to AppLanguage.string(R.string.agent_ws_issue_track_number_out_of_range), "disc_number_out_of_range" to AppLanguage.string(R.string.agent_ws_issue_disc_number_out_of_range), "missing_disc_number" to AppLanguage.string(R.string.agent_ws_issue_missing_disc_number), "same_title_versions" to AppLanguage.string(R.string.agent_ws_issue_same_title_versions), "possible_duplicate_recording" to AppLanguage.string(R.string.agent_ws_issue_possible_duplicate_recording), "possible_multidisc_split" to AppLanguage.string(R.string.agent_ws_issue_possible_multidisc_split))[issue.asString] ?: issue.asString }.orEmpty(), style = MaterialTheme.typography.bodySmall)
+                        result.objects("findings").forEach { finding -> Text(localizeInspectionFinding(finding), style = MaterialTheme.typography.bodySmall) }
+                        Text(result.getAsJsonArray("issues")?.joinToString(" · ") { issue -> mapOf("missing_artist" to AppLanguage.string(R.string.agent_ws_issue_missing_artist), "missing_title" to AppLanguage.string(R.string.agent_ws_issue_missing_title), "missing_album" to AppLanguage.string(R.string.agent_ws_issue_missing_album), "missing_cover" to AppLanguage.string(R.string.agent_ws_issue_missing_cover), "missing_lyrics" to AppLanguage.string(R.string.agent_ws_issue_missing_lyrics), "missing_track_number" to AppLanguage.string(R.string.agent_ws_issue_missing_track_number), "track_number_conflict" to AppLanguage.string(R.string.agent_ws_issue_track_number_conflict), "track_number_out_of_range" to AppLanguage.string(R.string.agent_ws_issue_track_number_out_of_range), "disc_number_out_of_range" to AppLanguage.string(R.string.agent_ws_issue_disc_number_out_of_range), "missing_disc_number" to AppLanguage.string(R.string.agent_ws_issue_missing_disc_number), "same_title_versions" to AppLanguage.string(R.string.agent_ws_issue_same_title_versions), "possible_duplicate_recording" to AppLanguage.string(R.string.agent_ws_issue_possible_duplicate_recording), "possible_multidisc_split" to AppLanguage.string(R.string.agent_ws_issue_possible_multidisc_split), "possible_album_split" to AppLanguage.string(R.string.agent_ws_issue_possible_album_split), "inspection_context_limited" to AppLanguage.string(R.string.agent_ws_issue_inspection_context_limited), "metadata_conflict" to AppLanguage.string(R.string.agent_ws_issue_metadata_conflict), "object_version_changed" to AppLanguage.string(R.string.agent_ws_issue_object_version_changed))[issue.asString] ?: issue.asString }.orEmpty(), style = MaterialTheme.typography.bodySmall)
                     }
                 }
                 AgentTrace(task); if (action.message != AppLanguage.string(R.string.completed) && action.message != "\u5df2\u5b8c\u6210") ActionStatus(action)
@@ -1164,4 +1164,72 @@ internal fun connectionBudget(connection: JsonObject): String {
         vm.agent.request("notification-preferences", "PUT", jsonBody("telegram_enabled" to enabled, "event_types" to jsonStrings(events.toList()), "min_severity" to severity,
             "quiet_start" to start.takeIf { it.isNotBlank() }, "quiet_end" to end.takeIf { it.isNotBlank() }, "timezone" to timezone)); saved(); dismiss()
     } } }, enabled = !action.busy) { Text(stringResource(R.string.agent_ws_save)) } }, dismissButton = { TextButton(dismiss, enabled = !action.busy) { Text(stringResource(R.string.agent_ws_cancel)) } })
+}
+
+internal fun localizeNoticeTitle(title: String): String = when (title) {
+    "整理方式已更新", "整理结果的自动处理方式已更新" -> AppLanguage.string(R.string.agent_ws_notice_title_policy_updated)
+    "曲库巡检完成", "曲库巡检已完成" -> AppLanguage.string(R.string.agent_ws_notice_title_inspection_done)
+    "曲库巡检需要处理", "曲库巡检未完全完成" -> AppLanguage.string(R.string.agent_ws_notice_title_inspection_partial)
+    "草案待确认", "曲库整理草案待确认", "导入整理草案待确认" -> AppLanguage.string(R.string.agent_ws_notice_title_curation_draft_pending)
+    "草案已应用", "曲库整理已自动应用" -> AppLanguage.string(R.string.agent_ws_notice_title_curation_auto_applied)
+    "歌词补全与洗版扫描结束", "全库歌词扫描已完成", "专辑歌词扫描已完成" -> AppLanguage.string(R.string.agent_ws_notice_title_lyric_library_done)
+    "导入任务结束", "扫描任务结束", "曲库导入或扫描已完成" -> AppLanguage.string(R.string.agent_ws_notice_title_import_done)
+    "元数据查询结束", "元数据批量查询已完成" -> AppLanguage.string(R.string.agent_ws_notice_title_metadata_batch_done)
+    else -> title
+}
+
+internal fun localizeNoticeSummary(summary: String): String {
+    when (summary) {
+        "自动应用" -> return AppLanguage.string(R.string.agent_ws_notice_summary_auto_apply)
+        "审核后应用" -> return AppLanguage.string(R.string.agent_ws_notice_summary_manual_review)
+        "任务已完成，请到曲库管理查看逐项结果。" -> return AppLanguage.string(R.string.agent_ws_notice_summary_lib_success)
+        "任务已结束，存在需要处理的项目，请到曲库管理查看结果。" -> return AppLanguage.string(R.string.agent_ws_notice_summary_lib_warning)
+    }
+    Regex("^已检查 (\\d+) 首，发现 (\\d+) 项，失败 (\\d+) 首。(?: 错误：(.+))?$").matchEntire(summary)?.let { m ->
+        val base = AppLanguage.string(R.string.agent_ws_notice_summary_insp_counts, m.groupValues[1].toInt(), m.groupValues[2].toInt(), m.groupValues[3].toInt())
+        return if (m.groupValues[4].isNotEmpty()) base + AppLanguage.string(R.string.agent_ws_notice_summary_insp_err_suffix, m.groupValues[4]) else base
+    }
+    Regex("^可升级 (\\d+) 首，待核对 (\\d+) 首，未匹配 (\\d+) 首，失败 (\\d+) 首。请到歌词补全查看并确认。$").matchEntire(summary)?.let { m ->
+        return AppLanguage.string(R.string.agent_ws_notice_summary_lyric_counts, m.groupValues[1].toInt(), m.groupValues[2].toInt(), m.groupValues[3].toInt(), m.groupValues[4].toInt())
+    }
+    Regex("^查询结束：建议已生成 (\\d+) 首，未匹配 (\\d+) 首，失败 (\\d+) 首，已变化 (\\d+) 首。建议需要确认后应用。(?:其中 (\\d+) 首有来源警告。)?$").matchEntire(summary)?.let { m ->
+        val base = AppLanguage.string(R.string.agent_ws_notice_summary_meta_counts, m.groupValues[1].toInt(), m.groupValues[2].toInt(), m.groupValues[3].toInt(), m.groupValues[4].toInt())
+        return if (m.groupValues[5].isNotEmpty()) base + AppLanguage.string(R.string.agent_ws_notice_summary_meta_warn_suffix, m.groupValues[5].toInt()) else base
+    }
+    return summary
+}
+
+internal fun localizeNoticeActionLabel(label: String): String = when (label) {
+    "查看扫描结果" -> AppLanguage.string(R.string.agent_ws_notice_action_lyric_scan)
+    "查看候选" -> AppLanguage.string(R.string.agent_ws_notice_action_candidates)
+    else -> label
+}
+
+internal fun localizeInspectionAnalysis(analysis: String): String {
+    if (analysis == "本次仅执行确定性规则检查，未调用外部 AI 模型。") {
+        return AppLanguage.string(R.string.agent_ws_analysis_rules_only)
+    }
+    Regex("^已通过整理工具查看 (\\d+) 项候选，生成 (\\d+) 份待确认草案。$").matchEntire(analysis)?.let { m ->
+        return AppLanguage.string(R.string.agent_ws_analysis_tool_progress, m.groupValues[1].toInt(), m.groupValues[2].toInt())
+    }
+    return analysis
+}
+
+internal fun localizeInspectionFinding(finding: JsonObject): String = when (finding.text("code")) {
+    "missing_artist" -> AppLanguage.string(R.string.agent_ws_finding_missing_artist)
+    "missing_title" -> AppLanguage.string(R.string.agent_ws_finding_missing_title)
+    "missing_album" -> AppLanguage.string(R.string.agent_ws_finding_missing_album)
+    "missing_cover" -> AppLanguage.string(R.string.agent_ws_finding_missing_cover)
+    "missing_lyrics" -> AppLanguage.string(R.string.agent_ws_finding_missing_lyrics)
+    "missing_track_number" -> AppLanguage.string(R.string.agent_ws_finding_missing_track_number)
+    "track_number_out_of_range" -> AppLanguage.string(R.string.agent_ws_finding_track_number_out_of_range)
+    "disc_number_out_of_range" -> AppLanguage.string(R.string.agent_ws_finding_disc_number_out_of_range)
+    "track_number_conflict" -> AppLanguage.string(R.string.agent_ws_finding_track_number_conflict)
+    "missing_disc_number" -> AppLanguage.string(R.string.agent_ws_finding_missing_disc_number)
+    "possible_multidisc_split" -> AppLanguage.string(R.string.agent_ws_finding_possible_multidisc_split)
+    "possible_album_split" -> AppLanguage.string(R.string.agent_ws_finding_possible_album_split)
+    "same_title_versions" -> AppLanguage.string(R.string.agent_ws_finding_same_title_versions)
+    "possible_duplicate_recording" -> AppLanguage.string(R.string.agent_ws_finding_possible_duplicate_recording)
+    "inspection_context_limited" -> AppLanguage.string(R.string.agent_ws_finding_inspection_context_limited)
+    else -> finding.text("summary")
 }

@@ -36,6 +36,12 @@ private val lyricLevels = listOf(
     R.string.lyric_scan_level_word,
     R.string.lyric_scan_level_bilingual_word,
 )
+internal fun lyricLevelLabel(quality: JsonObject?): String? {
+    if (quality == null) return null
+    val level = quality.get("level")?.takeIf { !it.isJsonNull }?.asInt
+    if (level != null && level in lyricLevels.indices) return AppLanguage.string(lyricLevels[level])
+    return quality.text("label").takeIf { it.isNotBlank() }
+}
 private val lyricStateResIds = mapOf(
     "running" to R.string.lyric_scan_state_running,
     "queued" to R.string.lyric_scan_state_queued,
@@ -170,7 +176,9 @@ private fun lyricStateLabel(status: String): String =
                     }
                     val baseline = item.get("baseline")?.takeIf { it.isJsonObject }?.asJsonObject
                     val candidate = item.get("quality")?.takeIf { it.isJsonObject }?.asJsonObject
-                    Text((baseline?.text("label") ?: stringResource(R.string.lyric_scan_not_checked)) + (candidate?.let { " → ${it.text("label")}" } ?: ""))
+                    val baselineLabel = lyricLevelLabel(baseline) ?: stringResource(R.string.lyric_scan_not_checked)
+                    val candidateLabel = lyricLevelLabel(candidate)
+                    Text(baselineLabel + (candidateLabel?.let { " → $it" } ?: ""))
                     if (item.text("error").isNotBlank()) Text(stringResource(R.string.lyric_scan_source_error, item.text("error")), style = MaterialTheme.typography.bodySmall)
                     TextButton({ scope.launch { action.run { previewTrack = vm.repository.track(item.text("track_id")) } } }, enabled = !action.busy) { Text(stringResource(R.string.lyric_scan_preview_candidates)) }
                     TextButton({ scope.launch { action.run { val path = "manage/tracks/${item.text("track_id")}/lyric-lock"; val lock = vm.repository.feature(path); vm.repository.feature(path, "PUT", lock.deepCopy().apply { addProperty("locked", !lock.flag("locked")) }); action.message = if (lock.flag("locked")) AppLanguage.string(R.string.lyric_scan_unlocked_message) else AppLanguage.string(R.string.lyric_scan_locked_message) } } }, enabled = !action.busy) { Text(stringResource(R.string.lyric_scan_lock_unlock)) }
