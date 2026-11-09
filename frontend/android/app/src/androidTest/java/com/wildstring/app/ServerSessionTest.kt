@@ -76,7 +76,6 @@ class ServerSessionTest {
         val client = OkHttpClient.Builder().addInterceptor(OriginGuard({ session.endpoint }, profile = session::cacheScope, unauthorized = session::invalidate))
             .addInterceptor(ScopedSessionInterceptor(session::requestState, session::cookieFor, session::cookieFrom)).build()
         val cache = ClientCache(context, session, settings); val downloads = OfflineDownloads(context, session, client)
-        downloads.wifiOnly = false
         val audio = InstrumentationRegistry.getInstrumentation().context.assets.open("playback.mp3").use { it.readBytes() }
         MockWebServer().use { a -> MockWebServer().use { b ->
             val dispatcher = object : Dispatcher() { override fun dispatch(request: RecordedRequest): MockResponse = audioStreamFixture(request, audio, "audio/mpeg", "\"owner-original\"") }
@@ -84,6 +83,8 @@ class ServerSessionTest {
             try {
                 session.configure(a.url("/").toString(), true)
                 session.write("wildstring_session=alice; Path=/; Max-Age=3600"); session.bindAccount(Account("alice", "alice", "listener"))
+                // wifi-only is stored per account scope, so set it after binding.
+                downloads.wifiOnly = false
                 val first = session.activeServerId!!; val firstToken = session.cacheScope()!!; val firstStorage = session.storageScope()
                 val track = Track("same-id", "A 的音乐", listOf("A"), album = null, durationMs = 12000, format = "mp3", status = "available")
                 cache.put("lyrics:same", "A 的歌词".toByteArray(), firstToken)
@@ -91,6 +92,7 @@ class ServerSessionTest {
                 session.configure(b.url("/").toString(), true)
                 assertNull(session.read()); assertNull(session.account); assertNull(cache.read("lyrics:same")); assertNull(downloads.file(track.id))
                 session.write("wildstring_session=bob; Path=/; Max-Age=3600"); session.bindAccount(Account("bob", "bob", "listener"))
+                downloads.wifiOnly = false
                 val second = session.activeServerId!!; val secondToken = session.cacheScope()!!
                 cache.put("lyrics:same", "B 的歌词".toByteArray(), secondToken)
                 downloads.enqueue(listOf(track.copy(title = "B 的音乐"))); downloads.run {}; assertNotNull(downloads.file(track.id))

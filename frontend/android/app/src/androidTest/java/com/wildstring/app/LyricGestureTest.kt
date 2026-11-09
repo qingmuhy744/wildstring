@@ -20,12 +20,12 @@ class LyricGestureTest {
     private val seeks = mutableListOf<Long>()
     private var toggles = 0
     private var previews = 0
-    private fun show(synced: Boolean = true, followDelayMs: Long = 2_000) {
+    private fun show(synced: Boolean = true, followDelayMs: Long = 2_000, playing: Boolean = false) {
         val lyrics = Lyrics(if (synced) "synced" else "plain", (0..19).map {
             LyricLine(if (synced) it * 1000L else null, "测试歌词第 $it 行")
         })
         compose.setContent { MaterialTheme {
-            LyricViewport(lyrics, 0, { seeks += it }, { toggles++ }, Modifier.width(360.dp).height(400.dp), { previews++ }, followDelayMs)
+            LyricViewport(lyrics, 0, { seeks += it }, { toggles++ }, Modifier.width(360.dp).height(400.dp), { previews++ }, followDelayMs, playing)
         } }
     }
 
@@ -37,7 +37,7 @@ class LyricGestureTest {
     }
 
     @Test fun longerPreferenceKeepsTheSelectionBeyondTheDefaultDelay() {
-        show(followDelayMs = 5_000)
+        show(followDelayMs = 5_000, playing = true)
         compose.onNodeWithTag("lyric-scroll").performTouchInput { swipeUp(durationMillis = 450) }
         val started = android.os.SystemClock.elapsedRealtime()
         compose.waitUntil(3_000) { android.os.SystemClock.elapsedRealtime() - started >= 2_200 }
