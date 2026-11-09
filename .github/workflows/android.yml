@@ -105,15 +105,14 @@ jobs:
           # The instrumented suite asserts Chinese copy, so pin the emulator to
           # zh-CN before running it; otherwise resource lookups follow the
           # runner's default locale and every copy assertion misses.
+          # android-emulator-runner runs each script line in its own shell, so
+          # the post-reboot wait must stay on one line.
           script: &android-test-script |
             adb root
             adb shell setprop persist.sys.locale zh-CN
             adb reboot
             adb wait-for-device
-            for _ in $(seq 1 120); do
-              test "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" && break
-              sleep 2
-            done
+            adb shell 'while [ "$(getprop sys.boot_completed)" != "1" ]; do sleep 2; done'
             make android-connected-test ANDROID_TEST_ARGS=-Pandroid.testInstrumentationRunnerArguments.realBackend=http://10.0.2.2:19882/
       - name: Archive the first emulator attempt
         if: ${{ steps.emulator_regression.outcome == 'failure' }}
