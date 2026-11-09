@@ -38,7 +38,7 @@ make android-locks              # 修改依赖后刷新锁与 SHA-256 校验元�
 
 `make android-ci` 的安装包位于 `artifacts/android/`，包含 `wildstring-<version>-debug.apk`与 `SHA256SUMS`。GitHub 的 **Android APK** 工作流通过后，在该次运行的 **Artifacts → wildstring-android-debug** 下载并解压 ZIP 后安装 APK。原有 Python/Web/Docker CI 继续独立运行。
 
-本地完整回归先启动手机模拟器，在一个终端运行 `make android-test-api`，另一个终端运行 `make android-connected-test ANDROID_TEST_ARGS=-Pandroid.testInstrumentationRunnerArguments.realBackend=http://10.0.2.2:19885/`。连接多个设备时用 `ANDROID_SERIAL` 指定模拟器；测试结束后在 API 终端按 Ctrl-C 停止。设备测试显式固定 Espresso 3.7，以兼容 API 37 的输入接口。
+本地完整回归先启动手机模拟器，在一个终端运行 `make android-test-api`，另一个终端运行 `make android-connected-test ANDROID_TEST_ARGS=-Pandroid.testInstrumentationRunnerArguments.realBackend=http://10.0.2.2:19885/`。设备测试断言中文界面文案，模拟器系统语言需为 `zh-CN`：本地英文镜像先执行 `adb root && adb shell setprop persist.sys.locale zh-CN && adb reboot`，CI 在运行前自动设置。连接多个设备时用 `ANDROID_SERIAL` 指定模拟器；测试结束后在 API 终端按 Ctrl-C 停止。设备测试显式固定 Espresso 3.7，以兼容 API 37 的输入接口。
 
 手动模拟器 CI 另启动一次性合成曲库，并通过 `ANDROID_TEST_ARGS=-Pandroid.testInstrumentationRunnerArguments.realBackend=http://10.0.2.2:19882/` 运行真实 API 集成。该参数只允许指向临时测试实例，使用固定的公开测试账号，会创建／删除测试歌单及修改测试曲目。不要指向个人服务器。
 
