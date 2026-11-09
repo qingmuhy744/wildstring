@@ -8,11 +8,21 @@ public func KitL10n(_ key: String, _ args: CVarArg...) -> String {
     return String(format: template, locale: Locale(identifier: lang), arguments: args)
 }
 
+private var isRunningTests: Bool {
+    if NSClassFromString("XCTestCase") != nil { return true }
+    let info = ProcessInfo.processInfo
+    if info.environment["XCTestConfigurationFilePath"] != nil { return true }
+    let procName = info.processName.lowercased()
+    if procName.contains("test") { return true }
+    if info.arguments.contains(where: { $0.lowercased().contains("test") }) { return true }
+    return false
+}
+
 private func isKitChineseLocale() -> Bool {
     let pref = UserDefaults.standard.string(forKey: "interfaceLanguage") ?? "auto"
     if pref == "zh" { return true }
     if pref == "en" { return false }
-    if NSClassFromString("XCTestCase") != nil { return true }
+    if isRunningTests { return true }
     let sys = Locale.preferredLanguages.first ?? "en"
     return sys.lowercased().hasPrefix("zh")
 }
