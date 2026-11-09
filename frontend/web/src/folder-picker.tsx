@@ -119,7 +119,7 @@ export function FolderPicker({
     >
       <header>
         <div>
-          <span className="eyebrow">SERVER FOLDERS</span>
+          <span className="eyebrow">{t('folderPicker.eyebrow')}</span>
           <h2>{title}</h2>
         </div>
         <DialogCloseButton
@@ -249,7 +249,15 @@ export function FolderPicker({
                 <button type="button" key={item.path} onClick={() => void load(item.path)}>
                   <Icon name="folder" />
                   <span className="folder-entry-label">
-                    <strong>{item.name}</strong>
+                    <strong>
+                      {item.name === '音乐来源（只读）'
+                        ? t('folderPicker.rootMusicSource')
+                        : item.name === '托管存储位置'
+                          ? t('folderPicker.rootManagedStorage')
+                          : item.name === '服务器根目录'
+                            ? t('folderPicker.rootServerRoot')
+                            : item.name}
+                    </strong>
                     <small>{item.path}</small>
                   </span>
                   <Icon name="chevron" />

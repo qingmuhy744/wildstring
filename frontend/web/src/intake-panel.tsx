@@ -152,7 +152,7 @@ export function IntakePanel() {
   return (
     <>
       <section className="management-card">
-        <span className="eyebrow">AUTOMATIC IMPORT</span>
+        <span className="eyebrow">{t('intakePanel.eyebrow')}</span>
         <h2>{t('intakePanel.title')}</h2>
         <p className="muted">{t('intakePanel.description')}</p>
         <form

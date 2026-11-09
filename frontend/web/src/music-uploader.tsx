@@ -259,7 +259,7 @@ export function MusicUploader({
 
   return (
     <section className="management-card music-uploader" aria-label={t('musicUploader.sectionAria')}>
-      <span className="eyebrow">UPLOAD WORKSPACE</span>
+      <span className="eyebrow">{t('musicUploader.eyebrow')}</span>
       <h2>{t('musicUploader.title')}</h2>
       <p className="muted">{t('musicUploader.description')}</p>
 

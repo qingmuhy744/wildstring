@@ -5,11 +5,28 @@ import type { Player } from './player';
 import { Icon } from './icons';
 import { errorText, localDate } from './workspace-ui';
 import { RecommendationSources } from './recommendation-preferences';
-import type {
-  RecommendationPreferences,
-  RecommendationWarning,
-  SourceStatus,
+import {
+  recommendationSourceName,
+  type RecommendationPreferences,
+  type RecommendationWarning,
+  type SourceStatus,
 } from './recommendation-types';
+const externalSummaryKeys: Record<string, string> = {
+  'Last.fm 歌曲相似关系': 'external.sourceLabelSimilar',
+  'Last.fm 公共热门榜': 'external.sourceLabelCharts',
+  'Last.fm 标签热门歌曲': 'external.sourceLabelTags',
+  'Last.fm 艺人关联与热门歌曲': 'external.sourceLabelArtists',
+};
+function localizeExternalReason(t: (key: string) => string, reason: string): string {
+  const suffix = '；尚未与本库精确匹配';
+  if (!reason.endsWith(suffix)) return reason;
+  const prefix = reason
+    .slice(0, -suffix.length)
+    .split(' / ')
+    .map((part) => (externalSummaryKeys[part] ? t(externalSummaryKeys[part]) : part))
+    .join(' / ');
+  return `${prefix}${t('external.unmatchedSuffix')}`;
+}
 interface ExternalSuggestion {
   external_id: string;
   name: string;
@@ -291,12 +308,15 @@ export function ExternalRecommendations({
                       {item.local_track ? t('external.inLibrary') : t('external.clue')}
                     </span>
                   </div>
-                  <p className="external-reason">{item.reason}</p>
+                  <p className="external-reason">{localizeExternalReason(t, item.reason)}</p>
                   <details>
                     <summary>{t('external.evidence')}</summary>
                     {item.evidence.map((evidence, index) => (
                       <p className="muted" key={index}>
-                        <strong>{evidence.source}</strong> · {evidence.summary}
+                        <strong>{recommendationSourceName(t, evidence.source)}</strong> ·{' '}
+                        {externalSummaryKeys[evidence.summary]
+                          ? t(externalSummaryKeys[evidence.summary])
+                          : evidence.summary}
                       </p>
                     ))}
                   </details>

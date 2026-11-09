@@ -46,8 +46,51 @@ const issueKeys: Record<string, string> = {
   same_title_versions: 'agentWorkbench.issueSameTitleVersions',
   possible_duplicate_recording: 'agentWorkbench.issuePossibleDuplicateRecording',
   possible_multidisc_split: 'agentWorkbench.issuePossibleMultidiscSplit',
+  possible_album_split: 'agentWorkbench.issuePossibleAlbumSplit',
+  inspection_context_limited: 'agentWorkbench.issueInspectionContextLimited',
   metadata_conflict: 'agentWorkbench.issueMetadataConflict',
   object_version_changed: 'agentWorkbench.issueObjectVersionChanged',
+};
+const findingKeys: Record<string, string> = {
+  inspection_context_limited: 'agentWorkbench.findingInspectionContextLimited',
+  missing_title: 'agentWorkbench.findingMissingTitle',
+  missing_artist: 'agentWorkbench.findingMissingArtist',
+  missing_album: 'agentWorkbench.findingMissingAlbum',
+  missing_cover: 'agentWorkbench.findingMissingCover',
+  missing_lyrics: 'agentWorkbench.findingMissingLyrics',
+  missing_track_number: 'agentWorkbench.findingMissingTrackNumber',
+  track_number_conflict: 'agentWorkbench.findingTrackNumberConflict',
+  track_number_out_of_range: 'agentWorkbench.findingTrackNumberOutOfRange',
+  disc_number_out_of_range: 'agentWorkbench.findingDiscNumberOutOfRange',
+  missing_disc_number: 'agentWorkbench.findingMissingDiscNumber',
+  same_title_versions: 'agentWorkbench.findingSameTitleVersions',
+  possible_duplicate_recording: 'agentWorkbench.findingPossibleDuplicateRecording',
+  possible_multidisc_split: 'agentWorkbench.findingPossibleMultidiscSplit',
+  possible_album_split: 'agentWorkbench.findingPossibleAlbumSplit',
+};
+const lyricLevelKeys = [
+  'lyricScans.levelNone',
+  'lyricScans.levelStatic',
+  'lyricScans.levelSyncedLine',
+  'lyricScans.levelBilingualLine',
+  'lyricScans.levelSyncedWord',
+  'lyricScans.levelBilingualWord',
+];
+const lyricQualityLabel = (t: (key: string) => string, value: unknown) => {
+  const q = value as { level?: number; label?: string } | undefined;
+  if (!q) return '';
+  if (typeof q.level === 'number' && lyricLevelKeys[q.level]) return t(lyricLevelKeys[q.level]);
+  return String(q.label || '');
+};
+const localizeAnalysis = (
+  t: (key: string, options?: Record<string, unknown>) => string,
+  text: string,
+) => {
+  const skipped = text.match(/^本地规则已检查 (\d+) 首，未发现待解释的问题，已跳过本次 AI 分析。/);
+  if (skipped) return t('agentWorkbench.ruleCheckSkippedAi', { count: Number(skipped[1]) });
+  const progress = text.match(/^已完成 (\d+) 次受控工具调用，请查看草案及实际应用状态。$/);
+  if (progress) return t('agentWorkbench.toolCallsProgress', { count: Number(progress[1]) });
+  return text;
 };
 
 function DraftDetail({
@@ -294,10 +337,8 @@ function DraftDetail({
           </p>
           <p>
             {t('agentWorkbench.lyricsQuality', {
-              current: String((draft.before?.current_quality as { label?: string })?.label || ''),
-              candidate: String(
-                (draft.before?.candidate_quality as { label?: string })?.label || '',
-              ),
+              current: lyricQualityLabel(t, draft.before?.current_quality),
+              candidate: lyricQualityLabel(t, draft.before?.candidate_quality),
             })}
           </p>
           <p>
@@ -981,7 +1022,7 @@ export function AgentTasks({
                             : result.title || t('agentWorkbench.unreadableTrack')}
                         </strong>
                         {result.analysis ? (
-                          <p>{result.analysis}</p>
+                          <p>{localizeAnalysis(t, result.analysis)}</p>
                         ) : (
                           <small>
                             {result.error_code
@@ -993,7 +1034,9 @@ export function AgentTasks({
                         )}
                         {result.findings?.map((finding) => (
                           <p className="muted" key={finding.code}>
-                            {finding.summary}
+                            {findingKeys[finding.code]
+                              ? t(findingKeys[finding.code])
+                              : finding.summary}
                           </p>
                         ))}
                         {result.draft_ids?.map((id) => (
