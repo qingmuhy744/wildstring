@@ -61,7 +61,7 @@ class OptimisticActionsTest {
                 gate.countDown()
                 compose.waitUntil(5000) { !vm.state.value.pendingFavorites.contains(track.id) }
                 assertFalse(vm.repository.knownTracks[track.id]!!.loved)
-                assertTrue(vm.state.value.error!!.contains("收藏未保存"))
+                assertTrue(vm.state.value.error!!.contains(uiString(R.string.vm_favorite_not_saved, "").substringBefore("，").substringBefore(",")))
                 assertEquals(1, server.requestCount.let { count ->
                     (0 until count).mapNotNull { server.takeRequest(1, TimeUnit.SECONDS) }.count { it.path!!.contains("/favorite") }
                 })

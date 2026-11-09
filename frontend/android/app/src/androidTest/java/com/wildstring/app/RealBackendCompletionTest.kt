@@ -93,7 +93,7 @@ class RealBackendCompletionTest {
             step = "other"
             val other = runBlocking { api.saveSharedPlayback(shared.copy(deviceId = "other-test-device", updatedAt = null).writeBody()) }
             val previous = compose.runOnIdle { vm.controller!!.currentMediaItem!!.mediaId }
-            try { runBlocking { withContext(Dispatchers.Main) { vm.resumeShared(shared) } }; fail("Stale handoff must fail") } catch (error: IOException) { assertTrue(error.message.orEmpty().contains("进度已更新")) }
+            try { runBlocking { withContext(Dispatchers.Main) { vm.resumeShared(shared) } }; fail("Stale handoff must fail") } catch (error: IOException) { assertTrue(error.message.orEmpty().contains(uiString(R.string.vm_other_device_updated))) }
             assertEquals(previous, compose.runOnIdle { vm.controller!!.currentMediaItem!!.mediaId })
             runBlocking { withContext(Dispatchers.Main) { vm.resumeShared(other) } }
             compose.waitUntil(10_000) { compose.runOnIdle { vm.controller!!.currentPosition == other.positionMs } }

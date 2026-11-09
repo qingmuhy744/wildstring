@@ -308,25 +308,25 @@ class MobileCompletionTest {
                 compose.onNodeWithTag("agent-chat-input").assertIsDisplayed()
                 compose.onNodeWithTag("nav-mine").performClick()
                 compose.onNodeWithContentDescription(uiString(R.string.playlist_new)).performClick()
-                compose.onNodeWithText("歌单名称").performTextInput("手机规则歌单")
+                compose.onNodeWithText(uiString(R.string.pl_tools_playlist_name)).performTextInput("手机规则歌单")
                 dismissKeyboard()
                 compose.onNode(isToggleable()).performClick()
-                compose.waitUntil(10_000) { compose.onAllNodesWithText("只选我喜欢的音乐").fetchSemanticsNodes().isNotEmpty() }
-                compose.onNodeWithText("只选我喜欢的音乐").assertIsDisplayed()
-                compose.onNodeWithText("保存歌单").performScrollTo().performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnClick) { click -> assertTrue(click()) }
+                compose.waitUntil(10_000) { compose.onAllNodesWithText(uiString(R.string.pl_tools_only_loved)).fetchSemanticsNodes().isNotEmpty() }
+                compose.onNodeWithText(uiString(R.string.pl_tools_only_loved)).assertIsDisplayed()
+                compose.onNodeWithText(uiString(R.string.pl_tools_save_playlist)).performScrollTo().performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnClick) { click -> assertTrue(click()) }
                 compose.waitUntil(10_000) { fixture.mutations.any { it.first.endsWith("/playlists") && it.second.contains("\"kind\":\"smart\"") } }
                 compose.runOnIdle { vm.openAlbum(Album("completion-album", "手机测试专辑", listOf("测试艺人"), 3, null)) }
                 compose.waitUntil(10_000) { compose.onAllNodesWithContentDescription(uiString(R.string.track_actions_named, "手机测试歌曲 0")).fetchSemanticsNodes().isNotEmpty() }
                 compose.onNodeWithContentDescription(uiString(R.string.track_actions_named, "手机测试歌曲 0")).performClick(); compose.onNodeWithText(uiString(R.string.track_edit)).performScrollTo().performClick()
-                compose.waitUntil(10_000) { compose.onAllNodesWithText("歌曲名称").fetchSemanticsNodes().isNotEmpty() }
-                compose.waitUntil(10_000) { compose.onAllNodes(hasText("保存修改") and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
+                compose.waitUntil(10_000) { compose.onAllNodesWithText(uiString(R.string.lib_mgmt_field_title)).fetchSemanticsNodes().isNotEmpty() }
+                compose.waitUntil(10_000) { compose.onAllNodes(hasText(uiString(R.string.lib_mgmt_save_changes)) and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
                 capture("mobile-metadata.png")
-                compose.onNodeWithText("歌曲名称").performTextReplacement("手机修正标题")
+                compose.onNodeWithText(uiString(R.string.lib_mgmt_field_title)).performTextReplacement("手机修正标题")
                 capture("mobile-metadata-edit-footer.png")
                 // The footer remains visible while the focused field requests the IME.
                 // Exercise its real accessibility click action rather than racing a changing
                 // keyboard animation with a previously measured screen coordinate.
-                compose.onNodeWithText("保存修改").assertIsDisplayed().assertIsEnabled()
+                compose.onNodeWithText(uiString(R.string.lib_mgmt_save_changes)).assertIsDisplayed().assertIsEnabled()
                     .performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnClick) { click -> assertTrue(click()) }
                 try { compose.waitUntil(10_000) { fixture.mutations.any { it.first.endsWith("/metadata") } } }
                 catch (error: Throwable) { capture("mobile-metadata-save-failure.png"); throw AssertionError("Metadata save requests=${fixture.requests.toList()} mutations=${fixture.mutations.toList()}", error) }
@@ -342,27 +342,27 @@ class MobileCompletionTest {
                 compose.waitUntil(10_000) { compose.onAllNodesWithContentDescription(uiString(R.string.track_actions_named, "手机测试歌曲 0")).fetchSemanticsNodes().isNotEmpty() }
                 compose.onNodeWithContentDescription(uiString(R.string.track_actions_named, "手机测试歌曲 0")).performClick()
                 compose.onNodeWithText(uiString(R.string.lyrics_edit_timing)).performScrollTo().performClick()
-                compose.waitUntil(10_000) { compose.onAllNodesWithText("粘贴歌词，每句一行；也支持 LRC").fetchSemanticsNodes().isNotEmpty() }
-                compose.waitUntil(10_000) { compose.onAllNodes(hasText("保存歌词") and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
-                compose.onNodeWithText("粘贴歌词，每句一行；也支持 LRC").performTextReplacement("新的第一句\n新的第二句")
+                compose.waitUntil(10_000) { compose.onAllNodesWithText(uiString(R.string.lib_mgmt_paste_lyrics_label)).fetchSemanticsNodes().isNotEmpty() }
+                compose.waitUntil(10_000) { compose.onAllNodes(hasText(uiString(R.string.lib_mgmt_save_lyrics)) and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
+                compose.onNodeWithText(uiString(R.string.lib_mgmt_paste_lyrics_label)).performTextReplacement("新的第一句\n新的第二句")
                 fixture.failLyrics.set(true)
-                compose.onNodeWithText("保存歌词").performScrollTo().performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnClick) { it() }
-                compose.waitUntil(10_000) { compose.onAllNodesWithText("内容已变化，请刷新后重试。").fetchSemanticsNodes().isNotEmpty() }
+                compose.onNodeWithText(uiString(R.string.lib_mgmt_save_lyrics)).performScrollTo().performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnClick) { it() }
+                compose.waitUntil(10_000) { compose.onAllNodesWithText(uiString(R.string.repo_content_changed)).fetchSemanticsNodes().isNotEmpty() }
                 compose.onNodeWithText("新的第一句\n新的第二句").assertExists()
                 fixture.failLyrics.set(false)
-                compose.onNodeWithText("保存歌词").performScrollTo().performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnClick) { it() }
-                compose.waitUntil(10_000) { compose.onAllNodesWithText("歌词已保存").fetchSemanticsNodes().isNotEmpty() }
+                compose.onNodeWithText(uiString(R.string.lib_mgmt_save_lyrics)).performScrollTo().performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnClick) { it() }
+                compose.waitUntil(10_000) { compose.onAllNodesWithText(uiString(R.string.lib_mgmt_lyrics_saved)).fetchSemanticsNodes().isNotEmpty() }
                 val lyricBody = JsonParser.parseString(fixture.mutations.last { it.first.endsWith("/lyrics") }.second).asJsonObject
                 assertEquals("a".repeat(64), lyricBody["file_version"].asString); assertEquals(1, lyricBody["version"].asInt)
-                compose.onNodeWithText("开始逐行打点").performScrollTo().performClick()
-                compose.onNodeWithText("播放此曲以打点").performScrollTo().performClick()
+                compose.onNodeWithText(uiString(R.string.lib_mgmt_start_timing)).performScrollTo().performClick()
+                compose.onNodeWithText(uiString(R.string.lib_mgmt_play_to_time)).performScrollTo().performClick()
                 compose.waitUntil(15_000) { vm.state.value.playing && !vm.state.value.buffering }
                 compose.onNodeWithText("标记下一句（1 / 2）").performScrollTo().performClick()
                 val firstMark = vm.position.value
                 compose.waitUntil(10_000) { vm.position.value >= firstMark + 600 }
                 compose.onNodeWithText("标记下一句（2 / 2）").performScrollTo().performClick()
-                compose.onNodeWithText("生成同步歌词").performScrollTo().performClick()
-                compose.onNodeWithText("保存歌词").performScrollTo().performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnClick) { it() }
+                compose.onNodeWithText(uiString(R.string.lib_mgmt_generate_synced_lyrics)).performScrollTo().performClick()
+                compose.onNodeWithText(uiString(R.string.lib_mgmt_save_lyrics)).performScrollTo().performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnClick) { it() }
                 compose.waitUntil(10_000) { fixture.lyrics.startsWith("[") }
                 assertEquals(2, fixture.lyrics.lines().size)
                 assertTrue(fixture.lyrics.lines().all { it.matches(Regex("\\[\\d{2}:\\d{2}\\.\\d{3}].*")) })
@@ -441,14 +441,14 @@ class MobileCompletionTest {
                 fixture.holdPlaylistDetails.set(true)
                 compose.onNodeWithText(uiString(R.string.playlist_edit)).performClick()
                 compose.waitUntil(10_000) { fixture.playlistDetailsRequested.count == 0L }
-                compose.onNodeWithText("歌单名称").assertIsNotEnabled()
+                compose.onNodeWithText(uiString(R.string.pl_tools_playlist_name)).assertIsNotEnabled()
                 fixture.releasePlaylistDetails.countDown()
                 compose.waitUntil(10_000) {
-                    compose.onAllNodes(hasText("歌单名称") and isEnabled()).fetchSemanticsNodes().isNotEmpty()
+                    compose.onAllNodes(hasText(uiString(R.string.pl_tools_playlist_name)) and isEnabled()).fetchSemanticsNodes().isNotEmpty()
                 }
-                compose.onNodeWithText("歌单名称").performTextClearance()
-                compose.onNodeWithText("歌单名称").performTextInput("长按改名")
-                compose.onNodeWithText("保存歌单").performScrollTo().performClick()
+                compose.onNodeWithText(uiString(R.string.pl_tools_playlist_name)).performTextClearance()
+                compose.onNodeWithText(uiString(R.string.pl_tools_playlist_name)).performTextInput("长按改名")
+                compose.onNodeWithText(uiString(R.string.pl_tools_save_playlist)).performScrollTo().performClick()
                 compose.waitUntil(10_000) { vm.state.value.playlists.any { it.name == "长按改名" } }
                 dismissKeyboard()
                 assertEquals("Closing the editor keyboard must preserve the current tab", "mine", vm.state.value.tab)
@@ -593,7 +593,7 @@ class MobileCompletionTest {
                 try {
                     runBlocking { withContext(Dispatchers.Main) { vm.acceptHandoff() } }
                     fail("A peer resuming during queue loading must cancel the handoff")
-                } catch (error: java.io.IOException) { assertTrue(error.message.orEmpty().contains("恢复播放")) }
+                } catch (error: java.io.IOException) { assertTrue(error.message.orEmpty().contains(uiString(R.string.vm_other_device_resumed_or_expired))) }
                 compose.runOnIdle { assertNull(vm.state.value.handoff); assertEquals(queueBefore, vm.state.value.queue) }
                 assertFalse(fixture.mutations.any { it.first.endsWith("/playback/state") })
             } finally { vm.sharing.mode("off"); cleanup(vm) }

@@ -209,7 +209,7 @@ class AccountPlaybackTest {
             // The backend's lossy passthrough must keep original audio and show the actual codec.
             val lossyTrack = gson.fromJson(lossy, Track::class.java)
             compose.runOnIdle { vm.play(listOf(lossyTrack)) }
-            compose.waitUntil(15_000) { vm.state.value.playbackQuality == "原音 · MP3" && compose.runOnIdle { vm.controller!!.isPlaying } }
+            compose.waitUntil(15_000) { vm.state.value.playbackQuality == uiString(R.string.abs_player_quality_original) + " · MP3" && compose.runOnIdle { vm.controller!!.isPlaying } }
             assertTrue(requests.any { it == "/api/v1/tracks/lossy/stream" })
             compose.runOnIdle { vm.logout() }
             compose.waitUntil(10_000) { !vm.state.value.connected && compose.onAllNodes(hasSetTextAction()).fetchSemanticsNodes().size == 3 }
