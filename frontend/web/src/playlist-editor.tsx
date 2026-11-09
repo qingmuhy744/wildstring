@@ -167,7 +167,7 @@ export function PlaylistEditor({
       <form onSubmit={(event) => void save(event)}>
         <div className="editor-heading">
           <div>
-            <span className="eyebrow">YOUR OWN MIX</span>
+            <span className="eyebrow">{t('playlistEditor.eyebrow')}</span>
             <h2>{initial ? t('playlistEditor.editTitle') : t('playlistEditor.createTagline')}</h2>
           </div>
           <DialogCloseButton

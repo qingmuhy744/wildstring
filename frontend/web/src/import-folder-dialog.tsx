@@ -122,7 +122,7 @@ export function ImportFolderDialog({
     >
       <header className="import-folder-heading">
         <div>
-          <span className="eyebrow">IMPORT FOLDER</span>
+          <span className="eyebrow">{t('importFolderDialog.eyebrow')}</span>
           <h2>{t('importFolderDialog.title')}</h2>
           <p>{t('importFolderDialog.description')}</p>
         </div>

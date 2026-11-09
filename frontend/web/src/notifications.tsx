@@ -11,6 +11,83 @@ import {
   WorkspaceNotice,
 } from './workspace-ui';
 
+const notificationTitleKeys: Record<string, string> = {
+  整理方式已更新: 'notificationsPage.eventTitlePolicyChanged',
+  曲库巡检完成: 'notificationsPage.eventTitleInspectionCompleted',
+  曲库巡检需要处理: 'notificationsPage.eventTitleInspectionAttention',
+  草案待确认: 'notificationsPage.eventTitleDraftPending',
+  草案已应用: 'notificationsPage.eventTitleDraftApplied',
+  歌词补全与洗版扫描结束: 'notificationsPage.eventTitleLyricScanCompleted',
+  导入任务结束: 'notificationsPage.eventTitleImportCompleted',
+  扫描任务结束: 'notificationsPage.eventTitleScanCompleted',
+  元数据查询结束: 'notificationsPage.eventTitleMetadataCompleted',
+};
+
+const notificationSummaryKeys: Record<string, string> = {
+  自动应用: 'notificationsPage.eventSummaryAutoApply',
+  审核后应用: 'notificationsPage.eventSummaryManualReview',
+  '任务已完成，请到曲库管理查看逐项结果。': 'notificationsPage.eventSummaryLibrarySuccess',
+  '任务已结束，存在需要处理的项目，请到曲库管理查看结果。':
+    'notificationsPage.eventSummaryLibraryWarning',
+};
+
+const notificationActionKeys: Record<string, string> = {
+  查看扫描结果: 'notificationsPage.actionViewScanResults',
+  查看候选: 'notificationsPage.actionViewCandidates',
+};
+
+function localizeNotificationTitle(t: (key: string) => string, title: string): string {
+  return notificationTitleKeys[title] ? t(notificationTitleKeys[title]) : title;
+}
+
+function localizeNotificationSummary(
+  t: (key: string, options?: Record<string, unknown>) => string,
+  summary: string,
+): string {
+  if (notificationSummaryKeys[summary]) return t(notificationSummaryKeys[summary]);
+  const insp = summary.match(/^已检查 (\d+) 首，发现 (\d+) 项，失败 (\d+) 首。(?: 错误：(.+))?$/);
+  if (insp) {
+    const base = t('notificationsPage.eventSummaryInspectionCounts', {
+      processed: insp[1],
+      issues: insp[2],
+      failed: insp[3],
+    });
+    return insp[4]
+      ? `${base}${t('notificationsPage.eventSummaryInspectionErrorSuffix', { error: insp[4] })}`
+      : base;
+  }
+  const lyric = summary.match(
+    /^可升级 (\d+) 首，待核对 (\d+) 首，未匹配 (\d+) 首，失败 (\d+) 首。请到歌词补全查看并确认。$/,
+  );
+  if (lyric) {
+    return t('notificationsPage.eventSummaryLyricCounts', {
+      ready: lyric[1],
+      review: lyric[2],
+      noMatch: lyric[3],
+      failed: lyric[4],
+    });
+  }
+  const meta = summary.match(
+    /^查询结束：建议已生成 (\d+) 首，未匹配 (\d+) 首，失败 (\d+) 首，已变化 (\d+) 首。建议需要确认后应用。(?:其中 (\d+) 首有来源警告。)?$/,
+  );
+  if (meta) {
+    const base = t('notificationsPage.eventSummaryMetadataCounts', {
+      completed: meta[1],
+      noMatch: meta[2],
+      failed: meta[3],
+      stale: meta[4],
+    });
+    return meta[5]
+      ? `${base}${t('notificationsPage.eventSummaryMetadataWarningsSuffix', { warnings: meta[5] })}`
+      : base;
+  }
+  return summary;
+}
+
+function localizeNotificationAction(t: (key: string) => string, label: string): string {
+  return notificationActionKeys[label] ? t(notificationActionKeys[label]) : label;
+}
+
 export function useNotifications(userId: string) {
   const { t } = useTranslation();
   const [items, setItems] = useState<AgentNotification[]>([]),
@@ -240,8 +317,8 @@ export function Notifications({
                   }
                 />
                 <div>
-                  <h3>{item.title}</h3>
-                  <p>{item.summary}</p>
+                  <h3>{localizeNotificationTitle(t, item.title)}</h3>
+                  <p>{localizeNotificationSummary(t, item.summary)}</p>
                   <small>
                     {localDate(item.created_at)} ·{' '}
                     {item.severity === 'error'
@@ -259,7 +336,7 @@ export function Notifications({
                       className={action.id === item.actions?.[0]?.id ? 'primary' : undefined}
                       onClick={() => onOpen(action)}
                     >
-                      {action.label}
+                      {localizeNotificationAction(t, action.label)}
                       {typeof action.count === 'number' && action.count > 0
                         ? ` · ${action.count}`
                         : ''}
@@ -295,7 +372,9 @@ export function Notifications({
                   )}
                   {!item.read_at && (
                     <button
-                      aria-label={t('notificationsPage.markReadAria', { title: item.title })}
+                      aria-label={t('notificationsPage.markReadAria', {
+                        title: localizeNotificationTitle(t, item.title),
+                      })}
                       onClick={() => void inbox.read([item.id])}
                     >
                       {t('notificationsPage.markRead')}

@@ -206,7 +206,7 @@ export function AlbumEditor({
     >
       <div className="editor-heading">
         <div>
-          <span className="eyebrow">FLAC ALBUM METADATA & ARTWORK</span>
+          <span className="eyebrow">{t('albumEditor.eyebrow')}</span>
           <h2>{t('albumEditor.title')}</h2>
           <p className="muted">{initialTitle || record?.primary_title || albumId}</p>
         </div>

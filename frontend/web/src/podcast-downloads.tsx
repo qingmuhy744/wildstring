@@ -4,6 +4,47 @@ import { api } from './api';
 import { Icon } from './icons';
 import type { DownloadQueueInfo, DownloadTaskItem } from './podcasts';
 type DownloadQueueView = 'active' | 'failed' | 'completed';
+
+const taskErrorExactKeys: Record<string, string> = {
+  下载失败: 'podcastDownloads.errDownloadFailed',
+  下载已被停止: 'podcastDownloads.errDownloadStopped',
+  播客音频超过大小限制: 'podcastDownloads.errAudioTooLarge',
+  '源站域名被解析为 fake-ip 地址（198.18.0.0/15），请在服务端开启 WILDSTRING_PODCAST_ALLOW_FAKE_IP 或配置出站代理':
+    'podcastDownloads.errFakeIp',
+  播客音频地址指向非公网资源: 'podcastDownloads.errNonPublicUrl',
+  '源站频繁请求限流 (HTTP 429 Too Many Requests)，已启动防限流冷却': 'podcastDownloads.errHttp429',
+  '源站防盗链或拒绝访问 (HTTP 403 Forbidden)': 'podcastDownloads.errHttp403',
+  '音频资源文件不存在 (HTTP 404 Not Found)': 'podcastDownloads.errHttp404',
+  '源站服务过载不可用 (HTTP 503)': 'podcastDownloads.errHttp503',
+  '网络连接超时，源站响应过慢': 'podcastDownloads.errTimeout',
+  '网络请求超时，源站响应过慢': 'podcastDownloads.errRequestTimeout',
+  '源站 SSL 证书校验失败': 'podcastDownloads.errSsl',
+};
+
+function localizeTaskError(
+  t: (key: string, options?: Record<string, unknown>) => string,
+  error?: string | null,
+): string {
+  if (!error) return t('podcastDownloads.defaultTaskError');
+  if (taskErrorExactKeys[error]) return t(taskErrorExactKeys[error]);
+  const retry = error.match(/^第 (\d+)\/(\d+) 次重试等待中 \((\d+)s\): (.+)$/);
+  if (retry) {
+    return t('podcastDownloads.errRetryWaitingDetail', {
+      attempt: retry[1],
+      max: retry[2],
+      seconds: retry[3],
+      error: localizeTaskError(t, retry[4]),
+    });
+  }
+  const http = error.match(/^源站 HTTP 请求失败 \((\d+)\)$/);
+  if (http) return t('podcastDownloads.errHttpStatus', { code: http[1] });
+  const net = error.match(/^网络连接失败 \((.+)\)$/);
+  if (net) return t('podcastDownloads.errNetworkReason', { reason: net[1] });
+  const exc = error.match(/^下载遇到异常: (.+)$/);
+  if (exc) return t('podcastDownloads.errExceptionReason', { reason: exc[1] });
+  return error;
+}
+
 export function PodcastDownloadManager() {
   const { t } = useTranslation();
   const [notice, showNotice] = useState('');
@@ -147,9 +188,7 @@ export function PodcastDownloadManager() {
                   <div className="queue-task-main">
                     <div className="queue-task-title">{task.episode_title}</div>
                     <div className="queue-task-sub">{task.podcast_title}</div>
-                    <div className="queue-task-error">
-                      {task.error || t('podcastDownloads.defaultTaskError')}
-                    </div>
+                    <div className="queue-task-error">{localizeTaskError(t, task.error)}</div>
                   </div>
                   <button
                     type="button"
@@ -207,7 +246,7 @@ export function PodcastDownloadManager() {
                           </span>
                           <span>
                             {task.downloaded_human
-                              ? `${task.downloaded_human} / ${task.total_human || t('podcastDownloads.unknownTotal')}`
+                              ? `${task.downloaded_human} / ${task.total_human && task.total_human !== '未知大小' ? task.total_human : t('podcastDownloads.unknownTotal')}`
                               : t('podcastDownloads.connecting')}
                           </span>
                         </div>

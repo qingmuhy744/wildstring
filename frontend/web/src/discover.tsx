@@ -48,6 +48,7 @@ const reasonKeys: Record<string, string> = {
   探索本曲库中你尚未听过的歌曲: 'discover.reasons.discovery',
   你已超过30天没有重听这首歌: 'discover.reasons.revisit30',
   'Last.fm 公共来源中找到与本库标题、艺人一致的歌曲': 'discover.reasons.lastfm',
+  '根据你听过或收藏歌曲的 Last.fm 相似关系，在本地曲库找到': 'discover.reasons.lastfmSimilar',
   从本地曲库中选取: 'discover.reasons.localPick',
   本地关键词匹配: 'discoverPage.reasons.localMatch',
   本地曲库候选: 'discoverPage.reasons.localCandidate',

@@ -179,7 +179,7 @@ export function GainControls({ trackId }: { trackId?: string }) {
         >
           <div className="editor-heading">
             <div>
-              <span className="eyebrow">PLAYBACK GAIN</span>
+              <span className="eyebrow">{t('playbackGain.eyebrow')}</span>
               <h2>{t('playbackGain.dialogTitle')}</h2>
               <p className="muted">{t('playbackGain.dialogDescription')}</p>
             </div>

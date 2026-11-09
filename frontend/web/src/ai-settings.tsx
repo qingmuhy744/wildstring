@@ -134,7 +134,7 @@ export function AISettings() {
               />
             </label>
             <div className="metadata-field">
-              <label htmlFor="ai-api-key">API Key</label>
+              <label htmlFor="ai-api-key">{t('aiSettings.keyLabel')}</label>
               <input
                 id="ai-api-key"
                 type="password"

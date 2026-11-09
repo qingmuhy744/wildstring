@@ -25,7 +25,7 @@ test('专辑网格操作菜单打开专辑编辑器，修改 FLAC 标签与封�
   // 专辑编辑弹窗应弹出
   const dialog = page.locator('.album-editor-dialog');
   await expect(dialog).toBeVisible();
-  await expect(dialog).toContainText('FLAC ALBUM METADATA & ARTWORK');
+  await expect(dialog).toContainText('FLAC 专辑信息与封面');
   await expect(dialog).toContainText('专辑名称 (ALBUM)');
   await expect(dialog).toContainText('专辑艺人 (ALBUMARTIST)');
   await expect(dialog).toContainText('发行日期 (DATE)');

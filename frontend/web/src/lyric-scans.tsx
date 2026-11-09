@@ -487,8 +487,13 @@ export function LyricScans({
                   <span>{getStatusLabel(item.status, t)}</span>
                 </div>
                 <p>
-                  {item.baseline?.label ?? t('lyricScans.notCheckedYet')}
-                  {item.quality && ` → ${item.quality.label}`}
+                  {item.baseline
+                    ? levelKeys[item.baseline.level]
+                      ? t(levelKeys[item.baseline.level])
+                      : item.baseline.label
+                    : t('lyricScans.notCheckedYet')}
+                  {item.quality &&
+                    ` → ${levelKeys[item.quality.level] ? t(levelKeys[item.quality.level]) : item.quality.label}`}
                 </p>
                 {item.error && (
                   <p role="status">

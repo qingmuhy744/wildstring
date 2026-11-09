@@ -225,7 +225,7 @@ export function MetadataEditor({
     >
       <div className="editor-heading">
         <div>
-          <span className="eyebrow">MAKE IT YOURS</span>
+          <span className="eyebrow">{t('metadataEditor.eyebrow')}</span>
           <h2>{t('metadataEditor.heading')}</h2>
           <p className="muted">{track.title}</p>
         </div>

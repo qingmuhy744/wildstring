@@ -131,7 +131,7 @@ export function LibrarySources({
     <>
       <MusicUploader canImport={canImport} onUploaded={onChanged} />
       <section className="management-card" aria-label={t('librarySources.workbenchAria')}>
-        <span className="eyebrow">SOURCE WORKSPACE</span>
+        <span className="eyebrow">{t('librarySources.sourceEyebrow')}</span>
         <h2>{t('librarySources.title')}</h2>
         <p className="muted">{t('librarySources.description')}</p>
         <div className="source-folder-selection">
@@ -207,7 +207,7 @@ export function LibrarySources({
         )}
       </section>
       <section className="management-card" aria-label={t('librarySources.recycleBinAria')}>
-        <span className="eyebrow">LIBRARY TRASH</span>
+        <span className="eyebrow">{t('librarySources.trashEyebrow')}</span>
         <h2>{t('librarySources.recycleBinTitle')}</h2>
         <p className="muted">{t('librarySources.recycleBinHint')}</p>
         {trash.filter((item) => item.status === 'trashed').length === 0 ? (
