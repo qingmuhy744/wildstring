@@ -1,5 +1,6 @@
 import { HelpLabel } from './desktop-help';
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { artist, type Playlist } from './api';
 import {
   allDownloadPlaylists,
@@ -29,12 +30,12 @@ const size = (bytes: number) =>
       ? `${(bytes / 1024).toFixed(1)} KB`
       : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 const labels = {
-  queued: '等待下载',
-  downloading: '下载中',
-  complete: '已离线保存',
-  paused: '已暂停',
-  failed: '下载失败',
-};
+  queued: 'offlinePanel.state_queued',
+  downloading: 'offlinePanel.state_downloading',
+  complete: 'offlinePanel.state_complete',
+  paused: 'offlinePanel.state_paused',
+  failed: 'offlinePanel.state_failed',
+} as const;
 export function OfflinePanel({
   player,
   onSettings,
@@ -44,6 +45,7 @@ export function OfflinePanel({
   onSettings: () => void;
   onBrowse: () => void;
 }) {
+  const { t } = useTranslation();
   const [records, setRecords] = useState<OfflineTrack[]>([]),
     [error, setError] = useState(''),
     [loading, setLoading] = useState(true),
@@ -61,7 +63,7 @@ export function OfflinePanel({
         })
         .catch(() => {
           if (live) {
-            setError('无法读取离线存储，请重试。');
+            setError(t('offlinePanel.loadFailed'));
             setLoading(false);
           }
         });
@@ -79,16 +81,19 @@ export function OfflinePanel({
       setError('');
       await fn();
     } catch (e) {
-      setError(e instanceof Error ? e.message : '操作未完成。');
+      setError(e instanceof Error ? e.message : t('offlinePanel.actionIncomplete'));
     }
   }
   return (
-    <section className="completion-page offline-page" aria-label="离线音乐">
-      <h1>离线音乐</h1>
+    <section className="completion-page offline-page" aria-label={t('offlinePanel.ariaLabel')}>
+      <h1>{t('offlinePanel.title')}</h1>
       {!loading && (!error || records.length > 0) && (
         <p className="muted">
-          {ready.length} 首完整保存 · 已用 {size(records.reduce((s, r) => s + r.bytes, 0))} /{' '}
-          {offlineLimit() / 1024 / 1024} MB
+          {t('offlinePanel.storageUsage', {
+            count: ready.length,
+            used: size(records.reduce((s, r) => s + r.bytes, 0)),
+            limit: offlineLimit() / 1024 / 1024,
+          })}
         </p>
       )}
       <div className="toolbar-actions offline-page-actions">
@@ -102,14 +107,14 @@ export function OfflinePanel({
               )
             }
           >
-            播放离线音乐
+            {t('offlinePanel.playOffline')}
           </button>
         )}
-        <button onClick={onSettings}>下载设置</button>
+        <button onClick={onSettings}>{t('offlinePanel.downloadSettings')}</button>
       </div>
       {(!('serviceWorker' in navigator) || !isSecureContext) && (
         <p className="muted" role="status">
-          断网后重新打开网页需要 HTTPS 或 localhost。当前地址可以下载音频，离线页面壳暂不可用。
+          {t('offlinePanel.serviceWorkerNotice')}
         </p>
       )}
       {error && (
@@ -122,17 +127,17 @@ export function OfflinePanel({
               setRevision((v) => v + 1);
             }}
           >
-            重试
+            {t('offlinePanel.retry')}
           </button>
         </p>
       )}
-      {loading && <p role="status">正在读取离线音乐…</p>}
+      {loading && <p role="status">{t('offlinePanel.loading')}</p>}
       {!loading && !error && !records.length && (
         <div className="empty">
-          <h2>暂无离线音乐</h2>
-          <p>在歌曲、专辑或歌单中选择“保存离线”。</p>
+          <h2>{t('offlinePanel.emptyTitle')}</h2>
+          <p>{t('offlinePanel.emptyHint')}</p>
           <button className="primary" onClick={onBrowse}>
-            浏览音乐
+            {t('offlinePanel.browseMusic')}
           </button>
         </div>
       )}
@@ -144,7 +149,7 @@ export function OfflinePanel({
               <button
                 className="track-title"
                 disabled={record.state !== 'complete'}
-                aria-label={`离线播放 ${record.track.title}`}
+                aria-label={t('offlinePanel.playTrackAria', { title: record.track.title })}
                 onClick={() =>
                   player.start(
                     ready.map((r) => r.track),
@@ -156,17 +161,17 @@ export function OfflinePanel({
                 <small>{artist(record.track)}</small>
               </button>
               <p role="status">
-                {labels[record.state]} · {size(record.bytes)}
+                {t(labels[record.state])} · {size(record.bytes)}
                 {record.total ? ` / ${size(record.total)}` : ''}
                 {' · '}
                 {record.bitrate && record.blob.type === 'audio/mp4'
                   ? `AAC ${record.bitrate} kbps`
-                  : '原音'}
+                  : t('offlinePanel.originalQuality')}
               </p>
               {record.error && <p className="error">{record.error}</p>}
               {record.total > 0 && record.state !== 'complete' && (
                 <progress
-                  aria-label={`${record.track.title} 下载进度`}
+                  aria-label={t('offlinePanel.trackProgressAria', { title: record.track.title })}
                   max={record.total}
                   value={record.bytes}
                 />
@@ -174,19 +179,23 @@ export function OfflinePanel({
             </div>
             <div className="download-actions">
               {record.state === 'downloading' || record.state === 'queued' ? (
-                <button onClick={() => pauseDownload(record.track.id)}>暂停</button>
+                <button onClick={() => pauseDownload(record.track.id)}>
+                  {t('offlinePanel.pause')}
+                </button>
               ) : (
                 record.state !== 'complete' && (
                   <button onClick={() => void action(() => resumeDownload(record.track.id))}>
-                    {record.state === 'failed' ? '重试' : '继续下载'}
+                    {record.state === 'failed'
+                      ? t('offlinePanel.retryDownload')
+                      : t('offlinePanel.resumeDownload')}
                   </button>
                 )
               )}
               <button
-                aria-label={`删除离线 ${record.track.title}`}
+                aria-label={t('offlinePanel.deleteAria', { title: record.track.title })}
                 onClick={() => void action(() => removeDownload(record.track.id))}
               >
-                删除
+                {t('offlinePanel.delete')}
               </button>
             </div>
           </article>
@@ -197,6 +206,7 @@ export function OfflinePanel({
 }
 
 export function OfflineSettings({ userId }: { userId: string }) {
+  const { t } = useTranslation();
   const [error, setError] = useState('');
   const [limit, setLimit] = useState(offlineLimit() / 1024 / 1024);
   const [bitrate, setBitrate] = useState(downloadBitrate);
@@ -208,19 +218,20 @@ export function OfflineSettings({ userId }: { userId: string }) {
       setError('');
       await fn();
     } catch (e) {
-      setError(e instanceof Error ? e.message : '操作未完成。');
+      setError(e instanceof Error ? e.message : t('offlinePanel.actionIncomplete'));
     }
   }
   return (
     <>
-      <section className="management-card offline-options" aria-label="下载设置">
-        <p className="muted">
-          退出登录会清除本机离线音乐。离线访问有效期 7 天，浏览器空间不足时可能回收内容。
-        </p>
+      <section
+        className="management-card offline-options"
+        aria-label={t('offlinePanel.settingsAriaLabel')}
+      >
+        <p className="muted">{t('offlinePanel.settingsNotice')}</p>
         <label>
-          <HelpLabel hint="offlineLimit">容量上限（MB）</HelpLabel>
+          <HelpLabel hint="offlineLimit">{t('offlinePanel.offlineLimit')}</HelpLabel>
           <input
-            aria-label="离线容量上限"
+            aria-label={t('offlinePanel.offlineLimitAria')}
             type="number"
             min="100"
             max="2048"
@@ -237,9 +248,9 @@ export function OfflineSettings({ userId }: { userId: string }) {
         </label>
 
         <label>
-          <HelpLabel hint="offlineQuality">默认下载音质</HelpLabel>
+          <HelpLabel hint="offlineQuality">{t('offlinePanel.defaultQuality')}</HelpLabel>
           <select
-            aria-label="默认下载音质"
+            aria-label={t('offlinePanel.defaultQualityAria')}
             value={bitrate}
             onChange={(e) => {
               const value = Number(e.target.value);
@@ -249,7 +260,7 @@ export function OfflineSettings({ userId }: { userId: string }) {
           >
             {[0, 128, 192, 256, 320].map((rate) => (
               <option key={rate} value={rate}>
-                {rate ? `AAC ${rate} kbps` : '原音'}
+                {rate ? `AAC ${rate} kbps` : t('offlinePanel.originalQuality')}
               </option>
             ))}
           </select>
@@ -263,14 +274,11 @@ export function OfflineSettings({ userId }: { userId: string }) {
               setAllowMeteredDownloads(e.target.checked);
             }}
           />
-          允许在移动数据或未知网络自动下载
+          {t('offlinePanel.allowMetered')}
         </label>
-        <p className="muted">
-          未开启时仅在能识别的
-          Wi-Fi／有线网络自动下载。浏览器无法识别网络时可手动保存。音质仅影响新下载，有损音频保持原音。
-        </p>
+        <p className="muted">{t('offlinePanel.meteredDescription')}</p>
         <button onClick={() => void action(async () => setPlaylists(await allDownloadPlaylists()))}>
-          选择自动下载歌单
+          {t('offlinePanel.selectPlaylists')}
         </button>
         {playlists?.map((playlist) => (
           <label className="check-label" key={playlist.id}>
@@ -286,14 +294,13 @@ export function OfflineSettings({ userId }: { userId: string }) {
           </label>
         ))}
         <p className="muted">
-          已选 {selected.length}{' '}
-          个歌单。网页打开时自动检查，新歌曲会保存到本机；移出歌单的已下载文件保留。
+          {t('offlinePanel.selectedPlaylistsNotice', { count: selected.length })}
         </p>
         <button
           disabled={!selected.length}
           onClick={() => void action(() => syncOfflinePlaylists(userId))}
         >
-          立即检查歌单
+          {t('offlinePanel.checkPlaylistsNow')}
         </button>
       </section>{' '}
       {error && (

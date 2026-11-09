@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { api } from './api';
 import { DialogCloseButton } from './dialog-close';
 
@@ -43,6 +44,7 @@ export function PodcastCleanupCandidatesDialog({
   onClose: () => void;
   onConfirmCleanup: () => void;
 }) {
+  const { t } = useTranslation();
   const dialog = useRef<HTMLDialogElement>(null);
 
   useEffect(() => {
@@ -82,18 +84,23 @@ export function PodcastCleanupCandidatesDialog({
     >
       <header className="podcast-cleanup-dialog-header">
         <div className="podcast-cleanup-dialog-title-wrap">
-          <h2 id="podcast-cleanup-dialog-title">待清理零引用音频</h2>
+          <h2 id="podcast-cleanup-dialog-title">{t('podcastResources.dialogTitle')}</h2>
           <span className="podcast-cleanup-dialog-badge">
-            {preview.candidate_count} 个文件 · {size(preview.candidate_bytes)}
+            {t('podcastResources.dialogBadge', {
+              count: preview.candidate_count,
+              size: size(preview.candidate_bytes),
+            })}
           </span>
         </div>
-        <DialogCloseButton aria-label="关闭待清理清单" disabled={busy} onClick={onClose} />
+        <DialogCloseButton
+          aria-label={t('podcastResources.closeDialog')}
+          disabled={busy}
+          onClick={onClose}
+        />
       </header>
 
       <div className="podcast-cleanup-dialog-body">
-        <p className="podcast-cleanup-dialog-desc">
-          以下音频文件无任何用户保存或个人引用、未被标记保护，且不在活跃播放或下载中。执行手动清理将物理回收磁盘空间，单集元数据与收听历史仍会保留。
-        </p>
+        <p className="podcast-cleanup-dialog-desc">{t('podcastResources.dialogDesc')}</p>
 
         {candidates.length > 0 ? (
           <div className="podcast-cleanup-candidates-list" role="list">
@@ -110,28 +117,26 @@ export function PodcastCleanupCandidatesDialog({
                 </div>
                 <div className="candidate-meta">
                   <span className="candidate-size">{size(item.size_bytes)}</span>
-                  <span className="candidate-pill">0 份引用</span>
+                  <span className="candidate-pill">{t('podcastResources.zeroReferences')}</span>
                 </div>
               </article>
             ))}
           </div>
         ) : (
           <div className="podcast-cleanup-empty-state">
-            <p className="empty-title">当前暂无待清理音频</p>
-            <p className="empty-desc">
-              所有本地音频均有账号引用、处于保护状态或正在播放/下载中，无需清理。
-            </p>
+            <p className="empty-title">{t('podcastResources.emptyTitle')}</p>
+            <p className="empty-desc">{t('podcastResources.emptyDesc')}</p>
           </div>
         )}
       </div>
 
       <footer className="podcast-cleanup-dialog-footer">
         <span className="podcast-cleanup-dialog-hint">
-          {candidates.length > 0 ? '清理后无法撤销，仅删除音频本地缓存文件' : ''}
+          {candidates.length > 0 ? t('podcastResources.irreversibleHint') : ''}
         </span>
         <div className="podcast-cleanup-dialog-actions">
           <button type="button" className="btn-secondary" disabled={busy} onClick={onClose}>
-            关闭
+            {t('podcastResources.close')}
           </button>
           <button
             type="button"
@@ -139,7 +144,9 @@ export function PodcastCleanupCandidatesDialog({
             disabled={busy || !preview.candidate_count}
             onClick={onConfirmCleanup}
           >
-            {busy ? '正在清理…' : `确认清理 (${preview.candidate_count})`}
+            {busy
+              ? t('podcastResources.cleaningUp')
+              : t('podcastResources.confirmCleanupCount', { count: preview.candidate_count })}
           </button>
         </div>
       </footer>
@@ -148,6 +155,7 @@ export function PodcastCleanupCandidatesDialog({
 }
 
 export function PodcastResourceManager() {
+  const { t } = useTranslation();
   const [page, setPage] = useState<ResourcePage | null>(null);
   const [settings, setSettings] = useState<Settings | null>(null);
   const [offset, setOffset] = useState(0);
@@ -172,7 +180,7 @@ export function PodcastResourceManager() {
     try {
       await action();
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : '操作未完成');
+      setMessage(error instanceof Error ? error.message : t('podcastResources.actionFailed'));
     } finally {
       setBusy(false);
     }
@@ -189,7 +197,13 @@ export function PodcastResourceManager() {
       setPreview(null);
       setCandidateDialogOpen(false);
       setMessage(
-        `已清理 ${result.deleted_count} 个文件，释放 ${size(result.freed_bytes)}${result.failed_count ? `，${result.failed_count} 个文件未能删除，登记已保留` : ''}。`,
+        t('podcastResources.cleanupResult', {
+          deleted: result.deleted_count,
+          freed: size(result.freed_bytes),
+          failedNotice: result.failed_count
+            ? t('podcastResources.cleanupFailedNotice', { count: result.failed_count })
+            : '',
+        }),
       );
       await load();
       return result;
@@ -209,12 +223,10 @@ export function PodcastResourceManager() {
     <section aria-labelledby="podcast-resources-title">
       <div className="podcast-resource-manager">
         <div className="podcast-resource-heading">
-          <h2 id="podcast-resources-title">共享音频管理</h2>
+          <h2 id="podcast-resources-title">{t('podcastResources.heading')}</h2>
         </div>
-        <p>保存单集会建立个人引用。清理仅处理零引用音频；正在播放、下载和手动保护的资源会保留。</p>
-        <p className="muted">
-          自动清理会等待保留期结束；节目资料与收听记录保留。以下手动清理会立即回收符合条件的零引用文件。
-        </p>
+        <p>{t('podcastResources.summaryIntro')}</p>
+        <p className="muted">{t('podcastResources.summaryAutoIntro')}</p>
         {message && <p role="status">{message}</p>}
         {settings && (
           <form
@@ -228,22 +240,22 @@ export function PodcastResourceManager() {
                   }),
                 );
                 setPreview(null);
-                setMessage('自动清理策略已保存。');
+                setMessage(t('podcastResources.autoCleanupSaved'));
               });
             }}
           >
             <fieldset disabled={busy}>
-              <legend>自动清理</legend>
+              <legend>{t('podcastResources.autoCleanupLegend')}</legend>
               <label>
                 <input
                   type="checkbox"
                   checked={settings.enabled}
                   onChange={(e) => setSettings({ ...settings, enabled: e.target.checked })}
                 />
-                自动清理零引用音频
+                {t('podcastResources.enableAutoCleanup')}
               </label>
               <label>
-                零引用后保留天数
+                {t('podcastResources.retentionDaysLabel')}
                 <input
                   type="number"
                   min={0}
@@ -254,15 +266,22 @@ export function PodcastResourceManager() {
                   }
                 />
               </label>
-              <button type="submit">保存清理策略</button>
+              <button type="submit">{t('podcastResources.savePolicy')}</button>
             </fieldset>
           </form>
         )}
         <div className="podcast-resource-cleanup">
-          <p>{page ? `${page.total} 份共享音频 · ${size(page.total_bytes)}` : '正在读取资源…'}</p>
+          <p>
+            {page
+              ? t('podcastResources.pageSummary', {
+                  total: page.total,
+                  size: size(page.total_bytes),
+                })
+              : t('podcastResources.loadingResources')}
+          </p>
           <div className="podcast-cleanup-action-row">
             <button type="button" disabled={busy} onClick={() => void run(() => cleanup(true))}>
-              预览零引用清理
+              {t('podcastResources.previewZeroRefCleanup')}
             </button>
             <button
               type="button"
@@ -270,14 +289,20 @@ export function PodcastResourceManager() {
               disabled={busy}
               onClick={() => void openCandidateDialog()}
             >
-              {preview ? `查看待清理清单 (${preview.candidate_count})` : '查看待清理清单'}
+              {preview
+                ? t('podcastResources.viewCandidateListWithCount', {
+                    count: preview.candidate_count,
+                  })
+                : t('podcastResources.viewCandidateList')}
             </button>
           </div>
           {preview && (
             <div role="status" className="podcast-cleanup-preview-box">
               <p>
-                当前可清理 {preview.candidate_count} 个文件，共 {size(preview.candidate_bytes)}
-                。手动清理会立即回收这些零引用文件。
+                {t('podcastResources.previewSummary', {
+                  count: preview.candidate_count,
+                  size: size(preview.candidate_bytes),
+                })}
               </p>
               <div className="podcast-cleanup-preview-actions">
                 <button
@@ -285,7 +310,7 @@ export function PodcastResourceManager() {
                   disabled={busy || !preview.candidate_count}
                   onClick={() => void run(() => cleanup(false))}
                 >
-                  确认清理零引用文件
+                  {t('podcastResources.confirmCleanupZeroRef')}
                 </button>
                 <button
                   type="button"
@@ -293,7 +318,9 @@ export function PodcastResourceManager() {
                   disabled={busy}
                   onClick={() => setCandidateDialogOpen(true)}
                 >
-                  查看待清理清单 ({preview.candidate_count})
+                  {t('podcastResources.viewCandidateListWithCount', {
+                    count: preview.candidate_count,
+                  })}
                 </button>
               </div>
             </div>
@@ -314,14 +341,22 @@ export function PodcastResourceManager() {
                 <strong>{item.title}</strong>
                 <p>{item.podcast_title}</p>
                 <small>
-                  {item.reference_count} 份引用 · {size(item.size_bytes)}
-                  {item.active ? ' · 使用中' : ''}
+                  {t('podcastResources.resourceMeta', {
+                    references: item.reference_count,
+                    size: size(item.size_bytes),
+                    activeStatus: item.active ? t('podcastResources.inUse') : '',
+                  })}
                 </small>
               </div>
               <button
                 type="button"
                 disabled={busy}
-                aria-label={`${item.protected ? '取消保护' : '保护'}：${item.title}`}
+                aria-label={t(
+                  item.protected
+                    ? 'podcastResources.unprotectAria'
+                    : 'podcastResources.protectAria',
+                  { title: item.title },
+                )}
                 onClick={() =>
                   void run(async () => {
                     await api(`/podcasts/resources/${encodeURIComponent(item.id)}/protection`, {
@@ -333,7 +368,9 @@ export function PodcastResourceManager() {
                   })
                 }
               >
-                {item.protected ? '取消保护' : '保护音频'}
+                {item.protected
+                  ? t('podcastResources.unprotect')
+                  : t('podcastResources.protectAudio')}
               </button>
             </article>
           ))}
@@ -344,17 +381,17 @@ export function PodcastResourceManager() {
             disabled={busy || offset === 0}
             onClick={() => setOffset(Math.max(0, offset - 50))}
           >
-            上一页
+            {t('podcastResources.previousPage')}
           </button>
           <button
             type="button"
             disabled={busy || !page || offset + 50 >= page.total}
             onClick={() => setOffset(offset + 50)}
           >
-            下一页
+            {t('podcastResources.nextPage')}
           </button>
           <button type="button" disabled={busy} onClick={() => void run(() => load())}>
-            重新读取
+            {t('podcastResources.reload')}
           </button>
         </div>
       </div>

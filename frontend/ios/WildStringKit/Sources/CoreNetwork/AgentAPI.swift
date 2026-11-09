@@ -165,8 +165,9 @@ extension WildstringClient {
     }
 
     public func createConversation(
-        title: String = "新对话", connectionID: String? = nil
+        title: String? = nil, connectionID: String? = nil
     ) async throws -> ConversationDetail {
+        let title = title ?? KitL10n("kit.agent.newConversation")
         struct Body: Encodable {
             let title: String
             let connectionID: String?

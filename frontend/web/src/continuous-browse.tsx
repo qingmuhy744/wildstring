@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react';
+import { useTranslation } from 'react-i18next';
+import i18n from './i18n';
 import { api, type DiscSummary } from './api';
 
 export interface BrowsePage<T> {
@@ -76,7 +78,7 @@ export function useContinuousBrowse<T extends { id: string }>({
       ) {
         retryOffset = 0;
         retryReplace = true;
-        throw new Error('曲库内容已变化，请重新加载列表。');
+        throw new Error(i18n.t('continuousBrowse.contentChanged'));
       }
       const start = before ? Math.min(before.page.offset, page.offset) : page.offset;
       const combined = !before
@@ -90,7 +92,7 @@ export function useContinuousBrowse<T extends { id: string }>({
       if (items.length !== end - start) {
         retryOffset = 0;
         retryReplace = true;
-        throw new Error('曲库顺序已变化，请重新加载列表。');
+        throw new Error(i18n.t('continuousBrowse.orderChanged'));
       }
       const next = {
         page: { ...page, offset: start, items },
@@ -106,7 +108,7 @@ export function useContinuousBrowse<T extends { id: string }>({
           identity: queryIdentity,
           offset: retryOffset,
           replace: retryReplace,
-          message: error instanceof Error ? error.message : '无法连接音乐服务，请检查连接。',
+          message: error instanceof Error ? error.message : i18n.t('continuousBrowse.networkError'),
         });
     } finally {
       if (request.current === controller) {
@@ -182,6 +184,7 @@ export function AlphabetRail({
   index: BrowseIndex;
   onJump: (offset: number) => void;
 }) {
+  const { t } = useTranslation();
   const [preview, setPreview] = useState<string | null>(null);
   const gesture = useRef<{ pointer: number; key: string; offset: number | null } | null>(null);
   function at(y: number, element: HTMLElement) {
@@ -202,7 +205,7 @@ export function AlphabetRail({
     <>
       <nav
         className="alphabet-rail"
-        aria-label="首字母定位"
+        aria-label={t('continuousBrowse.alphabetRailAria')}
         onPointerDown={(event) => {
           if (!event.isPrimary || event.button !== 0) return;
           const group = at(event.clientY, event.currentTarget);
@@ -235,7 +238,7 @@ export function AlphabetRail({
             key={group.key}
             type="button"
             disabled={group.offset === null || !group.count}
-            aria-label={`定位到 ${group.key}`}
+            aria-label={t('continuousBrowse.jumpToAria', { key: group.key })}
             aria-pressed={preview === group.key}
             onClick={(event) => {
               if (event.detail === 0 && group.offset !== null) onJump(group.offset);

@@ -18,6 +18,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -25,6 +26,8 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.wildstring.app.AppLanguage
+import com.wildstring.app.R
 import com.wildstring.app.data.PodcastDownloadQueueInfo
 import com.wildstring.app.data.PodcastDownloadSettings
 import com.wildstring.app.data.PodcastSummary
@@ -53,7 +56,7 @@ fun PodcastDownloadSettingsDialog(vm: MusicViewModel, podcast: PodcastSummary, o
         } catch (e: CancellationException) { throw e }
         catch (e: Exception) { if (owner == vm.repository.session.cacheScope()) error = friendlyError(e) }
     }
-    AlertDialog(onDismissRequest = { if (!busy) onDismiss() }, title = { Text("自动下载设置") },
+    AlertDialog(onDismissRequest = { if (!busy) onDismiss() }, title = { Text(stringResource(R.string.pod_dl_dialog_title)) },
         text = {
             Column(Modifier.heightIn(max = 480.dp).verticalScroll(rememberScrollState())) {
                 Text(podcast.title, style = MaterialTheme.typography.titleSmall)
@@ -61,12 +64,18 @@ fun PodcastDownloadSettingsDialog(vm: MusicViewModel, podcast: PodcastSummary, o
                 val current = value
                 if (current == null && error == null) CircularProgressIndicator(Modifier.size(24.dp))
                 if (current != null) {
-                    if (!current.active) Text("已取消关注，自动下载暂停。重新关注后恢复此设置。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    val policies = listOf("none" to "关闭", "latest_3" to "最新 3 集", "latest_5" to "最新 5 集",
-                        "latest_10" to "最新 10 集", "unplayed" to "所有未听完单集", "all" to "全部历史单集")
+                    if (!current.active) Text(stringResource(R.string.pod_dl_unfollowed_notice), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    val policies = listOf(
+                        "none" to stringResource(R.string.pod_dl_policy_none),
+                        "latest_3" to stringResource(R.string.pod_dl_policy_latest_3),
+                        "latest_5" to stringResource(R.string.pod_dl_policy_latest_5),
+                        "latest_10" to stringResource(R.string.pod_dl_policy_latest_10),
+                        "unplayed" to stringResource(R.string.pod_dl_policy_unplayed),
+                        "all" to stringResource(R.string.pod_dl_policy_all),
+                    )
                     var policyMenu by remember { mutableStateOf(false) }
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("自动下载", style = MaterialTheme.typography.bodyLarge)
+                        Text(stringResource(R.string.pod_dl_auto_download_label), style = MaterialTheme.typography.bodyLarge)
                         Box {
                             OutlinedButton(
                                 onClick = { policyMenu = true },
@@ -75,7 +84,7 @@ fun PodcastDownloadSettingsDialog(vm: MusicViewModel, podcast: PodcastSummary, o
                                 contentPadding = PaddingValues(start = 14.dp, end = 8.dp),
                                 modifier = Modifier.height(40.dp).testTag("podcast-auto-download-policy"),
                             ) {
-                                Text(policies.firstOrNull { it.first == current.downloadPolicy }?.second ?: "关闭", fontSize = 14.sp, maxLines = 1, softWrap = false)
+                                Text(policies.firstOrNull { it.first == current.downloadPolicy }?.second ?: stringResource(R.string.pod_dl_policy_none), fontSize = 14.sp, maxLines = 1, softWrap = false)
                                 Icon(Icons.Default.ArrowDropDown, contentDescription = null, modifier = Modifier.size(20.dp))
                             }
                             DropdownMenu(expanded = policyMenu, onDismissRequest = { policyMenu = false }) {
@@ -101,15 +110,15 @@ fun PodcastDownloadSettingsDialog(vm: MusicViewModel, podcast: PodcastSummary, o
                             Checkbox(current.retentionPolicy == "delete_after_played", enabled = !busy && current.active,
                                 onCheckedChange = { value = current.copy(retentionPolicy = if (it) "delete_after_played" else "keep") })
                             Column {
-                                Text("听完后自动移除")
-                                Text("手动保存的单集不受影响", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(stringResource(R.string.pod_dl_delete_played))
+                                Text(stringResource(R.string.pod_dl_manual_unaffected), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
                     }
                 }
                 if (canManageServer) {
                     Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("平缓下载", style = MaterialTheme.typography.bodyLarge)
+                        Text(stringResource(R.string.pod_dl_slow_download), style = MaterialTheme.typography.bodyLarge)
                         Switch(
                             checked = slowDownload,
                             onCheckedChange = { slowDownload = it },
@@ -118,7 +127,7 @@ fun PodcastDownloadSettingsDialog(vm: MusicViewModel, podcast: PodcastSummary, o
                         )
                     }
                 }
-                error?.let { Text(it, color = MaterialTheme.colorScheme.error); TextButton(onClick = { reload++ }, enabled = !busy) { Text("重新读取设置") } }
+                error?.let { Text(it, color = MaterialTheme.colorScheme.error); TextButton(onClick = { reload++ }, enabled = !busy) { Text(stringResource(R.string.pod_dl_reload_settings)) } }
             }
         },
         confirmButton = { TextButton(enabled = !busy && (value?.active == true || canManageServer), onClick = {
@@ -138,8 +147,8 @@ fun PodcastDownloadSettingsDialog(vm: MusicViewModel, podcast: PodcastSummary, o
                 catch (e: Exception) { if (owner == vm.repository.session.cacheScope()) error = friendlyError(e) }
                 finally { busy = false }
             }
-        }) { Text(if (busy) "保存中…" else "保存设置") } },
-        dismissButton = { TextButton(onClick = onDismiss, enabled = !busy) { Text("取消") } })
+        }) { Text(if (busy) stringResource(R.string.pod_dl_saving) else stringResource(R.string.pod_dl_save)) } },
+        dismissButton = { TextButton(onClick = onDismiss, enabled = !busy) { Text(stringResource(R.string.pod_dl_cancel)) } })
 }
 
 @Composable
@@ -198,22 +207,22 @@ fun PodcastDownloadQueueDialog(
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     IconButton(onClick = onDismiss) {
-                        Icon(Icons.Default.Close, contentDescription = "关闭")
+                        Icon(Icons.Default.Close, contentDescription = stringResource(R.string.pod_dl_close))
                     }
                     Column(Modifier.weight(1f)) {
                         Text(
-                            text = "服务器下载任务",
+                            text = stringResource(R.string.pod_dl_tasks_title),
                             style = MaterialTheme.typography.titleLarge,
                             fontWeight = FontWeight.Bold,
                         )
                         Text(
-                            text = "查看单集缓存、自动下载与平缓下载实时进度",
+                            text = stringResource(R.string.pod_dl_tasks_subtitle),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                     IconButton(onClick = { scope.launch { loadQueue() } }) {
-                        Icon(Icons.Default.Refresh, contentDescription = "刷新下载状态")
+                        Icon(Icons.Default.Refresh, contentDescription = stringResource(R.string.pod_dl_refresh_desc))
                     }
                 }
 
@@ -224,17 +233,17 @@ fun PodcastDownloadQueueDialog(
                     FilterChip(
                         selected = activeTab == "active",
                         onClick = { tab = "active" },
-                        label = { Text("进行中 (${queueInfo?.totalPending ?: 0})") },
+                        label = { Text(stringResource(R.string.pod_dl_tab_active, queueInfo?.totalPending ?: 0)) },
                     )
                     FilterChip(
                         selected = activeTab == "failed",
                         onClick = { tab = "failed" },
-                        label = { Text("需重试 (${queueInfo?.failedCount ?: 0})") },
+                        label = { Text(stringResource(R.string.pod_dl_tab_failed, queueInfo?.failedCount ?: 0)) },
                     )
                     FilterChip(
                         selected = activeTab == "completed",
                         onClick = { tab = "completed" },
-                        label = { Text("已完成 (${queueInfo?.recentCompleted?.size ?: 0})") },
+                        label = { Text(stringResource(R.string.pod_dl_tab_completed, queueInfo?.recentCompleted?.size ?: 0)) },
                     )
                 }
 
@@ -270,7 +279,7 @@ fun PodcastDownloadQueueDialog(
                                 modifier = Modifier.weight(1f),
                             )
                             TextButton(onClick = { scope.launch { loadQueue() } }) {
-                                Text("重试")
+                                Text(stringResource(R.string.pod_dl_retry))
                             }
                         }
                     }
@@ -302,9 +311,9 @@ fun PodcastDownloadQueueDialog(
                                         horizontalAlignment = Alignment.CenterHorizontally,
                                         verticalArrangement = Arrangement.spacedBy(6.dp),
                                     ) {
-                                        Text("当前没有进行中的下载任务", style = MaterialTheme.typography.titleSmall)
+                                        Text(stringResource(R.string.pod_dl_no_active_tasks), style = MaterialTheme.typography.titleSmall)
                                         Text(
-                                            "播放时自动缓存、开启节目自动下载或手动保存到服务器后，实时进度会显示在这里。",
+                                            stringResource(R.string.pod_dl_no_active_tasks_hint),
                                             style = MaterialTheme.typography.bodySmall,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         )
@@ -314,7 +323,7 @@ fun PodcastDownloadQueueDialog(
                         } else {
                             item {
                                 Text(
-                                    text = "${info?.activeCount ?: 0} 集正在下载 · ${info?.queuedCount ?: 0} 集排队等待",
+                                    text = stringResource(R.string.pod_dl_active_summary, info?.activeCount ?: 0, info?.queuedCount ?: 0),
                                     style = MaterialTheme.typography.labelMedium,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
@@ -333,7 +342,7 @@ fun PodcastDownloadQueueDialog(
                                         Row(verticalAlignment = Alignment.CenterVertically) {
                                             Column(Modifier.weight(1f)) {
                                                 Text(
-                                                    text = task.episodeTitle.ifBlank { "单集" },
+                                                    text = task.episodeTitle.ifBlank { stringResource(R.string.pod_dl_episode_fallback) },
                                                     style = MaterialTheme.typography.bodyMedium,
                                                     fontWeight = FontWeight.Medium,
                                                     maxLines = 1,
@@ -349,8 +358,8 @@ fun PodcastDownloadQueueDialog(
                                             }
                                             Spacer(Modifier.width(8.dp))
                                             Text(
-                                                text = if (task.status == "retrying") "重试等待 (${task.attempt ?: 1}/${task.maxRetries ?: 3})"
-                                                else if (pct != null) "$pct%" else "下载中",
+                                                text = if (task.status == "retrying") stringResource(R.string.pod_dl_status_retrying, task.attempt ?: 1, task.maxRetries ?: 3)
+                                                else if (pct != null) "$pct%" else stringResource(R.string.pod_dl_status_downloading),
                                                 style = MaterialTheme.typography.labelSmall,
                                                 color = MaterialTheme.colorScheme.primary,
                                                 fontWeight = FontWeight.SemiBold,
@@ -369,12 +378,12 @@ fun PodcastDownloadQueueDialog(
                                             horizontalArrangement = Arrangement.SpaceBetween,
                                         ) {
                                             Text(
-                                                text = (if (task.slowMode) "平缓下载 · " else "") + (task.speedHuman ?: "正在拉取数据…"),
+                                                text = (if (task.slowMode) stringResource(R.string.pod_dl_slow_prefix) else "") + (task.speedHuman ?: stringResource(R.string.pod_dl_fetching_data)),
                                                 style = MaterialTheme.typography.labelSmall,
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                             )
                                             Text(
-                                                text = if (!task.downloadedHuman.isNullOrBlank()) "${task.downloadedHuman} / ${task.totalHuman ?: "未知"}" else "连接中…",
+                                                text = if (!task.downloadedHuman.isNullOrBlank()) "${task.downloadedHuman} / ${task.totalHuman ?: stringResource(R.string.pod_dl_unknown_total)}" else stringResource(R.string.pod_dl_connecting),
                                                 style = MaterialTheme.typography.labelSmall,
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                             )
@@ -394,7 +403,7 @@ fun PodcastDownloadQueueDialog(
                                     ) {
                                         Column(Modifier.weight(1f)) {
                                             Text(
-                                                text = task.episodeTitle.ifBlank { "单集" },
+                                                text = task.episodeTitle.ifBlank { stringResource(R.string.pod_dl_episode_fallback) },
                                                 style = MaterialTheme.typography.bodyMedium,
                                                 maxLines = 1,
                                                 overflow = TextOverflow.Ellipsis,
@@ -409,7 +418,7 @@ fun PodcastDownloadQueueDialog(
                                         }
                                         Spacer(Modifier.width(8.dp))
                                         Text(
-                                            text = "排队 #${idx + 1}",
+                                            text = stringResource(R.string.pod_dl_queued_rank, idx + 1),
                                             style = MaterialTheme.typography.labelSmall,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         )
@@ -431,9 +440,9 @@ fun PodcastDownloadQueueDialog(
                                         horizontalAlignment = Alignment.CenterHorizontally,
                                         verticalArrangement = Arrangement.spacedBy(6.dp),
                                     ) {
-                                        Text("没有需要重试的单集", style = MaterialTheme.typography.titleSmall)
+                                        Text(stringResource(R.string.pod_dl_no_failed), style = MaterialTheme.typography.titleSmall)
                                         Text(
-                                            "下载遇到问题时，可以在这里查看原因并重新拉取。",
+                                            stringResource(R.string.pod_dl_no_failed_hint),
                                             style = MaterialTheme.typography.bodySmall,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         )
@@ -448,7 +457,7 @@ fun PodcastDownloadQueueDialog(
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
                                     Text(
-                                        text = "下载失败 (${failed.size})",
+                                        text = stringResource(R.string.pod_dl_failed_count, failed.size),
                                         style = MaterialTheme.typography.labelMedium,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
@@ -458,7 +467,7 @@ fun PodcastDownloadQueueDialog(
                                                 retrying = true
                                                 try {
                                                     val res = vm.repository.retryFailedPodcastDownloads()
-                                                    notice = "已将 ${res.retriedCount} 个失败任务重新加入队列"
+                                                    notice = AppLanguage.string(R.string.pod_dl_retry_all_notice, res.retriedCount)
                                                     loadQueue()
                                                     if (res.retriedCount > 0) tab = "active"
                                                 } catch (e: CancellationException) {
@@ -474,7 +483,7 @@ fun PodcastDownloadQueueDialog(
                                         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
                                         modifier = Modifier.height(32.dp),
                                     ) {
-                                        Text(if (retrying) "重试中…" else "全部重试", fontSize = 12.sp)
+                                        Text(if (retrying) stringResource(R.string.pod_dl_retrying) else stringResource(R.string.pod_dl_retry_all), fontSize = 12.sp)
                                     }
                                 }
                             }
@@ -490,7 +499,7 @@ fun PodcastDownloadQueueDialog(
                                     ) {
                                         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                                             Text(
-                                                text = task.episodeTitle.ifBlank { "单集" },
+                                                text = task.episodeTitle.ifBlank { stringResource(R.string.pod_dl_episode_fallback) },
                                                 style = MaterialTheme.typography.bodyMedium,
                                                 fontWeight = FontWeight.Medium,
                                                 maxLines = 1,
@@ -502,7 +511,7 @@ fun PodcastDownloadQueueDialog(
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                             )
                                             Text(
-                                                text = task.error?.takeIf { it.isNotBlank() } ?: "源站下载未成功，请检查网络或重试",
+                                                text = task.error?.takeIf { it.isNotBlank() } ?: stringResource(R.string.pod_dl_default_error),
                                                 style = MaterialTheme.typography.bodySmall,
                                                 color = MaterialTheme.colorScheme.error,
                                             )
@@ -525,7 +534,7 @@ fun PodcastDownloadQueueDialog(
                                             contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
                                             modifier = Modifier.height(32.dp),
                                         ) {
-                                            Text("重试", fontSize = 12.sp)
+                                            Text(stringResource(R.string.pod_dl_retry), fontSize = 12.sp)
                                         }
                                     }
                                 }
@@ -545,9 +554,9 @@ fun PodcastDownloadQueueDialog(
                                         horizontalAlignment = Alignment.CenterHorizontally,
                                         verticalArrangement = Arrangement.spacedBy(6.dp),
                                     ) {
-                                        Text("暂无近期完成记录", style = MaterialTheme.typography.titleSmall)
+                                        Text(stringResource(R.string.pod_dl_no_completed), style = MaterialTheme.typography.titleSmall)
                                         Text(
-                                            "后续完成的服务器下载任务会显示在这里。",
+                                            stringResource(R.string.pod_dl_no_completed_hint),
                                             style = MaterialTheme.typography.bodySmall,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         )
@@ -562,7 +571,7 @@ fun PodcastDownloadQueueDialog(
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
                                     Text(
-                                        text = "近期已完成 (${completed.size})",
+                                        text = stringResource(R.string.pod_dl_completed_count, completed.size),
                                         style = MaterialTheme.typography.labelMedium,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
@@ -571,7 +580,7 @@ fun PodcastDownloadQueueDialog(
                                             scope.launch {
                                                 try {
                                                     vm.repository.clearCompletedPodcastDownloads()
-                                                    notice = "已清除完成记录，已下载的音频仍保留"
+                                                    notice = AppLanguage.string(R.string.pod_dl_clear_completed_notice)
                                                     loadQueue()
                                                 } catch (e: CancellationException) {
                                                     throw e
@@ -581,7 +590,7 @@ fun PodcastDownloadQueueDialog(
                                             }
                                         },
                                     ) {
-                                        Text("清除记录", fontSize = 12.sp)
+                                        Text(stringResource(R.string.pod_dl_clear_records), fontSize = 12.sp)
                                     }
                                 }
                             }
@@ -597,7 +606,7 @@ fun PodcastDownloadQueueDialog(
                                     ) {
                                         Column(Modifier.weight(1f)) {
                                             Text(
-                                                text = task.episodeTitle.ifBlank { "单集" },
+                                                text = task.episodeTitle.ifBlank { stringResource(R.string.pod_dl_episode_fallback) },
                                                 style = MaterialTheme.typography.bodyMedium,
                                                 maxLines = 1,
                                                 overflow = TextOverflow.Ellipsis,
@@ -612,7 +621,7 @@ fun PodcastDownloadQueueDialog(
                                         }
                                         Spacer(Modifier.width(8.dp))
                                         Text(
-                                            text = "✓ 已下载",
+                                            text = stringResource(R.string.pod_dl_downloaded_badge),
                                             style = MaterialTheme.typography.labelSmall,
                                             color = MaterialTheme.colorScheme.primary,
                                         )

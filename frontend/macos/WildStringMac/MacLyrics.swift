@@ -167,14 +167,14 @@ struct MacLyricScroll: View {
                 ScrollView {
                     VStack(alignment: .center, spacing: prominent ? 26 : 22) {
                         if phase == .loading {
-                            ProgressView("正在读取歌词")
+                            ProgressView(L10n("macLyrics.loading"))
                                 .frame(maxWidth: .infinity)
                         } else if phase == .failed {
                             VStack(spacing: 12) {
-                                Text("暂时无法读取歌词。网络恢复后可以重试。")
+                                Text(L10n("macLyrics.failed"))
                                     .font(.callout)
                                     .multilineTextAlignment(.center)
-                                Button("重新读取", action: onRetry)
+                                Button(L10n("macLyrics.retry"), action: onRetry)
                             }
                             .foregroundStyle(.secondary)
                             .frame(maxWidth: .infinity)
@@ -247,7 +247,7 @@ struct MacLyricScroll: View {
                 }
                 .overlay(alignment: .bottom) {
                     if !isFollowing, timeline?.isSynced == true, phase == .ready {
-                        Button("回到当前歌词") {
+                        Button(L10n("macLyrics.backToCurrent")) {
                             isFollowing = true
                             if let current { reveal(current, proxy: proxy, animated: true) }
                         }

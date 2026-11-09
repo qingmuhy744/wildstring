@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { api } from './api';
 import { DialogCloseButton } from './dialog-close';
 import { Icon } from './icons';
@@ -32,6 +33,7 @@ export function ImportFolderDialog({
   onSelect: (selection: ImportSelection, preview: ImportPreview | null) => void;
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
   const dialog = useRef<HTMLDialogElement>(null);
   const request = useRef<AbortController | null>(null);
   const [sourceId, setSourceId] = useState(initial.source_id);
@@ -41,35 +43,38 @@ export function ImportFolderDialog({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [filter, setFilter] = useState('');
-  const load = useCallback(async (source: string, folder: string) => {
-    request.current?.abort();
-    const controller = new AbortController();
-    request.current = controller;
-    setBusy(true);
-    setError('');
-    setListing(null);
-    setPreview(null);
-    setFilter('');
-    setSourceId(source);
-    setPath(folder);
-    try {
-      const current = await api<SourceListing>(
-        `/manage/library/folders?source_id=${encodeURIComponent(source)}&path=${encodeURIComponent(folder)}`,
-        { signal: controller.signal },
-      );
-      if (!controller.signal.aborted) {
-        setListing(current);
-        setPath(current.path);
-      }
-    } catch (reason) {
-      if (!controller.signal.aborted)
-        setError(
-          reason instanceof Error ? reason.message : '目录暂时无法读取，请检查来源路径是否可用。',
+  const load = useCallback(
+    async (source: string, folder: string) => {
+      request.current?.abort();
+      const controller = new AbortController();
+      request.current = controller;
+      setBusy(true);
+      setError('');
+      setListing(null);
+      setPreview(null);
+      setFilter('');
+      setSourceId(source);
+      setPath(folder);
+      try {
+        const current = await api<SourceListing>(
+          `/manage/library/folders?source_id=${encodeURIComponent(source)}&path=${encodeURIComponent(folder)}`,
+          { signal: controller.signal },
         );
-    } finally {
-      if (!controller.signal.aborted) setBusy(false);
-    }
-  }, []);
+        if (!controller.signal.aborted) {
+          setListing(current);
+          setPath(current.path);
+        }
+      } catch (reason) {
+        if (!controller.signal.aborted)
+          setError(
+            reason instanceof Error ? reason.message : t('importFolderDialog.dirReadFailed'),
+          );
+      } finally {
+        if (!controller.signal.aborted) setBusy(false);
+      }
+    },
+    [t],
+  );
   useEffect(() => {
     dialog.current?.showModal();
     void load(initial.source_id, initial.path);
@@ -92,7 +97,7 @@ export function ImportFolderDialog({
       if (!controller.signal.aborted) setPreview(value);
     } catch (reason) {
       if (!controller.signal.aborted)
-        setError(reason instanceof Error ? reason.message : '预览未完成，请重试。');
+        setError(reason instanceof Error ? reason.message : t('importFolderDialog.previewFailed'));
     } finally {
       if (!controller.signal.aborted) setBusy(false);
     }
@@ -109,7 +114,7 @@ export function ImportFolderDialog({
     <dialog
       ref={dialog}
       className="import-folder-dialog"
-      aria-label="选择导入文件夹"
+      aria-label={t('importFolderDialog.dialogAria')}
       onCancel={(event) => {
         event.preventDefault();
         onClose();
@@ -118,14 +123,14 @@ export function ImportFolderDialog({
       <header className="import-folder-heading">
         <div>
           <span className="eyebrow">IMPORT FOLDER</span>
-          <h2>选择导入文件夹</h2>
-          <p>浏览服务器来源，选择本次要导入的目录。</p>
+          <h2>{t('importFolderDialog.title')}</h2>
+          <p>{t('importFolderDialog.description')}</p>
         </div>
-        <DialogCloseButton aria-label="关闭导入文件夹选择" onClick={onClose} />
+        <DialogCloseButton aria-label={t('importFolderDialog.closeAria')} onClick={onClose} />
       </header>
       <div className="import-folder-location">
         <label>
-          导入来源
+          {t('importFolderDialog.sourceLabel')}
           <select value={sourceId} onChange={(event) => void load(event.target.value, '.')}>
             {sources.map((item) => (
               <option key={item.id} value={item.id}>
@@ -141,23 +146,23 @@ export function ImportFolderDialog({
           }}
         >
           <label>
-            来源内路径
+            {t('importFolderDialog.pathLabel')}
             <input
-              aria-label="来源内路径"
+              aria-label={t('importFolderDialog.pathLabel')}
               disabled={busy}
               value={path}
               onChange={(event) => setPath(event.target.value)}
-              placeholder=". 或 艺人/专辑"
+              placeholder={t('importFolderDialog.pathPlaceholder')}
             />
           </label>
           <button type="submit" disabled={busy}>
-            打开路径
+            {t('importFolderDialog.openPath')}
           </button>
         </form>
       </div>
-      <nav className="source-breadcrumbs" aria-label="导入文件夹导航">
+      <nav className="source-breadcrumbs" aria-label={t('importFolderDialog.navAria')}>
         <button type="button" disabled={busy} onClick={() => void load(sourceId, '.')}>
-          {source?.name || '来源根目录'}
+          {source?.name || t('importFolderDialog.sourceRoot')}
         </button>
         {parts.map((part, index) => (
           <span key={index}>
@@ -173,7 +178,11 @@ export function ImportFolderDialog({
         ))}
       </nav>
       <div className="import-folder-workspace">
-        <section className="import-folder-files" aria-label="来源文件列表" aria-busy={busy}>
+        <section
+          className="import-folder-files"
+          aria-label={t('importFolderDialog.fileListAria')}
+          aria-busy={busy}
+        >
           <div className="import-folder-tools">
             <button
               type="button"
@@ -181,19 +190,19 @@ export function ImportFolderDialog({
               onClick={() => void load(sourceId, parts.slice(0, -1).join('/') || '.')}
             >
               <Icon name="up" />
-              上一级
+              {t('importFolderDialog.parentFolder')}
             </button>
             <input
               type="search"
-              aria-label="筛选当前文件夹"
+              aria-label={t('importFolderDialog.filterAria')}
               disabled={busy}
-              placeholder="筛选当前目录…"
+              placeholder={t('importFolderDialog.filterPlaceholder')}
               value={filter}
               onChange={(event) => setFilter(event.target.value)}
             />
             <button
               type="button"
-              aria-label="刷新目录"
+              aria-label={t('importFolderDialog.refreshAria')}
               disabled={busy}
               onClick={() => void load(sourceId, listing?.path || path)}
             >
@@ -203,7 +212,7 @@ export function ImportFolderDialog({
           <div className="import-folder-list">
             {busy && !listing ? (
               <p className="muted" role="status">
-                正在读取目录…
+                {t('importFolderDialog.loadingDirectory')}
               </p>
             ) : (
               visible.map((item) =>
@@ -217,7 +226,7 @@ export function ImportFolderDialog({
                   >
                     <Icon name="folder" />
                     <strong>{item.name}</strong>
-                    <span>文件夹</span>
+                    <span>{t('importFolderDialog.folderTag')}</span>
                     <Icon name="chevron" />
                   </button>
                 ) : (
@@ -225,47 +234,59 @@ export function ImportFolderDialog({
                     <Icon name="music" />
                     <span>{item.name}</span>
                     <small className={item.pending ? 'source-pending' : ''}>
-                      {item.pending ? '等待下载' : item.importable ? '音频' : '附属文件'}
+                      {item.pending
+                        ? t('importFolderDialog.tagPending')
+                        : item.importable
+                          ? t('importFolderDialog.tagAudio')
+                          : t('importFolderDialog.tagAsset')}
                     </small>
                   </div>
                 ),
               )
             )}
             {!busy && listing && !visible.length && (
-              <p className="muted">{filter ? '没有匹配的文件或文件夹。' : '这个目录是空的。'}</p>
+              <p className="muted">
+                {filter
+                  ? t('importFolderDialog.noMatches')
+                  : t('importFolderDialog.directoryEmpty')}
+              </p>
             )}
-            {!busy && !listing && <p className="muted">无法读取此目录，可返回来源根目录或重试。</p>}
+            {!busy && !listing && <p className="muted">{t('importFolderDialog.readFailedHint')}</p>}
           </div>
         </section>
-        <aside className="import-folder-summary" aria-label="当前导入范围">
+        <aside className="import-folder-summary" aria-label={t('importFolderDialog.summaryAria')}>
           <Icon name="folder" />
-          <h3>当前文件夹</h3>
-          <strong>{listing ? parts.at(-1) || source?.name : '尚未读取'}</strong>
+          <h3>{t('importFolderDialog.currentFolderTitle')}</h3>
+          <strong>
+            {listing ? parts.at(-1) || source?.name : t('importFolderDialog.notLoaded')}
+          </strong>
           <code>
             {source?.path}
             {listing && listing.path !== '.' ? `/${listing.path}` : ''}
           </code>
-          <p>选择后导入此目录及其子目录，不包含同级的其他文件夹。</p>
+          <p>{t('importFolderDialog.scopeHint')}</p>
           {listing && (
-            <small>
-              当前层级：{folders} 个文件夹 · {audio} 个音频文件
-            </small>
+            <small>{t('importFolderDialog.currentLevelCount', { folders, audio })}</small>
           )}
           <button type="button" disabled={busy || !listing} onClick={() => void inspect()}>
-            {busy && listing ? '正在预览…' : '预览此文件夹'}
+            {busy && listing
+              ? t('importFolderDialog.previewing')
+              : t('importFolderDialog.previewButton')}
           </button>
           {preview && (
             <div className="import-folder-result" role="status">
-              <strong>{preview.count} 个音频文件</strong>
-              <span>包含所有子目录，已入库且未变化的音频会跳过复制。</span>
+              <strong>{t('importFolderDialog.audioFilesCount', { count: preview.count })}</strong>
+              <span>{t('importFolderDialog.previewNote')}</span>
               {preview.pending_markers.length > 0 && (
                 <small className="source-pending">
-                  {preview.pending_markers.length} 个下载标记，相关音频仍需等待完成。
+                  {t('importFolderDialog.pendingMarkersCount', {
+                    count: preview.pending_markers.length,
+                  })}
                 </small>
               )}
             </div>
           )}
-          <small>来源始终只读，文件复制到当前音乐库。</small>
+          <small>{t('importFolderDialog.sourceReadOnlyNotice')}</small>
         </aside>
       </div>
       {error && (
@@ -276,12 +297,14 @@ export function ImportFolderDialog({
       <footer>
         <span>
           {listing
-            ? `已浏览：${listing.path === '.' ? '来源根目录' : listing.path}`
-            : '请选择可读取的文件夹'}
+            ? t('importFolderDialog.browsedPath', {
+                path: listing.path === '.' ? t('importFolderDialog.sourceRoot') : listing.path,
+              })
+            : t('importFolderDialog.selectReadableFolder')}
         </span>
         <div>
           <button type="button" onClick={onClose}>
-            取消
+            {t('importFolderDialog.cancel')}
           </button>
           <button
             type="button"
@@ -291,7 +314,7 @@ export function ImportFolderDialog({
               listing && onSelect({ source_id: sourceId, path: listing.path }, preview)
             }
           >
-            选择此文件夹
+            {t('importFolderDialog.selectFolder')}
           </button>
         </div>
       </footer>

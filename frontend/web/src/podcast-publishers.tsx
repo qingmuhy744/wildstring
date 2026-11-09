@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { api, ApiError } from './api';
 import { DialogCloseButton } from './dialog-close';
 import type { PodcastDetail, PodcastSummary } from './podcasts';
@@ -28,11 +29,12 @@ export function PublisherAffiliation({
   onOpen: (publisher: PodcastPublisher) => void;
   onSaved: (detail: PodcastDetail) => void;
 }) {
+  const { t } = useTranslation();
   const [editing, setEditing] = useState(false);
   return (
     <>
       <div className="podcast-publisher-affiliation">
-        <span>出品方：</span>
+        <span>{t('podcastPublishers.label')}</span>
         {podcast.publisher ? (
           <button
             type="button"
@@ -42,11 +44,13 @@ export function PublisherAffiliation({
             {podcast.publisher.name}
           </button>
         ) : (
-          <span className="publisher-unconfirmed">未确认</span>
+          <span className="publisher-unconfirmed">{t('podcastPublishers.unconfirmed')}</span>
         )}
         {canEdit && (
           <button type="button" className="podcast-refresh-btn" onClick={() => setEditing(true)}>
-            {podcast.publisher ? '修改出品方归属' : '确认出品方'}
+            {podcast.publisher
+              ? t('podcastPublishers.editAffiliation')
+              : t('podcastPublishers.confirmAffiliation')}
           </button>
         )}
       </div>
@@ -74,6 +78,7 @@ function PublisherEditor({
   onClose: () => void;
   onSaved: (detail: PodcastDetail) => void;
 }) {
+  const { t } = useTranslation();
   const dialog = useRef<HTMLDialogElement>(null);
   const choiceId = useId();
   const nameId = useId();
@@ -92,7 +97,7 @@ function PublisherEditor({
         if (active) setPublishers(items);
       })
       .catch(() => {
-        if (active) setError('出品方列表暂时无法加载，仍可输入名称后重试。');
+        if (active) setError(t('podcastPublishers.loadListFailed'));
       });
     return () => {
       active = false;
@@ -109,7 +114,7 @@ function PublisherEditor({
       setConflict(false);
       setError('');
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '资料加载失败');
+      setError(reason instanceof Error ? reason.message : t('podcastPublishers.loadDetailsFailed'));
     } finally {
       setBusy(false);
     }
@@ -134,7 +139,7 @@ function PublisherEditor({
       onSaved(detail);
     } catch (reason) {
       setConflict(reason instanceof ApiError && reason.status === 409);
-      setError(reason instanceof Error ? reason.message : '保存失败，请重试。');
+      setError(reason instanceof Error ? reason.message : t('podcastPublishers.saveFailed'));
     } finally {
       setBusy(false);
     }
@@ -151,8 +156,12 @@ function PublisherEditor({
       }}
     >
       <header className="podcasts-modal-header">
-        <h3 id="publisher-editor-title">出品方归属</h3>
-        <DialogCloseButton aria-label="关闭出品方归属" disabled={busy} onClick={onClose} />
+        <h3 id="publisher-editor-title">{t('podcastPublishers.dialogTitle')}</h3>
+        <DialogCloseButton
+          aria-label={t('podcastPublishers.closeDialog')}
+          disabled={busy}
+          onClick={onClose}
+        />
       </header>
       <form
         className="podcast-publisher-form"
@@ -163,32 +172,41 @@ function PublisherEditor({
       >
         <p>{podcast.title}</p>
         <p className="publisher-help">
-          来源作者：{podcast.author || '未提供'}。作者署名仅作参考，确认后才会加入同出品方聚合。
+          {t('podcastPublishers.sourceAuthorNotice', {
+            author: podcast.author || t('podcastPublishers.notProvided'),
+          })}
         </p>
-        <p className="publisher-help">当前归属：{current.publisher?.name || '未确认'}</p>
+        <p className="publisher-help">
+          {t('podcastPublishers.currentAffiliation', {
+            name: current.publisher?.name || t('podcastPublishers.unconfirmed'),
+          })}
+        </p>
         <div className="publisher-field">
-          <label htmlFor={choiceId}>选择出品方</label>
+          <label htmlFor={choiceId}>{t('podcastPublishers.selectPublisher')}</label>
           <select
             id={choiceId}
             value={choice}
             onChange={(event) => setChoice(event.target.value)}
             disabled={busy}
           >
-            <option value="new">输入出品方名称</option>
+            <option value="new">{t('podcastPublishers.inputPublisherName')}</option>
             {current.publisher && !publishers.some((item) => item.id === current.publisher!.id) && (
               <option value={current.publisher.id}>{current.publisher.name}</option>
             )}
             {publishers.map((item) => (
               <option key={item.id} value={item.id}>
-                {item.name} · {item.podcast_count} 档节目
+                {t('podcastPublishers.publisherItem', {
+                  name: item.name,
+                  count: item.podcast_count,
+                })}
               </option>
             ))}
-            <option value="none">解除出品方关联</option>
+            <option value="none">{t('podcastPublishers.unlinkPublisher')}</option>
           </select>
         </div>
         {choice === 'new' && (
           <div className="publisher-field">
-            <label htmlFor={nameId}>出品方名称</label>
+            <label htmlFor={nameId}>{t('podcastPublishers.publisherNameLabel')}</label>
             <input
               id={nameId}
               value={name}
@@ -207,19 +225,19 @@ function PublisherEditor({
             disabled={busy}
             onClick={() => void reload()}
           >
-            重新读取当前归属
+            {t('podcastPublishers.reloadCurrent')}
           </button>
         )}
         <div className="publisher-form-actions">
           <button type="button" className="modal-cancel-btn" disabled={busy} onClick={onClose}>
-            取消
+            {t('podcastPublishers.cancel')}
           </button>
           <button
             type="submit"
             className="modal-submit-btn"
             disabled={busy || conflict || (choice === 'new' && !name.trim())}
           >
-            {busy ? '保存中…' : '确认并保存'}
+            {busy ? t('podcastPublishers.saving') : t('podcastPublishers.confirmAndSave')}
           </button>
         </div>
       </form>

@@ -106,13 +106,13 @@ internal fun PodcastQueuePanel(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text = "待播队列 (${cloud.queueRows.size})",
+                text = stringResource(R.string.q_panel_queue_title, cloud.queueRows.size),
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold,
             )
             if (onClose != null) {
                 IconButton(onClick = onClose) {
-                    Icon(Icons.Default.Close, contentDescription = "关闭")
+                    Icon(Icons.Default.Close, contentDescription = stringResource(R.string.q_panel_close))
                 }
             }
         }
@@ -170,7 +170,7 @@ internal fun PodcastQueuePanel(
                             ) {
                                 Icon(
                                     Icons.Default.Close,
-                                    contentDescription = "从待播移除",
+                                    contentDescription = stringResource(R.string.q_panel_remove_from_queue),
                                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                     modifier = Modifier.size(18.dp),
                                 )
@@ -184,7 +184,7 @@ internal fun PodcastQueuePanel(
                 item {
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        text = "自动续播",
+                        text = stringResource(R.string.q_panel_auto_continue),
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.primary,
@@ -229,14 +229,14 @@ internal fun PodcastQueuePanel(
                                 shape = RoundedCornerShape(8.dp),
                                 modifier = Modifier.height(32.dp),
                             ) {
-                                Text("加入待播", style = MaterialTheme.typography.labelSmall)
+                                Text(stringResource(R.string.q_panel_add_to_queue), style = MaterialTheme.typography.labelSmall)
                             }
                         }
                     }
                 }
                 item {
                     Text(
-                        text = "不会写入待播队列",
+                        text = stringResource(R.string.q_panel_not_written_to_queue),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.outline,
                         modifier = Modifier.padding(top = 4.dp, bottom = 8.dp),

@@ -1,3 +1,4 @@
+import CoreNetwork
 import Foundation
 
 /// Pure, client-side rule for podcast auto-continuation.
@@ -23,14 +24,14 @@ public enum PodcastContinuation {
         public init(
             id: String,
             title: String,
-            artist: String = "电台",
+            artist: String? = nil,
             album: String? = nil,
             chronologicalIndex: Int,
             isCompleted: Bool = false
         ) {
             self.id = id
             self.title = title
-            self.artist = artist
+            self.artist = artist ?? KitL10n("kit.podcast.defaultArtist")
             self.album = album
             self.chronologicalIndex = chronologicalIndex
             self.isCompleted = isCompleted

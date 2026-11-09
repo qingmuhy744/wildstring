@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { CurationDraftPreview } from './curation-drafts';
 import { api, errorCodeMessage, eventId, type User, type Track } from './api';
 import type { AgentConnection, AgentDraft, AgentPage, AgentSchedule, AgentTask } from './agent-api';
@@ -13,40 +14,40 @@ import {
   WorkspaceNotice,
 } from './workspace-ui';
 
-const fields: Record<string, string> = {
-  title: '歌名',
-  artists: '艺人',
-  album: '专辑',
-  album_artists: '专辑艺人',
-  composers: '作曲',
-  lyricists: '作词',
-  arrangers: '编曲',
-  vocalists: '演唱',
-  genres: '风格',
-  track_number: '曲号',
-  disc_number: '碟号',
-  release_date: '发行日期',
-  artist_credit: '艺人署名',
-  album_artist_credit: '专辑艺人署名',
+const fieldKeys: Record<string, string> = {
+  title: 'agentWorkbench.fieldTitle',
+  artists: 'agentWorkbench.fieldArtists',
+  album: 'agentWorkbench.fieldAlbum',
+  album_artists: 'agentWorkbench.fieldAlbumArtists',
+  composers: 'agentWorkbench.fieldComposers',
+  lyricists: 'agentWorkbench.fieldLyricists',
+  arrangers: 'agentWorkbench.fieldArrangers',
+  vocalists: 'agentWorkbench.fieldVocalists',
+  genres: 'agentWorkbench.fieldGenres',
+  track_number: 'agentWorkbench.fieldTrackNumber',
+  disc_number: 'agentWorkbench.fieldDiscNumber',
+  release_date: 'agentWorkbench.fieldReleaseDate',
+  artist_credit: 'agentWorkbench.fieldArtistCredit',
+  album_artist_credit: 'agentWorkbench.fieldAlbumArtistCredit',
 };
-const format = (v: unknown) =>
-  Array.isArray(v) ? v.join(' / ') : v == null ? '（空）' : String(v);
-const issues: Record<string, string> = {
-  missing_album: '缺少专辑',
-  missing_cover: '缺少封面',
-  missing_lyrics: '未读到歌词（纯音乐可能正常）',
-  missing_artist: '缺少艺人',
-  missing_title: '缺少歌名',
-  missing_track_number: '曲序待核对',
-  track_number_conflict: '同碟曲序重复',
-  track_number_out_of_range: '曲序超过总曲数',
-  disc_number_out_of_range: '碟号超过总碟数',
-  missing_disc_number: '多碟专辑缺少碟号',
-  same_title_versions: '同名歌曲版本待核对',
-  possible_duplicate_recording: '同名且时长接近，需核对音频',
-  possible_multidisc_split: '多碟专辑可能被拆分',
-  metadata_conflict: '信息可能冲突',
-  object_version_changed: '歌曲信息已变化，本项已跳过',
+const format = (v: unknown, empty = '') =>
+  Array.isArray(v) ? v.join(' / ') : v == null ? empty : String(v);
+const issueKeys: Record<string, string> = {
+  missing_album: 'agentWorkbench.issueMissingAlbum',
+  missing_cover: 'agentWorkbench.issueMissingCover',
+  missing_lyrics: 'agentWorkbench.issueMissingLyrics',
+  missing_artist: 'agentWorkbench.issueMissingArtist',
+  missing_title: 'agentWorkbench.issueMissingTitle',
+  missing_track_number: 'agentWorkbench.issueMissingTrackNumber',
+  track_number_conflict: 'agentWorkbench.issueTrackNumberConflict',
+  track_number_out_of_range: 'agentWorkbench.issueTrackNumberOutOfRange',
+  disc_number_out_of_range: 'agentWorkbench.issueDiscNumberOutOfRange',
+  missing_disc_number: 'agentWorkbench.issueMissingDiscNumber',
+  same_title_versions: 'agentWorkbench.issueSameTitleVersions',
+  possible_duplicate_recording: 'agentWorkbench.issuePossibleDuplicateRecording',
+  possible_multidisc_split: 'agentWorkbench.issuePossibleMultidiscSplit',
+  metadata_conflict: 'agentWorkbench.issueMetadataConflict',
+  object_version_changed: 'agentWorkbench.issueObjectVersionChanged',
 };
 
 function DraftDetail({
@@ -60,6 +61,8 @@ function DraftDetail({
   onUpdated: (value: AgentDraft) => void;
   onApplied: () => void;
 }) {
+  const { t } = useTranslation();
+  const fields = Object.fromEntries(Object.entries(fieldKeys).map(([k, key]) => [k, t(key)]));
   const [busy, setBusy] = useState(false),
     [error, setError] = useState(''),
     [editing, setEditing] = useState(false),
@@ -167,22 +170,25 @@ function DraftDetail({
   }
   const permitted = draft.kind === 'playlist' || user.profile === 'owner';
   return (
-    <article className="workspace-card" aria-label="草案详情">
+    <article className="workspace-card" aria-label={t('agentWorkbench.draftAriaLabel')}>
       <div className="workspace-card-head">
         <div>
           <h2>{draft.title}</h2>
           <small>
             {
               {
-                playlist: '歌单草案',
-                metadata: '歌曲信息草案',
-                intake: '导入整理草案',
-                lyrics: '歌词选用草案',
-                cover: '封面选用草案',
-                metadata_batch: '专辑批量修改草案',
+                playlist: t('agentWorkbench.kindPlaylist'),
+                metadata: t('agentWorkbench.kindMetadata'),
+                intake: t('agentWorkbench.kindIntake'),
+                lyrics: t('agentWorkbench.kindLyrics'),
+                cover: t('agentWorkbench.kindCover'),
+                metadata_batch: t('agentWorkbench.kindMetadataBatch'),
               }[draft.kind]
             }{' '}
-            · 版本 {draft.version} · {localDate(draft.updated_at)}
+            {t('agentWorkbench.draftMeta', {
+              version: draft.version,
+              date: localDate(draft.updated_at),
+            })}
           </small>
         </div>
         <StateBadge state={draft.status} />
@@ -191,23 +197,25 @@ function DraftDetail({
       <p className="muted">
         {draft.status === 'applied'
           ? draft.result?.application_mode === 'automatic'
-            ? '此版本已应用。按你的自动整理设置执行。'
-            : '此版本已应用。'
+            ? t('agentWorkbench.statusAppliedAuto')
+            : t('agentWorkbench.statusApplied')
           : draft.status === 'approved'
-            ? '此为旧版已批准草案，点击接受即可完成应用。'
-            : '核对具体内容和来源后，点击接受即可直接应用。'}
+            ? t('agentWorkbench.statusApproved')
+            : t('agentWorkbench.statusPending')}
       </p>
       {draft.kind === 'playlist' ? (
         <>
           <p>
-            {String(draft.payload.name || draft.title)} ·{' '}
-            {Array.isArray(draft.payload.track_ids) ? draft.payload.track_ids.length : 0} 首
+            {t('agentWorkbench.playlistSummary', {
+              name: String(draft.payload.name || draft.title),
+              count: Array.isArray(draft.payload.track_ids) ? draft.payload.track_ids.length : 0,
+            })}
           </p>
           {editing && (
             <label>
-              草案歌单名称
+              {t('agentWorkbench.playlistNameLabel')}
               <input
-                aria-label="草案歌单名称"
+                aria-label={t('agentWorkbench.playlistNameAriaLabel')}
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 maxLength={100}
@@ -216,10 +224,16 @@ function DraftDetail({
           )}
           {draft.before?.name != null && (
             <p className="muted">
-              现有歌单：{String(draft.before.name)} ·{' '}
-              {Array.isArray(draft.before.track_ids) ? draft.before.track_ids.length : 0} 首 →{' '}
-              {String(draft.payload.name || draft.title)} ·{' '}
-              {Array.isArray(draft.payload.track_ids) ? draft.payload.track_ids.length : 0} 首
+              {t('agentWorkbench.playlistDiffNote', {
+                beforeName: String(draft.before.name),
+                beforeCount: Array.isArray(draft.before.track_ids)
+                  ? draft.before.track_ids.length
+                  : 0,
+                afterName: String(draft.payload.name || draft.title),
+                afterCount: Array.isArray(draft.payload.track_ids)
+                  ? draft.payload.track_ids.length
+                  : 0,
+              })}
             </p>
           )}
           {Array.isArray(draft.before?.track_ids) &&
@@ -229,7 +243,7 @@ function DraftDetail({
                 !(draft.payload.track_ids as string[]).includes(track.id),
             ) && (
               <details open>
-                <summary>将移出的歌曲</summary>
+                <summary>{t('agentWorkbench.tracksToRemove')}</summary>
                 <ul>
                   {tracks
                     .filter(
@@ -252,7 +266,7 @@ function DraftDetail({
                 <li key={track.id}>
                   <strong>{track.title}</strong>
                   <span>
-                    {track.artists.join(' / ')} · {track.album || '未知专辑'}
+                    {track.artists.join(' / ')} · {track.album || t('agentWorkbench.unknownAlbum')}
                   </span>
                 </li>
               ))}
@@ -267,41 +281,51 @@ function DraftDetail({
         />
       ) : draft.kind === 'lyrics' ? (
         <div>
-          <p>歌曲：{String(draft.before?.title || draft.before?.track_id || '')}</p>
           <p>
-            来源：{String(draft.before?.provider || '')} · 偏移{' '}
-            {Number(draft.payload.offset_ms || 0)} ms
+            {t('agentWorkbench.lyricsTrack', {
+              title: String(draft.before?.title || draft.before?.track_id || ''),
+            })}
           </p>
           <p>
-            当前：{String((draft.before?.current_quality as { label?: string })?.label || '')} →
-            候选：{String((draft.before?.candidate_quality as { label?: string })?.label || '')}
+            {t('agentWorkbench.lyricsSourceOffset', {
+              provider: String(draft.before?.provider || ''),
+              offset: Number(draft.payload.offset_ms || 0),
+            })}
           </p>
-          <p>匹配依据：{JSON.stringify(draft.before?.match)}</p>
+          <p>
+            {t('agentWorkbench.lyricsQuality', {
+              current: String((draft.before?.current_quality as { label?: string })?.label || ''),
+              candidate: String(
+                (draft.before?.candidate_quality as { label?: string })?.label || '',
+              ),
+            })}
+          </p>
+          <p>
+            {t('agentWorkbench.lyricsMatchBasis', { match: JSON.stringify(draft.before?.match) })}
+          </p>
           <div className="workspace-diff">
-            <strong>当前歌词预览</strong>
+            <strong>{t('agentWorkbench.lyricsCurrentPreview')}</strong>
             <pre>
               {((draft.before?.current_lines as { text: string }[]) || [])
                 .map((line) => line.text)
                 .join('\n')}
             </pre>
-            <strong>候选歌词预览</strong>
+            <strong>{t('agentWorkbench.lyricsCandidatePreview')}</strong>
             <pre>
               {((draft.before?.candidate_lines as { text: string; translation?: string }[]) || [])
                 .map((line) => [line.text, line.translation].filter(Boolean).join(' / '))
                 .join('\n')}
             </pre>
           </div>
-          <p className="muted">
-            请核对版本、时间轴和歌词内容。接受后应用此候选，保留原始格式和双语时间轴。
-          </p>
+          <p className="muted">{t('agentWorkbench.lyricsNote')}</p>
         </div>
       ) : (
         <table className="workspace-diff">
           <thead>
             <tr>
-              <th>字段</th>
-              <th>当前信息</th>
-              <th>建议值</th>
+              <th>{t('agentWorkbench.tableField')}</th>
+              <th>{t('agentWorkbench.tableCurrent')}</th>
+              <th>{t('agentWorkbench.tableSuggested')}</th>
             </tr>
           </thead>
           <tbody>
@@ -311,20 +335,22 @@ function DraftDetail({
                   <th>{fields[key] || key}</th>
                   <td>
                     {draft.before
-                      ? format(draft.before[key])
+                      ? format(draft.before[key], t('agentWorkbench.emptyValue'))
                       : original.value
-                        ? format(original.value.effective[key])
-                        : '读取当前信息中…'}
+                        ? format(original.value.effective[key], t('agentWorkbench.emptyValue'))
+                        : t('agentWorkbench.readingMetadata')}
                   </td>
                   <td>
                     {editing ? (
                       <textarea
-                        aria-label={`草案 ${fields[key] || key}`}
+                        aria-label={t('agentWorkbench.draftFieldAriaLabel', {
+                          field: fields[key] || key,
+                        })}
                         value={values[key] || ''}
                         onChange={(e) => setValues({ ...values, [key]: e.target.value })}
                       />
                     ) : (
-                      format(value)
+                      format(value, t('agentWorkbench.emptyValue'))
                     )}
                   </td>
                 </tr>
@@ -335,11 +361,10 @@ function DraftDetail({
       )}
       {draft.kind === 'intake' && (
         <p className="muted">
-          来源：{String(draft.before?.source_path || '')}
-          。应用后安排复制到托管曲库，导入源保持不变。
+          {t('agentWorkbench.intakeNote', { source: String(draft.before?.source_path || '') })}
         </p>
       )}
-      <h3>来源与依据</h3>
+      <h3>{t('agentWorkbench.evidenceHeading')}</h3>
       {draft.evidence.length ? (
         <ul className="draft-evidence">
           {draft.evidence.map((item, index) => (
@@ -348,14 +373,14 @@ function DraftDetail({
               <p>{item.summary}</p>
               {item.url && /^https?:\/\//.test(item.url) && (
                 <a href={item.url} target="_blank" rel="noopener noreferrer">
-                  查看来源 ↗
+                  {t('agentWorkbench.viewSource')}
                 </a>
               )}
             </li>
           ))}
         </ul>
       ) : (
-        <p className="muted">未附外部来源，请根据曲库信息核对。</p>
+        <p className="muted">{t('agentWorkbench.noEvidence')}</p>
       )}
       <DiagnosticId id={draft.trace_id} />
       {draft.status !== 'applied' && draft.status !== 'rejected' && (
@@ -363,10 +388,10 @@ function DraftDetail({
           {editing ? (
             <>
               <button className="primary" disabled={busy} onClick={() => void action('edit')}>
-                保存并重新确认
+                {t('agentWorkbench.saveAndReconfirm')}
               </button>
               <button disabled={busy} onClick={() => setEditing(false)}>
-                取消修改
+                {t('agentWorkbench.cancelChanges')}
               </button>
             </>
           ) : (
@@ -377,7 +402,7 @@ function DraftDetail({
                 }
                 onClick={() => setEditing(true)}
               >
-                修改草案
+                {t('agentWorkbench.editDraft')}
               </button>
               <button
                 className="primary"
@@ -388,30 +413,31 @@ function DraftDetail({
                 }
                 onClick={() => void action('accept')}
               >
-                {busy ? '应用中…' : '接受并应用'}
+                {busy ? t('agentWorkbench.applying') : t('agentWorkbench.acceptAndApply')}
               </button>
               <button disabled={busy} onClick={() => void action('reject')}>
-                拒绝草案
+                {t('agentWorkbench.rejectDraft')}
               </button>
             </>
           )}
         </div>
       )}
-      {!permitted && <p className="muted">共享歌曲信息的修改需要管理员。</p>}
+      {!permitted && <p className="muted">{t('agentWorkbench.adminRequiredNote')}</p>}
       {Boolean(draft.result?.automatic_error) && (
         <p role="alert">
-          自动应用未完成：{errorCodeMessage(String(draft.result?.automatic_error))}
-          。草案已保留供核对。
+          {t('agentWorkbench.autoError', {
+            error: errorCodeMessage(String(draft.result?.automatic_error)),
+          })}
         </p>
       )}
       {draft.result && draft.status === 'applied' && (
         <p role="status">
-          应用结果：
+          {t('agentWorkbench.resultPrefix')}
           {draft.result.playlist_id
-            ? '歌单已保存。'
+            ? t('agentWorkbench.resultPlaylistSaved')
             : draft.result.track_id
-              ? '歌曲信息已更新。'
-              : '结果已记录。'}
+              ? t('agentWorkbench.resultTrackUpdated')
+              : t('agentWorkbench.resultRecorded')}
         </p>
       )}
     </article>
@@ -426,6 +452,7 @@ export function Drafts({
   selectedId?: string;
   onChanged: () => void;
 }) {
+  const { t } = useTranslation();
   const [filter, setFilter] = useState('pending'),
     [offset, setOffset] = useState(0),
     [selected, setSelected] = useState<AgentDraft | null>(null),
@@ -444,21 +471,21 @@ export function Drafts({
     return () => c.abort();
   }, [selectedId]);
   return (
-    <section className="workspace-page" aria-label="草案工作台">
+    <section className="workspace-page" aria-label={t('agentWorkbench.pageAriaLabel')}>
       <WorkspaceHeader
-        title="整理结果"
-        description="审核模式下接受即应用；自动整理按授权类型执行，并保留差异与结果。"
+        title={t('agentWorkbench.headerTitle')}
+        description={t('agentWorkbench.headerDescription')}
       >
         <RefreshWorkspace busy={list.loading} onClick={() => void list.reload()} />
       </WorkspaceHeader>
       <WorkspaceNotice error={error || list.error} unavailable={list.unsupported} />
       <div className="workspace-tabs">
         {[
-          ['pending', '待确认'],
-          ['approved', '待应用'],
-          ['applied', '已应用'],
-          ['rejected', '已拒绝'],
-          ['', '全部'],
+          ['pending', t('agentWorkbench.tabPending')],
+          ['approved', t('agentWorkbench.tabApproved')],
+          ['applied', t('agentWorkbench.tabApplied')],
+          ['rejected', t('agentWorkbench.tabRejected')],
+          ['', t('agentWorkbench.tabAll')],
         ].map(([key, label]) => (
           <button
             key={key}
@@ -475,7 +502,7 @@ export function Drafts({
       {selected && (
         <>
           <button className="text-button" onClick={() => setSelected(null)}>
-            ← 返回草案列表
+            {t('agentWorkbench.backToList')}
           </button>
           <DraftDetail
             key={selected.id}
@@ -498,26 +525,29 @@ export function Drafts({
                 <small>
                   {
                     {
-                      playlist: '歌单',
-                      metadata: '歌曲信息',
-                      intake: '导入整理',
-                      lyrics: '歌词选用',
-                      cover: '封面选用',
-                      metadata_batch: '专辑批量修改',
+                      playlist: t('agentWorkbench.kindPlaylistShort'),
+                      metadata: t('agentWorkbench.kindMetadataShort'),
+                      intake: t('agentWorkbench.kindIntakeShort'),
+                      lyrics: t('agentWorkbench.kindLyricsShort'),
+                      cover: t('agentWorkbench.kindCoverShort'),
+                      metadata_batch: t('agentWorkbench.kindMetadataBatchShort'),
                     }[draft.kind]
                   }{' '}
                   · {localDate(draft.updated_at)}
                 </small>
               </div>
               <StateBadge state={draft.status} />
-              <button aria-label={`查看草案 ${draft.title}`} onClick={() => setSelected(draft)}>
-                查看差异
+              <button
+                aria-label={t('agentWorkbench.viewDiffAria', { title: draft.title })}
+                onClick={() => setSelected(draft)}
+              >
+                {t('agentWorkbench.viewDiff')}
               </button>
             </div>
           ))}
           {!list.value?.items.length && !list.unsupported && (
             <p className="workspace-empty">
-              {list.loading ? '正在读取草案…' : '这个分类下还没有草案。'}
+              {list.loading ? t('agentWorkbench.loadingDrafts') : t('agentWorkbench.emptyDrafts')}
             </p>
           )}
           <WorkspacePagination
@@ -539,16 +569,17 @@ export function WorkspacePagination({
   total: number;
   onOffset: (n: number) => void;
 }) {
+  const { t } = useTranslation();
   return total > 20 ? (
     <div className="workspace-inline">
       <button disabled={!offset} onClick={() => onOffset(Math.max(0, offset - 20))}>
-        上一页
+        {t('agentWorkbench.prevPage')}
       </button>
       <span className="muted">
         {offset + 1}–{Math.min(offset + 20, total)} / {total}
       </span>
       <button disabled={offset + 20 >= total} onClick={() => onOffset(offset + 20)}>
-        下一页
+        {t('agentWorkbench.nextPage')}
       </button>
     </div>
   ) : null;
@@ -561,6 +592,7 @@ export function AgentTasks({
   selectedId?: string;
   onDraft?: (id: string) => void;
 }) {
+  const { t } = useTranslation();
   const [editingSchedule, setEditingSchedule] = useState<AgentSchedule | null>(null);
   const [tab, setTab] = useState('tasks'),
     [offset, setOffset] = useState(0),
@@ -572,7 +604,7 @@ export function AgentTasks({
     [useAI, setUseAI] = useState(false),
     [connection, setConnection] = useState(''),
     [maxCalls, setMaxCalls] = useState(4),
-    [scheduleName, setScheduleName] = useState('每日曲库巡检'),
+    [scheduleName, setScheduleName] = useState(() => t('agentWorkbench.defaultScheduleName')),
     [hours, setHours] = useState(24),
     [timezone, setTimezone] = useState(
       Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Shanghai',
@@ -618,23 +650,23 @@ export function AgentTasks({
   const item = detail.value;
   const stageName = (stage: string, status: string) =>
     stage === 'completed' && status !== 'succeeded'
-      ? '处理结束，未全部完成'
+      ? t('agentWorkbench.stageCompletedIncomplete')
       : (
           {
-            rules: '检查本地信息',
-            model_call: '正在分析依据',
-            analysis_complete: '分析完成',
-            completed: '处理结束',
-            queued: '等待开始',
-            paused_authorization: '等待重新授权',
-            paused_budget: '等待预算调整',
+            rules: t('agentWorkbench.stageRules'),
+            model_call: t('agentWorkbench.stageModelCall'),
+            analysis_complete: t('agentWorkbench.stageAnalysisComplete'),
+            completed: t('agentWorkbench.stageCompleted'),
+            queued: t('agentWorkbench.stageQueued'),
+            paused_authorization: t('agentWorkbench.stagePausedAuth'),
+            paused_budget: t('agentWorkbench.stagePausedBudget'),
           } as Record<string, string>
-        )[stage] || '检查中';
+        )[stage] || t('agentWorkbench.stageChecking');
   return (
-    <section className="workspace-page" aria-label="巡检与任务">
+    <section className="workspace-page" aria-label={t('agentWorkbench.tasksAriaLabel')}>
       <WorkspaceHeader
-        title="音乐巡检"
-        description="巡检只检查和生成草案。任务在服务端继续，关闭网页后可回来查看。"
+        title={t('agentWorkbench.tasksTitle')}
+        description={t('agentWorkbench.tasksDescription')}
       >
         <RefreshWorkspace
           busy={tasks.loading}
@@ -658,10 +690,10 @@ export function AgentTasks({
             setEditingSchedule(null);
           }}
         >
-          任务
+          {t('agentWorkbench.tabTasks')}
         </button>
         <button aria-pressed={tab === 'schedules'} onClick={() => setTab('schedules')}>
-          定时巡检
+          {t('agentWorkbench.tabSchedules')}
         </button>
       </div>
       {!tasks.unsupported && (
@@ -690,23 +722,27 @@ export function AgentTasks({
                       ...(editingSchedule ? { version: editingSchedule.version } : {}),
                     },
                 tab === 'tasks'
-                  ? '巡检已提交，可在任务中查看进度。'
+                  ? t('agentWorkbench.taskSubmitted')
                   : editingSchedule
-                    ? '计划修改已保存。'
-                    : '计划已保存，默认关闭；请确认后开启。',
+                    ? t('agentWorkbench.scheduleUpdated')
+                    : t('agentWorkbench.scheduleSavedDisabled'),
               ).then((success) => {
                 if (success) setEditingSchedule(null);
               });
             }}
           >
             <h2>
-              {tab === 'tasks' ? '开始一次巡检' : editingSchedule ? '编辑巡检计划' : '添加巡检计划'}
+              {tab === 'tasks'
+                ? t('agentWorkbench.titleStartInspection')
+                : editingSchedule
+                  ? t('agentWorkbench.titleEditSchedule')
+                  : t('agentWorkbench.titleAddSchedule')}
             </h2>
             <div className="workspace-form">
               {tab === 'schedules' && (
                 <>
                   <label>
-                    计划名称
+                    {t('agentWorkbench.scheduleNameLabel')}
                     <input
                       required
                       maxLength={100}
@@ -715,7 +751,7 @@ export function AgentTasks({
                     />
                   </label>
                   <label>
-                    每隔（小时）
+                    {t('agentWorkbench.intervalHoursLabel')}
                     <input
                       required
                       type="number"
@@ -726,7 +762,7 @@ export function AgentTasks({
                     />
                   </label>
                   <label>
-                    时区
+                    {t('agentWorkbench.timezoneLabel')}
                     <input
                       required
                       value={timezone}
@@ -736,9 +772,9 @@ export function AgentTasks({
                 </>
               )}
               <label>
-                最多检查歌曲
+                {t('agentWorkbench.maxTracksLabel')}
                 <input
-                  aria-label="巡检歌曲上限"
+                  aria-label={t('agentWorkbench.maxTracksAriaLabel')}
                   required
                   type="number"
                   min={1}
@@ -753,19 +789,21 @@ export function AgentTasks({
                   checked={useAI}
                   onChange={(e) => setUseAI(e.target.checked)}
                 />
-                使用 AI 辅助巡检
+                {t('agentWorkbench.useAiLabel')}
               </label>
               {useAI && (
                 <>
                   <label>
-                    {tab === 'tasks' ? '本次巡检模型' : '定时巡检模型'}
+                    {tab === 'tasks'
+                      ? t('agentWorkbench.currentModelLabel')
+                      : t('agentWorkbench.scheduleModelLabel')}
                     <select
-                      aria-label="巡检模型连接"
+                      aria-label={t('agentWorkbench.modelSelectAriaLabel')}
                       required
                       value={selectedConnectionAvailable ? connection : ''}
                       onChange={(e) => setConnection(e.target.value)}
                     >
-                      <option value="">请选择 AI 连接</option>
+                      <option value="">{t('agentWorkbench.selectAiConnection')}</option>
                       {availableConnections.map((c) => (
                         <option value={c.id} key={c.id}>
                           {c.name} · {c.model}
@@ -776,14 +814,14 @@ export function AgentTasks({
                   {!selectedConnectionAvailable && !connections.loading && (
                     <p role="status">
                       {availableConnections.length
-                        ? '请选择用于本次巡检的 AI 连接。'
+                        ? t('agentWorkbench.selectAiConnectionHint')
                         : tab === 'tasks'
-                          ? '没有可用的 AI 连接。请先在「AI 连接」添加并启用连接。'
-                          : '没有可用于定时巡检的连接。请在「AI 连接」添加或编辑连接，开启「允许自动巡检使用」。'}
+                          ? t('agentWorkbench.noAiConnectionTasks')
+                          : t('agentWorkbench.noAiConnectionSchedules')}
                     </p>
                   )}
                   <label>
-                    模型调用上限
+                    {t('agentWorkbench.maxCallsLabel')}
                     <input
                       required
                       type="number"
@@ -801,26 +839,26 @@ export function AgentTasks({
                   disabled={busy || (useAI && !selectedConnectionAvailable)}
                 >
                   {busy
-                    ? '正在提交…'
+                    ? t('agentWorkbench.submitting')
                     : tab === 'tasks'
                       ? useAI
-                        ? '提交 AI 辅助巡检'
-                        : '提交规则巡检'
+                        ? t('agentWorkbench.submitAiInspection')
+                        : t('agentWorkbench.submitRuleInspection')
                       : editingSchedule
-                        ? '保存计划修改'
-                        : '保存关闭的计划'}
+                        ? t('agentWorkbench.saveScheduleChanges')
+                        : t('agentWorkbench.saveDisabledSchedule')}
                 </button>
                 {editingSchedule && (
                   <button type="button" disabled={busy} onClick={() => setEditingSchedule(null)}>
-                    取消编辑
+                    {t('agentWorkbench.cancelEditSchedule')}
                   </button>
                 )}
                 <span className="muted">
                   {useAI
                     ? tab === 'tasks'
-                      ? '提交仅授权本次 AI 巡检，可能产生模型费用，受调用上限与每日预算约束。结果先生成草案。'
-                      : '定时巡检仅使用已授权自动使用的连接，受每日预算约束。结果先生成草案。'
-                    : '本地规则不调用模型。'}
+                      ? t('agentWorkbench.aiTasksNotice')
+                      : t('agentWorkbench.aiSchedulesNotice')
+                    : t('agentWorkbench.rulesNotice')}
                 </span>
               </div>
             </div>
@@ -831,16 +869,24 @@ export function AgentTasks({
                 {tasks.value?.items.map((task) => (
                   <div className="workspace-row" key={task.id}>
                     <div className="workspace-row-main">
-                      <strong>{task.parameters.use_ai ? 'AI 辅助巡检' : '曲库规则巡检'}</strong>
+                      <strong>
+                        {task.parameters.use_ai
+                          ? t('agentWorkbench.taskAiInspection')
+                          : t('agentWorkbench.taskRuleInspection')}
+                      </strong>
                       <small>
                         {localDate(task.created_at)} · {stageName(task.stage, task.status)}
                       </small>
                     </div>
                     <StateBadge state={task.status} />
-                    <button onClick={() => setSelected(task.id)}>查看任务</button>
+                    <button onClick={() => setSelected(task.id)}>
+                      {t('agentWorkbench.viewTask')}
+                    </button>
                   </div>
                 ))}
-                {!tasks.value?.items.length && <p className="workspace-empty">尚无巡检任务。</p>}
+                {!tasks.value?.items.length && (
+                  <p className="workspace-empty">{t('agentWorkbench.emptyTasks')}</p>
+                )}
                 <WorkspacePagination
                   total={tasks.value?.total || 0}
                   offset={offset}
@@ -848,12 +894,18 @@ export function AgentTasks({
                 />
               </div>
               {item && (
-                <article className="workspace-card" aria-label="巡检任务详情">
+                <article
+                  className="workspace-card"
+                  aria-label={t('agentWorkbench.detailAriaLabel')}
+                >
                   <div className="workspace-card-head">
                     <div>
-                      <h2>巡检结果</h2>
+                      <h2>{t('agentWorkbench.inspectionResultTitle')}</h2>
                       <small>
-                        任务 {item.id} · {stageName(item.stage, item.status)}
+                        {t('agentWorkbench.taskSummaryHeader', {
+                          id: item.id,
+                          stage: stageName(item.stage, item.status),
+                        })}
                       </small>
                     </div>
                     <StateBadge state={item.status} />
@@ -862,7 +914,19 @@ export function AgentTasks({
                     {Object.entries(item.counts)
                       .map(
                         ([k, v]) =>
-                          `${({ processed: '已检查', total: '总计', issues: '本地问题', failed: '曲目失败', drafts: '草案', skipped: '跳过', calls: '模型调用' } as Record<string, string>)[k] || k} ${v}`,
+                          `${
+                            (
+                              {
+                                processed: t('agentWorkbench.countProcessed'),
+                                total: t('agentWorkbench.countTotal'),
+                                issues: t('agentWorkbench.countIssues'),
+                                failed: t('agentWorkbench.countFailed'),
+                                drafts: t('agentWorkbench.countDrafts'),
+                                skipped: t('agentWorkbench.countSkipped'),
+                                calls: t('agentWorkbench.countCalls'),
+                              } as Record<string, string>
+                            )[k] || k
+                          } ${v}`,
                       )
                       .join(' · ')}
                   </p>
@@ -877,11 +941,11 @@ export function AgentTasks({
                             `/agent/tasks/${item.id}/cancel`,
                             'POST',
                             {},
-                            '已请求停止；正在执行的步骤结束后确认。',
+                            t('agentWorkbench.cancelRequestedNotice'),
                           )
                         }
                       >
-                        请求取消
+                        {t('agentWorkbench.requestCancel')}
                       </button>
                     )}
                     {[
@@ -898,11 +962,11 @@ export function AgentTasks({
                             `/agent/tasks/${item.id}/resume`,
                             'POST',
                             {},
-                            '已提交恢复，将从保存的位置继续。',
+                            t('agentWorkbench.resumedNotice'),
                           )
                         }
                       >
-                        从进度恢复
+                        {t('agentWorkbench.resumeFromProgress')}
                       </button>
                     )}
                   </div>
@@ -912,19 +976,19 @@ export function AgentTasks({
                         <strong>
                           {result.analysis
                             ? result.ai_skipped
-                              ? '规则检查说明'
-                              : 'AI 分析结果'
-                            : result.title || '无法读取的歌曲'}
+                              ? t('agentWorkbench.ruleCheckDescription')
+                              : t('agentWorkbench.aiAnalysisResult')
+                            : result.title || t('agentWorkbench.unreadableTrack')}
                         </strong>
                         {result.analysis ? (
                           <p>{result.analysis}</p>
                         ) : (
                           <small>
                             {result.error_code
-                              ? '此项检查未完成，请查看诊断编号。'
+                              ? t('agentWorkbench.checkIncompleteError')
                               : (result.issues || [])
-                                  .map((issue) => issues[issue] || issue)
-                                  .join(' · ') || '未发现规则问题'}
+                                  .map((issue) => (issueKeys[issue] ? t(issueKeys[issue]) : issue))
+                                  .join(' · ') || t('agentWorkbench.noRuleIssues')}
                           </small>
                         )}
                         {result.findings?.map((finding) => (
@@ -934,7 +998,7 @@ export function AgentTasks({
                         ))}
                         {result.draft_ids?.map((id) => (
                           <button key={id} onClick={() => onDraft?.(id)}>
-                            查看草案与应用结果
+                            {t('agentWorkbench.viewDraftAndResult')}
                           </button>
                         ))}
                       </div>
@@ -950,8 +1014,11 @@ export function AgentTasks({
                   <div className="workspace-row-main">
                     <strong>{schedule.name}</strong>
                     <small>
-                      每 {schedule.interval_hours} 小时 · {schedule.timezone} · 下次{' '}
-                      {localDate(schedule.next_run_at)}
+                      {t('agentWorkbench.scheduleSummary', {
+                        hours: schedule.interval_hours,
+                        timezone: schedule.timezone,
+                        nextRun: localDate(schedule.next_run_at),
+                      })}
                     </small>
                   </div>
                   <button
@@ -970,7 +1037,7 @@ export function AgentTasks({
                         ?.scrollIntoView({ behavior: 'smooth' });
                     }}
                   >
-                    编辑计划
+                    {t('agentWorkbench.editSchedule')}
                   </button>
                   <button
                     disabled={busy}
@@ -987,30 +1054,36 @@ export function AgentTasks({
                           version: schedule.version,
                           enabled: !schedule.enabled,
                         },
-                        schedule.enabled ? '计划已关闭。' : '计划已开启。',
+                        schedule.enabled
+                          ? t('agentWorkbench.scheduleDisabledNotice')
+                          : t('agentWorkbench.scheduleEnabledNotice'),
                       )
                     }
                   >
-                    {schedule.enabled ? '关闭计划' : '开启计划'}
+                    {schedule.enabled
+                      ? t('agentWorkbench.disableSchedule')
+                      : t('agentWorkbench.enableSchedule')}
                   </button>
                   <button
                     disabled={busy}
                     onClick={() => {
-                      if (confirm(`删除计划“${schedule.name}”？历史任务会保留。`))
+                      if (
+                        confirm(t('agentWorkbench.deleteScheduleConfirm', { name: schedule.name }))
+                      )
                         void perform(
                           `/agent/schedules/${schedule.id}`,
                           'DELETE',
                           null,
-                          '计划已删除。',
+                          t('agentWorkbench.scheduleDeletedNotice'),
                         );
                     }}
                   >
-                    删除
+                    {t('agentWorkbench.deleteSchedule')}
                   </button>
                 </div>
               ))}
               {!schedules.value?.items.length && (
-                <p className="workspace-empty">尚无定时巡检，计划添加后默认关闭。</p>
+                <p className="workspace-empty">{t('agentWorkbench.emptySchedules')}</p>
               )}
             </div>
           )}

@@ -11,15 +11,15 @@ struct ServerRoutesEditor: View {
 
         var title: String {
             switch self {
-            case .add: return "添加新线路并独立登录"
-            case .reauth(let route): return "重新登录线路「\(route.name)」"
+            case .add: return L10n("routes.addAndSignIn")
+            case .reauth(let route): return L10n("routes.reauthRoute", route.name)
             }
         }
 
         var submitTitle: String {
             switch self {
-            case .add: return "验证并添加线路"
-            case .reauth: return "重新验证并更新"
+            case .add: return L10n("routes.verifyAndAdd")
+            case .reauth: return L10n("routes.reverifyAndUpdate")
             }
         }
     }
@@ -35,15 +35,15 @@ struct ServerRoutesEditor: View {
 
     var body: some View {
         Form {
-            Section("线路模式") {
-                Picker("选择", selection: Binding(get: { routes.profile.manualAddress ?? "" }, set: { value in Task { await routes.select(value.isEmpty ? nil : value) } })) {
-                    Text("Fallback · 故障时按优先级切换").tag("")
-                    ForEach(routes.profile.routes) { route in Text("手动 · \(route.name)").tag(route.address) }
+            Section(L10n("routes.modeSection")) {
+                Picker(L10n("routes.select"), selection: Binding(get: { routes.profile.manualAddress ?? "" }, set: { value in Task { await routes.select(value.isEmpty ? nil : value) } })) {
+                    Text(L10n("routes.fallbackOption")).tag("")
+                    ForEach(routes.profile.routes) { route in Text(L10n("routes.manualOption", route.name)).tag(route.address) }
                 }
-                Text("Fallback 保持当前可用线路；手动模式固定线路。重新选择 Fallback 会从第一条线路开始尝试。")
+                Text(L10n("routes.modeDescription"))
                     .font(.caption).foregroundStyle(.secondary)
             }
-            Section("线路优先级") {
+            Section(L10n("routes.prioritySection")) {
                 ForEach(Array(routes.profile.routes.enumerated()), id: \.element.id) { index, route in
                     ServerRouteRow(
                         route: route,
@@ -79,7 +79,7 @@ struct ServerRoutesEditor: View {
                             formMode = .add
                         }
                     } label: {
-                        Label("添加新线路…", systemImage: "plus")
+                        Label(L10n("routes.addNew"), systemImage: "plus")
                     }
                     .buttonStyle(.borderless)
                 }
@@ -87,13 +87,13 @@ struct ServerRoutesEditor: View {
 
             if let mode = formMode {
                 Section(mode.title) {
-                    TextField("线路名称，例如内网 / 备用公网", text: $name)
-                    TextField("服务器完整地址", text: $address).onChange(of: address) { _, _ in allowHTTP = false }
-                    Toggle("允许此线路使用 HTTP（请确认内网或 SD-WAN 保护）", isOn: $allowHTTP)
-                    TextField("账号", text: $username)
-                    SecureField("登录密码", text: $password)
+                    TextField(L10n("routes.namePlaceholder"), text: $name)
+                    TextField(L10n("routes.addressPlaceholder"), text: $address).onChange(of: address) { _, _ in allowHTTP = false }
+                    Toggle(L10n("routes.allowHttp"), isOn: $allowHTTP)
+                    TextField(L10n("routes.username"), text: $username)
+                    SecureField(L10n("routes.password"), text: $password)
                     HStack(spacing: 12) {
-                        Button("取消") {
+                        Button(L10n("common.cancel")) {
                             withAnimation(.easeInOut(duration: 0.2)) {
                                 formMode = nil
                                 error = nil
@@ -102,7 +102,7 @@ struct ServerRoutesEditor: View {
                         }
                         .buttonStyle(.bordered)
 
-                        Button(adding ? "验证中…" : mode.submitTitle) {
+                        Button(adding ? L10n("routes.verifying") : mode.submitTitle) {
                             adding = true; error = nil
                             Task {
                                 defer { adding = false; password = "" }
@@ -114,14 +114,14 @@ struct ServerRoutesEditor: View {
                                         formMode = nil
                                     }
                                 } catch {
-                                    self.error = (error as? APIError)?.code ?? "连接未完成，请检查地址、HTTP 许可和账号"
+                                    self.error = (error as? APIError)?.code ?? L10n("routes.connectionFailed")
                                 }
                             }
                         }
                         .buttonStyle(.borderedProminent)
                         .disabled(adding || password.isEmpty || address.isEmpty || name.isEmpty || username.isEmpty)
                     }
-                    Text("每条线路分别保存会话，不复制其他线路的 Cookie。线路设置仅保存在这台设备。")
+                    Text(L10n("routes.sessionNote"))
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }
@@ -153,14 +153,14 @@ private struct ServerRouteRow: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 8) {
                 if isEditing {
-                    TextField("线路名称", text: $draftName)
+                    TextField(L10n("routes.routeName"), text: $draftName)
                         .textFieldStyle(.roundedBorder)
                         .onSubmit { commitRename() }
-                    Button("保存") { commitRename() }
+                    Button(L10n("common.save")) { commitRename() }
                         .buttonStyle(.borderedProminent)
                         .controlSize(.small)
                         .disabled(draftName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    Button("取消") { cancelRename() }
+                    Button(L10n("common.cancel")) { cancelRename() }
                         .buttonStyle(.bordered)
                         .controlSize(.small)
                 } else {
@@ -175,10 +175,10 @@ private struct ServerRouteRow: View {
                         Image(systemName: "pencil")
                     }
                     .buttonStyle(.borderless)
-                    .help("修改线路名称")
+                    .help(L10n("routes.renameHelp"))
 
                     if isActive {
-                        Text("当前")
+                        Text(L10n("routes.active"))
                             .font(.caption2)
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
@@ -192,17 +192,17 @@ private struct ServerRouteRow: View {
                     Button { onMove(-1) } label: { Image(systemName: "arrow.up") }
                         .buttonStyle(.borderless)
                         .disabled(index == 0)
-                        .help("提高优先级")
+                        .help(L10n("routes.moveUpHelp"))
                     Button { onMove(1) } label: { Image(systemName: "arrow.down") }
                         .buttonStyle(.borderless)
                         .disabled(index == totalCount - 1)
-                        .help("降低优先级")
-                    Button("重新登录") { onReauth() }
+                        .help(L10n("routes.moveDownHelp"))
+                    Button(L10n("routes.reauth")) { onReauth() }
                         .buttonStyle(.borderless)
                     Button(role: .destructive) { onRemove() } label: { Image(systemName: "trash") }
                         .buttonStyle(.borderless)
                         .disabled(isActive || totalCount <= 1)
-                        .help("移除线路")
+                        .help(L10n("routes.removeHelp"))
                 }
             }
             Text(route.address)

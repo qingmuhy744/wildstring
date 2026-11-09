@@ -14,13 +14,13 @@ struct MacManageView: View {
             VStack(alignment: .leading, spacing: 24) {
                 HStack(alignment: .top, spacing: 16) {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("曲库运行记录").font(.title2.bold())
-                        Text("查看最近的导入和扫描；曲库配置与批量管理在网页版中完成。")
+                        Text(L10n("macManage.title")).font(.title2.bold())
+                        Text(L10n("macManage.subtitle"))
                             .font(.callout).foregroundStyle(.secondary)
                     }
                     Spacer(minLength: 0)
                     Link(destination: client.server.url) {
-                        Label("打开网页版", systemImage: "arrow.up.right.square")
+                        Label(L10n("macManage.openWeb"), systemImage: "arrow.up.right.square")
                     }.buttonStyle(.bordered)
                 }
                 if let message {
@@ -28,18 +28,18 @@ struct MacManageView: View {
                         .font(.callout).foregroundStyle(.orange)
                 }
                 if loading, imports.isEmpty, scans.isEmpty {
-                    ProgressView("正在读取记录…").frame(maxWidth: .infinity).padding(24)
+                    ProgressView(L10n("macManage.loadingRecords")).frame(maxWidth: .infinity).padding(24)
                 } else {
-                    recordSection("导入记录", count: imports.count) {
+                    recordSection(L10n("macManage.importRecords"), count: imports.count) {
                         ForEach(imports) { record in
                             MacTaskRecordCard(status: record.status ?? "unknown", startedAt: record.startedAt,
                                 summary: importSummary(record.counts ?? [:]), errors: record.errors ?? [])
                         }
                     }
-                    recordSection("扫描记录", count: scans.count) {
+                    recordSection(L10n("macManage.scanRecords"), count: scans.count) {
                         ForEach(scans) { record in
                             MacTaskRecordCard(status: record.status, startedAt: record.startedAt,
-                                summary: record.counts.map(scanSummary) ?? "暂无统计", errors: record.errors ?? [])
+                                summary: record.counts.map(scanSummary) ?? L10n("macManage.noStats"), errors: record.errors ?? [])
                         }
                     }
                 }
@@ -48,10 +48,10 @@ struct MacManageView: View {
             .frame(maxWidth: 900)
             .frame(maxWidth: .infinity, alignment: .top)
         }
-        .navigationTitle("管理")
+        .navigationTitle(L10n("macManage.navTitle"))
         .toolbar {
             Button { Task { await load() } } label: {
-                Label("刷新记录", systemImage: "arrow.clockwise")
+                Label(L10n("macManage.refreshRecords"), systemImage: "arrow.clockwise")
             }.disabled(loading)
         }
         .task { await load() }
@@ -61,10 +61,10 @@ struct MacManageView: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Text(title).font(.headline)
-                Text("最近 \(count) 项").font(.caption).foregroundStyle(.secondary)
+                Text(L10n("macManage.recentItems", count)).font(.caption).foregroundStyle(.secondary)
             }
             if count == 0 {
-                Text(message == nil ? "还没有记录" : "记录暂时不可用")
+                Text(message == nil ? L10n("macManage.noRecordsYet") : L10n("macManage.recordsUnavailable"))
                     .font(.callout).foregroundStyle(.secondary).padding(.vertical, 12)
             }
             content()
@@ -87,25 +87,25 @@ struct MacManageView: View {
 
     private func scanSummary(_ counts: ScanCounts) -> String {
         var parts: [String] = []
-        if let visited = counts.visited { parts.append("检查 \(visited)") }
-        if let added = counts.added, added > 0 { parts.append("新增 \(added)") }
-        if let updated = counts.updated, updated > 0 { parts.append("更新 \(updated)") }
-        if let unchanged = counts.unchanged, unchanged > 0 { parts.append("未变 \(unchanged)") }
-        if let missing = counts.missing, missing > 0 { parts.append("缺失 \(missing)") }
-        if let skipped = counts.skipped, skipped > 0 { parts.append("跳过 \(skipped)") }
-        if let errors = counts.errors, errors > 0 { parts.append("错误 \(errors)") }
-        return parts.isEmpty ? "没有曲目变更" : parts.joined(separator: " · ")
+        if let visited = counts.visited { parts.append(L10n("macManage.scanVisited", visited)) }
+        if let added = counts.added, added > 0 { parts.append(L10n("macManage.scanAdded", added)) }
+        if let updated = counts.updated, updated > 0 { parts.append(L10n("macManage.scanUpdated", updated)) }
+        if let unchanged = counts.unchanged, unchanged > 0 { parts.append(L10n("macManage.scanUnchanged", unchanged)) }
+        if let missing = counts.missing, missing > 0 { parts.append(L10n("macManage.scanMissing", missing)) }
+        if let skipped = counts.skipped, skipped > 0 { parts.append(L10n("macManage.scanSkipped", skipped)) }
+        if let errors = counts.errors, errors > 0 { parts.append(L10n("macManage.scanErrors", errors)) }
+        return parts.isEmpty ? L10n("macManage.noTrackChanges") : parts.joined(separator: " · ")
     }
 
     private func importSummary(_ counts: [String: Int]) -> String {
-        let labels = [("copied", "导入"), ("converted", "转换"), ("unchanged", "未变"),
-            ("duplicates", "重复"), ("assets_copied", "附件"), ("review", "待整理"),
-            ("waiting", "等待"), ("skipped", "跳过"), ("conflicts", "冲突"), ("errors", "错误")]
+        let labels = [("copied", L10n("macManage.importCopied")), ("converted", L10n("macManage.importConverted")), ("unchanged", L10n("macManage.importUnchanged")),
+            ("duplicates", L10n("macManage.importDuplicates")), ("assets_copied", L10n("macManage.importAssetsCopied")), ("review", L10n("macManage.importReview")),
+            ("waiting", L10n("macManage.importWaiting")), ("skipped", L10n("macManage.importSkipped")), ("conflicts", L10n("macManage.importConflicts")), ("errors", L10n("macManage.importErrors"))]
         let parts = labels.compactMap { key, label -> String? in
             guard let value = counts[key], value > 0 else { return nil }
             return "\(label) \(value)"
         }
-        return parts.isEmpty ? "没有文件变更" : parts.joined(separator: " · ")
+        return parts.isEmpty ? L10n("macManage.noFileChanges") : parts.joined(separator: " · ")
     }
 }
 
@@ -116,8 +116,15 @@ private struct MacTaskRecordCard: View {
     let errors: [ScanErrorDetail]
 
     private var statusText: String {
-        let labels = ["completed": "已完成", "completed_with_errors": "完成，部分失败", "failed": "失败",
-            "running": "进行中", "queued": "等待处理", "interrupted": "已中断", "cancelled": "已取消"]
+        let labels = [
+            "completed": L10n("macManage.statusCompleted"),
+            "completed_with_errors": L10n("macManage.statusCompletedWithErrors"),
+            "failed": L10n("macManage.statusFailed"),
+            "running": L10n("macManage.statusRunning"),
+            "queued": L10n("macManage.statusQueued"),
+            "interrupted": L10n("macManage.statusInterrupted"),
+            "cancelled": L10n("macManage.statusCancelled")
+        ]
         return labels[status] ?? status
     }
 
@@ -128,7 +135,7 @@ private struct MacTaskRecordCard: View {
     }
 
     private var dateText: String {
-        guard let startedAt else { return "时间未提供" }
+        guard let startedAt else { return L10n("macManage.timeNotProvided") }
         let formatter = ISO8601DateFormatter()
         var date = formatter.date(from: startedAt)
         if date == nil {
@@ -147,11 +154,11 @@ private struct MacTaskRecordCard: View {
             }
             Text(summary).font(.callout).foregroundStyle(.secondary)
             if !errors.isEmpty {
-                DisclosureGroup("查看 \(errors.count) 项错误") {
+                DisclosureGroup(L10n("macManage.viewErrors", errors.count)) {
                     VStack(alignment: .leading, spacing: 10) {
                         ForEach(Array(errors.enumerated()), id: \.offset) { _, error in
                             VStack(alignment: .leading, spacing: 3) {
-                                Text(error.message ?? error.code ?? "处理失败")
+                                Text(error.message ?? error.code ?? L10n("macManage.processingFailed"))
                                 if let path = error.path { Text(path).foregroundStyle(.secondary) }
                             }.font(.caption).textSelection(.enabled)
                         }
@@ -180,16 +187,16 @@ struct MacMetadataSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("歌曲信息")
+            Text(L10n("macManage.trackInfo"))
                 .font(.title3.bold())
-            Text("修改保存到曲库资料中，不会改写音频文件。")
+            Text(L10n("macManage.trackInfoNote"))
                 .font(.callout)
                 .foregroundStyle(.secondary)
-            TextField("标题", text: $title)
+            TextField(L10n("macManage.fieldTitle"), text: $title)
                 .textFieldStyle(.roundedBorder)
-            TextField("艺人，用 / 分开", text: $artists)
+            TextField(L10n("macManage.fieldArtists"), text: $artists)
                 .textFieldStyle(.roundedBorder)
-            TextField("专辑", text: $album)
+            TextField(L10n("macManage.fieldAlbum"), text: $album)
                 .textFieldStyle(.roundedBorder)
             if let message {
                 Text(message)
@@ -198,8 +205,8 @@ struct MacMetadataSheet: View {
             }
             HStack {
                 Spacer()
-                Button("取消", role: .cancel) { dismiss() }
-                Button(saving ? "正在保存…" : "保存") { Task { await save() } }
+                Button(L10n("macManage.cancel"), role: .cancel) { dismiss() }
+                Button(saving ? L10n("macManage.saving") : L10n("macManage.save")) { Task { await save() } }
                     .buttonStyle(.borderedProminent)
                     .disabled(!ready || saving || title.trimmingCharacters(in: .whitespaces).isEmpty)
             }

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { api, type Track } from './api';
 import type { PodcastEpisode, PodcastSummary } from './podcasts';
 import { podcastEpisodeToTrack } from './podcast-track';
@@ -15,10 +16,10 @@ import {
   type QueuePreferences,
 } from './podcast-remote';
 
-const actions: { value: NewEpisodeAction; label: string }[] = [
-  { value: 'ignore', label: '关闭（仅关注）' },
-  { value: 'queue_last', label: '自动加到队尾' },
-  { value: 'queue_next', label: '自动插到下一集' },
+const ACTION_KEYS: { value: NewEpisodeAction; key: string }[] = [
+  { value: 'ignore', key: 'actionIgnore' },
+  { value: 'queue_last', key: 'actionQueueLast' },
+  { value: 'queue_next', key: 'actionQueueNext' },
 ];
 
 function normalizeDeliveryAction(action: NewEpisodeAction | undefined): NewEpisodeAction {
@@ -41,6 +42,7 @@ function ActionSelect({
   disabled?: boolean;
   onChange: (value: NewEpisodeAction) => void;
 }) {
+  const { t } = useTranslation();
   const normalizedValue = normalizeDeliveryAction(value);
   const selectNode = (
     <select
@@ -50,9 +52,9 @@ function ActionSelect({
       disabled={disabled}
       onChange={(event) => onChange(event.target.value as NewEpisodeAction)}
     >
-      {actions.map((item) => (
+      {ACTION_KEYS.map((item) => (
         <option key={item.value} value={item.value}>
-          {item.label}
+          {t(`podcastInbox.${item.key}`)}
         </option>
       ))}
     </select>
@@ -67,6 +69,7 @@ function ActionSelect({
 }
 
 export function PodcastDeliverySelect({ showId }: { showId: string }) {
+  const { t } = useTranslation();
   const [action, setAction] = useState<NewEpisodeAction>('queue_last');
   const [limit, setLimit] = useState(3);
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
@@ -104,19 +107,19 @@ export function PodcastDeliverySelect({ showId }: { showId: string }) {
   return (
     <div className="podcast-delivery" aria-busy={status === 'loading'}>
       {status === 'loading' ? (
-        <p role="status">正在读取新集自动待播</p>
+        <p role="status">{t('podcastInbox.readingDelivery')}</p>
       ) : (
         <ActionSelect
-          label="新集自动待播"
+          label={t('podcastInbox.deliveryLabel')}
           value={action}
           onChange={(value) => void save(value, limit)}
         />
       )}
       {status === 'error' && (
         <p className="podcast-settings-error" role="alert">
-          暂时无法保存新集自动待播。
+          {t('podcastInbox.saveDeliveryFailed')}
           <button type="button" onClick={() => setReloadKey((value) => value + 1)}>
-            重试
+            {t('podcastInbox.retry')}
           </button>
         </p>
       )}
@@ -125,6 +128,7 @@ export function PodcastDeliverySelect({ showId }: { showId: string }) {
 }
 
 export function PodcastQueueDefaults() {
+  const { t } = useTranslation();
   const [action, setAction] = useState<NewEpisodeAction>('queue_last');
   const [limit, setLimit] = useState(3);
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
@@ -161,19 +165,19 @@ export function PodcastQueueDefaults() {
   return (
     <div className="podcast-settings-section podcast-queue-defaults">
       {status === 'loading' ? (
-        <p role="status">正在读取新集自动待播</p>
+        <p role="status">{t('podcastInbox.readingDelivery')}</p>
       ) : (
         <ActionSelect
-          label="新关注节目默认"
+          label={t('podcastInbox.defaultDeliveryLabel')}
           value={action}
           onChange={(value) => void save(value, limit)}
         />
       )}
       {status === 'error' && (
         <p className="podcast-settings-error" role="alert">
-          暂时无法读取新集自动待播。
+          {t('podcastInbox.readDeliveryFailed')}
           <button type="button" onClick={() => setReloadKey((value) => value + 1)}>
-            重试
+            {t('podcastInbox.retry')}
           </button>
         </p>
       )}
@@ -206,6 +210,7 @@ export function PodcastInboxDialog({
   onPlayQueue?: () => void | Promise<unknown>;
   onRemoveQueuedEpisode?: (episodeId: string) => void;
 }) {
+  const { t } = useTranslation();
   const [rows, setRows] = useState<UnifiedPendingRow[]>([]);
   const [queueVersion, setQueueVersion] = useState(0);
   const [followedShows, setFollowedShows] = useState<PodcastSummary[]>([]);
@@ -264,7 +269,7 @@ export function PodcastInboxDialog({
               episode_id: item.episode_id,
               origin: item.origin,
               source: 'queue',
-              title: '这一集已经无法读取',
+              title: t('podcastInbox.unreadableEpisode'),
             };
           }
         }),
@@ -293,7 +298,7 @@ export function PodcastInboxDialog({
                 episode_id: item.episode_id,
                 origin: 'manual',
                 source: 'inbox',
-                title: '这一集已经无法读取',
+                title: t('podcastInbox.unreadableEpisode'),
               };
             }
           }),
@@ -332,7 +337,7 @@ export function PodcastInboxDialog({
 
   async function playRow(item: UnifiedPendingRow) {
     if (!item.episode || !item.show) {
-      setProblem('这一集已经无法读取。可以移除它，或稍后重试。');
+      setProblem(t('podcastInbox.unreadableEpisodeHelp'));
       return;
     }
     const track = podcastEpisodeToTrack(item.episode, item.show);
@@ -362,14 +367,14 @@ export function PodcastInboxDialog({
       }
       setRows((current) => current.filter((entry) => entry.episode_id !== item.episode_id));
     } catch {
-      setProblem('暂时无法从待播移除。请重试。');
+      setProblem(t('podcastInbox.removeFailed'));
     }
   }
 
   async function playAllPending() {
     const playable = rows.filter((entry) => entry.episode && entry.show);
     if (!playable.length) {
-      setProblem('待播列表中没有可播放的单集。');
+      setProblem(t('podcastInbox.noPlayableEpisodes'));
       return;
     }
     try {
@@ -396,7 +401,7 @@ export function PodcastInboxDialog({
         onClose();
       }
     } catch {
-      setProblem('暂时无法开始播放待播列表。请重试。');
+      setProblem(t('podcastInbox.playQueueFailed'));
     }
   }
 
@@ -406,7 +411,7 @@ export function PodcastInboxDialog({
     try {
       await saveShowDelivery(showId, nextAction, limit);
     } catch {
-      setProblem('暂时无法保存节目新集自动待播。请重试。');
+      setProblem(t('podcastInbox.saveShowDeliveryFailed'));
     }
   }
 
@@ -422,10 +427,14 @@ export function PodcastInboxDialog({
         onClick={(event) => event.stopPropagation()}
       >
         <div className="podcast-inbox-header">
-          <h3 id="podcast-inbox-title">待播列表</h3>
+          <h3 id="podcast-inbox-title">{t('podcastInbox.inboxTitle')}</h3>
         </div>
         {status === 'loading' && (
-          <div className="podcast-inbox-list" role="status" aria-label="正在读取待播列表">
+          <div
+            className="podcast-inbox-list"
+            role="status"
+            aria-label={t('podcastInbox.readingInboxAria')}
+          >
             <span className="podcast-inbox-skeleton" />
             <span className="podcast-inbox-skeleton" />
             <span className="podcast-inbox-skeleton" />
@@ -433,17 +442,17 @@ export function PodcastInboxDialog({
         )}
         {status === 'error' && (
           <div role="alert">
-            <p>暂时无法读取待播列表。请重试。</p>
+            <p>{t('podcastInbox.readInboxFailed')}</p>
             <button type="button" className="podcasts-action-btn" onClick={() => void load()}>
-              重试
+              {t('podcastInbox.retry')}
             </button>
           </div>
         )}
         {status === 'ready' && !rows.length && (
           <div className="podcasts-empty" role="status">
-            <p>待播列表为空。在单集右侧点「+ 待播」，或开启下方「新集自动加入待播」。</p>
+            <p>{t('podcastInbox.emptyInbox')}</p>
             <button type="button" className="podcasts-action-btn" onClick={onBrowse}>
-              浏览节目
+              {t('podcastInbox.browseShows')}
             </button>
           </div>
         )}
@@ -453,10 +462,13 @@ export function PodcastInboxDialog({
           </p>
         )}
         {status === 'ready' && rows.length > 0 && (
-          <section className="podcast-inbox-section" aria-label="待播单集">
+          <section
+            className="podcast-inbox-section"
+            aria-label={t('podcastInbox.pendingSectionAria')}
+          >
             <div className="podcast-inbox-section-header">
               <h4>
-                待播单集 <small>{rows.length}</small>
+                {t('podcastInbox.pendingEpisodesTitle')} <small>{rows.length}</small>
               </h4>
               {playableCount > 0 && (
                 <button
@@ -464,7 +476,7 @@ export function PodcastInboxDialog({
                   className="podcasts-action-btn primary"
                   onClick={() => void playAllPending()}
                 >
-                  ▶ 播放全部
+                  {t('podcastInbox.playAll')}
                 </button>
               )}
             </div>
@@ -481,10 +493,12 @@ export function PodcastInboxDialog({
                         type="button"
                         className="podcasts-action-btn"
                         onClick={() =>
-                          void playRow(item).catch(() => setProblem('暂时无法播放该单集。请重试。'))
+                          void playRow(item).catch(() =>
+                            setProblem(t('podcastInbox.playEpisodeFailed')),
+                          )
                         }
                       >
-                        播放
+                        {t('podcastInbox.play')}
                       </button>
                     )}
                     <button
@@ -492,7 +506,7 @@ export function PodcastInboxDialog({
                       className="podcasts-action-btn"
                       onClick={() => void removeRow(item)}
                     >
-                      移除
+                      {t('podcastInbox.remove')}
                     </button>
                   </div>
                 </li>
@@ -501,9 +515,12 @@ export function PodcastInboxDialog({
           </section>
         )}
         {status === 'ready' && followedShows.length > 0 && (
-          <section className="podcast-inbox-section" aria-label="新集自动加入待播">
+          <section
+            className="podcast-inbox-section"
+            aria-label={t('podcastInbox.autoQueueSectionAria')}
+          >
             <div className="podcast-inbox-section-header">
-              <h4>新集自动加入待播</h4>
+              <h4>{t('podcastInbox.autoQueueSectionTitle')}</h4>
             </div>
             <ul className="podcast-inbox-list">
               {followedShows.map((show) => {
@@ -513,14 +530,16 @@ export function PodcastInboxDialog({
                     <div className="podcast-inbox-copy">
                       <strong>{show.title}</strong>
                       <span>
-                        {show.followed ? '已关注' : '未关注 · 关注后生效'}
+                        {show.followed
+                          ? t('podcastInbox.followedStatus')
+                          : t('podcastInbox.unfollowedStatus')}
                         {show.author ? ` · ${show.author}` : ''}
                       </span>
                     </div>
                     <div className="podcast-inbox-actions">
                       <ActionSelect
-                        label="新集自动待播"
-                        ariaLabel={`${show.title}新集自动待播`}
+                        label={t('podcastInbox.deliveryLabel')}
+                        ariaLabel={t('podcastInbox.showDeliveryAria', { title: show.title })}
                         hideLabel
                         value={currentAction}
                         onChange={(value) => void updateShowDelivery(show.id, value)}
@@ -533,7 +552,7 @@ export function PodcastInboxDialog({
           </section>
         )}
         <button type="button" className="modal-cancel-btn" onClick={onClose}>
-          关闭
+          {t('podcastInbox.close')}
         </button>
       </div>
     </div>

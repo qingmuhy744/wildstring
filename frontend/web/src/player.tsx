@@ -1,6 +1,8 @@
 import { trackUnavailableReason } from './api';
 import { hints } from './help-content';
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import i18n from './i18n';
 import {
   api,
   eventId,
@@ -357,7 +359,7 @@ export function usePlayer(userId: string) {
       }
     };
     void restore().catch(() => {
-      if (!controller.signal.aborted) setError('未能恢复上次播放，可以重新选择歌曲。');
+      if (!controller.signal.aborted) setError(i18n.t('playerPage.restoreFailed'));
     });
     return () => {
       controller.abort();
@@ -430,7 +432,7 @@ export function usePlayer(userId: string) {
 
   useEffect(() => {
     if (!buffering || !current) return;
-    const timer = setTimeout(() => setError('音频加载较慢或连接已中断，可重试或切换歌曲。'), 15000);
+    const timer = setTimeout(() => setError(i18n.t('playerPage.slowLoadingOrDisconnected')), 15000);
     return () => clearTimeout(timer);
   }, [buffering, current]);
 
@@ -452,7 +454,9 @@ export function usePlayer(userId: string) {
       if (attempt !== generation.current || reason.name === 'AbortError') return;
       setBuffering(false);
       setError(
-        reason.name === 'NotAllowedError' ? '请点击播放继续。' : '无法播放，请重试或换一首。',
+        reason.name === 'NotAllowedError'
+          ? i18n.t('playerPage.clickToContinue')
+          : i18n.t('playerPage.cannotPlayRetry'),
       );
     });
   }
@@ -476,7 +480,7 @@ export function usePlayer(userId: string) {
       if (delay) await new Promise((resolve) => setTimeout(resolve, delay));
       if (controller.signal.aborted || attempt !== generation.current) return;
       const offline = await offlineAudio(track.id, controller.signal);
-      if (!navigator.onLine && !offline) throw new Error('这首歌尚未完整离线保存。');
+      if (!navigator.onLine && !offline) throw new Error(i18n.t('playerPage.trackNotOfflineSaved'));
       let next: PlaybackPlan | null = null;
       if (!offline && !track.podcast_id && qualityRef.current !== 'original') {
         const query = new URLSearchParams({
@@ -522,7 +526,7 @@ export function usePlayer(userId: string) {
       element.removeAttribute('src');
       element.load();
       setBuffering(false);
-      setError(reason instanceof Error ? reason.message : '无法加载音频，请重试。');
+      setError(reason instanceof Error ? reason.message : i18n.t('playerPage.loadAudioFailed'));
     }
   }
 
@@ -538,7 +542,12 @@ export function usePlayer(userId: string) {
     if (!element || !track) return;
     const unavailable = trackUnavailableReason(track);
     if (unavailable) {
-      setError(`「${track.title}」${unavailable}。请恢复文件并重新扫描，刷新列表后重试。`);
+      setError(
+        i18n.t('playerPage.trackUnavailableMessage', {
+          title: track.title,
+          reason: unavailable,
+        }),
+      );
       return;
     }
     if (tracks.some((item) => trackUnavailableReason(item))) {
@@ -546,7 +555,7 @@ export function usePlayer(userId: string) {
       tracks = tracks.filter((item) => !trackUnavailableReason(item));
     }
     if (tracks.length > QUEUE_LIMIT) {
-      setError(`播放队列最多 ${QUEUE_LIMIT} 首。`);
+      setError(i18n.t('playerPage.queueLimitMessage', { limit: QUEUE_LIMIT }));
       return;
     }
     const intent = ++podcastIntent.current;
@@ -605,7 +614,7 @@ export function usePlayer(userId: string) {
       setPodcastProgressMessage('');
       // Freeze the revision that was inspected; never refresh and silently force a conflict away.
       if (!(await store.begin(id, remote, position, track.duration_ms / 1000))) {
-        setPodcastProgressMessage('另一台设备刚更新了本集，请重新选择接续位置。');
+        setPodcastProgressMessage(i18n.t('playerPage.podcastUpdatedElsewhere'));
         return;
       }
       if (intent !== podcastIntent.current) {
@@ -614,7 +623,8 @@ export function usePlayer(userId: string) {
       }
       begin(position);
     })().catch(() => {
-      if (intent === podcastIntent.current) setError('暂时无法读取单集进度，请重试。');
+      if (intent === podcastIntent.current)
+        setError(i18n.t('playerPage.cannotReadPodcastProgress'));
     });
   }
 
@@ -886,7 +896,7 @@ export function usePlayer(userId: string) {
       } else items.push(entry);
     }
     if (items.length > QUEUE_LIMIT) {
-      setError(`播放队列最多 ${QUEUE_LIMIT} 首。`);
+      setError(i18n.t('playerPage.queueLimitMessage', { limit: QUEUE_LIMIT }));
       return;
     }
     if (audible.queue[audible.index]?.podcast_id || audible.index < 0) applyAudible(items, queued);
@@ -897,7 +907,7 @@ export function usePlayer(userId: string) {
   function addToQueue(tracks: Track[], next = false) {
     tracks = tracks.filter((track) => !trackUnavailableReason(track));
     if (!tracks.length) {
-      setError('没有可播放的歌曲，请恢复文件并重新扫描后重试。');
+      setError(i18n.t('playerPage.noPlayableTracks'));
       return false;
     }
     if (tracks.every((track) => track.podcast_id)) {
@@ -905,7 +915,7 @@ export function usePlayer(userId: string) {
       return true;
     }
     if (queue.length + tracks.length > QUEUE_LIMIT) {
-      setError(`播放队列最多 ${QUEUE_LIMIT} 首。`);
+      setError(i18n.t('playerPage.queueLimitMessage', { limit: QUEUE_LIMIT }));
       return false;
     }
     if (index < 0 && next) {
@@ -1012,15 +1022,17 @@ export function usePlayer(userId: string) {
           setError(
             typeof detail === 'string'
               ? errorCodeMessage(detail)
-              : `无法播放本期播客（${response.status}），请稍后重试。`,
+              : i18n.t('playerPage.cannotPlayPodcastStatus', {
+                  status: response.status,
+                }),
           );
           return;
         }
         void response.body?.cancel();
         setError(
           code === 3 || code === 4
-            ? '浏览器无法解码本期播客的音频格式。'
-            : '播客音频连接中断，请点击播放重试。',
+            ? i18n.t('playerPage.browserCannotDecodePodcast')
+            : i18n.t('playerPage.podcastAudioDisconnected'),
         );
         return;
       }
@@ -1034,20 +1046,20 @@ export function usePlayer(userId: string) {
         return;
       }
       if (response.status === 404 || response.status === 409) {
-        setError('音频文件已变化或不可读，请在服务端重新扫描曲库。');
+        setError(i18n.t('playerPage.audioFileChangedOrUnreadable'));
         return;
       }
       if (planRef.current?.mode === 'transcode') {
-        setError('AAC 转码失败或服务繁忙，请重试或切换原音。');
+        setError(i18n.t('playerPage.transcodeFailedOrBusy'));
         return;
       }
       setError(
         code === 3 || code === 4
-          ? '浏览器无法解码这首原始音频，可换个浏览器或播放其他曲目。'
-          : '音频连接中断，请点击播放重试。',
+          ? i18n.t('playerPage.browserCannotDecodeOriginal')
+          : i18n.t('playerPage.audioDisconnected'),
       );
     } catch {
-      if (attempt === generation.current) setError('无法连接音乐服务，请检查连接后重试。');
+      if (attempt === generation.current) setError(i18n.t('playerPage.cannotConnectMusicService'));
     }
   }
 
@@ -1187,21 +1199,23 @@ export function usePlayer(userId: string) {
     sleepLabel:
       sleep === 'track'
         ? current?.podcast_id
-          ? '本集结束停止'
-          : '本曲结束停止'
+          ? i18n.t('playerPage.stopAfterEpisode')
+          : i18n.t('playerPage.stopAfterTrack')
         : typeof sleep === 'number'
-          ? `约 ${Math.max(1, Math.ceil((sleep - clock) / 60000))} 分钟后停止`
-          : '睡眠定时',
+          ? i18n.t('playerPage.stopAfterMinutes', {
+              minutes: Math.max(1, Math.ceil((sleep - clock) / 60000)),
+            })
+          : i18n.t('playerPage.sleepTimer'),
     setSleepTimer: (minutes: number | 'track' | null) => {
       setClock(Date.now());
       setSleep(minutes === 'track' || minutes === null ? minutes : Date.now() + minutes * 60000);
     },
     playbackTime: () => offset.current + (audio.current?.currentTime || 0),
     playbackLabel: objectUrl.current
-      ? '离线播放'
+      ? i18n.t('playerPage.playbackOffline')
       : plan?.mode === 'transcode'
         ? `AAC ${plan.output.bitrate_kbps} kbps`
-        : '原音直放',
+        : i18n.t('playerPage.playbackDirect'),
     start,
     playPodcastEpisode,
     playPodcastQueue: async () => {
@@ -1378,16 +1392,17 @@ export function PlayerBar({
   lyricsOpen: boolean;
   favorites: Favorites;
 }) {
+  const { t } = useTranslation();
   const { current, queue } = player;
   return (
-    <section className="player" aria-label="音乐播放器">
+    <section className="player" aria-label={t('playerPage.playerAria')}>
       <audio ref={player.audio} preload="metadata" {...player.audioEvents} />
       <div className="now-playing">
         <button
           className="playing-art"
           onClick={onLyrics}
           disabled={!current}
-          aria-label="全屏播放"
+          aria-label={t('playerPage.fullscreenAria')}
           aria-haspopup="dialog"
           aria-expanded={lyricsOpen}
         >
@@ -1409,8 +1424,8 @@ export function PlayerBar({
           )}
         </button>
         <div>
-          <strong>{current?.title || '等一首，喜欢的歌'}</strong>
-          <small>{current ? artist(current) : '从你的曲库开始播放'}</small>
+          <strong>{current?.title || t('playerPage.emptyTrackTitle')}</strong>
+          <small>{current ? artist(current) : t('playerPage.emptyTrackArtist')}</small>
         </div>
         {current && <span className="format">{current.format.toUpperCase()}</span>}
       </div>
@@ -1427,10 +1442,10 @@ export function PlayerBar({
             onClick={onLyrics}
             aria-expanded={lyricsOpen}
             disabled={!current}
-            aria-label="显示歌词"
-            data-help="查看同步歌词"
+            aria-label={t('playerPage.showLyrics')}
+            data-help={t('playerPage.viewSyncedLyrics')}
           >
-            词
+            {t('playerPage.lyricsShort')}
           </button>
         )}
         <VolumeControl player={player} />
@@ -1438,7 +1453,7 @@ export function PlayerBar({
           className={`icon-button ${queueOpen ? 'active' : ''}`}
           onClick={onQueue}
           aria-expanded={queueOpen}
-          aria-label="播放队列"
+          aria-label={t('playerPage.queueAria')}
         >
           ☷ <small>{queue.length}</small>
         </button>
@@ -1459,13 +1474,18 @@ export function PodcastSkipButton({
   direction: 'backward' | 'forward';
   variant?: 'default' | 'retro';
 }) {
+  const { t } = useTranslation();
   const amount = direction === 'backward' ? -seconds : seconds;
   return (
     <button
       className={`icon-button podcast-skip podcast-skip-${direction} ${
         variant === 'retro' ? 'retro-skip' : ''
       }`}
-      aria-label={`${variant === 'retro' ? '收音机' : ''}${direction === 'backward' ? '后退' : '前进'}${seconds}秒`}
+      aria-label={t('playerPage.podcastSkipAria', {
+        device: variant === 'retro' ? t('playerPage.radioDevice') : '',
+        dir: direction === 'backward' ? t('playerPage.skipBackward') : t('playerPage.skipForward'),
+        seconds,
+      })}
       onClick={() => player.seek(player.playbackTime() + amount)}
       disabled={!player.duration}
     >
@@ -1491,6 +1511,7 @@ export function PodcastSkipButton({
 }
 
 export function PlaybackControls({ player }: { player: Player }) {
+  const { t } = useTranslation();
   const { current, playing, index, queue, duration, position } = player;
   const podcast = !!current?.podcast_id;
   return (
@@ -1501,8 +1522,8 @@ export function PlaybackControls({ player }: { player: Player }) {
         ) : (
           <button
             className="icon-button playback-mode"
-            aria-label={`播放模式：${modeNames[player.mode]}`}
-            data-help={`播放模式：${modeNames[player.mode]}`}
+            aria-label={t('playerPage.playbackModeAria', { mode: modeNames[player.mode] })}
+            data-help={t('playerPage.playbackModeAria', { mode: modeNames[player.mode] })}
             onClick={() => {
               const modes = Object.keys(modeNames) as PlaybackMode[];
               player.setMode(modes[(modes.indexOf(player.mode) + 1) % modes.length]);
@@ -1525,7 +1546,7 @@ export function PlaybackControls({ player }: { player: Player }) {
           className="icon-button transport-track-button"
           onClick={() => player.step(-1)}
           disabled={!current || (index <= 0 && (podcast || player.mode === 'sequential'))}
-          aria-label={podcast ? '上一集' : '上一首'}
+          aria-label={podcast ? t('playerPage.prevEpisode') : t('playerPage.prevTrack')}
         >
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path d={podcast ? 'M6 5v14M18 5l-8 7 8 7' : 'M5 5h2v14H5zm14 0v14L8 12z'} />
@@ -1538,7 +1559,7 @@ export function PlaybackControls({ player }: { player: Player }) {
             player.toggle();
           }}
           disabled={!current}
-          aria-label={playing ? '暂停' : '播放'}
+          aria-label={playing ? t('playerPage.pause') : t('playerPage.play')}
         >
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path d={playing ? 'M7 5h4v14H7zm6 0h4v14h-4z' : 'M8 5l11 7-11 7z'} />
@@ -1555,7 +1576,7 @@ export function PlaybackControls({ player }: { player: Player }) {
                   player.podcastPreview.length === 0
                 : player.mode === 'sequential'))
           }
-          aria-label={podcast ? '下一集' : '下一首'}
+          aria-label={podcast ? t('playerPage.nextEpisode') : t('playerPage.nextTrack')}
         >
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path d={podcast ? 'M18 5v14M6 5l8 7-8 7' : 'M17 5h2v14h-2zM5 5l11 7-11 7z'} />
@@ -1564,7 +1585,7 @@ export function PlaybackControls({ player }: { player: Player }) {
         {podcast && <PodcastSkipButton player={player} seconds={30} direction="forward" />}
         {player.buffering && (
           <span className="sr-only" role="status">
-            缓冲中…
+            {t('playerPage.buffering')}
           </span>
         )}
       </div>
@@ -1572,7 +1593,7 @@ export function PlaybackControls({ player }: { player: Player }) {
         <time>{time(position)}</time>
         <input
           type="range"
-          aria-label="播放进度"
+          aria-label={t('playerPage.progressAria')}
           min="0"
           max={duration || 1}
           step="0.1"
@@ -1587,15 +1608,16 @@ export function PlaybackControls({ player }: { player: Player }) {
 }
 
 export function VolumeControl({ player }: { player: Player }) {
+  const { t } = useTranslation();
   return (
     <label className="volume">
-      音量
+      {t('playerPage.volume')}
       <input
         type="range"
         min="0"
         max="1"
         step="0.01"
-        aria-label="音量"
+        aria-label={t('playerPage.volume')}
         value={player.volume}
         onChange={(event) => player.setVolume(Number(event.target.value))}
       />
@@ -1604,27 +1626,31 @@ export function VolumeControl({ player }: { player: Player }) {
 }
 
 export function PlaybackError({ player }: { player: Player }) {
+  const { t } = useTranslation();
   return player.error ? (
     <div className="player-error" role="alert">
       {player.error}
-      <button onClick={() => player.start(player.queue, player.index)}>重试</button>
+      <button onClick={() => player.start(player.queue, player.index)}>
+        {t('playerPage.retry')}
+      </button>
     </div>
   ) : null;
 }
 
 export function QualityControl({ player }: { player: Player }) {
+  const { t } = useTranslation();
   const isPassthrough = player.plan?.reason === 'lossy_passthrough';
   const format = (player.current?.format || '').toUpperCase();
   return (
     <label className="quality-control">
-      <span>音质</span>
+      <span>{t('playerPage.quality')}</span>
       <select
-        aria-label="播放音质"
+        aria-label={t('playerPage.qualityAria')}
         data-help={hints.playbackQuality}
         value={player.quality}
         onChange={(event) => player.changeQuality(event.target.value)}
       >
-        <option value="original">原音</option>
+        <option value="original">{t('playerPage.qualityOriginal')}</option>
         {[128, 192, 256, 320].map((rate) => (
           <option key={rate} value={rate}>
             AAC {rate}k
@@ -1632,7 +1658,10 @@ export function QualityControl({ player }: { player: Player }) {
         ))}
       </select>
       {isPassthrough && format && (
-        <span className="quality-passthrough-hint" title={`当前音源：${format}`}>
+        <span
+          className="quality-passthrough-hint"
+          title={t('playerPage.sourceFormatTitle', { format })}
+        >
           {format}
         </span>
       )}
@@ -1641,11 +1670,12 @@ export function QualityControl({ player }: { player: Player }) {
 }
 
 export function PlaybackRateControl({ player }: { player: Player }) {
+  const { t } = useTranslation();
   return (
     <label className="playback-rate-control">
-      <span>倍速</span>
+      <span>{t('playerPage.playbackRate')}</span>
       <select
-        aria-label="播放倍速"
+        aria-label={t('playerPage.playbackRateAria')}
         value={player.playbackRate}
         onChange={(event) => player.setPlaybackRate(Number(event.target.value))}
       >
@@ -1660,13 +1690,14 @@ export function PlaybackRateControl({ player }: { player: Player }) {
 }
 
 export function SleepControl({ player }: { player: Player }) {
+  const { t } = useTranslation();
   const id = useId();
   const panel = useRef<HTMLDivElement>(null);
   return (
     <div className="sleep-setting">
       <button
         className={`icon-button sleep-trigger ${player.sleep !== null ? 'active' : ''}`}
-        aria-label="睡眠定时设置"
+        aria-label={t('playerPage.sleepTimerSettingsAria')}
         title={player.sleepLabel}
         data-help={player.sleepLabel}
         popoverTarget={id}
@@ -1683,9 +1714,9 @@ export function SleepControl({ player }: { player: Player }) {
       <div id={id} ref={panel} popover="auto" className="sleep-popover">
         <p>{player.sleepLabel}</p>
         <label>
-          停止时间
+          {t('playerPage.stopTime')}
           <select
-            aria-label="睡眠定时"
+            aria-label={t('playerPage.sleepTimer')}
             value={player.sleep === 'track' ? 'track' : player.sleep === null ? '' : 'active'}
             onChange={(event) => {
               const value = event.target.value;
@@ -1695,17 +1726,19 @@ export function SleepControl({ player }: { player: Player }) {
               panel.current?.hidePopover();
             }}
           >
-            <option value="">关闭</option>
+            <option value="">{t('playerPage.sleepOff')}</option>
             {typeof player.sleep === 'number' && (
               <option value="active" disabled>
-                定时中
+                {t('playerPage.sleepTiming')}
               </option>
             )}
-            <option value="15">15 分钟</option>
-            <option value="30">30 分钟</option>
-            <option value="60">60 分钟</option>
+            <option value="15">{t('playerPage.minutes15')}</option>
+            <option value="30">{t('playerPage.minutes30')}</option>
+            <option value="60">{t('playerPage.minutes60')}</option>
             <option value="track">
-              {player.current?.podcast_id ? '播完本集停止' : '播完本曲停止'}
+              {player.current?.podcast_id
+                ? t('playerPage.stopAfterPodcast')
+                : t('playerPage.stopAfterSong')}
             </option>
           </select>
         </label>

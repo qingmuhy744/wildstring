@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import { useEffect, useRef, useState } from 'react';
 import { api, type Track } from './api';
 import { OnlineMetadataMatcher } from './online-metadata-matcher';
@@ -39,26 +40,26 @@ interface MetadataRecord {
   overrides: Partial<MetadataFields>;
   origins?: Record<string, string>;
 }
-const labels: Record<keyof MetadataFields, string> = {
-  title: '歌名',
-  artists: '歌曲艺人',
-  album: '专辑',
-  album_artists: '专辑艺人',
-  track_number: '曲号',
-  disc_number: '碟号',
-  composers: '作曲',
-  lyricists: '作词',
-  arrangers: '编曲',
-  vocalists: '演唱',
-  genres: '风格',
-  track_total: '总曲数',
-  disc_total: '总碟数',
-  release_date: '发行日期',
-  original_date: '首次发行日期',
-  artist_credit: '艺人署名',
-  album_artist_credit: '专辑艺人署名',
+const labelKeys: Record<keyof MetadataFields, string> = {
+  title: 'metadataEditor.fieldTitle',
+  artists: 'metadataEditor.fieldArtists',
+  album: 'metadataEditor.fieldAlbum',
+  album_artists: 'metadataEditor.fieldAlbumArtists',
+  track_number: 'metadataEditor.fieldTrackNumber',
+  disc_number: 'metadataEditor.fieldDiscNumber',
+  composers: 'metadataEditor.fieldComposers',
+  lyricists: 'metadataEditor.fieldLyricists',
+  arrangers: 'metadataEditor.fieldArrangers',
+  vocalists: 'metadataEditor.fieldVocalists',
+  genres: 'metadataEditor.fieldGenres',
+  track_total: 'metadataEditor.fieldTrackTotal',
+  disc_total: 'metadataEditor.fieldDiscTotal',
+  release_date: 'metadataEditor.fieldReleaseDate',
+  original_date: 'metadataEditor.fieldOriginalDate',
+  artist_credit: 'metadataEditor.fieldArtistCredit',
+  album_artist_credit: 'metadataEditor.fieldAlbumArtistCredit',
 };
-const fields = Object.keys(labels) as (keyof MetadataFields)[];
+const fields = Object.keys(labelKeys) as (keyof MetadataFields)[];
 function display(value: unknown): string {
   return Array.isArray(value) ? value.join('\n') : value == null ? '' : String(value);
 }
@@ -73,6 +74,8 @@ export function MetadataEditor({
   onClose: () => void;
   onSaved: (id: string) => Promise<void>;
 }) {
+  const { t } = useTranslation();
+  const getLabel = (key: keyof MetadataFields) => t(labelKeys[key]);
   const dialog = useRef<HTMLDialogElement>(null);
   const [tab, setTab] = useState<'metadata' | 'lyrics' | 'online'>('metadata');
   const request = useRef<AbortController | null>(null);
@@ -122,7 +125,7 @@ export function MetadataEditor({
 
     setValues(nextValues);
     setOverridden((prev) => Array.from(new Set([...prev, ...changedKeys])));
-    setFillNotice('已成功填入网络元数据，请检查下方输入框，确认无误后点击保存。');
+    setFillNotice(t('metadataEditor.fillNotice'));
   };
   function load() {
     request.current?.abort();
@@ -175,7 +178,7 @@ export function MetadataEditor({
   }
   function validate() {
     if (overridden.includes('title') && !values.title.trim()) {
-      setError('请填写歌名。');
+      setError(t('metadataEditor.errorTitleRequired'));
       return;
     }
     for (const key of ['track_number', 'disc_number', 'track_total', 'disc_total'])
@@ -186,7 +189,7 @@ export function MetadataEditor({
           Number(values[key]) < 1 ||
           Number(values[key]) > 99999)
       ) {
-        setError('曲号和碟号应为 1–99999 的整数，或留空。');
+        setError(t('metadataEditor.errorNumberRange'));
         return;
       }
     setError('');
@@ -204,7 +207,7 @@ export function MetadataEditor({
       await onSaved(track.id);
       onClose();
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '保存未完成，请重试。');
+      setError(reason instanceof Error ? reason.message : t('metadataEditor.saveFailed'));
     } finally {
       setBusy(false);
     }
@@ -214,7 +217,7 @@ export function MetadataEditor({
     <dialog
       className="metadata-editor playlist-editor"
       ref={dialog}
-      aria-label="编辑歌曲信息"
+      aria-label={t('metadataEditor.dialogAria')}
       onCancel={(event) => {
         event.preventDefault();
         if (!busy) onClose();
@@ -223,25 +226,27 @@ export function MetadataEditor({
       <div className="editor-heading">
         <div>
           <span className="eyebrow">MAKE IT YOURS</span>
-          <h2>编辑歌曲信息</h2>
+          <h2>{t('metadataEditor.heading')}</h2>
           <p className="muted">{track.title}</p>
         </div>
-        <DialogCloseButton disabled={busy} aria-label="关闭歌曲编辑" onClick={onClose} />
+        <DialogCloseButton
+          disabled={busy}
+          aria-label={t('metadataEditor.closeAria')}
+          onClick={onClose}
+        />
       </div>
-      <nav className="management-tabs" aria-label="歌曲编辑分类">
+      <nav className="management-tabs" aria-label={t('metadataEditor.tabsAria')}>
         <button aria-pressed={tab === 'metadata'} onClick={() => setTab('metadata')}>
-          歌曲信息
+          {t('metadataEditor.tabMetadata')}
         </button>
         <button aria-pressed={tab === 'lyrics'} onClick={() => setTab('lyrics')}>
-          歌词
+          {t('metadataEditor.tabLyrics')}
         </button>
       </nav>
       <div hidden={tab !== 'metadata'}>
         {record ? (
           <>
-            <p className="muted">
-              保存后曲库信息立即生效，重新扫描会保留。本次保存不写入音乐标签。
-            </p>
+            <p className="muted">{t('metadataEditor.noticeEffective')}</p>
             {fillNotice && (
               <div
                 style={{
@@ -277,10 +282,11 @@ export function MetadataEditor({
             >
               <span
                 className="metadata-file-path"
-                title="托管曲库中的相对路径"
+                title={t('metadataEditor.filePathTooltip')}
                 style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
               >
-                文件路径：<code>{record.path}</code>
+                {t('metadataEditor.filePathPrefix')}
+                <code>{record.path}</code>
               </span>
               <button
                 type="button"
@@ -288,7 +294,7 @@ export function MetadataEditor({
                 style={{ flexShrink: 0, padding: '2px 8px' }}
                 onClick={() => setShowFileInfo(true)}
               >
-                查看文件属性与物理重排
+                {t('metadataEditor.viewFileAttributes')}
               </button>
             </div>
             {!preview ? (
@@ -296,18 +302,15 @@ export function MetadataEditor({
                 {fields.map((key) => (
                   <label className="metadata-field" key={key}>
                     <span className="metadata-field-label">
-                      {labels[key]}
-                      <span
-                        className="metadata-source"
-                        data-help="文件标签是原始音频中的资料；人工或来源建议是数据库覆盖值。保存和重扫不会把它们写回音频文件。"
-                      >
+                      {getLabel(key)}
+                      <span className="metadata-source" data-help={t('metadataEditor.sourceHelp')}>
                         {overridden.includes(key)
                           ? record.origins?.[key]?.startsWith('musicbrainz:')
                             ? 'MusicBrainz'
                             : record.origins?.[key]?.startsWith('lastfm:')
                               ? 'Last.fm'
-                              : '人工编辑'
-                          : '文件标签'}
+                              : t('metadataEditor.sourceManual')
+                          : t('metadataEditor.sourceFileTag')}
                       </span>
                     </span>
                     {[
@@ -320,7 +323,7 @@ export function MetadataEditor({
                       'genres',
                     ].includes(key) ? (
                       <textarea
-                        aria-label={labels[key]}
+                        aria-label={getLabel(key)}
                         value={values[key] || ''}
                         maxLength={10000}
                         rows={2}
@@ -328,11 +331,11 @@ export function MetadataEditor({
                           setValues({ ...values, [key]: e.target.value });
                           setOverridden((keys) => [...new Set([...keys, key])]);
                         }}
-                        placeholder="每行一项，支持 /、逗号或顿号分隔"
+                        placeholder={t('metadataEditor.listInputPlaceholder')}
                       />
                     ) : (
                       <input
-                        aria-label={labels[key]}
+                        aria-label={getLabel(key)}
                         type={key.endsWith('number') || key.endsWith('total') ? 'number' : 'text'}
                         min={1}
                         max={99999}
@@ -345,7 +348,11 @@ export function MetadataEditor({
                       />
                     )}
                     <span className="metadata-origin">
-                      文件值：{display(record.observed[key]).replaceAll('\n', ' / ') || '未填写'}
+                      {t('metadataEditor.fileValue', {
+                        value:
+                          display(record.observed[key]).replaceAll('\n', ' / ') ||
+                          t('metadataEditor.notFilled'),
+                      })}
                     </span>
                     {key === 'title' &&
                       record.source_stem &&
@@ -364,7 +371,7 @@ export function MetadataEditor({
                             setOverridden((keys) => [...new Set([...keys, 'title'])]);
                           }}
                         >
-                          从文件名填入歌名（{record.source_stem}）
+                          {t('metadataEditor.fillFromFilename', { name: record.source_stem })}
                         </button>
                       )}
                     {key === 'track_number' &&
@@ -390,12 +397,12 @@ export function MetadataEditor({
                             }
                           }}
                         >
-                          从原标签代号填入曲号（
-                          {parseInt(
-                            /^[a-zA-Z](\d{1,3})$/.exec(String(record.observed.title || ''))![1],
-                            10,
-                          )}
-                          ）
+                          {t('metadataEditor.fillFromOriginalCode', {
+                            number: parseInt(
+                              /^[a-zA-Z](\d{1,3})$/.exec(String(record.observed.title || ''))![1],
+                              10,
+                            ),
+                          })}
                         </button>
                       )}
                     {overridden.includes(key) && (
@@ -407,23 +414,26 @@ export function MetadataEditor({
                           setOverridden((keys) => keys.filter((v) => v !== key));
                         }}
                       >
-                        使用文件值 · {labels[key]}
+                        {t('metadataEditor.useFileValueForField', { field: getLabel(key) })}
                       </button>
                     )}
                   </label>
                 ))}
               </div>
             ) : (
-              <div className="metadata-diff" aria-label="元数据修改预览">
-                <h3>确认修改</h3>
+              <div className="metadata-diff" aria-label={t('metadataEditor.diffPreviewAria')}>
+                <h3>{t('metadataEditor.confirmChanges')}</h3>
                 {fields.map((key) => (
                   <div key={key}>
-                    <strong>{labels[key]}</strong>
+                    <strong>{getLabel(key)}</strong>
                     <span>
-                      {display(record.effective[key]).replaceAll('\n', ' / ') || '未填写'}
+                      {display(record.effective[key]).replaceAll('\n', ' / ') ||
+                        t('metadataEditor.notFilled')}
                     </span>
                     <span aria-hidden="true">→</span>
-                    <span>{display(next![key]).replaceAll('\n', ' / ') || '未填写'}</span>
+                    <span>
+                      {display(next![key]).replaceAll('\n', ' / ') || t('metadataEditor.notFilled')}
+                    </span>
                   </div>
                 ))}
               </div>
@@ -432,7 +442,7 @@ export function MetadataEditor({
               <p className="error" role="alert">
                 {error}{' '}
                 <button className="text-button" disabled={busy} onClick={load}>
-                  重新读取
+                  {t('metadataEditor.reload')}
                 </button>
               </p>
             )}
@@ -444,7 +454,7 @@ export function MetadataEditor({
                   else onClose();
                 }}
               >
-                {preview ? '返回编辑' : '取消'}
+                {preview ? t('metadataEditor.backToEdit') : t('metadataEditor.cancel')}
               </button>
               <button
                 className="text-button"
@@ -457,24 +467,28 @@ export function MetadataEditor({
                   setPreview(false);
                 }}
               >
-                全部使用文件值
+                {t('metadataEditor.useAllFileValues')}
               </button>
               <button
                 className="primary"
                 disabled={busy}
                 onClick={() => (preview ? void save() : validate())}
               >
-                {busy ? '保存中…' : preview ? '保存修改' : '预览修改'}
+                {busy
+                  ? t('metadataEditor.saving')
+                  : preview
+                    ? t('metadataEditor.saveChanges')
+                    : t('metadataEditor.previewChanges')}
               </button>
             </div>
           </>
         ) : error ? (
           <p className="error" role="alert">
             {error}
-            <button onClick={load}>重新读取</button>
+            <button onClick={load}>{t('metadataEditor.reload')}</button>
           </p>
         ) : (
-          <p role="status">读取歌曲信息…</p>
+          <p role="status">{t('metadataEditor.loadingTrackInfo')}</p>
         )}
       </div>
       <LyricsEditor key={track.id} track={track} player={player} active={tab === 'lyrics'} />

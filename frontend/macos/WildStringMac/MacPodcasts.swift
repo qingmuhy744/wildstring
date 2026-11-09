@@ -38,24 +38,24 @@ struct MacPodcastsView: View {
                     .safeAreaInset(edge: .top, spacing: 0) {
                         HStack {
                             Button { choosingShow = true } label: {
-                                Label("选择节目", systemImage: "list.bullet")
+                                Label(L10n("macPodcasts.selectShow"), systemImage: "list.bullet")
                             }
                             Spacer()
-                            Text("\(shows.count) 个节目").font(.caption).foregroundStyle(.secondary)
+                            Text(L10n("macPodcasts.showCount", shows.count)).font(.caption).foregroundStyle(.secondary)
                         }.padding(14).background(.bar)
                     }
             }
         }
-        .navigationTitle("电台")
+        .navigationTitle(L10n("macPodcasts.title"))
         .toolbar {
             ToolbarItemGroup {
-                Button { exploring = true } label: { Label("探索", systemImage: "safari") }
+                Button { exploring = true } label: { Label(L10n("macPodcasts.explore"), systemImage: "safari") }
                 Button {
                     Task { await loadShows() }
                 } label: {
                     Image(systemName: "arrow.clockwise")
                 }
-                .help("刷新节目")
+                .help(L10n("macPodcasts.refreshShows"))
                 .disabled(loadingShows)
             }
         }
@@ -74,31 +74,31 @@ struct MacPodcastsView: View {
         }
         .sheet(isPresented: $choosingShow) {
             VStack(spacing: 0) {
-                HStack { Spacer(); Button("关闭") { choosingShow = false } }
+                HStack { Spacer(); Button(L10n("macPodcasts.close")) { choosingShow = false } }
                     .padding(12)
                 showList
             }.frame(width: 360, height: 520)
         }
-        .confirmationDialog("从上次的位置继续？", isPresented: Binding(
+        .confirmationDialog(L10n("macPodcasts.resumePrompt"), isPresented: Binding(
             get: { resume != nil },
             set: { if !$0 { resume = nil } }
         ), titleVisibility: .visible) {
-            Button("继续") {
+            Button(L10n("macPodcasts.resume")) {
                 if let episode = resume, let detail {
                     start(episode, in: detail.episodes, at: Double(episode.positionSeconds))
                 }
                 resume = nil
             }
-            Button("从头播放") {
+            Button(L10n("macPodcasts.playFromStart")) {
                 if let episode = resume, let detail {
                     start(episode, in: detail.episodes, at: 0)
                 }
                 resume = nil
             }
-            Button("取消", role: .cancel) { resume = nil }
+            Button(L10n("macPodcasts.cancel"), role: .cancel) { resume = nil }
         } message: {
             if let episode = resume {
-                Text("已听 \(macPodcastClock(episode.positionSeconds))，共 \(macPodcastClock(episode.durationSeconds))。")
+                Text(L10n("macPodcasts.resumeProgress", macPodcastClock(episode.positionSeconds), macPodcastClock(episode.durationSeconds)))
             }
         }
     }
@@ -106,7 +106,7 @@ struct MacPodcastsView: View {
     private var showList: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Text("我的订阅")
+                Text(L10n("macPodcasts.mySubscriptions"))
                     .font(MacTheme.micro)
                     .foregroundStyle(MacTheme.muted)
                 Spacer()
@@ -122,7 +122,7 @@ struct MacPodcastsView: View {
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 12))
                     .foregroundStyle(MacTheme.faint)
-                TextField("搜索节目", text: $showQuery)
+                TextField(L10n("macPodcasts.searchShows"), text: $showQuery)
                     .textFieldStyle(.plain)
                     .font(MacTheme.caption)
                     .foregroundStyle(MacTheme.ink)
@@ -154,7 +154,7 @@ struct MacPodcastsView: View {
                 HStack(spacing: 8) {
                     Image(systemName: "list.bullet")
                         .foregroundStyle(showingInbox ? MacTheme.accentDeep : MacTheme.muted)
-                    Text("待播列表")
+                    Text(L10n("macPodcasts.upNext"))
                         .font(.system(size: 13, weight: showingInbox ? .semibold : .medium))
                         .foregroundStyle(MacTheme.ink)
                     Spacer(minLength: 0)
@@ -185,9 +185,9 @@ struct MacPodcastsView: View {
 
             if shows.isEmpty, !loadingShows {
                 ContentUnavailableView(
-                    "还没有订阅",
+                    L10n("macPodcasts.noSubscriptions"),
                     systemImage: "antenna.radiowaves.left.and.right",
-                    description: Text("点工具栏的“探索”添加节目。")
+                    description: Text(L10n("macPodcasts.noSubscriptionsDesc"))
                 )
                 .frame(maxHeight: .infinity)
             } else {
@@ -219,7 +219,7 @@ struct MacPodcastsView: View {
                 showingInbox = false
             }
         } else if loadingDetail {
-            ProgressView("正在打开节目…")
+            ProgressView(L10n("macPodcasts.openingShow"))
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(MacTheme.canvas)
         } else if let detail {
@@ -235,7 +235,7 @@ struct MacPodcastsView: View {
                     Rectangle().fill(MacTheme.border).frame(height: 1)
                     HStack(spacing: 12) {
                         HStack(alignment: .firstTextBaseline, spacing: 6) {
-                            Text("单集")
+                            Text(L10n("macPodcasts.episodes"))
                                 .font(MacTheme.section(15))
                                 .foregroundStyle(MacTheme.ink)
                             Text("\(detail.episodes.count)")
@@ -243,21 +243,21 @@ struct MacPodcastsView: View {
                                 .foregroundStyle(MacTheme.muted)
                         }
                         HStack(spacing: 6) {
-                            filterPill("全部", id: "all")
-                            filterPill("可听 \(unplayedCount)", id: "unplayed")
-                            filterPill("已听 \(completedCount)", id: "completed")
-                            filterPill("收藏 \(favoriteCount)", id: "favorite")
+                            filterPill(L10n("macPodcasts.filterAll"), id: "all")
+                            filterPill(L10n("macPodcasts.filterUnplayed", unplayedCount), id: "unplayed")
+                            filterPill(L10n("macPodcasts.filterCompleted", completedCount), id: "completed")
+                            filterPill(L10n("macPodcasts.filterFavorite", favoriteCount), id: "favorite")
                         }
                         .padding(.leading, 6)
 
                         Spacer()
 
                         Menu {
-                            Button("从新到旧") { newestFirst = true }
-                            Button("从旧到新") { newestFirst = false }
+                            Button(L10n("macPodcasts.newestFirst")) { newestFirst = true }
+                            Button(L10n("macPodcasts.oldestFirst")) { newestFirst = false }
                         } label: {
                             HStack(spacing: 4) {
-                                Text(newestFirst ? "从新到旧" : "从旧到新")
+                                Text(newestFirst ? L10n("macPodcasts.newestFirst") : L10n("macPodcasts.oldestFirst"))
                                 Image(systemName: "chevron.down")
                                     .font(.system(size: 9, weight: .semibold))
                             }
@@ -270,7 +270,7 @@ struct MacPodcastsView: View {
                     }
                     if visibleEpisodes.isEmpty {
                         ContentUnavailableView(
-                            episodeFilter == "completed" ? "还没有已听完的单集" : (episodeFilter == "unplayed" ? "全部单集都已听完" : (episodeFilter == "favorite" ? "还没有收藏的单集" : "还没有单集")),
+                            episodeFilter == "completed" ? L10n("macPodcasts.noCompletedEpisodes") : (episodeFilter == "unplayed" ? L10n("macPodcasts.allEpisodesPlayed") : (episodeFilter == "favorite" ? L10n("macPodcasts.noFavoriteEpisodes") : L10n("macPodcasts.noEpisodes"))),
                             systemImage: episodeFilter == "favorite" ? "heart" : "waveform"
                         )
                         .frame(maxWidth: .infinity)
@@ -327,15 +327,15 @@ struct MacPodcastsView: View {
             }
             .background(MacTheme.canvas)
         } else if let detailMessage {
-            ContentUnavailableView("无法打开节目", systemImage: "wifi.exclamationmark",
+            ContentUnavailableView(L10n("macPodcasts.cannotOpenShow"), systemImage: "wifi.exclamationmark",
                 description: Text(detailMessage))
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(MacTheme.canvas)
         } else {
             ContentUnavailableView(
-                "选择一个节目",
+                L10n("macPodcasts.selectAShow"),
                 systemImage: "antenna.radiowaves.left.and.right",
-                description: Text("左侧选择节目后，这里会显示简介和单集。")
+                description: Text(L10n("macPodcasts.selectAShowDesc"))
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(MacTheme.canvas)
@@ -373,13 +373,13 @@ struct MacPodcastsView: View {
                         .font(.system(size: 24, weight: .semibold))
                         .foregroundStyle(MacTheme.ink)
                         .fixedSize(horizontal: false, vertical: true)
-                    Text(detail.podcast.author.isEmpty ? "电台" : detail.podcast.author)
+                    Text(detail.podcast.author.isEmpty ? L10n("macPodcasts.defaultArtist") : detail.podcast.author)
                         .font(.callout)
                         .foregroundStyle(MacTheme.muted)
                     HStack(spacing: 0) {
-                        Text("共 \(detail.episodes.count) 集 · ")
+                        Text(L10n("macPodcasts.totalEpisodesWithDot", detail.episodes.count))
                             .foregroundStyle(MacTheme.muted)
-                        Text(unplayedCount > 0 ? "还有 \(unplayedCount) 集可听" : "全部已听完")
+                        Text(unplayedCount > 0 ? L10n("macPodcasts.unplayedCount", unplayedCount) : L10n("macPodcasts.allCompleted"))
                             .foregroundStyle(unplayedCount > 0 ? MacTheme.accentDeep : MacTheme.muted)
                             .fontWeight(unplayedCount > 0 ? .medium : .regular)
                     }
@@ -388,7 +388,7 @@ struct MacPodcastsView: View {
                     HStack(spacing: 10) {
                         if let next = detail.episodes.first(where: canResume) ?? detail.episodes.first(where: { !isCompleted($0) }) ?? detail.episodes.first {
                             Button { choose(next, in: detail.episodes) } label: {
-                                Label(canResume(next) ? "继续收听" : "播放最新一集", systemImage: "play.fill")
+                                Label(canResume(next) ? L10n("macPodcasts.resumeListening") : L10n("macPodcasts.playLatest"), systemImage: "play.fill")
                                     .font(.system(size: 13, weight: .semibold))
                                     .foregroundStyle(MacTheme.onAccent)
                                     .padding(.horizontal, 16)
@@ -400,7 +400,7 @@ struct MacPodcastsView: View {
                         let pendingQueueCount = cloud?.unifiedPendingEpisodes.count ?? 0
                         if pendingQueueCount > 0 {
                             Button { playPendingQueue() } label: {
-                                Label("播放待播 (\(pendingQueueCount))", systemImage: "play.fill")
+                                Label(L10n("macPodcasts.playPendingQueue", pendingQueueCount), systemImage: "play.fill")
                                     .font(.system(size: 13, weight: .semibold))
                                     .foregroundStyle(MacTheme.ink)
                                     .padding(.horizontal, 14)
@@ -418,15 +418,15 @@ struct MacPodcastsView: View {
                                         .joined(separator: "\n")
                                     NSPasteboard.general.clearContents()
                                     NSPasteboard.general.setString(shareText, forType: .string)
-                                    detailMessage = "已复制节目分享信息"
+                                    detailMessage = L10n("macPodcasts.shareCopied")
                                 } label: {
-                                    Label("分享节目", systemImage: "square.and.arrow.up")
+                                    Label(L10n("macPodcasts.shareShow"), systemImage: "square.and.arrow.up")
                                 }
                                 Divider()
                                 Button(role: .destructive) {
                                     Task { await toggle(detail.podcast) }
                                 } label: {
-                                    Label("取消订阅", systemImage: "bell.slash")
+                                    Label(L10n("macPodcasts.unsubscribe"), systemImage: "bell.slash")
                                 }
                             } label: {
                                 Image(systemName: "ellipsis")
@@ -439,10 +439,10 @@ struct MacPodcastsView: View {
                             .menuStyle(.borderlessButton)
                             .menuIndicator(.hidden)
                             .fixedSize()
-                            .help("更多节目操作")
-                            .accessibilityLabel("更多节目操作")
+                            .help(L10n("macPodcasts.moreShowActions"))
+                            .accessibilityLabel(L10n("macPodcasts.moreShowActions"))
                         } else {
-                            Button("订阅") {
+                            Button(L10n("macPodcasts.subscribe")) {
                                 Task { await toggle(detail.podcast) }
                             }
                             .buttonStyle(.bordered)
@@ -460,7 +460,7 @@ struct MacPodcastsView: View {
                         .lineSpacing(4)
                         .lineLimit(descriptionExpanded ? nil : 2)
                         .textSelection(.enabled)
-                    Button(descriptionExpanded ? "收起简介" : "展开简介") { descriptionExpanded.toggle() }
+                    Button(descriptionExpanded ? L10n("macPodcasts.collapseDescription") : L10n("macPodcasts.expandDescription")) { descriptionExpanded.toggle() }
                         .buttonStyle(.plain)
                         .font(MacTheme.caption.weight(.medium))
                         .foregroundStyle(MacTheme.accentDeep)
@@ -527,11 +527,11 @@ struct MacPodcastsView: View {
         }
         if !recent.isEmpty && !older.isEmpty {
             return newestFirst
-                ? [EpisodeGroup(title: "本周", episodes: recent), EpisodeGroup(title: "更早", episodes: older)]
-                : [EpisodeGroup(title: "更早", episodes: older), EpisodeGroup(title: "本周", episodes: recent)]
+                ? [EpisodeGroup(title: L10n("macPodcasts.thisWeek"), episodes: recent), EpisodeGroup(title: L10n("macPodcasts.older"), episodes: older)]
+                : [EpisodeGroup(title: L10n("macPodcasts.older"), episodes: older), EpisodeGroup(title: L10n("macPodcasts.thisWeek"), episodes: recent)]
         }
         if !recent.isEmpty {
-            return [EpisodeGroup(title: "本周", episodes: recent)]
+            return [EpisodeGroup(title: L10n("macPodcasts.thisWeek"), episodes: recent)]
         }
         return [EpisodeGroup(title: nil, episodes: older)]
     }
@@ -601,7 +601,7 @@ struct MacPodcastsView: View {
     private func start(_ episode: PodcastEpisode, in episodes: [PodcastEpisode], at position: Double) {
         guard episodes.contains(where: { $0.id == episode.id }) else { return }
         let show = detail?.podcast
-        let artist = (show?.author.isEmpty == false) ? (show?.author ?? "电台") : "电台"
+        let artist = (show?.author.isEmpty == false) ? (show?.author ?? L10n("macPodcasts.defaultArtist")) : L10n("macPodcasts.defaultArtist")
         // 只把用户点的这一集插到云端待播队首，不把整份节目灌进去。
         applyContinuation(episodes, show: show)
         let item = PlaybackService.Item(
@@ -615,7 +615,7 @@ struct MacPodcastsView: View {
     }
 
     private func applyContinuation(_ episodes: [PodcastEpisode], show: PodcastSummary?) {
-        let artist = (show?.author.isEmpty == false) ? (show?.author ?? "电台") : "电台"
+        let artist = (show?.author.isEmpty == false) ? (show?.author ?? L10n("macPodcasts.defaultArtist")) : L10n("macPodcasts.defaultArtist")
         let refs: [PodcastContinuation.Episode] = episodes.enumerated().map { index, episode in
             PodcastContinuation.Episode(
                 id: episode.id,
@@ -643,7 +643,7 @@ struct MacPodcastsView: View {
         let current = PlaybackService.podcastEpisodeID(playback.currentItem?.trackID ?? "")
         if let cloud = playback.podcastCloud {
             cloud.enqueueEpisode(episode.id, next: next, currentEpisodeID: current)
-            detailMessage = next ? "已加入待播 · 下一集播放" : "已加入待播"
+            detailMessage = next ? L10n("macPodcasts.enqueuedNext") : L10n("macPodcasts.enqueued")
             return
         }
         let item = PlaybackService.Item(
@@ -651,7 +651,7 @@ struct MacPodcastsView: View {
             artist: show.author.isEmpty ? show.title : show.author, album: show.title,
             streamPath: "api/v1/podcasts/episodes/\(episode.id)/stream?proxy=1&cache=1")
         if playback.enqueue(items: [item], next: next) {
-            detailMessage = next ? "已加入待播 · 下一集播放" : "已加入待播"
+            detailMessage = next ? L10n("macPodcasts.enqueuedNext") : L10n("macPodcasts.enqueued")
         } else {
             detailMessage = playback.errorMessage
         }
@@ -659,13 +659,13 @@ struct MacPodcastsView: View {
 
     private func saveForLater(_ episode: PodcastEpisode) async {
         guard let cloud = playback.podcastCloud else {
-            detailMessage = "暂时无法加入稍后听。请重新登录后再试。"
+            detailMessage = L10n("macPodcasts.cannotAddToInbox")
             return
         }
         if let error = await cloud.addToInbox(episodeID: episode.id) {
             detailMessage = error
         } else {
-            detailMessage = "已加入稍后听"
+            detailMessage = L10n("macPodcasts.addedToInbox")
         }
     }
 
@@ -684,7 +684,7 @@ struct MacPodcastsView: View {
             try await client.markPodcastEpisodeCompleted(episodeID: episode.id, duration: episode.durationSeconds, completed: target)
             await open(episode.podcastId)
         } catch {
-            detailMessage = "标记完成失败：\(MacErrorText.message(for: error))"
+            detailMessage = L10n("macPodcasts.markCompletedFailed", MacErrorText.message(for: error))
         }
     }
 
@@ -697,7 +697,7 @@ struct MacPodcastsView: View {
                 try await client.favoritePodcastEpisode(episodeID: episode.id, loved: !isFavorite(episode))
                 await open(episode.podcastId)
             } catch {
-                detailMessage = "收藏操作失败：\(MacErrorText.message(for: error))"
+                detailMessage = L10n("macPodcasts.favoriteFailed", MacErrorText.message(for: error))
             }
         }
     }
@@ -736,11 +736,11 @@ private struct MacPodcastShowRow: View {
                         .font(.system(size: 13, weight: selected ? .semibold : .medium))
                         .foregroundStyle(MacTheme.ink)
                         .lineLimit(1)
-                    Text(show.author.isEmpty ? "电台" : show.author)
+                    Text(show.author.isEmpty ? L10n("macPodcasts.defaultArtist") : show.author)
                         .font(MacTheme.caption)
                         .foregroundStyle(MacTheme.muted)
                         .lineLimit(1)
-                    Text(show.unplayedEpisodes > 0 ? "共 \(show.totalEpisodes) 集 · 还有 \(show.unplayedEpisodes) 集可听" : "共 \(show.totalEpisodes) 集")
+                    Text(show.unplayedEpisodes > 0 ? L10n("macPodcasts.showEpisodesWithUnplayed", show.totalEpisodes, show.unplayedEpisodes) : L10n("macPodcasts.showEpisodesTotal", show.totalEpisodes))
                         .font(.system(size: 11))
                         .foregroundStyle(MacTheme.faint)
                 }
@@ -806,7 +806,7 @@ struct MacPodcastEpisodeRow: View {
                                 Image(systemName: "checkmark.circle.fill")
                                     .font(.system(size: 13))
                                     .foregroundStyle(MacTheme.faint)
-                                    .accessibilityLabel("已听完")
+                                    .accessibilityLabel(L10n("macPodcasts.completed"))
                             }
                         }
                         metadataLine
@@ -837,8 +837,8 @@ struct MacPodcastEpisodeRow: View {
             inlineQueueButton
 
             Menu {
-                Button("下一集播放", action: next)
-                Button(isQueued ? "移出待播" : "加入待播") {
+                Button(L10n("macPodcasts.playNext"), action: next)
+                Button(isQueued ? L10n("macPodcasts.removeFromQueue") : L10n("macPodcasts.addToQueue")) {
                     if let toggleQueue {
                         toggleQueue()
                     } else if !isQueued {
@@ -846,10 +846,10 @@ struct MacPodcastEpisodeRow: View {
                     }
                 }
                 if let toggleCompleted {
-                    Button(completed ? "标为未听" : "标为已听完", action: toggleCompleted)
+                    Button(completed ? L10n("macPodcasts.markAsUnplayed") : L10n("macPodcasts.markAsCompleted"), action: toggleCompleted)
                 }
                 if let toggleFavorite {
-                    Button(isFavorite ? "取消收藏" : "单集收藏", action: toggleFavorite)
+                    Button(isFavorite ? L10n("macPodcasts.unfavorite") : L10n("macPodcasts.favoriteEpisode"), action: toggleFavorite)
                 }
             } label: {
                 Image(systemName: "ellipsis")
@@ -860,7 +860,7 @@ struct MacPodcastEpisodeRow: View {
             .menuIndicator(.hidden)
             .fixedSize()
             .padding(.trailing, 6)
-            .accessibilityLabel("\(displayTitle)的更多操作")
+            .accessibilityLabel(L10n("macPodcasts.moreActionsForEpisode", displayTitle))
         }
         .padding(.vertical, 2)
         .background(
@@ -880,7 +880,7 @@ struct MacPodcastEpisodeRow: View {
     @ViewBuilder
     private var inlineQueueButton: some View {
         if current {
-            Text("正在播放")
+            Text(L10n("macPodcasts.nowPlaying"))
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(MacTheme.accentDeep)
                 .padding(.horizontal, 8)
@@ -890,7 +890,7 @@ struct MacPodcastEpisodeRow: View {
             Button {
                 toggleQueue?()
             } label: {
-                Text("✓ 已待播")
+                Text(L10n("macPodcasts.queuedBadge"))
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(MacTheme.accentDeep)
                     .padding(.horizontal, 8)
@@ -898,7 +898,7 @@ struct MacPodcastEpisodeRow: View {
                     .background(MacTheme.accent.opacity(0.12), in: Capsule())
             }
             .buttonStyle(.plain)
-            .help("从待播列表移除")
+            .help(L10n("macPodcasts.removeFromQueueHelp"))
         } else {
             Button {
                 if let toggleQueue {
@@ -907,7 +907,7 @@ struct MacPodcastEpisodeRow: View {
                     append()
                 }
             } label: {
-                Text("+ 待播")
+                Text(L10n("macPodcasts.addToQueueBadge"))
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(MacTheme.muted)
                     .padding(.horizontal, 8)
@@ -916,7 +916,7 @@ struct MacPodcastEpisodeRow: View {
                     .overlay(Capsule().strokeBorder(MacTheme.border, lineWidth: 1))
             }
             .buttonStyle(.plain)
-            .help("加入待播列表")
+            .help(L10n("macPodcasts.addToQueueHelp"))
         }
     }
 
@@ -951,17 +951,17 @@ struct MacPodcastEpisodeRow: View {
             if current {
                 Text("· \(macPodcastDurationMinutes(episode.durationSeconds)) ·")
                     .foregroundStyle(MacTheme.muted)
-                Text(playing ? "正在播放" : "已暂停")
+                Text(playing ? L10n("macPodcasts.nowPlaying") : L10n("macPodcasts.paused"))
                     .foregroundStyle(MacTheme.accentDeep)
                     .fontWeight(.medium)
             } else if completed {
-                Text("· \(macPodcastDurationMinutes(episode.durationSeconds)) · 已听完")
+                Text(L10n("macPodcasts.durationWithCompleted", macPodcastDurationMinutes(episode.durationSeconds)))
                     .foregroundStyle(MacTheme.faint)
             } else if inProgress {
                 let remainingMinutes = max(1, (episode.durationSeconds - episode.positionSeconds + 59) / 60)
                 Text("·")
                     .foregroundStyle(MacTheme.muted)
-                Text("剩 \(remainingMinutes) 分钟")
+                Text(L10n("macPodcasts.remainingMinutes", remainingMinutes))
                     .foregroundStyle(MacTheme.accentDeep)
                     .fontWeight(.medium)
             } else {
@@ -983,9 +983,9 @@ func macPodcastClock(_ seconds: Int) -> String {
 }
 
 private func macPodcastDurationMinutes(_ seconds: Int) -> String {
-    guard seconds > 0 else { return "时长未知" }
+    guard seconds > 0 else { return L10n("macPodcasts.durationUnknown") }
     let minutes = max(1, (seconds + 30) / 60)
-    return "\(minutes)分钟"
+    return L10n("macPodcasts.durationMinutes", minutes)
 }
 
 private func macPodcastProgress(_ episode: PodcastEpisode) -> Double? {
@@ -1020,19 +1020,19 @@ func macPodcastParsedDate(_ value: String) -> Date? {
 }
 
 func macPodcastShortDate(_ value: String) -> String {
-    guard let date = macPodcastParsedDate(value) else { return "日期未提供" }
+    guard let date = macPodcastParsedDate(value) else { return L10n("macPodcasts.dateNotProvided") }
     let calendar = Calendar.current
     if calendar.isDate(date, equalTo: Date(), toGranularity: .year) {
         let month = calendar.component(.month, from: date)
         let day = calendar.component(.day, from: date)
-        return "\(month)月\(day)日"
+        return L10n("macPodcasts.monthDay", month, day)
     }
     return date.formatted(.dateTime.year().month(.defaultDigits).day(.defaultDigits))
 }
 
 func macPodcastDate(_ value: String) -> String {
     let date = macPodcastParsedDate(value)
-    return date?.formatted(.dateTime.year().month(.twoDigits).day(.twoDigits)) ?? "日期未提供"
+    return date?.formatted(.dateTime.year().month(.twoDigits).day(.twoDigits)) ?? L10n("macPodcasts.dateNotProvided")
 }
 
 private struct PodcastIntakeSettings: View {
@@ -1047,26 +1047,26 @@ private struct PodcastIntakeSettings: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 12) {
-                Text("新集处理")
+                Text(L10n("macPodcasts.newEpisodeIntake"))
                     .font(MacTheme.caption)
                     .foregroundStyle(MacTheme.muted)
-                Picker("新集处理", selection: $action) {
-                    Text("自动加到队尾").tag("queue_last")
-                    Text("自动插到下一集").tag("queue_next")
-                    Text("关闭（仅关注）").tag("ignore")
+                Picker(L10n("macPodcasts.newEpisodeIntake"), selection: $action) {
+                    Text(L10n("macPodcasts.intakeQueueLast")).tag("queue_last")
+                    Text(L10n("macPodcasts.intakeQueueNext")).tag("queue_next")
+                    Text(L10n("macPodcasts.intakeIgnore")).tag("ignore")
                 }
                 .pickerStyle(.menu)
                 .fixedSize()
             }
             HStack(spacing: 12) {
-                Text("自动续播")
+                Text(L10n("macPodcasts.autoContinue"))
                     .font(MacTheme.caption)
                     .foregroundStyle(MacTheme.muted)
-                Picker("自动续播", selection: $order) {
-                    Text("跟随列表").tag("follow")
-                    Text("从旧到新").tag("asc")
-                    Text("从新到旧").tag("desc")
-                    Text("关闭").tag("off")
+                Picker(L10n("macPodcasts.autoContinue"), selection: $order) {
+                    Text(L10n("macPodcasts.continueFollow")).tag("follow")
+                    Text(L10n("macPodcasts.continueAsc")).tag("asc")
+                    Text(L10n("macPodcasts.continueDesc")).tag("desc")
+                    Text(L10n("macPodcasts.continueOff")).tag("off")
                 }
                 .pickerStyle(.menu)
                 .fixedSize()
@@ -1074,7 +1074,7 @@ private struct PodcastIntakeSettings: View {
             if let message = playback.podcastCloud?.preferenceError {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(message).font(.callout).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
-                    Button("重试") { Task { await save() } }.buttonStyle(.plain).font(.caption)
+                    Button(L10n("macPodcasts.retry")) { Task { await save() } }.buttonStyle(.plain).font(.caption)
                 }
             }
         }
@@ -1115,7 +1115,7 @@ private struct MacPodcastUnifiedQueue: View {
         let cloud = playback.podcastCloud
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                Text("待播列表")
+                Text(L10n("macPodcasts.upNext"))
                     .font(.system(size: 24, weight: .semibold))
                     .foregroundStyle(MacTheme.ink)
 
@@ -1126,7 +1126,7 @@ private struct MacPodcastUnifiedQueue: View {
 
                     autoIntakeSection(cloud)
                 } else {
-                    Text("暂时读不到待播列表。请重新登录后再试。").foregroundStyle(.secondary)
+                    Text(L10n("macPodcasts.cannotLoadQueue")).foregroundStyle(.secondary)
                 }
             }
             .frame(maxWidth: 720, alignment: .leading)
@@ -1141,7 +1141,7 @@ private struct MacPodcastUnifiedQueue: View {
         return VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .firstTextBaseline) {
                 HStack(spacing: 6) {
-                    Text("待播单集")
+                    Text(L10n("macPodcasts.pendingEpisodes"))
                         .font(MacTheme.section(16))
                         .foregroundStyle(MacTheme.ink)
                     Text("\(items.count)")
@@ -1153,7 +1153,7 @@ private struct MacPodcastUnifiedQueue: View {
                     Button {
                         playFirst(cloud)
                     } label: {
-                        Label("播放全部", systemImage: "play.fill")
+                        Label(L10n("macPodcasts.playAll"), systemImage: "play.fill")
                             .font(.system(size: 12, weight: .semibold))
                             .foregroundStyle(MacTheme.onAccent)
                             .padding(.horizontal, 12)
@@ -1167,13 +1167,13 @@ private struct MacPodcastUnifiedQueue: View {
             if cloud.loading && items.isEmpty {
                 HStack(spacing: 8) {
                     ProgressView().controlSize(.small)
-                    Text("正在同步待播列表…").foregroundStyle(.secondary)
+                    Text(L10n("macPodcasts.syncingQueue")).foregroundStyle(.secondary)
                 }
             } else if items.isEmpty {
                 ContentUnavailableView(
-                    "待播单集是空的",
+                    L10n("macPodcasts.emptyQueue"),
                     systemImage: "list.bullet",
-                    description: Text("关注的节目有更新或手动加入待播的单集会显示在这里。")
+                    description: Text(L10n("macPodcasts.emptyQueueDesc"))
                 )
                 .padding(.vertical, 20)
             } else {
@@ -1198,14 +1198,14 @@ private struct MacPodcastUnifiedQueue: View {
                                     .foregroundStyle(MacTheme.ink)
                                     .lineLimit(2)
                                 if item.origin == "rule" {
-                                    Text("新集自动加入")
+                                    Text(L10n("macPodcasts.autoAddedBadge"))
                                         .font(MacTheme.micro)
                                         .foregroundStyle(MacTheme.accentDeep)
                                 }
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
 
-                            Button("移除") {
+                            Button(L10n("macPodcasts.remove")) {
                                 cloud.removeEpisode(item.episodeId)
                             }
                             .buttonStyle(.borderless)
@@ -1224,12 +1224,12 @@ private struct MacPodcastUnifiedQueue: View {
 
     private func autoIntakeSection(_ cloud: PodcastCloudQueue) -> some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("新集自动加入待播")
+            Text(L10n("macPodcasts.autoIntakeSectionTitle"))
                 .font(MacTheme.section(16))
                 .foregroundStyle(MacTheme.ink)
 
             if shows.isEmpty {
-                Text("还没有订阅的节目。订阅节目后可在这里设置新集入队规则。")
+                Text(L10n("macPodcasts.autoIntakeEmptyShows"))
                     .font(MacTheme.caption)
                     .foregroundStyle(MacTheme.muted)
             } else {
@@ -1269,17 +1269,17 @@ private struct MacShowDeliveryRow: View {
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(MacTheme.ink)
                     .lineLimit(1)
-                Text(show.author.isEmpty ? "电台" : show.author)
+                Text(show.author.isEmpty ? L10n("macPodcasts.defaultArtist") : show.author)
                     .font(MacTheme.caption)
                     .foregroundStyle(MacTheme.muted)
                     .lineLimit(1)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            Picker("新集规则", selection: $action) {
-                Text("关闭（仅关注）").tag("ignore")
-                Text("自动加到队尾").tag("queue_last")
-                Text("自动插到下一集").tag("queue_next")
+            Picker(L10n("macPodcasts.intakeRulePicker"), selection: $action) {
+                Text(L10n("macPodcasts.intakeIgnore")).tag("ignore")
+                Text(L10n("macPodcasts.intakeQueueLast")).tag("queue_last")
+                Text(L10n("macPodcasts.intakeQueueNext")).tag("queue_next")
             }
             .pickerStyle(.menu)
             .fixedSize()

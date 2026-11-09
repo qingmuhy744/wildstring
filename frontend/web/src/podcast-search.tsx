@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ApiError, api } from './api';
+import i18n from './i18n';
 import { cleanPodcastDescription } from './podcast-description';
 import './podcast-search.css';
 
@@ -44,23 +46,11 @@ export interface PodcastFeedPreview {
   followed: boolean;
 }
 
-const REGION_NAMES: Record<string, string> = {
-  us: '美国',
-  tw: '台湾',
-  cn: '中国大陆',
-  hk: '香港',
-  mo: '澳门',
-  sg: '新加坡',
-  jp: '日本',
-  kr: '韩国',
-  gb: '英国',
-  ca: '加拿大',
-  au: '澳大利亚',
-  de: '德国',
-  fr: '法国',
+export const regionName = (code: string) => {
+  const key = `podcastSearch.region_${code.toLowerCase()}`;
+  const val = i18n.t(key);
+  return val && val !== key ? val : code.toUpperCase();
 };
-
-export const regionName = (code: string) => REGION_NAMES[code] || code.toUpperCase();
 
 export const isFeedAddress = (value: string) => /^https?:\/\//i.test(value.trim());
 
@@ -109,14 +99,16 @@ function describeError(error: unknown): ErrorState {
   if (error instanceof ApiError) {
     return { message: error.message, retryAfter: error.retryAfter };
   }
-  return { message: error instanceof Error ? error.message : '请求未完成，请重试。' };
+  return {
+    message: error instanceof Error ? error.message : i18n.t('podcastSearch.requestFailed'),
+  };
 }
 
 function shortDate(value: string | null) {
   if (!value) return '';
   const time = Date.parse(value);
   if (Number.isNaN(time)) return '';
-  return new Date(time).toLocaleDateString('zh-CN', {
+  return new Date(time).toLocaleDateString(i18n.language === 'zh' ? 'zh-CN' : 'en-US', {
     year: 'numeric',
     month: 'short',
     day: 'numeric',
@@ -126,8 +118,13 @@ function shortDate(value: string | null) {
 function minutes(seconds: number | null) {
   if (!seconds) return '';
   return seconds >= 3600
-    ? `${Math.floor(seconds / 3600)} 小时 ${Math.round((seconds % 3600) / 60)} 分`
-    : `${Math.max(1, Math.round(seconds / 60))} 分钟`;
+    ? i18n.t('podcastSearch.hoursMinutes', {
+        hours: Math.floor(seconds / 3600),
+        minutes: Math.round((seconds % 3600) / 60),
+      })
+    : i18n.t('podcastSearch.minutesOnly', {
+        minutes: Math.max(1, Math.round(seconds / 60)),
+      });
 }
 
 function Artwork({ src, title }: { src: string; title: string }) {
@@ -166,6 +163,7 @@ export function PodcastSearchPage({
   onSubscribed: (podcastId: string, title: string) => void | Promise<void>;
   onOpen: (podcastId: string) => void | Promise<void>;
 }) {
+  const { t } = useTranslation();
   const [query, setQuery] = useState(initialQuery);
   const [explore, setExplore] = useState(initialExplore);
   const [region, setRegion] = useState('');
@@ -371,12 +369,12 @@ export function PodcastSearchPage({
   const showDetail = Boolean(selection);
 
   const actionLabel = state.followed
-    ? '打开节目'
+    ? t('podcastSearch.actionOpen')
     : state.inCatalog
-      ? '关注并打开'
+      ? t('podcastSearch.actionFollowAndOpen')
       : canAdd
-        ? '添加并关注'
-        : '管理员尚未开放添加节目';
+        ? t('podcastSearch.actionAddAndFollow')
+        : t('podcastSearch.actionNotAllowed');
   // A failed preview of a pasted address can still be added: the server dedupes against
   // the catalog first and reports its own fetch error, matching the previous RSS dialog.
   const actionDisabled =
@@ -399,12 +397,16 @@ export function PodcastSearchPage({
       <header className="podcast-explore-header">
         <div>
           <h2 id="podcast-search-title" ref={heading} tabIndex={-1}>
-            {explore ? '探索播客' : canAdd ? '搜索或添加节目' : '搜索节目'}
+            {explore
+              ? t('podcastSearch.headingExplore')
+              : canAdd
+                ? t('podcastSearch.headingSearchOrAdd')
+                : t('podcastSearch.headingSearch')}
           </h2>
-          <p>找一个感兴趣的声音，先看看，再决定是否关注。</p>
+          <p>{t('podcastSearch.subheading')}</p>
         </div>
         <button type="button" className="podcast-back-btn" onClick={onClose}>
-          ← 返回电台
+          {t('podcastSearch.backToRadio')}
         </button>
       </header>
       <div className="podcast-search-controls">
@@ -421,8 +423,8 @@ export function PodcastSearchPage({
             type="search"
             inputMode="search"
             enterKeyHint="search"
-            aria-label="节目名称或 RSS 地址"
-            placeholder="搜索节目名称，或粘贴 RSS 地址"
+            aria-label={t('podcastSearch.searchAriaLabel')}
+            placeholder={t('podcastSearch.searchPlaceholder')}
             value={query}
             maxLength={1024}
             autoComplete="off"
@@ -444,20 +446,20 @@ export function PodcastSearchPage({
               setSubmitted((value) => value + 1);
             }}
           >
-            热门探索
+            {t('podcastSearch.explorePopular')}
           </button>
           {!term && (
             <label>
-              区域{' '}
+              {t('podcastSearch.regionLabel')}
               <select
-                aria-label="探索区域"
+                aria-label={t('podcastSearch.regionAriaLabel')}
                 value={region}
                 onChange={(event) => {
                   setRegion(event.target.value);
                   setSelection(null);
                 }}
               >
-                <option value="">服务器默认</option>
+                <option value="">{t('podcastSearch.serverDefault')}</option>
                 {Array.from(new Set([...availableRegions, 'us', 'tw', 'cn', 'hk', 'jp', 'gb'])).map(
                   (code) => (
                     <option key={code} value={code}>
@@ -472,58 +474,68 @@ export function PodcastSearchPage({
       </div>
       <p className="podcast-search-hint">
         {urlMode
-          ? '已识别为 RSS 地址，将直接预览这个源。'
-          : `通过 Apple Podcasts 目录${!term ? '浏览热门节目' : '搜索'}${
-              regions.length ? `：${regions.map(regionName).join(' · ')}` : ''
-            }`}
+          ? t('podcastSearch.hintUrlMode')
+          : !term
+            ? t('podcastSearch.hintBrowsePopular', {
+                regions: regions.length ? `：${regions.map(regionName).join(' · ')}` : '',
+              })
+            : t('podcastSearch.hintSearch', {
+                regions: regions.length ? `：${regions.map(regionName).join(' · ')}` : '',
+              })}
       </p>
 
       <div className="podcast-search-body">
         <section
           className="podcast-search-results"
-          aria-label="搜索结果"
+          aria-label={t('podcastSearch.resultsAriaLabel')}
           aria-busy={searching}
           hidden={urlMode && showDetail}
         >
           {searching && (
-            <div className="podcast-search-status">{term ? '正在搜索…' : '正在加载热门节目…'}</div>
+            <div className="podcast-search-status">
+              {term ? t('podcastSearch.searching') : t('podcastSearch.loadingPopular')}
+            </div>
           )}
           {!searching && error && (
             <div className="modal-error-message" role="alert">
               {error.message}
-              {error.retryAfter ? `（约 ${error.retryAfter} 秒后可重试）` : ''}
+              {error.retryAfter ? t('podcastSearch.retryAfter', { seconds: error.retryAfter }) : ''}
               <div className="podcast-search-retry">
-                {!term && explore && (
-                  <p>热门榜单暂时无法加载，可以重试、切换区域，或直接搜索节目名称。</p>
-                )}
+                {!term && explore && <p>{t('podcastSearch.popularLoadErrorHelp')}</p>}
                 <button type="button" onClick={() => setSubmitted((value) => value + 1)}>
-                  重新加载
+                  {t('podcastSearch.reload')}
                 </button>
               </div>
             </div>
           )}
           {!searching && !error && failed.length > 0 && (
             <div className="podcast-search-warning" role="status">
-              部分区域暂时无法搜索：{failed.map((item) => regionName(item.region)).join('、')}
+              {t('podcastSearch.failedRegions', {
+                regions: failed
+                  .map((item) => regionName(item.region))
+                  .join(t('podcastSearch.regionSeparator')),
+              })}
             </div>
           )}
           {!searching && !error && response && response.explicit_hidden > 0 && (
             <div className="podcast-search-status">
-              已按管理员设置隐藏 {response.explicit_hidden} 个含成人内容的节目。
+              {t('podcastSearch.explicitHidden', { count: response.explicit_hidden })}
             </div>
           )}
           {!searching && !error && response && results.length === 0 && (
             <div className="podcast-search-empty">
               <strong>
-                {term ? `没有找到与「${response.query}」相关的节目` : '这个区域暂无可用节目'}
+                {term
+                  ? t('podcastSearch.noResultsQuery', { query: response.query })
+                  : t('podcastSearch.noResultsRegion')}
               </strong>
-              <span>换个关键词，或直接粘贴节目的 RSS 地址。</span>
+              <span>{t('podcastSearch.noResultsHint')}</span>
             </div>
           )}
           {!term && !explore && (
             <div className="podcast-search-empty">
-              <strong>输入节目名称开始搜索</strong>
-              <span>也可以粘贴以 http:// 或 https:// 开头的 RSS 地址。</span>
+              <strong>{t('podcastSearch.searchStartPromptTitle')}</strong>
+              <span>{t('podcastSearch.searchStartPromptDesc')}</span>
             </div>
           )}
           {!searching && results.length > 0 && (
@@ -546,15 +558,20 @@ export function PodcastSearchPage({
                         <span className="podcast-search-card-title">
                           {item.title}
                           {item.explicit && (
-                            <span className="podcast-search-explicit" title="含成人内容">
-                              成人
+                            <span
+                              className="podcast-search-explicit"
+                              title={t('podcastSearch.explicitTooltip')}
+                            >
+                              {t('podcastSearch.explicitBadge')}
                             </span>
                           )}
                         </span>
                         <span className="podcast-search-card-author">{item.author}</span>
                         <span className="podcast-search-card-meta">
                           {[
-                            item.episode_count != null ? `${item.episode_count} 集` : '',
+                            item.episode_count != null
+                              ? t('podcastSearch.episodeCount', { count: item.episode_count })
+                              : '',
                             item.genres[0] ?? '',
                           ]
                             .filter(Boolean)
@@ -567,9 +584,13 @@ export function PodcastSearchPage({
                             </span>
                           ))}
                           {item.followed ? (
-                            <span className="podcast-search-state followed">已关注</span>
+                            <span className="podcast-search-state followed">
+                              {t('podcastSearch.stateFollowed')}
+                            </span>
                           ) : item.in_catalog ? (
-                            <span className="podcast-search-state">本服已有</span>
+                            <span className="podcast-search-state">
+                              {t('podcastSearch.stateInCatalog')}
+                            </span>
                           ) : null}
                         </span>
                       </span>
@@ -584,31 +605,39 @@ export function PodcastSearchPage({
         {showDetail && (
           <section
             className="podcast-search-preview"
-            aria-label="节目预览"
+            aria-label={t('podcastSearch.previewAriaLabel')}
             ref={detailPanel}
             tabIndex={-1}
           >
             {!urlMode && (
               <button type="button" className="podcast-search-back" onClick={returnToResults}>
-                ← 返回结果
+                {t('podcastSearch.backToResults')}
               </button>
             )}
             <div className="podcast-search-preview-head">
               <Artwork
                 src={preview?.cover_url || result?.artwork_url || ''}
-                title={preview?.title || result?.title || '节'}
+                title={preview?.title || result?.title || t('podcastSearch.defaultShowLetter')}
               />
               <div>
                 <h4>{preview?.title || result?.title || selectedFeed}</h4>
                 <p>{preview?.author || result?.author}</p>
-                {result?.explicit && <span className="podcast-search-explicit">含成人内容</span>}
+                {result?.explicit && (
+                  <span className="podcast-search-explicit">
+                    {t('podcastSearch.explicitTooltip')}
+                  </span>
+                )}
               </div>
             </div>
-            {previewing && <div className="podcast-search-status">正在读取 RSS 源…</div>}
+            {previewing && (
+              <div className="podcast-search-status">{t('podcastSearch.readingRssFeed')}</div>
+            )}
             {previewError && (
               <div className="modal-error-message" role="alert">
                 {previewError.message}
-                {previewError.retryAfter ? `（约 ${previewError.retryAfter} 秒后可重试）` : ''}
+                {previewError.retryAfter
+                  ? t('podcastSearch.retryAfter', { seconds: previewError.retryAfter })
+                  : ''}
               </div>
             )}
             {preview && (
@@ -618,7 +647,9 @@ export function PodcastSearchPage({
                     {cleanPodcastDescription(preview.description)}
                   </p>
                 )}
-                <h5>最新单集 · 共 {preview.episode_count} 集</h5>
+                <h5>
+                  {t('podcastSearch.latestEpisodesHeading', { count: preview.episode_count })}
+                </h5>
                 <ol className="podcast-search-episodes">
                   {preview.latest_episodes.map((episode, index) => (
                     <li key={`${index}-${episode.title}`}>
@@ -645,7 +676,7 @@ export function PodcastSearchPage({
                   className="modal-submit-btn primary"
                   onClick={() => void onOpen(state.podcastId!)}
                 >
-                  已关注 · 打开节目
+                  {t('podcastSearch.followedOpenShow')}
                 </button>
               ) : (
                 <button
@@ -654,7 +685,7 @@ export function PodcastSearchPage({
                   disabled={actionDisabled}
                   onClick={() => void subscribe()}
                 >
-                  {busy ? '正在添加…' : actionLabel}
+                  {busy ? t('podcastSearch.adding') : actionLabel}
                 </button>
               )}
             </div>

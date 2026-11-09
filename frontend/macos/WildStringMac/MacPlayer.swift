@@ -97,18 +97,18 @@ struct MacTransportBar: View {
                                     .lineLimit(1)
                                 }.frame(maxWidth: .infinity, alignment: .leading)
                             }
-                        }.buttonStyle(.plain).help("全屏播放")
+                        }.buttonStyle(.plain).help(L10n("macPlayer.fullscreen"))
                         if let favorites = session.favorites {
                             Button { Task { await favorites.toggle(item.trackID) } } label: {
                                 Image(systemName: favorites.isFavorite(item.trackID) ? "heart.fill" : "heart")
                                     .foregroundStyle(favorites.isFavorite(item.trackID) ? MacTheme.accentDeep : Color.secondary)
                                     .frame(width: 28, height: 32)
-                            }.buttonStyle(.plain).help(favorites.isFavorite(item.trackID) ? "取消红心" : "红心")
+                            }.buttonStyle(.plain).help(favorites.isFavorite(item.trackID) ? L10n("macPlayer.unfavorite") : L10n("macPlayer.favorite"))
                         }
                     } else {
                         Image(systemName: "music.note").frame(width: 52, height: 52)
                             .background(MacTheme.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
-                        Text("选择一首歌开始播放").font(.callout).foregroundStyle(.secondary)
+                        Text(L10n("macPlayer.selectTrackToPlay")).font(.callout).foregroundStyle(.secondary)
                         Spacer()
                     }
                 }.frame(width: sideWidth, alignment: .leading)
@@ -118,23 +118,23 @@ struct MacTransportBar: View {
                         if isPodcast {
                             MacSleepMenu(playback: playback, podcast: true, iconOnly: true)
                         } else {
-                            transportButton("shuffle", help: "随机", active: playback.isShuffled) { playback.toggleShuffle() }
+                            transportButton("shuffle", help: L10n("macPlayer.shuffle"), active: playback.isShuffled) { playback.toggleShuffle() }
                         }
-                        transportButton(isPodcast ? "gobackward.15" : "backward.fill", help: isPodcast ? "后退 15 秒" : "上一首") {
+                        transportButton(isPodcast ? "gobackward.15" : "backward.fill", help: isPodcast ? L10n("macPlayer.back15s") : L10n("macPlayer.previousTrack")) {
                             if isPodcast { playback.seek(to: max(0, playback.currentTime - 15)) } else { playback.previous() }
                         }
                         Button { playback.togglePlayPause() } label: {
                             Image(systemName: playback.isPlaying ? "pause.fill" : "play.fill")
                                 .font(.system(size: 14, weight: .semibold)).foregroundStyle(MacTheme.onAccent)
                                 .frame(width: 38, height: 38).background(MacTheme.accent, in: Circle())
-                        }.buttonStyle(.plain).help(playback.isPlaying ? "暂停" : "播放").disabled(playback.currentItem == nil)
-                        transportButton(isPodcast ? "goforward.30" : "forward.fill", help: isPodcast ? "前进 30 秒" : "下一首") {
+                        }.buttonStyle(.plain).help(playback.isPlaying ? L10n("macPlayer.pause") : L10n("macPlayer.play")).disabled(playback.currentItem == nil)
+                        transportButton(isPodcast ? "goforward.30" : "forward.fill", help: isPodcast ? L10n("macPlayer.forward30s") : L10n("macPlayer.nextTrack")) {
                             if isPodcast { playback.seek(to: playback.currentTime + 30) } else { playback.next() }
                         }
                         if isPodcast {
                             MacPlaybackRateMenu(playback: playback)
                         } else {
-                            transportButton(playback.repeatMode == .one ? "repeat.1" : "repeat", help: "循环",
+                            transportButton(playback.repeatMode == .one ? "repeat.1" : "repeat", help: L10n("macPlayer.repeat"),
                                 active: playback.repeatMode != .off) { playback.cycleRepeatMode() }
                         }
                     }
@@ -172,7 +172,7 @@ struct MacTransportBar: View {
                             .frame(width: 22, height: 26)
                         }
                         .buttonStyle(.plain)
-                        .help(playback.volume <= 0.01 ? "取消静音" : "静音")
+                        .help(playback.volume <= 0.01 ? L10n("macPlayer.unmute") : L10n("macPlayer.mute"))
 
                         Slider(
                             value: Binding(
@@ -184,17 +184,17 @@ struct MacTransportBar: View {
                         .controlSize(.mini)
                         .frame(width: 72)
                         .tint(MacTheme.muted)
-                        .accessibilityLabel("音量")
+                        .accessibilityLabel(L10n("macPlayer.volume"))
                     }
                     .padding(.trailing, 4)
 
                     if !isPodcast {
-                        transportButton("quote.bubble", help: "歌词", active: session.showLyrics) { session.showLyrics.toggle() }
+                        transportButton("quote.bubble", help: L10n("macPlayer.lyrics"), active: session.showLyrics) { session.showLyrics.toggle() }
                     }
-                    transportButton("list.number", help: "播放队列", active: session.showQueue) { session.showQueue.toggle() }
-                    transportButton("arrow.up.left.and.arrow.down.right", help: "全屏播放") { session.showFullscreen = true }
+                    transportButton("list.number", help: L10n("macPlayer.queue"), active: session.showQueue) { session.showQueue.toggle() }
+                    transportButton("arrow.up.left.and.arrow.down.right", help: L10n("macPlayer.fullscreen")) { session.showFullscreen = true }
                     if !isPodcast {
-                        transportButton("captions.bubble", help: session.desktopLyricsVisible ? "关闭桌面歌词" : "打开桌面歌词",
+                        transportButton("captions.bubble", help: session.desktopLyricsVisible ? L10n("macPlayer.closeDesktopLyrics") : L10n("macPlayer.openDesktopLyrics"),
                             active: session.desktopLyricsVisible) {
                             NotificationCenter.default.post(name: .wildstringShowDesktopLyrics, object: nil)
                         }
@@ -264,12 +264,13 @@ struct MacPlayerInspector: View {
                     .foregroundStyle(MacTheme.accentDeep)
                     .frame(width: 32, height: 32)
                     .background(MacTheme.accentSoft, in: RoundedRectangle(cornerRadius: 10))
-                Text(showingQueue ? "播放队列" : "歌词")
+                Text(showingQueue ? L10n("macPlayer.queue") : L10n("macPlayer.lyrics"))
                     .font(MacTheme.display(19)).foregroundStyle(MacTheme.ink)
                 if showingQueue {
                     Text(
-                        "\(playback.playbackItems.count) " +
-                        (playback.currentItem?.trackID.hasPrefix("podcast_ep_") == true ? "集" : "项")
+                        playback.currentItem?.trackID.hasPrefix("podcast_ep_") == true
+                            ? L10n("macPlayer.queueEpisodesCount", playback.playbackItems.count)
+                            : L10n("macPlayer.queueItemsCount", playback.playbackItems.count)
                     )
                     .font(MacTheme.micro)
                     .foregroundStyle(MacTheme.muted)
@@ -282,12 +283,12 @@ struct MacPlayerInspector: View {
                     Image(systemName: "xmark").font(.system(size: 11, weight: .medium))
                         .foregroundStyle(MacTheme.muted).frame(width: 26, height: 26)
                         .background(MacTheme.canvas, in: Circle())
-                }.buttonStyle(.plain).help("关闭侧栏").accessibilityLabel("关闭侧栏")
+                }.buttonStyle(.plain).help(L10n("macPlayer.closeSidebar")).accessibilityLabel(L10n("macPlayer.closeSidebar"))
             }
             if session.showLyrics && session.showQueue {
-                Picker("正在看", selection: $focus) {
-                    Text("歌词").tag(InspectorFocus.lyrics)
-                    Text("队列").tag(InspectorFocus.queue)
+                Picker(L10n("macPlayer.viewing"), selection: $focus) {
+                    Text(L10n("macPlayer.lyrics")).tag(InspectorFocus.lyrics)
+                    Text(L10n("macPlayer.queueTab")).tag(InspectorFocus.queue)
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
@@ -315,9 +316,9 @@ struct MacPlayerInspector: View {
     private var lyrics: some View {
         if playback.currentItem?.trackID.hasPrefix("podcast_ep_") == true {
             VStack(alignment: .leading, spacing: 12) {
-                Text("播客单集")
+                Text(L10n("macPlayer.podcastEpisode"))
                     .font(.headline)
-                Text("播客没有歌词。底部按钮提供后退 15 秒和前进 30 秒，队列里可以切换单集。")
+                Text(L10n("macPlayer.podcastNoLyricsHint"))
                     .font(.callout)
                     .foregroundStyle(.secondary)
                 Spacer()
@@ -336,7 +337,7 @@ struct MacPlayerInspector: View {
                 }
                 MacLyricScroll(
                     playback: playback, timeline: timeline,
-                    empty: playback.currentItem == nil ? "选一首歌后，歌词会显示在这里" : "这首歌没有歌词",
+                    empty: playback.currentItem == nil ? L10n("macPlayer.selectTrackForLyrics") : L10n("macPlayer.noLyrics"),
                     phase: lyricPhase, onRetry: { lyricTrackID = nil; lyricAttempt += 1 }
                 )
             }
@@ -461,7 +462,7 @@ struct PlaybackSlider: View {
         }
         .frame(height: 18)
         .disabled(totalDuration <= 0)
-        .accessibilityLabel("播放进度")
+        .accessibilityLabel(L10n("macPlayer.playbackProgress"))
     }
 }
 
@@ -478,9 +479,9 @@ struct MenuBarPlayer: View {
         VStack(alignment: .leading, spacing: 16) {
             if let playback = session.playback, let item = playback.currentItem, let client = session.client {
                 HStack {
-                    Label(isPodcast ? "播客" : "音乐", systemImage: isPodcast ? "antenna.radiowaves.left.and.right" : "waveform")
+                    Label(isPodcast ? L10n("macPlayer.podcast") : L10n("macPlayer.music"), systemImage: isPodcast ? "antenna.radiowaves.left.and.right" : "waveform")
                     Spacer()
-                    Text(playback.isBuffering ? "正在缓冲" : playback.isPlaying ? "正在播放" : "已暂停")
+                    Text(playback.isBuffering ? L10n("macPlayer.buffering") : (playback.isPlaying ? L10n("macPlayer.nowPlaying") : L10n("macPlayer.paused")))
                 }.font(.caption).foregroundStyle(.secondary)
                 Button { openPlayer() } label: {
                     HStack(alignment: .top, spacing: 12) {
@@ -511,7 +512,7 @@ struct MenuBarPlayer: View {
                         Button { playback.toggleShuffle() } label: {
                             Image(systemName: "shuffle")
                                 .foregroundStyle(playback.isShuffled ? MacTheme.accentDeep : Color.secondary)
-                        }.help("随机播放")
+                        }.help(L10n("macPlayer.shuffleFull"))
                     }
                     Spacer(minLength: 0)
                     Button {
@@ -519,33 +520,33 @@ struct MenuBarPlayer: View {
                         else { playback.previous() }
                     } label: {
                         Image(systemName: isPodcast ? "gobackward.15" : "backward.fill")
-                    }.help(isPodcast ? "后退 15 秒" : "上一首")
+                    }.help(isPodcast ? L10n("macPlayer.back15s") : L10n("macPlayer.previousTrack"))
                     Button { playback.togglePlayPause() } label: {
                         Image(systemName: playback.isPlaying ? "pause.fill" : "play.fill")
                             .font(.title3).foregroundStyle(MacTheme.onAccent).frame(width: 42, height: 42)
                             .background(MacTheme.accent, in: Circle())
-                    }.help(playback.isPlaying ? "暂停" : "播放")
+                    }.help(playback.isPlaying ? L10n("macPlayer.pause") : L10n("macPlayer.play"))
                     Button {
                         if isPodcast { playback.seek(to: playback.currentTime + 30) }
                         else { playback.next() }
                     } label: {
                         Image(systemName: isPodcast ? "goforward.30" : "forward.fill")
-                    }.help(isPodcast ? "前进 30 秒" : "下一首")
+                    }.help(isPodcast ? L10n("macPlayer.forward30s") : L10n("macPlayer.nextTrack"))
                     Spacer(minLength: 0)
                     if isPodcast {
-                        Button { openPlayer() } label: { Image(systemName: "doc.text") }.help("本期内容")
+                        Button { openPlayer() } label: { Image(systemName: "doc.text") }.help(L10n("macPlayer.episodeContent"))
                     } else {
                         Button { playback.cycleRepeatMode() } label: {
                             Image(systemName: playback.repeatMode == .one ? "repeat.1" : "repeat")
                                 .foregroundStyle(playback.repeatMode != .off ? MacTheme.accentDeep : Color.secondary)
-                        }.help("循环播放")
+                        }.help(L10n("macPlayer.repeatFull"))
                     }
                 }.buttonStyle(.plain)
                 HStack {
                     MacSleepMenu(playback: playback, podcast: isPodcast)
                     Spacer()
                     if !isPodcast {
-                        Button(session.desktopLyricsVisible ? "关闭桌面歌词" : "桌面歌词") {
+                        Button(session.desktopLyricsVisible ? L10n("macPlayer.closeDesktopLyrics") : L10n("macPlayer.desktopLyrics")) {
                             NotificationCenter.default.post(name: .wildstringShowDesktopLyrics, object: nil)
                         }
                     }
@@ -554,7 +555,7 @@ struct MenuBarPlayer: View {
                    playback.playbackItems.indices.contains(index + 1) {
                     Divider()
                     VStack(alignment: .leading, spacing: 6) {
-                        Text(isPodcast ? "下一集" : "下一首").font(.caption).foregroundStyle(.secondary)
+                        Text(isPodcast ? L10n("macPlayer.nextEpisode") : L10n("macPlayer.nextTrackTitle")).font(.caption).foregroundStyle(.secondary)
                         Text(playback.playbackItems[index + 1].title).font(.callout).lineLimit(2)
                     }
                 }
@@ -563,14 +564,14 @@ struct MenuBarPlayer: View {
                 }
                 Button { openPlayer() } label: {
                     HStack {
-                        Text(isPodcast ? "打开单集详情" : "打开完整播放器")
+                        Text(isPodcast ? L10n("macPlayer.openEpisodeDetails") : L10n("macPlayer.openFullPlayer"))
                         Spacer()
                         Image(systemName: "arrow.up.forward")
                     }
                 }.buttonStyle(.borderless)
             } else {
-                Text("还没有在播放").foregroundStyle(.secondary)
-                Button("打开野弦") { openWindow(id: "main"); NSApp.activate(ignoringOtherApps: true) }
+                Text(L10n("macPlayer.notPlaying")).foregroundStyle(.secondary)
+                Button(L10n("macPlayer.openWildString")) { openWindow(id: "main"); NSApp.activate(ignoringOtherApps: true) }
             }
         }
         .padding(18).frame(width: 360).tint(MacTheme.accentDeep)
@@ -611,7 +612,7 @@ struct DesktopLyricsView: View {
             Button { session.desktopLyrics.close() } label: {
                 Image(systemName: "xmark").font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.85)).frame(width: 24, height: 24)
-            }.buttonStyle(.plain).help("关闭桌面歌词").accessibilityLabel("关闭桌面歌词")
+            }.buttonStyle(.plain).help(L10n("macPlayer.closeDesktopLyrics")).accessibilityLabel(L10n("macPlayer.closeDesktopLyrics"))
                 .padding(4)
         }
         .frame(width: 540, height: 112)
@@ -629,7 +630,7 @@ struct DesktopLyricsView: View {
     }
 
     private var title: some View {
-        Text(session.playback?.currentItem?.title ?? "野弦")
+        Text(session.playback?.currentItem?.title ?? L10n("macPlayer.appName"))
             .font(.system(size: 24, weight: .semibold)).foregroundStyle(.white)
             .lineLimit(2).minimumScaleFactor(0.7)
     }

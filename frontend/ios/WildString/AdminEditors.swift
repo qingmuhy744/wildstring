@@ -23,20 +23,20 @@ struct MetadataEditView: View {
         NavigationStack {
             Form {
                 if metadata != nil {
-                    Section("曲目") {
-                        TextField("标题", text: $title)
-                        TextField("艺人（用「、」分隔）", text: $artists)
-                        TextField("专辑", text: $album)
-                        TextField("专辑艺人（用「、」分隔）", text: $albumArtists)
+                    Section(L10n("adminEdit.trackSection")) {
+                        TextField(L10n("adminEdit.titlePlaceholder"), text: $title)
+                        TextField(L10n("adminEdit.artistsPlaceholder"), text: $artists)
+                        TextField(L10n("adminEdit.albumPlaceholder"), text: $album)
+                        TextField(L10n("adminEdit.albumArtistsPlaceholder"), text: $albumArtists)
                     }
-                    Section("编号") {
-                        TextField("音轨号", text: $trackNumber)
+                    Section(L10n("adminEdit.numberingSection")) {
+                        TextField(L10n("adminEdit.trackNumberPlaceholder"), text: $trackNumber)
                             .keyboardType(.numberPad)
-                        TextField("碟号", text: $discNumber)
+                        TextField(L10n("adminEdit.discNumberPlaceholder"), text: $discNumber)
                             .keyboardType(.numberPad)
                     }
-                    Section("简介") {
-                        TextField("简介", text: $description, axis: .vertical)
+                    Section(L10n("adminEdit.descriptionSection")) {
+                        TextField(L10n("adminEdit.descriptionPlaceholder"), text: $description, axis: .vertical)
                             .lineLimit(2...6)
                     }
                     if let message {
@@ -45,7 +45,7 @@ struct MetadataEditView: View {
                             .foregroundStyle(messageIsError ? .red : .green)
                     }
                     Section {
-                        Text("修改只保存到服务端数据库，不写入音频文件与导入源。")
+                        Text(L10n("adminEdit.metadataNotice"))
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
@@ -57,14 +57,14 @@ struct MetadataEditView: View {
                     ProgressView()
                 }
             }
-            .navigationTitle("编辑元数据")
+            .navigationTitle(L10n("adminEdit.metadataTitle"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button("取消") { dismiss() }
+                    Button(L10n("adminEdit.cancel")) { dismiss() }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("保存") { Task { await save() } }
+                    Button(L10n("adminEdit.save")) { Task { await save() } }
                         .disabled(metadata == nil || isSaving)
                 }
             }
@@ -78,9 +78,9 @@ struct MetadataEditView: View {
             metadata = loaded
             let fields = loaded.observed
             title = fields.title ?? ""
-            artists = (fields.artists ?? []).joined(separator: "、")
+            artists = (fields.artists ?? []).joined(separator: L10n("adminEdit.listSeparator"))
             album = fields.album ?? ""
-            albumArtists = (fields.albumArtists ?? []).joined(separator: "、")
+            albumArtists = (fields.albumArtists ?? []).joined(separator: L10n("adminEdit.listSeparator"))
             trackNumber = fields.trackNumber.map(String.init) ?? ""
             discNumber = fields.discNumber.map(String.init) ?? ""
             description = fields.description ?? ""
@@ -126,11 +126,11 @@ struct MetadataEditView: View {
                 overrides: overrides
             )
             metadata = updated
-            message = "已保存"
+            message = L10n("adminEdit.savedMessage")
             messageIsError = false
         } catch let error as APIError where error.statusCode == 409 {
             await load()
-            message = "元数据已在别处更新，已刷新，请重试"
+            message = L10n("adminEdit.metadataConflictMessage")
             messageIsError = true
         } catch {
             message = ErrorText.message(for: error)
@@ -185,16 +185,16 @@ struct LyricsEditView: View {
                     Spacer()
                 }
             }
-            .navigationTitle("编辑歌词")
+            .navigationTitle(L10n("adminEdit.lyricsTitle"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button("取消") { dismiss() }
+                    Button(L10n("adminEdit.cancel")) { dismiss() }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Menu("保存") {
-                        Button("保存当前内容") { Task { await save(text: text) } }
-                        Button("恢复为文件歌词", role: .destructive) {
+                    Menu(L10n("adminEdit.save")) {
+                        Button(L10n("adminEdit.saveCurrentLyrics")) { Task { await save(text: text) } }
+                        Button(L10n("adminEdit.revertToFileLyrics"), role: .destructive) {
                             Task { await save(text: nil) }
                         }
                     }
@@ -230,11 +230,11 @@ struct LyricsEditView: View {
             )
             record = updated
             text = updated.override ?? updated.observedText
-            message = value == nil ? "已恢复为文件歌词" : "已保存"
+            message = value == nil ? L10n("adminEdit.revertedMessage") : L10n("adminEdit.savedMessage")
             messageIsError = false
         } catch let error as APIError where error.statusCode == 409 {
             await load()
-            message = "歌词已在别处更新，已刷新，请重试"
+            message = L10n("adminEdit.lyricsConflictMessage")
             messageIsError = true
         } catch {
             message = ErrorText.message(for: error)

@@ -1,4 +1,5 @@
 import { useId } from 'react';
+import { useTranslation } from 'react-i18next';
 import { artist } from './api';
 import type { Player } from './player';
 import { PlaybackIndicator } from './playback-indicator';
@@ -19,6 +20,7 @@ export function QueuePanel({
   upNextOnly?: boolean;
   upNextPodcastId?: string;
 }) {
+  const { t } = useTranslation();
   const instruction = useId();
   const entries = player.queue
     .map((track, index) => ({ track, index }))
@@ -38,22 +40,26 @@ export function QueuePanel({
   function move(from: number, to: number) {
     if (from === to) return;
     player.move(from, to);
-    onNotice('已调整播放顺序');
+    onNotice(t('queuePanel.orderAdjusted'));
   }
   return (
-    <aside className={`queue-panel ${embedded ? 'embedded-queue' : ''}`} aria-label="播放队列">
+    <aside
+      className={`queue-panel ${embedded ? 'embedded-queue' : ''}`}
+      aria-label={t('queuePanel.ariaLabel')}
+    >
       <div className="queue-heading">
         <div>
           <h2>
-            {upNextOnly ? '下一集' : '播放队列'} <small>{entries.length}</small>
+            {upNextOnly ? t('queuePanel.nextEpisode') : t('queuePanel.title')}{' '}
+            <small>{entries.length}</small>
           </h2>
         </div>
-        <button className="icon-button" onClick={onClose} aria-label="关闭队列">
+        <button className="icon-button" onClick={onClose} aria-label={t('queuePanel.close')}>
           ×
         </button>
       </div>
       <p className="sr-only" id={instruction}>
-        使用每首歌曲右侧的上移和下移按钮调整播放顺序。
+        {t('queuePanel.reorderInstruction')}
       </p>
       {entries.length ? (
         <ol>
@@ -76,12 +82,16 @@ export function QueuePanel({
                 <strong>{track.title}</strong>
                 <small>{artist(track)}</small>
               </button>
-              <span className="queue-reorder" role="group" aria-label={`调整队列第 ${i + 1} 首`}>
+              <span
+                className="queue-reorder"
+                role="group"
+                aria-label={t('queuePanel.adjustIndex', { index: i + 1 })}
+              >
                 <button
                   className="icon-button"
                   disabled={i === 0}
                   onClick={() => move(i, i - 1)}
-                  aria-label={`上移队列第 ${i + 1} 首`}
+                  aria-label={t('queuePanel.moveUpIndex', { index: i + 1 })}
                   aria-describedby={instruction}
                 >
                   ↑
@@ -90,7 +100,7 @@ export function QueuePanel({
                   className="icon-button"
                   disabled={i === player.queue.length - 1}
                   onClick={() => move(i, i + 1)}
-                  aria-label={`下移队列第 ${i + 1} 首`}
+                  aria-label={t('queuePanel.moveDownIndex', { index: i + 1 })}
                   aria-describedby={instruction}
                 >
                   ↓
@@ -100,7 +110,7 @@ export function QueuePanel({
                 className="icon-button"
                 disabled={i === player.index}
                 onClick={() => player.remove(i)}
-                aria-label={`移除队列第 ${i + 1} 首`}
+                aria-label={t('queuePanel.removeIndex', { index: i + 1 })}
               >
                 ×
               </button>
@@ -108,14 +118,18 @@ export function QueuePanel({
           ))}
         </ol>
       ) : (
-        <p className="muted">从歌曲操作中加入队列，或直接播放曲库。</p>
+        <p className="muted">{t('queuePanel.emptyHint')}</p>
       )}
       {isPodcast && (
-        <div className="queue-podcast-continuation" role="group" aria-label="自动续播">
+        <div
+          className="queue-podcast-continuation"
+          role="group"
+          aria-label={t('queuePanel.autoContinueAria')}
+        >
           <div className="queue-continuation-header">
-            <strong>自动续播</strong>
+            <strong>{t('queuePanel.autoContinue')}</strong>
             <select
-              aria-label="播客续播顺序"
+              aria-label={t('queuePanel.orderAria')}
               value={!auto ? 'off' : preference.order}
               onChange={(event) =>
                 player.setPodcastPreference({
@@ -124,10 +138,10 @@ export function QueuePanel({
                 })
               }
             >
-              <option value="follow">跟随列表顺序</option>
-              <option value="asc">从旧到新</option>
-              <option value="desc">从新到旧</option>
-              <option value="off">关闭自动续播</option>
+              <option value="follow">{t('queuePanel.orderFollow')}</option>
+              <option value="asc">{t('queuePanel.orderAsc')}</option>
+              <option value="desc">{t('queuePanel.orderDesc')}</option>
+              <option value="off">{t('queuePanel.orderOff')}</option>
             </select>
           </div>
           {preview.length > 0 ? (
@@ -151,17 +165,23 @@ export function QueuePanel({
                     }
                   >
                     <strong>{track.title}</strong>
-                    <small>自动续播 · {artist(track)}</small>
+                    <small>
+                      {t('queuePanel.autoContinueArtist', {
+                        artist: artist(track),
+                      })}
+                    </small>
                   </button>
                   <button
                     type="button"
                     className="icon-button"
                     onClick={() => {
                       player.enqueue(track);
-                      onNotice('已加入手动待播清单');
+                      onNotice(t('queuePanel.addedToQueueNotice'));
                     }}
-                    aria-label={`加入待播 ${track.title}`}
-                    title="加入手动待播清单"
+                    aria-label={t('queuePanel.addToQueueAria', {
+                      title: track.title,
+                    })}
+                    title={t('queuePanel.addToQueueTitle')}
                   >
                     +
                   </button>
@@ -169,8 +189,10 @@ export function QueuePanel({
                     type="button"
                     className="icon-button"
                     onClick={() => player.dismissPodcastPreview(track.id)}
-                    aria-label={`不再预览 ${track.title}`}
-                    title="不再预览"
+                    aria-label={t('queuePanel.dismissPreviewAria', {
+                      title: track.title,
+                    })}
+                    title={t('queuePanel.dismissPreviewTitle')}
                   >
                     ×
                   </button>
@@ -179,7 +201,7 @@ export function QueuePanel({
             </div>
           ) : (
             <p className="muted queue-continuation-empty">
-              {!auto ? '已关闭自动续播，播完待播即停。' : '当前节目没有更多可自动续播的单集。'}
+              {!auto ? t('queuePanel.autoContinueDisabled') : t('queuePanel.noMoreEpisodes')}
             </p>
           )}
         </div>

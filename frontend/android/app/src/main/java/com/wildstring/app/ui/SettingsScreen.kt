@@ -68,6 +68,7 @@ internal enum class SettingsSection(@androidx.annotation.StringRes val title: In
     var logout by remember(settingsOwner) { mutableStateOf(false) }
     var diagnostics by remember(settingsOwner) { mutableStateOf(false) }
     var crashReports by remember(settingsOwner) { mutableStateOf(false) }
+    var downloadTasks by remember(settingsOwner) { mutableStateOf(false) }
     var feature by remember(settingsOwner) { mutableStateOf<String?>(null) }
     var podcastPlayback by remember(settingsOwner) { mutableStateOf<com.wildstring.app.data.PodcastPlaybackSettings?>(null) }
     var savingPodcastPlayback by remember(settingsOwner) { mutableStateOf(false) }
@@ -215,6 +216,13 @@ internal enum class SettingsSection(@androidx.annotation.StringRes val title: In
                             )
                         }
                     }
+                    if (state.account?.profile in listOf("owner", "librarian")) {
+                        SettingsGroup(stringResource(R.string.podcast_download_tasks)) {
+                            SettingsAction(stringResource(R.string.podcast_download_tasks), Icons.Default.Downloading, tag = "podcast-download-tasks") {
+                                downloadTasks = true
+                            }
+                        }
+                    }
                 }
                 SettingsSection.Appearance -> {
                     SettingsGroup(stringResource(R.string.settings_group_appearance)) {
@@ -296,6 +304,7 @@ internal enum class SettingsSection(@androidx.annotation.StringRes val title: In
     if (servers) ServersScreen(vm) { servers = false }
     if (diagnostics) PlaybackDiagnosticsDialog(vm) { diagnostics = false }
     if (crashReports) CrashReportsDialog { crashReports = false }
+    if (downloadTasks) PodcastDownloadQueueDialog(vm = vm, onDismiss = { downloadTasks = false })
     feature?.let { route -> FeatureDialog(vm, route) { feature = null } }
     if (logout) AlertDialog(onDismissRequest = { logout = false }, title = { Text(stringResource(R.string.logout_title)) }, text = { Text(stringResource(R.string.logout_message)) }, confirmButton = { TextButton({ logout = false; back(); vm.logout() }) { Text(stringResource(R.string.logout)) } }, dismissButton = { TextButton({ logout = false }) { Text(stringResource(R.string.cancel)) } })
     if (profile) ProfileDialog(vm) { profile = false }

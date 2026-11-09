@@ -2,6 +2,8 @@ package com.wildstring.app.data
 
 import android.content.Context
 import com.google.gson.Gson
+import com.wildstring.app.AppLanguage
+import com.wildstring.app.R
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.IOException
 import java.util.UUID
@@ -73,16 +75,16 @@ class PodcastProgress @Inject constructor(
     fun recordManualProgress(id: String, progress: EpisodeProgress) {
         mutablePositions.value = mutablePositions.value + (id to progress)
     }
-    private fun ownerValid(owner: String) { if (owner != repository.session.cacheScope()) throw CancellationException("会话已变化。") }
+    private fun ownerValid(owner: String) { if (owner != repository.session.cacheScope()) throw CancellationException(AppLanguage.string(R.string.pod_prog_session_changed)) }
     // Requests use the ephemeral login generation; durable rows use the stable server/account key.
     private fun storageOwner(owner: String): String = repository.session.withStorageScope(owner) { it }
-        ?: throw CancellationException("会话已变化。")
+        ?: throw CancellationException(AppLanguage.string(R.string.pod_prog_session_changed))
     private suspend fun read(owner: String, id: String): EpisodeCheckpoint? =
         repository.database.podcasts().get(storageOwner(owner), id)?.let { runCatching { gson.fromJson(it.payload, EpisodeCheckpoint::class.java) }.getOrNull() }
     private suspend fun save(owner: String, id: String, value: EpisodeCheckpoint) =
         repository.database.podcasts().save(PodcastCheckpointRow(storageOwner(owner), id, gson.toJson(value)))
     private suspend fun <T> request(block: suspend () -> T): T = try { withTimeout(6000) { block() } }
-        catch (_: TimeoutCancellationException) { throw IOException("单集进度暂未同步。") }
+        catch (_: TimeoutCancellationException) { throw IOException(AppLanguage.string(R.string.pod_prog_not_synced)) }
 
     /** Only called for a play/seek intent, never on passive restoration or background retry. */
     suspend fun prepare(id: String, title: String, durationMs: Long, requestedMs: Long? = null, automatic: Boolean = false): Long? {
@@ -97,7 +99,7 @@ class PodcastProgress @Inject constructor(
             else if (remote.completed) 0 else remote.positionSeconds * 1000
         if (requestedMs == null && mode.value == "restart") position = 0
         if (conflict) {
-            mutableMessage.value = "这集在其他设备有更新的进度"
+            mutableMessage.value = AppLanguage.string(R.string.pod_prog_newer_on_other_device)
         } else {
             mutableMessage.value = null
         }
@@ -121,10 +123,10 @@ class PodcastProgress @Inject constructor(
                 }
                 if (force || android.os.SystemClock.elapsedRealtime() - (lastSent["${session.first}:$id"] ?: 0) >= 10_000) flush(session.first, id)
             } catch (error: CancellationException) { throw error }
-            catch (_: Exception) { mutableMessage.value = "单集进度暂未同步，请检查网络或存储空间。" }
+            catch (_: Exception) { mutableMessage.value = AppLanguage.string(R.string.pod_prog_sync_failed_check_network) }
         }
     }
-    fun playbackProblem() { mutableMessage.value = "暂时无法读取单集进度，请重试。" }
+    fun playbackProblem() { mutableMessage.value = AppLanguage.string(R.string.pod_prog_load_failed_retry) }
     fun retry() { scope.launch { flushAll(throttle = true) } }
     private suspend fun flushAll(throttle: Boolean = false) {
         val owner = repository.session.cacheScope() ?: return
@@ -156,8 +158,8 @@ class PodcastProgress @Inject constructor(
                     // Keep checkpointing locally if playback continues, but never upload or
                     // treat a deliberate seek as owned until the user resolves the conflict.
                     if (active == Triple(owner, id, pending.update.sessionId)) activeConflicted = true
-                    mutableMessage.value = "另一台设备更新了本集。本机进度已保留，下次播放时请选择接续位置。"
-                } else if (error.code() == 422) mutableMessage.value = "请更新服务器以同步播客进度，本机进度已保存。"
+                    mutableMessage.value = AppLanguage.string(R.string.pod_prog_conflict_resolution_notice)
+                } else if (error.code() == 422) mutableMessage.value = AppLanguage.string(R.string.pod_prog_server_update_required)
             } catch (_: IOException) { /* Persisted outbox is retried; never turn a retry into a new claim. */ }
         }
     }

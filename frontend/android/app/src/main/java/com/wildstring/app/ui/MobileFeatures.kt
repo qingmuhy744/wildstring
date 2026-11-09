@@ -1,6 +1,7 @@
 @file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 package com.wildstring.app.ui
 
+import com.wildstring.app.AppLanguage
 import com.wildstring.app.R
 import androidx.compose.ui.res.stringResource
 import androidx.compose.foundation.clickable
@@ -35,10 +36,11 @@ internal fun MobileShortcuts(discovery: Boolean = false, open: (String) -> Unit)
     val entries = if (discovery) listOf(
         Triple("daily", stringResource(R.string.daily_recommendations), Icons.Default.AutoAwesome),
         Triple("rankings", stringResource(R.string.listening_rankings), Icons.Default.BarChart),
-        Triple("external", stringResource(R.string.discover_new_music), Icons.Default.Explore)
+        Triple("external", stringResource(R.string.discover_new_music), Icons.Default.Public)
     ) else listOf(
         Triple("offline", stringResource(R.string.offline_save), Icons.Default.Download),
-        Triple("statistics", stringResource(R.string.listening_statistics), Icons.Default.BarChart)
+        Triple("statistics", stringResource(R.string.listening_statistics), Icons.Default.BarChart),
+        Triple("settings", stringResource(R.string.settings_title), Icons.Default.Settings)
     )
     Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp).testTag(if (discovery) "discovery-shortcuts" else "personal-shortcuts"), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         entries.forEach { (route, title, icon) ->
@@ -133,8 +135,8 @@ internal fun SleepDialog(vm: MusicViewModel, dismiss: () -> Unit) {
 }
 
 /** A local pending flag gives instant feedback and prevents duplicate mutations. */
-private const val PROCESSING_STATUS = "正在处理…"
-private const val DONE_STATUS = "已完成"
+private val PROCESSING_STATUS get() = AppLanguage.string(R.string.mob_feat_processing)
+internal val DONE_STATUS get() = AppLanguage.string(R.string.completed)
 internal class FeatureAction {
     var busy by mutableStateOf(false)
     var message by mutableStateOf<String?>(null)
@@ -150,7 +152,7 @@ internal class FeatureAction {
 @Composable internal fun ActionStatus(action: FeatureAction) {
     if (action.busy) LinearProgressIndicator(Modifier.fillMaxWidth())
     // Loading surfaces already provide the visual progress cue. Keep transient
-    // "正在处理…" text from competing with skeletons and the wave indicator;
+    // processing text from competing with skeletons and the wave indicator;
     // final messages and errors remain visible after the operation settles.
     action.message?.takeIf { !action.busy }?.let {
         androidx.compose.foundation.text.selection.SelectionContainer {
@@ -291,8 +293,8 @@ private fun DevicesPanel(vm: MusicViewModel) {
 }
 
 internal suspend fun saveRecommendations(vm: MusicViewModel, name: String, items: List<RecommendationItem>) {
-    val owner = vm.repository.session.cacheScope() ?: throw CancellationException("登录已失效。")
-    fun requireOwner() { if (owner != vm.repository.session.cacheScope()) throw CancellationException("服务器或账号已变化。") }
+    val owner = vm.repository.session.cacheScope() ?: throw CancellationException(AppLanguage.string(R.string.mob_feat_login_expired))
+    fun requireOwner() { if (owner != vm.repository.session.cacheScope()) throw CancellationException(AppLanguage.string(R.string.mob_feat_server_account_changed)) }
     val api = vm.repository.api()
     val base = vm.repository.url("api", "v1", "playlists")
     val playlist = api.createPlaylist(PlaylistRequest(name.take(100)))

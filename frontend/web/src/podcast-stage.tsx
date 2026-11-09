@@ -1,6 +1,8 @@
 import { useEffect, useRef, type CSSProperties } from 'react';
+import { useTranslation } from 'react-i18next';
 import { time } from './api';
 import { Cover } from './cover';
+import i18n from './i18n';
 import { readAudioPeak } from './playback-gain';
 import { PodcastSkipButton, type Player } from './player';
 import { maybePlayRadioClick } from './radio-click';
@@ -10,15 +12,16 @@ import { renderPodcastDescription } from './podcast-description';
 function date(value?: string | null) {
   const parsed = Date.parse(value || '');
   return Number.isFinite(parsed)
-    ? new Intl.DateTimeFormat('zh-CN', {
+    ? new Intl.DateTimeFormat(i18n.language === 'zh' ? 'zh-CN' : 'en-US', {
         year: 'numeric',
         month: '2-digit',
         day: '2-digit',
       }).format(parsed)
-    : '日期未提供';
+    : i18n.t('podcastStage.dateNotProvided');
 }
 
 function Radio({ player, onPreview }: { player: Player; onPreview: () => void }) {
+  const { t } = useTranslation();
   const track = player.current!;
   const live = player.playing && !player.buffering && !player.error;
   const progress = player.duration > 0 ? player.position / player.duration : 0;
@@ -82,7 +85,7 @@ function Radio({ player, onPreview }: { player: Player; onPreview: () => void })
   return (
     <section
       className="retro-radio"
-      aria-label="野弦复古收音机"
+      aria-label={t('podcastStage.radioAria')}
       data-live={live}
       style={
         {
@@ -96,7 +99,11 @@ function Radio({ player, onPreview }: { player: Player; onPreview: () => void })
         <span className="retro-lamp" aria-hidden="true" />
       </header>
       <div className="retro-main">
-        <button className="retro-screen" onClick={onPreview} aria-label="查看播客封面大图">
+        <button
+          className="retro-screen"
+          onClick={onPreview}
+          aria-label={t('podcastStage.viewCoverLarge')}
+        >
           <Cover
             trackId={track.id}
             title={track.album || track.title}
@@ -106,9 +113,13 @@ function Radio({ player, onPreview }: { player: Player; onPreview: () => void })
           <span className="retro-screen-copy">
             <span className="retro-on-air">
               <i aria-hidden="true" />
-              {player.buffering ? '正在调谐' : live ? '正在播出' : '已暂停'}
+              {player.buffering
+                ? t('podcastStage.tuning')
+                : live
+                  ? t('podcastStage.onAir')
+                  : t('podcastStage.paused')}
             </span>
-            <strong>{track.album || '播客节目'}</strong>
+            <strong>{track.album || t('podcastStage.podcastShowDefault')}</strong>
             <span className="retro-time">
               {time(player.position)}
               <small> / {time(player.duration)}</small>
@@ -120,7 +131,7 @@ function Radio({ player, onPreview }: { player: Player; onPreview: () => void })
       <div className="retro-tuner">
         <div className="retro-tuner-label" aria-hidden="true">
           <span>
-            FM <small className="retro-tuner-hint">· 拖动跳转</small>
+            FM <small className="retro-tuner-hint">{t('podcastStage.dragToSeek')}</small>
           </span>
           <span>88</span>
           <span>92</span>
@@ -131,11 +142,11 @@ function Radio({ player, onPreview }: { player: Player; onPreview: () => void })
             108 <small>MHz</small>
           </span>
         </div>
-        <div className="retro-tuner-track" title="拖动刻度跳转">
+        <div className="retro-tuner-track" title={t('podcastStage.dragTrackToSeek')}>
           <i />
           <input
             type="range"
-            aria-label="收音机调谐进度"
+            aria-label={t('podcastStage.radioTunerAria')}
             min="0"
             max={player.duration || 1}
             step="1"
@@ -155,7 +166,7 @@ function Radio({ player, onPreview }: { player: Player; onPreview: () => void })
               maybePlayRadioClick();
               player.toggle();
             }}
-            aria-label={player.playing ? '收音机暂停' : '收音机播放'}
+            aria-label={player.playing ? t('podcastStage.radioPause') : t('podcastStage.radioPlay')}
             aria-pressed={player.playing}
           >
             <span aria-hidden="true">{player.playing ? 'Ⅱ' : '▶'}</span>
@@ -201,7 +212,7 @@ function Radio({ player, onPreview }: { player: Player; onPreview: () => void })
               max="1"
               step="0.01"
               value={player.volume}
-              aria-label="收音机音量"
+              aria-label={t('podcastStage.radioVolume')}
               onChange={(event) => player.setVolume(Number(event.target.value))}
             />
           </span>
@@ -218,6 +229,7 @@ function Radio({ player, onPreview }: { player: Player; onPreview: () => void })
 }
 
 function Upcoming({ player }: { player: Player }) {
+  const { t } = useTranslation();
   const queued = player.queue
     .map((track, index) => ({ track, index }))
     .filter((entry) => entry.index > player.index && entry.track.podcast_queue_origin !== 'auto');
@@ -227,25 +239,25 @@ function Upcoming({ player }: { player: Player }) {
   const direction =
     preference.order === 'follow' ? player.current?.podcast_list_order || 'desc' : preference.order;
   return (
-    <aside className="radio-programme" aria-label="接下来播放">
+    <aside className="radio-programme" aria-label={t('podcastStage.upNextAria')}>
       <header className="programme-heading">
         <div className="programme-heading-main">
           <h2>
-            接下来播放 <small>{queued.length + preview.length}</small>
+            {t('podcastStage.upNextTitle')} <small>{queued.length + preview.length}</small>
           </h2>
           <span className="programme-status">
             {direction === 'off' || !auto
-              ? '自动续播关闭'
+              ? t('podcastStage.statusAutoOff')
               : direction === 'asc'
-                ? '从旧到新'
-                : '从新到旧'}
+                ? t('podcastStage.statusOldestFirst')
+                : t('podcastStage.statusNewestFirst')}
           </span>
         </div>
         <div className="programme-settings">
           <label>
-            <span className="sr-only">播客续播顺序</span>
+            <span className="sr-only">{t('podcastStage.playbackOrderAria')}</span>
             <select
-              aria-label="播客续播顺序"
+              aria-label={t('podcastStage.playbackOrderAria')}
               value={!auto ? 'off' : preference.order}
               onChange={(event) =>
                 player.setPodcastPreference({
@@ -254,10 +266,10 @@ function Upcoming({ player }: { player: Player }) {
                 })
               }
             >
-              <option value="follow">跟随列表顺序</option>
-              <option value="asc">从旧到新</option>
-              <option value="desc">从新到旧</option>
-              <option value="off">关闭自动续播</option>
+              <option value="follow">{t('podcastStage.orderFollow')}</option>
+              <option value="asc">{t('podcastStage.orderAsc')}</option>
+              <option value="desc">{t('podcastStage.orderDesc')}</option>
+              <option value="off">{t('podcastStage.orderOff')}</option>
             </select>
           </label>
           <label className="programme-unplayed">
@@ -268,27 +280,27 @@ function Upcoming({ player }: { player: Player }) {
                 player.setPodcastPreference({ ...preference, skipCompleted: event.target.checked })
               }
             />
-            跳过已听完
+            {t('podcastStage.skipCompleted')}
           </label>
         </div>
       </header>
       {player.podcastSync === 'error' && (
         <div className="programme-sync" role="status">
-          <p>暂时无法同步，本机播放不受影响</p>
+          <p>{t('podcastStage.syncFailedNotice')}</p>
           <button type="button" onClick={() => player.retryPodcastQueue()}>
-            重试
+            {t('podcastStage.retry')}
           </button>
         </div>
       )}
       {player.podcastSync === 'conflict' && (
         <div className="programme-sync" role="status">
-          <p>队列已在其他设备更新，本机队列仍保留。</p>
+          <p>{t('podcastStage.queueConflictNotice')}</p>
           <div className="programme-sync-actions">
             <button type="button" onClick={() => void player.useServerPodcastQueue()}>
-              使用服务器上的队列
+              {t('podcastStage.useServerQueue')}
             </button>
             <button type="button" onClick={() => void player.overwritePodcastQueue()}>
-              用本机队列覆盖
+              {t('podcastStage.overwriteWithLocalQueue')}
             </button>
           </div>
         </div>
@@ -318,21 +330,25 @@ function Upcoming({ player }: { player: Player }) {
                 >
                   <strong>{track.title}</strong>
                   <span>
-                    {track.podcast_queue_origin === 'rule' ? '新集规则' : '手动添加'} ·{' '}
-                    {time(track.duration_ms / 1000)}
+                    {track.podcast_queue_origin === 'rule'
+                      ? t('podcastStage.originRule')
+                      : t('podcastStage.originManual')}{' '}
+                    · {time(track.duration_ms / 1000)}
                     {track.podcast_position_seconds
-                      ? ` · 已听 ${time(track.podcast_position_seconds)}`
+                      ? t('podcastStage.listenedProgress', {
+                          time: time(track.podcast_position_seconds),
+                        })
                       : ` · ${date(track.release_date)}`}
                   </span>
                 </button>
                 <span
                   className="programme-reorder"
                   role="group"
-                  aria-label={`调整待播 ${track.title}`}
+                  aria-label={t('podcastStage.adjustQueuedAria', { title: track.title })}
                 >
                   <button
                     type="button"
-                    aria-label={`上移待播 ${track.title}`}
+                    aria-label={t('podcastStage.moveUpQueuedAria', { title: track.title })}
                     disabled={i === 0}
                     onClick={() => player.move(index, queued[i - 1].index)}
                   >
@@ -340,7 +356,7 @@ function Upcoming({ player }: { player: Player }) {
                   </button>
                   <button
                     type="button"
-                    aria-label={`下移待播 ${track.title}`}
+                    aria-label={t('podcastStage.moveDownQueuedAria', { title: track.title })}
                     disabled={i === queued.length - 1}
                     onClick={() => player.move(index, queued[i + 1].index)}
                   >
@@ -349,7 +365,7 @@ function Upcoming({ player }: { player: Player }) {
                 </span>
                 <button
                   className="programme-remove"
-                  aria-label={`移除待播 ${track.title}`}
+                  aria-label={t('podcastStage.removeQueuedAria', { title: track.title })}
                   onClick={() => player.remove(index)}
                 >
                   ×
@@ -359,9 +375,9 @@ function Upcoming({ player }: { player: Player }) {
           </ol>
         )}
         {preview.length > 0 && (
-          <section aria-label="自动续播">
-            <h3>自动续播</h3>
-            {!queued.length && <p>播完会接下一集</p>}
+          <section aria-label={t('podcastStage.autoContinuationSectionAria')}>
+            <h3>{t('podcastStage.autoContinuationHeading')}</h3>
+            {!queued.length && <p>{t('podcastStage.willPlayNext')}</p>}
             <ol>
               {preview.map((track, i) => (
                 <li key={`${track.id}-${i}`}>
@@ -384,15 +400,18 @@ function Upcoming({ player }: { player: Player }) {
                   >
                     <strong>{track.title}</strong>
                     <span>
-                      自动续播 · {time(track.duration_ms / 1000)}
+                      {t('podcastStage.autoContinuationTrackPrefix')}
+                      {time(track.duration_ms / 1000)}
                       {track.podcast_position_seconds
-                        ? ` · 已听 ${time(track.podcast_position_seconds)}`
+                        ? t('podcastStage.listenedProgress', {
+                            time: time(track.podcast_position_seconds),
+                          })
                         : ` · ${date(track.release_date)}`}
                     </span>
                   </button>
                   <button
                     className="programme-remove"
-                    aria-label={`不再预览 ${track.title}`}
+                    aria-label={t('podcastStage.dismissPreviewAria', { title: track.title })}
                     onClick={() => player.dismissPodcastPreview(track.id)}
                   >
                     ×
@@ -405,12 +424,12 @@ function Upcoming({ player }: { player: Player }) {
         {!queued.length && !preview.length && (
           <p className="programme-empty">
             {!auto
-              ? '已关闭，播完即停'
+              ? t('podcastStage.emptyQueueOff')
               : player.podcastQueueStatus === 'loading'
-                ? '正在读取后续单集'
+                ? t('podcastStage.emptyQueueLoading')
                 : player.podcastQueueStatus === 'error'
-                  ? '暂时无法读取后续单集，当前播放不受影响。'
-                  : '这个方向没有未听的下一集，播完即停'}
+                  ? t('podcastStage.emptyQueueError')
+                  : t('podcastStage.emptyQueueNoMore')}
           </p>
         )}
       </div>
@@ -427,34 +446,50 @@ export function PodcastStage({
   showQueue: boolean;
   onPreview: () => void;
 }) {
+  const { t } = useTranslation();
   const track = player.current!;
-  const listeningStatus = player.buffering ? '正在调谐' : player.playing ? '正在播出' : '已暂停';
+  const listeningStatus = player.buffering
+    ? t('podcastStage.tuning')
+    : player.playing
+      ? t('podcastStage.onAir')
+      : t('podcastStage.paused');
   return (
     <div className="podcast-stage">
       <div className="podcast-device-column">
         <Radio player={player} onPreview={onPreview} />
         {showQueue && <Upcoming player={player} />}
       </div>
-      <article className="radio-newspaper" aria-label="播客广播报">
+      <article className="radio-newspaper" aria-label={t('podcastStage.newspaperAria')}>
         <div className="newspaper-masthead">
           <span>THE WILDSTRING JOURNAL</span>
-          <strong>野弦广播报</strong>
+          <strong>{t('podcastStage.newspaperTitle')}</strong>
           <span>
-            声音有故事
+            {t('podcastStage.newspaperSloganLine1')}
             <br />
-            收听无边界
+            {t('podcastStage.newspaperSloganLine2')}
           </span>
         </div>
         <div className="newspaper-edition">
-          <span>播客手记 / {track.album || '独立声音'}</span>
+          <span>
+            {t('podcastStage.podcastNotes', {
+              show: track.album || t('podcastStage.independentVoice'),
+            })}
+          </span>
           <span>{date(track.release_date)}</span>
         </div>
-        <div className="newspaper-reader" key={track.id} tabIndex={0} aria-label="单集简介">
+        <div
+          className="newspaper-reader"
+          key={track.id}
+          tabIndex={0}
+          aria-label={t('podcastStage.episodeDescriptionAria')}
+        >
           <header className="newspaper-article-header">
-            <span className="print-kicker">{listeningStatus} · 本期节目</span>
+            <span className="print-kicker">
+              {t('podcastStage.currentEpisodeKicker', { status: listeningStatus })}
+            </span>
             <h1>{track.title}</h1>
             <div className="newspaper-byline">
-              <span>{track.album || '播客节目'}</span>
+              <span>{track.album || t('podcastStage.podcastShowDefault')}</span>
               <span>
                 {time(track.duration_ms / 1000)} · {track.format.toUpperCase()}
               </span>
@@ -466,7 +501,7 @@ export function PodcastStage({
                 onTimecode: (seconds) => player.seek(seconds),
               })
             ) : (
-              <p>这一集还没有文字简介。调好音量，听听声音里的故事。</p>
+              <p>{t('podcastStage.noDescriptionText')}</p>
             )}
           </div>
           <div className="newspaper-end" aria-hidden="true">
@@ -474,8 +509,14 @@ export function PodcastStage({
           </div>
         </div>
         <footer className="newspaper-footer">
-          <span>WILDSTRING · 私人收听时光</span>
-          <span>滚动阅读{track.description?.match(/\d+:\d{2}/) ? ' · 点击时间码跳转' : ''}</span>
+          <span>{t('podcastStage.privateListeningTime')}</span>
+          <span>
+            {t('podcastStage.scrollRead', {
+              timecodeJump: track.description?.match(/\d+:\d{2}/)
+                ? t('podcastStage.timecodeJump')
+                : '',
+            })}
+          </span>
         </footer>
       </article>
     </div>

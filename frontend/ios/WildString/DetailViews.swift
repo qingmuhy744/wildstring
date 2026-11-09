@@ -80,9 +80,9 @@ struct AlbumDetailView: View {
                         ProgressView()
                     } else if model.items.isEmpty {
                         ContentUnavailableView(
-                            "没有曲目",
+                            L10n("detailView.noTracks"),
                             systemImage: "music.note",
-                            description: Text(model.errorMessage ?? "这张专辑还没有可播放的曲目")
+                            description: Text(model.errorMessage ?? L10n("detailView.emptyAlbumDescription"))
                         )
                     }
                 }
@@ -121,7 +121,7 @@ struct AlbumDetailView: View {
             } else {
                 let count = model.discs.first { $0.number == number }?.trackCount
                 let title = count.map {
-                    "DISC \(String(format: "%02d", number)) · \($0) 首"
+                    L10n("detailView.discHeader", String(format: "%02d", number), $0)
                 } ?? "DISC \(String(format: "%02d", number))"
                 sections.append(TrackSection(id: number, title: title, tracks: [track]))
             }
@@ -176,14 +176,14 @@ struct AlbumDetailView: View {
                 reload()
             } label: {
                 Label(
-                    order == .asc ? "改为降序" : "改为升序",
+                    order == .asc ? L10n("detailView.sortDesc") : L10n("detailView.sortAsc"),
                     systemImage: order == .asc ? "arrow.down" : "arrow.up"
                 )
             }
         } label: {
             Image(systemName: "arrow.up.arrow.down")
         }
-        .accessibilityLabel("排序")
+        .accessibilityLabel(L10n("detailView.sort"))
     }
 
     private var header: some View {
@@ -197,7 +197,7 @@ struct AlbumDetailView: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
-                Text("\(album.trackCount) 首")
+                Text(L10n("detailView.trackCount", album.trackCount))
                     .font(.caption)
                     .foregroundStyle(.tertiary)
                 Button {
@@ -205,7 +205,7 @@ struct AlbumDetailView: View {
                         playTracks(model?.items ?? [], startingAt: first, using: playback)
                     }
                 } label: {
-                    Label("播放全部", systemImage: "play.fill")
+                    Label(L10n("detailView.playAll"), systemImage: "play.fill")
                         .font(.subheadline.bold())
                 }
                 .buttonStyle(.borderedProminent)
@@ -227,8 +227,15 @@ struct ArtistDetailView: View {
     let artist: Artist
 
     enum Section: String, CaseIterable {
-        case songs = "歌曲"
-        case albums = "专辑"
+        case songs
+        case albums
+
+        var title: String {
+            switch self {
+            case .songs: return L10n("detailView.sectionSongs")
+            case .albums: return L10n("detailView.sectionAlbums")
+            }
+        }
     }
 
     @State private var section: Section = .songs
@@ -253,9 +260,9 @@ struct ArtistDetailView: View {
     var body: some View {
         VStack(spacing: 0) {
             header
-            Picker("分类", selection: $section) {
+            Picker(L10n("detailView.category"), selection: $section) {
                 ForEach(Section.allCases, id: \.self) { section in
-                    Text(section.rawValue).tag(section)
+                    Text(section.title).tag(section)
                 }
             }
             .pickerStyle(.segmented)
@@ -285,7 +292,7 @@ struct ArtistDetailView: View {
             if let songsLoader {
                 LoadedList(
                     loader: songsLoader,
-                    emptyTitle: "没有歌曲",
+                    emptyTitle: L10n("detailView.emptySongs"),
                     emptyIcon: "music.note"
                 ) { track in
                     TrackActionRow(client: client, track: track) {
@@ -308,7 +315,7 @@ struct ArtistDetailView: View {
             if let albumsLoader {
                 LoadedList(
                     loader: albumsLoader,
-                    emptyTitle: "没有专辑",
+                    emptyTitle: L10n("detailView.emptyAlbums"),
                     emptyIcon: "square.stack"
                 ) { album in
                     NavigationLink(value: album) {
@@ -328,7 +335,7 @@ struct ArtistDetailView: View {
                 Text(artist.name)
                     .font(.headline)
                     .lineLimit(1)
-                Text("\(artist.trackCount) 首 · \(artist.albumCount) 张专辑")
+                Text(L10n("detailView.artistSummary", artist.trackCount, artist.albumCount))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -400,13 +407,13 @@ struct ArtistDetailView: View {
                 Task { await ensureSectionLoaded() }
             } label: {
                 Label(
-                    songOrder == .asc ? "改为降序" : "改为升序",
+                    songOrder == .asc ? L10n("detailView.sortDesc") : L10n("detailView.sortAsc"),
                     systemImage: songOrder == .asc ? "arrow.down" : "arrow.up"
                 )
             }
         } label: {
             Image(systemName: "arrow.up.arrow.down")
         }
-        .accessibilityLabel("排序")
+        .accessibilityLabel(L10n("detailView.sort"))
     }
 }

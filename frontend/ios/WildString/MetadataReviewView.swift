@@ -41,9 +41,16 @@ struct MetadataReviewView: View {
         var fields: Set<String>
     }
 
-    private enum ReviewTab: String, CaseIterable {
-        case fields = "文字资料"
-        case cover = "封面对比"
+    private enum ReviewTab: CaseIterable {
+        case fields
+        case cover
+
+        var label: String {
+            switch self {
+            case .fields: L10n("metaReview.tabFields")
+            case .cover: L10n("metaReview.tabCover")
+            }
+        }
     }
 
     private static let fieldOrder = [
@@ -65,7 +72,7 @@ struct MetadataReviewView: View {
                         if let current {
                             activeTrack(current)
                         } else if page != nil, !isWorking {
-                            Text("这个专辑没有待核对的候选。")
+                            Text(L10n("metaReview.noCandidatesInAlbum"))
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
                         }
@@ -79,14 +86,14 @@ struct MetadataReviewView: View {
                 }
                 bottomBar
             }
-            .navigationTitle("批量核对资料")
+            .navigationTitle(L10n("metaReview.title"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button("关闭") { dismiss() }
+                    Button(L10n("metaReview.close")) { dismiss() }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("重新读取") {
+                    Button(L10n("metaReview.reload")) {
                         Task { await reloadKeepingActive() }
                     }
                     .disabled(isWorking)
@@ -106,14 +113,14 @@ struct MetadataReviewView: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("先对比，再接受。人工值默认保留，勾选后会替换该字段。")
+            Text(L10n("metaReview.headerHint"))
                 .font(.footnote)
                 .foregroundStyle(.secondary)
             HStack {
-                Button("选择专辑") { showAlbums = true }
+                Button(L10n("metaReview.selectAlbum")) { showAlbums = true }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
-                Button("勾选变化（保留人工值）") {
+                Button(L10n("metaReview.selectChanges")) {
                     choices = Dictionary(
                         uniqueKeysWithValues: tracks.map { ($0.id, defaultChoice($0)) }
                     )
@@ -121,20 +128,20 @@ struct MetadataReviewView: View {
                 .buttonStyle(.bordered)
                 .controlSize(.small)
                 .disabled(isWorking || tracks.isEmpty)
-                Button("清空") {
+                Button(L10n("metaReview.clear")) {
                     choices = choices.mapValues { ReviewChoice(sourceID: $0.sourceID, fields: []) }
                 }
                 .buttonStyle(.plain)
                 .font(.footnote)
                 .disabled(isWorking)
             }
-            Text(page?.albumID == nil ? "暂无待核对专辑" : current?.album ?? "待核对专辑")
+            Text(page?.albumID == nil ? L10n("metaReview.noAlbumPending") : current?.album ?? L10n("metaReview.pendingAlbum"))
                 .font(.headline)
                 .lineLimit(1)
-            Text("\(page?.total ?? 0) 首 · 本页 \(tracks.count) 首")
+            Text(L10n("metaReview.trackCountPageSummary", page?.total ?? 0, tracks.count))
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            Button(showSongs ? "收起歌曲列表" : "选择歌曲（已选 \(selectedTracks.count) 首）") {
+            Button(showSongs ? L10n("metaReview.collapseSongList") : L10n("metaReview.selectSongsCount", selectedTracks.count)) {
                 showSongs.toggle()
             }
             .font(.footnote)
@@ -165,8 +172,8 @@ struct MetadataReviewView: View {
                         Text(track.title).font(.subheadline).lineLimit(1)
                         Text(
                             conflicts.contains(track.id)
-                                ? "版本或候选冲突"
-                                : "\(choices[track.id]?.fields.count ?? 0) 个字段已选"
+                                ? L10n("metaReview.conflictNotice")
+                                : L10n("metaReview.selectedFieldsCount", choices[track.id]?.fields.count ?? 0)
                         )
                         .font(.caption2)
                         .foregroundStyle(conflicts.contains(track.id) ? .red : .secondary)
@@ -184,7 +191,7 @@ struct MetadataReviewView: View {
             }
             if let page, page.total > 500 {
                 HStack {
-                    Button("上一页") {
+                    Button(L10n("metaReview.previousPage")) {
                         Task {
                             await loadPage(
                                 albumID: page.albumID,
@@ -194,7 +201,7 @@ struct MetadataReviewView: View {
                     }
                     .disabled(isWorking || pageOffset == 0)
                     Spacer()
-                    Button("下一页") {
+                    Button(L10n("metaReview.nextPage")) {
                         Task {
                             await loadPage(
                                 albumID: page.albumID,
@@ -221,27 +228,27 @@ struct MetadataReviewView: View {
                 Button {
                     showSources = true
                 } label: {
-                    Text(source.map { candidateLabel($0, track: current) } ?? "选择候选来源")
+                    Text(source.map { candidateLabel($0, track: current) } ?? L10n("metaReview.selectCandidateSource"))
                         .font(.footnote)
                         .multilineTextAlignment(.leading)
                         .lineLimit(3)
                 }
                 .buttonStyle(.plain)
                 Spacer()
-                Button("查询新资料") {
+                Button(L10n("metaReview.queryNewMetadata")) {
                     Task { await refreshCandidates(current) }
                 }
                 .font(.footnote)
                 .disabled(isWorking)
             }
             if let source, (source.duplicateCount ?? 1) > 1 {
-                Text("已合并 \(source.duplicateCount ?? 1) 条相同候选记录，不同版本分别保留。")
+                Text(L10n("metaReview.duplicateCandidatesMerged", source.duplicateCount ?? 1))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
-            Picker("内容", selection: $tab) {
+            Picker(L10n("metaReview.content"), selection: $tab) {
                 ForEach(ReviewTab.allCases, id: \.self) { tab in
-                    Text(tab.rawValue).tag(tab)
+                    Text(tab.label).tag(tab)
                 }
             }
             .pickerStyle(.segmented)
@@ -255,22 +262,23 @@ struct MetadataReviewView: View {
 
     @ViewBuilder
     private func fieldsSection(_ current: ReviewTrack, source: ReviewCandidate?) -> some View {
-        Toggle("只看变化字段", isOn: $onlyChanges)
+        Toggle(L10n("metaReview.onlyChangedFields"), isOn: $onlyChanges)
             .font(.footnote)
         if let source {
             Text(
-                "信息版本 \(source.metadataVersion)"
-                    + (source.metadataVersion != current.metadataVersion ? " · 已过期，仅供核对" : "")
+                source.metadataVersion != current.metadataVersion
+                    ? L10n("metaReview.metadataVersionExpired", source.metadataVersion)
+                    : L10n("metaReview.metadataVersion", source.metadataVersion)
             )
             .font(.caption2)
             .foregroundStyle(
                 source.metadataVersion != current.metadataVersion ? .orange : .secondary
             )
             if let url = source.sourceURL.flatMap(URL.init(string:)) {
-                Link("查看来源依据", destination: url).font(.caption)
+                Link(L10n("metaReview.viewSourceEvidence"), destination: url).font(.caption)
             }
         } else {
-            Text("没有有效候选，可以查询资料或跳过。")
+            Text(L10n("metaReview.noValidCandidates"))
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -280,19 +288,19 @@ struct MetadataReviewView: View {
                 fieldCard(key, source: source, current: current, stale: stale)
             }
         }
-        DisclosureGroup("文件原始值与匹配依据", isExpanded: $showOriginal) {
+        DisclosureGroup(L10n("metaReview.originalValuesAndMatch"), isExpanded: $showOriginal) {
             VStack(alignment: .leading, spacing: 4) {
                 ForEach(current.original.keys.sorted(), id: \.self) { key in
-                    Text("\(fieldLabel(key))：\(current.original[key]?.display ?? "—")")
+                    Text(L10n("metaReview.fieldWithColon", fieldLabel(key), current.original[key]?.display ?? "—"))
                         .font(.caption2)
                 }
                 if let match = source?.match {
-                    Text(
-                        "匹配方式：\(match.method ?? "未知")"
-                            + (match.score.map { " · \(Int(($0 * 100).rounded()))%" } ?? "")
-                    )
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    let method = match.method ?? L10n("metaReview.unknown")
+                    let text = match.score.map { L10n("metaReview.matchMethodWithScore", method, Int(($0 * 100).rounded())) }
+                        ?? L10n("metaReview.matchMethod", method)
+                    Text(text)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
                 }
             }
             .padding(.vertical, 4)
@@ -325,20 +333,20 @@ struct MetadataReviewView: View {
                 Text(fieldLabel(key)).font(.caption.bold())
                 Spacer()
                 if manual {
-                    Text("人工值").font(.caption2).foregroundStyle(Color.wildAccent)
+                    Text(L10n("metaReview.manualValue")).font(.caption2).foregroundStyle(Color.wildAccent)
                 }
             }
-            Text("当前值").font(.caption2).foregroundStyle(.secondary)
+            Text(L10n("metaReview.currentValue")).font(.caption2).foregroundStyle(.secondary)
             Text(current.current[key]?.display ?? "—")
                 .font(.caption)
             Divider()
-            Text("建议值").font(.caption2).foregroundStyle(Color.wildAccent)
+            Text(L10n("metaReview.suggestedValue")).font(.caption2).foregroundStyle(Color.wildAccent)
             Text(source.fields[key]?.display ?? "—")
                 .font(.caption)
             Button(
                 selected
-                    ? "本页同字段取消"
-                    : "本页同字段勾选"
+                    ? L10n("metaReview.unselectSameFieldOnPage")
+                    : L10n("metaReview.selectSameFieldOnPage")
             ) {
                 applyFieldToPage(key, selected: !selected)
             }
@@ -351,25 +359,25 @@ struct MetadataReviewView: View {
 
     @ViewBuilder
     private func coverSection(_ current: ReviewTrack, source: ReviewCandidate?) -> some View {
-        Toggle("用于本页同专辑歌曲（\(coverAll ? tracks.count : 1) 首）", isOn: $coverAll)
+        Toggle(L10n("metaReview.applyCoverToAlbumTracksOnPage", coverAll ? tracks.count : 1), isOn: $coverAll)
             .font(.footnote)
             .onChange(of: coverAll) { _, _ in
                 resetCover()
             }
         HStack(spacing: 12) {
             VStack(spacing: 4) {
-                Text("当前封面").font(.caption2).foregroundStyle(.secondary)
+                Text(L10n("metaReview.currentCover")).font(.caption2).foregroundStyle(.secondary)
                 if current.hasCover {
                     CoverImage(client: client, trackID: current.id, size: 140)
                 } else {
                     RoundedRectangle(cornerRadius: 8)
                         .fill(Color(.secondarySystemBackground))
                         .frame(width: 140, height: 140)
-                        .overlay(Text("暂无封面").font(.caption2).foregroundStyle(.secondary))
+                        .overlay(Text(L10n("metaReview.noCover")).font(.caption2).foregroundStyle(.secondary))
                 }
             }
             VStack(spacing: 4) {
-                Text("将采用的封面").font(.caption2).foregroundStyle(.secondary)
+                Text(L10n("metaReview.targetCover")).font(.caption2).foregroundStyle(.secondary)
                 if let coverDraft {
                     ReviewCoverPreview(client: client, draftID: coverDraft.id) { ready in
                         coverReady = ready
@@ -380,12 +388,12 @@ struct MetadataReviewView: View {
                     RoundedRectangle(cornerRadius: 8)
                         .fill(Color(.secondarySystemBackground))
                         .frame(width: 140, height: 140)
-                        .overlay(Text("尚未固定").font(.caption2).foregroundStyle(.secondary))
+                        .overlay(Text(L10n("metaReview.notFrozen")).font(.caption2).foregroundStyle(.secondary))
                 }
             }
         }
         .frame(maxWidth: .infinity)
-        Button("固定并预览此封面") {
+        Button(L10n("metaReview.freezeAndPreviewCover")) {
             Task { await freezeCover(current, source: source) }
         }
         .buttonStyle(.bordered)
@@ -395,23 +403,24 @@ struct MetadataReviewView: View {
                 || source?.metadataVersion != current.metadataVersion
         )
         if coverFailed {
-            Text("封面无法显示，本次不能应用。")
+            Text(L10n("metaReview.coverFailedNotice"))
                 .font(.caption)
                 .foregroundStyle(.red)
         }
     }
 
     private var bottomBar: some View {
-        VStack(spacing: 6) {
+        let fieldCount = selectedTracks.reduce(0) { $0 + (choices[$1.id]?.fields.count ?? 0) }
+        return VStack(spacing: 6) {
             Text(
-                "已选 \(selectedTracks.count) 首 · "
-                    + "\(selectedTracks.reduce(0) { $0 + (choices[$1.id]?.fields.count ?? 0) }) 个字段"
-                    + (coverDraft != nil ? " · 含固定封面" : "")
+                coverDraft != nil
+                    ? L10n("metaReview.bottomBarSummaryWithCover", selectedTracks.count, fieldCount)
+                    : L10n("metaReview.bottomBarSummary", selectedTracks.count, fieldCount)
             )
             .font(.caption)
             .foregroundStyle(.secondary)
             HStack(spacing: 8) {
-                Button("本次跳过") {
+                Button(L10n("metaReview.skipThisTrack")) {
                     choices[activeID] = ReviewChoice(
                         sourceID: choices[activeID]?.sourceID ?? "",
                         fields: []
@@ -421,7 +430,7 @@ struct MetadataReviewView: View {
                 }
                 .buttonStyle(.bordered)
                 .disabled(isWorking || current == nil)
-                Button("接受选中项") {
+                Button(L10n("metaReview.acceptSelected")) {
                     Task { await acceptReview(single: false) }
                 }
                 .buttonStyle(.borderedProminent)
@@ -438,13 +447,13 @@ struct MetadataReviewView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             HStack(spacing: 8) {
-                Button("拒绝当前建议") {
+                Button(L10n("metaReview.rejectCurrentSuggestion")) {
                     Task { await rejectCurrent() }
                 }
                 .font(.footnote)
                 .disabled(isWorking || candidate(for: current) == nil)
                 Spacer()
-                Button("接受本曲并下一首") {
+                Button(L10n("metaReview.acceptTrackAndNext")) {
                     Task { await acceptReview(single: true) }
                 }
                 .font(.footnote)
@@ -463,7 +472,7 @@ struct MetadataReviewView: View {
     private var albumPicker: some View {
         NavigationStack {
             List {
-                TextField("筛选专辑", text: $albumFilter)
+                TextField(L10n("metaReview.filterAlbums"), text: $albumFilter)
                 ForEach(
                     albums.filter {
                         albumFilter.isEmpty
@@ -479,23 +488,23 @@ struct MetadataReviewView: View {
                         HStack {
                             Text(album.title).lineLimit(1)
                             Spacer()
-                            Text("\(album.count) 首")
+                            Text(L10n("metaReview.trackCount", album.count))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
                     }
                 }
                 if albums.count < albumTotal {
-                    Button("更多专辑") {
+                    Button(L10n("metaReview.moreAlbums")) {
                         Task { await loadAlbums(append: true) }
                     }
                 }
             }
-            .navigationTitle("待核对专辑")
+            .navigationTitle(L10n("metaReview.pendingAlbumsTitle"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("关闭") { showAlbums = false }
+                    Button(L10n("metaReview.close")) { showAlbums = false }
                 }
             }
             .task { if albums.isEmpty { await loadAlbums() } }
@@ -523,11 +532,11 @@ struct MetadataReviewView: View {
                     }
                 }
             }
-            .navigationTitle("候选来源")
+            .navigationTitle(L10n("metaReview.candidateSourcesTitle"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("关闭") { showSources = false }
+                    Button(L10n("metaReview.close")) { showSources = false }
                 }
             }
         }
@@ -689,7 +698,7 @@ struct MetadataReviewView: View {
                 ReviewCoverTarget(trackID: $0.id, metadataVersion: $0.metadataVersion)
             }
             coverDraft = try await client.reviewCoverDraft(
-                title: "封面核对 · \(current.album ?? current.title)",
+                title: L10n("metaReview.coverDraftTitle", current.album ?? current.title),
                 suggestionID: source.id,
                 metadataVersion: current.metadataVersion,
                 targets: targets
@@ -710,7 +719,7 @@ struct MetadataReviewView: View {
                 mode: "missing",
                 force: false
             )
-            message = "已排队 \(queued.queued) 首，查询完成后重新读取。"
+            message = L10n("metaReview.queuedForRefresh", queued.queued)
             messageIsError = false
         } catch {
             message = ErrorText.message(for: error)
@@ -729,19 +738,19 @@ struct MetadataReviewView: View {
                 metadataVersion: current.metadataVersion,
                 candidateDigest: source.candidateDigest
             )
-            rejectionNotice = "已拒绝当前候选，现有资料保持不变。"
+            rejectionNotice = L10n("metaReview.rejectionNotice")
             await loadPage(
                 albumID: page?.albumID,
                 preferred: current.id
             )
             await loadAlbums()
-            rejectionNotice = "已拒绝当前候选，现有资料保持不变。"
+            rejectionNotice = L10n("metaReview.rejectionNotice")
         } catch let error as APIError where error.statusCode == 404 || error.statusCode == 405 {
-            message = "服务端版本较旧，请升级到 0.5.12 后使用拒绝。"
+            message = L10n("metaReview.serverUpgradeRequired")
             messageIsError = true
         } catch let error as APIError where error.statusCode == 409 {
             await reloadKeepingActive()
-            message = "候选或歌曲信息已变化，已刷新，请重新核对。"
+            message = L10n("metaReview.staleCandidateRefresh")
             messageIsError = true
         } catch {
             message = ErrorText.message(for: error)
@@ -797,7 +806,7 @@ struct MetadataReviewView: View {
                 )
                 guard result.status == "applied" else {
                     conflicts = Set(result.conflicts?.map(\.trackID) ?? [])
-                    message = "此批次未应用：歌曲或候选已变化，请重新读取后核对。"
+                    message = L10n("metaReview.batchNotAppliedStale")
                     messageIsError = true
                     return
                 }
@@ -816,12 +825,13 @@ struct MetadataReviewView: View {
                 preferred: nextID
             )
             await loadAlbums()
-            message = "已应用 \(appliedCount) 首的所选资料"
-                + (hadCover ? "及固定封面。" : "。")
+            message = hadCover
+                ? L10n("metaReview.appliedWithCover", appliedCount)
+                : L10n("metaReview.applied", appliedCount)
             messageIsError = false
         } catch let error as APIError where error.statusCode == 409 {
             await reloadKeepingActive()
-            message = "歌曲信息或候选已变化，已刷新，请重新核对。"
+            message = L10n("metaReview.trackOrCandidateChanged")
             messageIsError = true
         } catch {
             message = ErrorText.message(for: error)
@@ -833,24 +843,24 @@ struct MetadataReviewView: View {
 
     private func fieldLabel(_ key: String) -> String {
         switch key {
-        case "title": "歌名"
-        case "artists": "歌曲艺人"
-        case "album": "专辑"
-        case "album_artists": "专辑艺人"
-        case "vocalists": "演唱"
-        case "lyricists": "作词"
-        case "composers": "作曲"
-        case "arrangers": "编曲"
-        case "track_number": "曲序"
-        case "disc_number": "碟号"
-        case "track_total": "总曲数"
-        case "disc_total": "总碟数"
-        case "release_date": "发行日期"
-        case "original_date": "首次发行日期"
-        case "genres": "风格"
-        case "external_ids": "外部标识"
-        case "tags": "标签"
-        case "description": "简介"
+        case "title": L10n("metaReview.fieldTitle")
+        case "artists": L10n("metaReview.fieldArtists")
+        case "album": L10n("metaReview.fieldAlbum")
+        case "album_artists": L10n("metaReview.fieldAlbumArtists")
+        case "vocalists": L10n("metaReview.fieldVocalists")
+        case "lyricists": L10n("metaReview.fieldLyricists")
+        case "composers": L10n("metaReview.fieldComposers")
+        case "arrangers": L10n("metaReview.fieldArrangers")
+        case "track_number": L10n("metaReview.fieldTrackNumber")
+        case "disc_number": L10n("metaReview.fieldDiscNumber")
+        case "track_total": L10n("metaReview.fieldTrackTotal")
+        case "disc_total": L10n("metaReview.fieldDiscTotal")
+        case "release_date": L10n("metaReview.fieldReleaseDate")
+        case "original_date": L10n("metaReview.fieldOriginalDate")
+        case "genres": L10n("metaReview.fieldGenres")
+        case "external_ids": L10n("metaReview.fieldExternalIds")
+        case "tags": L10n("metaReview.fieldTags")
+        case "description": L10n("metaReview.fieldDescription")
         default: key
         }
     }
@@ -860,15 +870,15 @@ struct MetadataReviewView: View {
         if let title = source.fields["title"]?.display, !title.isEmpty, title != track.title {
             parts.append(title)
         }
-        parts.append(source.fields["album"]?.display ?? "未提供专辑")
+        parts.append(source.fields["album"]?.display ?? L10n("metaReview.albumNotProvided"))
         if let date = source.fields["release_date"]?.display, !date.isEmpty {
             parts.append(date)
         }
         if let score = source.match?.score {
-            parts.append("匹配度 \(Int((score * 100).rounded()))%")
+            parts.append(L10n("metaReview.matchScore", Int((score * 100).rounded())))
         }
         if source.metadataVersion != track.metadataVersion {
-            parts.append("已过期")
+            parts.append(L10n("metaReview.expired"))
         }
         return parts.joined(separator: " · ")
     }

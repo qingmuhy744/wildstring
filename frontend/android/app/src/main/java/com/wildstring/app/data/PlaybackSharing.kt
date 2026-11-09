@@ -1,6 +1,8 @@
 package com.wildstring.app.data
 
 import android.content.Context
+import com.wildstring.app.AppLanguage
+import com.wildstring.app.R
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -55,7 +57,7 @@ class PlaybackSharing @Inject constructor(@ApplicationContext private val contex
             val remote = repository.api().sharedPlayback(RequestOwner(profile))
             supportsPausedHandoff = remote.handoffSupported
             revision = claimVersion ?: remote.version
-            if (profile != repository.session.cacheScope()) throw kotlinx.coroutines.CancellationException("会话已变化。")
+            if (profile != repository.session.cacheScope()) throw kotlinx.coroutines.CancellationException(AppLanguage.string(R.string.pb_share_session_changed))
             enabled = true; claimedGeneration = generation
         }
         if (!enabled || snapshot.trackIds.isEmpty()) return@withLock null

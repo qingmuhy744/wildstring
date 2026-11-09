@@ -1,6 +1,8 @@
 package com.wildstring.app.data
 
 import com.google.gson.Gson
+import com.wildstring.app.AppLanguage
+import com.wildstring.app.R
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CancellationException
@@ -52,37 +54,37 @@ class ServerRouteManager(private val store: ServerRouteSessions) {
         val request = Request.Builder().url(base.resolve("api/v1/auth/status")!!)
             .header("Cookie", "${cookie.name}=${cookie.value}").header("X-Wildstring-Client", "android").build()
         return client.newCall(request).execute().use {
-            if (it.code == 403 && it.peekBody(4096).string().contains("https_required")) throw IOException("此线路要求 HTTPS")
-            if (it.code >= 500) throw IOException("服务器暂不可用")
+            if (it.code == 403 && it.peekBody(4096).string().contains("https_required")) throw IOException(AppLanguage.string(R.string.srv_route_https_required))
+            if (it.code >= 500) throw IOException(AppLanguage.string(R.string.srv_route_server_unavailable))
             if (!it.isSuccessful) return null
             try { gson.fromJson(it.body!!.string(), AuthStatus::class.java) }
-            catch (error: com.google.gson.JsonParseException) { throw IOException("无效的服务器响应", error) }
+            catch (error: com.google.gson.JsonParseException) { throw IOException(AppLanguage.string(R.string.srv_route_invalid_response), error) }
         }
     }
     suspend fun add(name: String, raw: String, allowHttp: Boolean, username: String, password: String) = withContext(Dispatchers.IO) {
         lock.withLock {
             val owner = store.activeServerId
             val server = store.servers.value.first { it.id == owner }
-            val user = store.account ?: error("请先登录当前服务器。")
-            check(server.instanceId != null) { "请升级服务端并连接后再添加线路。" }
+            val user = store.account ?: error(AppLanguage.string(R.string.srv_route_login_first))
+            check(server.instanceId != null) { AppLanguage.string(R.string.srv_route_upgrade_server_hint) }
             val base = ServerAddress.normalize(raw, allowHttp)
-            require(name.trim().length in 1..80) { "线路名称应为 1–80 个字符。" }
+            require(name.trim().length in 1..80) { AppLanguage.string(R.string.srv_route_name_length) }
             val existing = store.routeRecords().firstOrNull { it.url == base.toString() }
             val info = client.newCall(Request.Builder().url(base.resolve("api/v1/server")!!).build()).execute().use {
-                check(it.isSuccessful) { "无法读取服务器信息。" }; gson.fromJson(it.body!!.string(), ServerInfo::class.java)
+                check(it.isSuccessful) { AppLanguage.string(R.string.srv_route_cannot_read_info) }; gson.fromJson(it.body!!.string(), ServerInfo::class.java)
             }
-            check(info.instance_id == server.instanceId) { "这条线路不属于当前服务器。" }
+            check(info.instance_id == server.instanceId) { AppLanguage.string(R.string.srv_route_mismatched_server) }
             val payload = gson.toJson(LoginRequest(username.trim(), password)).toRequestBody("application/json".toMediaType())
             val cookie = client.newCall(Request.Builder().url(base.resolve("api/v1/auth/login")!!).header("X-Wildstring-Client", "android").post(payload).build()).execute().use {
-                check(it.isSuccessful) { "线路登录失败，请检查账号。" }
+                check(it.isSuccessful) { AppLanguage.string(R.string.srv_route_login_failed) }
                 val account = gson.fromJson(it.body!!.string(), Account::class.java)
-                check(account.id == user.id) { "请使用与当前服务器相同的账号。" }
+                check(account.id == user.id) { AppLanguage.string(R.string.srv_route_mismatched_account) }
                 Cookie.parseAll(base, it.headers).lastOrNull { cookie -> cookie.name in setOf("wildstring_session", "wildstring_session_http", "wildstring_session_https") && cookie.matches(base) }
-                    ?: error("服务器未返回可用会话。")
+                    ?: error(AppLanguage.string(R.string.srv_route_no_session_returned))
             }
-            check(store.activeServerId == owner && store.account?.id == user.id) { "服务器或账号已变化。" }
+            check(store.activeServerId == owner && store.account?.id == user.id) { AppLanguage.string(R.string.srv_route_server_or_account_changed) }
             store.saveRoute(ServerRoute(name.trim(), base.toString(), allowHttp), cookie.toString())
-            status.value = if (existing == null) "线路已独立登录并保存" else "线路会话已更新"
+            status.value = if (existing == null) AppLanguage.string(R.string.srv_route_logged_in_and_saved) else AppLanguage.string(R.string.srv_route_session_updated)
         }
     }
     suspend fun select(address: String?) = withContext(Dispatchers.IO) {
@@ -91,7 +93,7 @@ class ServerRouteManager(private val store: ServerRouteSessions) {
             val previous = store.manualRoute
             store.setRouteMode(address)
             val chosen = choose(if (address == null) store.routeRecords() else store.routeRecords().filter { it.url == address })
-            if (!chosen) { store.setRouteMode(previous); status.value = "线路选择未完成，已保留原模式和连接" }
+            if (!chosen) { store.setRouteMode(previous); status.value = AppLanguage.string(R.string.srv_route_selection_incomplete) }
         }
     }
     private fun choose(routes: List<ServerRoute>): Boolean {
@@ -105,7 +107,7 @@ class ServerRouteManager(private val store: ServerRouteSessions) {
             if (store.activeRouteUrl != route.url) { store.selectRoute(route); changed.tryEmit(route.url) }
             failures = 0; status.value = null; return true
         }
-        status.value = if (store.manualRoute == null) "没有可用的已登录线路，请检查网络或重新登录" else "手动线路不可用，未切换其他线路"
+        status.value = if (store.manualRoute == null) AppLanguage.string(R.string.srv_route_no_available_route) else AppLanguage.string(R.string.srv_route_manual_unavailable_no_switch)
         return false
     }
     suspend fun playbackConnectionFailed(address: String?) = withContext(Dispatchers.IO) {
@@ -126,12 +128,12 @@ class ServerRouteManager(private val store: ServerRouteSessions) {
             if (store.routeRecords().size < 2 || store.account == null) return@withLock
             val route = store.routeRecords().firstOrNull { it.url == store.activeRouteUrl } ?: return@withLock
             try {
-                if (status(route)?.authenticated != true) status.value = "当前线路登录已过期，请重新登录"
+                if (status(route)?.authenticated != true) status.value = AppLanguage.string(R.string.srv_route_current_expired)
                 else { failures = 0; status.value = null }
             } catch (cancel: CancellationException) { throw cancel }
             catch (_: IOException) {
                 failures++
-                if (store.manualRoute != null) { status.value = "手动线路连接失败，未切换线路"; return@withLock }
+                if (store.manualRoute != null) { status.value = AppLanguage.string(R.string.srv_route_manual_connect_failed_no_switch); return@withLock }
                 if (failures >= 2) choose(store.routeRecords().filter { it.url != route.url })
             }
         }

@@ -1,6 +1,9 @@
 import { hints } from './help-content';
 import { HelpLabel } from './desktop-help';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import type { TFunction } from 'i18next';
+import { useTranslation } from 'react-i18next';
+import i18n from './i18n';
 import { api, time, type Track } from './api';
 import { Icon } from './icons';
 import type { Player } from './player';
@@ -39,6 +42,7 @@ function PluginFeedback({ value, className = '' }: { value?: Feedback; className
 }
 
 export function SourcePlugins() {
+  const { t } = useTranslation();
   const [plugins, setPlugins] = useState<Plugin[]>([]);
   const [operation, setOperation] = useState<string | null>(null);
   const pending = useRef(false);
@@ -75,8 +79,8 @@ export function SourcePlugins() {
     );
   }
   useEffect(() => {
-    void load().catch(() => setMessage({ kind: 'error', text: '无法读取数据源插件。' }));
-  }, []);
+    void load().catch(() => setMessage({ kind: 'error', text: t('sourcePlugins.loadError') }));
+  }, [t]);
   function dirty(p: Plugin) {
     return (
       saved[p.id] !==
@@ -93,21 +97,27 @@ export function SourcePlugins() {
     if (pending.current || dirty(p)) return;
     pending.current = true;
     setOperation(`test:${p.id}`);
-    setResults((prior) => ({ ...prior, [p.id]: { kind: 'pending', text: '正在测试此插件…' } }));
+    setResults((prior) => ({
+      ...prior,
+      [p.id]: { kind: 'pending', text: t('sourcePlugins.testing') },
+    }));
     try {
       const result = await api<{ count: number }>(`/manage/source-plugins/${p.id}/test`, {
         method: 'POST',
       });
       setResults((prior) => ({
         ...prior,
-        [p.id]: { kind: 'success', text: `检索已响应 · 返回 ${result.count} 条候选。` },
+        [p.id]: {
+          kind: 'success',
+          text: t('sourcePlugins.testSuccess', { count: result.count }),
+        },
       }));
     } catch (error) {
       setResults((prior) => ({
         ...prior,
         [p.id]: {
           kind: 'error',
-          text: error instanceof Error ? error.message : '插件测试未完成。',
+          text: error instanceof Error ? error.message : t('sourcePlugins.testFailed'),
         },
       }));
     } finally {
@@ -130,14 +140,17 @@ export function SourcePlugins() {
       );
     const feedback = (value: Feedback) =>
       pluginId ? setNotices((prior) => ({ ...prior, [pluginId]: value })) : setMessage(value);
-    feedback({ kind: 'pending', text: '正在处理…' });
+    feedback({ kind: 'pending', text: t('sourcePlugins.processing') });
     try {
       await work();
       await load(pluginId);
       feedback({ kind: 'success', text: success });
       return true;
     } catch (error) {
-      feedback({ kind: 'error', text: error instanceof Error ? error.message : '操作未完成。' });
+      feedback({
+        kind: 'error',
+        text: error instanceof Error ? error.message : t('sourcePlugins.actionFailed'),
+      });
       return false;
     } finally {
       pending.current = false;
@@ -147,18 +160,15 @@ export function SourcePlugins() {
   return (
     <section className="source-plugins" aria-labelledby="source-plugins-heading">
       <header className="source-plugins-heading">
-        <h3 id="source-plugins-heading">数据源插件</h3>
-        <p className="muted">为曲库补充元数据、封面和歌词，按来源独立配置。</p>
+        <h3 id="source-plugins-heading">{t('sourcePlugins.title')}</h3>
+        <p className="muted">{t('sourcePlugins.description')}</p>
       </header>
       <section className="plugin-import" aria-labelledby="plugin-import-heading">
-        <h4 id="plugin-import-heading">导入新插件</h4>
-        <p className="muted">
-          默认不预装数据源插件，请手动导入 ZIP，配置后启用。服务升级会保留已安装的插件和配置。
-          插件会运行代码，请选择你信任的 WildString 插件包。
-        </p>
+        <h4 id="plugin-import-heading">{t('sourcePlugins.importTitle')}</h4>
+        <p className="muted">{t('sourcePlugins.importDescription')}</p>
         <PluginZipUpload
-          inputLabel="数据源插件 ZIP"
-          actionLabel="导入插件"
+          inputLabel={t('sourcePlugins.zipInputLabel')}
+          actionLabel={t('sourcePlugins.importAction')}
           disabled={busy}
           working={operation === 'import'}
           onUpload={(file) =>
@@ -169,7 +179,7 @@ export function SourcePlugins() {
                   headers: { 'Content-Type': 'application/zip' },
                   body: await file.arrayBuffer(),
                 }),
-              '插件已导入，请在下方配置并启用。',
+              t('sourcePlugins.importSuccess'),
               'import',
             )
           }
@@ -177,8 +187,8 @@ export function SourcePlugins() {
         <PluginFeedback value={message} className="plugin-import-result" />
       </section>
       <div className="plugin-list-heading">
-        <h4>已安装插件</h4>
-        <span>{plugins.length} 个来源</span>
+        <h4>{t('sourcePlugins.installedTitle')}</h4>
+        <span>{t('sourcePlugins.sourcesCount', { count: plugins.length })}</span>
       </div>
       <div className="plugin-list">
         {plugins.map((p) => (
@@ -191,24 +201,33 @@ export function SourcePlugins() {
               <div>
                 <h4 id={`plugin-name-${p.id}`}>{p.name}</h4>
                 <p className="plugin-version">
-                  插件 {p.plugin_version} · 配置版本 {p.version}
+                  {t('sourcePlugins.versionInfo', {
+                    pluginVersion: p.plugin_version,
+                    version: p.version,
+                  })}
                 </p>
                 <a href={p.upstream} target="_blank" rel="noreferrer">
-                  上游项目 ↗
+                  {t('sourcePlugins.upstreamLink')}
                 </a>
                 <span className="plugin-license">{p.license}</span>
               </div>
               <span className={`plugin-state${p.enabled ? ' is-enabled' : ''}`}>
-                {dirty(p) ? '未保存' : p.enabled ? '已启用' : '已停用'}
+                {dirty(p)
+                  ? t('sourcePlugins.statusUnsaved')
+                  : p.enabled
+                    ? t('sourcePlugins.statusEnabled')
+                    : t('sourcePlugins.statusDisabled')}
               </span>
             </header>
             {!p.available && (
               <p className="plugin-feedback" data-kind="error" role="status">
-                运行环境缺少插件声明的依赖，请使用含社区插件运行时的官方镜像或按插件说明配置。
+                {t('sourcePlugins.missingDependencies')}
               </p>
             )}
             <fieldset disabled={busy}>
-              <legend className="plugin-sr-only">{p.name} 配置</legend>
+              <legend className="plugin-sr-only">
+                {t('sourcePlugins.configLegend', { name: p.name })}
+              </legend>
               <div className="plugin-capabilities">
                 {(['enabled', 'metadata_enabled', 'lyrics_enabled'] as const).map(
                   (field, index) => (
@@ -225,9 +244,15 @@ export function SourcePlugins() {
                         }
                       />
                       {index === 0 ? (
-                        <HelpLabel hint="pluginEnabled">启用此插件</HelpLabel>
+                        <HelpLabel hint="pluginEnabled">
+                          {t('sourcePlugins.enablePlugin')}
+                        </HelpLabel>
                       ) : (
-                        ['启用此插件', '提供元数据与封面', '提供歌词'][index]
+                        [
+                          t('sourcePlugins.enablePlugin'),
+                          t('sourcePlugins.provideMetadata'),
+                          t('sourcePlugins.provideLyrics'),
+                        ][index]
                       )}
                     </label>
                   ),
@@ -235,7 +260,7 @@ export function SourcePlugins() {
               </div>
               <div className="plugin-config-grid">
                 <label>
-                  <HelpLabel hint="sourcePriority">来源优先级（0–100，越小越优先）</HelpLabel>
+                  <HelpLabel hint="sourcePriority">{t('sourcePlugins.sourcePriority')}</HelpLabel>
                   <input
                     type="number"
                     min="0"
@@ -267,7 +292,9 @@ export function SourcePlugins() {
                       }
                       value={values[p.id]?.[field.key] || ''}
                       placeholder={
-                        p.configured_secrets.includes(field.key) ? '已保存，留空保留' : ''
+                        p.configured_secrets.includes(field.key)
+                          ? t('sourcePlugins.secretPlaceholder')
+                          : ''
                       }
                       onChange={(e) =>
                         setValues({
@@ -282,7 +309,7 @@ export function SourcePlugins() {
               <div className="plugin-main-actions">
                 <button
                   className="primary"
-                  aria-label={`保存 ${p.name}`}
+                  aria-label={t('sourcePlugins.savePluginAria', { name: p.name })}
                   onClick={() =>
                     void run(
                       () =>
@@ -297,41 +324,43 @@ export function SourcePlugins() {
                             config: values[p.id] || {},
                           }),
                         }),
-                      '插件配置已保存。',
+                      t('sourcePlugins.savedNotice'),
                       `save:${p.id}`,
                       p.id,
                     )
                   }
                 >
-                  {operation === `save:${p.id}` ? '正在保存…' : '保存设置'}
+                  {operation === `save:${p.id}`
+                    ? t('sourcePlugins.saving')
+                    : t('sourcePlugins.saveSettings')}
                 </button>
                 <button
-                  aria-label={`测试 ${p.name}`}
+                  aria-label={t('sourcePlugins.testPluginAria', { name: p.name })}
                   disabled={!p.enabled || dirty(p)}
                   onClick={() => void testPlugin(p)}
                 >
-                  {operation === `test:${p.id}` ? '正在测试…' : '测试连接'}
+                  {operation === `test:${p.id}`
+                    ? t('sourcePlugins.testingButton')
+                    : t('sourcePlugins.testConnection')}
                 </button>
               </div>
               {dirty(p) && (
-                <p className="muted plugin-unsaved">有未保存的设置，请先保存，再测试或升级。</p>
+                <p className="muted plugin-unsaved">{t('sourcePlugins.unsavedSettings')}</p>
               )}
               <PluginFeedback value={notices[p.id]} className="plugin-operation-result" />
               <PluginFeedback value={results[p.id]} className="plugin-test-result" />
               <details className="plugin-maintenance">
                 <summary data-help={hints.pluginMaintenance}>
-                  <strong>版本与维护</strong>
-                  <span>升级 · 导出 · 卸载</span>
+                  <strong>{t('sourcePlugins.maintenanceTitle')}</strong>
+                  <span>{t('sourcePlugins.maintenanceSubtitle')}</span>
                   <Icon name="chevron" />
                 </summary>
                 <div className="plugin-maintenance-content">
-                  <h5>升级 {p.name}</h5>
-                  <p className="muted">
-                    选择此插件的 ZIP 升级包，确认后上传。升级保留配置并停用插件，核对后可重新启用。
-                  </p>
+                  <h5>{t('sourcePlugins.upgradeTitle', { name: p.name })}</h5>
+                  <p className="muted">{t('sourcePlugins.upgradeDescription')}</p>
                   <PluginZipUpload
-                    inputLabel={`${p.name} 升级 ZIP`}
-                    actionLabel="确认升级"
+                    inputLabel={t('sourcePlugins.upgradeZipInput', { name: p.name })}
+                    actionLabel={t('sourcePlugins.confirmUpgrade')}
                     disabled={busy || dirty(p)}
                     working={operation === `upgrade:${p.id}`}
                     onUpload={(file) =>
@@ -345,7 +374,7 @@ export function SourcePlugins() {
                               body: await file.arrayBuffer(),
                             },
                           ),
-                        '插件已升级并停用，配置已保留，请重新核对后启用。',
+                        t('sourcePlugins.upgradeSuccess'),
                         `upgrade:${p.id}`,
                         p.id,
                       )
@@ -357,12 +386,12 @@ export function SourcePlugins() {
                       href={`/api/v1/manage/source-plugins/${p.id}/export`}
                     >
                       <Icon name="download" />
-                      导出 ZIP
+                      {t('sourcePlugins.exportZip')}
                     </a>
                     <div>
                       <button
                         className="plugin-uninstall"
-                        aria-label={`卸载 ${p.name}`}
+                        aria-label={t('sourcePlugins.uninstallPluginAria', { name: p.name })}
                         disabled={p.enabled || dirty(p)}
                         onClick={() =>
                           void run(
@@ -370,17 +399,17 @@ export function SourcePlugins() {
                               api(`/manage/source-plugins/${p.id}?version=${p.version}`, {
                                 method: 'DELETE',
                               }),
-                            `已卸载 ${p.name}，已有候选和歌词保留。`,
+                            t('sourcePlugins.uninstallSuccess', { name: p.name }),
                             `uninstall:${p.id}`,
                           )
                         }
                       >
-                        卸载插件
+                        {t('sourcePlugins.uninstallPlugin')}
                       </button>
                       <small>
                         {p.enabled || dirty(p)
-                          ? '先停用并保存，才能卸载。'
-                          : '卸载会保留已有候选和歌词。'}
+                          ? t('sourcePlugins.uninstallDisabledHint')
+                          : t('sourcePlugins.uninstallHint')}
                       </small>
                     </div>
                   </div>
@@ -432,43 +461,66 @@ type LyricCandidate = {
   };
 };
 
-function inferCandidateQuality(candidate: LyricCandidate) {
+function candidateQualityLabel(
+  quality: { word_timed: boolean; bilingual: boolean; level: number; lines: number },
+  t: TFunction,
+) {
+  if (quality.word_timed) {
+    return quality.bilingual
+      ? t('sourcePlugins.qualityBilingualWordTimed')
+      : t('sourcePlugins.qualityWordTimed');
+  }
+  if (quality.level >= 2) {
+    return quality.bilingual
+      ? t('sourcePlugins.qualityBilingualLineTimed')
+      : t('sourcePlugins.qualityLineTimed');
+  }
+  if (quality.lines > 0 || quality.level === 1) {
+    return t('sourcePlugins.qualityStatic');
+  }
+  return t('sourcePlugins.qualityNone');
+}
+
+function inferCandidateQuality(
+  candidate: LyricCandidate,
+  t: TFunction | ((key: string) => string) = i18n.t.bind(i18n),
+) {
+  const hasRoman = candidate.normalized.lines.some((line) => Boolean(line.romanization?.trim()));
   if (candidate.quality) {
-    const hasRoman = candidate.normalized.lines.some((line) => Boolean(line.romanization?.trim()));
-    return { ...candidate.quality, romanized: hasRoman };
+    return {
+      ...candidate.quality,
+      label: candidateQualityLabel(
+        { ...candidate.quality, lines: candidate.quality.lines ?? 0 },
+        t as TFunction,
+      ),
+      romanized: hasRoman,
+    };
   }
   const lines = candidate.normalized.lines.filter((line) => line.text.trim().length > 0);
   const count = Math.max(1, lines.length);
   const timedRatio = lines.filter((line) => line.time_ms !== null).length / count;
   const wordRatio = lines.filter((line) => (line.words?.length ?? 0) > 0).length / count;
   const transRatio = lines.filter((line) => Boolean(line.translation?.trim())).length / count;
-  const hasRoman = lines.some((line) => Boolean(line.romanization?.trim()));
   const synced = candidate.normalized.kind === 'synced' && timedRatio >= 0.8;
   const wordTimed = synced && wordRatio >= 0.8;
   const bilingual = synced && transRatio >= 0.8;
-  const label = wordTimed
+  const level = wordTimed
     ? bilingual
-      ? '双语逐字动态'
-      : '逐字动态'
+      ? 5
+      : 4
     : synced
       ? bilingual
-        ? '双语逐行动态'
-        : '逐行动态'
+        ? 3
+        : 2
       : lines.length > 0
-        ? '静态歌词'
-        : '无歌词';
+        ? 1
+        : 0;
+  const label = candidateQualityLabel(
+    { word_timed: wordTimed, bilingual, level, lines: lines.length },
+    t as TFunction,
+  );
   return {
-    level: wordTimed
-      ? bilingual
-        ? 5
-        : 4
-      : synced
-        ? bilingual
-          ? 3
-          : 2
-        : lines.length > 0
-          ? 1
-          : 0,
+    level,
     label,
     word_timed: wordTimed,
     bilingual,
@@ -506,6 +558,7 @@ function InteractiveCandidateAudition({
   track?: Track;
   player?: Player;
 }) {
+  const { t } = useTranslation();
   const isPlayingThisTrack = player && player.current?.id === trackId;
   const currentPosMs = isPlayingThisTrack ? player.position * 1000 - offset : null;
 
@@ -572,14 +625,18 @@ function InteractiveCandidateAudition({
           {isPlayingThisTrack ? (
             <div className="status-playing-pill">
               <span className={`audition-dot ${player.playing ? 'playing' : 'paused'}`} />
-              <span>{player.playing ? '正在播放试听' : '试听已暂停'}</span>
+              <span>
+                {player.playing
+                  ? t('sourcePlugins.auditionPlaying')
+                  : t('sourcePlugins.auditionPaused')}
+              </span>
               <span className="audition-time">({time(player.position)})</span>
               <button
                 type="button"
                 className="text-button audition-ctrl-btn"
                 onClick={player.toggle}
               >
-                {player.playing ? '暂停' : '播放'}
+                {player.playing ? t('sourcePlugins.pause') : t('sourcePlugins.play')}
               </button>
             </div>
           ) : player ? (
@@ -588,32 +645,48 @@ function InteractiveCandidateAudition({
               className="text-button audition-start-btn"
               onClick={handleStartTrack}
             >
-              ▶ 播放此歌曲以交互试听
+              {t('sourcePlugins.startAudition')}
             </button>
           ) : null}
         </div>
 
         <div className="audition-offset-controls">
-          <span className="offset-label">微调：</span>
+          <span className="offset-label">{t('sourcePlugins.fineTune')}</span>
           <div className="nudge-btn-group">
-            <button type="button" onClick={() => onOffsetChange(offset - 500)} title="提早 500ms">
+            <button
+              type="button"
+              onClick={() => onOffsetChange(offset - 500)}
+              title={t('sourcePlugins.earlier500ms')}
+            >
               -500ms
             </button>
-            <button type="button" onClick={() => onOffsetChange(offset - 200)} title="提早 200ms">
+            <button
+              type="button"
+              onClick={() => onOffsetChange(offset - 200)}
+              title={t('sourcePlugins.earlier200ms')}
+            >
               -200ms
             </button>
             <button
               type="button"
               className={offset === 0 ? 'nudge-zero-active' : ''}
               onClick={() => onOffsetChange(0)}
-              title="复位到 0 偏移"
+              title={t('sourcePlugins.resetOffset')}
             >
               0
             </button>
-            <button type="button" onClick={() => onOffsetChange(offset + 200)} title="延后 200ms">
+            <button
+              type="button"
+              onClick={() => onOffsetChange(offset + 200)}
+              title={t('sourcePlugins.later200ms')}
+            >
               +200ms
             </button>
-            <button type="button" onClick={() => onOffsetChange(offset + 500)} title="延后 500ms">
+            <button
+              type="button"
+              onClick={() => onOffsetChange(offset + 500)}
+              title={t('sourcePlugins.later500ms')}
+            >
               +500ms
             </button>
           </div>
@@ -631,7 +704,7 @@ function InteractiveCandidateAudition({
         </div>
       </div>
 
-      <p className="audition-hint">💡 点击任意歌词行立即跳播试听；随播放高亮并平滑居中滚动。</p>
+      <p className="audition-hint">{t('sourcePlugins.auditionTip')}</p>
 
       <pre className="candidate-lyric-list" role="list">
         {candidate.normalized.lines.slice(0, 300).map((line, idx) => {
@@ -642,7 +715,7 @@ function InteractiveCandidateAudition({
               ref={isActive ? activeRowRef : null}
               className={`candidate-lyric-row ${isActive ? 'active' : ''}`}
               onClick={() => handleSeek(line.time_ms)}
-              title={line.time_ms !== null ? '点击跳播试听此句' : undefined}
+              title={line.time_ms !== null ? t('sourcePlugins.seekLineTitle') : undefined}
             >
               <span className="candidate-lyric-time">{formatCandidateMs(line.time_ms)}</span>
               <div className="candidate-lyric-body">
@@ -658,7 +731,7 @@ function InteractiveCandidateAudition({
                           )}
                         </span>
                       ))
-                    : line.text || '（间奏）'}
+                    : line.text || t('sourcePlugins.interlude')}
                 </div>
                 {line.translation && (
                   <div className="candidate-lyric-trans">{line.translation}</div>
@@ -686,6 +759,7 @@ export function OnlineLyrics({
   player?: Player;
   applied: () => void;
 }) {
+  const { t } = useTranslation();
   const [result, setResult] = useState<{
     items: LyricCandidate[];
     jobs: { status: string; warnings: string[] }[];
@@ -700,8 +774,8 @@ export function OnlineLyrics({
     setResult(await api(`/manage/tracks/${trackId}/online-lyrics`));
   }
   useEffect(() => {
-    void load().catch(() => setMessage('无法读取联网歌词候选。'));
-  }, [trackId]);
+    void load().catch(() => setMessage(t('sourcePlugins.loadLyricsError')));
+  }, [trackId, t]);
   const running = result?.jobs.some((job) => ['queued', 'running'].includes(job.status));
   useEffect(() => {
     if (!running) return;
@@ -717,24 +791,22 @@ export function OnlineLyrics({
       await work();
       await load();
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : '歌词操作未完成。');
+      setMessage(error instanceof Error ? error.message : t('sourcePlugins.lyricsActionFailed'));
     } finally {
       setBusy(false);
     }
   }
   return (
     <section className="online-lyrics">
-      <h3>联网歌词候选</h3>
-      <p className="muted">
-        先比较版本、歌手和时长，再预览时间轴；逐字歌词也可能匹配错误，确认后才替换数据库歌词。
-      </p>
+      <h3>{t('sourcePlugins.onlineLyricsTitle')}</h3>
+      <p className="muted">{t('sourcePlugins.onlineLyricsDescription')}</p>
       <button
         disabled={busy || running}
         onClick={() =>
           void run(() => api(`/manage/tracks/${trackId}/online-lyrics`, { method: 'POST' }))
         }
       >
-        查找联网歌词
+        {t('sourcePlugins.searchOnlineLyrics')}
       </button>
       {running && (
         <progress
@@ -745,9 +817,9 @@ export function OnlineLyrics({
       <p role="status">
         {message ||
           (running
-            ? '后台正在查询歌词…'
+            ? t('sourcePlugins.queryingLyrics')
             : result?.jobs[0]?.status === 'no_match'
-              ? '没有取得可用歌词，请检查插件设置与查询反馈。'
+              ? t('sourcePlugins.noLyricsFound')
               : '')}
       </p>
       {result?.jobs[0]?.warnings?.map((value) => (
@@ -772,7 +844,7 @@ export function OnlineLyrics({
             aria-pressed={filterMode === 'all'}
             onClick={() => setFilterMode('all')}
           >
-            全部（{result.items.length}）
+            {t('sourcePlugins.filterAll', { count: result.items.length })}
           </button>
           <button
             type="button"
@@ -780,8 +852,9 @@ export function OnlineLyrics({
             aria-pressed={filterMode === 'word'}
             onClick={() => setFilterMode('word')}
           >
-            仅看逐字（{result.items.filter((item) => inferCandidateQuality(item).word_timed).length}
-            ）
+            {t('sourcePlugins.filterWord', {
+              count: result.items.filter((item) => inferCandidateQuality(item).word_timed).length,
+            })}
           </button>
           <button
             type="button"
@@ -789,8 +862,9 @@ export function OnlineLyrics({
             aria-pressed={filterMode === 'bilingual'}
             onClick={() => setFilterMode('bilingual')}
           >
-            仅看双语（{result.items.filter((item) => inferCandidateQuality(item).bilingual).length}
-            ）
+            {t('sourcePlugins.filterBilingual', {
+              count: result.items.filter((item) => inferCandidateQuality(item).bilingual).length,
+            })}
           </button>
         </div>
       )}
@@ -802,7 +876,7 @@ export function OnlineLyrics({
           return true;
         })
         .map((candidate) => {
-          const q = inferCandidateQuality(candidate);
+          const q = inferCandidateQuality(candidate, t);
           return (
             <article className="suggestion-card" key={candidate.id}>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
@@ -824,10 +898,12 @@ export function OnlineLyrics({
                   }}
                 >
                   {q.word_timed
-                    ? `逐字动态 · ${Math.round(q.word_coverage * 100)}%`
+                    ? t('sourcePlugins.badgeWordTimed', {
+                        pct: Math.round(q.word_coverage * 100),
+                      })
                     : q.level >= 2
-                      ? '逐行动态'
-                      : '静态歌词'}
+                      ? t('sourcePlugins.badgeLineTimed')
+                      : t('sourcePlugins.badgeStatic')}
                 </span>
                 {q.bilingual && (
                   <span
@@ -838,7 +914,9 @@ export function OnlineLyrics({
                       background: 'rgba(128, 128, 128, 0.18)',
                     }}
                   >
-                    双语 · {Math.round(q.translation_coverage * 100)}%
+                    {t('sourcePlugins.badgeBilingual', {
+                      pct: Math.round(q.translation_coverage * 100),
+                    })}
                   </span>
                 )}
                 {q.romanized && (
@@ -850,7 +928,7 @@ export function OnlineLyrics({
                       background: 'rgba(128, 128, 128, 0.18)',
                     }}
                   >
-                    音译
+                    {t('sourcePlugins.badgeRomanized')}
                   </span>
                 )}
                 <span
@@ -866,17 +944,24 @@ export function OnlineLyrics({
                 </span>
               </div>
               <p>
-                {candidate.match.artists.join(' / ')} · {q.label} ·{' '}
-                {candidate.normalized.format.toUpperCase()} · {candidate.line_count} 行 · 匹配{' '}
-                {Math.round(candidate.match.score * 100)}%
+                {t('sourcePlugins.candidateSummary', {
+                  artists: candidate.match.artists.join(' / '),
+                  label: q.label,
+                  format: candidate.normalized.format.toUpperCase(),
+                  count: candidate.line_count,
+                  score: Math.round(candidate.match.score * 100),
+                })}
               </p>
-              {candidate.match.version_mismatch && <p>版本标记不同，请试听核对。</p>}
+              {candidate.match.version_mismatch && (
+                <p>{t('sourcePlugins.versionMismatchNotice')}</p>
+              )}
               <p>
-                时长差：
                 {candidate.match.duration_difference_ms === null
-                  ? '未知'
-                  : `${(candidate.match.duration_difference_ms / 1000).toFixed(1)} 秒`}{' '}
-                · 来源 ID：{candidate.source_id}
+                  ? t('sourcePlugins.durationDiffUnknown', { id: candidate.source_id })
+                  : t('sourcePlugins.durationDiff', {
+                      diff: (candidate.match.duration_difference_ms / 1000).toFixed(1),
+                      id: candidate.source_id,
+                    })}
               </p>
               <button
                 disabled={busy}
@@ -885,25 +970,29 @@ export function OnlineLyrics({
                   setOffset(0);
                 }}
               >
-                预览并选择歌词
+                {t('sourcePlugins.previewAndSelect')}
               </button>
             </article>
           );
         })}
       {selected &&
         (() => {
-          const selectedQuality = inferCandidateQuality(selected);
+          const selectedQuality = inferCandidateQuality(selected, t);
           const hasWords = selected.normalized.lines.some((line) => (line.words?.length ?? 0) > 0);
           return (
             <div className="management-card">
-              <h4>核对歌词候选</h4>
+              <h4>{t('sourcePlugins.reviewTitle')}</h4>
               <p>
                 {selected.match.title} · {selected.plugin_id} ·{' '}
                 <strong>{selectedQuality.label}</strong>
                 {selectedQuality.word_timed &&
-                  `（逐字覆盖 ${Math.round(selectedQuality.word_coverage * 100)}%）`}
+                  t('sourcePlugins.selectedQualityWord', {
+                    pct: Math.round(selectedQuality.word_coverage * 100),
+                  })}
                 {selectedQuality.bilingual &&
-                  ` · 译文覆盖 ${Math.round(selectedQuality.translation_coverage * 100)}%`}
+                  t('sourcePlugins.selectedQualityTrans', {
+                    pct: Math.round(selectedQuality.translation_coverage * 100),
+                  })}
               </p>
               {hasWords && (
                 <label
@@ -914,7 +1003,7 @@ export function OnlineLyrics({
                     checked={showWordSplits}
                     onChange={(e) => setShowWordSplits(e.target.checked)}
                   />
-                  显示逐字时间切分标记
+                  {t('sourcePlugins.showWordSplits')}
                 </label>
               )}
               <InteractiveCandidateAudition
@@ -946,14 +1035,14 @@ export function OnlineLyrics({
                       window.dispatchEvent(
                         new CustomEvent('wildstring:lyrics-updated', { detail: trackId }),
                       );
-                      setMessage('已保存选中的歌词，音乐文件未修改。');
+                      setMessage(t('sourcePlugins.lyricsSavedNotice'));
                     })
                   }
                 >
-                  确认使用此歌词
+                  {t('sourcePlugins.confirmLyrics')}
                 </button>
                 <button type="button" onClick={() => setSelected(null)}>
-                  取消选择
+                  {t('sourcePlugins.cancelSelection')}
                 </button>
               </div>
             </div>

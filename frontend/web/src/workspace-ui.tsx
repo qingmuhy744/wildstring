@@ -156,44 +156,110 @@ export function RefreshWorkspace({ busy, onClick }: { busy: boolean; onClick: ()
   );
 }
 export const stateNames: Record<string, string> = {
-  draft: '待确认',
-  approved: '已批准，待应用',
-  applied: '已应用',
-  stale: '依据已变化',
-  rejected: '已拒绝',
-  expired: '已过期',
-  queued: '排队中',
-  running: '执行中',
-  retry_wait: '等待重试',
-  paused_budget: '预算暂停',
-  paused_auth: '授权暂停',
-  paused_authorization: '授权暂停',
-  disabled: '已关闭',
-  revoked: '已撤销',
-  cancel_requested: '正在停止',
-  cancelled: '已取消',
-  succeeded: '已完成',
-  partial: '部分完成',
-  partial_success: '部分完成',
-  failed: '失败',
-  interrupted: '已中断',
-  sent: '接口已确认发送',
-  unknown: '投递结果不明',
-  sending: '发送中',
-  pending: '待确认',
-  ready: '可用',
-  ok: '可用',
-  unconfigured: '未配置',
-  not_configured: '未配置',
-  unverified: '未验证',
-  unsupported: '不支持',
-  error: '检测失败',
+  get draft() {
+    return i18n.t('workspaceUi.states.draft');
+  },
+  get approved() {
+    return i18n.t('workspaceUi.states.approved');
+  },
+  get applied() {
+    return i18n.t('workspaceUi.states.applied');
+  },
+  get stale() {
+    return i18n.t('workspaceUi.states.stale');
+  },
+  get rejected() {
+    return i18n.t('workspaceUi.states.rejected');
+  },
+  get expired() {
+    return i18n.t('workspaceUi.states.expired');
+  },
+  get queued() {
+    return i18n.t('workspaceUi.states.queued');
+  },
+  get running() {
+    return i18n.t('workspaceUi.states.running');
+  },
+  get retry_wait() {
+    return i18n.t('workspaceUi.states.retry_wait');
+  },
+  get paused_budget() {
+    return i18n.t('workspaceUi.states.paused_budget');
+  },
+  get paused_auth() {
+    return i18n.t('workspaceUi.states.paused_auth');
+  },
+  get paused_authorization() {
+    return i18n.t('workspaceUi.states.paused_authorization');
+  },
+  get disabled() {
+    return i18n.t('workspaceUi.states.disabled');
+  },
+  get revoked() {
+    return i18n.t('workspaceUi.states.revoked');
+  },
+  get cancel_requested() {
+    return i18n.t('workspaceUi.states.cancel_requested');
+  },
+  get cancelled() {
+    return i18n.t('workspaceUi.states.cancelled');
+  },
+  get succeeded() {
+    return i18n.t('workspaceUi.states.succeeded');
+  },
+  get partial() {
+    return i18n.t('workspaceUi.states.partial');
+  },
+  get partial_success() {
+    return i18n.t('workspaceUi.states.partial_success');
+  },
+  get failed() {
+    return i18n.t('workspaceUi.states.failed');
+  },
+  get interrupted() {
+    return i18n.t('workspaceUi.states.interrupted');
+  },
+  get sent() {
+    return i18n.t('workspaceUi.states.sent');
+  },
+  get unknown() {
+    return i18n.t('workspaceUi.states.unknown');
+  },
+  get sending() {
+    return i18n.t('workspaceUi.states.sending');
+  },
+  get pending() {
+    return i18n.t('workspaceUi.states.pending');
+  },
+  get ready() {
+    return i18n.t('workspaceUi.states.ready');
+  },
+  get ok() {
+    return i18n.t('workspaceUi.states.ok');
+  },
+  get unconfigured() {
+    return i18n.t('workspaceUi.states.unconfigured');
+  },
+  get not_configured() {
+    return i18n.t('workspaceUi.states.not_configured');
+  },
+  get unverified() {
+    return i18n.t('workspaceUi.states.unverified');
+  },
+  get unsupported() {
+    return i18n.t('workspaceUi.states.unsupported');
+  },
+  get error() {
+    return i18n.t('workspaceUi.states.error');
+  },
 };
 export function StateBadge({ state }: { state: string }) {
   const { t } = useTranslation();
   return (
     <HelpText className={`workspace-badge state-${state}`} text={stateHelp[state]}>
-      {t(`state.${state}`, { defaultValue: stateNames[state] || state })}
+      {t(`workspaceUi.states.${state}`, {
+        defaultValue: t(`state.${state}`, { defaultValue: stateNames[state] || state }),
+      })}
     </HelpText>
   );
 }

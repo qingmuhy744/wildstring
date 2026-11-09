@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import { useEffect, useState } from 'react';
 import { api } from './api';
 import { Icon } from './icons';
@@ -45,6 +46,7 @@ export function OnlineMetadataMatcher({
   currentArtist: string;
   onApply: (fields: Record<string, unknown>) => void;
 }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [searching, setSearching] = useState(false);
@@ -105,7 +107,7 @@ export function OnlineMetadataMatcher({
       <div className="online-matcher-header">
         <div className="online-matcher-title">
           <Icon name="assistant" />
-          <span>联网匹配与快速填充</span>
+          <span>{t('onlineMetadataMatcher.headerTitle')}</span>
         </div>
         <button
           type="button"
@@ -116,7 +118,9 @@ export function OnlineMetadataMatcher({
             setQueryArtist(currentArtist);
           }}
         >
-          {open ? '收起在线匹配' : '查找网络元数据 ↗'}
+          {open
+            ? t('onlineMetadataMatcher.collapseMatcher')
+            : t('onlineMetadataMatcher.findOnlineMetadata')}
         </button>
       </div>
 
@@ -125,21 +129,21 @@ export function OnlineMetadataMatcher({
           <div className="matcher-search-bar">
             <div className="matcher-input-group">
               <label>
-                <span>歌名</span>
+                <span>{t('onlineMetadataMatcher.fieldTitle')}</span>
                 <input
                   type="text"
                   value={queryTitle}
                   onChange={(e) => setQueryTitle(e.target.value)}
-                  placeholder="检索歌名"
+                  placeholder={t('onlineMetadataMatcher.searchTitlePlaceholder')}
                 />
               </label>
               <label>
-                <span>艺人</span>
+                <span>{t('onlineMetadataMatcher.fieldArtist')}</span>
                 <input
                   type="text"
                   value={queryArtist}
                   onChange={(e) => setQueryArtist(e.target.value)}
-                  placeholder="检索艺人"
+                  placeholder={t('onlineMetadataMatcher.searchArtistPlaceholder')}
                 />
               </label>
             </div>
@@ -149,25 +153,29 @@ export function OnlineMetadataMatcher({
               disabled={searching}
               onClick={handleSearch}
             >
-              {searching ? '正在联网检索…' : '重新联网检索'}
+              {searching
+                ? t('onlineMetadataMatcher.searching')
+                : t('onlineMetadataMatcher.searchButton')}
             </button>
           </div>
 
           {loading ? (
-            <div className="matcher-loading">正在读取网络候选…</div>
+            <div className="matcher-loading">{t('onlineMetadataMatcher.loadingCandidates')}</div>
           ) : suggestions.length > 0 ? (
             <div className="matcher-results">
               <div className="matcher-results-caption">
-                找到以下网络元数据候选（点击一键填入表单）：
+                {t('onlineMetadataMatcher.resultsCaption')}
               </div>
               <ul className="matcher-card-list">
                 {suggestions.slice(0, 5).map((item) => {
-                  const title = item.fields.title || '未知歌名';
-                  const artists = (item.fields.artists || []).join(' / ') || '未知艺人';
-                  const album = item.fields.album || '未知专辑';
+                  const title = item.fields.title || t('onlineMetadataMatcher.unknownTitle');
+                  const artists =
+                    (item.fields.artists || []).join(' / ') ||
+                    t('onlineMetadataMatcher.unknownArtist');
+                  const album = item.fields.album || t('onlineMetadataMatcher.unknownAlbum');
                   const date = item.fields.release_date || item.fields.original_date || '';
                   const trackNo = item.fields.track_number
-                    ? `第 ${item.fields.track_number} 首`
+                    ? t('onlineMetadataMatcher.trackNo', { number: item.fields.track_number })
                     : '';
                   const score = item.match.score ? Math.round(item.match.score) : null;
                   const providerLabel = providerNames[item.provider] || item.provider;
@@ -202,7 +210,11 @@ export function OnlineMetadataMatcher({
                         </div>
                         <div className="matcher-card-badges">
                           <span className="source-badge">{providerLabel}</span>
-                          {score !== null && <span className="score-badge">匹配度 {score}%</span>}
+                          {score !== null && (
+                            <span className="score-badge">
+                              {t('onlineMetadataMatcher.matchScore', { score })}
+                            </span>
+                          )}
                         </div>
                       </div>
                       <div className="matcher-card-action">
@@ -211,7 +223,9 @@ export function OnlineMetadataMatcher({
                           className={appliedId === item.id ? 'applied-button' : 'fill-button'}
                           onClick={() => handleApply(item)}
                         >
-                          {appliedId === item.id ? '✓ 已填入下方' : '一键填入表单'}
+                          {appliedId === item.id
+                            ? t('onlineMetadataMatcher.applied')
+                            : t('onlineMetadataMatcher.fillForm')}
                         </button>
                       </div>
                     </li>
@@ -221,10 +235,7 @@ export function OnlineMetadataMatcher({
             </div>
           ) : (
             <div className="matcher-empty">
-              <p>
-                暂无现成候选。您可以点击上方的「重新联网检索」，系统将自动通过已启用的音源与
-                MusicBrainz 在线查找最佳匹配。
-              </p>
+              <p>{t('onlineMetadataMatcher.emptyPrompt')}</p>
             </div>
           )}
         </div>

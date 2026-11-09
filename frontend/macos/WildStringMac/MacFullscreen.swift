@@ -42,7 +42,7 @@ struct MacFullscreenPlayer: View {
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                             .padding(.vertical, 16)
                     } else {
-                        ContentUnavailableView("先播放一首喜欢的歌", systemImage: "music.note")
+                        ContentUnavailableView(L10n("macFullscreen.playFavoriteFirst"), systemImage: "music.note")
                             .frame(maxHeight: .infinity)
                     }
                     controls
@@ -101,7 +101,7 @@ struct MacFullscreenPlayer: View {
 
     private var header: some View {
         ZStack {
-            Text(isPodcast ? "正在收听" : "正在播放")
+            Text(isPodcast ? L10n("macFullscreen.nowListening") : L10n("macFullscreen.nowPlaying"))
                 .font(.callout.weight(.medium)).foregroundStyle(MacTheme.muted)
             HStack {
                 Button { session.showFullscreen = false } label: {
@@ -109,20 +109,20 @@ struct MacFullscreenPlayer: View {
                         .frame(width: 36, height: 36)
                         .background(ink.opacity(0.06), in: Circle())
                 }
-                .buttonStyle(.plain).help("收起全屏播放（Esc）").accessibilityLabel("收起全屏播放")
+                .buttonStyle(.plain).help(L10n("macFullscreen.collapseShortcut")).accessibilityLabel(L10n("macFullscreen.collapse"))
                 Spacer()
                 if !isPodcast {
                     Menu {
                         Button { playerStyle = "vinyl" } label: {
-                            if showsVinyl { Label("唱片", systemImage: "checkmark") } else { Text("唱片") }
+                            if showsVinyl { Label(L10n("macFullscreen.styleVinyl"), systemImage: "checkmark") } else { Text(L10n("macFullscreen.styleVinyl")) }
                         }
                         Button { playerStyle = "cover" } label: {
-                            if !showsVinyl { Label("封面", systemImage: "checkmark") } else { Text("封面") }
+                            if !showsVinyl { Label(L10n("macFullscreen.styleCover"), systemImage: "checkmark") } else { Text(L10n("macFullscreen.styleCover")) }
                         }
                     } label: {
-                        Label(showsVinyl ? "唱片" : "封面", systemImage: "square.stack").font(.callout)
+                        Label(showsVinyl ? L10n("macFullscreen.styleVinyl") : L10n("macFullscreen.styleCover"), systemImage: "square.stack").font(.callout)
                     }
-                    .menuStyle(.borderlessButton).fixedSize().help("播放样式")
+                    .menuStyle(.borderlessButton).fixedSize().help(L10n("macFullscreen.playerStyle"))
                     .padding(4).background(ink.opacity(0.045), in: Capsule())
                 }
             }
@@ -145,7 +145,7 @@ struct MacFullscreenPlayer: View {
                             MacCover(client: client, trackID: item.trackID, side: side, cornerRadius: 12)
                         }
                     }
-                    .buttonStyle(.plain).help("查看大封面").accessibilityLabel("查看大封面")
+                    .buttonStyle(.plain).help(L10n("macFullscreen.viewLargeCover")).accessibilityLabel(L10n("macFullscreen.viewLargeCover"))
                     HStack(alignment: .top, spacing: 12) {
                         VStack(alignment: .leading, spacing: 7) {
                             Text(item.title).font(MacTheme.display(26))
@@ -158,7 +158,7 @@ struct MacFullscreenPlayer: View {
                                 Image(systemName: favorites.isFavorite(item.trackID) ? "heart.fill" : "heart")
                                     .font(.title3).frame(width: 28, height: 30)
                                     .foregroundStyle(favorites.isFavorite(item.trackID) ? MacTheme.accentDeep : ink.opacity(0.6))
-                            }.buttonStyle(.plain).help(favorites.isFavorite(item.trackID) ? "取消红心" : "红心")
+                            }.buttonStyle(.plain).help(favorites.isFavorite(item.trackID) ? L10n("macFullscreen.unfavorite") : L10n("macFullscreen.favorite"))
                         }
                     }
                 }.frame(width: side)
@@ -169,7 +169,7 @@ struct MacFullscreenPlayer: View {
                             .background(ink.opacity(0.035), in: RoundedRectangle(cornerRadius: 18))
                     } else if showLyrics {
                         MacLyricScroll(
-                            playback: playback, timeline: timeline, empty: "这首歌还没有歌词",
+                            playback: playback, timeline: timeline, empty: L10n("macFullscreen.noLyrics"),
                             prominent: true, phase: lyricPhase, onRetry: { lyricAttempt += 1 }
                         )
                             .id(item.trackID)
@@ -282,13 +282,13 @@ struct MacFullscreenPlayer: View {
             .font(.caption.monospacedDigit()).foregroundStyle(MacTheme.muted)
             HStack {
                 HStack(spacing: 14) {
-                    control("shuffle", help: "随机播放", active: playback.isShuffled) { playback.toggleShuffle() }
-                    control(playback.repeatMode == .one ? "repeat.1" : "repeat", help: "循环播放",
+                    control("shuffle", help: L10n("macFullscreen.shuffle"), active: playback.isShuffled) { playback.toggleShuffle() }
+                    control(playback.repeatMode == .one ? "repeat.1" : "repeat", help: L10n("macFullscreen.repeat"),
                         active: playback.repeatMode != .off) { playback.cycleRepeatMode() }
                 }
                 Spacer()
                 HStack(spacing: 28) {
-                    control(isPodcast ? "gobackward.15" : "backward.fill", help: isPodcast ? "后退 15 秒" : "上一首") {
+                    control(isPodcast ? "gobackward.15" : "backward.fill", help: isPodcast ? L10n("macFullscreen.back15s") : L10n("macFullscreen.previousTrack")) {
                         if isPodcast { playback.seek(to: max(0, playback.currentTime - 15)) } else { playback.previous() }
                     }
                     Button { playback.togglePlayPause() } label: {
@@ -296,22 +296,22 @@ struct MacFullscreenPlayer: View {
                             .font(.system(size: 20, weight: .semibold))
                             .foregroundStyle(MacTheme.onAccent).frame(width: 56, height: 56)
                             .background(MacTheme.accent, in: Circle())
-                    }.buttonStyle(.plain).help(playback.isPlaying ? "暂停" : "播放")
+                    }.buttonStyle(.plain).help(playback.isPlaying ? L10n("macFullscreen.pause") : L10n("macFullscreen.play"))
                         .disabled(playback.currentItem == nil)
-                    control(isPodcast ? "goforward.30" : "forward.fill", help: isPodcast ? "前进 30 秒" : "下一首") {
+                    control(isPodcast ? "goforward.30" : "forward.fill", help: isPodcast ? L10n("macFullscreen.forward30s") : L10n("macFullscreen.nextTrack")) {
                         if isPodcast { playback.seek(to: playback.currentTime + 30) } else { playback.next() }
                     }
                 }
                 Spacer()
                 HStack(spacing: 12) {
                     if !isPodcast {
-                        control("quote.bubble", help: showLyrics ? "收起歌词" : "展开歌词",
+                        control("quote.bubble", help: showLyrics ? L10n("macFullscreen.hideLyrics") : L10n("macFullscreen.showLyrics"),
                             active: showLyrics) { showLyrics.toggle() }
-                        control("list.number", help: showQueue ? "收起队列" : "展开队列",
+                        control("list.number", help: showQueue ? L10n("macFullscreen.hideQueue") : L10n("macFullscreen.showQueue"),
                             active: showQueue) { showQueue.toggle() }
                     }
                     sleepMenu
-                    control("captions.bubble", help: session.desktopLyricsVisible ? "关闭桌面歌词" : "打开桌面歌词",
+                    control("captions.bubble", help: session.desktopLyricsVisible ? L10n("macFullscreen.closeDesktopLyrics") : L10n("macFullscreen.openDesktopLyrics"),
                         active: session.desktopLyricsVisible) {
                         NotificationCenter.default.post(name: .wildstringShowDesktopLyrics, object: nil)
                     }
@@ -325,17 +325,17 @@ struct MacFullscreenPlayer: View {
 
     private var sleepMenu: some View {
         Menu {
-            Button("15 分钟后暂停") { playback.setSleepTimer(minutes: 15) }
-            Button("30 分钟后暂停") { playback.setSleepTimer(minutes: 30) }
-            Button("60 分钟后暂停") { playback.setSleepTimer(minutes: 60) }
-            Button("这首播完后暂停") { playback.sleepAfterCurrentTrack() }
-            Button("取消定时") { playback.cancelSleepTimer() }
+            Button(L10n("macFullscreen.sleep15m")) { playback.setSleepTimer(minutes: 15) }
+            Button(L10n("macFullscreen.sleep30m")) { playback.setSleepTimer(minutes: 30) }
+            Button(L10n("macFullscreen.sleep60m")) { playback.setSleepTimer(minutes: 60) }
+            Button(L10n("macFullscreen.sleepEndOfTrack")) { playback.sleepAfterCurrentTrack() }
+            Button(L10n("macFullscreen.cancelSleepTimer")) { playback.cancelSleepTimer() }
         } label: {
             Image(systemName: "moon").font(.system(size: 17))
                 .foregroundStyle(playback.sleepTimerEnd != nil || playback.pauseAfterCurrentTrack ? MacTheme.accentDeep : ink.opacity(0.65))
                 .frame(width: 28, height: 28)
         }
-        .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().help("定时暂停")
+        .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().help(L10n("macFullscreen.sleepTimerHelp"))
     }
 
     private func control(_ symbol: String, help: String, active: Bool = false, action: @escaping () -> Void) -> some View {

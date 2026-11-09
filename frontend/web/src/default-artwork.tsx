@@ -1,4 +1,5 @@
 import type { CSSProperties } from 'react';
+import { useTranslation } from 'react-i18next';
 
 // 精心调配的 8 组复古黑胶暗调色彩，赋予每张没有封面的专辑专属的高级质感
 const VINYL_PALETTES = [
@@ -35,6 +36,7 @@ export function DefaultArtwork({
   style?: CSSProperties;
   interactive?: boolean;
 }) {
+  const { t } = useTranslation();
   const cleanTitle = title.trim() || 'WildString';
   const palette = getPalette(cleanTitle);
 
@@ -190,7 +192,7 @@ export function DefaultArtwork({
           )}
         </g>
       </svg>
-      {interactive && <div className="default-artwork-hint">点击更换封面</div>}
+      {interactive && <div className="default-artwork-hint">{t('defaultArtwork.changeCover')}</div>}
     </div>
   );
 }

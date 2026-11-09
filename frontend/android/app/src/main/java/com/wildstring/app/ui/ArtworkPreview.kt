@@ -1,5 +1,8 @@
 package com.wildstring.app.ui
 
+import androidx.compose.ui.res.stringResource
+import com.wildstring.app.AppLanguage
+import com.wildstring.app.R
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.rememberTransformableState
@@ -45,10 +48,10 @@ import kotlinx.coroutines.withContext
             busy = true
             try {
                 withContext(Dispatchers.IO) {
-                    check(vm.repository.session.cacheScope() == captured.first) { "会话已变化，请重新下载。" }
+                    check(vm.repository.session.cacheScope() == captured.first) { AppLanguage.string(R.string.art_prev_session_changed) }
                     checkNotNull(context.contentResolver.openOutputStream(uri, "w")).use { it.write(captured.second) }
                 }
-                message = "封面已保存。"
+                message = AppLanguage.string(R.string.art_prev_saved)
             } catch (error: CancellationException) { throw error }
             catch (error: Exception) { message = friendlyError(error) }
             finally { busy = false }
@@ -83,19 +86,19 @@ import kotlinx.coroutines.withContext
                     .pointerInput(Unit) { detectTapGestures(onTap = {}) }, ContentScale.Fit)
             Row(Modifier.align(Alignment.TopEnd).padding(8.dp)) {
                 if (track.mayHaveCover && !track.isPodcast) IconButton({ scope.launch {
-                    busy = true; message = "正在准备封面…"
+                    busy = true; message = AppLanguage.string(R.string.art_prev_preparing)
                     try {
                         val owner = checkNotNull(vm.repository.session.cacheScope())
                         val bytes = vm.repository.coverImage(track.id)
                         pending = owner to bytes; message = null
-                        save.launch(track.title.replace(Regex("[\\\\/:*?\"<>|\\p{Cntrl}]"), "_").take(100).ifBlank { "WildString" } + "-封面.jpg")
+                        save.launch(track.title.replace(Regex("[\\\\/:*?\"<>|\\p{Cntrl}]"), "_").take(100).ifBlank { "WildString" } + AppLanguage.string(R.string.art_prev_filename_suffix))
                     } catch (error: CancellationException) { throw error }
                     catch (error: Exception) { pending = null; message = friendlyError(error) }
                     finally { busy = false }
                 } }, enabled = !busy && pending == null) {
-                    Icon(Icons.Default.Download, "下载封面", tint = Color.White)
+                    Icon(Icons.Default.Download, stringResource(R.string.art_prev_download), tint = Color.White)
                 }
-                IconButton(onClose) { Icon(Icons.Default.Close, "关闭大封面", tint = Color.White) }
+                IconButton(onClose) { Icon(Icons.Default.Close, stringResource(R.string.art_prev_close), tint = Color.White) }
             }
             message?.let { Text(it, Modifier.align(Alignment.BottomCenter).padding(20.dp), color = Color.White, style = MaterialTheme.typography.bodyMedium) }
         }

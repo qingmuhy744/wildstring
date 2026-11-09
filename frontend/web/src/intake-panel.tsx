@@ -1,5 +1,6 @@
 import { HelpLabel } from './desktop-help';
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { api } from './api';
 
 type Preferences = {
@@ -28,47 +29,9 @@ type Item = {
   can_approve: boolean;
 };
 type Items = { items: Item[]; total: number; limit: number; offset: number };
-const labels: Record<string, string> = {
-  download_incomplete: '同专辑仍有下载标记，等待下载完成',
-  release_collision: '目标路径已有不同文件，需要核对发行版本',
-  cue_release_collision: '分轨目标已有其他版本，需要核对 CUE 发行信息',
-  intake_snapshot_changed: '暂存副本发生变化，请重新检查',
-  source_missing: '确认后源文件已移走，暂存副本仍保留',
-  cue_lossy_image_unsupported: '暂不自动分割有损整轨音频',
-  conversion_failed: '转换失败，可重试并查看文件状态',
-  retry: '等待重新检查',
-  waiting: '等待文件稳定',
-  ready: '等待处理',
-  review: '待整理',
-  approved: '等待入库',
-  failed: '处理失败',
-  conflict: '存在冲突',
-  missing_title: '缺少歌名',
-  missing_artists: '缺少歌曲艺人',
-  missing_album: '缺少专辑',
-  album_artist_ambiguous: '专辑艺人不明确，可能是合辑',
-  cue_invalid: 'CUE 内容无效',
-  cue_conflicting_sheets: '多个 CUE 内容不一致',
-  cue_metadata_incomplete: 'CUE 缺少歌曲或专辑信息',
-  cue_hidden_pregap: '首曲前有隐藏音轨，需要单独处理',
-  cue_out_of_bounds: 'CUE 时间超出音频范围',
-  cue_index_order: 'CUE 索引顺序不正确',
-  cue_synthetic_gap: 'CUE 含需另行处理的合成间隙',
-  cue_multiple_images: '多镜像 CUE 尚需单独处理',
-  cue_inexact_sample: 'CUE 无法精确定位采样',
-  wav_not_integer_pcm: 'WAV 不是可支持的整数 PCM',
-  wav_precision_unsupported: '暂不支持此 WAV 精度或声道',
-  flac_precision_unsupported: '暂不支持此 FLAC 精度的分轨',
-  insufficient_storage: '磁盘空间不足',
-  ffmpeg_unavailable: '转换工具不可用',
-  intake_file_unavailable: '无法读取或解析文件',
-  managed_copy_missing: '库内副本缺失，已停止自动恢复',
-  source_changed_managed_copy_preserved: '源文件变化，已保留库内副本',
-  pcm_verification_failed: '转换后音频校验未通过',
-  flac_verification_failed: '转换后解码校验未通过',
-  flac_parameters_changed: '转换后音频参数不一致',
-};
+
 export function IntakePanel() {
+  const { t } = useTranslation();
   const [preferences, setPreferences] = useState<Preferences | null>(null);
   const [suffixText, setSuffixText] = useState('');
   const [items, setItems] = useState<Items | null>(null);
@@ -79,6 +42,11 @@ export function IntakePanel() {
     [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState<Item | null>(null),
     [fields, setFields] = useState<string[]>([]);
+
+  function getLabel(code: string) {
+    return t(`intakePanel.label_${code}`, { defaultValue: code });
+  }
+
   useEffect(() => {
     const controller = new AbortController();
     api<Preferences>('/manage/intake/settings', { signal: controller.signal })
@@ -160,25 +128,33 @@ export function IntakePanel() {
       setTick((value) => value + 1);
       setNotice(
         action === 'approve'
-          ? '已确认，后台将继续导入。'
+          ? t('intakePanel.noticeApprove')
           : action === 'ignore'
-            ? '已忽略；源文件变化后会重新检查。'
-            : '已安排重新检查。',
+            ? t('intakePanel.noticeIgnore')
+            : t('intakePanel.noticeRetry'),
       );
     } catch (reason) {
-      setError(`${(reason as Error).message}。若文件或记录已变化，请取消编辑并重新打开。`);
+      setError(t('intakePanel.errorActionWithHint', { message: (reason as Error).message }));
     } finally {
       setBusy(false);
     }
   }
+
+  const fieldLabels = [
+    t('intakePanel.fieldTitle'),
+    t('intakePanel.fieldArtists'),
+    t('intakePanel.fieldAlbum'),
+    t('intakePanel.fieldAlbumArtists'),
+    t('intakePanel.fieldTrackNumber'),
+    t('intakePanel.fieldDiscNumber'),
+  ];
+
   return (
     <>
       <section className="management-card">
         <span className="eyebrow">AUTOMATIC IMPORT</span>
-        <h2>自动导入</h2>
-        <p className="muted">
-          定期发现新文件，稳定后检查并导入；信息不完整的歌曲留在待整理中。手动“导入音乐”表示源文件已准备就绪。
-        </p>
+        <h2>{t('intakePanel.title')}</h2>
+        <p className="muted">{t('intakePanel.description')}</p>
         <form
           onSubmit={async (event) => {
             event.preventDefault();
@@ -203,7 +179,7 @@ export function IntakePanel() {
                   }),
                 }),
               );
-              setNotice('自动导入设置已保存。');
+              setNotice(t('intakePanel.savedNotice'));
             } catch (reason) {
               setError((reason as Error).message);
             } finally {
@@ -220,10 +196,10 @@ export function IntakePanel() {
                   setPreferences((value) => value && { ...value, enabled: event.target.checked })
                 }
               />
-              自动发现并导入新音乐
+              {t('intakePanel.enableAutoImport')}
             </label>
             <label>
-              <HelpLabel hint="importInterval">检查间隔（秒）</HelpLabel>
+              <HelpLabel hint="importInterval">{t('intakePanel.intervalSeconds')}</HelpLabel>
               <input
                 type="number"
                 min="15"
@@ -238,7 +214,7 @@ export function IntakePanel() {
               />
             </label>
             <label>
-              <HelpLabel hint="importStable">等待文件稳定（秒）</HelpLabel>
+              <HelpLabel hint="importStable">{t('intakePanel.stableSeconds')}</HelpLabel>
               <input
                 type="number"
                 min="5"
@@ -272,12 +248,10 @@ export function IntakePanel() {
                       )
                     }
                   />
-                  同专辑有下载标记时整张等待（含 CD / Disc 子目录）
+                  {t('intakePanel.waitForAlbum')}
                 </label>
                 <label>
-                  <HelpLabel hint="downloadSuffix">
-                    下载中文件／目录后缀（空格或逗号分隔）
-                  </HelpLabel>
+                  <HelpLabel hint="downloadSuffix">{t('intakePanel.downloadSuffixes')}</HelpLabel>
                   <input
                     required
                     value={suffixText}
@@ -285,25 +259,23 @@ export function IntakePanel() {
                     onChange={(event) => setSuffixText(event.target.value)}
                   />
                 </label>
-                <p className="muted">
-                  建议下载器把未完成任务放在独立目录，完成后移入导入源。仅靠文件短时间不变，无法判断整个下载任务已完成。导入只复制，原件可继续做种。
-                </p>
+                <p className="muted">{t('intakePanel.downloadNotice')}</p>
               </>
             )}
-            <button className="primary">保存自动导入设置</button>
+            <button className="primary">{t('intakePanel.saveSettings')}</button>
           </fieldset>
         </form>
       </section>
-      <section className="management-card" aria-label="待整理音乐">
+      <section className="management-card" aria-label={t('intakePanel.reviewSectionAria')}>
         <div className="management-section-heading">
           <div>
             <h2>
-              待整理 <small>{items?.total ?? '…'}</small>
+              {t('intakePanel.reviewTitle')} <small>{items?.total ?? '…'}</small>
             </h2>
-            <p className="muted">补充缺失信息后继续入库；转换错误与版本冲突单独处理。</p>
+            <p className="muted">{t('intakePanel.reviewDescription')}</p>
           </div>
           <button disabled={busy} onClick={() => setTick((value) => value + 1)}>
-            刷新待整理
+            {t('intakePanel.refreshReview')}
           </button>
         </div>
         {notice && <p role="status">{notice}</p>}
@@ -312,16 +284,14 @@ export function IntakePanel() {
             {error}
           </p>
         )}
-        {items?.items.length === 0 && <p className="muted">没有需要处理的音乐。</p>}
+        {items?.items.length === 0 && <p className="muted">{t('intakePanel.emptyList')}</p>}
         <ul className="intake-list">
           {items?.items.map((item) => (
             <li key={item.id}>
               <div>
-                <strong>{labels[item.state] || item.state}</strong>
+                <strong>{getLabel(item.state)}</strong>
                 <code>{item.source_path}</code>
-                <p className="muted">
-                  {item.issues.map((code) => labels[code] || code).join(' · ')}
-                </p>
+                <p className="muted">{item.issues.map((code) => getLabel(code)).join(' · ')}</p>
               </div>
               {editing?.id === item.id ? (
                 <form
@@ -330,17 +300,10 @@ export function IntakePanel() {
                     void act(editing, 'approve');
                   }}
                   className="intake-edit"
-                  aria-label="补充导入信息"
+                  aria-label={t('intakePanel.editFormAria')}
                 >
-                  <p className="muted">确认后使用这些信息归档并更新曲库。</p>
-                  {[
-                    '歌名',
-                    '歌曲艺人（每行一位）',
-                    '专辑',
-                    '专辑艺人（每行一位）',
-                    '曲号',
-                    '碟号',
-                  ].map((label, i) => (
+                  <p className="muted">{t('intakePanel.editFormHint')}</p>
+                  {fieldLabels.map((label, i) => (
                     <label key={label}>
                       {label}
                       {i === 1 || i === 3 ? (
@@ -372,10 +335,10 @@ export function IntakePanel() {
                   ))}
                   <div className="intake-buttons">
                     <button className="primary" disabled={busy}>
-                      确认信息并继续导入
+                      {t('intakePanel.confirmAndImport')}
                     </button>
                     <button type="button" disabled={busy} onClick={() => setEditing(null)}>
-                      取消编辑
+                      {t('intakePanel.cancelEdit')}
                     </button>
                   </div>
                 </form>
@@ -383,17 +346,17 @@ export function IntakePanel() {
                 <div className="intake-buttons">
                   {item.can_approve && (
                     <button disabled={busy} onClick={() => edit(item)}>
-                      补充信息
+                      {t('intakePanel.supplementInfo')}
                     </button>
                   )}
                   {item.state === 'failed' && (
                     <button disabled={busy} onClick={() => void act(item, 'retry')}>
-                      重新检查
+                      {t('intakePanel.recheck')}
                     </button>
                   )}
                   {['review', 'waiting', 'failed', 'conflict'].includes(item.state) && (
                     <button disabled={busy} onClick={() => void act(item, 'ignore')}>
-                      忽略此项
+                      {t('intakePanel.ignoreItem')}
                     </button>
                   )}
                 </div>
@@ -407,7 +370,7 @@ export function IntakePanel() {
               disabled={offset === 0}
               onClick={() => setOffset(Math.max(0, offset - items.limit))}
             >
-              上一页
+              {t('intakePanel.prevPage')}
             </button>
             <span>
               {Math.floor(offset / items.limit) + 1} / {Math.ceil(items.total / items.limit)}
@@ -416,7 +379,7 @@ export function IntakePanel() {
               disabled={offset + items.limit >= items.total}
               onClick={() => setOffset(offset + items.limit)}
             >
-              下一页
+              {t('intakePanel.nextPage')}
             </button>
           </div>
         )}

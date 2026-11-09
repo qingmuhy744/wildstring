@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import { HelpLabel } from './desktop-help';
 import { useEffect, useRef, useState } from 'react';
 import { api, time, type Lyrics, type Track } from './api';
@@ -35,6 +36,7 @@ export function LyricsEditor({
   player: Player;
   active: boolean;
 }) {
+  const { t } = useTranslation();
   const [record, setRecord] = useState<Record | null>(null),
     [text, setText] = useState('');
   const [restore, setRestore] = useState(false),
@@ -71,7 +73,7 @@ export function LyricsEditor({
       }
     } catch (reason) {
       if (!controller.signal.aborted)
-        setError(reason instanceof Error ? reason.message : '无法读取歌词。');
+        setError(reason instanceof Error ? reason.message : t('lyricsEditor.loadError'));
     }
   }
   useEffect(() => {
@@ -106,12 +108,12 @@ export function LyricsEditor({
     const milliseconds = Math.round(player.playbackTime() * 1000);
     const previous = selected > 0 ? lines[selected - 1].time_ms : null;
     if (previous !== null && milliseconds < previous) {
-      setError('时间早于上一句，请先试听或调整上一句。');
+      setError(t('lyricsEditor.timeEarlierThanPrev'));
       return;
     }
     const nextTime = lines[selected + 1]?.time_ms;
     if (nextTime !== null && nextTime !== undefined && milliseconds > nextTime) {
-      setError('时间晚于下一句，请先调整下一句。');
+      setError(t('lyricsEditor.timeLaterThanNext'));
       return;
     }
     change(
@@ -126,7 +128,7 @@ export function LyricsEditor({
     try {
       await work();
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '操作未完成，请重试。');
+      setError(reason instanceof Error ? reason.message : t('lyricsEditor.actionFailed'));
     } finally {
       setBusy(false);
     }
@@ -148,7 +150,7 @@ export function LyricsEditor({
               line.text.split('\n').map((text) => ({ time_ms: line.time_ms, text })),
             );
       if (!next.length) {
-        setError('请先填写歌词，每句一行。');
+        setError(t('lyricsEditor.emptyLyricsError'));
         return;
       }
       setLines(next);
@@ -189,7 +191,7 @@ export function LyricsEditor({
       setRecord(result);
       setText(result.text);
       setPreview(result.effective);
-      setNotice('歌词已保存。');
+      setNotice(t('lyricsEditor.savedNotice'));
       window.dispatchEvent(new CustomEvent('wildstring:lyrics-updated', { detail: track.id }));
     });
   }
@@ -226,7 +228,7 @@ export function LyricsEditor({
     <section
       hidden={!active}
       className="lyrics-editor"
-      aria-label="歌词编辑器"
+      aria-label={t('lyricsEditor.sectionAria')}
       onKeyDown={(event) => {
         const target = event.target as HTMLElement;
         if (
@@ -244,8 +246,8 @@ export function LyricsEditor({
     >
       {!record ? (
         <p role={error ? 'alert' : 'status'}>
-          {error || '读取歌词…'}
-          {error && <button onClick={() => void load()}>重新读取歌词</button>}
+          {error || t('lyricsEditor.loading')}
+          {error && <button onClick={() => void load()}>{t('lyricsEditor.reloadLyrics')}</button>}
         </p>
       ) : (
         <>
@@ -253,19 +255,21 @@ export function LyricsEditor({
             <div>
               <h3>
                 {mode === 'timing'
-                  ? '跟着音乐，逐句打点'
+                  ? t('lyricsEditor.modeTimingTitle')
                   : mode === 'preview'
-                    ? '歌词预览'
-                    : '编辑歌词'}
+                    ? t('lyricsEditor.modePreviewTitle')
+                    : t('lyricsEditor.modeTextTitle')}
               </h3>
               <p className="muted">
                 {mode === 'timing'
-                  ? '听到下一句开始时按空格，记录时间并切到这一句。第一下从第一句开始。'
-                  : '每句一行，可粘贴纯文本或 LRC。保存后所有播放器都能读取。'}
+                  ? t('lyricsEditor.modeTimingHelp')
+                  : t('lyricsEditor.modeTextHelp')}
               </p>
             </div>
             <span className="metadata-source">
-              {record.override !== null ? '人工编辑' : '文件歌词'}
+              {record.override !== null
+                ? t('lyricsEditor.sourceManual')
+                : t('lyricsEditor.sourceFile')}
             </span>
           </div>
           <div className="lyric-editor-player">
@@ -273,9 +277,13 @@ export function LyricsEditor({
               type="button"
               disabled={busy}
               onClick={play}
-              aria-label={mine && player.playing ? '暂停打点歌曲' : '播放打点歌曲'}
+              aria-label={
+                mine && player.playing
+                  ? t('lyricsEditor.pauseTrackAria')
+                  : t('lyricsEditor.playTrackAria')
+              }
             >
-              {mine && player.playing ? 'Ⅱ 暂停' : '▶ 播放这首歌'}
+              {mine && player.playing ? t('lyricsEditor.pauseLabel') : t('lyricsEditor.playLabel')}
             </button>
             <span>
               {time(mine ? player.position : 0)} /{' '}
@@ -283,7 +291,7 @@ export function LyricsEditor({
             </span>
             <input
               type="range"
-              aria-label="歌词制作播放进度"
+              aria-label={t('lyricsEditor.progressAria')}
               min={0}
               max={mine ? player.duration || 0 : 0}
               step={0.01}
@@ -299,9 +307,9 @@ export function LyricsEditor({
           )}
           {mode === 'text' && (
             <label className="metadata-field">
-              歌词内容
+              {t('lyricsEditor.fieldContent')}
               <textarea
-                aria-label="歌词内容"
+                aria-label={t('lyricsEditor.fieldContent')}
                 rows={11}
                 maxLength={524288}
                 value={text}
@@ -313,7 +321,7 @@ export function LyricsEditor({
                   setPreview(null);
                   setNotice('');
                 }}
-                placeholder="把歌词放在这里，每句一行。"
+                placeholder={t('lyricsEditor.contentPlaceholder')}
               />
             </label>
           )}
@@ -322,14 +330,15 @@ export function LyricsEditor({
               ref={workspace}
               className="lyric-timing-workspace"
               tabIndex={0}
-              aria-label="逐行打点工作区"
+              aria-label={t('lyricsEditor.timingWorkspaceAria')}
             >
               <div className="lyric-cue" aria-live="polite">
-                <small>当前句</small>
-                <p>{selected > 0 ? lines[selected - 1].text || '♪' : '前奏，准备第一句'}</p>
-                <small>下一句</small>
+                <small>{t('lyricsEditor.currentLine')}</small>
+                <p>{selected > 0 ? lines[selected - 1].text || '♪' : t('lyricsEditor.introCue')}</p>
+                <small>{t('lyricsEditor.nextLine')}</small>
                 <p className="lyric-cue-next">
-                  {lines[selected]?.text || (selected >= lines.length ? '全部完成' : '♪')}
+                  {lines[selected]?.text ||
+                    (selected >= lines.length ? t('lyricsEditor.allCompleted') : '♪')}
                 </p>
               </div>
               <div className="lyric-timing-actions">
@@ -340,7 +349,7 @@ export function LyricsEditor({
                   }
                   onClick={stamp}
                 >
-                  下一句（空格）
+                  {t('lyricsEditor.stampNext')}
                 </button>
                 <button
                   disabled={!history.length || busy}
@@ -352,13 +361,16 @@ export function LyricsEditor({
                     setError('');
                   }}
                 >
-                  撤销打点
+                  {t('lyricsEditor.undoStamp')}
                 </button>
                 <span role="status">
-                  {lines.filter((line) => line.time_ms !== null).length} / {lines.length} 句已标记
+                  {t('lyricsEditor.markedCount', {
+                    timed: lines.filter((line) => line.time_ms !== null).length,
+                    total: lines.length,
+                  })}
                 </span>
               </div>
-              <ol className="lyric-timing-lines" aria-label="打点歌词">
+              <ol className="lyric-timing-lines" aria-label={t('lyricsEditor.timingLinesAria')}>
                 {lines.map((line, index) => (
                   <li
                     key={index}
@@ -368,7 +380,10 @@ export function LyricsEditor({
                     <button
                       className="lyric-select"
                       aria-current={index === selected ? 'step' : undefined}
-                      aria-label={`选择第 ${index + 1} 句：${line.text || '间奏'}`}
+                      aria-label={t('lyricsEditor.selectLineAria', {
+                        index: index + 1,
+                        text: line.text || t('lyricsEditor.interlude'),
+                      })}
                       onClick={() => setSelected(index)}
                     >
                       <small>{String(index + 1).padStart(2, '0')}</small>
@@ -376,10 +391,10 @@ export function LyricsEditor({
                     </button>
                     <input
                       type="number"
-                      aria-label={`第 ${index + 1} 句时间（秒）`}
+                      aria-label={t('lyricsEditor.lineTimeAria', { index: index + 1 })}
                       min={0}
                       step={0.01}
-                      placeholder="未标记"
+                      placeholder={t('lyricsEditor.unmarked')}
                       value={line.time_ms === null ? '' : line.time_ms / 1000}
                       onChange={(event) => {
                         const raw = event.target.value,
@@ -395,21 +410,21 @@ export function LyricsEditor({
                     />
                     <button
                       className="text-button"
-                      aria-label={`试听第 ${index + 1} 句`}
+                      aria-label={t('lyricsEditor.previewLineAria', { index: index + 1 })}
                       disabled={!mine || !player.duration || line.time_ms === null}
                       onClick={() => {
                         player.seek(line.time_ms! / 1000);
                         if (!player.playing) player.toggle();
                       }}
                     >
-                      试听
+                      {t('lyricsEditor.previewLine')}
                     </button>
                   </li>
                 ))}
               </ol>
               <div className="lyric-shift">
                 <label>
-                  <HelpLabel hint="lyricOffset">整体偏移（秒）</HelpLabel>
+                  <HelpLabel hint="lyricOffset">{t('lyricsEditor.shiftLabel')}</HelpLabel>
                   <input
                     type="number"
                     step={0.1}
@@ -425,7 +440,7 @@ export function LyricsEditor({
                       !Number.isFinite(offset) ||
                       lines.some((line) => line.time_ms !== null && line.time_ms + offset < 0)
                     ) {
-                      setError('偏移后时间不能小于 0。');
+                      setError(t('lyricsEditor.negativeTimeError'));
                       return;
                     }
                     change(
@@ -437,21 +452,21 @@ export function LyricsEditor({
                     );
                   }}
                 >
-                  应用偏移
+                  {t('lyricsEditor.applyShift')}
                 </button>
               </div>
             </div>
           )}
           {mode === 'preview' && (
-            <div className="lyric-edit-preview" aria-label="歌词修改预览">
+            <div className="lyric-edit-preview" aria-label={t('lyricsEditor.previewAria')}>
               <p className="muted">
                 {restore
-                  ? '将恢复文件中的歌词。'
+                  ? t('lyricsEditor.previewRestore')
                   : preview?.kind === 'synced'
-                    ? '同步歌词，可边播放边核对。'
+                    ? t('lyricsEditor.previewSynced')
                     : preview?.kind === 'plain'
-                      ? '纯文本歌词，尚未打点。'
-                      : '将不显示歌词。'}
+                      ? t('lyricsEditor.previewPlain')
+                      : t('lyricsEditor.previewEmpty')}
               </p>
               <ol>
                 {preview?.lines.map((line, index) => (
@@ -467,12 +482,12 @@ export function LyricsEditor({
             <p className="error" role="alert">
               {error}{' '}
               <button className="text-button" disabled={busy} onClick={() => void load()}>
-                重新读取歌词
+                {t('lyricsEditor.reloadLyrics')}
               </button>
             </p>
           )}
           {notice && (
-            <p className="ai-status" role="status" aria-label="歌词编辑状态">
+            <p className="ai-status" role="status" aria-label={t('lyricsEditor.statusAria')}>
               {notice}
             </p>
           )}
@@ -485,10 +500,10 @@ export function LyricsEditor({
                 setError('');
               }}
             >
-              文本编辑
+              {t('lyricsEditor.textEditMode')}
             </button>
             <button disabled={busy || !text.trim()} onClick={prepare}>
-              逐行打点
+              {t('lyricsEditor.timingMode')}
             </button>
             {mode === 'text' && (
               <button
@@ -502,12 +517,12 @@ export function LyricsEditor({
                   setNotice('');
                 }}
               >
-                恢复文件歌词
+                {t('lyricsEditor.restoreFileLyrics')}
               </button>
             )}
             {mode === 'preview' && preview?.kind === 'synced' && (
               <button disabled={busy} onClick={exportLrc}>
-                导出 LRC
+                {t('lyricsEditor.exportLrc')}
               </button>
             )}
             <button
@@ -522,7 +537,11 @@ export function LyricsEditor({
               }
               onClick={() => (mode === 'preview' ? void save() : checkPreview())}
             >
-              {busy ? '处理中…' : mode === 'preview' ? '保存歌词' : '预览歌词'}
+              {busy
+                ? t('lyricsEditor.processing')
+                : mode === 'preview'
+                  ? t('lyricsEditor.saveLyrics')
+                  : t('lyricsEditor.previewLyrics')}
             </button>
           </div>
         </>

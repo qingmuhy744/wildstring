@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 export interface MatchedTrack {
   title: string;
@@ -35,6 +36,7 @@ interface Props {
 }
 
 export const CatalogGapCard: React.FC<Props> = ({ data, onPlayTrack }) => {
+  const { t } = useTranslation();
   const [tab, setTab] = useState<'missing' | 'matched'>(
     data.missing.length > 0 ? 'missing' : 'matched',
   );
@@ -43,11 +45,11 @@ export const CatalogGapCard: React.FC<Props> = ({ data, onPlayTrack }) => {
     <div className="catalog-gap-card">
       <div className="gap-card-header">
         <div>
-          <h4>{data.artist} · 全网榜单曲库查漏补缺</h4>
-          <span className="gap-card-sub">全网权威代表作比对</span>
+          <h4>{t('catalogGapCard.title', { artist: data.artist })}</h4>
+          <span className="gap-card-sub">{t('catalogGapCard.subtitle')}</span>
         </div>
         <div className={`gap-badge ${data.coverage_percent === 100 ? 'perfect' : ''}`}>
-          {data.coverage_percent}% 收录
+          {t('catalogGapCard.coveragePercent', { percent: data.coverage_percent })}
         </div>
       </div>
 
@@ -66,21 +68,21 @@ export const CatalogGapCard: React.FC<Props> = ({ data, onPlayTrack }) => {
           className={`gap-tab-btn ${tab === 'missing' ? 'active' : ''}`}
           onClick={() => setTab('missing')}
         >
-          待补齐 ({data.missing_count})
+          {t('catalogGapCard.tabMissing', { count: data.missing_count })}
         </button>
         <button
           type="button"
           className={`gap-tab-btn ${tab === 'matched' ? 'active' : ''}`}
           onClick={() => setTab('matched')}
         >
-          已收录 ({data.matched_count})
+          {t('catalogGapCard.tabMatched', { count: data.matched_count })}
         </button>
       </div>
 
       <div className="gap-list">
         {tab === 'missing' ? (
           data.missing.length === 0 ? (
-            <div className="gap-empty-hint">🎉 完美！该歌手榜单代表作已全数收录！</div>
+            <div className="gap-empty-hint">{t('catalogGapCard.emptyMissing')}</div>
           ) : (
             data.missing.map((item, idx) => (
               <div className="gap-item missing" key={idx}>
@@ -90,12 +92,12 @@ export const CatalogGapCard: React.FC<Props> = ({ data, onPlayTrack }) => {
                     {[item.album, item.year].filter(Boolean).join(' · ')}
                   </div>
                 </div>
-                <span className="gap-status-tag missing">暂缺</span>
+                <span className="gap-status-tag missing">{t('catalogGapCard.statusMissing')}</span>
               </div>
             ))
           )
         ) : data.matched.length === 0 ? (
-          <div className="gap-empty-hint">本地曲库尚未收录该歌手的歌曲</div>
+          <div className="gap-empty-hint">{t('catalogGapCard.emptyMatched')}</div>
         ) : (
           data.matched.map((item) => (
             <div className="gap-item matched" key={item.track_id}>
@@ -110,9 +112,9 @@ export const CatalogGapCard: React.FC<Props> = ({ data, onPlayTrack }) => {
                   type="button"
                   className="gap-play-btn"
                   onClick={() => onPlayTrack(item.track_id)}
-                  title="播放此歌曲"
+                  title={t('catalogGapCard.playTrackTitle')}
                 >
-                  ▶ 播放
+                  {t('catalogGapCard.playButton')}
                 </button>
               )}
             </div>

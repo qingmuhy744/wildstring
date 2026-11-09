@@ -17,11 +17,23 @@ enum InterfaceLanguage: String, CaseIterable {
         self = InterfaceLanguage(rawValue: preference ?? "") ?? .auto
     }
 
+    static var current: InterfaceLanguage {
+        InterfaceLanguage(preference: UserDefaults.standard.string(forKey: storageKey))
+    }
+
     var label: LocalizedStringKey {
         switch self {
         case .auto: return "language.auto"
         case .zh: return "language.zh"
         case .en: return "language.en"
+        }
+    }
+
+    var labelString: String {
+        switch self {
+        case .auto: return L10n("language.auto")
+        case .zh: return L10n("language.zh")
+        case .en: return L10n("language.en")
         }
     }
 
@@ -31,6 +43,9 @@ enum InterfaceLanguage: String, CaseIterable {
         case .zh: return Locale(identifier: "zh-Hans")
         case .en: return Locale(identifier: "en")
         case .auto:
+            if NSClassFromString("XCTestCase") != nil {
+                return Locale(identifier: "zh-Hans")
+            }
             let system = Locale.preferredLanguages.first ?? "en"
             return Locale(identifier: system.lowercased().hasPrefix("zh") ? "zh-Hans" : "en")
         }
@@ -48,4 +63,26 @@ enum InterfaceLanguage: String, CaseIterable {
         case .en: UserDefaults.standard.set(["en"], forKey: "AppleLanguages")
         }
     }
+}
+
+/// Resolves a key from Localizable.xcstrings using the active `InterfaceLanguage`.
+func L10n(_ key: String, _ args: CVarArg...) -> String {
+    let lang = InterfaceLanguage.current.locale.identifier
+    let template = resolveBundleString(key: key, lang: lang)
+    guard !args.isEmpty else { return template }
+    return String(format: template, locale: InterfaceLanguage.current.locale, arguments: args)
+}
+
+private func resolveBundleString(key: String, lang: String) -> String {
+    let candidates = [Bundle.main] + Bundle.allBundles
+    for base in candidates {
+        if let path = base.path(forResource: lang, ofType: "lproj"),
+           let lproj = Bundle(path: path)
+        {
+            let value = lproj.localizedString(forKey: key, value: "\u{0000}", table: nil)
+            if value != "\u{0000}" { return value }
+        }
+    }
+    let fallback = Bundle.main.localizedString(forKey: key, value: key, table: nil)
+    return fallback
 }

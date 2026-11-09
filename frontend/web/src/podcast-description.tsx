@@ -1,4 +1,5 @@
 import React from 'react';
+import i18n from './i18n';
 
 const ALLOWED_TAGS = new Set([
   'P',
@@ -73,7 +74,7 @@ export function renderPodcastDescription(
                 key: `${key}-time-${match.index}`,
                 type: 'button',
                 className: 'podcast-timecode',
-                title: `跳转到 ${match[0]}`,
+                title: i18n.t('podcastDescription.jumpTo', { time: match[0] }),
                 onClick: () => options.onTimecode?.(seconds),
               },
               match[0],

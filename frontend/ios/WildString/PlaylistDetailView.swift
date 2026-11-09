@@ -28,7 +28,7 @@ struct PlaylistDetailView: View {
             if let loader {
                 LoadedList(
                     loader: loader,
-                    emptyTitle: "歌单为空",
+                    emptyTitle: L10n("playlistDetail.empty"),
                     emptyIcon: "music.note.list",
                     onMove: onMoveHandler
                 ) { track in
@@ -46,7 +46,7 @@ struct PlaylistDetailView: View {
                     }
                     .swipeActions(edge: .trailing) {
                         if detail.isEditable {
-                            Button("移除", role: .destructive) {
+                            Button(L10n("playlistDetail.remove"), role: .destructive) {
                                 Task { await remove(track) }
                             }
                         }
@@ -82,7 +82,7 @@ struct PlaylistDetailView: View {
                 Text(kindLabel)
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                Text("\(detail.trackCount) 首")
+                Text(L10n("playlistDetail.trackCount", detail.trackCount))
                     .font(.caption)
                     .foregroundStyle(.tertiary)
                 Button {
@@ -90,7 +90,7 @@ struct PlaylistDetailView: View {
                         playTracks(loader?.items ?? [], startingAt: first, using: playback)
                     }
                 } label: {
-                    Label("播放全部", systemImage: "play.fill")
+                    Label(L10n("playlistDetail.playAll"), systemImage: "play.fill")
                         .font(.subheadline.bold())
                 }
                 .buttonStyle(.borderedProminent)
@@ -105,9 +105,9 @@ struct PlaylistDetailView: View {
     }
 
     private var kindLabel: String {
-        if detail.isFavorites { return "自动收藏" }
-        if detail.isSmart { return "规则歌单" }
-        return "普通歌单"
+        if detail.isFavorites { return L10n("playlistDetail.kindFavorites") }
+        if detail.isSmart { return L10n("playlistDetail.kindSmart") }
+        return L10n("playlistDetail.kindStandard")
     }
 
     private var onMoveHandler: ((IndexSet, Int) -> Void)? {
@@ -120,7 +120,7 @@ struct PlaylistDetailView: View {
     private func reorder(from offsets: IndexSet, to destination: Int) {
         guard let loader, let current, current.isEditable else { return }
         if current.trackCount > loader.items.count {
-            message = "请先滚动加载完整歌单再排序"
+            message = L10n("playlistDetail.loadAllBeforeReorder")
             return
         }
         Haptics.selection()
@@ -142,7 +142,7 @@ struct PlaylistDetailView: View {
         } catch let error as APIError where error.statusCode == 409 {
             self.current = try? await client.playlist(id: current.id)
             await loader?.loadInitial()
-            message = "歌单已更新，已刷新，请重试"
+            message = L10n("playlistDetail.conflictRetry")
         } catch {
             await loader?.loadInitial()
             message = ErrorText.message(for: error)
@@ -178,7 +178,7 @@ struct PlaylistDetailView: View {
         } catch let error as APIError where error.statusCode == 409 {
             current = try? await client.playlist(id: detail.id)
             await loader?.loadInitial()
-            message = "歌单已更新，已刷新，请重试"
+            message = L10n("playlistDetail.conflictRetry")
         } catch {
             message = ErrorText.message(for: error)
         }

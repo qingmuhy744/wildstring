@@ -14,7 +14,7 @@ struct ServersView: View {
         NavigationStack {
             List {
                 if !model.servers.isEmpty {
-                    Section("已保存的服务器") {
+                    Section(L10n("serversView.savedServersSection")) {
                         ForEach(model.servers) { server in
                             Button {
                                 Task { await model.connect(to: server) }
@@ -29,10 +29,10 @@ struct ServersView: View {
                             }
                             .buttonStyle(.plain)
                             .contextMenu {
-                                Button("本机别名") { alias = server.alias ?? ""; editing = server }
+                                Button(L10n("serversView.localAlias")) { alias = server.alias ?? ""; editing = server }
                             }
                             .swipeActions {
-                                Button("删除", role: .destructive) {
+                                Button(L10n("serversView.delete"), role: .destructive) {
                                     Task { await model.deleteServer(server) }
                                 }
                             }
@@ -40,16 +40,16 @@ struct ServersView: View {
                     }
                 }
                 if model.routes != nil {
-                    Section { Button("当前服务器线路") { showRoutes = true } }
+                    Section { Button(L10n("serversView.currentServerRoutes")) { showRoutes = true } }
                 }
                 Section {
                     Button {
                         model.showAddServer()
                     } label: {
-                        Label("添加服务器", systemImage: "plus")
+                        Label(L10n("serversView.addServer"), systemImage: "plus")
                     }
                 } footer: {
-                    Text("每个服务器保存独立的登录、缓存、离线与队列。")
+                    Text(L10n("serversView.serverNotice"))
                 }
                 if let message = model.errorMessage {
                     Section {
@@ -59,17 +59,17 @@ struct ServersView: View {
                     }
                 }
             }
-            .navigationTitle("野弦")
+            .navigationTitle(L10n("serversView.brandTitle"))
             .sheet(isPresented: $showRoutes) {
                 if let routes = model.routes {
-                    NavigationStack { ServerRoutesEditor(routes: routes).navigationTitle("服务器线路").toolbar { Button("完成") { showRoutes = false } } }
+                    NavigationStack { ServerRoutesEditor(routes: routes).navigationTitle(L10n("serversView.serverRoutesTitle")).toolbar { Button(L10n("serversView.done")) { showRoutes = false } } }
                 }
             }
-            .alert("本机别名", isPresented: Binding(get: { editing != nil }, set: { if !$0 { editing = nil } })) {
-                TextField("留空使用服务器名称", text: $alias)
-                Button("保存") { if let editing { model.setAlias(alias, for: editing) }; editing = nil }
-                Button("取消", role: .cancel) { editing = nil }
-            } message: { Text("别名仅保存在这台设备。") }
+            .alert(L10n("serversView.localAliasTitle"), isPresented: Binding(get: { editing != nil }, set: { if !$0 { editing = nil } })) {
+                TextField(L10n("serversView.aliasPlaceholder"), text: $alias)
+                Button(L10n("serversView.save")) { if let editing { model.setAlias(alias, for: editing) }; editing = nil }
+                Button(L10n("serversView.cancel"), role: .cancel) { editing = nil }
+            } message: { Text(L10n("serversView.aliasNotice")) }
         }
     }
 }

@@ -3,6 +3,8 @@ package com.wildstring.app.data
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
+import com.wildstring.app.AppLanguage
+import com.wildstring.app.R
 import java.io.IOException
 import com.google.gson.Gson
 import kotlinx.coroutines.Dispatchers
@@ -27,7 +29,7 @@ import retrofit2.converter.gson.GsonConverterFactory
 
 const val DISCOVERY_CACHE_TTL = 3600_000L
 
-data class CatalogQuery(val tab: String = "search", val kind: String = "discover", val title: String = "发现",
+data class CatalogQuery(val tab: String = "search", val kind: String = "discover", val title: String = AppLanguage.string(R.string.repo_tab_discover),
     val query: String = "", val offset: Int = 0, val collection: String? = null, val collectionId: String? = null,
     val playlist: Playlist? = null, val role: String = "album_artist", val sort: String = "title", val albumFilter: String? = null, val order: String = "asc",
     val libraryId: String = "all") {
@@ -103,7 +105,7 @@ class Repository @Inject constructor(@param:ApplicationContext private val conte
         return (knownTracks[track.id] ?: track).copy(loved = track.loved).also { knownTracks[track.id] = it }
     }
     @Synchronized fun api(): Api {
-        val request = session.requestState() ?: throw IOException("请先连接服务器。")
+        val request = session.requestState() ?: throw IOException(AppLanguage.string(R.string.repo_connect_server_first))
         val base = request.endpoint
         val selection = request.selection
         val library = selectedLibraryId
@@ -120,7 +122,7 @@ class Repository @Inject constructor(@param:ApplicationContext private val conte
     }
     /** A lost assistant response can already have consumed model budget; do not resend POSTs. */
     @Synchronized fun agentApi(): Api {
-        val request = session.requestState() ?: throw IOException("请先连接服务器。")
+        val request = session.requestState() ?: throw IOException(AppLanguage.string(R.string.repo_connect_server_first))
         val library = selectedLibraryId
         val key = "${request.endpoint}|${request.selection}|$library"
         if (cachedAgentKey != key) {
@@ -135,7 +137,7 @@ class Repository @Inject constructor(@param:ApplicationContext private val conte
         return checkNotNull(cachedAgentApi)
     }
     fun url(vararg segments: String): String {
-        val builder = (session.endpoint ?: throw IOException("请先连接服务器。")).newBuilder()
+        val builder = (session.endpoint ?: throw IOException(AppLanguage.string(R.string.repo_connect_server_first))).newBuilder()
         segments.forEach { builder.addPathSegment(it) }
         return builder.build().toString()
     }
@@ -156,14 +158,14 @@ class Repository @Inject constructor(@param:ApplicationContext private val conte
                 while (true) {
                     val count = input.read(buffer)
                     if (count < 0) break
-                    if (output.size() + count > 4 * 1024 * 1024) throw IOException("封面图片过大。")
+                    if (output.size() + count > 4 * 1024 * 1024) throw IOException(AppLanguage.string(R.string.repo_cover_too_large))
                     output.write(buffer, 0, count)
                 }
                 output.toByteArray()
             }
         }
         requireProfile(owner)
-        if (bytes.size < 3 || bytes[0] != 0xff.toByte() || bytes[1] != 0xd8.toByte()) throw IOException("封面图片不可用。")
+        if (bytes.size < 3 || bytes[0] != 0xff.toByte() || bytes[1] != 0xd8.toByte()) throw IOException(AppLanguage.string(R.string.repo_cover_unavailable))
         bytes
     }
     private fun podcastNetwork(): String {
@@ -309,7 +311,7 @@ class Repository @Inject constructor(@param:ApplicationContext private val conte
     }
     suspend fun updatePodcastPlaybackSettings(settings: PodcastPlaybackSettings, expectedOwner: String? = session.cacheScope()): PodcastPlaybackSettings {
         val owner = expectedOwner; requireProfile(owner)
-        if (settings.userId != session.account?.id) throw CancellationException("会话已变化。")
+        if (settings.userId != session.account?.id) throw CancellationException(AppLanguage.string(R.string.repo_session_changed))
         return api().updatePodcastPlaybackSettings(PodcastPlaybackSettingsUpdate(settings.version, settings.autoCacheCurrent, settings.prefetchNext, settings.networkPolicy), RequestOwner(owner)).also { requireProfile(owner) }
     }
     suspend fun podcastInbox(): PodcastInboxSnapshot {
@@ -418,7 +420,7 @@ class Repository @Inject constructor(@param:ApplicationContext private val conte
         val owner = session.cacheScope()
         val endpoint = session.endpoint
         return api().status().also {
-            if (owner != session.cacheScope() || endpoint != session.endpoint) throw CancellationException("会话已变化。")
+            if (owner != session.cacheScope() || endpoint != session.endpoint) throw CancellationException(AppLanguage.string(R.string.repo_session_changed))
             it.server?.let(session::updateServerInfo)
         }
     }
@@ -433,33 +435,33 @@ class Repository @Inject constructor(@param:ApplicationContext private val conte
         return changed
     }
     suspend fun updateProfile(username: String, displayName: String, email: String): Account {
-        val owner = session.cacheScope() ?: throw IOException("登录已失效。")
+        val owner = session.cacheScope() ?: throw IOException(AppLanguage.string(R.string.repo_login_expired))
         val endpoint = session.endpoint
-        val account = session.account ?: throw IOException("尚未获取账号信息。")
+        val account = session.account ?: throw IOException(AppLanguage.string(R.string.repo_no_account_info))
         val updated = api().updateProfile(ProfileUpdate(version = account.version, username = username, displayName = displayName, email = email))
-        if (owner != session.cacheScope() || endpoint != session.endpoint) throw CancellationException("会话已变化。")
+        if (owner != session.cacheScope() || endpoint != session.endpoint) throw CancellationException(AppLanguage.string(R.string.repo_session_changed))
         session.bindAccount(updated)
         return updated
     }
     /** Saves the interface language on the account; it does not bump the profile version. */
     suspend fun updateLanguage(language: String): Account {
-        val owner = session.cacheScope() ?: throw IOException("登录已失效。")
+        val owner = session.cacheScope() ?: throw IOException(AppLanguage.string(R.string.repo_login_expired))
         val endpoint = session.endpoint
         val updated = api().updatePreferences(PreferencesUpdate(language))
-        if (owner != session.cacheScope() || endpoint != session.endpoint) throw CancellationException("会话已变化。")
+        if (owner != session.cacheScope() || endpoint != session.endpoint) throw CancellationException(AppLanguage.string(R.string.repo_session_changed))
         session.bindAccount(updated)
         return updated
     }
     suspend fun changePassword(current: String, next: String) {
-        val owner = session.cacheScope() ?: throw IOException("登录已失效。")
-        val request = session.requestState() ?: throw IOException("尚未连接服务器。")
+        val owner = session.cacheScope() ?: throw IOException(AppLanguage.string(R.string.repo_login_expired))
+        val request = session.requestState() ?: throw IOException(AppLanguage.string(R.string.repo_not_connected))
         val base = request.endpoint
-        val cookie = session.cookieFor(request)?.substringBefore(';') ?: throw IOException("登录已失效。")
+        val cookie = session.cookieFor(request)?.substringBefore(';') ?: throw IOException(AppLanguage.string(R.string.repo_login_expired))
         // A late password response must never clear cookies belonging to a newer login.
         val isolated = Retrofit.Builder().baseUrl(base).client(client.newBuilder().apply { interceptors().removeAll { it is ScopedSessionInterceptor }; interceptors().add(0, SelectionRequestInterceptor(request.selection) { session.requestState()?.selection }) }.cookieJar(CookieJar.NO_COOKIES).build())
             .addConverterFactory(GsonConverterFactory.create(networkGson())).build().create(Api::class.java)
         val response = isolated.changePassword(cookie, PasswordChange(current, next))
-        if (owner != session.cacheScope() || base != session.endpoint) throw CancellationException("会话已变化。")
+        if (owner != session.cacheScope() || base != session.endpoint) throw CancellationException(AppLanguage.string(R.string.repo_session_changed))
         if (!response.isSuccessful) throw HttpException(response)
     }
     suspend fun tracks(query: String = "", offset: Int = 0, collection: String? = null, collectionId: String? = null, recent: Boolean = false, role: String = "artist", sort: String = if (recent) "last_played_at" else "title", limit: Int = 50, albumFilter: String? = null, order: String? = null): Page<Track> {
@@ -474,7 +476,7 @@ class Repository @Inject constructor(@param:ApplicationContext private val conte
         }.build().toString()
         return api().tracks(target, query, limit = limit, offset = offset).let { page -> requireProfile(profile); page.copy(items = page.items.map { rememberTrack(it, snapshot) }) }
     }
-    private fun requireProfile(profile: String?) { if (profile == null || session.cacheScope() != profile) throw CancellationException("会话已变化。") }
+    private fun requireProfile(profile: String?) { if (profile == null || session.cacheScope() != profile) throw CancellationException(AppLanguage.string(R.string.repo_session_changed)) }
     private suspend fun <T> saved(key: String, type: Class<T>): T? {
         val owner = session.cacheScope() ?: return null
         val result = withContext(Dispatchers.IO) { cache.read(key)?.let { runCatching { gson.fromJson(String(it.bytes, Charsets.UTF_8), type) }.getOrNull() } }
@@ -506,7 +508,7 @@ class Repository @Inject constructor(@param:ApplicationContext private val conte
     }
     suspend fun saveAvatar(bytes: ByteArray, owner: String) {
         requireProfile(owner)
-        require(bytes.size <= 5 * 1024 * 1024) { "头像图片超过 5 MiB，请压缩后重试。" }
+        require(bytes.size <= 5 * 1024 * 1024) { AppLanguage.string(R.string.repo_avatar_too_large) }
         val response = api().uploadAvatar(url("api", "v1", "auth", "avatar"), bytes.toRequestBody("application/octet-stream".toMediaType()), RequestOwner(owner))
         requireProfile(owner)
         if (!response.isSuccessful) {
@@ -516,12 +518,12 @@ class Repository @Inject constructor(@param:ApplicationContext private val conte
     }
     suspend fun cachedCatalog(query: CatalogQuery): CatalogPage? = saved("catalog:${query.key}", CatalogPage::class.java)?.let { it.copy(tracks = it.tracks.map { track -> rememberTrack(track) }) }
     private fun <T> Page<T>.checked(query: CatalogQuery): Page<T> {
-        require(offset == query.offset && limit == CATALOG_PAGE_SIZE && total >= 0) { "列表位置发生变化，请刷新重试。" }
-        require(items.size == minOf(CATALOG_PAGE_SIZE, (total - offset).coerceAtLeast(0))) { "列表读取不完整，请重试。" }
+        require(offset == query.offset && limit == CATALOG_PAGE_SIZE && total >= 0) { AppLanguage.string(R.string.repo_list_position_changed) }
+        require(items.size == minOf(CATALOG_PAGE_SIZE, (total - offset).coerceAtLeast(0))) { AppLanguage.string(R.string.repo_list_incomplete) }
         return this
     }
     suspend fun catalog(query: CatalogQuery): CatalogPage {
-        if (query.libraryId != selectedLibraryId) throw CancellationException("音乐库已切换。")
+        if (query.libraryId != selectedLibraryId) throw CancellationException(AppLanguage.string(R.string.repo_library_switched))
         val profile = session.cacheScope()
         val revision = cache.catalogRevision
         val page = when (query.kind) {
@@ -538,21 +540,21 @@ class Repository @Inject constructor(@param:ApplicationContext private val conte
             else -> tracks(query.query, query.offset, query.collection, query.collectionId, query.kind == "recent", query.role, query.sort, albumFilter = query.albumFilter, order = query.order).checked(query).let { CatalogPage(tracks = it.items, total = it.total, discs = it.discs) }
         }
         requireProfile(profile)
-        if (query.libraryId != selectedLibraryId) throw CancellationException("音乐库已切换。")
-        if (revision != cache.catalogRevision) throw CancellationException("曲库已更新。")
+        if (query.libraryId != selectedLibraryId) throw CancellationException(AppLanguage.string(R.string.repo_library_switched))
+        if (revision != cache.catalogRevision) throw CancellationException(AppLanguage.string(R.string.repo_catalog_updated))
         save("catalog:${query.key}", page, profile, revision)
         (page.tracks + page.addedTracks.orEmpty()).forEach { save("track:${it.id}", it, profile, revision) }
-        if (revision != cache.catalogRevision) throw CancellationException("曲库已更新。")
+        if (revision != cache.catalogRevision) throw CancellationException(AppLanguage.string(R.string.repo_catalog_updated))
         return page
     }
     suspend fun browseIndex(query: CatalogQuery): BrowseIndex? {
-        if (query.libraryId != selectedLibraryId) throw CancellationException("音乐库已切换。")
+        if (query.libraryId != selectedLibraryId) throw CancellationException(AppLanguage.string(R.string.repo_library_switched))
         if (!query.indexed) return null
         val owner = session.cacheScope()
         val result = api().browseIndex(query.kind, query.query,
             query.collectionId.takeIf { query.collection == "artists" }, query.role.takeIf { query.collection == "artists" || query.kind == "artists" }, query.albumFilter)
         requireProfile(owner)
-        if (query.libraryId != selectedLibraryId) throw CancellationException("音乐库已切换。")
+        if (query.libraryId != selectedLibraryId) throw CancellationException(AppLanguage.string(R.string.repo_library_switched))
         // An older server or incomplete response must not create fabricated positions.
         require(result.kind == query.kind && result.total >= 0 && result.groups.size == 28)
         require(result.groups.map { it.key } == listOf("0–9") + ('A'..'Z').map { it.toString() } + "#")
@@ -561,7 +563,7 @@ class Repository @Inject constructor(@param:ApplicationContext private val conte
     }
     /** Build the complete snapshot before touching playback. Any failed page preserves the old queue. */
     suspend fun collectionTracks(query: CatalogQuery): List<Track> {
-        val owner = session.cacheScope() ?: throw IOException("登录已失效。")
+        val owner = session.cacheScope() ?: throw IOException(AppLanguage.string(R.string.repo_login_expired))
         val library = selectedLibraryId
         val revision = cache.catalogRevision
         val result = linkedMapOf<String, Track>()
@@ -570,15 +572,15 @@ class Repository @Inject constructor(@param:ApplicationContext private val conte
         while (true) {
             val page = tracks(query.query, offset, query.collection, query.collectionId, query.kind == "recent", query.role, query.sort, 200, query.albumFilter, query.order)
             requireProfile(owner)
-            if (library != selectedLibraryId || revision != cache.catalogRevision) throw CancellationException("音乐库或权限已变化，请重新读取。")
-            if (expected == -1) { expected = page.total; require(expected <= 5000) { "集合超过 5000 首，请筛选后播放。" } }
-            require(expected == page.total) { "集合已变化，请重试。" }
-            if (page.items.isEmpty()) { require(offset >= expected) { "集合读取不完整，请重试。" }; break }
+            if (library != selectedLibraryId || revision != cache.catalogRevision) throw CancellationException(AppLanguage.string(R.string.repo_library_or_permission_changed))
+            if (expected == -1) { expected = page.total; require(expected <= 5000) { AppLanguage.string(R.string.repo_collection_limit_exceeded) } }
+            require(expected == page.total) { AppLanguage.string(R.string.repo_collection_changed) }
+            if (page.items.isEmpty()) { require(offset >= expected) { AppLanguage.string(R.string.repo_collection_incomplete) }; break }
             page.items.forEach { result[it.id] = it }
             offset += page.items.size
             if (offset >= expected) break
         }
-        require(result.size == expected) { "集合已变化，请重试。" }
+        require(result.size == expected) { AppLanguage.string(R.string.repo_collection_changed) }
         return result.values.toList()
     }
     suspend fun cachedTrack(id: String): Track? = saved("track:$id", Track::class.java)?.let { rememberTrack(it) }
@@ -588,7 +590,7 @@ class Repository @Inject constructor(@param:ApplicationContext private val conte
         podcastEpisodeId(id)?.let { episodeId ->
             return try {
                 val episode = podcastEpisode(episodeId)
-                val podcast = podcasts().firstOrNull { it.id == episode.podcastId } ?: throw IOException("节目已移除。")
+                val podcast = podcasts().firstOrNull { it.id == episode.podcastId } ?: throw IOException(AppLanguage.string(R.string.repo_podcast_removed))
                 requireProfile(profile)
                 rememberPodcastEpisode(episode, podcast)
             } catch (error: IOException) {
@@ -621,7 +623,7 @@ class Repository @Inject constructor(@param:ApplicationContext private val conte
     suspend fun feedback(body: RecommendationFeedback): okhttp3.ResponseBody {
         val profile = session.cacheScope()
         return api().recommendationFeedback(body, RequestOwner(profile)).also { response ->
-            if (profile == null || profile != session.cacheScope()) { response.close(); throw CancellationException("会话已变化。") }
+            if (profile == null || profile != session.cacheScope()) { response.close(); throw CancellationException(AppLanguage.string(R.string.repo_session_changed)) }
         }
     }
     suspend fun logout() {
@@ -648,27 +650,27 @@ class Repository @Inject constructor(@param:ApplicationContext private val conte
 
 }
 fun friendlyError(error: Throwable): String = (when (error) {
-    is AgentApiException -> error.message ?: "操作未完成，请重试。"
+    is AgentApiException -> error.message ?: AppLanguage.string(R.string.repo_operation_incomplete)
     is HttpException -> when (error.code()) {
         400 -> when {
-            error.response()?.errorBody()?.string()?.contains("current_password_incorrect") == true -> "当前密码不正确。"
-            else -> "服务器拒绝此访问地址，请检查域名白名单或输入内容。"
+            error.response()?.errorBody()?.string()?.contains("current_password_incorrect") == true -> AppLanguage.string(R.string.repo_current_password_incorrect)
+            else -> AppLanguage.string(R.string.repo_access_rejected)
         }
         422 -> when {
             error.response()?.errorBody()?.string()?.contains("remote_url_fake_ip") == true ->
-                "服务端 DNS 处于 fake-ip 模式（198.18.0.0/15），请在网页联网设置中配置出站代理，或在服务端开启 WILDSTRING_PODCAST_ALLOW_FAKE_IP。"
-            else -> "输入不符合服务器要求，请检查后重试。"
+                AppLanguage.string(R.string.repo_fake_ip_dns_hint)
+            else -> AppLanguage.string(R.string.repo_invalid_input_server)
         }
-        401 -> "登录已失效，请重新登录。"
-        403 -> if (error.response()?.errorBody()?.string()?.contains("https_required") == true) "服务器仅允许 HTTPS，请使用 HTTPS 线路登录。" else "服务器拒绝请求，请检查服务版本与权限。"
-        404 -> "内容不存在或已经移除。"
-        409 -> "内容已变化，请刷新后重试。"
-        429 -> "尝试次数较多，请稍后一分钟重试。"
-        503 -> "服务暂不可用，请确认已在服务端初始化管理员。"
-        else -> "服务器请求未完成（${error.code()}），请重试。"
+        401 -> AppLanguage.string(R.string.repo_login_expired_relogin)
+        403 -> if (error.response()?.errorBody()?.string()?.contains("https_required") == true) AppLanguage.string(R.string.repo_https_only) else AppLanguage.string(R.string.repo_server_forbidden)
+        404 -> AppLanguage.string(R.string.repo_not_found)
+        409 -> AppLanguage.string(R.string.repo_content_changed)
+        429 -> AppLanguage.string(R.string.repo_rate_limited)
+        503 -> AppLanguage.string(R.string.repo_server_unavailable_init_admin)
+        else -> AppLanguage.string(R.string.repo_request_failed_code, error.code())
     }
-    is javax.net.ssl.SSLException -> "HTTPS 证书校验失败，请检查服务器证书。"
-    is IllegalArgumentException -> error.message ?: "输入无效。"
-    is IOException -> "无法连接服务器，请检查地址和网络。"
-    else -> "操作未完成，请重试。"
-}) + (if (error is HttpException) diagnosticId(error.response()?.headers()?.get("X-Wildstring-Trace-Id"))?.let { "\n诊断编号：$it" }.orEmpty() else "")
+    is javax.net.ssl.SSLException -> AppLanguage.string(R.string.repo_ssl_failed)
+    is IllegalArgumentException -> error.message ?: AppLanguage.string(R.string.repo_invalid_input)
+    is IOException -> AppLanguage.string(R.string.repo_connection_failed)
+    else -> AppLanguage.string(R.string.repo_operation_incomplete)
+}) + (if (error is HttpException) diagnosticId(error.response()?.headers()?.get("X-Wildstring-Trace-Id"))?.let { "\n" + AppLanguage.string(R.string.repo_diagnostic_id, it) }.orEmpty() else "")

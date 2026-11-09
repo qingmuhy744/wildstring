@@ -78,7 +78,7 @@ import com.wildstring.app.data.Album
 @Composable private fun SectionHeading(title: String, action: String, click: () -> Unit) {
     Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
         horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-        Text(title, Modifier.weight(1f), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-        TextButton(click) { Text(action) }
+        Text(title, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+        TextButton(click, Modifier.heightIn(min = 48.dp)) { Text(action) }
     }
 }

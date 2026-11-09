@@ -262,6 +262,7 @@ export function AccountSettings({
 }
 
 export function UsersPanel() {
+  const { t } = useTranslation();
   const [libraries, setLibraries] = useState<MusicLibrary[]>([]);
   const [libraryIds, setLibraryIds] = useState<string[] | null>(null);
   const defaultLibraryIds = libraries
@@ -316,7 +317,7 @@ export function UsersPanel() {
       setNotice(message);
       return true;
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '操作未完成，请重试。');
+      setError(reason instanceof Error ? reason.message : t('accountsAdmin.operationIncomplete'));
       return false;
     } finally {
       setBusy(false);
@@ -325,7 +326,7 @@ export function UsersPanel() {
   async function create(event: FormEvent) {
     event.preventDefault();
     if (password !== confirmation) {
-      setError('两次输入的初始密码不一致。');
+      setError(t('accountsAdmin.passwordMismatch'));
       return;
     }
     if (
@@ -340,7 +341,7 @@ export function UsersPanel() {
               library_ids: libraryIds ?? defaultLibraryIds,
             }),
           }),
-        '账号已创建。',
+        t('accountsAdmin.accountCreated'),
       )
     ) {
       setUsername('');
@@ -360,14 +361,14 @@ export function UsersPanel() {
             enabled: values.enabled ?? user.enabled,
           }),
         }),
-      '账号已更新，旧会话已退出。',
+      t('accountsAdmin.accountUpdated'),
     );
   }
   async function reset(event: FormEvent) {
     event.preventDefault();
     if (!resetting) return;
     if (resetPassword !== resetConfirm) {
-      setError('两次输入的重置密码不一致。');
+      setError(t('accountsAdmin.resetPasswordMismatch'));
       return;
     }
     if (
@@ -377,7 +378,7 @@ export function UsersPanel() {
             method: 'POST',
             body: JSON.stringify({ version: resetting.version, new_password: resetPassword }),
           }),
-        '密码已重置，对方需要重新登录。',
+        t('accountsAdmin.passwordReset'),
       )
     ) {
       setResetting(null);
@@ -386,12 +387,10 @@ export function UsersPanel() {
     }
   }
   return (
-    <section aria-label="用户管理" className="management-users">
+    <section aria-label={t('accountsAdmin.title')} className="management-users">
       <div className="management-card">
-        <h2>用户管理</h2>
-        <p className="muted">
-          按账号分配音乐库，角色决定可执行的操作。收藏、关注和播放进度各自保存。
-        </p>
+        <h2>{t('accountsAdmin.title')}</h2>
+        <p className="muted">{t('accountsAdmin.description')}</p>
         {error && (
           <p className="error" role="alert">
             {error}{' '}
@@ -399,10 +398,10 @@ export function UsersPanel() {
               disabled={busy}
               onClick={() => {
                 setResetting(null);
-                void act(() => Promise.resolve(), '账号列表已刷新。');
+                void act(() => Promise.resolve(), t('accountsAdmin.accountsRefreshed'));
               }}
             >
-              重新读取账号
+              {t('accountsAdmin.reloadAccounts')}
             </button>
           </p>
         )}
@@ -412,52 +411,62 @@ export function UsersPanel() {
           </p>
         )}
         <div className="account-list-heading" aria-hidden="true">
-          <span>账号</span>
-          <span>角色</span>
-          <span>音乐库</span>
-          <span>账号操作</span>
+          <span>{t('accountsAdmin.colAccount')}</span>
+          <span>{t('accountsAdmin.colRole')}</span>
+          <span>{t('accountsAdmin.colLibraries')}</span>
+          <span>{t('accountsAdmin.colActions')}</span>
         </div>
-        <ul className="account-list" aria-label="账号列表">
+        <ul className="account-list" aria-label={t('accountsAdmin.accountList')}>
           {users.map((user) => (
             <li key={user.id}>
               <div className="account-row-identity">
                 <strong>{user.username}</strong>
                 <small>
-                  {user.enabled ? '已启用' : '已停用'}
-                  {self?.id === user.id ? ' · 当前账号' : ''}
+                  {user.enabled
+                    ? t('accountsAdmin.statusEnabled')
+                    : t('accountsAdmin.statusDisabled')}
+                  {self?.id === user.id ? t('accountsAdmin.currentAccount') : ''}
                 </small>
               </div>
               <select
                 className="account-row-role"
-                aria-label={`${user.username} 的角色`}
+                aria-label={t('accountsAdmin.roleAria', { username: user.username })}
                 disabled={busy || !self || self.id === user.id}
                 value={userProfile(user)}
                 onChange={(e) => update(user, { profile: e.target.value as Profile })}
               >
-                <option value="listener">听众</option>
-                <option value="editor">资料编辑员</option>
-                <option value="librarian">曲库管理员</option>
-                <option value="owner">所有者</option>
+                <option value="listener">{t('accountsAdmin.roleListener')}</option>
+                <option value="editor">{t('accountsAdmin.roleEditor')}</option>
+                <option value="librarian">{t('accountsAdmin.roleLibrarian')}</option>
+                <option value="owner">{t('accountsAdmin.roleOwner')}</option>
               </select>
               <button
                 className="account-row-access"
-                aria-label={`${user.username} 的库权限`}
-                title={user.profile === 'owner' ? '所有者始终可以访问全部音乐库' : undefined}
+                aria-label={t('accountsAdmin.libraryAccessAria', { username: user.username })}
+                title={
+                  user.profile === 'owner' ? t('accountsAdmin.ownerFullAccessHint') : undefined
+                }
                 disabled={busy || !self || user.profile === 'owner'}
                 onClick={() => setGranting(user)}
               >
-                {user.profile === 'owner' ? '全部音乐库' : '库权限'}
+                {user.profile === 'owner'
+                  ? t('accountsAdmin.allLibraries')
+                  : t('accountsAdmin.libraryAccess')}
               </button>
               <div className="account-row-actions">
                 <button
-                  aria-label={`${user.enabled ? '停用' : '启用'} ${user.username}`}
+                  aria-label={
+                    user.enabled
+                      ? t('accountsAdmin.disableUserAria', { username: user.username })
+                      : t('accountsAdmin.enableUserAria', { username: user.username })
+                  }
                   disabled={busy || !self || self.id === user.id}
                   onClick={() => update(user, { enabled: !user.enabled })}
                 >
-                  {user.enabled ? '停用' : '启用'}
+                  {user.enabled ? t('accountsAdmin.disable') : t('accountsAdmin.enable')}
                 </button>
                 <button
-                  aria-label={`重置密码 · ${user.username}`}
+                  aria-label={t('accountsAdmin.resetPasswordAria', { username: user.username })}
                   disabled={busy || !self || self.id === user.id}
                   onClick={() => {
                     setResetting(user);
@@ -466,7 +475,7 @@ export function UsersPanel() {
                     setError('');
                   }}
                 >
-                  重置密码
+                  {t('accountsAdmin.resetPassword')}
                 </button>
               </div>
             </li>
@@ -477,7 +486,7 @@ export function UsersPanel() {
             user={granting}
             onClose={() => setGranting(null)}
             onSaved={() => {
-              setNotice(`${granting.username} 的库权限已保存。`);
+              setNotice(t('accountsAdmin.userAccessSaved', { username: granting.username }));
               setGranting(null);
             }}
           />
@@ -486,11 +495,11 @@ export function UsersPanel() {
           <form
             className="account-form reset-password-form"
             onSubmit={reset}
-            aria-label={`重置 ${resetting.username} 的密码`}
+            aria-label={t('accountsAdmin.resetPasswordForAria', { username: resetting.username })}
           >
-            <h3>重置 {resetting.username} 的密码</h3>
+            <h3>{t('accountsAdmin.resetPasswordFor', { username: resetting.username })}</h3>
             <label>
-              重置密码
+              {t('accountsAdmin.newPassword')}
               <input
                 type="password"
                 autoComplete="new-password"
@@ -502,7 +511,7 @@ export function UsersPanel() {
               />
             </label>
             <label>
-              确认重置密码
+              {t('accountsAdmin.confirmResetPassword')}
               <input
                 type="password"
                 autoComplete="new-password"
@@ -523,19 +532,23 @@ export function UsersPanel() {
                   setResetConfirm('');
                 }}
               >
-                取消重置
+                {t('accountsAdmin.cancelReset')}
               </button>
               <button className="primary" disabled={busy}>
-                确认重置密码
+                {t('accountsAdmin.confirmResetPassword')}
               </button>
             </div>
           </form>
         )}
       </div>
-      <form className="management-card account-form" onSubmit={create} aria-label="创建账号">
-        <h2>创建账号</h2>
+      <form
+        className="management-card account-form"
+        onSubmit={create}
+        aria-label={t('accountsAdmin.createAccount')}
+      >
+        <h2>{t('accountsAdmin.createAccount')}</h2>
         <label>
-          用户名
+          {t('accountsAdmin.username')}
           <input
             required
             minLength={1}
@@ -546,19 +559,19 @@ export function UsersPanel() {
             onChange={(e) => setUsername(e.target.value)}
           />
         </label>
-        <span className="muted">1–32 位英文字母、数字、点、下划线或连字符；首位为字母或数字。</span>
+        <span className="muted">{t('accountsAdmin.usernameHint')}</span>
         <label>
-          角色
+          {t('accountsAdmin.role')}
           <select value={profile} onChange={(e) => setProfile(e.target.value as Profile)}>
-            <option value="listener">听众</option>
-            <option value="editor">资料编辑员</option>
-            <option value="librarian">曲库管理员</option>
-            <option value="owner">所有者</option>
+            <option value="listener">{t('accountsAdmin.roleListener')}</option>
+            <option value="editor">{t('accountsAdmin.roleEditor')}</option>
+            <option value="librarian">{t('accountsAdmin.roleLibrarian')}</option>
+            <option value="owner">{t('accountsAdmin.roleOwner')}</option>
           </select>
         </label>
         {profile !== 'owner' && (
           <fieldset className="music-library-options">
-            <legend>可访问音乐库</legend>
+            <legend>{t('accountsAdmin.accessibleLibraries')}</legend>
             {libraries.map((library) => (
               <label key={library.id} className="music-library-grant-option">
                 <input
@@ -575,11 +588,11 @@ export function UsersPanel() {
                 <span>{library.name}</span>
               </label>
             ))}
-            <small>未勾选时只可使用个人播客关注等功能。</small>
+            <small>{t('accountsAdmin.noLibrariesHint')}</small>
           </fieldset>
         )}
         <label>
-          初始密码
+          {t('accountsAdmin.initialPassword')}
           <input
             type="password"
             autoComplete="new-password"
@@ -591,7 +604,7 @@ export function UsersPanel() {
           />
         </label>
         <label>
-          确认初始密码
+          {t('accountsAdmin.confirmInitialPassword')}
           <input
             type="password"
             autoComplete="new-password"
@@ -603,7 +616,7 @@ export function UsersPanel() {
           />
         </label>
         <button className="primary" disabled={busy}>
-          {busy ? '处理中…' : '创建账号'}
+          {busy ? t('accountsAdmin.processing') : t('accountsAdmin.createAccount')}
         </button>
       </form>
     </section>

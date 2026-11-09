@@ -1,5 +1,7 @@
 package com.wildstring.app.ui
 
+import com.wildstring.app.AppLanguage
+import com.wildstring.app.R
 import android.content.ComponentName
 import android.content.Context
 import androidx.core.content.ContextCompat
@@ -26,7 +28,7 @@ data class QueueRow(val entryId: String, val trackId: String, val title: String,
 data class MusicState(
     val account: Account? = null, val playbackQuality: String = "", val connected: Boolean = false, val connecting: Boolean = false, val loading: Boolean = false,
     val server: String = "", val serverSelection: String = "", val localHttp: Boolean = false, val error: String? = null,
-    val tab: String = "search", val kind: String = "discover", val title: String = "发现",
+    val tab: String = "search", val kind: String = "discover", val title: String = AppLanguage.string(R.string.vm_title_discover),
     val query: String = "", val offset: Int = 0, val total: Int = 0,
     val collection: String? = null, val collectionId: String? = null, val activePlaylist: Playlist? = null,
     val tracks: List<Track> = emptyList(), val albums: List<Album> = emptyList(),
@@ -114,7 +116,7 @@ class MusicViewModel @Inject constructor(
         withContext(Dispatchers.IO) { repository.cache.clear(owner); audioCache.clear(owner) }
         if (owner == repository.session.cacheScope()) { pages.clear(); windows.clear(); browseIndices.clear(); cancelRanges(); podcastBrowser.reset(); imageLoader.memoryCache?.clear() }
     }
-    private fun requireOwner(owner: String?) { if (owner == null || owner != repository.session.cacheScope()) throw CancellationException("服务器或账号已变化。") }
+    private fun requireOwner(owner: String?) { if (owner == null || owner != repository.session.cacheScope()) throw CancellationException(AppLanguage.string(R.string.vm_server_or_account_changed)) }
     private suspend fun invalidateCatalog(owner: String? = repository.session.cacheScope()) {
         requireOwner(owner); pages.clear(); windows.clear(); browseIndices.clear(); cancelRanges()
         withContext(Dispatchers.IO) { repository.cache.invalidateCatalog(owner) }
@@ -166,14 +168,14 @@ class MusicViewModel @Inject constructor(
         } }
         controllerFuture.addListener({
             runCatching { controllerFuture.get() }.onSuccess { c -> controller = c; c.addListener(playerListener); rebuildQueue(); refreshPlayer() }
-                .onFailure { mutable.update { it.copy(error = "播放器连接失败，请重新打开应用。") } }
+                .onFailure { mutable.update { it.copy(error = AppLanguage.string(R.string.vm_player_connection_failed)) } }
         }, ContextCompat.getMainExecutor(context))
         viewModelScope.launch { repository.session.invalidations.collect { selection ->
             yield()
             if (selection == supersededInvalidationSelection || selection != repository.session.requestState()?.selection.orEmpty()) return@collect
             authGeneration++; optimisticFavorites.clear()
             loadGeneration++; loadJob?.cancel(); lyricJob?.cancel(); lyricTrack = null; pages.clear(); windows.clear(); browseIndices.clear(); cancelRanges(); tabs.clear(); history.clear(); repository.knownTracks.clear(); controller?.stop(); controller?.clearMediaItems()
-            val message = invalidationMessage ?: "登录已失效，请重新登录。"
+            val message = invalidationMessage ?: AppLanguage.string(R.string.vm_login_expired)
             invalidationMessage = null
             mutable.value = connectionState(message.takeIf { it.isNotBlank() })
             imageLoader.memoryCache?.clear()
@@ -190,9 +192,9 @@ class MusicViewModel @Inject constructor(
         selectionJob = viewModelScope.launch {
             val generation = authGeneration
             val selection = repository.session.requestState()?.selection
-            fun requireSelection() { if (generation != authGeneration || selection != repository.session.requestState()?.selection) throw CancellationException("服务器已变化。") }
+            fun requireSelection() { if (generation != authGeneration || selection != repository.session.requestState()?.selection) throw CancellationException(AppLanguage.string(R.string.vm_server_changed)) }
             val saved = repository.cachedCatalog(CatalogQuery())
-                ?: repository.cachedCatalog(CatalogQuery(tab = "library", kind = "albums", title = "曲库"))
+                ?: repository.cachedCatalog(CatalogQuery(tab = "library", kind = "albums", title = AppLanguage.string(R.string.vm_title_library)))
                 ?: repository.downloads.entries.value.filter { it.state == "complete" }.map { it.track }.takeIf { it.isNotEmpty() }?.let { CatalogPage(tracks = it, total = it.size) }
             requireSelection()
             if (saved != null && repository.session.cacheScope() != null) {
@@ -204,7 +206,7 @@ class MusicViewModel @Inject constructor(
                 requireSelection()
                 if (status.authenticated) {
                     val changed = repository.acceptAccount(status.user)
-                    if (generation != authGeneration) throw CancellationException("服务器已变化。")
+                    if (generation != authGeneration) throw CancellationException(AppLanguage.string(R.string.vm_server_changed))
                     if (changed) {
                         pages.clear(); windows.clear(); browseIndices.clear(); cancelRanges(); controller?.stop(); controller?.clearMediaItems()
                         mutable.update { connectionState().copy(account = status.user, connected = true) }
@@ -268,7 +270,7 @@ class MusicViewModel @Inject constructor(
         repository.client.dispatcher.cancelAll(); repository.downloads.pauseAll(); sleep.cancel()
         controller?.stop(); controller?.clearMediaItems(); repository.knownTracks.clear(); queueSnapshot = emptyList()
         withContext(Dispatchers.IO) { repository.database.queue().clear() }
-        if (generation != authGeneration) throw CancellationException("服务器已变化。")
+        if (generation != authGeneration) throw CancellationException(AppLanguage.string(R.string.vm_server_changed))
         imageLoader.memoryCache?.clear()
     }
     fun switchServer(id: String) {
@@ -285,7 +287,7 @@ class MusicViewModel @Inject constructor(
     suspend fun saveServer(id: String?, url: String, name: String, localHttp: Boolean): ServerConfiguration {
         val old = repository.session.servers.value.firstOrNull { it.id == id }
         val canonical = ServerAddress.normalize(url, localHttp).toString()
-        require(repository.session.servers.value.none { it.url == canonical && it.id != id }) { "这个服务器已经保存，请直接选择。" }
+        require(repository.session.servers.value.none { it.url == canonical && it.id != id }) { AppLanguage.string(R.string.vm_server_already_saved) }
         val changedActive = id != null && id == repository.session.activeServerId && old?.url != canonical
         if (changedActive) { selectionJob?.cancel(); stopForServerChange() }
         val saved = repository.session.saveServer(id, url, name, localHttp)
@@ -317,18 +319,18 @@ class MusicViewModel @Inject constructor(
                 generation = authGeneration
                 mutable.value = connectionState().copy(connecting = true)
                 val status = repository.status()
-                if (generation != authGeneration) throw CancellationException("服务器已变化。")
-                check(status.configured) { "请先在服务端初始化管理员。" }
+                if (generation != authGeneration) throw CancellationException(AppLanguage.string(R.string.vm_server_changed))
+                check(status.configured) { AppLanguage.string(R.string.vm_init_admin_first) }
                 repository.api().login(LoginRequest(username.trim(), password)).close()
                 val authenticated = repository.status()
-                if (generation != authGeneration) throw CancellationException("服务器已变化。")
-                check(authenticated.authenticated) { "登录未成功，请重试。" }
+                if (generation != authGeneration) throw CancellationException(AppLanguage.string(R.string.vm_server_changed))
+                check(authenticated.authenticated) { AppLanguage.string(R.string.vm_login_failed) }
                 repository.acceptAccount(authenticated.user)
                 if (generation != authGeneration) return@launch
                 mutable.value = connectionState().copy(account = authenticated.user, connected = true, serverVersion = authenticated.version)
                 load()
             } catch (e: CancellationException) { throw e }
-            catch (e: Exception) { if (generation == authGeneration) mutable.update { it.copy(error = if (e is HttpException && e.code() == 401) "账号或密码不正确。" else if (e is IllegalStateException) e.message else friendlyError(e)) } }
+            catch (e: Exception) { if (generation == authGeneration) mutable.update { it.copy(error = if (e is HttpException && e.code() == 401) AppLanguage.string(R.string.vm_invalid_credentials) else if (e is IllegalStateException) e.message else friendlyError(e)) } }
             finally { if (generation == authGeneration) mutable.update { it.copy(connecting = false) } }
         }.also { selectionJob = it }
     }
@@ -355,7 +357,7 @@ class MusicViewModel @Inject constructor(
 
     suspend fun changePassword(current: String, next: String) {
         repository.changePassword(current, next)
-        invalidationMessage = "密码已修改，请重新登录。"
+        invalidationMessage = AppLanguage.string(R.string.vm_password_changed_relogin)
         repository.session.invalidate()
     }
     fun refreshLyrics() {
@@ -383,11 +385,11 @@ class MusicViewModel @Inject constructor(
                 else -> "albums"
             },
             title = when (tab) {
-                "mine" -> "我的"
-                "search" -> "发现"
-                "podcast" -> "电台"
-                "assistant" -> "AI 助手"
-                else -> "音乐"
+                "mine" -> AppLanguage.string(R.string.vm_title_mine)
+                "search" -> AppLanguage.string(R.string.vm_title_discover)
+                "podcast" -> AppLanguage.string(R.string.vm_title_podcast)
+                "assistant" -> AppLanguage.string(R.string.vm_title_assistant)
+                else -> AppLanguage.string(R.string.vm_title_music)
             }
         )
         show(target)
@@ -438,7 +440,7 @@ class MusicViewModel @Inject constructor(
             val followed = repository.followPodcast(podcast.id, !podcast.followed)
             requireOwner(owner)
             podcastBrowser.followed(podcast.id, followed)
-            notify(if (followed) "已关注节目" else "已取消关注，收听进度已保留")
+            notify(if (followed) AppLanguage.string(R.string.vm_followed_podcast) else AppLanguage.string(R.string.vm_unfollowed_podcast))
         } catch (e: CancellationException) { throw e }
         catch (e: Exception) { notify(friendlyError(e)) }
     }
@@ -457,7 +459,7 @@ class MusicViewModel @Inject constructor(
     fun browseAlbums() {
         if (mutable.value.tab != "library") tabs[mutable.value.tab] = query()
         history.remove("library")
-        show(CatalogQuery(tab = "library", kind = "albums", title = "曲库"))
+        show(CatalogQuery(tab = "library", kind = "albums", title = AppLanguage.string(R.string.vm_title_library)))
     }
     private fun show(target: CatalogQuery, delayMs: Long = 0) {
         val context = catalogSortContext(target.kind, target.collection, target.albumFilter)
@@ -623,7 +625,7 @@ class MusicViewModel @Inject constructor(
     }
     fun search(query: String) {
         show(this.query().copy(kind = if (query.isBlank()) "discover" else "tracks", query = query.take(256), offset = 0,
-            title = "发现", collection = null, collectionId = null, playlist = null), 300)
+            title = AppLanguage.string(R.string.vm_title_discover), collection = null, collectionId = null, playlist = null), 300)
     }
     fun openAlbum(album: Album) = open(if (mutable.value.collection == "artists") query().copy(kind = "tracks", albumFilter = album.id, title = album.title, query = "", offset = 0, sort = "title")
         else query().copy(kind = "tracks", collection = "albums", collectionId = album.id, title = album.title, query = "", offset = 0, playlist = null, albumFilter = null, sort = "title"))
@@ -642,13 +644,13 @@ class MusicViewModel @Inject constructor(
                 if (generation != authGeneration || catalogGeneration != loadGeneration) return@launch
                 val id = current.albumId?.takeIf { it.isNotBlank() }
                 if (id == null) {
-                    mutable.update { it.copy(error = "暂时无法读取所属专辑，请联网刷新歌曲后重试。") }
+                    mutable.update { it.copy(error = AppLanguage.string(R.string.vm_cannot_read_album)) }
                     return@launch
                 }
                 // Open the whole album, clearing any artist/playlist/search constraints.
                 val preference = settings.catalogSort(owner, "album-tracks")
                 val destination = query().copy(kind = "tracks", collection = "albums", collectionId = id,
-                    title = current.album ?: "未知专辑", query = "", offset = 0, playlist = null,
+                    title = current.album ?: AppLanguage.string(R.string.vm_unknown_album), query = "", offset = 0, playlist = null,
                     albumFilter = null, sort = preference.sort, order = preference.order)
                 // Resolve the first page before dismissing the player. A failed lookup leaves it visible.
                 val first = repository.catalog(destination)
@@ -676,7 +678,7 @@ class MusicViewModel @Inject constructor(
                     ?: result.items.firstOrNull { it.name.equals(query, ignoreCase = true) }
                     ?: result.items.singleOrNull()
                 if (item == null) {
-                    mutable.update { it.copy(error = "没有找到艺人“$query”。") }
+                    mutable.update { it.copy(error = AppLanguage.string(R.string.vm_artist_not_found, query)) }
                     return@launch
                 }
                 open(query().copy(kind = "albums", role = "artist", albumFilter = null, collection = "artists", collectionId = item.id, title = item.name, query = "", offset = 0, playlist = null))
@@ -689,12 +691,12 @@ class MusicViewModel @Inject constructor(
         }
     }
     fun openPlaylist(playlist: Playlist) = open(query().copy(kind = "tracks", collection = "playlists", collectionId = playlist.id, playlist = playlist, title = playlist.name, query = "", offset = 0))
-    fun recent() = open(query().copy(kind = "recent", title = "最近听过", collection = null, collectionId = null, offset = 0, query = "",
+    fun recent() = open(query().copy(kind = "recent", title = AppLanguage.string(R.string.vm_title_recent_played), collection = null, collectionId = null, offset = 0, query = "",
         sort = "last_played_at", playlist = null, albumFilter = null))
 
     fun recentlyAdded(kind: String) {
         settings.catalogSort(repository.session.cacheScope(), kind, CatalogSort("added_at", "desc"))
-        open(query().copy(kind = kind, title = if (kind == "albums") "最近添加的专辑" else "最近添加的歌曲",
+        open(query().copy(kind = kind, title = if (kind == "albums") AppLanguage.string(R.string.vm_title_recent_albums) else AppLanguage.string(R.string.vm_title_recent_tracks),
             collection = null, collectionId = null, query = "", playlist = null, albumFilter = null, sort = "added_at", order = "desc"))
     }
 
@@ -784,8 +786,8 @@ class MusicViewModel @Inject constructor(
                 val page = cached ?: repository.catalog(request)
                 requireOwner(owner)
                 if (generation != loadGeneration) return@launch
-                require(page.total == mutable.value.total) { "曲库已变化，请刷新列表。" }
-                require(page.itemCount == minOf(CATALOG_PAGE_SIZE, page.total - offset)) { "列表读取不完整，请重试。" }
+                require(page.total == mutable.value.total) { AppLanguage.string(R.string.vm_library_changed_refresh) }
+                require(page.itemCount == minOf(CATALOG_PAGE_SIZE, page.total - offset)) { AppLanguage.string(R.string.vm_list_read_incomplete) }
                 val window = mutable.value.window.withPage(offset, page)
                 windows[query().key] = window
                 mutable.update { it.withWindow(window).copy(offline = cached != null && current.offline) }
@@ -842,28 +844,28 @@ class MusicViewModel @Inject constructor(
         mutable.update { it.copy(handoff = null) }
     }
     suspend fun sharePlayback(): SharedPlayback = withContext(Dispatchers.Main.immediate) {
-        val c = controller ?: throw IOException("播放器尚未连接。")
+        val c = controller ?: throw IOException(AppLanguage.string(R.string.vm_player_not_connected))
         val snapshot = SharedPlayback(trackIds = queueSnapshot.map { it.trackId }, index = c.currentMediaItemIndex.coerceAtLeast(0),
             positionMs = c.currentPosition.coerceAtLeast(0), playbackState = if (c.playbackState == Player.STATE_ENDED) "ended" else if (c.playWhenReady) "playing" else "paused", mode = if (c.shuffleModeEnabled) "shuffle" else when(c.repeatMode) {
                 Player.REPEAT_MODE_ONE -> "repeat_one"; Player.REPEAT_MODE_ALL -> "repeat_all"; else -> "sequential"
             })
-        sharing.publish(snapshot, claim = true) ?: throw IOException("尚无可同步的播放。")
+        sharing.publish(snapshot, claim = true) ?: throw IOException(AppLanguage.string(R.string.vm_no_syncable_playback))
     }
     suspend fun resumeShared(saved: SharedPlayback, requirePausedHandoff: Boolean = false): Unit = withContext(Dispatchers.Main.immediate) {
-        require(saved.trackIds.none { podcastEpisodeId(it) != null }) { "播客请从单集列表继续收听，每集进度独立保存。" }
-        require(saved.trackIds.size <= 5000) { "共享队列超过本机 5000 首上限。" }
+        require(saved.trackIds.none { podcastEpisodeId(it) != null }) { AppLanguage.string(R.string.vm_podcast_resume_hint) }
+        require(saved.trackIds.size <= 5000) { AppLanguage.string(R.string.vm_shared_queue_limit_exceeded) }
         val owner = repository.session.cacheScope()
         val epoch = localPlaybackEpoch
         val tracks = saved.trackIds.chunked(8).flatMap { batch -> coroutineScope { batch.map { async { repository.track(it) } }.awaitAll() } }
-        check(owner != null && owner == repository.session.cacheScope()) { "会话已变化。" }
+        check(owner != null && owner == repository.session.cacheScope()) { AppLanguage.string(R.string.vm_session_changed) }
         requireOwner(owner)
         val latest = repository.api().sharedPlayback(RequestOwner(owner)); requireOwner(owner)
         if (requirePausedHandoff && (!latest.isRecentPausedHandoff() || latest.pauseEvent() != saved.pauseEvent())) {
             mutable.update { it.copy(handoff = null) }
-            throw IOException("其他设备已恢复播放，或暂停记录已过期。")
+            throw IOException(AppLanguage.string(R.string.vm_other_device_resumed_or_expired))
         }
-        if (latest.version != saved.version) throw IOException("其他设备的进度已更新，请重新读取后继续。")
-        check(epoch == localPlaybackEpoch && controller?.playWhenReady != true) { "本机播放已变化，请重新读取后继续。" }
+        if (latest.version != saved.version) throw IOException(AppLanguage.string(R.string.vm_other_device_updated))
+        check(epoch == localPlaybackEpoch && controller?.playWhenReady != true) { AppLanguage.string(R.string.vm_local_playback_changed) }
         sharing.pauseOffered(saved)
         sharing.acceptRemote(saved.version)
         play(tracks, saved.index, autoplay = false, positionMs = saved.positionMs)
@@ -876,12 +878,12 @@ class MusicViewModel @Inject constructor(
         val selected = index ?: tracks.indexOfFirst { it.isAvailable }.takeIf { it >= 0 } ?: 0
         val target = tracks.getOrNull(selected) ?: return
         if (!target.isAvailable) {
-            mutable.update { it.copy(error = "「${target.title}」${target.unavailableReason}。请恢复文件并重新扫描，刷新列表后重试。") }
+            mutable.update { it.copy(error = AppLanguage.string(R.string.vm_track_unavailable_format, target.title, target.unavailableReason.orEmpty())) }
             return
         }
         val index = tracks.take(selected).count { it.isAvailable }
         val tracks = tracks.filter { it.isAvailable }
-        require(tracks.size <= 5000) { "播放队列最多 5000 首。" }
+        require(tracks.size <= 5000) { AppLanguage.string(R.string.vm_queue_limit_exceeded) }
         // Media3 transports bundle lists with a retriever; smaller additions also bound each transaction.
         tracks.forEach { repository.rememberPlaybackTrack(it) }
         val items = tracks.mapIndexed { itemIndex, track -> track.mediaItem(repository).let { item ->
@@ -913,7 +915,7 @@ class MusicViewModel @Inject constructor(
         } catch (e: Exception) {
             if (previous.isNotEmpty()) { c.setMediaItems(previous.take(100), 0, 0); previous.drop(100).chunked(100).forEach { c.addMediaItems(it) }; c.seekTo(previousIndex, position); c.prepare(); c.playWhenReady = previousAutoplay }
             else c.clearMediaItems()
-            mutable.update { it.copy(error = "队列未能更新，已保留原播放。") }
+            mutable.update { it.copy(error = AppLanguage.string(R.string.vm_queue_update_failed)) }
         }
     }
     fun playCollection(startId: String? = null, onStarted: () -> Unit = {}) = viewModelScope.launch {
@@ -924,7 +926,7 @@ class MusicViewModel @Inject constructor(
         try {
             val tracks = repository.collectionTracks(request)
             if (profile != repository.session.cacheScope()) return@launch
-            if (tracks.isEmpty()) { mutable.update { it.copy(mutationMessage = "集合中没有可播放的音乐") }; return@launch }
+            if (tracks.isEmpty()) { mutable.update { it.copy(mutationMessage = AppLanguage.string(R.string.vm_collection_empty_music)) }; return@launch }
             play(tracks, startId?.let { id -> tracks.indexOfFirst { it.id == id }.coerceAtLeast(0) })
             onStarted()
         } catch (error: CancellationException) { throw error }
@@ -932,7 +934,7 @@ class MusicViewModel @Inject constructor(
         finally { mutable.update { it.copy(collecting = false) } }
     }
     fun download(tracks: List<Track>): Boolean = runCatching {
-        repository.downloads.enqueue(tracks); startDownloads(); notify("已加入离线保存任务"); true
+        repository.downloads.enqueue(tracks); startDownloads(); notify(AppLanguage.string(R.string.vm_download_task_enqueued)); true
     }.getOrElse { error -> mutable.update { it.copy(error = friendlyError(error), mutationMessage = null) }; false }
     fun startDownloads() { ContextCompat.startForegroundService(context, android.content.Intent(context, com.wildstring.app.playback.DownloadService::class.java)) }
     suspend fun allPlaylists(): List<Playlist> {
@@ -947,7 +949,7 @@ class MusicViewModel @Inject constructor(
     }
     fun followPlaylist(playlist: Playlist, enabled: Boolean) {
         repository.downloads.followPlaylist(playlist.id, enabled)
-        notify(if (enabled) "已开启歌单自动下载" else "已关闭歌单自动下载，离线音乐保留")
+        notify(if (enabled) AppLanguage.string(R.string.vm_auto_download_enabled) else AppLanguage.string(R.string.vm_auto_download_disabled))
         viewModelScope.launch { runCatching { syncOfflinePlaylists() } }
     }
     suspend fun syncOfflinePlaylists() {
@@ -955,11 +957,11 @@ class MusicViewModel @Inject constructor(
         try {
             val owner = repository.session.cacheScope(); requireOwner(owner)
             if (!repository.downloads.networkAllowed()) {
-                mutableOfflineSync.value = "等待 Wi-Fi，返回应用后自动检查。"; return
+                mutableOfflineSync.value = AppLanguage.string(R.string.vm_waiting_wifi); return
             }
             repository.downloads.resumeNetworkWaiting()
             val selected = repository.downloads.followedPlaylists()
-            if (selected.isNotEmpty()) mutableOfflineSync.value = "正在同步已选歌单…"
+            if (selected.isNotEmpty()) mutableOfflineSync.value = AppLanguage.string(R.string.vm_syncing_selected_playlists)
             for (id in selected) {
                 val tracks = try { repository.collectionTracks(CatalogQuery(collection = "playlists", collectionId = id)) }
                     catch (e: HttpException) { if (e.code() == 404) { requireOwner(owner); repository.downloads.followPlaylist(id, false); continue } else throw e }
@@ -968,7 +970,7 @@ class MusicViewModel @Inject constructor(
             }
             requireOwner(owner)
             if (repository.downloads.entries.value.any { it.state == "queued" }) startDownloads()
-            mutableOfflineSync.value = if (selected.isEmpty()) "" else "歌单已检查，新歌曲会自动保存；已下载文件保留。"
+            mutableOfflineSync.value = if (selected.isEmpty()) "" else AppLanguage.string(R.string.vm_playlists_checked)
         } catch (e: CancellationException) { throw e }
         catch (e: Exception) { mutableOfflineSync.value = friendlyError(e); throw e }
         finally { offlineSyncLock.unlock() }
@@ -1005,10 +1007,10 @@ class MusicViewModel @Inject constructor(
         val c = controller ?: return false
         val tracks = tracks.filter { it.isAvailable }
         if (tracks.isEmpty()) {
-            mutable.update { it.copy(error = "没有可播放的歌曲，请恢复文件并重新扫描后重试。") }
+            mutable.update { it.copy(error = AppLanguage.string(R.string.vm_no_playable_tracks_rescan)) }
             return false
         }
-        if (c.mediaItemCount + tracks.size > 5000) { mutable.update { it.copy(error = "播放队列最多 5000 项。") }; return false }
+        if (c.mediaItemCount + tracks.size > 5000) { mutable.update { it.copy(error = AppLanguage.string(R.string.vm_queue_max_limit)) }; return false }
         localPlaybackEpoch++
         tracks.forEach { repository.rememberPlaybackTrack(it) }
         val items = tracks.map { it.mediaItem(repository) }
@@ -1052,7 +1054,7 @@ class MusicViewModel @Inject constructor(
         catch (e: Exception) {
             if (generation == authGeneration && profile == repository.session.cacheScope()) {
                 showFavorite(previous)
-                mutable.update { it.copy(error = "收藏未保存，已恢复。${friendlyError(e)}") }
+                mutable.update { it.copy(error = AppLanguage.string(R.string.vm_favorite_not_saved, friendlyError(e))) }
             }
         }
         finally {
@@ -1071,7 +1073,7 @@ class MusicViewModel @Inject constructor(
             repository.api().createPlaylist(PlaylistRequest(name.trim()))
             if (generation == authGeneration && profile == repository.session.cacheScope()) {
                 invalidateCatalog(); tabs.remove("mine")
-                mutable.update { it.copy(mutationMessage = "歌单已建立") }
+                mutable.update { it.copy(mutationMessage = AppLanguage.string(R.string.vm_playlist_created)) }
                 if (mutable.value.tab == "mine") load() else navigate("mine")
             }
         }
@@ -1089,7 +1091,7 @@ class MusicViewModel @Inject constructor(
         }
         invalidateCatalog(owner); tabs.remove("mine")
         if (mutable.value.tab == "mine") load()
-        notify("已加入：${created.name}")
+        notify(AppLanguage.string(R.string.vm_added_to_playlist, created.name))
     }
     fun renamePlaylist(playlist: Playlist, name: String) = viewModelScope.launch {
         if (!playlistJobs.add(playlist.id)) return@launch
@@ -1105,7 +1107,7 @@ class MusicViewModel @Inject constructor(
             if (generation == authGeneration && profile == repository.session.cacheScope()) { apply(updated); invalidateCatalog() }
         }
         catch (e: CancellationException) { throw e }
-        catch (e: Exception) { if (generation == authGeneration && profile == repository.session.cacheScope()) { apply(playlist); mutable.update { it.copy(error = "歌单未保存，已恢复。${friendlyError(e)}") } } }
+        catch (e: Exception) { if (generation == authGeneration && profile == repository.session.cacheScope()) { apply(playlist); mutable.update { it.copy(error = AppLanguage.string(R.string.vm_playlist_not_saved, friendlyError(e))) } } }
         finally { playlistJobs.remove(playlist.id) }
     }
     suspend fun playlistsForAdd(): List<Playlist> {
@@ -1117,33 +1119,33 @@ class MusicViewModel @Inject constructor(
     suspend fun addTracksToPlaylist(tracks: List<Track>, playlist: Playlist) {
         val owner = repository.session.cacheScope(); requireOwner(owner)
         repository.api().addTracks(repository.url("api", "v1", "playlists", playlist.id, "tracks"), AddTracks(playlist.version, tracks.map { it.id }.distinct()))
-        requireOwner(owner); invalidateCatalog(owner); load(); notify("已加入：${playlist.name}")
+        requireOwner(owner); invalidateCatalog(owner); load(); notify(AppLanguage.string(R.string.vm_added_to_playlist, playlist.name))
     }
     suspend fun savePlaylist(name: String, definition: com.google.gson.JsonObject?, existing: Playlist?) {
         val owner = repository.session.cacheScope(); requireOwner(owner)
         if (existing == null) repository.api().createPlaylist(PlaylistRequest(name, if (definition == null) "manual" else "smart", definition))
         else repository.api().updatePlaylist(repository.url("api", "v1", "playlists", existing.id), PlaylistUpdate(name, existing.version, definition, existing.kind))
-        requireOwner(owner); invalidateCatalog(owner); load(); notify("歌单已保存")
+        requireOwner(owner); invalidateCatalog(owner); load(); notify(AppLanguage.string(R.string.vm_playlist_saved))
     }
     suspend fun deletePlaylist(playlist: Playlist) {
         val owner = repository.session.cacheScope(); requireOwner(owner)
         repository.api().deletePlaylist(repository.url("api", "v1", "playlists", playlist.id), playlist.version).let { if (!it.isSuccessful) throw HttpException(it) }
         requireOwner(owner); repository.downloads.followPlaylist(playlist.id, false); invalidateCatalog(owner)
         if (mutable.value.collectionId == playlist.id) back() else load()
-        notify("歌单已删除")
+        notify(AppLanguage.string(R.string.vm_playlist_deleted))
     }
     suspend fun removePlaylistTrack(track: Track, playlist: Playlist) {
         val owner = repository.session.cacheScope(); requireOwner(owner)
         repository.api().removeTrack(repository.url("api", "v1", "playlists", playlist.id, "tracks", track.id), playlist.version).close()
         requireOwner(owner)
         val fresh = repository.api().playlist(repository.url("api", "v1", "playlists", playlist.id))
-        requireOwner(owner); mutable.update { if (it.collectionId == playlist.id) it.copy(activePlaylist = fresh) else it }; invalidateCatalog(owner); load(); notify("已从歌单移除")
+        requireOwner(owner); mutable.update { if (it.collectionId == playlist.id) it.copy(activePlaylist = fresh) else it }; invalidateCatalog(owner); load(); notify(AppLanguage.string(R.string.vm_removed_from_playlist))
     }
     suspend fun playlistTracks(playlist: Playlist) = repository.collectionTracks(CatalogQuery(collection = "playlists", collectionId = playlist.id))
     suspend fun reorderPlaylist(playlist: Playlist, ids: List<String>) {
         val owner = repository.session.cacheScope(); requireOwner(owner)
         val fresh = repository.api().reorderPlaylist(repository.url("api", "v1", "playlists", playlist.id, "order"), AddTracks(playlist.version, ids))
-        requireOwner(owner); mutable.update { it.copy(activePlaylist = fresh) }; invalidateCatalog(owner); load(); notify("歌单顺序已保存")
+        requireOwner(owner); mutable.update { it.copy(activePlaylist = fresh) }; invalidateCatalog(owner); load(); notify(AppLanguage.string(R.string.vm_playlist_order_saved))
     }
     fun addToPlaylist(track: Track, playlist: Playlist) = viewModelScope.launch {
         if (!playlistJobs.add(playlist.id)) return@launch
@@ -1152,7 +1154,7 @@ class MusicViewModel @Inject constructor(
         try {
             repository.api().addTracks(repository.url("api", "v1", "playlists", playlist.id, "tracks"), AddTracks(playlist.version, listOf(track.id)))
             if (generation == authGeneration && profile == repository.session.cacheScope()) {
-                invalidateCatalog(); mutable.update { it.copy(mutationMessage = "已加入：${playlist.name}") }
+                invalidateCatalog(); mutable.update { it.copy(mutationMessage = AppLanguage.string(R.string.vm_added_to_playlist, playlist.name)) }
                 if (mutable.value.tab == "mine") load()
             }
         }

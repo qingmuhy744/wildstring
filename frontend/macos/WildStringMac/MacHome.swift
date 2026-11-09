@@ -73,10 +73,10 @@ struct MacHomeView: View {
                         columns: Array(repeating: GridItem(.flexible(), spacing: 14), count: geometry.size.width >= 720 ? 3 : 1),
                         spacing: 14
                     ) {
-                        entry("每日推荐", detail: recommendationDetail, symbol: "sparkles", tint: MacTheme.accent) {
+                        entry(L10n("macHome.dailyRecommendations"), detail: recommendationDetail, symbol: "sparkles", tint: MacTheme.accent) {
                             session.page = .discover
                         }
-                        entry("继续收听", detail: playback.currentItem?.title ?? model.recent.first?.title ?? "找回上次听过的音乐",
+                        entry(L10n("macHome.continueListening"), detail: playback.currentItem?.title ?? model.recent.first?.title ?? L10n("macHome.continueListeningFallback"),
                             symbol: "play.circle.fill", tint: .green) {
                             if playback.currentItem != nil {
                                 playback.resume()
@@ -86,7 +86,7 @@ struct MacHomeView: View {
                                 session.page = .listening
                             }
                         }
-                        entry("电台与播客", detail: "继续节目，或探索新的声音", symbol: "antenna.radiowaves.left.and.right", tint: .blue) {
+                        entry(L10n("macHome.podcasts"), detail: L10n("macHome.podcastsDetail"), symbol: "antenna.radiowaves.left.and.right", tint: .blue) {
                             session.page = .podcasts
                         }
                     }
@@ -95,14 +95,14 @@ struct MacHomeView: View {
                         HStack {
                             Label(error, systemImage: "exclamationmark.circle").foregroundStyle(.secondary)
                             Spacer()
-                            Button("重试") { Task { await model.load() } }.disabled(model.loading)
+                            Button(L10n("macHome.retry")) { Task { await model.load() } }.disabled(model.loading)
                         }.font(.callout)
                     }
 
                     VStack(alignment: .leading, spacing: 14) {
-                        heading("最近添加的专辑", more: "查看专辑") { session.page = .albums }
+                        heading(L10n("macHome.recentlyAddedAlbums"), more: L10n("macHome.viewAlbums")) { session.page = .albums }
                         if model.albums.isEmpty {
-                            empty(model.loading ? "正在读取曲库…" : "新加入曲库的专辑会显示在这里。")
+                            empty(model.loading ? L10n("macHome.loadingLibrary") : L10n("macHome.noRecentAlbums"))
                         } else {
                             ScrollView(.horizontal) {
                                 HStack(alignment: .top, spacing: 18) {
@@ -121,7 +121,7 @@ struct MacHomeView: View {
                                                     .foregroundStyle(MacTheme.muted)
                                                     .lineLimit(1)
                                             }.frame(width: 144, alignment: .leading).contentShape(Rectangle())
-                                        }.buttonStyle(.plain).help("打开专辑「\(album.title)」")
+                                        }.buttonStyle(.plain).help(L10n("macHome.openAlbum", album.title))
                                     }
                                 }.padding(.bottom, 6)
                             }
@@ -132,10 +132,10 @@ struct MacHomeView: View {
                         columns: Array(repeating: GridItem(.flexible(), spacing: 28, alignment: .top), count: geometry.size.width >= 680 ? 2 : 1),
                         alignment: .leading, spacing: 28
                     ) {
-                        tracksSection("最近添加的歌曲", tracks: model.added, more: "浏览歌曲", empty: "新入库的歌曲会显示在这里。") {
+                        tracksSection(L10n("macHome.recentlyAddedTracks"), tracks: model.added, more: L10n("macHome.browseTracks"), empty: L10n("macHome.noRecentTracks")) {
                             session.page = .tracks
                         }
-                        tracksSection("最近听过", tracks: model.recent, more: "收听记录", empty: "听几首喜欢的歌，记录会出现在这里。") {
+                        tracksSection(L10n("macHome.recentlyPlayed"), tracks: model.recent, more: L10n("macHome.listeningHistory"), empty: L10n("macHome.noRecentHistory")) {
                             session.page = .listening
                         }
                     }
@@ -145,16 +145,16 @@ struct MacHomeView: View {
                 .frame(maxWidth: .infinity, alignment: .topLeading)
             }
         }
-        .navigationTitle("首页")
+        .navigationTitle(L10n("macHome.title"))
         .task { await model.load() }
     }
 
     private var introduction: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("今天，想听点什么？")
+            Text(L10n("macHome.welcomeHeader"))
                 .font(MacTheme.display(32))
                 .foregroundStyle(MacTheme.ink)
-            Text("从熟悉的旋律，到刚加入收藏的新声音。")
+            Text(L10n("macHome.welcomeSubtitle"))
                 .font(MacTheme.caption)
                 .foregroundStyle(MacTheme.muted)
         }
@@ -165,23 +165,23 @@ struct MacHomeView: View {
             Button {
                 session.page = .assistant
             } label: {
-                Label("音乐助手", systemImage: "bubble.left.and.bubble.right")
+                Label(L10n("macHome.musicAssistant"), systemImage: "bubble.left.and.bubble.right")
                     .padding(.horizontal, 12)
                     .frame(height: 34)
                     .macPanel(padding: 0, radius: 10)
             }
-            .help("打开音乐助手")
+            .help(L10n("macHome.openMusicAssistant"))
 
             Button {
                 Task { await model.load() }
             } label: {
-                Label("刷新首页", systemImage: "arrow.clockwise")
+                Label(L10n("macHome.refreshHome"), systemImage: "arrow.clockwise")
                     .labelStyle(.iconOnly)
                     .frame(width: 34, height: 34)
                     .macPanel(padding: 0, radius: 10)
             }
             .disabled(model.loading)
-            .help(model.loading ? "正在刷新首页…" : "刷新首页")
+            .help(model.loading ? L10n("macHome.refreshingHome") : L10n("macHome.refreshHome"))
         }
         .font(MacTheme.caption)
         .foregroundStyle(MacTheme.muted)
@@ -189,9 +189,9 @@ struct MacHomeView: View {
     }
 
     private var recommendationDetail: String {
-        if let daily = model.daily, !daily.items.isEmpty { return "为你挑选了 \(daily.items.count) 首歌" }
-        if model.recommendationError != nil { return "暂不可用 · 点击查看详情" }
-        return "打开今天的专属歌单"
+        if let daily = model.daily, !daily.items.isEmpty { return L10n("macHome.dailyPickedCount", daily.items.count) }
+        if model.recommendationError != nil { return L10n("macHome.dailyUnavailable") }
+        return L10n("macHome.openDailyPlaylist")
     }
 
     private func entry(_ title: String, detail: String, symbol: String, tint: Color, action: @escaping () -> Void) -> some View {
@@ -230,7 +230,7 @@ struct MacHomeView: View {
         action: @escaping () -> Void) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             heading(title, more: more, action: action)
-            if tracks.isEmpty { empty(model.loading ? "正在读取…" : message) }
+            if tracks.isEmpty { empty(model.loading ? L10n("macHome.loading") : message) }
             ForEach(tracks) { track in
                 Button { MacPlayback.play(tracks, startingAt: track, playback: playback) } label: {
                     HStack(spacing: 12) {
@@ -253,17 +253,17 @@ struct MacHomeView: View {
                     }.padding(.vertical, 6).contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("播放 \(track.title)")
+                .accessibilityLabel(L10n("macHome.playTrack", track.title))
                 .contextMenu {
-                    Button("下一首播放", systemImage: "text.line.first.and.arrowtriangle.forward") {
+                    Button(L10n("macHome.playNext"), systemImage: "text.line.first.and.arrowtriangle.forward") {
                         _ = playback.enqueue(items: [MacPlayback.item(track)], next: true)
                     }
-                    Button("加入播放队列", systemImage: "text.badge.plus") {
+                    Button(L10n("macHome.addToQueue"), systemImage: "text.badge.plus") {
                         _ = playback.enqueue(items: [MacPlayback.item(track)], next: false)
                     }
                     if let albumID = track.albumId {
-                        Button("查看专辑", systemImage: "square.stack") {
-                            navigate(.album(id: albumID, title: track.album ?? "专辑"))
+                        Button(L10n("macHome.viewAlbum"), systemImage: "square.stack") {
+                            navigate(.album(id: albumID, title: track.album ?? L10n("macHome.defaultAlbum")))
                         }
                     }
                 }

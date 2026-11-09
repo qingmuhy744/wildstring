@@ -1,6 +1,7 @@
 @file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 package com.wildstring.app.ui
 
+import com.wildstring.app.AppLanguage
 import com.wildstring.app.R
 import androidx.compose.ui.res.stringResource
 import androidx.compose.foundation.layout.*
@@ -56,7 +57,7 @@ import kotlinx.coroutines.launch
                                 Text(server.label, style = MaterialTheme.typography.titleMedium)
                                 if (server.name.isNotBlank()) Text(server.url, style = MaterialTheme.typography.bodySmall)
                                 Text((if (active) stringResource(R.string.server_current_prefix) else "") + (if (vm.repository.session.hasSession(server.id)) stringResource(R.string.server_saved_signin) + vm.repository.session.accountFor(server.id)?.username?.let { " · $it" }.orEmpty() else stringResource(R.string.server_not_signed_in)) + (if (active && state.serverVersion != null) stringResource(R.string.about_server_version, state.serverVersion.orEmpty()) else ""), style = MaterialTheme.typography.bodySmall)
-                                if (active && state.connected) TextButton({ showRoutes = true }) { Text("线路与故障切换") }
+                                if (active && state.connected) TextButton({ showRoutes = true }) { Text(stringResource(R.string.srv_scr_routes_and_failover)) }
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                     Row { IconButton({ editing = server }, Modifier.testTag("server-edit-${server.id}")) { Icon(Icons.Default.Edit, stringResource(R.string.edit_named, server.label)) }
                                         IconButton({ deleting = server }, Modifier.testTag("server-delete-${server.id}")) { Icon(Icons.Default.DeleteOutline, stringResource(R.string.delete_named, server.label)) } }
@@ -126,38 +127,38 @@ import kotlinx.coroutines.launch
             }
         }
         Surface(Modifier.fillMaxSize()) {
-            Scaffold(topBar = { TopAppBar(title = { Text("服务器线路") }, navigationIcon = { IconButton(dismiss) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回") } }) }) { padding ->
+            Scaffold(topBar = { TopAppBar(title = { Text(stringResource(R.string.srv_scr_server_routes_title)) }, navigationIcon = { IconButton(dismiss) { Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.srv_scr_back)) } }) }) { padding ->
                 Column(Modifier.padding(padding).padding(16.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("线路顺序和模式仅保存在本机；每条线路分别登录。", style = MaterialTheme.typography.bodySmall)
-                    Row { RadioButton(selected == null, { scope.launch { manager.select(null); selected = session.manualRoute } }, enabled = !busy); Text("Fallback · 故障时按优先级切换") }
-                    Text("Fallback 保持当前可用线路。重新选择 Fallback 会从首条线路尝试。手动模式固定所选线路。", style = MaterialTheme.typography.bodySmall)
+                    Text(stringResource(R.string.srv_scr_routes_hint), style = MaterialTheme.typography.bodySmall)
+                    Row { RadioButton(selected == null, { scope.launch { manager.select(null); selected = session.manualRoute } }, enabled = !busy); Text(stringResource(R.string.srv_scr_fallback_label)) }
+                    Text(stringResource(R.string.srv_scr_fallback_hint), style = MaterialTheme.typography.bodySmall)
                     routes.forEachIndexed { index, route ->
                         ElevatedCard(Modifier.fillMaxWidth()) {
                             Column(Modifier.padding(12.dp)) {
-                                Row { RadioButton(selected == route.url, { scope.launch { manager.select(route.url); selected = session.manualRoute } }, enabled = !busy); Text("手动 · ${route.name}" + if (session.activeRouteUrl == route.url) " · 当前" else "") }
+                                Row { RadioButton(selected == route.url, { scope.launch { manager.select(route.url); selected = session.manualRoute } }, enabled = !busy); Text(stringResource(R.string.srv_scr_manual_prefix, route.name) + if (session.activeRouteUrl == route.url) stringResource(R.string.srv_scr_current_suffix) else "") }
                                 Text(route.url, style = MaterialTheme.typography.bodySmall)
                                 Row {
-                                    TextButton({ session.editRoutes(routes.toMutableList().apply { add(index - 1, removeAt(index)) }) }, enabled = index > 0 && !busy) { Text("上移") }
-                                    TextButton({ session.editRoutes(routes.toMutableList().apply { add(index + 1, removeAt(index)) }) }, enabled = index < routes.lastIndex && !busy) { Text("下移") }
-                                    TextButton({ name = route.name; url = route.url; http = route.allowHttp }) { Text("改名 / 重新登录") }
-                                    TextButton({ session.editRoutes(routes.filterNot { it.url == route.url }) }, enabled = session.activeRouteUrl != route.url && !busy) { Text("删除") }
+                                    TextButton({ session.editRoutes(routes.toMutableList().apply { add(index - 1, removeAt(index)) }) }, enabled = index > 0 && !busy) { Text(stringResource(R.string.srv_scr_move_up)) }
+                                    TextButton({ session.editRoutes(routes.toMutableList().apply { add(index + 1, removeAt(index)) }) }, enabled = index < routes.lastIndex && !busy) { Text(stringResource(R.string.srv_scr_move_down)) }
+                                    TextButton({ name = route.name; url = route.url; http = route.allowHttp }) { Text(stringResource(R.string.srv_scr_rename_relogin)) }
+                                    TextButton({ session.editRoutes(routes.filterNot { it.url == route.url }) }, enabled = session.activeRouteUrl != route.url && !busy) { Text(stringResource(R.string.srv_scr_delete)) }
                                 }
                             }
                         }
                     }
                     HorizontalDivider()
-                    Text("添加或更新线路", style = MaterialTheme.typography.titleMedium)
-                    OutlinedTextField(name, { name = it.take(80) }, label = { Text("线路名称，如内网 / 公网") }, modifier = Modifier.fillMaxWidth(), enabled = !busy)
-                    OutlinedTextField(url, { url = it; http = false }, label = { Text("完整服务器地址") }, modifier = Modifier.fillMaxWidth(), enabled = !busy)
-                    Row { Checkbox(http, { http = it }, enabled = !busy); Text("允许这条 HTTP 线路（请确认内网或 SD-WAN 保护）") }
-                    OutlinedTextField(username, { username = it }, label = { Text("账号") }, modifier = Modifier.fillMaxWidth(), enabled = !busy)
-                    OutlinedTextField(password, { password = it }, label = { Text("该线路的登录密码") }, visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth(), enabled = !busy)
+                    Text(stringResource(R.string.srv_scr_add_or_update_route), style = MaterialTheme.typography.titleMedium)
+                    OutlinedTextField(name, { name = it.take(80) }, label = { Text(stringResource(R.string.srv_scr_route_name_label)) }, modifier = Modifier.fillMaxWidth(), enabled = !busy)
+                    OutlinedTextField(url, { url = it; http = false }, label = { Text(stringResource(R.string.srv_scr_server_url_label)) }, modifier = Modifier.fillMaxWidth(), enabled = !busy)
+                    Row { Checkbox(http, { http = it }, enabled = !busy); Text(stringResource(R.string.srv_scr_allow_http_label)) }
+                    OutlinedTextField(username, { username = it }, label = { Text(stringResource(R.string.srv_scr_account_label)) }, modifier = Modifier.fillMaxWidth(), enabled = !busy)
+                    OutlinedTextField(password, { password = it }, label = { Text(stringResource(R.string.srv_scr_password_label)) }, visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth(), enabled = !busy)
                     Button({ busy = true; error = null; scope.launch {
                         try { manager.add(name, url, http, username, password); name = ""; url = "" }
                         catch (cancel: kotlinx.coroutines.CancellationException) { throw cancel }
-                        catch (failure: Exception) { error = failure.message ?: "线路保存失败" }
+                        catch (failure: Exception) { error = failure.message ?: AppLanguage.string(R.string.srv_scr_save_failed) }
                         finally { busy = false; password = "" }
-                    } }, enabled = !busy && name.isNotBlank() && url.isNotBlank() && password.isNotBlank()) { Text(if (busy) "验证中…" else "验证并保存线路") }
+                    } }, enabled = !busy && name.isNotBlank() && url.isNotBlank() && password.isNotBlank()) { Text(if (busy) stringResource(R.string.srv_scr_verifying) else stringResource(R.string.srv_scr_verify_and_save)) }
                     (error ?: message)?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                 }
             }

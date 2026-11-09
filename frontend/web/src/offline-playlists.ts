@@ -2,6 +2,7 @@ import { readPreference, writePreference } from './user-preferences';
 import { useEffect } from 'react';
 import { api, ApiError, type Playlist, type TrackPage } from './api';
 import { activeOfflineUserId, automaticDownloadNetworkAllowed, saveDownloads } from './offline';
+import i18n from './i18n';
 
 const event = 'wildstring:offline-options';
 const key = (userId: string) => `wildstring:auto-playlists:${userId}`;
@@ -44,7 +45,7 @@ let syncing = false;
 export async function syncOfflinePlaylists(userId: string, signal?: AbortSignal) {
   if (syncing || activeOfflineUserId() !== userId) return;
   if (!automaticDownloadNetworkAllowed())
-    throw new Error('等待可识别的 Wi-Fi／有线网络；也可以在下载设置中允许移动数据或未知网络。');
+    throw new Error(i18n.t('offlinePlaylists.waitingForNetwork'));
   syncing = true;
   const valid = () => !signal?.aborted && activeOfflineUserId() === userId;
   try {
@@ -61,12 +62,12 @@ export async function syncOfflinePlaylists(userId: string, signal?: AbortSignal)
           if (!valid()) return;
           if (total === -1) total = page.total;
           if (total !== page.total || total > 1000)
-            throw new Error('歌单已变化或超过离线 1000 首上限，请检查后重试。');
+            throw new Error(i18n.t('offlinePlaylists.playlistChangedOrLimit'));
           tracks.push(...page.items);
           offset += page.items.length;
           if (!page.items.length || offset >= total) break;
         }
-        if (tracks.length !== total) throw new Error('歌单读取不完整，请稍后重试。');
+        if (tracks.length !== total) throw new Error(i18n.t('offlinePlaylists.playlistIncomplete'));
         if (valid() && followedPlaylists(userId).includes(id)) await saveDownloads(tracks, true);
       } catch (error) {
         if (!valid()) return;

@@ -1,5 +1,8 @@
 package com.wildstring.app.ui
 
+import androidx.compose.ui.res.stringResource
+import com.wildstring.app.AppLanguage
+import com.wildstring.app.R
 import android.animation.ValueAnimator
 import android.database.ContentObserver
 import android.os.Handler
@@ -43,7 +46,12 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.wildstring.app.data.Track
 import kotlinx.coroutines.delay
 
-internal val playbackStyles = listOf("cover" to "封面", "vinyl" to "黑胶", "cassette" to "磁带")
+internal val playbackStyles: List<Pair<String, String>>
+    get() = listOf(
+        "cover" to AppLanguage.string(R.string.pb_vis_style_cover),
+        "vinyl" to AppLanguage.string(R.string.pb_vis_style_vinyl),
+        "cassette" to AppLanguage.string(R.string.pb_vis_style_cassette)
+    )
 
 /** Saved separately from the audio session; the angle is read only during drawing. */
 @Stable internal class PlaybackRotation(initial: Float = 0f) {
@@ -86,13 +94,14 @@ internal val playbackStyles = listOf("cover" to "封面", "vinyl" to "黑胶", "
     var settled by remember(track.id) { mutableStateOf(false) }
     LaunchedEffect(track.id) { delay(180); settled = true }
     val arm by animateFloatAsState(if (playing && settled) 26f else 8f, tween(if (motionAllowed) 350 else 0), label = "tonearm")
+    val stateDesc = if (moving) stringResource(R.string.pb_vis_state_spinning) else stringResource(R.string.pb_vis_state_still)
     Crossfade(style, modifier.testTag("playback-visual-$style").semantics {
-        stateDescription = if (moving) "正在转动" else "静止"
+        stateDescription = stateDesc
     }.combinedClickable(
         interactionSource = remember { MutableInteractionSource() },
         indication = null,
-        onClickLabel = "查看歌词",
-        onLongClickLabel = "查看大封面",
+        onClickLabel = stringResource(R.string.pb_vis_view_lyrics),
+        onLongClickLabel = stringResource(R.string.pb_vis_view_artwork),
         onLongClick = onArtwork,
         hapticFeedbackEnabled = false,
         onClick = onLyrics,

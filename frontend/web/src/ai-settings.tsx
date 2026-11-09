@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { api } from './api';
 interface AIConfig {
   version: number;
@@ -9,6 +10,7 @@ interface AIConfig {
   configured: boolean;
 }
 export function AISettings() {
+  const { t } = useTranslation();
   const [config, setConfig] = useState<AIConfig | null>(null),
     [url, setUrl] = useState(''),
     [model, setModel] = useState(''),
@@ -61,9 +63,9 @@ export function AISettings() {
           }),
         }),
       );
-      setNotice('AI 服务配置已保存');
+      setNotice(t('aiSettings.savedNotice'));
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '配置保存失败。');
+      setError(reason instanceof Error ? reason.message : t('aiSettings.saveFailed'));
     } finally {
       setBusy(false);
     }
@@ -74,23 +76,25 @@ export function AISettings() {
     setNotice('');
     try {
       await api('/manage/ai/test', { method: 'POST' });
-      setNotice('模型响应正常。此测试尚未验证工具调用能力。');
+      setNotice(t('aiSettings.probeSuccess'));
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '连接测试失败。');
+      setError(reason instanceof Error ? reason.message : t('aiSettings.probeFailed'));
     } finally {
       setBusy(false);
     }
   }
   return (
-    <section className="management-card ai-settings" aria-label="AI 服务配置">
+    <section className="management-card ai-settings" aria-label={t('aiSettings.ariaLabel')}>
       <div className="management-section-heading">
         <div>
-          <h2>原有实例连接</h2>
-          <p className="muted">
-            接入兼容 Chat Completions 的 API。密钥仅保存在服务端，保存后可测试模型连接。
-          </p>
+          <h2>{t('aiSettings.title')}</h2>
+          <p className="muted">{t('aiSettings.subtitle')}</p>
         </div>
-        <span className="job-status">{config?.configured ? '已配置' : '未配置'}</span>
+        <span className="job-status">
+          {config?.configured
+            ? t('aiSettings.statusConfigured')
+            : t('aiSettings.statusUnconfigured')}
+        </span>
       </div>
       <form
         onSubmit={(event) => {
@@ -101,11 +105,11 @@ export function AISettings() {
         <fieldset disabled={!config || busy}>
           <div className="metadata-fields">
             <label className="metadata-field">
-              API 地址
+              {t('aiSettings.urlLabel')}
               <input
                 required
                 type="url"
-                aria-label="AI API 地址"
+                aria-label={t('aiSettings.urlAriaLabel')}
                 placeholder="https://your-api.example/v1"
                 maxLength={2048}
                 value={url}
@@ -116,11 +120,11 @@ export function AISettings() {
               />
             </label>
             <label className="metadata-field">
-              模型名称
+              {t('aiSettings.modelLabel')}
               <input
                 required
-                aria-label="AI 模型名称"
-                placeholder="填写服务支持的模型 ID"
+                aria-label={t('aiSettings.modelAriaLabel')}
+                placeholder={t('aiSettings.modelPlaceholder')}
                 maxLength={200}
                 value={model}
                 onChange={(e) => {
@@ -134,11 +138,13 @@ export function AISettings() {
               <input
                 id="ai-api-key"
                 type="password"
-                aria-label="AI API Key"
+                aria-label={t('aiSettings.keyAriaLabel')}
                 autoComplete="new-password"
                 maxLength={4096}
                 placeholder={
-                  config?.has_api_key ? '已保存；留空保留原密钥' : '本地无鉴权模型可留空'
+                  config?.has_api_key
+                    ? t('aiSettings.keyPlaceholderSaved')
+                    : t('aiSettings.keyPlaceholderEmpty')
                 }
                 disabled={clearKey}
                 value={key}
@@ -154,14 +160,14 @@ export function AISettings() {
                     checked={clearKey}
                     onChange={(e) => setClearKey(e.target.checked)}
                   />
-                  清除已保存的密钥
+                  {t('aiSettings.clearKey')}
                 </label>
               )}
             </div>
             <label className="metadata-field">
-              请求超时（秒）
+              {t('aiSettings.timeoutLabel')}
               <input
-                aria-label="AI 请求超时"
+                aria-label={t('aiSettings.timeoutAriaLabel')}
                 type="number"
                 min={1}
                 max={120}
@@ -183,22 +189,20 @@ export function AISettings() {
           )}
           <div className="ai-settings-actions">
             <button className="primary" disabled={busy || !config || !dirty}>
-              {busy ? '处理中…' : '保存 AI 配置'}
+              {busy ? t('aiSettings.saving') : t('aiSettings.saveButton')}
             </button>
             <button
               type="button"
               disabled={busy || !config?.configured || dirty}
               onClick={() => void probe()}
             >
-              测试模型连接
+              {t('aiSettings.probeButton')}
             </button>
-            <span className="muted">测试会发送简短请求，消耗少量 token。</span>
+            <span className="muted">{t('aiSettings.probeNotice')}</span>
           </div>
         </fieldset>
       </form>
-      <p className="muted">
-        本配置以 legacy 连接出现在统一列表中；保存不会自动用于找歌或推荐，请在对应功能中明确选择。
-      </p>
+      <p className="muted">{t('aiSettings.legacyNotice')}</p>
     </section>
   );
 }

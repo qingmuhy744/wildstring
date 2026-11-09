@@ -11,9 +11,17 @@ struct BrowseView: View {
     var autoPlayFirst = false
 
     enum Section: String, CaseIterable {
-        case songs = "歌曲"
-        case albums = "专辑"
-        case artists = "艺人"
+        case songs
+        case albums
+        case artists
+
+        var title: String {
+            switch self {
+            case .songs: return L10n("browse.songs")
+            case .albums: return L10n("browse.albums")
+            case .artists: return L10n("browse.artists")
+            }
+        }
     }
 
     @State private var section: Section = Self.demoSection
@@ -61,23 +69,23 @@ struct BrowseView: View {
     var body: some View {
         NavigationStack(path: $path) {
             VStack(spacing: 0) {
-                Picker("分类", selection: $section) {
+                Picker(L10n("browse.category"), selection: $section) {
                     ForEach(Section.allCases, id: \.self) { section in
-                        Text(section.rawValue).tag(section)
+                        Text(section.title).tag(section)
                     }
                 }
                 .pickerStyle(.segmented)
                 .padding(.horizontal)
                 .padding(.vertical, 6)
                 if section == .artists {
-                    Picker("角色", selection: $artistRole) {
-                        Text("全部").tag("")
-                        Text("艺人").tag("artist")
-                        Text("专辑艺人").tag("album_artist")
-                        Text("演唱").tag("vocalist")
-                        Text("作词").tag("lyricist")
-                        Text("作曲").tag("composer")
-                        Text("编曲").tag("arranger")
+                    Picker(L10n("browse.role"), selection: $artistRole) {
+                        Text(L10n("browse.roleAll")).tag("")
+                        Text(L10n("browse.roleArtist")).tag("artist")
+                        Text(L10n("browse.roleAlbumArtist")).tag("album_artist")
+                        Text(L10n("browse.roleVocalist")).tag("vocalist")
+                        Text(L10n("browse.roleLyricist")).tag("lyricist")
+                        Text(L10n("browse.roleComposer")).tag("composer")
+                        Text(L10n("browse.roleArranger")).tag("arranger")
                     }
                     .pickerStyle(.menu)
                     .padding(.horizontal)
@@ -85,7 +93,7 @@ struct BrowseView: View {
 
                 content
             }
-            .navigationTitle("音乐")
+            .navigationTitle(L10n("browse.title"))
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button {
@@ -93,7 +101,7 @@ struct BrowseView: View {
                     } label: {
                         Image(systemName: "magnifyingglass")
                     }
-                    .accessibilityLabel("搜索")
+                    .accessibilityLabel(L10n("browse.search"))
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     if libraries.count > 1 {
@@ -143,14 +151,14 @@ struct BrowseView: View {
 
     private var libraryMenu: some View {
         Menu {
-            Button("默认曲库") { selectLibrary(nil) }
+            Button(L10n("browse.defaultLibrary")) { selectLibrary(nil) }
             ForEach(libraries) { library in
                 Button(library.name) { selectLibrary(library.id) }
             }
         } label: {
             Image(systemName: "books.vertical")
         }
-        .accessibilityLabel("曲库")
+        .accessibilityLabel(L10n("browse.library"))
     }
 
     private func selectLibrary(_ id: String?) {
@@ -185,7 +193,7 @@ struct BrowseView: View {
             if let songsLoader {
                 LoadedList(
                     loader: songsLoader,
-                    emptyTitle: "曲库为空",
+                    emptyTitle: L10n("browse.emptySongs"),
                     emptyIcon: "music.note.list"
                 ) { track in
                     TrackActionRow(client: client, track: track) {
@@ -218,7 +226,7 @@ struct BrowseView: View {
             if let albumsLoader {
                 LoadedList(
                     loader: albumsLoader,
-                    emptyTitle: "没有专辑",
+                    emptyTitle: L10n("browse.emptyAlbums"),
                     emptyIcon: "square.stack"
                 ) { album in
                     NavigationLink(value: album) {
@@ -232,7 +240,7 @@ struct BrowseView: View {
             if let artistsLoader {
                 LoadedList(
                     loader: artistsLoader,
-                    emptyTitle: "没有艺人",
+                    emptyTitle: L10n("browse.emptyArtists"),
                     emptyIcon: "person.2"
                 ) { artist in
                     NavigationLink(value: artist) {
@@ -330,7 +338,7 @@ struct BrowseView: View {
                     toggleSongOrder()
                 } label: {
                     Label(
-                        songOrder == .asc ? "改为降序" : "改为升序",
+                        songOrder == .asc ? L10n("browse.sortDesc") : L10n("browse.sortAsc"),
                         systemImage: songOrder == .asc ? "arrow.down" : "arrow.up"
                     )
                 }
@@ -351,7 +359,7 @@ struct BrowseView: View {
                     toggleAlbumOrder()
                 } label: {
                     Label(
-                        albumOrder == .asc ? "改为降序" : "改为升序",
+                        albumOrder == .asc ? L10n("browse.sortDesc") : L10n("browse.sortAsc"),
                         systemImage: albumOrder == .asc ? "arrow.down" : "arrow.up"
                     )
                 }
@@ -359,7 +367,7 @@ struct BrowseView: View {
         } label: {
             Image(systemName: "arrow.up.arrow.down")
         }
-        .accessibilityLabel("排序")
+        .accessibilityLabel(L10n("browse.sort"))
     }
 
     private func choose(songSort sort: TrackSort) {

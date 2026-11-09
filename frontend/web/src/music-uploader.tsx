@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { api } from './api';
 
 export interface UploadItem {
@@ -86,6 +87,7 @@ export function MusicUploader({
   canImport: boolean;
   onUploaded: () => void;
 }) {
+  const { t } = useTranslation();
   const [items, setItems] = useState<UploadItem[]>([]);
   const [dragActive, setDragActive] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -227,7 +229,7 @@ export function MusicUploader({
           }
         } catch (err) {
           errorCount++;
-          const message = err instanceof Error ? err.message : '上传失败';
+          const message = err instanceof Error ? err.message : t('musicUploader.uploadFailed');
           updateItem(item.id, { status: 'error', error: message });
         }
       }
@@ -256,12 +258,10 @@ export function MusicUploader({
   const progressPercent = items.length > 0 ? Math.round((completedCount / items.length) * 100) : 0;
 
   return (
-    <section className="management-card music-uploader" aria-label="上传音乐工作台">
+    <section className="management-card music-uploader" aria-label={t('musicUploader.sectionAria')}>
       <span className="eyebrow">UPLOAD WORKSPACE</span>
-      <h2>上传音乐与文件夹</h2>
-      <p className="muted">
-        支持拖拽整个文件夹或音频文件，自动解析标签、排他去重并按规范整理入库。若无曲序标签将智能根据文件名提取。
-      </p>
+      <h2>{t('musicUploader.title')}</h2>
+      <p className="muted">{t('musicUploader.description')}</p>
 
       {/* Hidden file inputs */}
       <input
@@ -304,9 +304,9 @@ export function MusicUploader({
             📂
           </span>
           <p>
-            <strong>拖拽文件夹或音频文件到此处</strong>
+            <strong>{t('musicUploader.dropzonePrompt')}</strong>
           </p>
-          <span className="muted">支持 FLAC、MP3、M4A、WAV 及伴随歌词 (.lrc)</span>
+          <span className="muted">{t('musicUploader.dropzoneFormats')}</span>
           <div className="dropzone-buttons">
             <button
               type="button"
@@ -314,14 +314,14 @@ export function MusicUploader({
               disabled={!canImport || uploading}
               onClick={() => folderInputRef.current?.click()}
             >
-              选择文件夹
+              {t('musicUploader.selectFolder')}
             </button>
             <button
               type="button"
               disabled={!canImport || uploading}
               onClick={() => fileInputRef.current?.click()}
             >
-              选择音频文件
+              {t('musicUploader.selectAudioFiles')}
             </button>
           </div>
         </div>
@@ -332,14 +332,17 @@ export function MusicUploader({
         <div className="upload-queue-panel">
           <div className="queue-header">
             <div>
-              <strong>待上传清单</strong>
+              <strong>{t('musicUploader.queueTitle')}</strong>
               <span className="muted">
-                （共 {items.length} 个文件 · {formatBytes(totalBytes)}）
+                {t('musicUploader.queueSummary', {
+                  count: items.length,
+                  size: formatBytes(totalBytes),
+                })}
               </span>
             </div>
             {!uploading && (
               <button type="button" onClick={clearItems} className="text-button">
-                清空列表
+                {t('musicUploader.clearList')}
               </button>
             )}
           </div>
@@ -347,24 +350,24 @@ export function MusicUploader({
           {/* Quick Override Fields (Second line of defense) */}
           <div className="upload-overrides">
             <details>
-              <summary>标签缺失时的覆盖设置（可选）</summary>
+              <summary>{t('musicUploader.overrideSummary')}</summary>
               <div className="overrides-form">
                 <label>
-                  <span>强制/默认艺人：</span>
+                  <span>{t('musicUploader.overrideArtistLabel')}</span>
                   <input
                     type="text"
                     value={overrideArtist}
-                    placeholder="如：周杰伦"
+                    placeholder={t('musicUploader.overrideArtistPlaceholder')}
                     disabled={uploading}
                     onChange={(e) => setOverrideArtist(e.target.value)}
                   />
                 </label>
                 <label>
-                  <span>强制/默认专辑：</span>
+                  <span>{t('musicUploader.overrideAlbumLabel')}</span>
                   <input
                     type="text"
                     value={overrideAlbum}
-                    placeholder="如：范特西"
+                    placeholder={t('musicUploader.overrideAlbumPlaceholder')}
                     disabled={uploading}
                     onChange={(e) => setOverrideAlbum(e.target.value)}
                   />
@@ -377,7 +380,7 @@ export function MusicUploader({
           {uploading && (
             <div className="upload-progress-bar-wrapper">
               <div className="progress-info">
-                <span>正在上传...</span>
+                <span>{t('musicUploader.uploading')}</span>
                 <span>
                   {completedCount} / {items.length} ({progressPercent}%)
                 </span>
@@ -392,9 +395,12 @@ export function MusicUploader({
           {summary && (
             <div className="upload-summary-box" role="status">
               <span>
-                🎉 上传完成：成功导入 <strong>{summary.imported}</strong> 首， 跳过重复{' '}
-                <strong>{summary.duplicate}</strong> 首
-                {summary.error > 0 && `，失败 ${summary.error} 项`}。
+                {t('musicUploader.summaryPrefix')}
+                <strong>{summary.imported}</strong>
+                {t('musicUploader.summaryImported')} <strong>{summary.duplicate}</strong>
+                {t('musicUploader.summaryDuplicate')}
+                {summary.error > 0 && t('musicUploader.summaryFailed', { count: summary.error })}
+                {t('musicUploader.summaryPeriod')}
               </span>
             </div>
           )}
@@ -410,19 +416,25 @@ export function MusicUploader({
                   <span className="item-size muted">{formatBytes(item.file.size)}</span>
                 </div>
                 <div className="item-status">
-                  {item.status === 'pending' && <span className="status-tag pending">等待中</span>}
+                  {item.status === 'pending' && (
+                    <span className="status-tag pending">{t('musicUploader.statusPending')}</span>
+                  )}
                   {item.status === 'uploading' && (
-                    <span className="status-tag uploading">上传中...</span>
+                    <span className="status-tag uploading">
+                      {t('musicUploader.statusUploading')}
+                    </span>
                   )}
                   {item.status === 'imported' && (
-                    <span className="status-tag success">✓ 已导入</span>
+                    <span className="status-tag success">{t('musicUploader.statusSuccess')}</span>
                   )}
                   {item.status === 'duplicate' && (
-                    <span className="status-tag duplicate">✓ 重复跳过</span>
+                    <span className="status-tag duplicate">
+                      {t('musicUploader.statusDuplicate')}
+                    </span>
                   )}
                   {item.status === 'error' && (
                     <span className="status-tag error" title={item.error}>
-                      ✕ {item.error || '失败'}
+                      ✕ {item.error || t('musicUploader.statusFailed')}
                     </span>
                   )}
                 </div>
@@ -442,7 +454,12 @@ export function MusicUploader({
               }
               onClick={() => void startUpload()}
             >
-              {uploading ? `正在上传 (${completedCount}/${items.length})` : '开始上传入库'}
+              {uploading
+                ? t('musicUploader.uploadingProgress', {
+                    completed: completedCount,
+                    total: items.length,
+                  })
+                : t('musicUploader.startUpload')}
             </button>
           </div>
         </div>

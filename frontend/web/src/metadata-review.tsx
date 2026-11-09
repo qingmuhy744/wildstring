@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import { HelpText } from './desktop-help';
 import { hints } from './help-content';
 import { HelpLabel } from './desktop-help';
@@ -54,36 +55,38 @@ type ReviewPage = AgentPage<ReviewTrack> & {
   } | null;
 };
 type Choice = { source: string; fields: string[] };
-const names: Record<string, string> = {
-  title: '歌名',
-  artists: '歌曲艺人',
-  album: '专辑',
-  album_artists: '专辑艺人',
-  artist_credit: '艺人署名',
-  album_artist_credit: '专辑艺人署名',
-  track_number: '曲序',
-  disc_number: '碟号',
-  track_total: '总曲数',
-  disc_total: '总碟数',
-  release_date: '发行日期',
-  original_date: '首次发行日期',
-  composers: '作曲',
-  lyricists: '作词',
-  arrangers: '编曲',
-  vocalists: '演唱',
-  genres: '风格',
-  tags: '标签',
-  external_ids: '外部标识',
-  description: '简介',
+const fieldKeys: Record<string, string> = {
+  title: 'metadataReview.fieldTitle',
+  artists: 'metadataReview.fieldArtists',
+  album: 'metadataReview.fieldAlbum',
+  album_artists: 'metadataReview.fieldAlbumArtists',
+  artist_credit: 'metadataReview.fieldArtistCredit',
+  album_artist_credit: 'metadataReview.fieldAlbumArtistCredit',
+  track_number: 'metadataReview.fieldTrackNumber',
+  disc_number: 'metadataReview.fieldDiscNumber',
+  track_total: 'metadataReview.fieldTrackTotal',
+  disc_total: 'metadataReview.fieldDiscTotal',
+  release_date: 'metadataReview.fieldReleaseDate',
+  original_date: 'metadataReview.fieldOriginalDate',
+  composers: 'metadataReview.fieldComposers',
+  lyricists: 'metadataReview.fieldLyricists',
+  arrangers: 'metadataReview.fieldArrangers',
+  vocalists: 'metadataReview.fieldVocalists',
+  genres: 'metadataReview.fieldGenres',
+  tags: 'metadataReview.fieldTags',
+  external_ids: 'metadataReview.fieldExternalIds',
+  description: 'metadataReview.fieldDescription',
 };
+const fieldName = (field: string, t: (key: string) => string) =>
+  fieldKeys[field] ? t(fieldKeys[field]) : field;
 const same = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 const candidateStale = (candidate: Candidate, track: ReviewTrack) =>
   candidate.stale ?? candidate.metadata_version !== track.metadata_version;
-const display = (v: unknown): string =>
+const display = (v: unknown, t: (key: string) => string): string =>
   v == null
-    ? '未设置'
+    ? t('metadataReview.notSet')
     : Array.isArray(v)
-      ? v.join(' / ') || '未设置'
+      ? v.join(' / ') || t('metadataReview.notSet')
       : typeof v === 'object'
         ? JSON.stringify(v)
         : String(v);
@@ -91,11 +94,12 @@ function candidateLabel(
   candidate: Candidate,
   track: ReviewTrack,
   providers: Record<string, string>,
+  t: (key: string, options?: Record<string, unknown>) => string,
 ) {
   const album =
     typeof candidate.fields.album === 'string' && candidate.fields.album
       ? candidate.fields.album
-      : '未提供专辑';
+      : t('metadataReview.noAlbumProvided');
   const title =
     typeof candidate.fields.title === 'string' && candidate.fields.title !== track.title
       ? candidate.fields.title
@@ -109,10 +113,11 @@ function candidateLabel(
     album,
     date,
     typeof score === 'number' && Number.isFinite(score)
-      ? `匹配度 ${Math.round(score <= 1 ? score * 100 : score)}%`
+      ? t('metadataReview.matchScore', { score: Math.round(score <= 1 ? score * 100 : score) })
       : '',
-    candidate.match.album_release_lock ? '与锁定发行冲突' : '',
-    candidate.stale_reason || (candidateStale(candidate, track) ? '查询依据已变化' : ''),
+    candidate.match.album_release_lock ? t('metadataReview.conflictWithReleaseLock') : '',
+    candidate.stale_reason ||
+      (candidateStale(candidate, track) ? t('metadataReview.queryBasisChanged') : ''),
   ]
     .filter(Boolean)
     .join(' · ');
@@ -154,6 +159,7 @@ export function MetadataReviewWorkbench({
   onApplied?: () => void | Promise<void>;
   onBusy?: (busy: boolean) => void;
 }) {
+  const { t } = useTranslation();
   const [albums, setAlbums] = useState<Album[]>([]),
     [albumTotal, setAlbumTotal] = useState(0),
     [filter, setFilter] = useState('');
@@ -300,7 +306,7 @@ export function MetadataReviewWorkbench({
         body: JSON.stringify({ album_id: page.album_id }),
       });
       const updatedAlbums = await loadAlbums();
-      setNotice('已拒绝此专辑的所有建议；现有资料保持不变。');
+      setNotice(t('metadataReview.rejectAlbumNotice'));
       const next = updatedAlbums.find((a) => a.id !== page.album_id);
       if (next) {
         await load(`album_id=${encodeURIComponent(next.id)}`);
@@ -327,7 +333,7 @@ export function MetadataReviewWorkbench({
       });
       await load(pageQuery(page), undefined, true);
       await loadAlbums();
-      setNotice('已拒绝该单曲的所有建议；现有资料保持不变。');
+      setNotice(t('metadataReview.rejectTrackNotice'));
     } catch (reason) {
       setError(errorText(reason));
     } finally {
@@ -353,7 +359,7 @@ export function MetadataReviewWorkbench({
       });
       await load(pageQuery(page), active, true);
       await loadAlbums();
-      setNotice('已拒绝当前候选及其旧的重复记录，现有资料保持不变；其他候选和后续查询不受影响。');
+      setNotice(t('metadataReview.rejectCurrentNotice'));
     } catch (reason) {
       setError(errorText(reason));
     } finally {
@@ -398,7 +404,7 @@ export function MetadataReviewWorkbench({
           setConflicts(
             Object.fromEntries((result.conflicts || []).map((c) => [c.track_id, c.error_code])),
           );
-          setError('此批次未应用；有歌曲或候选发生变化，请重新读取后核对。');
+          setError(t('metadataReview.conflictError'));
           return;
         }
       } else if (cover)
@@ -427,7 +433,11 @@ export function MetadataReviewWorkbench({
         await load(pageQuery(page), next);
       }
       setNotice(
-        `已应用 ${tracks.length} 首的 ${items.reduce((n, i) => n + i.fields.length, 0)} 个字段${cover ? '及已预览封面' : ''}。`,
+        t('metadataReview.appliedNotice', {
+          trackCount: tracks.length,
+          fieldCount: items.reduce((n, i) => n + i.fields.length, 0),
+          coverSuffix: cover ? t('metadataReview.coverSuffix') : '',
+        }),
       );
     } catch (reason) {
       setError(errorText(reason));
@@ -460,7 +470,7 @@ export function MetadataReviewWorkbench({
         method: 'POST',
         body: JSON.stringify({
           kind: 'cover',
-          title: `封面核对 · ${current.album || current.title}`,
+          title: t('metadataReview.coverDraftTitle', { name: current.album || current.title }),
           payload: {
             suggestion_id: candidate.id,
             metadata_version: current.metadata_version,
@@ -488,7 +498,7 @@ export function MetadataReviewWorkbench({
       } else {
         const id = releaseId(candidate);
         if (!candidate || !id) {
-          setError('当前候选没有可锁定的发行版本 ID，请选择带发行信息的来源。');
+          setError(t('metadataReview.noReleaseLockId'));
           return;
         }
         await api(`/manage/albums/${encodeURIComponent(page.album_id)}/release-lock`, {
@@ -503,11 +513,7 @@ export function MetadataReviewWorkbench({
         });
       }
       await load(pageQuery(page), active, true);
-      setNotice(
-        clear
-          ? '已解除专辑发行版本锁定。'
-          : '已锁定当前发行版本；其他发行候选仍会保留，但不能自动应用。',
-      );
+      setNotice(clear ? t('metadataReview.releaseLockCleared') : t('metadataReview.releaseLocked'));
     } catch (reason) {
       setError(errorText(reason));
     } finally {
@@ -526,8 +532,11 @@ export function MetadataReviewWorkbench({
       );
       setNotice(
         res.purged_count > 0
-          ? `已成功清理 ${res.purged_count} 个失效候选，剩余 ${res.remaining_pending} 个待核对候选。`
-          : `当前暂无失效候选，全部待核对候选均为有效版本。`,
+          ? t('metadataReview.stalePurged', {
+              purgedCount: res.purged_count,
+              remainingPending: res.remaining_pending,
+            })
+          : t('metadataReview.noStaleCandidates'),
       );
       const updated = await loadAlbums();
       if (updated.length && page) {
@@ -543,29 +552,29 @@ export function MetadataReviewWorkbench({
   }
   const disabled = busy || loading;
   return (
-    <section className="metadata-review" aria-label="批量核对工作台">
+    <section className="metadata-review" aria-label={t('metadataReview.workbenchAria')}>
       <header className="review-heading">
         <div>
-          <h2>批量核对资料</h2>
-          <p className="muted">只勾选需要的变化。已有人工值默认保留；勾选后会替换该字段。</p>
+          <h2>{t('metadataReview.headingTitle')}</h2>
+          <p className="muted">{t('metadataReview.headingMuted')}</p>
         </div>
         <div className="review-heading-actions">
           <button
             disabled={disabled}
             onClick={() => void purgeStale()}
-            title="清理歌曲信息已改变或查询依据失效的废弃候选，释放待办"
+            title={t('metadataReview.purgeStaleTitle')}
           >
-            清理已失效候选
+            {t('metadataReview.purgeStale')}
           </button>
           <button disabled={disabled} onClick={() => page && void load(pageQuery(page), active)}>
-            重新读取候选
+            {t('metadataReview.reloadCandidates')}
           </button>
           <button disabled={disabled || !current} onClick={() => setRefresh(true)}>
-            重新查询
+            {t('metadataReview.requery')}
           </button>
           {onClose && (
-            <button aria-label="关闭批量核对" disabled={busy} onClick={onClose}>
-              关闭
+            <button aria-label={t('metadataReview.closeAria')} disabled={busy} onClick={onClose}>
+              {t('metadataReview.close')}
             </button>
           )}
         </div>
@@ -577,9 +586,9 @@ export function MetadataReviewWorkbench({
       )}
       {notice && <p role="status">{notice}</p>}
       <div className="review-layout">
-        <aside aria-label="待核对专辑">
+        <aside aria-label={t('metadataReview.albumsAsideAria')}>
           <label>
-            筛选专辑
+            {t('metadataReview.filterAlbumsLabel')}
             <input value={filter} onChange={(e) => setFilter(e.target.value)} />
           </label>
           <ul>
@@ -596,7 +605,8 @@ export function MetadataReviewWorkbench({
                   >
                     <strong>{a.title}</strong>
                     <small>
-                      {a.artists.join(' / ')} · {a.count} 首待核对
+                      {a.artists.join(' / ')} ·{' '}
+                      {t('metadataReview.tracksPending', { count: a.count })}
                     </small>
                   </button>
                 </li>
@@ -604,50 +614,58 @@ export function MetadataReviewWorkbench({
           </ul>
           {albums.length < albumTotal && (
             <button disabled={disabled} onClick={() => void loadAlbums(true)}>
-              更多专辑
+              {t('metadataReview.moreAlbums')}
             </button>
           )}
         </aside>
         <main>
           <div className="review-album">
-            <h3>{current?.album || page?.items[0]?.album || '暂无待核对专辑'}</h3>
+            <h3>
+              {current?.album || page?.items[0]?.album || t('metadataReview.noPendingAlbums')}
+            </h3>
             <p>
-              {page?.total || 0} 首 · 本页 {page?.items.length || 0} 首
+              {t('metadataReview.albumHeaderSummary', {
+                total: page?.total || 0,
+                count: page?.items.length || 0,
+              })}
             </p>
             {!page?.batch_id && page?.release_lock ? (
               <p className="muted">
-                已锁定发行版本：{page.release_lock.provider} · {page.release_lock.release_id}{' '}
+                {t('metadataReview.releaseLockedLabel', {
+                  provider: page.release_lock.provider,
+                  releaseId: page.release_lock.release_id,
+                })}
                 <button
                   disabled={disabled || lockBusy}
                   onClick={() => void updateReleaseLock(true)}
                 >
-                  解除锁定
+                  {t('metadataReview.unlockRelease')}
                 </button>
               </p>
             ) : !page?.batch_id ? (
               <p className="muted">
-                尚未锁定发行版本；选择带 release ID 的候选后可固定，避免自动整理拆分专辑。{' '}
+                {t('metadataReview.releaseNotLockedLabel')}
                 <button
                   disabled={disabled || lockBusy || !releaseId(candidate)}
                   onClick={() => void updateReleaseLock()}
                 >
-                  锁定当前来源
+                  {t('metadataReview.lockRelease')}
                 </button>
               </p>
             ) : (
-              <p className="muted">
-                本页按查询批次汇总候选；专辑发行版本锁定请在单张专辑核对时设置。
-              </p>
+              <p className="muted">{t('metadataReview.batchSummaryNotice')}</p>
             )}
             <button
               disabled={disabled || !page?.items.length}
               onClick={() =>
                 setChoices(
-                  Object.fromEntries((page?.items || []).map((t) => [t.id, defaultChoice(t)])),
+                  Object.fromEntries(
+                    (page?.items || []).map((item) => [item.id, defaultChoice(item)]),
+                  ),
                 )
               }
             >
-              勾选本页变化（保留人工值）
+              {t('metadataReview.selectPageChanges')}
             </button>
             <button
               disabled={disabled}
@@ -659,32 +677,36 @@ export function MetadataReviewWorkbench({
                 )
               }
             >
-              清空选择
+              {t('metadataReview.clearSelection')}
             </button>
             <button
               className="review-song-toggle"
               aria-expanded={showSongs}
               onClick={() => setShowSongs(!showSongs)}
             >
-              {showSongs ? '收起歌曲列表' : `选择歌曲（已选 ${selected.length} 首）`}
+              {showSongs
+                ? t('metadataReview.collapseSongList')
+                : t('metadataReview.selectSongs', { count: selected.length })}
             </button>
           </div>
-          {loading && <p role="status">正在读取专辑差异…</p>}
+          {loading && <p role="status">{t('metadataReview.loadingDiff')}</p>}
           {showSongs && (
-            <div className="review-song-list" aria-label="专辑歌曲">
-              {page?.items.map((t) => (
-                <div key={t.id} className={active === t.id ? 'active' : ''}>
+            <div className="review-song-list" aria-label={t('metadataReview.albumSongsAria')}>
+              {page?.items.map((trackItem) => (
+                <div key={trackItem.id} className={active === trackItem.id ? 'active' : ''}>
                   <input
                     type="checkbox"
-                    aria-label={`选择 ${t.title}`}
-                    checked={!!choices[t.id]?.fields.length}
+                    aria-label={t('metadataReview.selectTrackAria', { title: trackItem.title })}
+                    checked={!!choices[trackItem.id]?.fields.length}
                     disabled={disabled}
-                    onChange={(e) => choose(t.id, e.target.checked ? defaultChoice(t).fields : [])}
+                    onChange={(e) =>
+                      choose(trackItem.id, e.target.checked ? defaultChoice(trackItem).fields : [])
+                    }
                   />
                   <button
                     disabled={disabled}
                     onClick={() => {
-                      setActive(t.id);
+                      setActive(trackItem.id);
                       setNotice('');
                       setError('');
                       setCover(null);
@@ -692,14 +714,16 @@ export function MetadataReviewWorkbench({
                     }}
                   >
                     <span>
-                      {t.disc_number || 1}.{t.track_number || '—'} {t.title}
+                      {trackItem.disc_number || 1}.{trackItem.track_number || '—'} {trackItem.title}
                     </span>
                     <small>
-                      {conflicts[t.id]
-                        ? '版本或来源冲突'
-                        : t.suggestions.some((s) => !candidateStale(s, t))
-                          ? `${choices[t.id]?.fields.length || 0} 个字段已选`
-                          : '暂无有效候选'}
+                      {conflicts[trackItem.id]
+                        ? t('metadataReview.conflictNotice')
+                        : trackItem.suggestions.some((s) => !candidateStale(s, trackItem))
+                          ? t('metadataReview.fieldsSelected', {
+                              count: choices[trackItem.id]?.fields.length || 0,
+                            })
+                          : t('metadataReview.noValidCandidate')}
                     </small>
                   </button>
                 </div>
@@ -712,25 +736,25 @@ export function MetadataReviewWorkbench({
                 disabled={disabled || page.offset === 0}
                 onClick={() => void load(pageQuery(page, Math.max(0, page.offset - page.limit)))}
               >
-                上一页
+                {t('metadataReview.prevPage')}
               </button>
               <button
                 disabled={disabled || page.offset + page.limit >= page.total}
                 onClick={() => void load(pageQuery(page, page.offset + page.limit))}
               >
-                下一页
+                {t('metadataReview.nextPage')}
               </button>
             </div>
           )}
           {current && (
-            <article className="review-detail" aria-label="当前歌曲差异">
+            <article className="review-detail" aria-label={t('metadataReview.trackDiffAria')}>
               <h3>{current.title}</h3>
               <p>{current.artists.join(' / ')}</p>
               <div className="workspace-actions">
                 <label>
-                  <HelpLabel hint="candidate">候选来源</HelpLabel>
+                  <HelpLabel hint="candidate">{t('metadataReview.candidateSourceLabel')}</HelpLabel>
                   <select
-                    aria-label="候选来源"
+                    aria-label={t('metadataReview.candidateSourceAria')}
                     value={choices[current.id]?.source || ''}
                     disabled={disabled}
                     onChange={(e) => {
@@ -755,45 +779,45 @@ export function MetadataReviewWorkbench({
                     }}
                   >
                     <option value="" disabled>
-                      选择来源
+                      {t('metadataReview.selectSourcePlaceholder')}
                     </option>
                     {current.suggestions.map((c) => (
                       <option key={c.id} value={c.id}>
-                        {candidateLabel(c, current, page?.provider_names || {})}
+                        {candidateLabel(c, current, page?.provider_names || {}, t)}
                       </option>
                     ))}
                   </select>
                 </label>
                 <button disabled={disabled} onClick={() => setRefresh(true)}>
-                  更新元数据
+                  {t('metadataReview.updateMetadata')}
                 </button>
                 <button
                   disabled={disabled || !current}
                   className="text-button danger"
                   onClick={() => void rejectTrack(current.id)}
-                  title="拒绝该单曲的所有建议候选"
+                  title={t('metadataReview.rejectTrackTitle')}
                 >
-                  拒绝此歌曲建议
+                  {t('metadataReview.rejectTrack')}
                 </button>
               </div>
               {candidate && (candidate.duplicate_count || 1) > 1 && (
                 <p className="muted review-candidate-note">
-                  已合并 {candidate.duplicate_count} 条相同候选记录；不同发行版本仍分别保留。
+                  {t('metadataReview.duplicateCountNote', { count: candidate.duplicate_count })}
                 </p>
               )}
               {jobs.length > 0 && (
                 <details open={jobs.some((j) => j.status === 'failed')}>
-                  <summary>本曲最近查询记录</summary>
+                  <summary>{t('metadataReview.recentQueries')}</summary>
                   {jobs.map((job) => (
                     <JobDiagnostics key={job.id} job={job} />
                   ))}
                 </details>
               )}
-              <nav className="workspace-tabs" aria-label="核对内容">
+              <nav className="workspace-tabs" aria-label={t('metadataReview.reviewContentAria')}>
                 {[
-                  ['fields', '文字资料'],
-                  ['cover', '封面对比'],
-                  ['lyrics', '歌词预览'],
+                  ['fields', t('metadataReview.tabFields')],
+                  ['cover', t('metadataReview.tabCover')],
+                  ['lyrics', t('metadataReview.tabLyrics')],
                 ].map(([id, label]) => (
                   <button key={id} aria-pressed={tab === id} onClick={() => setTab(id)}>
                     {label}
@@ -808,22 +832,24 @@ export function MetadataReviewWorkbench({
                       checked={onlyChanges}
                       onChange={(e) => setOnlyChanges(e.target.checked)}
                     />
-                    只看变化字段
+                    {t('metadataReview.onlyChanges')}
                   </label>
                   {candidate && !candidateStale(candidate, current) ? (
                     <>
                       <p className="muted">
-                        来源：{page?.provider_names[candidate.provider] || candidate.provider} ·
-                        信息版本 {candidate.metadata_version}
+                        {t('metadataReview.candidateSourceHeader', {
+                          provider: page?.provider_names[candidate.provider] || candidate.provider,
+                          version: candidate.metadata_version,
+                        })}
                         {candidate.stale_reason ? `（${candidate.stale_reason}）` : ''}
                       </p>
                       <table className="review-diff">
                         <thead>
                           <tr>
-                            <th>字段</th>
-                            <th>当前值</th>
-                            <th>建议值</th>
-                            <th>来源</th>
+                            <th>{t('metadataReview.colField')}</th>
+                            <th>{t('metadataReview.colCurrent')}</th>
+                            <th>{t('metadataReview.colSuggested')}</th>
+                            <th>{t('metadataReview.colSource')}</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -836,7 +862,9 @@ export function MetadataReviewWorkbench({
                                     <input
                                       type="checkbox"
                                       checked={choices[current.id]?.fields.includes(field) || false}
-                                      aria-label={`采用 ${names[field] || field}`}
+                                      aria-label={t('metadataReview.adoptFieldAria', {
+                                        field: fieldName(field, t),
+                                      })}
                                       disabled={disabled || candidateStale(candidate, current)}
                                       onChange={(e) =>
                                         choose(
@@ -847,17 +875,23 @@ export function MetadataReviewWorkbench({
                                         )
                                       }
                                     />
-                                    {names[field] || field}
+                                    {fieldName(field, t)}
                                   </label>
                                   {Object.hasOwn(current.overrides, field) && (
                                     <small>
-                                      <HelpText hint="manualValue">人工值</HelpText>
+                                      <HelpText hint="manualValue">
+                                        {t('metadataReview.manualValue')}
+                                      </HelpText>
                                     </small>
                                   )}
                                 </th>
-                                <td data-label="当前值">{display(current.current[field])}</td>
-                                <td data-label="建议值">{display(value)}</td>
-                                <td data-label="来源">
+                                <td data-label={t('metadataReview.colCurrent')}>
+                                  {display(current.current[field], t)}
+                                </td>
+                                <td data-label={t('metadataReview.colSuggested')}>
+                                  {display(value, t)}
+                                </td>
+                                <td data-label={t('metadataReview.colSource')}>
                                   {candidate.source_url ? (
                                     <a href={candidate.source_url} target="_blank" rel="noreferrer">
                                       {page?.provider_names[candidate.provider] ||
@@ -873,17 +907,17 @@ export function MetadataReviewWorkbench({
                                       const on = !choices[current.id].fields.includes(field);
                                       setChoices((old) =>
                                         Object.fromEntries(
-                                          (page?.items || []).map((t) => {
-                                            const c = t.suggestions.find(
-                                              (s) => s.id === old[t.id]?.source,
+                                          (page?.items || []).map((item) => {
+                                            const c = item.suggestions.find(
+                                              (s) => s.id === old[item.id]?.source,
                                             );
-                                            const fields = old[t.id]?.fields || [];
+                                            const fields = old[item.id]?.fields || [];
                                             return [
-                                              t.id,
+                                              item.id,
                                               {
-                                                ...old[t.id],
+                                                ...old[item.id],
                                                 fields:
-                                                  c && field in c.fields && !candidateStale(c, t)
+                                                  c && field in c.fields && !candidateStale(c, item)
                                                     ? on
                                                       ? [...new Set([...fields, field])]
                                                       : fields.filter((k) => k !== field)
@@ -895,8 +929,11 @@ export function MetadataReviewWorkbench({
                                       );
                                     }}
                                   >
-                                    本页同字段
-                                    {choices[current.id].fields.includes(field) ? '取消' : '勾选'}
+                                    {t('metadataReview.batchFieldToggle', {
+                                      action: choices[current.id].fields.includes(field)
+                                        ? t('metadataReview.actionUncheck')
+                                        : t('metadataReview.actionCheck'),
+                                    })}
                                   </button>
                                 </td>
                               </tr>
@@ -904,12 +941,12 @@ export function MetadataReviewWorkbench({
                         </tbody>
                       </table>
                       <details>
-                        <summary>文件原始值与匹配依据</summary>
+                        <summary>{t('metadataReview.originalValuesDetails')}</summary>
                         <dl>
                           {Object.entries(current.original).map(([k, v]) => (
                             <div key={k}>
-                              <dt>{names[k] || k}</dt>
-                              <dd>{display(v)}</dd>
+                              <dt>{fieldName(k, t)}</dt>
+                              <dd>{display(v, t)}</dd>
                             </div>
                           ))}
                         </dl>
@@ -918,13 +955,13 @@ export function MetadataReviewWorkbench({
                     </>
                   ) : current.suggestions.length ? (
                     <p className="review-stale-notice" role="status">
-                      当前候选的歌曲信息版本或查询依据已经变化，不能直接应用。请重新查询生成新的候选。
+                      {t('metadataReview.staleCandidateNotice')}
                       <button disabled={disabled} onClick={() => setRefresh(true)}>
-                        重新查询本专辑
+                        {t('metadataReview.requeryAlbum')}
                       </button>
                     </p>
                   ) : (
-                    <p>当前没有有效候选，可以查询新资料或跳过。</p>
+                    <p>{t('metadataReview.noCandidates')}</p>
                   )}
                 </>
               )}
@@ -941,49 +978,57 @@ export function MetadataReviewWorkbench({
                       }}
                       disabled={disabled}
                     />
-                    将此封面用于本页同专辑歌曲（{coverAll ? page?.items.length : 1} 首）
+                    {t('metadataReview.applyCoverToAlbumTracks', {
+                      count: coverAll ? page?.items.length : 1,
+                    })}
                   </label>
                   {candidate?.cover_url ? (
                     <button
                       disabled={disabled || candidateStale(candidate, current)}
                       onClick={() => void prepareCover()}
                     >
-                      固定并预览此封面
+                      {t('metadataReview.pinAndPreviewCover')}
                     </button>
                   ) : (
-                    <p>此候选没有封面。</p>
+                    <p>{t('metadataReview.noCoverInCandidate')}</p>
                   )}
                   <div className="review-covers">
                     <figure>
                       {current.has_cover ? (
                         <img
                           src={`/api/v1/tracks/${current.id}/cover?size=320&v=${current.metadata_version}`}
-                          alt="当前封面"
+                          alt={t('metadataReview.currentCoverAlt')}
                         />
                       ) : (
-                        <div className="review-no-cover">暂无封面</div>
+                        <div className="review-no-cover">{t('metadataReview.noCover')}</div>
                       )}
-                      <figcaption>当前封面</figcaption>
+                      <figcaption>{t('metadataReview.currentCoverFigcaption')}</figcaption>
                     </figure>
                     <figure>
                       {cover ? (
                         <img
                           key={cover.id}
                           src={`/api/v1/agent/drafts/${cover.id}/cover-preview?v=${cover.version}`}
-                          alt="将采用的固定封面"
+                          alt={t('metadataReview.pinnedCoverAlt')}
                           onLoad={() => setCoverReady(true)}
                           onError={() => {
                             setCoverReady(false);
-                            setError('封面快照无法显示，本次不能应用。');
+                            setError(t('metadataReview.coverLoadError'));
                           }}
                         />
                       ) : (
-                        <div className="review-no-cover">先固定并预览候选</div>
+                        <div className="review-no-cover">
+                          {t('metadataReview.previewCandidateFirst')}
+                        </div>
                       )}
                       <figcaption>
-                        将采用的封面
+                        {t('metadataReview.coverToApplyFigcaption')}
                         {cover
-                          ? ` · ${Array.isArray(cover.payload.targets) ? cover.payload.targets.length : 1} 首`
+                          ? t('metadataReview.coverTracksCount', {
+                              count: Array.isArray(cover.payload.targets)
+                                ? cover.payload.targets.length
+                                : 1,
+                            })
                           : ''}
                       </figcaption>
                     </figure>
@@ -1004,7 +1049,11 @@ export function MetadataReviewWorkbench({
       </div>
       <footer className="review-actions">
         <span>
-          已选 {selected.length} 首 · {fieldCount} 个字段{cover ? ' · 含已预览封面' : ''}
+          {t('metadataReview.selectedSummary', {
+            trackCount: selected.length,
+            fieldCount,
+            coverSuffix: cover ? t('metadataReview.coverPreviewedSuffix') : '',
+          })}
         </span>
         <div>
           <button
@@ -1015,23 +1064,23 @@ export function MetadataReviewWorkbench({
               nextItem();
             }}
           >
-            本次跳过 / 下一首
+            {t('metadataReview.skipNext')}
           </button>
           <button
             className="danger"
             disabled={disabled || !page?.album_id}
             onClick={() => void rejectAlbum()}
             data-help={hints.reviewReject}
-            title="一键拒绝整专所有建议"
+            title={t('metadataReview.rejectAlbumTitle')}
           >
-            拒绝整专建议
+            {t('metadataReview.rejectAlbum')}
           </button>
           <button
             disabled={disabled || !candidate}
             onClick={() => void rejectCurrent()}
             data-help={hints.reviewReject}
           >
-            拒绝当前建议
+            {t('metadataReview.rejectCurrent')}
           </button>
           <button
             className="primary"
@@ -1039,7 +1088,7 @@ export function MetadataReviewWorkbench({
             data-help={hints.reviewAccept}
             onClick={() => void accept()}
           >
-            {busy ? '应用中…' : '接受选中项'}
+            {busy ? t('metadataReview.applying') : t('metadataReview.acceptSelected')}
           </button>
         </div>
       </footer>
@@ -1047,7 +1096,7 @@ export function MetadataReviewWorkbench({
         <MetadataRefreshDialog
           target={{ scope: 'album', id: current.album_id, label: current.album }}
           onClose={() => setRefresh(false)}
-          onQueued={() => setNotice('查询已排队，完成后点击重新读取。')}
+          onQueued={() => setNotice(t('metadataReview.refreshQueuedNotice'))}
         />
       )}
     </section>
@@ -1065,6 +1114,7 @@ export function MetadataReviewDialog({
   onClose: () => void;
   onApplied?: () => void | Promise<void>;
 }) {
+  const { t } = useTranslation();
   const [busy, setBusy] = useState(false);
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => {
@@ -1079,7 +1129,7 @@ export function MetadataReviewDialog({
     <dialog
       className="metadata-review-dialog"
       ref={dialog}
-      aria-label="批量核对资料"
+      aria-label={t('metadataReview.dialogAria')}
       onCancel={(e) => {
         e.preventDefault();
         if (!busy) onClose();

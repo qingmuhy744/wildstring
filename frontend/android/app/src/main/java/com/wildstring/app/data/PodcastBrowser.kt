@@ -1,5 +1,7 @@
 package com.wildstring.app.data
 
+import com.wildstring.app.AppLanguage
+import com.wildstring.app.R
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -62,13 +64,13 @@ class PodcastBrowser(
         mutable.update { it.copy(listLoaded = true, listLoading = true) }
         listJob = scope.launch {
             try {
-                if (synchronize && !refreshAll()) error("服务端暂时无法更新订阅，请稍后下拉重试。")
+                if (synchronize && !refreshAll()) error(AppLanguage.string(R.string.pod_brw_sync_failed))
                 val podcasts = fetchList()
                 if (valid(owner, epoch)) mutable.update { it.copy(podcasts = podcasts,
                     loadedDetails = if (force) it.loadingDetails else it.loadedDetails) }
             } catch (e: CancellationException) { throw e }
             catch (e: Exception) {
-                if (valid(owner, epoch)) mutable.update { it.copy(message = "获取播客订阅失败：${friendlyError(e)}") }
+                if (valid(owner, epoch)) mutable.update { it.copy(message = AppLanguage.string(R.string.pod_brw_fetch_failed, friendlyError(e))) }
             } finally {
                 if (valid(owner, epoch)) mutable.update { it.copy(listLoading = false) }
             }
@@ -96,7 +98,7 @@ class PodcastBrowser(
                 if (active()) putDetail(detail)
             } catch (e: CancellationException) { throw e }
             catch (e: Exception) {
-                if (active()) mutable.update { it.copy(message = "加载单集列表失败：${friendlyError(e)}") }
+                if (active()) mutable.update { it.copy(message = AppLanguage.string(R.string.pod_brw_episodes_failed, friendlyError(e))) }
             } finally {
                 if (active()) {
                     mutable.update { it.copy(loadingDetails = it.loadingDetails - id) }

@@ -91,7 +91,7 @@ WEB_COMPONENT_TO_SPECS: dict[str, list[str]] = {
     "locales": ["i18n.spec.ts"],
 }
 
-QUOTED_STR = re.compile(r"""["'`]([^"'`\n]{2,80})["'`]""")
+QUOTED_STR = re.compile(r"""(["'`])([^"'`\n]{0,80})\1""")
 CJK_CHAR = re.compile(r"[\u4e00-\u9fff]")
 IGNORE_STRINGS = {
     "true",
@@ -173,7 +173,7 @@ def extract_removed_ui_strings(base: str | None) -> set[str]:
         if line.startswith(("---", "+++", "@@")):
             continue
         if line.startswith("-"):
-            for match in QUOTED_STR.findall(line[1:]):
+            for _, match in QUOTED_STR.findall(line[1:]):
                 candidate = match.strip()
                 if candidate in IGNORE_STRINGS:
                     continue

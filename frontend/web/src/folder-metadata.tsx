@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import { useEffect, useState } from 'react';
 import { api } from './api';
 
@@ -20,6 +21,7 @@ type FolderTrack = {
 type FolderDetail = FolderSummary & { tracks: FolderTrack[] };
 
 export function FolderMetadataEditor({ onChanged }: { onChanged: () => void }) {
+  const { t } = useTranslation();
   const [folders, setFolders] = useState<FolderSummary[]>([]);
   const [selected, setSelected] = useState<FolderDetail | null>(null);
   const [album, setAlbum] = useState('');
@@ -39,7 +41,7 @@ export function FolderMetadataEditor({ onChanged }: { onChanged: () => void }) {
       .then((result) => setFolders(result.items))
       .catch((reason) => {
         if (!controller.signal.aborted)
-          setError(reason instanceof Error ? reason.message : '无法读取文件夹分组。');
+          setError(reason instanceof Error ? reason.message : t('folderMetadata.loadFoldersError'));
       });
     return () => controller.abort();
   }, []);
@@ -56,7 +58,7 @@ export function FolderMetadataEditor({ onChanged }: { onChanged: () => void }) {
       setArtists(detail.album_artist_variants.join(' / '));
       setMessage('');
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '无法读取文件夹歌曲。');
+      setError(reason instanceof Error ? reason.message : t('folderMetadata.loadTracksError'));
     } finally {
       setBusy(false);
     }
@@ -86,11 +88,11 @@ export function FolderMetadataEditor({ onChanged }: { onChanged: () => void }) {
           overrides,
         }),
       });
-      setMessage(`已更新 ${result.updated} 首，历史版本已保留。`);
+      setMessage(t('folderMetadata.updatedNotice', { count: result.updated }));
       await open(selected.folder);
       onChanged();
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '批量更新未完成，请重新读取后重试。');
+      setError(reason instanceof Error ? reason.message : t('folderMetadata.updateFailed'));
     } finally {
       setBusy(false);
     }
@@ -107,13 +109,11 @@ export function FolderMetadataEditor({ onChanged }: { onChanged: () => void }) {
   const trackCount = folders.reduce((total, item) => total + item.track_count, 0);
 
   return (
-    <section className="management-card" aria-label="按文件夹批量整理">
+    <section className="management-card" aria-label={t('folderMetadata.sectionAria')}>
       <div className="management-section-heading">
         <div>
-          <h2>按文件夹批量整理</h2>
-          <p className="muted">
-            同一文件夹通常对应同一发行版。先查看差异，再一次修改整组歌曲；每首歌的元数据历史仍可恢复。
-          </p>
+          <h2>{t('folderMetadata.headingTitle')}</h2>
+          <p className="muted">{t('folderMetadata.headingMuted')}</p>
         </div>
       </div>
       {error && (
@@ -127,21 +127,21 @@ export function FolderMetadataEditor({ onChanged }: { onChanged: () => void }) {
         </p>
       )}
       {!folders.length ? (
-        <p className="muted">暂时没有可批量整理的文件夹。</p>
+        <p className="muted">{t('folderMetadata.noFolders')}</p>
       ) : (
         <>
-          <div className="folder-metadata-summary" aria-label="文件夹整理概览">
+          <div className="folder-metadata-summary" aria-label={t('folderMetadata.overviewAria')}>
             <div>
               <strong>{folders.length}</strong>
-              <span>个文件夹</span>
+              <span>{t('folderMetadata.foldersCount')}</span>
             </div>
             <div>
               <strong>{trackCount}</strong>
-              <span>首歌曲</span>
+              <span>{t('folderMetadata.tracksCount')}</span>
             </div>
             <div className={warningCount ? 'has-warning' : ''}>
               <strong>{warningCount}</strong>
-              <span>个待核对</span>
+              <span>{t('folderMetadata.pendingReviewCount')}</span>
             </div>
           </div>
           <div className="folder-metadata-layout">
@@ -153,8 +153,8 @@ export function FolderMetadataEditor({ onChanged }: { onChanged: () => void }) {
                     setQuery(event.target.value);
                     setShowAll(false);
                   }}
-                  placeholder="搜索文件夹、专辑或艺人"
-                  aria-label="搜索文件夹"
+                  placeholder={t('folderMetadata.searchPlaceholder')}
+                  aria-label={t('folderMetadata.searchAria')}
                 />
                 <button
                   className={warningsOnly ? 'active' : ''}
@@ -163,12 +163,14 @@ export function FolderMetadataEditor({ onChanged }: { onChanged: () => void }) {
                     setShowAll(false);
                   }}
                 >
-                  {warningsOnly ? '显示全部' : `仅看问题 ${warningCount}`}
+                  {warningsOnly
+                    ? t('folderMetadata.showAll')
+                    : t('folderMetadata.onlyWarnings', { count: warningCount })}
                 </button>
               </div>
               <div className="folder-metadata-list-heading">
-                <h3>文件夹分组</h3>
-                <span>{filteredFolders.length} 个结果</span>
+                <h3>{t('folderMetadata.groupsHeading')}</h3>
+                <span>{t('folderMetadata.resultsCount', { count: filteredFolders.length })}</span>
               </div>
               <ul className="manage-track-list folder-metadata-list">
                 {visibleFolders.map((item) => (
@@ -179,29 +181,39 @@ export function FolderMetadataEditor({ onChanged }: { onChanged: () => void }) {
                     <div>
                       <strong>{item.folder}</strong>
                       <span>
-                        {item.track_count} 首 · {item.album_variants.join(' / ') || '未命名专辑'}
+                        {t('folderMetadata.folderItemSummary', {
+                          count: item.track_count,
+                          album:
+                            item.album_variants.join(' / ') || t('folderMetadata.unnamedAlbum'),
+                        })}
                       </span>
                       {item.warning && (
                         <small className="metadata-task-warning">
-                          发现多个专辑版本，建议先核对
+                          {t('folderMetadata.multiVersionWarning')}
                         </small>
                       )}
                     </div>
                     <button disabled={busy} onClick={() => void open(item.folder)}>
-                      {selected?.folder === item.folder ? '已选中' : '编辑'}
+                      {selected?.folder === item.folder
+                        ? t('folderMetadata.selectedButton')
+                        : t('folderMetadata.editButton')}
                     </button>
                   </li>
                 ))}
               </ul>
               {!visibleFolders.length && (
-                <p className="muted folder-metadata-empty">没有符合条件的文件夹。</p>
+                <p className="muted folder-metadata-empty">
+                  {t('folderMetadata.noMatchingFolders')}
+                </p>
               )}
               {filteredFolders.length > 8 && (
                 <button
                   className="folder-metadata-more"
                   onClick={() => setShowAll((value) => !value)}
                 >
-                  {showAll ? '收起列表' : `显示全部 ${filteredFolders.length} 个文件夹`}
+                  {showAll
+                    ? t('folderMetadata.collapseList')
+                    : t('folderMetadata.showAllFolders', { count: filteredFolders.length })}
                 </button>
               )}
             </div>
@@ -210,26 +222,28 @@ export function FolderMetadataEditor({ onChanged }: { onChanged: () => void }) {
                 <>
                   <div className="folder-metadata-editor-heading">
                     <div>
-                      <span className="eyebrow">当前选中</span>
+                      <span className="eyebrow">{t('folderMetadata.eyebrowSelected')}</span>
                       <h3>{selected.folder}</h3>
                     </div>
-                    <span>{selected.tracks.length} 首歌曲</span>
+                    <span>
+                      {t('folderMetadata.selectedTracksCount', { count: selected.tracks.length })}
+                    </span>
                   </div>
                   <p className="muted">
-                    将应用到：
+                    {t('folderMetadata.applyToPrefix')}
                     {selected.tracks
                       .slice(0, 5)
                       .map((track) => track.title)
                       .join('、')}
-                    {selected.tracks.length > 5 ? ` 等 ${selected.tracks.length} 首` : ''}
+                    {selected.tracks.length > 5
+                      ? t('folderMetadata.applyToEllipsis', { count: selected.tracks.length })
+                      : ''}
                   </p>
                   {selected.warning && (
-                    <p className="error">
-                      这个文件夹包含多个现有专辑或专辑艺人值，确认后会统一为下面的值。
-                    </p>
+                    <p className="error">{t('folderMetadata.warningMultipleValues')}</p>
                   )}
                   <label className="metadata-field">
-                    <span>专辑</span>
+                    <span>{t('folderMetadata.fieldAlbum')}</span>
                     <input
                       value={album}
                       onChange={(event) => setAlbum(event.target.value)}
@@ -237,7 +251,7 @@ export function FolderMetadataEditor({ onChanged }: { onChanged: () => void }) {
                     />
                   </label>
                   <label className="metadata-field">
-                    <span>专辑艺人（用 / 分隔）</span>
+                    <span>{t('folderMetadata.fieldAlbumArtists')}</span>
                     <input
                       value={artists}
                       onChange={(event) => setArtists(event.target.value)}
@@ -249,13 +263,13 @@ export function FolderMetadataEditor({ onChanged }: { onChanged: () => void }) {
                     disabled={busy || (!album.trim() && !artists.trim())}
                     onClick={() => void apply()}
                   >
-                    {busy ? '正在更新…' : '应用到整组歌曲'}
+                    {busy ? t('folderMetadata.updating') : t('folderMetadata.applyToGroup')}
                   </button>
                 </>
               ) : (
                 <div className="folder-metadata-editor-empty">
-                  <strong>选择一个文件夹开始整理</strong>
-                  <span>先看左侧分组和警告，再统一修改整组歌曲。</span>
+                  <strong>{t('folderMetadata.selectFolderPrompt')}</strong>
+                  <span>{t('folderMetadata.selectFolderHelp')}</span>
                 </div>
               )}
             </div>

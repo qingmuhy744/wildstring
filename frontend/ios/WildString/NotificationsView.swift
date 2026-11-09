@@ -15,9 +15,17 @@ struct NotificationsView: View {
     @State private var showingDrafts = false
 
     private enum Filter: String, CaseIterable {
-        case unread = "未读"
-        case read = "已读"
-        case all = "全部"
+        case unread
+        case read
+        case all
+
+        var title: String {
+            switch self {
+            case .unread: return L10n("notifications.filterUnread")
+            case .read: return L10n("notifications.filterRead")
+            case .all: return L10n("notifications.filterAll")
+            }
+        }
     }
 
     var body: some View {
@@ -26,7 +34,7 @@ struct NotificationsView: View {
                 ContentUnavailableView(
                     emptyTitle,
                     systemImage: "bell",
-                    description: Text("后台整理和建议的结果会出现在这里。")
+                    description: Text(L10n("notifications.emptyDescription"))
                 )
             }
             ForEach(filtered) { notification in
@@ -45,7 +53,7 @@ struct NotificationsView: View {
                                 .foregroundStyle(.primary)
                             Spacer()
                             if let severity = notification.severity, severity != "info" {
-                                Text(severity == "error" ? "错误" : "提醒")
+                                Text(severity == "error" ? L10n("notifications.severityError") : L10n("notifications.severityWarning"))
                                     .font(.caption2)
                                     .foregroundStyle(severity == "error" ? .red : .orange)
                             }
@@ -60,7 +68,7 @@ struct NotificationsView: View {
                                 .foregroundStyle(.tertiary)
                             Spacer()
                             if notification.draftID != nil {
-                                Text("查看草案")
+                                Text(L10n("notifications.viewDraft"))
                                     .font(.caption2)
                                     .foregroundStyle(Color.wildAccent)
                             }
@@ -71,7 +79,7 @@ struct NotificationsView: View {
                 .buttonStyle(.plain)
                 .swipeActions {
                     if notification.isUnread {
-                        Button("标为已读") {
+                        Button(L10n("notifications.markRead")) {
                             Task { await markRead([notification]) }
                         }
                         .tint(.accentColor)
@@ -86,9 +94,9 @@ struct NotificationsView: View {
         }
         .listStyle(.plain)
         .safeAreaInset(edge: .top) {
-            Picker("筛选", selection: $filter) {
+            Picker(L10n("notifications.filter"), selection: $filter) {
                 ForEach(Filter.allCases, id: \.self) { value in
-                    Text(value.rawValue).tag(value)
+                    Text(value.title).tag(value)
                 }
             }
             .pickerStyle(.segmented)
@@ -96,11 +104,11 @@ struct NotificationsView: View {
             .padding(.vertical, 6)
             .background(.bar)
         }
-        .navigationTitle("通知")
+        .navigationTitle(L10n("notifications.title"))
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button("全部已读") {
+                Button(L10n("notifications.markAllRead")) {
                     Task { await markAllRead() }
                 }
                 .disabled(unreadCount == 0 || isLoading)
@@ -123,9 +131,9 @@ struct NotificationsView: View {
 
     private var emptyTitle: String {
         switch filter {
-        case .unread: "没有未读通知"
-        case .read: "暂无已读记录"
-        case .all: "还没有通知"
+        case .unread: L10n("notifications.emptyUnread")
+        case .read: L10n("notifications.emptyRead")
+        case .all: L10n("notifications.emptyAll")
         }
     }
 

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { api } from './api';
 
 type CatalogPolicy = { version: number; allow_user_subscriptions: boolean; can_add: boolean };
@@ -26,6 +27,7 @@ export function useCanAddPodcast(userId: string, canManage: boolean) {
 }
 
 export function PodcastCatalogSettings() {
+  const { t } = useTranslation();
   const [policy, setPolicy] = useState<CatalogPolicy | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
@@ -56,21 +58,18 @@ export function PodcastCatalogSettings() {
           }),
         }),
       );
-      setMessage('播客添加权限已保存。');
+      setMessage(t('podcastCatalogSettings.saveSuccess'));
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : '保存失败');
+      setMessage(error instanceof Error ? error.message : t('podcastCatalogSettings.saveFailed'));
       setPolicy(await api<CatalogPolicy>('/podcasts/catalog-settings').catch(() => null));
     } finally {
       setBusy(false);
     }
   }
   return (
-    <section className="management-card" aria-label="播客添加权限">
-      <h2>播客添加权限</h2>
-      <p className="muted">
-        控制普通用户是否可以通过 RSS
-        添加节目并关注。节目和音频由服务器共享，关注和收听进度属于个人。
-      </p>
+    <section className="management-card" aria-label={t('podcastCatalogSettings.cardTitle')}>
+      <h2>{t('podcastCatalogSettings.cardTitle')}</h2>
+      <p className="muted">{t('podcastCatalogSettings.description')}</p>
       {policy && (
         <>
           <label className="music-library-grant-option">
@@ -82,13 +81,11 @@ export function PodcastCatalogSettings() {
                 setPolicy({ ...policy, allow_user_subscriptions: event.target.checked })
               }
             />
-            <span>允许普通用户添加 RSS 并关注</span>
+            <span>{t('podcastCatalogSettings.allowUserSubscriptions')}</span>
           </label>
-          <p className="muted">
-            关闭后仍可关注本服已有节目。全服更新、存储策略和删除节目继续由管理员管理。
-          </p>
+          <p className="muted">{t('podcastCatalogSettings.allowUserSubscriptionsHelp')}</p>
           <button type="button" disabled={busy} onClick={() => void save()}>
-            {busy ? '保存中…' : '保存播客添加权限'}
+            {busy ? t('podcastCatalogSettings.saving') : t('podcastCatalogSettings.saveButton')}
           </button>
         </>
       )}

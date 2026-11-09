@@ -1,4 +1,5 @@
 import { useEffect, useId, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { api } from './api';
 import { selectLibrary, selectedLibrary } from './library-context';
 import { LibraryStorage } from './library-storage';
@@ -25,6 +26,7 @@ export function LibrarySwitcher({
   management?: boolean;
   visible?: boolean;
 }) {
+  const { t } = useTranslation();
   const [libraries, setLibraries] = useState<MusicLibrary[]>([]);
   const [selected, setSelected] = useState(selectedLibrary());
   const [supported, setSupported] = useState(false);
@@ -66,13 +68,11 @@ export function LibrarySwitcher({
   }, [onChanged, management, visible]);
   if (!supported || !visible || (!management && libraries.length === 1)) return null;
   if (!management && libraries.length === 0)
-    return (
-      <small className="music-access-empty">暂无可播放的音乐，可联系管理员分配访问权限。</small>
-    );
+    return <small className="music-access-empty">{t('musicLibraries.noPlayableMusic')}</small>;
   if (management && libraries.length === 1)
     return (
       <div className="music-library-switcher music-library-switcher-management">
-        <span>当前音乐库</span>
+        <span>{t('musicLibraries.currentLibrary')}</span>
         <strong>{libraries[0].name}</strong>
       </div>
     );
@@ -80,25 +80,26 @@ export function LibrarySwitcher({
     <label
       className={`music-library-switcher ${management ? 'music-library-switcher-management' : 'music-library-switcher-browse'}`}
     >
-      {management ? '当前音乐库' : '浏览范围'}
+      {management ? t('musicLibraries.currentLibrary') : t('musicLibraries.browseScope')}
       <select
-        aria-label="选择音乐库"
+        aria-label={t('musicLibraries.selectLibraryAria')}
         value={selected}
         onChange={(event) => selectLibrary(event.target.value)}
       >
-        {!management && <option value="all">全部音乐</option>}
+        {!management && <option value="all">{t('musicLibraries.allMusic')}</option>}
         {libraries.map((item) => (
           <option key={item.id} value={item.id}>
             {item.name}
           </option>
         ))}
       </select>
-      {libraries.length === 0 && <small>尚未分配音乐库，可联系所有者授权。</small>}
+      {libraries.length === 0 && <small>{t('musicLibraries.noAssignedLibraries')}</small>}
     </label>
   );
 }
 
 export function MusicLibraryManager() {
+  const { t } = useTranslation();
   const id = useId();
   const [libraries, setLibraries] = useState<MusicLibrary[]>([]);
   const [editing, setEditing] = useState<MusicLibrary | null>(null);
@@ -155,10 +156,10 @@ export function MusicLibraryManager() {
       });
       edit(null);
       await load();
-      setNotice('音乐库已保存。');
+      setNotice(t('musicLibraries.savedNotice'));
       window.dispatchEvent(new Event('wildstring:libraries-updated'));
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '音乐库保存失败。');
+      setError(reason instanceof Error ? reason.message : t('musicLibraries.saveFailed'));
     } finally {
       setBusy(false);
     }
@@ -171,17 +172,18 @@ export function MusicLibraryManager() {
       const items = await load();
       edit(items.find((item) => item.id === identity) || null);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '音乐库读取失败。');
+      setError(reason instanceof Error ? reason.message : t('musicLibraries.loadFailed'));
     } finally {
       setBusy(false);
     }
   }
   return (
-    <section className="management-card music-library-manager" aria-label="音乐库配置">
-      <h2>音乐库配置</h2>
-      <p className="muted">
-        每个库可接入多个只读文件夹。导入后使用托管副本，移除来源或停用库会保留已有音乐。
-      </p>
+    <section
+      className="management-card music-library-manager"
+      aria-label={t('musicLibraries.configAria')}
+    >
+      <h2>{t('musicLibraries.configAria')}</h2>
+      <p className="muted">{t('musicLibraries.configDescription')}</p>
       {error && (
         <p role="alert" className="error">
           {error}
@@ -193,13 +195,18 @@ export function MusicLibraryManager() {
           <button type="button" key={item.id} onClick={() => edit(item)} disabled={busy}>
             <strong>{item.name}</strong>
             <span>
-              {item.sources?.length || 0} 个来源 · {item.enabled ? '启用' : '已停用'}
-              {item.is_default ? ' · 默认库' : ''}
+              {t('musicLibraries.sourcesCount', {
+                count: item.sources?.length || 0,
+                status: item.enabled
+                  ? t('musicLibraries.statusEnabled')
+                  : t('musicLibraries.statusDisabled'),
+              })}
+              {item.is_default ? t('musicLibraries.defaultTag') : ''}
             </span>
           </button>
         ))}
         <button type="button" onClick={() => edit(null)} disabled={busy}>
-          ＋ 新建音乐库
+          {t('musicLibraries.newLibrary')}
         </button>
       </div>
       <form
@@ -208,8 +215,12 @@ export function MusicLibraryManager() {
           void save();
         }}
       >
-        <h3>{editing ? `编辑「${editing.name}」` : '新建音乐库'}</h3>
-        <label htmlFor={`${id}-name`}>库名称</label>
+        <h3>
+          {editing
+            ? t('musicLibraries.editLibraryTitle', { name: editing.name })
+            : t('musicLibraries.createLibraryTitle')}
+        </h3>
+        <label htmlFor={`${id}-name`}>{t('musicLibraries.libraryName')}</label>
         <input
           id={`${id}-name`}
           value={name}
@@ -225,13 +236,13 @@ export function MusicLibraryManager() {
             disabled={busy}
             onChange={(event) => setDefaultAccess(event.target.checked)}
           />
-          <span>新用户默认可访问此库</span>
+          <span>{t('musicLibraries.defaultAccessCheckbox')}</span>
         </label>
-        <p className="muted">仅用于创建新账号时的默认授权，已有用户的权限保持不变。</p>
+        <p className="muted">{t('musicLibraries.defaultAccessHint')}</p>
         <div className="library-folder-heading">
-          <label htmlFor={`${id}-folders`}>源文件夹，每行一个</label>
+          <label htmlFor={`${id}-folders`}>{t('musicLibraries.sourceFoldersLabel')}</label>
           <button type="button" disabled={busy} onClick={() => setPicker('source')}>
-            浏览添加来源
+            {t('musicLibraries.browseSourceFolders')}
           </button>
         </div>
         <textarea
@@ -243,7 +254,7 @@ export function MusicLibraryManager() {
           disabled={busy}
         />
         <fieldset disabled={busy}>
-          <legend>监听文件夹</legend>
+          <legend>{t('musicLibraries.watchFoldersLegend')}</legend>
           {folders
             .split('\n')
             .map((s) => s.trim())
@@ -262,45 +273,49 @@ export function MusicLibraryManager() {
                 <span className="storage-path">{root}</span>
               </label>
             ))}
-          <p className="muted">
-            勾选的来源参与自动监听；取消勾选仍可手动导入。自动导入还需启用下方策略。
-          </p>
+          <p className="muted">{t('musicLibraries.watchFoldersHint')}</p>
         </fieldset>
         {!editing && (
           <>
-            <label htmlFor={`${id}-managed`}>托管目录（可选）</label>
+            <label htmlFor={`${id}-managed`}>{t('musicLibraries.managedDirLabel')}</label>
             <input
               id={`${id}-managed`}
               value={managedRoot}
               onChange={(e) => setManagedRoot(e.target.value)}
-              placeholder="留空使用默认目录"
+              placeholder={t('musicLibraries.managedDirPlaceholder')}
               disabled={busy}
             />
             <button type="button" disabled={busy} onClick={() => setPicker('managed')}>
-              浏览托管目录
+              {t('musicLibraries.browseManagedDir')}
             </button>
-            <p className="muted">填写服务端可写的独立空目录。Docker 使用容器内已挂载的路径。</p>
+            <p className="muted">{t('musicLibraries.managedDirHint')}</p>
           </>
         )}
         <div className="music-library-actions">
           <button type="submit" disabled={busy}>
-            {busy ? '保存中…' : '保存音乐库'}
+            {busy ? t('musicLibraries.saving') : t('musicLibraries.saveLibrary')}
           </button>
           {editing && !editing.is_default && (
             <button type="button" disabled={busy} onClick={() => void save(!editing.enabled)}>
-              {editing.enabled ? '停用并保留音乐' : '重新启用'}
+              {editing.enabled
+                ? t('musicLibraries.disableLibrary')
+                : t('musicLibraries.enableLibrary')}
             </button>
           )}
           {editing && (
             <button type="button" disabled={busy} onClick={() => void reread()}>
-              重新读取配置
+              {t('musicLibraries.reloadConfig')}
             </button>
           )}
         </div>
       </form>
       {picker && (
         <FolderPicker
-          title={picker === 'source' ? '选择音乐来源文件夹' : '选择托管目录'}
+          title={
+            picker === 'source'
+              ? t('musicLibraries.pickerSourceTitle')
+              : t('musicLibraries.pickerManagedTitle')
+          }
           onClose={() => setPicker(null)}
           onSelect={(path) => {
             if (picker === 'source')

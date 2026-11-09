@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { api } from './api';
 import { MusicUploader } from './music-uploader';
 
@@ -19,10 +20,6 @@ type TrashEntry = {
   tracks: number;
 };
 
-function displayPath(path: string) {
-  return path === '.' ? '导入目录' : `导入目录 / ${path}`;
-}
-
 export function LibrarySources({
   canImport,
   canDelete,
@@ -34,6 +31,9 @@ export function LibrarySources({
   canPurge: boolean;
   onChanged: () => void;
 }) {
+  const { t } = useTranslation();
+  const displayPath = (path: string) =>
+    path === '.' ? t('librarySources.importDirRoot') : t('librarySources.importDirSub', { path });
   const [sources, setSources] = useState<ImportSource[]>([]);
   const [selection, setSelection] = useState<ImportSelection | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -57,7 +57,9 @@ export function LibrarySources({
       setSelection(value.items[0] ? { source_id: value.items[0].id, path: '.' } : null);
     } catch (reason) {
       if (!signal?.aborted)
-        setSourceError(reason instanceof Error ? reason.message : '来源暂时无法读取。');
+        setSourceError(
+          reason instanceof Error ? reason.message : t('librarySources.sourceReadFailed'),
+        );
     }
   }
   useEffect(() => {
@@ -69,7 +71,7 @@ export function LibrarySources({
       })
       .catch((reason) => {
         if (!controller.signal.aborted)
-          setError(reason instanceof Error ? reason.message : '回收区暂时无法读取。');
+          setError(reason instanceof Error ? reason.message : t('librarySources.trashReadFailed'));
       });
     return () => controller.abort();
   }, []);
@@ -85,10 +87,10 @@ export function LibrarySources({
         method: 'POST',
         body: JSON.stringify(selection),
       });
-      setNotice('已提交导入任务，可在任务记录查看进度。');
+      setNotice(t('librarySources.importTaskSubmitted'));
       onChanged();
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '导入任务未提交。');
+      setError(reason instanceof Error ? reason.message : t('librarySources.importTaskFailed'));
     } finally {
       setBusy(false);
     }
@@ -100,26 +102,26 @@ export function LibrarySources({
     setError('');
     try {
       await api(`/manage/library/trash/${id}/restore`, { method: 'POST' });
-      setNotice('回收项已恢复到原位置。');
+      setNotice(t('librarySources.restoredNotice'));
       await loadTrash();
       onChanged();
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '恢复未完成。');
+      setError(reason instanceof Error ? reason.message : t('librarySources.restoreFailed'));
     } finally {
       setBusy(false);
     }
   }
 
   async function purge(id: string) {
-    if (!canPurge || !confirm('永久清理后无法恢复，确认继续吗？')) return;
+    if (!canPurge || !confirm(t('librarySources.confirmPurge'))) return;
     setBusy(true);
     setError('');
     try {
       await api(`/manage/library/trash/${id}`, { method: 'DELETE' });
-      setNotice('回收项已永久清理。');
+      setNotice(t('librarySources.purgedNotice'));
       await loadTrash();
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '永久清理未完成。');
+      setError(reason instanceof Error ? reason.message : t('librarySources.purgeFailed'));
     } finally {
       setBusy(false);
     }
@@ -128,21 +130,19 @@ export function LibrarySources({
   return (
     <>
       <MusicUploader canImport={canImport} onUploaded={onChanged} />
-      <section className="management-card" aria-label="导入来源工作台">
+      <section className="management-card" aria-label={t('librarySources.workbenchAria')}>
         <span className="eyebrow">SOURCE WORKSPACE</span>
-        <h2>来源浏览与导入</h2>
-        <p className="muted">
-          选择本次导入的文件夹，包含其下所有子目录。已入库且未变化的音频会跳过复制。
-        </p>
+        <h2>{t('librarySources.title')}</h2>
+        <p className="muted">{t('librarySources.description')}</p>
         <div className="source-folder-selection">
           <Icon name="folder" />
           <div>
             <strong>
               {selection
                 ? selection.path === '.'
-                  ? source?.name || '来源根目录'
+                  ? source?.name || t('librarySources.sourceRoot')
                   : selection.path.split('/').at(-1)
-                : '尚未选择来源'}
+                : t('librarySources.noSourceSelected')}
             </strong>
             <small>
               {source?.path}
@@ -150,20 +150,18 @@ export function LibrarySources({
             </small>
           </div>
           <button type="button" disabled={busy || !selection} onClick={() => setPickerOpen(true)}>
-            浏览文件夹
+            {t('librarySources.browseFolders')}
           </button>
         </div>
         {sourceError && (
           <p className="error" role="alert">
             {sourceError}{' '}
             <button type="button" onClick={() => void loadSources()}>
-              重新读取来源
+              {t('librarySources.reloadSources')}
             </button>
           </p>
         )}
-        <p className="muted">
-          导入源始终只读，文件复制到当前音乐库；带有 .part 等标记的文件会等待下载完成。
-        </p>
+        <p className="muted">{t('librarySources.readOnlyNotice')}</p>
         <div className="source-actions">
           <button
             type="button"
@@ -171,10 +169,10 @@ export function LibrarySources({
             disabled={busy || !canImport || !selection}
             onClick={() => void importFolder()}
           >
-            {busy ? '正在提交…' : '导入所选文件夹'}
+            {busy ? t('librarySources.submitting') : t('librarySources.importSelectedFolder')}
           </button>
           <small className="muted">
-            {selection ? displayPath(selection.path) : '请先选择导入文件夹'}
+            {selection ? displayPath(selection.path) : t('librarySources.pleaseSelectFolder')}
           </small>
         </div>
         {pickerOpen && selection && (
@@ -193,10 +191,10 @@ export function LibrarySources({
         {preview && (
           <div className="source-preview">
             <strong>{displayPath(preview.path)}</strong>
-            <span>{preview.count} 个音频文件（含子目录）</span>
+            <span>{t('librarySources.audioFilesWithSubdirs', { count: preview.count })}</span>
             {preview.pending_markers.length > 0 && (
               <span className="source-pending">
-                {preview.pending_markers.length} 个文件仍在等待下载
+                {t('librarySources.pendingFilesCount', { count: preview.pending_markers.length })}
               </span>
             )}
             {preview.files.length > 0 && (
@@ -208,12 +206,12 @@ export function LibrarySources({
           </div>
         )}
       </section>
-      <section className="management-card" aria-label="曲库回收区">
+      <section className="management-card" aria-label={t('librarySources.recycleBinAria')}>
         <span className="eyebrow">LIBRARY TRASH</span>
-        <h2>回收区</h2>
-        <p className="muted">删除的托管副本会先保留在这里。导入源不会被移动或删除。</p>
+        <h2>{t('librarySources.recycleBinTitle')}</h2>
+        <p className="muted">{t('librarySources.recycleBinHint')}</p>
         {trash.filter((item) => item.status === 'trashed').length === 0 ? (
-          <p className="muted">回收区为空。</p>
+          <p className="muted">{t('librarySources.recycleBinEmpty')}</p>
         ) : (
           <div className="trash-list">
             {trash
@@ -221,10 +219,10 @@ export function LibrarySources({
               .map((item) => (
                 <div className="trash-row" key={item.id}>
                   <div>
-                    <strong>专辑 {item.album_id}</strong>
+                    <strong>{t('librarySources.albumItem', { albumId: item.album_id })}</strong>
                     <small>
-                      {item.tracks} 首 · {new Date(item.created_at).toLocaleString()} ·{' '}
-                      {item.created_by}
+                      {t('librarySources.tracksCount', { count: item.tracks })} ·{' '}
+                      {new Date(item.created_at).toLocaleString()} · {item.created_by}
                     </small>
                   </div>
                   <div className="source-actions">
@@ -233,11 +231,11 @@ export function LibrarySources({
                       disabled={busy || !canDelete}
                       onClick={() => void restore(item.id)}
                     >
-                      恢复
+                      {t('librarySources.restoreBtn')}
                     </button>
                     {canPurge && (
                       <button type="button" disabled={busy} onClick={() => void purge(item.id)}>
-                        永久清理
+                        {t('librarySources.purgeBtn')}
                       </button>
                     )}
                   </div>

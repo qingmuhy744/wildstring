@@ -14,43 +14,46 @@ struct ApplicationPolicyView: View {
     @State private var message: String?
     @State private var messageIsError = false
 
-    private static let kindLabels: [(String, String)] = [
-        ("playlist", "我的歌单"),
-        ("metadata", "单曲信息"),
-        ("metadata_batch", "专辑批量信息"),
-        ("cover", "封面"),
-        ("lyrics", "歌词"),
-        ("intake", "导入整理"),
-    ]
+    private static func kindLabel(_ kind: String) -> String {
+        switch kind {
+        case "playlist": return L10n("appPolicy.kindPlaylist")
+        case "metadata": return L10n("appPolicy.kindMetadata")
+        case "metadata_batch": return L10n("appPolicy.kindMetadataBatch")
+        case "cover": return L10n("appPolicy.kindCover")
+        case "lyrics": return L10n("appPolicy.kindLyrics")
+        case "intake": return L10n("appPolicy.kindIntake")
+        default: return kind
+        }
+    }
 
     var body: some View {
         Form {
             Section {
-                Picker("整理方式", selection: $mode) {
-                    Text("审核后应用").tag("manual")
-                    Text("自动整理").tag("automatic")
+                Picker(L10n("appPolicy.organizeMode"), selection: $mode) {
+                    Text(L10n("appPolicy.modeManual")).tag("manual")
+                    Text(L10n("appPolicy.modeAutomatic")).tag("automatic")
                 }
                 .pickerStyle(.inline)
                 .labelsHidden()
                 .disabled(isSaving || policy == nil)
                 Text(
                     mode == "manual"
-                        ? "查看草案后，点击接受即可直接应用。"
-                        : "新草案中勾选的类型会直接应用，并保留修改记录。"
+                        ? L10n("appPolicy.modeManualHint")
+                        : L10n("appPolicy.modeAutomaticHint")
                 )
                 .font(.footnote)
                 .foregroundStyle(.secondary)
             } header: {
-                Text("整理方式")
+                Text(L10n("appPolicy.organizeMode"))
             } footer: {
-                Text("按账号保存，助手、巡检和 MCP 共用；MCP 还需授予应用草案权限。")
+                Text(L10n("appPolicy.modeFooter"))
             }
 
             if let policy {
-                Section("自动应用范围") {
+                Section(L10n("appPolicy.autoScopeSection")) {
                     ForEach(policy.allowedKinds, id: \.self) { kind in
                         Toggle(
-                            Self.kindLabels.first { $0.0 == kind }?.1 ?? kind,
+                            Self.kindLabel(kind),
                             isOn: Binding(
                                 get: { kinds.contains(kind) },
                                 set: { enabled in
@@ -62,7 +65,7 @@ struct ApplicationPolicyView: View {
                     }
                 }
                 Section {
-                    Button("保存整理方式") {
+                    Button(L10n("appPolicy.saveButton")) {
                         Task { await save() }
                     }
                     .disabled(
@@ -75,13 +78,13 @@ struct ApplicationPolicyView: View {
                             .foregroundStyle(messageIsError ? .red : .green)
                     }
                 } footer: {
-                    Text("已有待确认草案保持原状；资料保存在应用内，导入源不变。")
+                    Text(L10n("appPolicy.saveFooter"))
                 }
             } else if isLoading {
                 ProgressView()
             }
         }
-        .navigationTitle("整理方式")
+        .navigationTitle(L10n("appPolicy.title"))
         .navigationBarTitleDisplayMode(.inline)
         .task { await load() }
         .refreshable { await load() }
@@ -111,11 +114,11 @@ struct ApplicationPolicyView: View {
                     version: policy.version
                 )
             )
-            message = "已保存整理方式。"
+            message = L10n("appPolicy.savedSuccess")
             messageIsError = false
         } catch let error as APIError where error.statusCode == 409 {
             await load()
-            message = "整理设置已在其他设备更新，已刷新，请重试。"
+            message = L10n("appPolicy.conflictNotice")
             messageIsError = true
         } catch {
             message = ErrorText.message(for: error)

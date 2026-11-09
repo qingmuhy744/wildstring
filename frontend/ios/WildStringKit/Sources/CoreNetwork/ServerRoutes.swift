@@ -37,7 +37,7 @@ public final class ServerRoutes {
     private var loop: Task<Void, Never>?
     private var failures = 0
     private var failedPlaybackRoutes: Set<String> = []
-    public var activeName: String { profile.routes.first { $0.address == profile.activeAddress }?.name ?? "默认线路" }
+    public var activeName: String { profile.routes.first { $0.address == profile.activeAddress }?.name ?? KitL10n("kit.routes.defaultName") }
 
     public init(primary: ServerRoute, defaults: UserDefaults = .standard,
                 makeClient: @escaping @MainActor (ServerAddress) -> WildstringClient) {
@@ -64,30 +64,30 @@ public final class ServerRoutes {
     public func add(name: String, address input: String, allowHTTP: Bool, username: String, password: String) async throws {
         guard !busy else { return }
         guard let instanceID = profile.instanceID, let userID = profile.userID else {
-            throw APIError(statusCode: 409, code: "请升级服务端并登录后再添加线路")
+            throw APIError(statusCode: 409, code: KitL10n("kit.routes.upgradeRequired"))
         }
         let address = try ServerAddress(input: input, allowsInsecureHTTP: allowHTTP)
         guard !profile.routes.contains(where: { $0.address != address.description && (try? ServerAddress(input: $0.address, allowsInsecureHTTP: $0.allowHTTP).origin) == address.origin }) else {
-            throw APIError(statusCode: 409, code: "该地址或同源线路已经保存")
+            throw APIError(statusCode: 409, code: KitL10n("kit.routes.duplicateOrigin"))
         }
         let label = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !label.isEmpty, label.count <= 80 else { throw APIError(statusCode: 422, code: "请填写 1–80 字的线路名称") }
+        guard !label.isEmpty, label.count <= 80 else { throw APIError(statusCode: 422, code: KitL10n("kit.routes.invalidNameLength")) }
         busy = true; defer { busy = false }
         let candidate = makeClient(address)
         let info = try await candidate.serverInfo()
-        guard info.instance_id == instanceID else { throw APIError(statusCode: 409, code: "这条线路不属于当前服务器") }
+        guard info.instance_id == instanceID else { throw APIError(statusCode: 409, code: KitL10n("kit.routes.differentServer")) }
         let user = try await candidate.login(username: username, password: password)
         let authenticatedInfo = try await candidate.serverInfo()
         guard authenticatedInfo.instance_id == instanceID, user.id == userID else {
             try? await candidate.logout()
             await candidate.clearSession()
-            throw APIError(statusCode: 409, code: "线路的服务器或账号不一致")
+            throw APIError(statusCode: 409, code: KitL10n("kit.routes.accountMismatch"))
         }
         let route = ServerRoute(name: label, address: address.description, allowHTTP: allowHTTP)
         if let index = profile.routes.firstIndex(where: { $0.id == route.id }) { profile.routes[index] = route }
         else { profile.routes.append(route) }
         if profile.activeAddress == route.address { await onSelected?(candidate, address) }
-        persist(); message = "线路已独立登录并保存"; start()
+        persist(); message = KitL10n("kit.routes.saved"); start()
     }
 
     public func rename(_ route: ServerRoute, name: String) {
@@ -119,7 +119,7 @@ public final class ServerRoutes {
         // probes keep the currently working route rather than bouncing back.
         if !(await choose(address.map { target in profile.routes.filter { $0.address == target } } ?? profile.routes)) {
             profile.manualAddress = previous
-            message = "线路选择未完成，已保留原模式和连接；请检查网络或重新登录"
+            message = KitL10n("kit.routes.selectFailed")
         }
         persist()
     }
@@ -144,7 +144,7 @@ public final class ServerRoutes {
             } catch is CancellationError { return false }
             catch { continue }
         }
-        message = profile.manualAddress == nil ? "没有可用的已登录线路，请检查网络或重新登录" : "手动线路不可用，请重新登录或切回 Fallback"
+        message = profile.manualAddress == nil ? KitL10n("kit.routes.noAvailableRoute") : KitL10n("kit.routes.manualUnavailable")
         return false
     }
 
@@ -202,15 +202,15 @@ public final class ServerRoutes {
               let address = try? ServerAddress(input: route.address, allowsInsecureHTTP: route.allowHTTP) else { return }
         do {
             let status = try await makeClient(address).authStatus(timeout: 5)
-            if !status.authenticated { message = "当前线路登录已过期，请重新登录" }
+            if !status.authenticated { message = KitL10n("kit.routes.sessionExpired") }
             else { failures = 0; message = nil }
         } catch {
             if let api = error as? APIError, api.statusCode < 500 && api.code != "https_required" {
-                message = "当前线路认证或权限错误（\(api.statusCode)）"; return
+                message = KitL10n("kit.routes.authError", api.statusCode); return
             }
             if Task.isCancelled { return }
             failures += 1
-            guard profile.manualAddress == nil else { message = "手动线路连接失败，未切换线路"; return }
+            guard profile.manualAddress == nil else { message = KitL10n("kit.routes.manualFailed"); return }
             if failures >= 2 { await choose(profile.routes.filter { $0.address != profile.activeAddress }) }
         }
     }

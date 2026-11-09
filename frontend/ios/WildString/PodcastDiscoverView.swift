@@ -24,14 +24,14 @@ struct PodcastDiscoverView: View {
         List {
             if query.isEmpty {
                 Section {
-                    Picker("区域", selection: $region) {
-                        Text("服务器默认").tag("")
-                        Text("中国大陆").tag("cn")
-                        Text("香港").tag("hk")
-                        Text("台湾").tag("tw")
-                        Text("美国").tag("us")
-                        Text("日本").tag("jp")
-                        Text("英国").tag("gb")
+                    Picker(L10n("podcastDiscover.region"), selection: $region) {
+                        Text(L10n("podcastDiscover.regionDefault")).tag("")
+                        Text(L10n("podcastDiscover.regionCN")).tag("cn")
+                        Text(L10n("podcastDiscover.regionHK")).tag("hk")
+                        Text(L10n("podcastDiscover.regionTW")).tag("tw")
+                        Text(L10n("podcastDiscover.regionUS")).tag("us")
+                        Text(L10n("podcastDiscover.regionJP")).tag("jp")
+                        Text(L10n("podcastDiscover.regionGB")).tag("gb")
                     }
                 }
             }
@@ -41,24 +41,24 @@ struct PodcastDiscoverView: View {
                     HStack {
                         Text(errorMessage).foregroundStyle(.red)
                         Spacer()
-                        Button("重试") { retryToken += 1 }
+                        Button(L10n("podcastDiscover.retry")) { retryToken += 1 }
                     }
                 }
             }
 
             if let page, !page.failedRegions.isEmpty {
                 Section {
-                    Text("部分区域暂不可用：\(page.failedRegions.map(\.region).joined(separator: ", "))")
+                    Text(L10n("podcastDiscover.failedRegions", page.failedRegions.map(\.region).joined(separator: ", ")))
                         .font(.caption)
                         .foregroundStyle(.orange)
                 }
             }
 
-            Section(query.isEmpty ? "热门榜单" : "搜索结果") {
+            Section(query.isEmpty ? L10n("podcastDiscover.topCharts") : L10n("podcastDiscover.searchResults")) {
                 if loading && (page == nil || page?.results.isEmpty == true) {
                     HStack(spacing: 8) {
                         ProgressView()
-                        Text("正在加载播客目录…").foregroundStyle(.secondary)
+                        Text(L10n("podcastDiscover.loadingDirectory")).foregroundStyle(.secondary)
                     }
                 } else if let results = page?.results, !results.isEmpty {
                     ForEach(results) { result in
@@ -87,7 +87,7 @@ struct PodcastDiscoverView: View {
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                         .lineLimit(1)
-                                    Text(result.followed ? "已关注" : result.genres.joined(separator: " · "))
+                                    Text(result.followed ? L10n("podcastDiscover.followed") : result.genres.joined(separator: " · "))
                                         .font(.caption2)
                                         .foregroundStyle(result.followed ? Color.accentColor : .secondary)
                                         .lineLimit(1)
@@ -97,15 +97,15 @@ struct PodcastDiscoverView: View {
                     }
                 } else if !loading {
                     ContentUnavailableView(
-                        query.isEmpty ? "暂无热门推荐" : "未找到相关播客",
+                        query.isEmpty ? L10n("podcastDiscover.emptyChartsTitle") : L10n("podcastDiscover.noResultsTitle"),
                         systemImage: "magnifyingglass",
-                        description: Text(query.isEmpty ? "请尝试切换其他区域。" : "换个关键词试试。")
+                        description: Text(query.isEmpty ? L10n("podcastDiscover.emptyChartsDescription") : L10n("podcastDiscover.noResultsDescription"))
                     )
                 }
             }
         }
-        .navigationTitle("探索播客")
-        .searchable(text: $query, prompt: "搜索播客名称或主题")
+        .navigationTitle(L10n("podcastDiscover.title"))
+        .searchable(text: $query, prompt: Text(L10n("podcastDiscover.searchPrompt")))
         .sheet(item: $selectedResult) { result in
             NavigationStack {
                 previewSheet(result: result)
@@ -145,7 +145,7 @@ struct PodcastDiscoverView: View {
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                         if let count = preview?.episodeCount {
-                            Text("\(count) 集")
+                            Text(L10n("podcastDiscover.episodeCount", count))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -155,7 +155,7 @@ struct PodcastDiscoverView: View {
                 if previewing {
                     HStack(spacing: 8) {
                         ProgressView()
-                        Text("正在读取节目简介…").font(.caption).foregroundStyle(.secondary)
+                        Text(L10n("podcastDiscover.readingDescription")).font(.caption).foregroundStyle(.secondary)
                     }
                     .padding(.vertical, 8)
                 }
@@ -175,7 +175,7 @@ struct PodcastDiscoverView: View {
                             if following {
                                 ProgressView()
                             } else {
-                                Text(preview.followed ? "已关注 · 打开电台" : "关注节目")
+                                Text(preview.followed ? L10n("podcastDiscover.followedOpen") : L10n("podcastDiscover.followShow"))
                                     .fontWeight(.semibold)
                             }
                             Spacer()
@@ -186,14 +186,14 @@ struct PodcastDiscoverView: View {
                     .disabled(following || (!canAdd && preview.catalogPodcastID == nil))
 
                     if !canAdd && preview.catalogPodcastID == nil {
-                        Text("管理员尚未开放添加节目")
+                        Text(L10n("podcastDiscover.addDisabledNotice"))
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
 
                     if !preview.latestEpisodes.isEmpty {
                         Divider()
-                        Text("最新单集")
+                        Text(L10n("podcastDiscover.latestEpisodes"))
                             .font(.headline)
                         ForEach(Array(preview.latestEpisodes.prefix(5).enumerated()), id: \.offset) { _, ep in
                             VStack(alignment: .leading, spacing: 2) {
@@ -219,11 +219,11 @@ struct PodcastDiscoverView: View {
             }
             .padding(20)
         }
-        .navigationTitle("节目预览")
+        .navigationTitle(L10n("podcastDiscover.previewTitle"))
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button("完成") { selectedResult = nil }
+                Button(L10n("podcastDiscover.done")) { selectedResult = nil }
             }
         }
     }
@@ -261,7 +261,7 @@ struct PodcastDiscoverView: View {
         do {
             preview = try await client.previewPodcast(feedURL: result.feedURL)
         } catch {
-            previewError = "无法获取节目预览：\(ErrorText.message(for: error))"
+            previewError = L10n("podcastDiscover.previewFailed", ErrorText.message(for: error))
         }
         previewing = false
     }
@@ -277,7 +277,7 @@ struct PodcastDiscoverView: View {
             }
             selectedResult = nil
         } catch {
-            previewError = "操作失败：\(ErrorText.message(for: error))"
+            previewError = L10n("podcastDiscover.actionFailed", ErrorText.message(for: error))
         }
     }
 }

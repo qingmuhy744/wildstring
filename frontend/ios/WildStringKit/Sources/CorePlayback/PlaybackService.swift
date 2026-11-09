@@ -245,7 +245,7 @@ public final class PlaybackService {
         invalidatePodcastAdvance()
         podcastOverrideItem = nil
         if let reason = items[index].unavailableReason {
-            errorMessage = "「\(items[index].title)」\(reason)。请恢复文件并重新扫描，刷新列表后重试。"
+            errorMessage = KitL10n("kit.playback.trackUnavailableRetry", items[index].title, reason)
             return
         }
         let playable = items.filter { $0.unavailableReason == nil }
@@ -280,7 +280,7 @@ public final class PlaybackService {
     private func startPodcastEpisode(_ item: Item, position: Double, recordInCloudQueue: Bool) {
         let turn = invalidatePodcastAdvance()
         guard item.unavailableReason == nil else {
-            errorMessage = "「\(item.title)」不可用。"
+            errorMessage = KitL10n("kit.playback.itemUnavailable", item.title)
             return
         }
         podcastOverrideItem = nil
@@ -456,11 +456,11 @@ public final class PlaybackService {
     public func enqueue(items: [Item], next: Bool = false) -> Bool {
         let items = items.filter { $0.unavailableReason == nil }
         guard !items.isEmpty else {
-            errorMessage = "没有可播放的歌曲。请恢复文件并重新扫描，刷新列表后重试。"
+            errorMessage = KitL10n("kit.playback.noPlayableTracks")
             return false
         }
         guard queue.count + items.count <= 5000 else {
-            errorMessage = "播放队列最多 5000 首。"
+            errorMessage = KitL10n("kit.playback.queueLimit")
             return false
         }
         let wasEmpty = queue.count == 0
@@ -566,7 +566,7 @@ public final class PlaybackService {
         )
         if finished { checkpointPodcast(event: "seek", force: true) }
         beginPlayback()
-        if !finished { errorMessage = "跳转未完成，请重试" }
+        if !finished { errorMessage = KitL10n("kit.playback.seekIncomplete") }
         updateSystemNowPlaying()
     }
 
@@ -584,7 +584,7 @@ public final class PlaybackService {
             player.pause()
             isPlaying = false
             isBuffering = false
-            errorMessage = "无法启用音频播放，请重试：\(error.localizedDescription)"
+            errorMessage = KitL10n("kit.playback.audioSessionFailed", error.localizedDescription)
             updateSystemNowPlaying()
         }
     }
@@ -799,7 +799,7 @@ public final class PlaybackService {
                 isTranscode: false,
                 transcodeBaseSeconds: 0,
                 durationOverride: nil,
-                outputLabel: "离线",
+                outputLabel: KitL10n("kit.playback.outputOffline"),
                 autoplay: autoplay,
                 startAt: startAt
             )
@@ -821,7 +821,7 @@ public final class PlaybackService {
             isTranscode: false,
             transcodeBaseSeconds: 0,
             durationOverride: nil,
-            outputLabel: "原音",
+            outputLabel: KitL10n("kit.playback.outputOriginal"),
             autoplay: autoplay,
             startAt: startAt
         )
@@ -872,14 +872,14 @@ public final class PlaybackService {
         } catch {
             guard !Task.isCancelled, currentItem?.id == item.id else { return }
             assetLoadTask = nil
-            errorMessage = "转码暂不可用，已回退原音"
+            errorMessage = KitL10n("kit.playback.transcodeFallback")
             prefetchLeadingBytes(of: item)
             buildAsset(
                 url: WildstringAudioResourceLoader.assetURL(server: server, path: item.streamPath),
                 isTranscode: false,
                 transcodeBaseSeconds: 0,
                 durationOverride: nil,
-                outputLabel: "原音",
+                outputLabel: KitL10n("kit.playback.outputOriginal"),
                 autoplay: intendedPlaying,
                 startAt: startAt
             )
@@ -946,10 +946,10 @@ public final class PlaybackService {
             if let bitrate = plan.output.bitrateKbps {
                 return "AAC \(bitrate) kbps"
             }
-            return "AAC 转码"
+            return KitL10n("kit.playback.outputAacTranscode")
         }
         let codec = plan.output.codec.uppercased()
-        return codec.isEmpty ? "原音" : "原音 · \(codec)"
+        return codec.isEmpty ? KitL10n("kit.playback.outputOriginal") : KitL10n("kit.playback.outputOriginalCodec", codec)
     }
 
     private func observe(playerItem: AVPlayerItem) {
@@ -1003,11 +1003,11 @@ public final class PlaybackService {
                     isTranscode: false,
                     transcodeBaseSeconds: 0,
                     durationOverride: nil,
-                    outputLabel: "原音",
+                    outputLabel: KitL10n("kit.playback.outputOriginal"),
                     autoplay: intendedPlaying,
                     startAt: resumeAt
                 )
-                errorMessage = "转码流失败，已回退原音"
+                errorMessage = KitL10n("kit.playback.transcodeStreamFailedFallback")
                 return
             }
             intendedPlaying = false
@@ -1016,12 +1016,12 @@ public final class PlaybackService {
             } else if let error {
                 #if DEBUG
                     let nsError = error as NSError
-                    errorMessage = "无法播放这首歌曲（\(nsError.domain) \(nsError.code)）"
+                    errorMessage = KitL10n("kit.playback.cannotPlayDebug", nsError.domain, nsError.code)
                 #else
-                    errorMessage = "无法播放这首歌曲"
+                    errorMessage = KitL10n("kit.playback.cannotPlay")
                 #endif
             } else {
-                errorMessage = "无法播放这首歌曲"
+                errorMessage = KitL10n("kit.playback.cannotPlay")
             }
         case .readyToPlay:
             if let durationOverrideSeconds, durationOverrideSeconds > 0 {
@@ -1156,7 +1156,7 @@ public final class PlaybackService {
         if let next {
             guard let item = await cloud?.playbackItem(for: next.episodeId) else {
                 guard turn == podcastTurn else { return }
-                errorMessage = "下一集暂时打不开。待播队列还在，可以重试。"
+                errorMessage = KitL10n("kit.playback.nextEpisodeUnavailable")
                 stopAtEndOfPodcast()
                 return
             }
@@ -1183,7 +1183,7 @@ public final class PlaybackService {
                     try await syncPodcastContinuation(forEpisodeID: episodeID, cloud: cloud, turn: turn)
                 } catch {
                     guard turn == podcastTurn else { return }
-                    errorMessage = "暂时读不到节目单集，待播队列已保留，可以重试。"
+                    errorMessage = KitL10n("kit.playback.episodesReadFailed")
                     stopAtEndOfPodcast()
                     return
                 }
@@ -1308,7 +1308,7 @@ public final class PlaybackService {
             let result = await submit(episode, write)
             if result == .conflict {
                 self.podcast.block()
-                self.podcastProgressMessage = "这集在其他设备有更新的进度"
+                self.podcastProgressMessage = KitL10n("kit.playback.podcastProgressConflict")
             }
         }
     }
@@ -1334,13 +1334,13 @@ public final class PlaybackService {
 
     private static func message(for error: APIError) -> String {
         switch error.code {
-        case "authentication_required", "http_401": return "登录已过期，请重新登录"
-        case "track_not_found": return "这首歌曲已不在曲库"
-        case "track_unavailable": return "音频文件暂不可用，请恢复文件并重新扫描后重试"
-        case "audio_not_found", "http_404": return "音频文件缺失，请恢复文件并重新扫描后重试"
-        case "audio_unavailable", "http_409": return "服务端无法读取音频文件，请检查存储后重试"
-        case "file_changed", "file_changed_rescan_required": return "音频文件已变化，请重新扫描后重试"
-        default: return "无法播放（\(error.statusCode)）"
+        case "authentication_required", "http_401": return KitL10n("kit.playback.authExpired")
+        case "track_not_found": return KitL10n("kit.playback.trackNotFound")
+        case "track_unavailable": return KitL10n("kit.playback.audioTempUnavailable")
+        case "audio_not_found", "http_404": return KitL10n("kit.playback.audioMissing")
+        case "audio_unavailable", "http_409": return KitL10n("kit.playback.audioUnreadable")
+        case "file_changed", "file_changed_rescan_required": return KitL10n("kit.playback.fileChanged")
+        default: return KitL10n("kit.playback.cannotPlayStatus", error.statusCode)
         }
     }
 }

@@ -1,26 +1,41 @@
+import { useTranslation } from 'react-i18next';
 import { HelpLabel, HelpText } from './desktop-help';
 import { useEffect, useRef, useState } from 'react';
 import { api } from './api';
 import { OnlineLyrics } from './source-plugins';
 
-const levels = ['无歌词', '静态歌词', '逐行动态', '双语逐行动态', '逐字动态', '双语逐字动态'];
-const statuses: Record<string, string> = {
-  running: '扫描中',
-  queued: '等待',
-  paused: '已暂停',
-  completed: '扫描结束',
-  cancelled: '已取消',
-  ready: '可升级',
-  review: '待核对',
-  no_match: '未匹配',
-  failed: '失败',
-  locked: '已锁定',
-  skipped_goal: '已满足目标',
-  skipped_scanned: '已扫跳过',
-  stale: '歌曲已变化',
-  applied: '已启用',
-  restored: '已恢复',
+const levelKeys = [
+  'lyricScans.levelNone',
+  'lyricScans.levelStatic',
+  'lyricScans.levelSyncedLine',
+  'lyricScans.levelBilingualLine',
+  'lyricScans.levelSyncedWord',
+  'lyricScans.levelBilingualWord',
+];
+const statusKeys: Record<string, string> = {
+  running: 'lyricScans.statusRunning',
+  queued: 'lyricScans.statusQueued',
+  paused: 'lyricScans.statusPaused',
+  completed: 'lyricScans.statusCompleted',
+  cancelled: 'lyricScans.statusCancelled',
+  ready: 'lyricScans.statusReady',
+  review: 'lyricScans.statusReview',
+  no_match: 'lyricScans.statusNoMatch',
+  failed: 'lyricScans.statusFailed',
+  locked: 'lyricScans.statusLocked',
+  skipped_goal: 'lyricScans.statusSkippedGoal',
+  skipped_scanned: 'lyricScans.statusSkippedScanned',
+  stale: 'lyricScans.statusStale',
+  applied: 'lyricScans.statusApplied',
+  restored: 'lyricScans.statusRestored',
 };
+const getStatusLabel = (status: string, t: (k: string) => string) =>
+  statusKeys[status] ? t(statusKeys[status]) : status;
+const rateProfileKeyMap = {
+  low: 'lyricScans.rateLabelLow',
+  medium: 'lyricScans.rateLabelMedium',
+  high: 'lyricScans.rateLabelHigh',
+} as const;
 type RateSettings = {
   default_profile: string;
   low_seconds: number;
@@ -62,6 +77,7 @@ export function LyricScans({
   albumId?: string;
   initialBatchId?: string;
 }) {
+  const { t } = useTranslation();
   const [goal, setGoal] = useState(5),
     [mode, setMode] = useState('upgrade');
   const [preference, setPreference] = useState('timing'),
@@ -129,7 +145,7 @@ export function LyricScans({
     try {
       await action();
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : '操作失败，请重试。');
+      setMessage(error instanceof Error ? error.message : t('lyricScans.actionFailed'));
     } finally {
       setBusy(false);
     }
@@ -148,50 +164,54 @@ export function LyricScans({
     });
   }
   return (
-    <section className="management-card lyric-scans" aria-label="歌词补全与洗版">
-      <h3>{albumId ? '专辑歌词补全与洗版' : '歌词补全与洗版'}</h3>
-      <p className="muted">
-        慢速查找更好的歌词，确认后启用。锁定歌曲会跳过；原歌词可恢复，音乐文件保持原样。
-      </p>
+    <section className="management-card lyric-scans" aria-label={t('lyricScans.sectionAria')}>
+      <h3>{albumId ? t('lyricScans.albumHeader') : t('lyricScans.libraryHeader')}</h3>
+      <p className="muted">{t('lyricScans.headingMuted')}</p>
       <fieldset disabled={busy || !defaults} className="lyric-scan-options">
         <label>
-          <HelpLabel hint="scanMode">扫描模式</HelpLabel>
+          <HelpLabel hint="scanMode">{t('lyricScans.scanMode')}</HelpLabel>
           <select value={mode} onChange={(e) => setMode(e.target.value)}>
-            <option value="upgrade">歌词洗版</option>
-            <option value="missing">仅补缺失</option>
+            <option value="upgrade">{t('lyricScans.modeUpgrade')}</option>
+            <option value="missing">{t('lyricScans.modeMissing')}</option>
           </select>
         </label>
         {mode === 'upgrade' && (
           <label>
-            <HelpLabel hint="lyricGoal">目标等级</HelpLabel>
+            <HelpLabel hint="lyricGoal">{t('lyricScans.targetGoal')}</HelpLabel>
             <select value={goal} onChange={(e) => setGoal(Number(e.target.value))}>
-              {levels.slice(1).map((label, i) => (
-                <option value={i + 1} key={label}>
-                  {label}
+              {levelKeys.slice(1).map((key, i) => (
+                <option value={i + 1} key={key}>
+                  {t(key)}
                 </option>
               ))}
             </select>
           </label>
         )}
         <label>
-          <HelpLabel hint="lyricPreference">洗版偏好</HelpLabel>
+          <HelpLabel hint="lyricPreference">{t('lyricScans.preference')}</HelpLabel>
           <select value={preference} onChange={(e) => setPreference(e.target.value)}>
-            <option value="timing">逐字优先</option>
-            <option value="bilingual">双语优先</option>
+            <option value="timing">{t('lyricScans.prefTiming')}</option>
+            <option value="bilingual">{t('lyricScans.prefBilingual')}</option>
           </select>
         </label>
         <label>
-          <HelpLabel hint="scanRate">请求频率</HelpLabel>
+          <HelpLabel hint="scanRate">{t('lyricScans.requestRate')}</HelpLabel>
           <select value={rateProfile} onChange={(e) => setRateProfile(e.target.value)}>
-            <option value="low">低频（{defaults?.low_seconds ?? 10}秒）</option>
-            <option value="medium">中频（{defaults?.medium_seconds ?? 5}秒）</option>
-            <option value="high">高频（{defaults?.high_seconds ?? 2}秒）</option>
-            <option value="custom">自定义</option>
+            <option value="low">
+              {t('lyricScans.rateLow', { seconds: defaults?.low_seconds ?? 10 })}
+            </option>
+            <option value="medium">
+              {t('lyricScans.rateMedium', { seconds: defaults?.medium_seconds ?? 5 })}
+            </option>
+            <option value="high">
+              {t('lyricScans.rateHigh', { seconds: defaults?.high_seconds ?? 2 })}
+            </option>
+            <option value="custom">{t('lyricScans.rateCustom')}</option>
           </select>
         </label>
         {rateProfile === 'custom' && (
           <label>
-            <HelpLabel hint="scanRate">来源请求最短间隔（秒）</HelpLabel>
+            <HelpLabel hint="scanRate">{t('lyricScans.customIntervalLabel')}</HelpLabel>
             <input
               type="number"
               min={1}
@@ -203,12 +223,10 @@ export function LyricScans({
         )}
         <label className="check">
           <input type="checkbox" checked={force} onChange={(e) => setForce(e.target.checked)} />
-          <HelpLabel hint="scanForce">强制重扫已查记录和缓存</HelpLabel>
+          <HelpLabel hint="scanForce">{t('lyricScans.forceRescan')}</HelpLabel>
         </label>
       </fieldset>
-      <p className="muted">
-        后台默认低频，每来源串行、不突发放量；旧插件未声明请求级限速时按调用级控制。未匹配记录会保留，普通扫描复用已有结果。双语逐字指原文逐字高亮、译文同步显示。
-      </p>
+      <p className="muted">{t('lyricScans.rateExplanation')}</p>
       <div className="button-row">
         <button
           disabled={busy || interval < 1 || interval > 120 || !Number.isInteger(interval)}
@@ -222,11 +240,11 @@ export function LyricScans({
             })
           }
         >
-          检查扫描范围
+          {t('lyricScans.checkScope')}
         </button>
         {preview !== null && (
           <>
-            <span>本次范围：{preview} 首</span>
+            <span>{t('lyricScans.scopeCount', { count: preview })}</span>
             <button
               className="primary"
               disabled={busy || preview === 0}
@@ -240,24 +258,24 @@ export function LyricScans({
                 })
               }
             >
-              开始后台扫描
+              {t('lyricScans.startScan')}
             </button>
           </>
         )}
         <button disabled={busy} onClick={() => void run(() => load())}>
-          刷新任务
+          {t('lyricScans.refreshTasks')}
         </button>
       </div>
       <p role="status">{message}</p>
       {defaults && (
         <details>
-          <summary>扫描频率默认设置</summary>
+          <summary>{t('lyricScans.rateDefaultsSummary')}</summary>
           <fieldset disabled={busy} className="lyric-scan-options">
             {(['low', 'medium', 'high'] as const).map((key) => {
               const field = `${key}_seconds` as 'low_seconds' | 'medium_seconds' | 'high_seconds';
               return (
                 <label key={key}>
-                  {{ low: '低频', medium: '中频', high: '高频' }[key]}间隔（秒）
+                  {t('lyricScans.rateIntervalLabel', { rate: t(rateProfileKeyMap[key]) })}
                   <input
                     type="number"
                     min={1}
@@ -269,14 +287,14 @@ export function LyricScans({
               );
             })}
             <label>
-              后台默认频率
+              {t('lyricScans.defaultRateLabel')}
               <select
                 value={defaults.default_profile}
                 onChange={(e) => setDefaults({ ...defaults, default_profile: e.target.value })}
               >
-                <option value="low">低频</option>
-                <option value="medium">中频</option>
-                <option value="high">高频</option>
+                <option value="low">{t('lyricScans.rateLabelLow')}</option>
+                <option value="medium">{t('lyricScans.rateLabelMedium')}</option>
+                <option value="high">{t('lyricScans.rateLabelHigh')}</option>
               </select>
             </label>
             <button
@@ -296,18 +314,18 @@ export function LyricScans({
                       body: JSON.stringify(defaults),
                     }),
                   );
-                  setMessage('默认频率已保存，新建任务使用新设置。');
+                  setMessage(t('lyricScans.defaultsSaved'));
                 })
               }
             >
-              保存频率默认值
+              {t('lyricScans.saveDefaults')}
             </button>
           </fieldset>
         </details>
       )}
       {scans.length > 0 && (
         <details open={!batch}>
-          <summary>最近的扫描任务</summary>
+          <summary>{t('lyricScans.recentTasksSummary')}</summary>
           <div className="lyric-scan-history">
             {scans.map((scan) => (
               <button
@@ -321,18 +339,26 @@ export function LyricScans({
                   })
                 }
               >
-                {new Date(scan.created_at * 1000).toLocaleString()} · {scan.total} 首 ·{' '}
-                {statuses[scan.status] ?? scan.status}
+                {t('lyricScans.recentTaskItem', {
+                  time: new Date(scan.created_at * 1000).toLocaleString(),
+                  total: scan.total,
+                  status: getStatusLabel(scan.status, t),
+                })}
               </button>
             ))}
           </div>
         </details>
       )}
       {batch && (
-        <div aria-label="歌词扫描进度">
-          <p className="muted">本任务每来源请求间隔：{batch.options.interval_seconds} 秒</p>
+        <div aria-label={t('lyricScans.scanProgressAria')}>
+          <p className="muted">
+            {t('lyricScans.intervalNotice', { seconds: batch.options.interval_seconds })}
+          </p>
           <h4>
-            {statuses[batch.status]} · {batch.total} 首
+            {t('lyricScans.batchTitle', {
+              status: getStatusLabel(batch.status, t),
+              total: batch.total,
+            })}
           </h4>
           <div className="lyric-scan-counts">
             {Object.entries(batch.counts).map(([state, count]) => (
@@ -348,35 +374,38 @@ export function LyricScans({
                         : undefined
                 }
               >
-                {statuses[state] ?? state} {count}
+                {getStatusLabel(state, t)} {count}
               </HelpText>
             ))}
           </div>
           {batch.cooldowns.map((c) => (
             <p key={c.plugin_id}>
-              {c.plugin_id} 正在冷却至 {new Date(c.cooldown_until * 1000).toLocaleTimeString()} ·{' '}
-              {c.reason}
+              {t('lyricScans.cooldownNotice', {
+                pluginId: c.plugin_id,
+                time: new Date(c.cooldown_until * 1000).toLocaleTimeString(),
+                reason: c.reason,
+              })}
             </p>
           ))}
           <div className="button-row">
             {batch.status === 'running' && (
               <button disabled={busy} onClick={() => void control('pause')}>
-                暂停扫描
+                {t('lyricScans.pauseScan')}
               </button>
             )}
             {batch.status === 'paused' && (
               <button disabled={busy} onClick={() => void control('resume')}>
-                继续扫描
+                {t('lyricScans.resumeScan')}
               </button>
             )}
             {['running', 'paused'].includes(batch.status) && (
               <button disabled={busy} onClick={() => setConfirmation('cancel')}>
-                取消任务
+                {t('lyricScans.cancelTask')}
               </button>
             )}
             {batch.status !== 'running' && (
               <button disabled={busy} onClick={() => void control('retry_failed')}>
-                仅重试失败
+                {t('lyricScans.retryFailedOnly')}
               </button>
             )}
             <button
@@ -385,18 +414,22 @@ export function LyricScans({
                 setSelected(batch.items.filter((i) => i.status === 'ready').map((i) => i.id))
               }
             >
-              选择本页可升级
+              {t('lyricScans.selectReadyOnPage')}
             </button>
             <button disabled={busy || !selected.length} onClick={() => setConfirmation('apply')}>
-              确认选中歌词（{selected.length}）
+              {t('lyricScans.confirmSelectedLyrics', { count: selected.length })}
             </button>
           </div>
           {confirmation && (
-            <div className="lyric-scan-confirm" role="group" aria-label="确认歌词操作">
+            <div
+              className="lyric-scan-confirm"
+              role="group"
+              aria-label={t('lyricScans.confirmGroupAria')}
+            >
               <p>
                 {confirmation === 'apply'
-                  ? `启用选中的 ${selected.length} 首歌词？已有能力不会降级，歌曲发生变化时会跳过。`
-                  : '取消尚未完成的查询？已找到的候选会保留。'}
+                  ? t('lyricScans.confirmApplyPrompt', { count: selected.length })
+                  : t('lyricScans.confirmCancelPrompt')}
               </p>
               <button
                 disabled={busy}
@@ -409,7 +442,11 @@ export function LyricScans({
                           { method: 'POST', body: JSON.stringify({ item_ids: selected }) },
                         );
                         setMessage(
-                          `已启用 ${result.items.filter((i) => i.status === 'applied').length} 首；冲突 ${result.items.filter((i) => i.status === 'conflict').length} 首。`,
+                          t('lyricScans.appliedResultNotice', {
+                            appliedCount: result.items.filter((i) => i.status === 'applied').length,
+                            conflictCount: result.items.filter((i) => i.status === 'conflict')
+                              .length,
+                          }),
                         );
                         setSelected([]);
                         setConfirmation(null);
@@ -422,10 +459,10 @@ export function LyricScans({
                       })
                 }
               >
-                确定
+                {t('lyricScans.confirmButton')}
               </button>
               <button disabled={busy} onClick={() => setConfirmation(null)}>
-                返回
+                {t('lyricScans.backButton')}
               </button>
             </div>
           )}
@@ -436,7 +473,7 @@ export function LyricScans({
                   <label>
                     <input
                       type="checkbox"
-                      aria-label={`选择 ${item.title}`}
+                      aria-label={t('lyricScans.selectTrackAria', { title: item.title })}
                       disabled={item.status !== 'ready' || busy}
                       checked={selected.includes(item.id)}
                       onChange={(e) =>
@@ -447,19 +484,24 @@ export function LyricScans({
                     />
                     <strong>{item.title}</strong>
                   </label>
-                  <span>{statuses[item.status] ?? item.status}</span>
+                  <span>{getStatusLabel(item.status, t)}</span>
                 </div>
                 <p>
-                  {item.baseline?.label ?? '尚未检查'}
+                  {item.baseline?.label ?? t('lyricScans.notCheckedYet')}
                   {item.quality && ` → ${item.quality.label}`}
                 </p>
-                {item.error && <p role="status">来源问题：{item.error}</p>}
+                {item.error && (
+                  <p role="status">
+                    {t('lyricScans.sourceIssuePrefix')}
+                    {item.error}
+                  </p>
+                )}
                 <div className="button-row">
                   <button
                     disabled={busy}
                     onClick={() => setExpanded(expanded === item.id ? '' : item.id)}
                   >
-                    预览与其他候选
+                    {t('lyricScans.previewCandidates')}
                   </button>
                   <button
                     disabled={busy}
@@ -472,11 +514,15 @@ export function LyricScans({
                           method: 'PUT',
                           body: JSON.stringify({ ...lock, locked: !lock.locked }),
                         });
-                        setMessage(lock.locked ? '已解锁，可在新扫描中查询。' : '当前歌词已锁定。');
+                        setMessage(
+                          lock.locked
+                            ? t('lyricScans.unlockedNotice')
+                            : t('lyricScans.lockedNotice'),
+                        );
                       })
                     }
                   >
-                    锁定／解锁歌词
+                    {t('lyricScans.toggleLock')}
                   </button>
                   {item.status === 'applied' && (
                     <button
@@ -493,7 +539,7 @@ export function LyricScans({
                         })
                       }
                     >
-                      恢复洗版前歌词
+                      {t('lyricScans.restorePreCleanup')}
                     </button>
                   )}
                 </div>
@@ -520,7 +566,7 @@ export function LyricScans({
                 })
               }
             >
-              上一页
+              {t('lyricScans.prevPage')}
             </button>
             <span>
               {Math.min(offset + 1, batch.total)}–{Math.min(offset + 50, batch.total)} /{' '}
@@ -537,7 +583,7 @@ export function LyricScans({
                 })
               }
             >
-              下一页
+              {t('lyricScans.nextPage')}
             </button>
           </div>
         </div>
@@ -555,6 +601,7 @@ export function LyricScanDialog({
   batchId?: string;
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
@@ -568,16 +615,16 @@ export function LyricScanDialog({
     <dialog
       ref={dialog}
       className="metadata-refresh-dialog lyric-scan-dialog"
-      aria-label={albumId ? '专辑歌词补全与洗版' : '歌词补全与洗版'}
+      aria-label={albumId ? t('lyricScans.albumHeader') : t('lyricScans.libraryHeader')}
       onCancel={(e) => {
         e.preventDefault();
         onClose();
       }}
     >
       <header className="lyric-scan-header">
-        <strong>{albumId ? '专辑歌词补全与洗版' : '歌词补全与洗版'}</strong>
-        <button onClick={onClose} aria-label="关闭歌词扫描">
-          关闭
+        <strong>{albumId ? t('lyricScans.albumHeader') : t('lyricScans.libraryHeader')}</strong>
+        <button onClick={onClose} aria-label={t('lyricScans.closeAria')}>
+          {t('lyricScans.close')}
         </button>
       </header>
       <LyricScans albumId={albumId} initialBatchId={batchId} />
@@ -586,12 +633,13 @@ export function LyricScanDialog({
 }
 
 export function LyricScanEntry() {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   return (
     <section className="management-card">
-      <h2>歌词补全与洗版</h2>
-      <p className="muted">全库慢速补全、歌词升级及频率设置，支持暂停续扫。</p>
-      <button onClick={() => setOpen(true)}>打开歌词补全与洗版</button>
+      <h2>{t('lyricScans.entryTitle')}</h2>
+      <p className="muted">{t('lyricScans.entryMuted')}</p>
+      <button onClick={() => setOpen(true)}>{t('lyricScans.openLyricScans')}</button>
       {open && <LyricScanDialog onClose={() => setOpen(false)} />}
     </section>
   );

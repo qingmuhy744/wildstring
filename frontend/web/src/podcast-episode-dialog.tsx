@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { DialogCloseButton } from './dialog-close';
 import { Icon } from './icons';
 import { renderPodcastDescription } from './podcast-description';
@@ -26,6 +27,7 @@ export function PodcastEpisodeDialog({
   onSave: () => void;
   onToggleFavorite?: () => void;
 }) {
+  const { t } = useTranslation();
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -69,57 +71,75 @@ export function PodcastEpisodeDialog({
             <h2 id="podcast-episode-heading">{episode.title}</h2>
           </div>
         </div>
-        <DialogCloseButton aria-label="关闭详情" onClick={onClose} />
+        <DialogCloseButton aria-label={t('podcastEpisodeDialog.closeDetails')} onClick={onClose} />
         <div className="episode-dialog-meta">
-          {date && <span>{date}发布</span>}
-          {duration && <span>时长 {duration}</span>}
+          {date && <span>{t('podcastEpisodeDialog.publishedAt', { date })}</span>}
+          {duration && <span>{t('podcastEpisodeDialog.duration', { duration })}</span>}
           <span className="episode-dialog-availability">
-            {episode.download_status === 'downloaded' ? '服务器已有音频' : '在线音频'}
+            {episode.download_status === 'downloaded'
+              ? t('podcastEpisodeDialog.serverDownloaded')
+              : t('podcastEpisodeDialog.onlineAudio')}
           </span>
         </div>
       </header>
-      <section className="episode-dialog-description" aria-label="本集简介" tabIndex={0}>
-        <h3>本集简介</h3>
-        {renderPodcastDescription(episode.description) || <p>暂无单集简介。</p>}
+      <section
+        className="episode-dialog-description"
+        aria-label={t('podcastEpisodeDialog.descriptionAriaLabel')}
+        tabIndex={0}
+      >
+        <h3>{t('podcastEpisodeDialog.descriptionHeading')}</h3>
+        {renderPodcastDescription(episode.description) || (
+          <p>{t('podcastEpisodeDialog.noDescription')}</p>
+        )}
       </section>
       <footer className="episode-dialog-footer">
         <div className="episode-dialog-playback">
           <button type="button" className="primary" onClick={onPlay}>
             <Icon name="play" />
-            播放单集
+            {t('podcastEpisodeDialog.playEpisode')}
           </button>
           <button type="button" onClick={() => onQueue(true)}>
             <Icon name="next" />
-            下一集播放
+            {t('podcastEpisodeDialog.playNext')}
           </button>
           <button type="button" onClick={() => onQueue(false)}>
             <Icon name="queue" />
-            加入待播
+            {t('podcastEpisodeDialog.addToQueue')}
           </button>
         </div>
         <div className="episode-dialog-files">
           <a
             href={`/api/v1/podcasts/episodes/${encodeURIComponent(episode.id)}/stream?download=1`}
             download
-            title="将原始音频文件下载到此设备"
+            title={t('podcastEpisodeDialog.downloadTooltip')}
           >
             <Icon name="download" />
-            {extension ? `下载 ${extension.toUpperCase()}` : '下载音频'}
+            {extension
+              ? t('podcastEpisodeDialog.downloadExtension', { extension: extension.toUpperCase() })
+              : t('podcastEpisodeDialog.downloadAudio')}
           </a>
-          <span>保存到此设备</span>
+          <span>{t('podcastEpisodeDialog.saveToDevice')}</span>
           {onToggleFavorite && (
             <button
               type="button"
               className={`episode-favorite-btn${isFavorited ? ' active' : ''}`}
               onClick={onToggleFavorite}
-              title={isFavorited ? '取消收藏该单集' : '收藏该单集'}
+              title={
+                isFavorited
+                  ? t('podcastEpisodeDialog.unfavoriteTooltip')
+                  : t('podcastEpisodeDialog.favoriteTooltip')
+              }
             >
               <Icon name="heart" />
-              {isFavorited ? '取消收藏' : '单集收藏'}
+              {isFavorited
+                ? t('podcastEpisodeDialog.unfavorite')
+                : t('podcastEpisodeDialog.favorite')}
             </button>
           )}
           <button type="button" className="episode-save-btn" onClick={onSave}>
-            {episode.resource_saved ? '取消个人保存' : '保存到服务器'}
+            {episode.resource_saved
+              ? t('podcastEpisodeDialog.unsaveResource')
+              : t('podcastEpisodeDialog.saveToServer')}
           </button>
         </div>
       </footer>

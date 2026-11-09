@@ -351,7 +351,7 @@ fun ConnectionScreen(state: MusicState, connect: (String, String, String, Boolea
             Text(stringResource(R.string.connect_collection), color = Muted)
             TextButton(manageServers, Modifier.testTag("connection-servers")) { Icon(Icons.Default.Dns, null); Spacer(Modifier.width(8.dp)); Text(stringResource(R.string.settings_servers)) }
             if (routes.size > 1) {
-                Text("选择已保存线路重新登录", style = MaterialTheme.typography.bodySmall)
+                Text(stringResource(R.string.ws_app_choose_saved_route), style = MaterialTheme.typography.bodySmall)
                 routes.forEach { route -> TextButton({ server = route.url; localHttp = route.allowHttp; password = "" }, enabled = !state.connecting) { Text(route.name + " · " + route.url) } }
             }
             OutlinedTextField(server, { server = it; localHttp = false }, Modifier.fillMaxWidth(), label = { Text(stringResource(R.string.server_address)) }, placeholder = { Text("music.your-domain.com") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri), enabled = !state.connecting)
@@ -404,7 +404,6 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
     var queue by rememberSaveable { mutableStateOf(false) }
     var settings by rememberSaveable { mutableStateOf(false) }
     var feature by remember { mutableStateOf<String?>(null) }
-    var downloadTasks by remember { mutableStateOf(false) }
     var playerReturnFeature by remember { mutableStateOf<String?>(null) }
     var featureTrack by remember { mutableStateOf<Track?>(null) }
     var featurePlaylist by remember { mutableStateOf<Playlist?>(null) }
@@ -579,16 +578,11 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
                         Icon(painterResource(R.drawable.ic_wildstring), null, Modifier.padding(vertical = 24.dp).size(36.dp), tint = Color.Unspecified)
                         RailItems(state, vm)
                     }
-                    val showGlobalMore = state.tab == "search" && state.collection == null && state.kind != "recent"
                     val showMiniPlayer = state.current != null && (state.tab != "assistant" || state.playing || state.buffering)
                     Scaffold(
                         contentWindowInsets = WindowInsets(0, 0, 0, 0),
                         topBar = { if (state.tab != "assistant" && (state.tab != "podcast" || state.podcastId == null)) CatalogTopBar(state, vm::back, { settings = true }, compact = true, unread = unread,
-                            notifications = { feature = "notifications" },
-                            queue = if (showGlobalMore) ({ queue = true }) else null,
-                            recent = if (showGlobalMore) vm::recent else null,
-                            offline = if (showGlobalMore) ({ feature = "offline" }) else null,
-                            downloads = if (state.tab == "podcast" && state.account?.profile in listOf("owner", "librarian")) ({ downloadTasks = true }) else null) },
+                            notifications = { feature = "notifications" }) },
                         bottomBar = {
                             Surface(
                                 color = MaterialTheme.colorScheme.surfaceContainer,
@@ -639,7 +633,7 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
                                 Column(Modifier.fillMaxWidth()) {
                                     if (state.tab == "mine" && state.collection == null && state.kind != "recent") {
                                         PersonalHeader(vm, state, { vm.recent() }, compact = compact)
-                                        MobileShortcuts { feature = it }
+                                        MobileShortcuts { if (it == "settings") settings = true else feature = it }
                                         Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                                             Text(stringResource(R.string.my_playlists), style = MaterialTheme.typography.titleMedium)
                                             IconButton({ featurePlaylist = null; feature = "playlist" }) { Icon(Icons.Default.Add, stringResource(R.string.playlist_new)) }
@@ -852,7 +846,6 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
             }
         }
     }
-    if (downloadTasks) PodcastDownloadQueueDialog(vm = vm, onDismiss = { downloadTasks = false })
     feature?.let { route -> FeatureDialog(vm, route, featureTrack, featurePlaylist, albumId = featureAlbumId, dismiss = { feature = null; featureTrack = null; featurePlaylist = null; featureBatchId = null; featureAlbumId = null }, initialBatchId = featureBatchId, onOpenAction = ::openFeatureAction) }
     playlistActions?.let { playlist -> ModalBottomSheet(onDismissRequest = { playlistActions = null }) {
         Text(playlist.name, Modifier.padding(horizontal = 20.dp, vertical = 12.dp), style = MaterialTheme.typography.titleLarge)
@@ -922,7 +915,7 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
             chooseTrack = track; actions = null
             scope.launch { try { playlistChoices = vm.playlistsForAdd() } catch (e: Exception) { localError = friendlyError(e) } }
         }
-        SongAction("离线保存", Icons.Default.Download) { vm.download(listOf(track)); actions = null }
+        SongAction(stringResource(R.string.ws_app_offline_save), Icons.Default.Download) { vm.download(listOf(track)); actions = null }
         state.activePlaylist?.takeIf { it.kind == "manual" }?.let { playlist -> SongAction(stringResource(R.string.playlist_remove_track), Icons.Default.RemoveCircleOutline, destructive = true) { actions = null; scope.launch { try { vm.removePlaylistTrack(track, playlist) } catch (e: Exception) { localError = friendlyError(e) } } } }
         if (state.account?.profile in listOf("owner", "librarian", "editor")) {
             HorizontalDivider(Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
@@ -1058,7 +1051,7 @@ private fun MobileAssistantPage(vm: MusicViewModel, unread: Int, onNotifications
 /** Main navigation destinations; labels follow the interface language. */
 @Composable
 private fun navItems() = listOf(
-    Triple("search", androidx.compose.ui.res.stringResource(R.string.nav_discover), Icons.Default.Search),
+    Triple("search", androidx.compose.ui.res.stringResource(R.string.nav_discover), Icons.Default.Explore),
     Triple("podcast", androidx.compose.ui.res.stringResource(R.string.nav_radio), Icons.Default.Podcasts),
     Triple("assistant", androidx.compose.ui.res.stringResource(R.string.nav_assistant), Icons.Default.AutoAwesome),
     Triple("library", androidx.compose.ui.res.stringResource(R.string.nav_music), Icons.Default.LibraryMusic),
@@ -1076,35 +1069,12 @@ private fun RailItems(state: MusicState, vm: MusicViewModel) {
 private fun RowScope.BottomItems(state: MusicState, vm: MusicViewModel) {
     val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
     navItems().forEach { (id, label, icon) ->
-        val isAssistant = id == "assistant"
         NavigationBarItem(
             selected = state.tab == id,
             onClick = { keyboard?.hide(); vm.navigate(id) },
             modifier = Modifier.testTag("nav-$id"),
-            icon = {
-                if (isAssistant) {
-                    Surface(
-                        shape = RoundedCornerShape(10.dp),
-                        color = if (state.tab == id) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f),
-                        contentColor = if (state.tab == id) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onPrimaryContainer,
-                        modifier = Modifier.size(28.dp),
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(icon, label, modifier = Modifier.size(18.dp))
-                        }
-                    }
-                } else {
-                    Icon(icon, label)
-                }
-            },
-            label = {
-                Text(
-                    label,
-                    fontWeight = if (isAssistant && state.tab == id) androidx.compose.ui.text.font.FontWeight.Bold else androidx.compose.ui.text.font.FontWeight.Normal,
-                    maxLines = 1,
-                    softWrap = false,
-                )
-            },
+            icon = { Icon(icon, label) },
+            label = { Text(label, maxLines = 1, softWrap = false) },
         )
     }
 }

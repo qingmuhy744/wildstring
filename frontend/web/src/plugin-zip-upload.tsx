@@ -1,4 +1,5 @@
 import { useId, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Icon } from './icons';
 
 const MAX_ZIP = 16 * 1024 * 1024;
@@ -16,6 +17,7 @@ export function PluginZipUpload({
   working: boolean;
   onUpload: (file: File) => Promise<boolean>;
 }) {
+  const { t } = useTranslation();
   const input = useRef<HTMLInputElement>(null);
   const descriptionId = useId();
   const [file, setFile] = useState<File | null>(null);
@@ -26,20 +28,20 @@ export function PluginZipUpload({
     if (disabled) return;
     setError('');
     if (files.length !== 1) {
-      setError('请一次选择一个插件 ZIP。');
+      setError(t('pluginZipUpload.errorSingleFile'));
       return;
     }
     const next = files[0];
     if (!/\.zip$/i.test(next.name)) {
-      setError('请选择 .zip 格式的插件包。');
+      setError(t('pluginZipUpload.errorZipFormat'));
       return;
     }
     if (next.size > MAX_ZIP) {
-      setError('插件 ZIP 超过 16 MiB，请选择较小的包。');
+      setError(t('pluginZipUpload.errorTooLarge'));
       return;
     }
     if (!next.size) {
-      setError('这个文件是空的，请重新选择插件 ZIP。');
+      setError(t('pluginZipUpload.errorEmptyFile'));
       return;
     }
     setFile(next);
@@ -61,7 +63,7 @@ export function PluginZipUpload({
       />
       <div
         className={`plugin-dropzone${dragging && !disabled ? ' is-dragging' : ''}`}
-        aria-label={`${inputLabel}拖放区`}
+        aria-label={t('pluginZipUpload.dropzoneAria', { label: inputLabel })}
         onDragOver={(event) => {
           event.preventDefault();
           if (!disabled) event.dataTransfer.dropEffect = 'copy';
@@ -88,11 +90,11 @@ export function PluginZipUpload({
           ZIP
         </span>
         <div className="plugin-file-description" id={descriptionId}>
-          <strong>{file ? file.name : '选择或拖入插件 ZIP'}</strong>
+          <strong>{file ? file.name : t('pluginZipUpload.selectOrDropPrompt')}</strong>
           <span>
             {file
-              ? `${file.size < 1024 * 1024 ? `${(file.size / 1024).toFixed(1)} KiB` : `${(file.size / 1024 / 1024).toFixed(1)} MiB`} · ${working ? '正在上传并校验' : '等待确认上传'}`
-              : '每次一个文件，最大 16 MiB'}
+              ? `${file.size < 1024 * 1024 ? `${(file.size / 1024).toFixed(1)} KiB` : `${(file.size / 1024 / 1024).toFixed(1)} MiB`} · ${working ? t('pluginZipUpload.statusWorking') : t('pluginZipUpload.statusWaiting')}`
+              : t('pluginZipUpload.fileLimitHint')}
           </span>
         </div>
         <div className="plugin-file-controls">
@@ -102,7 +104,7 @@ export function PluginZipUpload({
             aria-describedby={descriptionId}
             onClick={() => input.current?.click()}
           >
-            {file ? '重新选择' : '选择 ZIP'}
+            {file ? t('pluginZipUpload.reselect') : t('pluginZipUpload.chooseZip')}
           </button>
           {file && (
             <button
@@ -114,7 +116,7 @@ export function PluginZipUpload({
                 setError('');
               }}
             >
-              移除文件
+              {t('pluginZipUpload.removeFile')}
             </button>
           )}
         </div>
@@ -134,9 +136,9 @@ export function PluginZipUpload({
             if (await onUpload(file)) setFile(null);
           }}
         >
-          {working ? '正在上传并校验…' : actionLabel}
+          {working ? t('pluginZipUpload.workingUploading') : actionLabel}
         </button>
-        {working && <span role="status">请稍候，完成后会显示结果。</span>}
+        {working && <span role="status">{t('pluginZipUpload.workingHint')}</span>}
       </div>
     </div>
   );

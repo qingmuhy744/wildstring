@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { api, ApiError } from './api';
 import type { AgentNotification, NotificationAction, NotificationPage } from './agent-api';
 import {
@@ -11,6 +12,7 @@ import {
 } from './workspace-ui';
 
 export function useNotifications(userId: string) {
+  const { t } = useTranslation();
   const [items, setItems] = useState<AgentNotification[]>([]),
     [unread, setUnread] = useState(0),
     [busy, setBusy] = useState(false),
@@ -23,111 +25,114 @@ export function useNotifications(userId: string) {
     account = useRef(userId),
     unsupportedRef = useRef(false),
     queued = useRef<boolean | null>(null);
-  const refresh = useCallback(async function pull(full = false): Promise<void> {
-    if (document.hidden || !navigator.onLine || (unsupportedRef.current && !full)) return;
-    if (request.current) {
-      // A reconnect/read can happen after the in-flight snapshot was taken.
-      // Coalesce it into one follow-up instead of losing the newer signal.
-      queued.current = full || queued.current === true;
-      return;
-    }
-    const controller = new AbortController();
-    request.current = controller;
-    const owner = account.current;
-    setBusy(true);
-    setError('');
-    try {
-      let next = full ? null : cursor.current,
-        reset = full || !cursor.current,
-        remaining = true;
-      const incoming = new Map<string, AgentNotification>();
-      let latestUnread = 0,
-        latestWatermark = 0,
-        pages = 0;
-      const absorb = (response: NotificationPage) => {
-        for (const item of response.items) {
-          const prior = incoming.get(item.id);
-          if (!prior || item.version >= prior.version) incoming.set(item.id, item);
-        }
-        latestUnread = response.unread_count;
-        latestWatermark = response.high_watermark;
-      };
-      if (reset) {
-        let offset = 0,
-          initialCursor: string | null = null;
-        while (!controller.signal.aborted) {
-          if (++pages > 1000) throw new Error('通知较多，请稍后刷新继续补拉。');
-          const response = await api<NotificationPage>(
-            `/agent/notifications?limit=100&offset=${offset}`,
-            { signal: controller.signal },
-          );
-          absorb(response);
-          if (offset === 0) initialCursor = response.next_cursor;
-          offset += response.items.length;
-          if (offset >= response.total || response.items.length < 100) break;
-        }
-        next = initialCursor;
-      }
-      while (remaining && next && !controller.signal.aborted) {
-        if (++pages > 1000) throw new Error('通知较多，请稍后刷新继续补拉。');
-        let response: NotificationPage;
-        try {
-          response = await api<NotificationPage>(
-            `/agent/notifications?limit=100&cursor=${encodeURIComponent(next)}`,
-            { signal: controller.signal },
-          );
-        } catch (reason) {
-          throw reason;
-        }
-        absorb(response);
-        const previous = next;
-        next = response.next_cursor;
-        remaining = response.items.length === 100 && !!next && next !== previous;
-      }
-      if (controller.signal.aborted || !mounted.current || owner !== account.current) return;
-      cursor.current = next;
-      setItems((old) => {
-        const merged = reset
-          ? new Map<string, AgentNotification>()
-          : new Map(old.map((n) => [n.id, n]));
-        for (const item of incoming.values()) {
-          const prior = merged.get(item.id);
-          if (!prior || item.version >= prior.version) merged.set(item.id, item);
-        }
-        return [...merged.values()].sort(
-          (a, b) => b.created_at.localeCompare(a.created_at) || b.id.localeCompare(a.id),
-        );
-      });
-      setUnread(latestUnread);
-      setWatermark(latestWatermark);
-      unsupportedRef.current = false;
-      setUnsupported(false);
-    } catch (reason) {
-      if (controller.signal.aborted || !mounted.current || owner !== account.current) return;
-      if (reason instanceof ApiError && reason.status === 410 && !full) {
-        cursor.current = null;
-        if (request.current === controller) request.current = null;
-        await pull(true);
+  const refresh = useCallback(
+    async function pull(full = false): Promise<void> {
+      if (document.hidden || !navigator.onLine || (unsupportedRef.current && !full)) return;
+      if (request.current) {
+        // A reconnect/read can happen after the in-flight snapshot was taken.
+        // Coalesce it into one follow-up instead of losing the newer signal.
+        queued.current = full || queued.current === true;
         return;
       }
-      if (reason instanceof ApiError && [404, 405, 501].includes(reason.status)) {
-        unsupportedRef.current = true;
-        setUnsupported(true);
-        setItems([]);
-        setUnread(0);
-      } else setError(errorText(reason));
-    } finally {
-      if (request.current === controller) {
-        request.current = null;
-        const followUp = queued.current;
-        queued.current = null;
-        if (mounted.current) {
-          setBusy(false);
-          if (followUp !== null && owner === account.current) void pull(followUp);
+      const controller = new AbortController();
+      request.current = controller;
+      const owner = account.current;
+      setBusy(true);
+      setError('');
+      try {
+        let next = full ? null : cursor.current,
+          reset = full || !cursor.current,
+          remaining = true;
+        const incoming = new Map<string, AgentNotification>();
+        let latestUnread = 0,
+          latestWatermark = 0,
+          pages = 0;
+        const absorb = (response: NotificationPage) => {
+          for (const item of response.items) {
+            const prior = incoming.get(item.id);
+            if (!prior || item.version >= prior.version) incoming.set(item.id, item);
+          }
+          latestUnread = response.unread_count;
+          latestWatermark = response.high_watermark;
+        };
+        if (reset) {
+          let offset = 0,
+            initialCursor: string | null = null;
+          while (!controller.signal.aborted) {
+            if (++pages > 1000) throw new Error(t('notificationsPage.tooManyNotifications'));
+            const response = await api<NotificationPage>(
+              `/agent/notifications?limit=100&offset=${offset}`,
+              { signal: controller.signal },
+            );
+            absorb(response);
+            if (offset === 0) initialCursor = response.next_cursor;
+            offset += response.items.length;
+            if (offset >= response.total || response.items.length < 100) break;
+          }
+          next = initialCursor;
+        }
+        while (remaining && next && !controller.signal.aborted) {
+          if (++pages > 1000) throw new Error(t('notificationsPage.tooManyNotifications'));
+          let response: NotificationPage;
+          try {
+            response = await api<NotificationPage>(
+              `/agent/notifications?limit=100&cursor=${encodeURIComponent(next)}`,
+              { signal: controller.signal },
+            );
+          } catch (reason) {
+            throw reason;
+          }
+          absorb(response);
+          const previous = next;
+          next = response.next_cursor;
+          remaining = response.items.length === 100 && !!next && next !== previous;
+        }
+        if (controller.signal.aborted || !mounted.current || owner !== account.current) return;
+        cursor.current = next;
+        setItems((old) => {
+          const merged = reset
+            ? new Map<string, AgentNotification>()
+            : new Map(old.map((n) => [n.id, n]));
+          for (const item of incoming.values()) {
+            const prior = merged.get(item.id);
+            if (!prior || item.version >= prior.version) merged.set(item.id, item);
+          }
+          return [...merged.values()].sort(
+            (a, b) => b.created_at.localeCompare(a.created_at) || b.id.localeCompare(a.id),
+          );
+        });
+        setUnread(latestUnread);
+        setWatermark(latestWatermark);
+        unsupportedRef.current = false;
+        setUnsupported(false);
+      } catch (reason) {
+        if (controller.signal.aborted || !mounted.current || owner !== account.current) return;
+        if (reason instanceof ApiError && reason.status === 410 && !full) {
+          cursor.current = null;
+          if (request.current === controller) request.current = null;
+          await pull(true);
+          return;
+        }
+        if (reason instanceof ApiError && [404, 405, 501].includes(reason.status)) {
+          unsupportedRef.current = true;
+          setUnsupported(true);
+          setItems([]);
+          setUnread(0);
+        } else setError(errorText(reason));
+      } finally {
+        if (request.current === controller) {
+          request.current = null;
+          const followUp = queued.current;
+          queued.current = null;
+          if (mounted.current) {
+            setBusy(false);
+            if (followUp !== null && owner === account.current) void pull(followUp);
+          }
         }
       }
-    }
-  }, []);
+    },
+    [t],
+  );
   useEffect(() => {
     mounted.current = true;
     account.current = userId;
@@ -180,15 +185,16 @@ export function Notifications({
   inbox: NotificationInbox;
   onOpen: (action: NotificationAction) => void;
 }) {
+  const { t } = useTranslation();
   const [filter, setFilter] = useState('unread');
   const visible = inbox.items.filter((item) =>
     filter === 'unread' ? !item.read_at : filter === 'read' ? !!item.read_at : true,
   );
   return (
-    <section className="workspace-page" aria-label="通知中心">
+    <section className="workspace-page" aria-label={t('notificationsPage.sectionAria')}>
       <WorkspaceHeader
-        title="通知中心"
-        description="优先显示未读消息；已读通知收进记录，随时可查。打开列表不会自动标为已读。"
+        title={t('notificationsPage.title')}
+        description={t('notificationsPage.description')}
       >
         <RefreshWorkspace busy={inbox.busy} onClick={() => void inbox.refresh(true)} />
       </WorkspaceHeader>
@@ -197,39 +203,41 @@ export function Notifications({
         <>
           <div className="workspace-tabs">
             <button aria-pressed={filter === 'unread'} onClick={() => setFilter('unread')}>
-              未读 · {inbox.unread}
+              {t('notificationsPage.tabUnread', { count: inbox.unread })}
             </button>
             <button aria-pressed={filter === 'read'} onClick={() => setFilter('read')}>
-              已读记录
+              {t('notificationsPage.tabRead')}
             </button>
             <button aria-pressed={filter === 'all'} onClick={() => setFilter('all')}>
-              全部通知
+              {t('notificationsPage.tabAll')}
             </button>
             <button
-              data-help="只更新当前账号的已读状态，不删除通知，也不会接受草案或应用资料。"
+              data-help={t('notificationsPage.markAllReadHelp')}
               disabled={!inbox.unread || inbox.busy}
               onClick={() => void inbox.read()}
             >
-              将当前通知标为已读
+              {t('notificationsPage.markAllRead')}
             </button>
           </div>
           <div className="workspace-card">
             {!visible.length && (
               <p className="workspace-empty" role="status">
                 {inbox.busy
-                  ? '正在读取通知…'
+                  ? t('notificationsPage.loading')
                   : filter === 'unread'
-                    ? '没有未读通知，已处理的消息可在已读记录中查看。'
+                    ? t('notificationsPage.emptyUnread')
                     : filter === 'read'
-                      ? '暂无已读记录。'
-                      : '还没有通知，继续听歌吧。'}
+                      ? t('notificationsPage.emptyRead')
+                      : t('notificationsPage.emptyAll')}
               </p>
             )}
             {visible.map((item) => (
               <article className="notification-row" key={item.id}>
                 <span
                   className={`notification-dot ${item.read_at ? '' : 'unread'}`}
-                  aria-label={item.read_at ? '已读' : '未读'}
+                  aria-label={
+                    item.read_at ? t('notificationsPage.dotRead') : t('notificationsPage.dotUnread')
+                  }
                 />
                 <div>
                   <h3>{item.title}</h3>
@@ -237,10 +245,10 @@ export function Notifications({
                   <small>
                     {localDate(item.created_at)} ·{' '}
                     {item.severity === 'error'
-                      ? '需要处理'
+                      ? t('notificationsPage.severityError')
                       : item.severity === 'warning'
-                        ? '请留意'
-                        : '结果通知'}
+                        ? t('notificationsPage.severityWarning')
+                        : t('notificationsPage.severityInfo')}
                   </small>
                   <DiagnosticId id={item.trace_id} />
                 </div>
@@ -263,12 +271,12 @@ export function Notifications({
                         onOpen({
                           id: 'draft',
                           target: 'draft',
-                          label: '查看草案',
+                          label: t('notificationsPage.viewDraft'),
                           params: { id: item.draft_id! },
                         })
                       }
                     >
-                      查看草案
+                      {t('notificationsPage.viewDraft')}
                     </button>
                   )}
                   {!item.actions?.length && item.task_id && (
@@ -277,20 +285,20 @@ export function Notifications({
                         onOpen({
                           id: 'task',
                           target: 'task',
-                          label: '查看任务',
+                          label: t('notificationsPage.viewTask'),
                           params: { id: item.task_id! },
                         })
                       }
                     >
-                      查看任务
+                      {t('notificationsPage.viewTask')}
                     </button>
                   )}
                   {!item.read_at && (
                     <button
-                      aria-label={`标为已读 ${item.title}`}
+                      aria-label={t('notificationsPage.markReadAria', { title: item.title })}
                       onClick={() => void inbox.read([item.id])}
                     >
-                      标为已读
+                      {t('notificationsPage.markRead')}
                     </button>
                   )}
                 </div>

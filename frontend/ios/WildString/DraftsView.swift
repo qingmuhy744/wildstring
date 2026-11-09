@@ -12,10 +12,18 @@ struct DraftsView: View {
     @State private var message: String?
     @State private var filter: DraftFilter = .pending
 
-    private enum DraftFilter: String, CaseIterable {
-        case pending = "待处理"
-        case processed = "已处理"
-        case all = "全部"
+    private enum DraftFilter: Hashable, CaseIterable {
+        case pending
+        case processed
+        case all
+
+        var label: String {
+            switch self {
+            case .pending: L10n("drafts.filterPending")
+            case .processed: L10n("drafts.filterProcessed")
+            case .all: L10n("drafts.filterAll")
+            }
+        }
     }
 
     var body: some View {
@@ -23,9 +31,9 @@ struct DraftsView: View {
             List {
                 if drafts.isEmpty, !isLoading {
                     ContentUnavailableView(
-                        "没有草案",
+                        L10n("drafts.emptyTitle"),
                         systemImage: "checklist",
-                        description: Text("让助手帮你做点什么，草案会出现在这里。")
+                        description: Text(L10n("drafts.emptyDescription"))
                     )
                 }
                 ForEach(drafts) { draft in
@@ -46,9 +54,9 @@ struct DraftsView: View {
             }
             .listStyle(.plain)
             .safeAreaInset(edge: .top) {
-                Picker("状态", selection: $filter) {
+                Picker(L10n("drafts.statusPicker"), selection: $filter) {
                     ForEach(DraftFilter.allCases, id: \.self) { value in
-                        Text(value.rawValue).tag(value)
+                        Text(value.label).tag(value)
                     }
                 }
                 .pickerStyle(.segmented)
@@ -56,11 +64,11 @@ struct DraftsView: View {
                 .padding(.vertical, 6)
                 .background(.bar)
             }
-            .navigationTitle("助手草案")
+            .navigationTitle(L10n("drafts.title"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button("关闭") { dismiss() }
+                    Button(L10n("drafts.close")) { dismiss() }
                 }
             }
             .task { await load() }
@@ -133,7 +141,7 @@ struct DraftsView: View {
         do {
             let applied = try await client.applyDraft(id: draft.id, version: draft.version)
             replace(applied)
-            message = "已生成歌单"
+            message = L10n("drafts.playlistGenerated")
         } catch {
             message = ErrorText.message(for: error)
         }
@@ -173,7 +181,7 @@ private struct DraftRow: View {
                 .font(.caption)
                 .foregroundStyle(statusColor)
             if let payload = draft.payload, let trackIds = payload.trackIds, !trackIds.isEmpty {
-                Text("\(trackIds.count) 首曲目")
+                Text(L10n("drafts.trackCount", trackIds.count))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -187,17 +195,17 @@ private struct DraftRow: View {
                 if busy {
                     ProgressView()
                 } else if draft.isPending {
-                    Button("接受并应用", action: onAccept)
+                    Button(L10n("drafts.acceptAndApply"), action: onAccept)
                         .buttonStyle(.borderedProminent)
                         .controlSize(.small)
-                    Button("批准", action: onApprove)
+                    Button(L10n("drafts.approve"), action: onApprove)
                         .buttonStyle(.bordered)
                         .controlSize(.small)
-                    Button("拒绝", role: .destructive, action: onReject)
+                    Button(L10n("drafts.reject"), role: .destructive, action: onReject)
                         .buttonStyle(.bordered)
                         .controlSize(.small)
                 } else if draft.isApproved {
-                    Button("应用", action: onApply)
+                    Button(L10n("drafts.apply"), action: onApply)
                         .buttonStyle(.borderedProminent)
                         .controlSize(.small)
                 }
@@ -209,23 +217,23 @@ private struct DraftRow: View {
 
     private var kindLabel: String {
         switch draft.kind {
-        case "playlist": return "歌单"
-        case "metadata_batch": return "专辑批量"
-        case "cover": return "封面"
-        case "lyrics": return "歌词"
-        case "intake": return "导入"
-        default: return "元数据"
+        case "playlist": return L10n("drafts.kindPlaylist")
+        case "metadata_batch": return L10n("drafts.kindMetadataBatch")
+        case "cover": return L10n("drafts.kindCover")
+        case "lyrics": return L10n("drafts.kindLyrics")
+        case "intake": return L10n("drafts.kindIntake")
+        default: return L10n("drafts.kindMetadata")
         }
     }
 
     private var statusText: String {
         switch draft.status {
-        case "pending": return "待批准"
-        case "approved": return "已批准，等待应用"
+        case "pending": return L10n("drafts.statusPending")
+        case "approved": return L10n("drafts.statusApproved")
         case "applied":
-            if draft.result?.playlistId != nil { return "已应用 · 已生成歌单" }
-            return "已应用"
-        case "rejected": return "已拒绝"
+            if draft.result?.playlistId != nil { return L10n("drafts.statusAppliedPlaylist") }
+            return L10n("drafts.statusApplied")
+        case "rejected": return L10n("drafts.statusRejected")
         default: return draft.status
         }
     }

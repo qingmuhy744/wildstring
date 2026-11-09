@@ -24,6 +24,7 @@ import {
   type PublisherDetail,
 } from './podcast-publishers';
 import { favoritePodcastEpisode } from './podcast-remote';
+import { useTranslation } from 'react-i18next';
 
 export interface PodcastSummary {
   id: string;
@@ -223,6 +224,7 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
   onRemoveQueuedEpisode,
 }) => {
   const queuedSet = useMemo(() => new Set(queuedEpisodeIds), [queuedEpisodeIds]);
+  const { t } = useTranslation();
   const [podcasts, setPodcasts] = useState<PodcastSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedPodcast, setSelectedPodcast] = useState<PodcastSummary | null>(null);
@@ -347,7 +349,7 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
         if (active) setStorageInfo(info);
       })
       .catch(() => {
-        if (active) setStorageError('暂时无法读取存储信息，可以稍后重新打开。');
+        if (active) setStorageError(t('podcasts.storageInfoLoadFailed'));
       });
     return () => {
       active = false;
@@ -399,10 +401,10 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
         episode.resource_saved || episode.resource_automatic || episode.resource_playback_cached,
     ).length || 0;
   const sortOrderLabels: Record<typeof sortField, { asc: string; desc: string }> = {
-    pub_date: { asc: '最早发布在前', desc: '最新发布在前' },
-    episode_number: { asc: '期号从低到高', desc: '期号从高到低' },
-    duration: { asc: '时长从短到长', desc: '时长从长到短' },
-    title: { asc: '标题正序排列', desc: '标题倒序排列' },
+    pub_date: { asc: t('podcasts.sortPubDateAsc'), desc: t('podcasts.sortPubDateDesc') },
+    episode_number: { asc: t('podcasts.sortEpisodeAsc'), desc: t('podcasts.sortEpisodeDesc') },
+    duration: { asc: t('podcasts.sortDurationAsc'), desc: t('podcasts.sortDurationDesc') },
+    title: { asc: t('podcasts.sortTitleAsc'), desc: t('podcasts.sortTitleDesc') },
   };
   const currentSortOrderLabel = sortOrderLabels[sortField][sortOrder];
   const nextSortOrderLabel = sortOrderLabels[sortField][sortOrder === 'desc' ? 'asc' : 'desc'];
@@ -480,7 +482,7 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
       const res = await api<PodcastSummary[]>('/podcasts?followed=true');
       setPodcasts(res);
     } catch (e) {
-      showNotice(e instanceof Error ? e.message : '获取播客订阅失败');
+      showNotice(e instanceof Error ? e.message : t('podcasts.loadSubscriptionsFailed'));
     } finally {
       if (!background) setLoading(false);
     }
@@ -494,7 +496,7 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
       setSelectedDetail(detail);
       setSelectedPodcast(detail.podcast);
     } catch (e) {
-      showNotice(e instanceof Error ? e.message : '加载单集失败');
+      showNotice(e instanceof Error ? e.message : t('podcasts.loadEpisodeFailed'));
     } finally {
       setDetailLoading(false);
     }
@@ -517,9 +519,9 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
       setSelectedPodcast((item) => item && update(item));
       setPublisherView((value) => value && { ...value, podcasts: value.podcasts.map(update) });
       invalidatePodcastDiscoverCache();
-      showNotice(result.followed ? '已关注节目' : '已取消关注，收听进度已保留');
+      showNotice(result.followed ? t('podcasts.followed') : t('podcasts.unfollowed'));
     } catch (reason) {
-      showNotice(reason instanceof Error ? reason.message : '关注状态保存失败');
+      showNotice(reason instanceof Error ? reason.message : t('podcasts.followSaveFailed'));
     } finally {
       setFollowBusy(null);
     }
@@ -534,7 +536,7 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
       setSelectedPodcast(null);
       setSelectedDetail(null);
     } catch (reason) {
-      showNotice(reason instanceof Error ? reason.message : '出品方节目加载失败');
+      showNotice(reason instanceof Error ? reason.message : t('podcasts.publisherShowsLoadFailed'));
     }
   };
 
@@ -556,7 +558,7 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
       };
     });
     void loadPodcasts(true);
-    showNotice('出品方归属已保存');
+    showNotice(t('podcasts.publisherSaved'));
   };
 
   const handleRefreshPodcast = async (id: string) => {
@@ -566,9 +568,9 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
         method: 'POST',
       });
       setSelectedDetail(detail);
-      showNotice('已从源端完成单集巡检更新并根据规则触发自动下载');
+      showNotice(t('podcasts.refreshDone'));
     } catch (e) {
-      showNotice(e instanceof Error ? e.message : '刷新失败');
+      showNotice(e instanceof Error ? e.message : t('podcasts.refreshFailed'));
     } finally {
       setDetailLoading(false);
     }
@@ -580,10 +582,10 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
       const res = await api<{ refreshed_count: number }>('/podcasts/refresh-all', {
         method: 'POST',
       });
-      showNotice(`已完成全部更新，更新了 ${res.refreshed_count} 个频道`);
+      showNotice(t('podcasts.refreshAllDone', { count: res.refreshed_count }));
       await loadPodcasts(true);
     } catch (e) {
-      showNotice(e instanceof Error ? e.message : '全部更新失败');
+      showNotice(e instanceof Error ? e.message : t('podcasts.refreshAllFailed'));
     } finally {
       setRefreshingAll(false);
     }
@@ -598,7 +600,7 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
       setSelectedDetail(detail);
       setSelectedPodcast(detail.podcast);
     } catch (e) {
-      showNotice(e instanceof Error ? e.message : '加载单集失败');
+      showNotice(e instanceof Error ? e.message : t('podcasts.loadEpisodeFailed'));
     } finally {
       setDetailLoading(false);
     }
@@ -628,11 +630,11 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
   const handleCopyPath = (path: string) => {
     if (navigator.clipboard?.writeText) {
       void navigator.clipboard.writeText(path).then(
-        () => setStorageNotice('已复制完整路径'),
-        () => setStorageNotice('复制失败，请长按或选中路径复制。'),
+        () => setStorageNotice(t('podcasts.pathCopied')),
+        () => setStorageNotice(t('podcasts.copyFailed')),
       );
     } else {
-      setStorageNotice('当前环境不支持直接复制，请长按或选中路径复制。');
+      setStorageNotice(t('podcasts.copyUnsupported'));
     }
   };
 
@@ -661,9 +663,11 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
       });
       setPlaybackSettings(updated);
       setShowPlaybackSettings(false);
-      showNotice('播放缓存设置已保存');
+      showNotice(t('podcasts.playbackSettingsSaved'));
     } catch (err) {
-      setPlaybackSettingsError(err instanceof Error ? err.message : '播放缓存设置保存失败');
+      setPlaybackSettingsError(
+        err instanceof Error ? err.message : t('podcasts.playbackSettingsSaveFailed'),
+      );
     } finally {
       setSavingPlaybackSettings(false);
     }
@@ -685,7 +689,7 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
           }),
         },
       );
-      showNotice(`已更新《${updated.podcast.title}》的服务器下载设置`);
+      showNotice(t('podcasts.serverSettingsSaved', { title: updated.podcast.title }));
       if (selectedPodcast?.id === updated.podcast.id) {
         setSelectedPodcast(updated.podcast);
         setSelectedDetail(updated);
@@ -696,7 +700,7 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
       setSettingsPodcast(null);
       await loadPodcasts(true);
     } catch (err) {
-      setSettingsError(err instanceof Error ? err.message : '保存设置失败');
+      setSettingsError(err instanceof Error ? err.message : t('podcasts.settingsSaveFailed'));
     } finally {
       setSavingSettings(false);
     }
@@ -719,7 +723,7 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
       }
       setCleanupState({ podcast, preview, returnToSettings });
     } catch (err) {
-      const message = err instanceof Error ? err.message : '清理音频失败';
+      const message = err instanceof Error ? err.message : t('podcasts.cleanFailed');
       if (returnToSettings) setSettingsError(message);
       else showNotice(message);
     } finally {
@@ -736,7 +740,10 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
         `/podcasts/${encodeURIComponent(podcast.id)}/clean-downloads`,
         { method: 'POST' },
       );
-      const message = `已清理 ${res.deleted_count} 个音频文件，释放空间 ${(res.freed_bytes / 1024 / 1024).toFixed(1)} MB`;
+      const message = t('podcasts.cleanedFreed', {
+        count: res.deleted_count,
+        size: (res.freed_bytes / 1024 / 1024).toFixed(1),
+      });
       setCleanupState(null);
       if (returnToSettings) {
         setSettingsPodcast(podcast);
@@ -753,7 +760,7 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
         await openDetail(podcast);
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : '清理音频失败';
+      const message = err instanceof Error ? err.message : t('podcasts.cleanFailed');
       setCleanupState(null);
       if (returnToSettings) {
         setSettingsPodcast(podcast);
@@ -772,7 +779,7 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
       setQueueInfo(q);
       setQueueError(null);
     } catch (err) {
-      setQueueError(err instanceof Error ? err.message : '下载状态加载失败，请重试');
+      setQueueError(err instanceof Error ? err.message : t('podcasts.queueLoadFailed'));
     }
   };
 
@@ -789,7 +796,7 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
   const handleDownloadAll = async (p: PodcastSummary) => {
     setContextMenu(null);
     try {
-      showNotice(`正在将《${p.title}》的所有单集加入后台下载队列…`);
+      showNotice(t('podcasts.queueingAll', { title: p.title }));
       const res = await api<{ queued_episodes: number; message: string }>(
         `/podcasts/${encodeURIComponent(p.id)}/download-all`,
         { method: 'POST' },
@@ -800,7 +807,7 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
         await openDetail(p);
       }
     } catch (err) {
-      showNotice(err instanceof Error ? err.message : '触发全量下载失败');
+      showNotice(err instanceof Error ? err.message : t('podcasts.downloadAllFailed'));
     }
   };
 
@@ -824,13 +831,13 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
       setSelectedEpisode((item) => item && patch(item));
       showNotice(
         !saved
-          ? '已取消个人保存，共享音频按服务器清理策略保留。'
+          ? t('podcasts.unsavedNotice')
           : result.reused
-            ? '已复用服务器已有音频，无需重复下载'
-            : '已保存，正在准备服务器音频。',
+            ? t('podcasts.reusedNotice')
+            : t('podcasts.savedPreparing'),
       );
     } catch (err) {
-      showNotice(err instanceof Error ? err.message : '保存单集失败');
+      showNotice(err instanceof Error ? err.message : t('podcasts.saveEpisodeFailed'));
     }
   };
 
@@ -887,7 +894,7 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
   };
 
   const handleSubscribed = async (podcastId: string, title: string) => {
-    showNotice(`已关注《${title}》`);
+    showNotice(t('podcasts.followedByTitle', { title: title }));
     await loadPodcasts();
     await openFromSearch(podcastId);
   };
@@ -908,16 +915,16 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
     track.podcast_list_order =
       sortField === 'pub_date' || sortField === 'episode_number' ? sortOrder : 'desc';
     onQueueTrack(track, next);
-    showNotice(next ? '已安排为下一集播放' : '已加入手动待播清单');
+    showNotice(next ? t('podcasts.playNextQueued') : t('podcasts.addedToQueue'));
   };
 
   const toggleEpisodeCompleted = async (ep: PodcastEpisode) => {
     const nextCompleted = !ep.completed;
     try {
       await setEpisodeCompleted(userId, ep.id, ep.duration_seconds, nextCompleted);
-      showNotice(nextCompleted ? '已标为已听完' : '已恢复为未听状态');
+      showNotice(nextCompleted ? t('podcasts.markedCompleted') : t('podcasts.markedUnplayed'));
     } catch {
-      showNotice('暂时无法更新收听状态，请重试');
+      showNotice(t('podcasts.progressUpdateFailed'));
     }
   };
 
@@ -942,9 +949,9 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
           ? { ...prev, favorite: targetFav, loved: targetFav, favorited: targetFav }
           : prev,
       );
-      showNotice(targetFav ? '已加入单集收藏' : '已取消单集收藏');
+      showNotice(targetFav ? t('podcasts.favoriteAdded') : t('podcasts.favoriteRemoved'));
     } catch {
-      showNotice('暂时无法更新收藏状态，请重试');
+      showNotice(t('podcasts.favoriteUpdateFailed'));
     }
   };
 
@@ -985,16 +992,18 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
               }}
             >
               {selectedPodcast && publisherView
-                ? `← 返回${publisherView.publisher.name}`
-                : '← 返回电台列表'}
+                ? t('podcasts.backToPublisher', { name: publisherView.publisher.name })
+                : t('podcasts.backToStationList')}
             </button>
           ) : (
-            <h2>电台 · 播客</h2>
+            <h2>{t('podcasts.title')}</h2>
           )}
           {!selectedPodcast && publisherView && (
             <>
               <h2>{publisherView.publisher.name}</h2>
-              <p className="publisher-help">我关注的 {visiblePodcasts.length} 档已确认节目</p>
+              <p className="publisher-help">
+                {t('podcasts.publisherFollowedCount', { count: visiblePodcasts.length })}
+              </p>
             </>
           )}
         </div>
@@ -1006,9 +1015,10 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
               className="podcasts-action-btn"
               disabled={refreshingAll || loading}
               onClick={handleRefreshAll}
-              title="即刻从源端检查所有频道的最新单集并自动下载"
+              title={t('podcasts.refreshAllTitle')}
             >
-              <Icon name="podcast" /> {refreshingAll ? '更新中…' : '全部更新'}
+              <Icon name="podcast" />{' '}
+              {refreshingAll ? t('podcasts.refreshing') : t('podcasts.refreshAll')}
             </button>
           )}
           {!selectedPodcast && (
@@ -1020,7 +1030,7 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
                 setShowSearch(true);
               }}
             >
-              {canAddPodcast ? '+ 添加节目' : '搜索节目'}
+              {canAddPodcast ? t('podcasts.addShow') : t('podcasts.searchShows')}
             </button>
           )}
           {queuedSet.size > 0 && onPlayQueue && (
@@ -1029,26 +1039,26 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
               className="podcasts-action-btn"
               onClick={() => {
                 onPlayQueue();
-                showNotice('开始播放待播清单');
+                showNotice(t('podcasts.queuePlaybackStarted'));
               }}
-              title="按顺序播放待播队列"
+              title={t('podcasts.playQueueTitle')}
             >
-              ▶ 播放待播 ({queuedSet.size})
+              {t('podcasts.playQueueBtn', { count: queuedSet.size })}
             </button>
           )}
           <button
             type="button"
             className="podcasts-action-btn"
             onClick={() => setShowInbox(true)}
-            title="管理待播列表与新集自动待播规则"
+            title={t('podcasts.inboxTitle')}
           >
-            待播列表
+            {t('podcasts.inbox')}
           </button>
           <details className="podcasts-more-menu" ref={headerMenuRef}>
             <summary
               className={`podcasts-action-btn podcasts-more-trigger`}
-              aria-label="更多操作"
-              title="播放缓存与 OPML 导入导出"
+              aria-label={t('podcasts.moreActions')}
+              title={t('podcasts.moreMenuTitle')}
             >
               <Icon name="more" />
             </summary>
@@ -1061,9 +1071,9 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
                   setPlaybackSettingsError(null);
                   setShowPlaybackSettings(true);
                 }}
-                title="播放未下载单集时自动缓存当前单集"
+                title={t('podcasts.autoCacheTitle')}
               >
-                播放缓存
+                {t('podcasts.playbackCache')}
               </button>
               {!selectedPodcast && canAddPodcast && (
                 <button
@@ -1073,9 +1083,9 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
                     closeHeaderMenu();
                     setShowOpmlImport(true);
                   }}
-                  title="从其他播客应用导出的 OPML 文件批量关注节目"
+                  title={t('podcasts.opmlImportTitle')}
                 >
-                  导入 OPML
+                  {t('podcasts.importOpml')}
                 </button>
               )}
               {!selectedPodcast && (
@@ -1084,9 +1094,9 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
                   href={OPML_EXPORT_URL}
                   download="wildstring-podcasts.opml"
                   onClick={() => closeHeaderMenu()}
-                  title="把我关注的节目导出为 OPML 文件"
+                  title={t('podcasts.opmlExportTitle')}
                 >
-                  导出 OPML
+                  {t('podcasts.exportOpml')}
                 </a>
               )}
             </div>
@@ -1095,7 +1105,11 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
       </div>
 
       {!selectedPodcast && !publisherView && (
-        <div className="podcast-catalog-tabs" role="group" aria-label="节目范围">
+        <div
+          className="podcast-catalog-tabs"
+          role="group"
+          aria-label={t('podcasts.catalogTabsLabel')}
+        >
           <button
             type="button"
             aria-pressed={!showSearch}
@@ -1103,7 +1117,7 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
               closeSubscribe();
             }}
           >
-            我的关注
+            {t('podcasts.myFollows')}
           </button>
           <button
             type="button"
@@ -1113,7 +1127,7 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
               setShowSearch(true);
             }}
           >
-            探索播客
+            {t('podcasts.discoverPodcasts')}
           </button>
         </div>
       )}
@@ -1144,7 +1158,9 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
                 <div className="podcast-meta-heading">
                   <h3>{selectedPodcast.title}</h3>
                   <div className="podcast-meta-subline">
-                    <p className="podcast-meta-author">{selectedPodcast.author || '未知播客主'}</p>
+                    <p className="podcast-meta-author">
+                      {selectedPodcast.author || t('podcasts.unknownAuthor')}
+                    </p>
                     <PublisherAffiliation
                       podcast={selectedPodcast}
                       canEdit={canEditPublishers}
@@ -1160,7 +1176,7 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
                       className="podcast-refresh-btn"
                       onClick={() => setPersonalDownload(selectedPodcast)}
                     >
-                      自动下载
+                      {t('podcasts.autoDownload')}
                     </button>
                   )}
                   <button
@@ -1169,23 +1185,30 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
                     disabled={followBusy === selectedPodcast.id}
                     onClick={() => void toggleFollow(selectedPodcast)}
                   >
-                    {selectedPodcast.followed ? '取消关注' : '关注节目'}
+                    {selectedPodcast.followed ? t('podcasts.unfollow') : t('podcasts.follow')}
                   </button>
                 </div>
               </div>
               <div className="podcast-meta-desc">
-                {renderPodcastDescription(selectedPodcast.description) || '暂无详细介绍'}
+                {renderPodcastDescription(selectedPodcast.description) ||
+                  t('podcasts.noDescription')}
               </div>
               <div className="podcast-meta-footer">
                 <div className="podcast-meta-stats">
-                  <span>共 {selectedPodcast.total_episodes} 集</span>
+                  <span>
+                    {t('podcasts.totalEpisodes', { count: selectedPodcast.total_episodes })}
+                  </span>
                   {selectedPodcast.downloaded_episodes > 0 && (
                     <span className="ep-download-badge">
-                      ✓ 已下载 {selectedPodcast.downloaded_episodes} 集
+                      {t('podcasts.downloadedEpisodesBadge', {
+                        count: selectedPodcast.downloaded_episodes,
+                      })}
                     </span>
                   )}
                   {selectedPodcast.unplayed_episodes > 0 && (
-                    <span className="unplayed-tag">{selectedPodcast.unplayed_episodes} 未听</span>
+                    <span className="unplayed-tag">
+                      {t('podcasts.unplayedCount', { count: selectedPodcast.unplayed_episodes })}
+                    </span>
                   )}
                 </div>
                 {canManageSources && (
@@ -1196,14 +1219,14 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
                       disabled={detailLoading}
                       onClick={() => handleRefreshPodcast(selectedPodcast.id)}
                     >
-                      {detailLoading ? '同步中…' : '从源端立即同步'}
+                      {detailLoading ? t('podcasts.syncing') : t('podcasts.syncNow')}
                     </button>
                     <button
                       type="button"
                       className="podcast-refresh-btn"
                       onClick={() => handleOpenSettings(selectedPodcast)}
                     >
-                      存储与下载设置…
+                      {t('podcasts.storageSettings')}
                     </button>
                   </div>
                 )}
@@ -1215,7 +1238,7 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
           <div className="podcast-episodes-section">
             <div className="podcast-episodes-header">
               <h4>
-                单集列表
+                {t('podcasts.episodesTitle')}
                 <span
                   style={{
                     fontSize: '0.85rem',
@@ -1234,30 +1257,40 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
                 <input
                   type="text"
                   className="podcast-search-input"
-                  placeholder="搜索单集..."
+                  placeholder={t('podcasts.searchEpisodesPlaceholder')}
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                 />
 
-                <div className="podcast-sort-control" role="group" aria-label="单集排序">
+                <div
+                  className="podcast-sort-control"
+                  role="group"
+                  aria-label={t('podcasts.sortGroupLabel')}
+                >
                   <select
                     className="podcast-select"
                     value={sortField}
                     onChange={(e) => setSortField(e.target.value as typeof sortField)}
-                    aria-label="排序依据"
-                    title="选择排序依据"
+                    aria-label={t('podcasts.sortBy')}
+                    title={t('podcasts.sortByTitle')}
                   >
-                    <option value="pub_date">发布时间</option>
-                    <option value="episode_number">单集期号</option>
-                    <option value="duration">单集时长</option>
-                    <option value="title">标题首字</option>
+                    <option value="pub_date">{t('podcasts.sortPubDate')}</option>
+                    <option value="episode_number">{t('podcasts.sortEpisodeNumber')}</option>
+                    <option value="duration">{t('podcasts.sortDuration')}</option>
+                    <option value="title">{t('podcasts.sortTitle')}</option>
                   </select>
                   <button
                     type="button"
                     className="podcast-sort-direction"
                     onClick={() => setSortOrder(sortOrder === 'desc' ? 'asc' : 'desc')}
-                    aria-label={`当前${currentSortOrderLabel}，点击切换为${nextSortOrderLabel}`}
-                    title={`当前：${currentSortOrderLabel}；点击切换为：${nextSortOrderLabel}`}
+                    aria-label={t('podcasts.sortDirectionAria', {
+                      current: currentSortOrderLabel,
+                      next: nextSortOrderLabel,
+                    })}
+                    title={t('podcasts.sortDirectionTitle', {
+                      current: currentSortOrderLabel,
+                      next: nextSortOrderLabel,
+                    })}
                   >
                     <span aria-hidden="true">{sortOrder === 'desc' ? '↓' : '↑'}</span>
                   </button>
@@ -1267,92 +1300,94 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
                   type="button"
                   className={`podcast-toolbar-btn ${filterMode === 'all' ? 'active' : ''}`}
                   onClick={() => setFilterMode('all')}
-                  title="查看全部单集"
+                  title={t('podcasts.filterAllTitle')}
                 >
-                  全部
+                  {t('podcasts.filterAll')}
                 </button>
                 <button
                   type="button"
                   className={`podcast-toolbar-btn ${filterMode === 'unplayed' ? 'active' : ''}`}
                   onClick={() => setFilterMode(filterMode === 'unplayed' ? 'all' : 'unplayed')}
-                  title="只看未听完的单集"
+                  title={t('podcasts.filterUnplayedTitle')}
                 >
-                  <Icon name="history" /> 未听完
+                  <Icon name="history" /> {t('podcasts.filterUnplayed')}
                 </button>
                 <button
                   type="button"
                   className={`podcast-toolbar-btn ${filterMode === 'favorited' ? 'active' : ''}`}
                   onClick={() => setFilterMode(filterMode === 'favorited' ? 'all' : 'favorited')}
-                  title="只看已收藏的单集"
+                  title={t('podcasts.filterFavoritedTitle')}
                 >
-                  <Icon name="heart" /> 已收藏
+                  <Icon name="heart" /> {t('podcasts.filterFavorited')}
                 </button>
               </div>
             </div>
 
-            <div className="podcast-episode-scope" role="group" aria-label="单集范围">
+            <div
+              className="podcast-episode-scope"
+              role="group"
+              aria-label={t('podcasts.scopeGroupLabel')}
+            >
               <button
                 type="button"
                 aria-pressed={episodeScope === 'saved'}
                 onClick={() => changeEpisodeScope('saved')}
               >
-                我的下载 <span>{personalDownloadCount}</span>
+                {t('podcasts.myDownloads')} <span>{personalDownloadCount}</span>
               </button>
               <button
                 type="button"
                 aria-pressed={episodeScope === 'downloaded'}
                 onClick={() => changeEpisodeScope('downloaded')}
-                title="已保存在服务器的单集"
+                title={t('podcasts.serverDownloadsTitle')}
               >
-                服务器已有 <span>{downloadedCount}</span>
+                {t('podcasts.serverDownloads')} <span>{downloadedCount}</span>
               </button>
               <button
                 type="button"
                 aria-pressed={episodeScope === 'all'}
                 onClick={() => changeEpisodeScope('all')}
               >
-                全部单集 <span>{selectedDetail?.episodes.length || 0}</span>
+                {t('podcasts.allEpisodes')} <span>{selectedDetail?.episodes.length || 0}</span>
               </button>
             </div>
 
             {episodeScope === 'saved' && (
-              <p className="download-records-note">
-                包含你的手动下载、自动下载和播放缓存。播放缓存可按服务器清理规则回收。
-              </p>
+              <p className="download-records-note">{t('podcasts.savedScopeNote')}</p>
             )}
 
             {detailLoading && !selectedDetail ? (
-              <div className="podcasts-loading">正在拉取最新单集…</div>
+              <div className="podcasts-loading">{t('podcasts.loadingEpisodes')}</div>
             ) : displayedEpisodes.length === 0 ? (
               <div className="podcasts-empty">
                 {episodeScope === 'saved' && personalDownloadCount === 0 ? (
                   <>
-                    <p>还没有你的下载</p>
-                    <p>浏览全部单集，播放时缓存或选择保存后会显示在这里。</p>
+                    <p>{t('podcasts.emptyMyDownloads')}</p>
+                    <p>{t('podcasts.emptyMyDownloadsHint')}</p>
                     <button
                       type="button"
                       className="podcasts-action-btn"
                       onClick={() => changeEpisodeScope('all')}
                     >
-                      浏览全部单集
+                      {t('podcasts.browseAllEpisodes')}
                     </button>
                   </>
                 ) : episodeScope === 'downloaded' && downloadedCount === 0 ? (
                   <>
-                    <p>这个播客还没有已下载单集</p>
-                    <p>浏览全部单集即可播放，也可以选择保存到服务器。</p>
+                    <p>{t('podcasts.emptyDownloaded')}</p>
+                    <p>{t('podcasts.emptyDownloadedHint')}</p>
                     <button
                       type="button"
                       className="podcasts-action-btn"
                       onClick={() => changeEpisodeScope('all')}
                     >
-                      浏览全部单集
+                      {t('podcasts.browseAllEpisodes')}
                     </button>
                   </>
                 ) : selectedDetail?.episodes.length === 0 ? (
-                  '暂无单集'
+                  t('podcasts.noEpisodes')
                 ) : (
-                  '未找到匹配条件的单集，请调整搜索或筛选条件'
+                  t('podcasts.noMatchingEpisodes')
                 )}
               </div>
             ) : (
@@ -1364,36 +1399,42 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
                     label={ep.title}
                     actions={[
                       {
-                        label: '播放单集',
+                        label: t('podcasts.playEpisode'),
                         icon: 'play',
                         run: () => playEpisode(ep, selectedPodcast),
                       },
                       {
-                        label: '下一集播放',
+                        label: t('podcasts.playNext'),
                         icon: 'next',
                         run: () => queueEpisode(ep, selectedPodcast, true),
                       },
                       {
-                        label: '加入待播',
+                        label: t('podcasts.addToQueue'),
                         icon: 'queue',
                         run: () => queueEpisode(ep, selectedPodcast, false),
                       },
                       {
-                        label: ep.completed ? '标为未听' : '标为已听完',
+                        label: ep.completed
+                          ? t('podcasts.markUnplayed')
+                          : t('podcasts.markCompleted'),
                         icon: 'select',
                         run: () => {
                           void toggleEpisodeCompleted(ep);
                         },
                       },
                       {
-                        label: isEpisodeFavorited(ep) ? '取消收藏' : '单集收藏',
+                        label: isEpisodeFavorited(ep)
+                          ? t('podcasts.unfavorite')
+                          : t('podcasts.favorite'),
                         icon: 'heart',
                         run: () => {
                           void toggleEpisodeFavorite(ep);
                         },
                       },
                       {
-                        label: ep.resource_saved ? '取消个人保存' : '保存到服务器',
+                        label: ep.resource_saved
+                          ? t('podcasts.unsave')
+                          : t('podcasts.saveToServer'),
                         icon: 'download',
                         run: () => {
                           void handleDownloadSingleEpisode(ep);
@@ -1405,7 +1446,7 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
                       type="button"
                       className="episode-play-btn"
                       onClick={() => playEpisode(ep, selectedPodcast)}
-                      title="播放该单集"
+                      title={t('podcasts.playEpisodeTitle')}
                     >
                       ▶
                     </button>
@@ -1414,7 +1455,7 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
                         type="button"
                         className="episode-title episode-title-button"
                         onClick={() => setSelectedEpisode(ep)}
-                        title="查看单集详情"
+                        title={t('podcasts.episodeDetailsTitle')}
                       >
                         {ep.title}
                       </button>
@@ -1424,32 +1465,45 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
                           <span className="ep-duration">{formatDuration(ep.duration_seconds)}</span>
                         )}
                         {ep.download_status === 'downloaded' && (
-                          <span className="ep-download-badge" title="共享音频已保存在服务器">
-                            ✓ 服务器已有
+                          <span
+                            className="ep-download-badge"
+                            title={t('podcasts.serverBadgeTitle')}
+                          >
+                            {t('podcasts.serverBadge')}
                           </span>
                         )}
                         {['downloading', 'queued'].includes(ep.download_status || '') && (
-                          <span className="ep-download-badge">准备中…</span>
+                          <span className="ep-download-badge">{t('podcasts.preparing')}</span>
                         )}
                         {ep.resource_playback_cached &&
                           !ep.resource_saved &&
-                          !ep.resource_automatic && <span className="ep-status-tag">播放缓存</span>}
+                          !ep.resource_automatic && (
+                            <span className="ep-status-tag">{t('podcasts.playbackCache')}</span>
+                          )}
                         <button
                           type="button"
                           className="ep-download-btn"
                           onClick={(e) => void handleDownloadSingleEpisode(ep, e)}
-                          title={ep.resource_saved ? '释放自己的保存引用' : '保存并保留服务器音频'}
+                          title={
+                            ep.resource_saved
+                              ? t('podcasts.releaseSaveRef')
+                              : t('podcasts.saveKeepAudio')
+                          }
                         >
                           {ep.resource_saved
-                            ? '✓ 已保存 · 取消'
+                            ? t('podcasts.savedCancel')
                             : ep.resource_automatic
-                              ? '自动保存 · 另作手动保存'
-                              : '保存到服务器'}
+                              ? t('podcasts.autoSavedManual')
+                              : t('podcasts.saveToServer')}
                         </button>
-                        {ep.completed && <span className="ep-status-tag">✓ 已听完</span>}
+                        {ep.completed && (
+                          <span className="ep-status-tag">{t('podcasts.playedBadge')}</span>
+                        )}
                         {!ep.completed && ep.position_seconds > 0 && (
                           <span className="ep-status-tag">
-                            已听至 {formatDuration(ep.position_seconds)}
+                            {t('podcasts.playedUpTo', {
+                              time: formatDuration(ep.position_seconds),
+                            })}
                           </span>
                         )}
                       </div>
@@ -1476,24 +1530,24 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
                         onClick={() => {
                           if (queuedSet.has(ep.id) && onRemoveQueuedEpisode) {
                             onRemoveQueuedEpisode(ep.id);
-                            showNotice('已从待播清单移除');
+                            showNotice(t('podcasts.removedFromQueue'));
                           } else {
                             queueEpisode(ep, selectedPodcast, false);
                           }
                         }}
                         title={
                           currentEpisodeId === ep.id && isPlayingPodcast
-                            ? '当前正在播放该单集'
+                            ? t('podcasts.queueStatePlaying')
                             : queuedSet.has(ep.id)
-                              ? '已在待播清单中，点击移除'
-                              : '加入待播清单'
+                              ? t('podcasts.queueStateRemove')
+                              : t('podcasts.queueStateAdd')
                         }
                       >
                         {currentEpisodeId === ep.id && isPlayingPodcast
-                          ? '正在播放'
+                          ? t('podcasts.nowPlaying')
                           : queuedSet.has(ep.id)
-                            ? '✓ 已待播'
-                            : '+ 待播'}
+                            ? t('podcasts.queuedBadge')
+                            : t('podcasts.addToQueueBtn')}
                       </button>
                     </div>
                   </RowMenu>
@@ -1506,24 +1560,22 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
         <div className="podcasts-overview">
           {publisherView && visiblePodcasts.length === 0 ? (
             <div className="podcasts-empty-state">
-              <h3>该出品方暂无已关联节目</h3>
+              <h3>{t('podcasts.publisherEmpty')}</h3>
             </div>
           ) : !loading && visiblePodcasts.length === 0 ? (
             <div className="podcasts-empty-state">
-              <h3>还没有关注的节目</h3>
+              <h3>{t('podcasts.emptyFollows')}</h3>
               <p>
-                {canAddPodcast
-                  ? '添加感兴趣的 RSS，你的关注与收听进度会单独保存。'
-                  : '这里仅显示你关注的节目。管理员尚未开放添加 RSS。'}
+                {canAddPodcast ? t('podcasts.emptyFollowsCanAdd') : t('podcasts.emptyFollowsNoAdd')}
               </p>
               <div className="podcasts-empty-actions">
                 <button type="button" onClick={() => setShowSearch(true)}>
-                  {canAddPodcast ? '搜索或添加节目' : '搜索节目'}
+                  {canAddPodcast ? t('podcasts.searchOrAddShows') : t('podcasts.searchShows')}
                 </button>
               </div>
             </div>
           ) : loading && visiblePodcasts.length === 0 ? (
-            <div className="podcasts-loading">正在加载节目…</div>
+            <div className="podcasts-loading">{t('podcasts.loadingShows')}</div>
           ) : (
             <div className="podcasts-grid">
               {visiblePodcasts.map((p) => (
@@ -1555,7 +1607,7 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
                     {p.downloaded_episodes > 0 && (
                       <span
                         className="podcast-badge-count"
-                        title={`已在本地库保存 ${p.downloaded_episodes} 集`}
+                        title={t('podcasts.cardDownloadedTitle', { count: p.downloaded_episodes })}
                       >
                         <Icon name="download" /> {p.downloaded_episodes}
                       </span>
@@ -1574,14 +1626,16 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
                             e.stopPropagation();
                             handleContextMenu(e, p);
                           }}
-                          title="右键或点击打开设置选项"
-                          aria-label={`${p.title}的节目操作`}
+                          title={t('podcasts.cardMenuTitle')}
+                          aria-label={t('podcasts.cardMenuAria', { title: p.title })}
                         >
                           <Icon name="more" />
                         </button>
                       )}
                     </div>
-                    <p className="podcast-card-author">{p.author || '未知创作者'}</p>
+                    <p className="podcast-card-author">
+                      {p.author || t('podcasts.unknownCreator')}
+                    </p>
                     {p.publisher && (
                       <button
                         type="button"
@@ -1591,16 +1645,16 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
                           void openPublisher(p.publisher!);
                         }}
                       >
-                        出品方：{p.publisher.name}
+                        {t('podcasts.publisherLabel', { name: p.publisher.name })}
                       </button>
                     )}
                     <div className="podcast-card-footer">
                       <div className="podcast-card-meta">
                         <span className="podcast-card-ep-count">
-                          {p.total_episodes} 单集
+                          {t('podcasts.episodeCount', { count: p.total_episodes })}
                           {p.unplayed_episodes > 0 && (
                             <span className="podcast-card-unplayed">
-                              {p.unplayed_episodes} 未听
+                              {t('podcasts.unplayedCount', { count: p.unplayed_episodes })}
                             </span>
                           )}
                         </span>
@@ -1615,7 +1669,7 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
                             void toggleFollow(p);
                           }}
                         >
-                          {p.followed ? '取消关注' : '关注节目'}
+                          {p.followed ? t('podcasts.unfollow') : t('podcasts.follow')}
                         </button>
                         {p.followed && (
                           <button
@@ -1626,7 +1680,7 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
                               setPersonalDownload(p);
                             }}
                           >
-                            自动下载
+                            {t('podcasts.autoDownload')}
                           </button>
                         )}
                       </div>
@@ -1651,13 +1705,13 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
             className="podcast-context-item"
             onClick={() => handleOpenSettings(contextMenu.podcast)}
           >
-            服务器下载与存储设置…
+            {t('podcasts.contextServerSettings')}
           </div>
           <div
             className="podcast-context-item"
             onClick={() => handleDownloadAll(contextMenu.podcast)}
           >
-            立即下载全部单集到库
+            {t('podcasts.contextDownloadAll')}
           </div>
           <div
             className="podcast-context-item"
@@ -1666,7 +1720,7 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
               void handleRefreshPodcast(contextMenu.podcast.id);
             }}
           >
-            立即从源端检查更新
+            {t('podcasts.contextRefresh')}
           </div>
         </div>
       )}
@@ -1675,10 +1729,10 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
         <div className="podcasts-modal-backdrop" onClick={() => setShowPlaybackSettings(false)}>
           <div className="podcasts-modal" onClick={(event) => event.stopPropagation()}>
             <div className="podcasts-modal-header">
-              <h3>播放缓存设置</h3>
+              <h3>{t('podcasts.playbackSettingsTitle')}</h3>
               <DialogCloseButton
                 className="modal-close-btn"
-                aria-label="关闭播放缓存设置"
+                aria-label={t('podcasts.closePlaybackSettings')}
                 onClick={() => setShowPlaybackSettings(false)}
               />
             </div>
@@ -1694,7 +1748,7 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
                     })
                   }
                 />
-                <span>播放时自动缓存当前单集</span>
+                <span>{t('podcasts.autoCacheCurrent')}</span>
               </label>
               <label className="podcast-checkbox-label">
                 <input
@@ -1707,19 +1761,17 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
                     })
                   }
                 />
-                <span>同时预缓存下一集</span>
+                <span>{t('podcasts.prefetchNext')}</span>
               </label>
-              <p className="podcast-settings-desc">
-                缓存任务在服务器后台执行，缓冲后即可播放，无需等整集下载完成。已有音频直接复用，播放触发的缓存会显示在「我的下载」中，并按服务器清理规则回收。
-              </p>
+              <p className="podcast-settings-desc">{t('podcasts.cacheDesc')}</p>
             </div>
             <div className="podcast-settings-section">
-              <label className="podcast-settings-title">网络策略</label>
+              <label className="podcast-settings-title">{t('podcasts.networkPolicy')}</label>
               <div className="podcast-settings-radio-group">
                 {[
-                  { value: 'off', label: '关闭自动缓存' },
-                  { value: 'wifi', label: '仅 Wi‑Fi（推荐）' },
-                  { value: 'any', label: '允许所有网络' },
+                  { value: 'off', label: t('podcasts.networkOff') },
+                  { value: 'wifi', label: t('podcasts.networkWifi') },
+                  { value: 'any', label: t('podcasts.networkAny') },
                 ].map((option) => (
                   <label key={option.value} className="podcast-radio-label">
                     <input
@@ -1738,11 +1790,7 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
                   </label>
                 ))}
               </div>
-              <p className="podcast-settings-desc">
-                网页无法识别网络类型时，「仅
-                Wi-Fi」不会自动缓存。可以手动存入服务器，或选择允许所有网络。
-                保存到服务器不等于下载到手机离线。
-              </p>
+              <p className="podcast-settings-desc">{t('podcasts.networkNote')}</p>
             </div>
             <PodcastQueueDefaults />
             {playbackSettingsError && (
@@ -1756,7 +1804,7 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
                 className="modal-cancel-btn"
                 onClick={() => setShowPlaybackSettings(false)}
               >
-                取消
+                {t('podcasts.cancel')}
               </button>
               <button
                 type="button"
@@ -1764,7 +1812,7 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
                 disabled={savingPlaybackSettings}
                 onClick={() => void savePlaybackSettings()}
               >
-                {savingPlaybackSettings ? '保存中…' : '保存设置'}
+                {savingPlaybackSettings ? t('podcasts.saving') : t('podcasts.saveSettings')}
               </button>
             </div>
           </div>
@@ -1788,7 +1836,7 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
             setSelectedPodcast((item) => item && update(item));
             if (selectedPodcast?.id === personalDownload.id)
               void openDetail(update(personalDownload));
-            showNotice('已保存你的自动下载设置');
+            showNotice(t('podcasts.autoDownloadSaved'));
           }}
         />
       )}
@@ -1806,11 +1854,11 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
           <header className="podcasts-modal-header">
             <div>
               <p className="storage-podcast-name">{settingsPodcast.title}</p>
-              <h3 id="podcast-storage-title">下载与存储</h3>
+              <h3 id="podcast-storage-title">{t('podcasts.storageDialogTitle')}</h3>
             </div>
             <DialogCloseButton
               className="modal-close-btn"
-              aria-label="关闭下载与存储"
+              aria-label={t('podcasts.closeStorageDialog')}
               onClick={() => setSettingsPodcast(null)}
             />
           </header>
@@ -1822,26 +1870,28 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
             }}
           >
             <div className="podcast-storage-body">
-              <section className="storage-overview" aria-label="服务器存储信息">
+              <section className="storage-overview" aria-label={t('podcasts.storageOverview')}>
                 {storageInfo ? (
                   <>
                     <dl className="storage-metrics">
                       <div>
-                        <dt>已下载单集</dt>
+                        <dt>{t('podcasts.downloadedEpisodesLabel')}</dt>
                         <dd>
                           {storageInfo.downloaded_episodes}
-                          <small> / {storageInfo.total_episodes} 集</small>
+                          <small>
+                            {t('podcasts.ofTotalEpisodes', { count: storageInfo.total_episodes })}
+                          </small>
                         </dd>
                       </div>
                       <div>
-                        <dt>服务器占用</dt>
+                        <dt>{t('podcasts.serverUsage')}</dt>
                         <dd>{storageInfo.disk_usage_human}</dd>
                       </div>
                     </dl>
                     <details className="storage-location">
                       <summary>
                         <Icon name="folder" />
-                        服务器保存位置
+                        {t('podcasts.serverLocation')}
                       </summary>
                       <code>{storageInfo.storage_path}</code>
                       <div className="storage-copy-row">
@@ -1850,24 +1900,22 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
                           className="storage-copy-btn"
                           onClick={() => handleCopyPath(storageInfo.storage_path)}
                         >
-                          复制路径
+                          {t('podcasts.copyPath')}
                         </button>
                       </div>
                     </details>
                   </>
                 ) : (
                   <p className="podcast-settings-desc" role="status">
-                    {storageError || '正在读取存储信息…'}
+                    {storageError || t('podcasts.readingStorage')}
                   </p>
                 )}
               </section>
 
-              <p className="podcast-settings-desc">
-                此处管理全服的共享下载与存储。个人自动下载请使用节目的「自动下载」；清理规则在「共享音频管理」配置。
-              </p>
+              <p className="podcast-settings-desc">{t('podcasts.serverStorageNote')}</p>
 
               <details className="storage-advanced">
-                <summary>下载速度与重试</summary>
+                <summary>{t('podcasts.speedAndRetry')}</summary>
                 <label className="storage-slow-option">
                   <input
                     type="checkbox"
@@ -1875,27 +1923,29 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
                     onChange={(event) => setSlowDownload(event.target.checked)}
                   />
                   <span>
-                    <strong>平缓下载</strong>
-                    <small>降低下载速度，并在单集之间稍作等待，减少被源站限流的机会。</small>
+                    <strong>{t('podcasts.gentleDownload')}</strong>
+                    <small>{t('podcasts.gentleDownloadHint')}</small>
                   </span>
                 </label>
                 {slowDownload && (
                   <div className="storage-retry-options">
                     <label>
-                      失败后重试
+                      {t('podcasts.retryAfterFail')}
                       <select
                         value={maxRetries}
                         onChange={(event) => setMaxRetries(Number(event.target.value))}
                       >
                         {Array.from({ length: 11 }, (_, value) => (
                           <option key={value} value={value}>
-                            {value === 0 ? '不重试' : `${value} 次`}
+                            {value === 0
+                              ? t('podcasts.noRetry')
+                              : t('podcasts.retryCount', { count: value })}
                           </option>
                         ))}
                       </select>
                     </label>
                     <label>
-                      首次重试等待
+                      {t('podcasts.firstRetryWait')}
                       <select
                         value={retryBackoffBase}
                         onChange={(event) => setRetryBackoffBase(Number(event.target.value))}
@@ -1904,31 +1954,27 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
                           .sort((a, b) => a - b)
                           .map((value) => (
                             <option key={value} value={value}>
-                              {value} 秒
+                              {t('podcasts.seconds', { count: value })}
                             </option>
                           ))}
                       </select>
                     </label>
-                    <p className="podcast-settings-desc">
-                      再次失败会逐步延长等待，最多等待 60 秒。
-                    </p>
+                    <p className="podcast-settings-desc">{t('podcasts.backoffNote')}</p>
                   </div>
                 )}
               </details>
 
               {canManageResources && (
                 <details className="storage-cleanup">
-                  <summary>清理零引用音频</summary>
-                  <p className="podcast-settings-desc">
-                    仅回收无人保存、未受保护且未在使用的音频。会先预览数量与容量。
-                  </p>
+                  <summary>{t('podcasts.cleanupTitle')}</summary>
+                  <p className="podcast-settings-desc">{t('podcasts.cleanupDesc')}</p>
                   <button
                     type="button"
                     className="podcast-clean-btn"
                     disabled={cleaningDownloads}
                     onClick={() => void handleCleanDownloads()}
                   >
-                    {cleaningDownloads ? '清理中…' : '清理零引用音频'}
+                    {cleaningDownloads ? t('podcasts.cleaning') : t('podcasts.cleanupTitle')}
                   </button>
                 </details>
               )}
@@ -1949,14 +1995,14 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
                 className="modal-cancel-btn"
                 onClick={() => setSettingsPodcast(null)}
               >
-                取消
+                {t('podcasts.cancel')}
               </button>
               <button
                 type="submit"
                 className="modal-submit-btn primary"
                 disabled={savingSettings || cleaningDownloads}
               >
-                {savingSettings ? '保存中…' : '保存设置'}
+                {savingSettings ? t('podcasts.saving') : t('podcasts.saveSettings')}
               </button>
             </footer>
           </form>

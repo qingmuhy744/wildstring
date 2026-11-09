@@ -62,22 +62,22 @@ enum MacPage: String, Identifiable, Hashable {
 
     var title: String {
         switch self {
-        case .home: return "首页"
-        case .search: return "搜索"
-        case .tracks: return "全部歌曲"
-        case .albums: return "专辑"
-        case .artists: return "艺人"
-        case .playlists: return "歌单"
-        case .favorites: return "我喜欢"
-        case .discover: return "每日推荐"
-        case .podcasts: return "电台"
-        case .assistant: return "音乐助手"
-        case .listening: return "收听记录"
-        case .devices: return "跨设备继续"
-        case .notifications: return "通知"
-        case .drafts: return "待确认草案"
-        case .manage: return "管理"
-        case .settings: return "设置"
+        case .home: return L10n("macSession.pageHome")
+        case .search: return L10n("macSession.pageSearch")
+        case .tracks: return L10n("macSession.pageTracks")
+        case .albums: return L10n("macSession.pageAlbums")
+        case .artists: return L10n("macSession.pageArtists")
+        case .playlists: return L10n("macSession.pagePlaylists")
+        case .favorites: return L10n("macSession.pageFavorites")
+        case .discover: return L10n("macSession.pageDiscover")
+        case .podcasts: return L10n("macSession.pagePodcasts")
+        case .assistant: return L10n("macSession.pageAssistant")
+        case .listening: return L10n("macSession.pageListening")
+        case .devices: return L10n("macSession.pageDevices")
+        case .notifications: return L10n("macSession.pageNotifications")
+        case .drafts: return L10n("macSession.pageDrafts")
+        case .manage: return L10n("macSession.pageManage")
+        case .settings: return L10n("macSession.pageSettings")
         }
     }
 
@@ -190,7 +190,7 @@ final class MacSession {
     private(set) var servers: [MacSavedServer] = []
     let updater: MacUpdater
     var serverLabel: String {
-        servers.first { $0.address == logicalServerAddress }?.label ?? client?.server.description ?? "服务器"
+        servers.first { $0.address == logicalServerAddress }?.label ?? client?.server.description ?? L10n("macSession.serverFallback")
     }
 
     func setServerAlias(_ alias: String) {
@@ -267,11 +267,11 @@ final class MacSession {
             await activate(client: client, address: address, username: user.username)
             showServerLogin = false
         } catch let error as APIError where error.code == "https_required" {
-            errorMessage = "服务器仅允许 HTTPS，请使用 HTTPS 线路登录"
+            errorMessage = L10n("macSession.httpsRequired")
         } catch let error as ServerAddress.ValidationError where error == .insecureHTTPNotAllowed {
-            errorMessage = "这是未加密的 HTTP。确认后再连接。"
+            errorMessage = L10n("macSession.insecureHttpWarning")
         } catch {
-            errorMessage = "无法登录，请检查地址、账号和网络"
+            errorMessage = L10n("macSession.loginFailed")
         }
     }
 
@@ -347,20 +347,20 @@ final class MacSession {
             if savedRoutes.profile.routes.count > 1 {
                 if let (candidate, selected, user) = await savedRoutes.restore() {
                     await activate(client: candidate, address: selected, username: user.username, routeProfile: savedRoutes)
-                } else { serverSwitchError = "已保存线路不可用，请检查网络或登录状态" }
+                } else { serverSwitchError = L10n("macSession.savedRoutesUnavailable") }
                 return
             }
             let candidate = makeClient(address)
             guard await candidate.storedSessionExists() else {
                 pendingServer = server
-                errorMessage = "请登录这个服务器"
+                errorMessage = L10n("macSession.pleaseLoginServer")
                 showServerLogin = client != nil
                 return
             }
             let status = try await candidate.authStatus()
             guard status.authenticated, let user = status.user else {
                 pendingServer = server
-                errorMessage = "登录已过期，请重新登录"
+                errorMessage = L10n("macSession.sessionExpired")
                 showServerLogin = client != nil
                 return
             }
@@ -370,12 +370,12 @@ final class MacSession {
             await activate(client: candidate, address: address, username: user.username)
             showServerLogin = false
         } catch {
-            serverSwitchError = "暂时无法连接所选服务器，当前连接已保留。"
+            serverSwitchError = L10n("macSession.cannotConnectServer")
         }
     }
 
     private func makeRoutes(_ address: ServerAddress, allowHTTP: Bool) -> ServerRoutes {
-        let controller = ServerRoutes(primary: ServerRoute(name: "默认线路", address: address.description, allowHTTP: allowHTTP), defaults: defaults) { [store, configuration] address in
+        let controller = ServerRoutes(primary: ServerRoute(name: L10n("macSession.defaultRouteName"), address: address.description, allowHTTP: allowHTTP), defaults: defaults) { [store, configuration] address in
             let client = WildstringClient(server: address, store: store, configuration: configuration)
             client.preferClientHeader("macos")
             return client
@@ -547,6 +547,7 @@ final class MacSession {
         servers = MacServers.load(defaults: defaults)
         let status = try? await client.authStatus()
         profile = status?.user?.profile ?? "listener"
+        InterfaceLanguage.store(status?.user?.language)
         controller.bind(info: info, userID: status?.user?.id, activeAddress: address.description)
         controller.onSelected = { [weak self, weak controller] candidate, address in
             guard let self, let controller, self.routes === controller else { return }

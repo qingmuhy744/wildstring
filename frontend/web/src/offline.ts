@@ -1,5 +1,6 @@
 import { bindPreferences, readPreference, writePreference } from './user-preferences';
 import { streamUrl, type Track, type User } from './api';
+import i18n from './i18n';
 
 export type DownloadState = 'queued' | 'downloading' | 'paused' | 'failed' | 'complete';
 export interface OfflineTrack {
@@ -59,7 +60,7 @@ function database(): Promise<IDBDatabase> {
     const request = indexedDB.open(DB, 1);
     request.onupgradeneeded = () => request.result.createObjectStore(STORE, { keyPath: 'key' });
     request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(new Error('浏览器无法打开离线存储。'));
+    request.onerror = () => reject(new Error(i18n.t('offlineStore.openStorageFailed')));
   });
 }
 async function storage<T>(
@@ -72,7 +73,7 @@ async function storage<T>(
       const tx = db.transaction(STORE, mode);
       const request = action(tx.objectStore(STORE));
       tx.oncomplete = () => resolve(request.result);
-      tx.onerror = tx.onabort = () => reject(new Error('离线存储未完成，可能空间不足。'));
+      tx.onerror = tx.onabort = () => reject(new Error(i18n.t('offlineStore.storageIncomplete')));
     });
   } finally {
     db.close();
@@ -169,7 +170,7 @@ export async function offlineAudio(id: string, signal?: AbortSignal): Promise<Bl
   if (!record || record.state !== 'complete' || epoch !== generation || account?.id !== user.id)
     return null;
   const leaseValid = () => offlineUser()?.id === user.id;
-  if (!navigator.onLine && !leaseValid()) throw new Error('离线访问已到期，请联网登录。');
+  if (!navigator.onLine && !leaseValid()) throw new Error(i18n.t('offlineStore.accessExpired'));
   if (navigator.onLine) {
     let response: Response;
     const controller = new AbortController();
@@ -204,7 +205,7 @@ export async function offlineAudio(id: string, signal?: AbortSignal): Promise<Bl
     if (response.status === 401 || response.status === 403) {
       await clearOfflineAccount();
       window.dispatchEvent(new Event('wildstring:unauthorized'));
-      throw new Error('访问权限已失效，请重新登录。');
+      throw new Error(i18n.t('offlineStore.authRevoked'));
     }
     if (
       response.status === 404 ||
@@ -214,9 +215,9 @@ export async function offlineAudio(id: string, signal?: AbortSignal): Promise<Bl
         response.headers.get('etag') !== (record.sourceEtag || record.etag))
     ) {
       await removeDownload(id);
-      throw new Error('服务端音频已变化，离线副本已移除，请重新保存。');
+      throw new Error(i18n.t('offlineStore.audioChangedRemoved'));
     }
-    if (!response.ok) throw new Error('无法校验离线副本，请稍后重试。');
+    if (!response.ok) throw new Error(i18n.t('offlineStore.verifyCopyFailed'));
   }
   return epoch === generation && account?.id === user.id ? record.blob : null;
 }
@@ -255,7 +256,7 @@ let scheduling: Promise<void> = Promise.resolve();
 export function saveDownloads(tracks: Track[], automatic = false): Promise<void> {
   const epoch = generation,
     user = account;
-  if (!user) return Promise.reject(new Error('请先登录再保存离线音乐。'));
+  if (!user) return Promise.reject(new Error(i18n.t('offlineStore.loginRequired')));
   const task = scheduling.then(() => {
     if (epoch === generation && account?.id === user.id) return queueDownloads(tracks, automatic);
   });
@@ -263,14 +264,14 @@ export function saveDownloads(tracks: Track[], automatic = false): Promise<void>
   return task;
 }
 async function queueDownloads(tracks: Track[], automatic: boolean) {
-  if (!account) throw new Error('请先登录再保存离线音乐。');
+  if (!account) throw new Error(i18n.t('offlineStore.loginRequired'));
   const epoch = generation,
     user = account;
   const before = await offlineTracks();
   if (epoch !== generation || account?.id !== user.id) return;
   const unique = [...new Map(tracks.map((t) => [t.id, t])).values()];
   if (new Set([...before.map((r) => r.track.id), ...unique.map((t) => t.id)]).size > MAX_ITEMS)
-    throw new Error('离线最多保存 1000 首，请先清理。');
+    throw new Error(i18n.t('offlineStore.limitExceeded'));
   for (const track of unique) {
     if (epoch !== generation || account?.id !== user.id) return;
     removed.delete(key(user.id, track.id));
@@ -279,7 +280,7 @@ async function queueDownloads(tracks: Track[], automatic: boolean) {
       automatic &&
       previous?.automatic &&
       previous.state === 'paused' &&
-      previous.error === '等待允许的下载网络。'
+      previous.error === i18n.t('offlineStore.waitingForNetwork')
     )
       await write({ ...previous, state: 'queued', error: undefined }, epoch);
     if (!before.some((r) => r.track.id === track.id))
@@ -354,10 +355,10 @@ async function download(record: OfflineTrack, used: number, currentGeneration: n
         credentials: 'same-origin',
         signal: controller.signal,
       });
-      if (!source.ok) throw new Error('无法验证原音，请重新连接后下载。');
+      if (!source.ok) throw new Error(i18n.t('offlineStore.verifySourceFailed'));
       const sourceEtag = source.headers.get('etag') || undefined;
       if (record.sourceEtag && record.sourceEtag !== sourceEtag)
-        throw new Error('原音已变化，请删除后重新保存。');
+        throw new Error(i18n.t('offlineStore.sourceChanged'));
       next.sourceEtag = sourceEtag;
       target.searchParams.set('format', 'aac');
       target.searchParams.set('bitrate_kbps', String(record.bitrate));
@@ -379,24 +380,25 @@ async function download(record: OfflineTrack, used: number, currentGeneration: n
     if (response.status === 401 || response.status === 403) {
       await clearOfflineAccount();
       window.dispatchEvent(new Event('wildstring:unauthorized'));
-      throw new Error('访问权限已失效，请重新登录。');
+      throw new Error(i18n.t('offlineStore.authRevoked'));
     }
-    if (!response.ok || !response.body) throw new Error('下载连接失败，可以重试。');
+    if (!response.ok || !response.body)
+      throw new Error(i18n.t('offlineStore.downloadConnectionFailed'));
     const resumed = response.status === 206 && record.bytes > 0 && !!record.etag;
     if (resumed && response.headers.get('etag') !== record.etag)
-      throw new Error('音频版本已变化，请删除后重新保存。');
+      throw new Error(i18n.t('offlineStore.audioVersionChanged'));
     if (resumed && !response.headers.get('content-range')?.startsWith(`bytes ${record.bytes}-`))
-      throw new Error('续传位置不一致，请删除后重新保存。');
+      throw new Error(i18n.t('offlineStore.resumeMismatch'));
     const streamingAac =
       !!record.bitrate && response.headers.get('x-wildstring-playback') === 'transcode';
     const total = Number(response.headers.get('content-length')) + (resumed ? record.bytes : 0);
     if (!Number.isFinite(total) || (total <= 0 && !streamingAac))
-      throw new Error('服务端未提供完整音频大小，无法安全离线保存。');
+      throw new Error(i18n.t('offlineStore.noAudioSize'));
     if (used - record.bytes + total > offlineLimit())
-      throw new Error('达到离线容量上限，请清理歌曲或提高上限。');
+      throw new Error(i18n.t('offlineStore.storageLimitReached'));
     const estimate = await navigator.storage?.estimate();
     if (estimate?.quota && (estimate.usage || 0) + total - record.bytes > estimate.quota * 0.9)
-      throw new Error('浏览器剩余空间不足，请先清理。');
+      throw new Error(i18n.t('offlineStore.quotaExceeded'));
     next = {
       ...next,
       total,
@@ -414,7 +416,7 @@ async function download(record: OfflineTrack, used: number, currentGeneration: n
         if (part.done) break;
         next.bytes += part.value.byteLength;
         if ((total > 0 && next.bytes > total) || used - record.bytes + next.bytes > offlineLimit())
-          throw new Error('音频大小异常或超出容量上限。');
+          throw new Error(i18n.t('offlineStore.audioSizeInvalid'));
         pieces.push(part.value.slice().buffer);
         if (next.bytes - checkpoint >= 4 * 1024 * 1024) {
           next.blob = new Blob(pieces, {
@@ -431,7 +433,7 @@ async function download(record: OfflineTrack, used: number, currentGeneration: n
     guard();
     next.blob = new Blob(pieces, { type: response.headers.get('content-type') || 'audio/mpeg' });
     if (!next.bytes || (total > 0 && next.bytes !== total))
-      throw new Error('音频未下载完整，可以继续。');
+      throw new Error(i18n.t('offlineStore.downloadIncomplete'));
     next.total = next.bytes;
     try {
       const cover = await fetch(`/api/v1/tracks/${record.track.id}/cover?size=320`, {
@@ -456,12 +458,12 @@ async function download(record: OfflineTrack, used: number, currentGeneration: n
         state: controller.signal.aborted ? 'paused' : 'failed',
         error:
           record.automatic && !automaticDownloadNetworkAllowed()
-            ? '等待允许的下载网络。'
+            ? i18n.t('offlineStore.waitingForNetwork')
             : controller.signal.aborted
               ? undefined
               : reason instanceof Error
                 ? reason.message
-                : '下载失败，可重试。',
+                : i18n.t('offlineStore.downloadFailed'),
       },
       currentGeneration,
     );

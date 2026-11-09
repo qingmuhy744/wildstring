@@ -6,13 +6,14 @@ import SwiftUI
 struct MacRootView: View {
     let session: MacSession
     @AppStorage("macAppearance") private var appearance = "system"
+    @AppStorage(InterfaceLanguage.storageKey) private var language = InterfaceLanguage.auto.rawValue
     @State private var systemDark = MacAppearance.isSystemDark()
 
     var body: some View {
         Group {
             switch session.phase {
             case .loading:
-                ProgressView("正在连接…")
+                ProgressView(L10n("macRoot.connecting"))
                     .frame(minWidth: 960, minHeight: 640)
             case .connect:
                 MacLoginView(session: session)
@@ -27,6 +28,7 @@ struct MacRootView: View {
         }
         .frame(minWidth: 1100, minHeight: 720)
         .tint(MacTheme.accent)
+        .environment(\.locale, InterfaceLanguage(preference: language).locale)
         .preferredColorScheme(MacAppearance.resolvedColorScheme(for: appearance, systemDark: systemDark))
         .onAppear {
             systemDark = MacAppearance.isSystemDark()
@@ -53,67 +55,67 @@ struct MacRootView: View {
                 MacServerRoutesSheet(session: session, routes: routes)
             }
         }
-        .confirmationDialog("退出当前服务器？", isPresented: Bindable(session).confirmLogout, titleVisibility: .visible) {
-            Button("退出服务器", role: .destructive) { Task { await session.logout() } }
-            Button("取消", role: .cancel) {}
+        .confirmationDialog(L10n("macRoot.logoutConfirmTitle"), isPresented: Bindable(session).confirmLogout, titleVisibility: .visible) {
+            Button(L10n("macRoot.logoutConfirmButton"), role: .destructive) { Task { await session.logout() } }
+            Button(L10n("macRoot.cancel"), role: .cancel) {}
         } message: {
-            Text("退出会停止当前播放。其他服务器的登录状态会保留。")
+            Text(L10n("macRoot.logoutConfirmMessage"))
         }
         .confirmationDialog(
-            "删除服务器「\(session.serverToDelete?.label ?? "")」？",
+            L10n("macRoot.deleteServerConfirmTitle", session.serverToDelete?.label ?? ""),
             isPresented: Binding(
                 get: { session.serverToDelete != nil },
                 set: { if !$0 { session.serverToDelete = nil } }
             ),
             titleVisibility: .visible
         ) {
-            Button("删除服务器", role: .destructive) {
+            Button(L10n("macRoot.deleteServerConfirmButton"), role: .destructive) {
                 if let target = session.serverToDelete {
                     session.serverToDelete = nil
                     Task { await session.deleteServer(target) }
                 }
             }
-            Button("取消", role: .cancel) { session.serverToDelete = nil }
+            Button(L10n("macRoot.cancel"), role: .cancel) { session.serverToDelete = nil }
         } message: {
-            Text("将清除该服务器在本机的登录凭据、保存的线路、播放队列与本地缓存。")
+            Text(L10n("macRoot.deleteServerConfirmMessage"))
         }
-        .alert("无法切换服务器", isPresented: Binding(
+        .alert(L10n("macRoot.switchServerErrorTitle"), isPresented: Binding(
             get: { session.serverSwitchError != nil },
             set: { if !$0 { session.serverSwitchError = nil } }
         )) {
-            Button("好", role: .cancel) { session.serverSwitchError = nil }
+            Button(L10n("macRoot.ok"), role: .cancel) { session.serverSwitchError = nil }
         } message: {
             Text(session.serverSwitchError ?? "")
         }
         .alert(
-            "发现新版本 WildString v\(session.updater.latestRelease?.version ?? "")",
+            L10n("macRoot.updateAvailableTitle", session.updater.latestRelease?.version ?? ""),
             isPresented: Bindable(session.updater).showUpdateAlert
         ) {
             if let release = session.updater.latestRelease {
-                Button("下载更新 (DMG)") {
+                Button(L10n("macRoot.downloadDMG")) {
                     session.updater.openDownload(for: release)
                 }
-                Button("查看发布说明") {
+                Button(L10n("macRoot.viewReleaseNotes")) {
                     session.updater.openReleasePage(for: release)
                 }
             }
-            Button("稍后再说", role: .cancel) {}
+            Button(L10n("macRoot.later"), role: .cancel) {}
         } message: {
             if let notes = session.updater.latestRelease?.releaseNotes {
                 Text(notes.prefix(300))
             } else {
-                Text("有新版本可用，建议升级以获得最新特性与稳定性修复。")
+                Text(L10n("macRoot.updateAvailableMessage"))
             }
         }
-        .alert("已是最新版本", isPresented: Bindable(session.updater).showUpToDateAlert) {
-            Button("好", role: .cancel) {}
+        .alert(L10n("macRoot.upToDateTitle"), isPresented: Bindable(session.updater).showUpToDateAlert) {
+            Button(L10n("macRoot.ok"), role: .cancel) {}
         } message: {
-            Text("当前使用的 WildString v\(session.updater.currentVersion) 已是最新版本。")
+            Text(L10n("macRoot.upToDateMessage", session.updater.currentVersion))
         }
-        .alert("检查更新失败", isPresented: Bindable(session.updater).showErrorAlert) {
-            Button("好", role: .cancel) {}
+        .alert(L10n("macRoot.updateCheckFailedTitle"), isPresented: Bindable(session.updater).showErrorAlert) {
+            Button(L10n("macRoot.ok"), role: .cancel) {}
         } message: {
-            Text(session.updater.errorMessage ?? "无法连接到更新服务器，请检查网络后重试。")
+            Text(session.updater.errorMessage ?? L10n("macRoot.updateCheckFailedDefaultMessage"))
         }
         .task { await session.restore() }
     }
@@ -133,15 +135,15 @@ private struct MacServerRoutesSheet: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("服务器与线路").font(.title2)
+                Text(L10n("macRoot.serverAndRoutesTitle")).font(.title2)
                 Spacer()
-                Button("完成") { session.showRoutes = false }
+                Button(L10n("macRoot.done")) { session.showRoutes = false }
                     .keyboardShortcut(.defaultAction)
             }
             .padding([.horizontal, .top])
             .padding(.bottom, 6)
 
-            TextField("本机别名（留空使用服务器名称）", text: aliasBinding)
+            TextField(L10n("macRoot.localAliasPrompt"), text: aliasBinding)
                 .textFieldStyle(.roundedBorder)
                 .padding(.horizontal)
                 .padding(.bottom, 6)
@@ -151,7 +153,7 @@ private struct MacServerRoutesSheet: View {
             Divider().padding(.top, 8)
 
             HStack {
-                Button("删除此服务器…", systemImage: "trash", role: .destructive) {
+                Button(L10n("macRoot.deleteServerButton"), systemImage: "trash", role: .destructive) {
                     if let current = session.servers.first(where: { $0.address == session.logicalServerAddress }) {
                         session.showRoutes = false
                         session.serverToDelete = current
@@ -196,27 +198,27 @@ private struct MacLoginView: View {
                     .frame(width: 48, height: 48)
                     .background(MacTheme.accentSoft, in: RoundedRectangle(cornerRadius: 14))
                 VStack(alignment: .leading, spacing: 5) {
-                    Text(addingServer ? "连接其他服务器" : "欢迎回到野弦")
+                    Text(addingServer ? L10n("macRoot.loginTitleAddServer") : L10n("macRoot.loginTitleWelcome"))
                         .font(MacTheme.section(20))
-                    Text(addingServer ? "登录后，即可在不同曲库间切换。" : "连接服务器，开始聆听你的音乐。")
+                    Text(addingServer ? L10n("macRoot.loginSubtitleAddServer") : L10n("macRoot.loginSubtitleWelcome"))
                         .font(MacTheme.caption).foregroundStyle(MacTheme.muted)
                 }
             }
             VStack(alignment: .leading, spacing: 18) {
-                field("服务器地址", symbol: "server.rack") {
-                    TextField("服务器地址", text: $serverText, prompt: Text(verbatim: "https://music.example.com"))
+                field(L10n("macRoot.fieldServerAddress"), symbol: "server.rack") {
+                    TextField(L10n("macRoot.fieldServerAddress"), text: $serverText, prompt: Text(verbatim: "https://music.example.com"))
                         .textContentType(.URL)
                 }
-                field("用户名", symbol: "person") {
-                    TextField("输入用户名", text: $username).textContentType(.username)
+                field(L10n("macRoot.fieldUsername"), symbol: "person") {
+                    TextField(L10n("macRoot.fieldUsernamePrompt"), text: $username).textContentType(.username)
                 }
-                field("密码", symbol: "lock") {
-                    SecureField("输入密码", text: $password).textContentType(.password)
+                field(L10n("macRoot.fieldPassword"), symbol: "lock") {
+                    SecureField(L10n("macRoot.fieldPasswordPrompt"), text: $password).textContentType(.password)
                 }
                 VStack(alignment: .leading, spacing: 6) {
-                    Toggle("允许此服务器使用 HTTP", isOn: $allowInsecureHTTP)
+                    Toggle(L10n("macRoot.allowInsecureHttp"), isOn: $allowInsecureHTTP)
                         .toggleStyle(.checkbox)
-                    Text("用于局域网或 SD-WAN 的 HTTP 地址；公网建议使用 HTTPS。")
+                    Text(L10n("macRoot.allowInsecureHttpNote"))
                         .font(MacTheme.caption).foregroundStyle(MacTheme.muted)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -228,11 +230,11 @@ private struct MacLoginView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             if session.routes != nil && !addingServer {
-                Button("管理已保存线路 / 重新登录") { session.showRoutes = true }
+                Button(L10n("macRoot.manageRoutesOrReauth")) { session.showRoutes = true }
             }
             if !session.servers.isEmpty {
                 VStack(alignment: .leading, spacing: 10) {
-                    Text("已保存的服务器").font(MacTheme.caption).foregroundStyle(MacTheme.muted)
+                    Text(L10n("macRoot.savedServers")).font(MacTheme.caption).foregroundStyle(MacTheme.muted)
                     ScrollView {
                         VStack(spacing: 6) {
                             ForEach(session.servers) { server in
@@ -252,7 +254,7 @@ private struct MacLoginView: View {
                                             }
                                             Spacer()
                                             if session.logicalServerAddress == server.address {
-                                                Text("当前连接").font(MacTheme.caption).foregroundStyle(MacTheme.muted)
+                                                Text(L10n("macRoot.currentConnection")).font(MacTheme.caption).foregroundStyle(MacTheme.muted)
                                             } else {
                                                 Image(systemName: "arrow.right").foregroundStyle(MacTheme.accent)
                                             }
@@ -270,7 +272,7 @@ private struct MacLoginView: View {
                                             .padding(4)
                                     }
                                     .buttonStyle(.plain)
-                                    .help("删除服务器")
+                                    .help(L10n("macRoot.deleteServerHelp"))
                                     .disabled(session.isBusy)
                                 }
                                 .padding(12)
@@ -285,11 +287,11 @@ private struct MacLoginView: View {
                 if session.isBusy { ProgressView().controlSize(.small) }
                 Spacer()
                 if addingServer {
-                    Button("取消") { session.showServerLogin = false }
+                    Button(L10n("macRoot.cancel")) { session.showServerLogin = false }
                         .keyboardShortcut(.cancelAction)
                         .disabled(session.isBusy)
                 }
-                Button(session.isBusy ? "正在连接…" : "连接服务器") {
+                Button(session.isBusy ? L10n("macRoot.connecting") : L10n("macRoot.connectServerButton")) {
                     Task {
                         await session.login(serverText: serverText, username: username, password: password,
                             allowInsecureHTTP: allowInsecureHTTP)
@@ -413,10 +415,10 @@ private struct MacShellView: View {
         .overlay(alignment: .top) {
             if let offer = session.sync?.handoff {
                 HStack(spacing: 12) {
-                    Text("其他设备暂停在「\(offer.title)」")
+                    Text(L10n("macRoot.handoffPausedAt", offer.title))
                         .lineLimit(1)
-                    Button("忽略") { session.sync?.dismiss() }
-                    Button("继续") { Task { await session.sync?.accept() } }
+                    Button(L10n("macRoot.handoffDismiss")) { session.sync?.dismiss() }
+                    Button(L10n("macRoot.handoffResume")) { Task { await session.sync?.accept() } }
                         .buttonStyle(.borderedProminent)
                 }
                 .padding(10)
@@ -487,10 +489,10 @@ private struct MacShellView: View {
                         in: RoundedRectangle(cornerRadius: 9, style: .continuous)
                     )
                 VStack(alignment: .leading, spacing: 1) {
-                    Text("野弦")
+                    Text(L10n("macRoot.brandName"))
                         .font(MacTheme.display(18))
                         .foregroundStyle(sidebarInk)
-                    Text("个人声音档案")
+                    Text(L10n("macRoot.brandTagline"))
                         .font(MacTheme.micro)
                         .foregroundStyle(sidebarFaint)
                 }
@@ -515,15 +517,15 @@ private struct MacShellView: View {
                         session.focusLibrarySearch = false
                         session.page = .search
                     }
-                    group("我的音乐", pages: MacPage.library + [.listening])
-                    group("发现", pages: MacPage.explore)
+                    group(L10n("macRoot.groupMyMusic"), pages: MacPage.library + [.listening])
+                    group(L10n("macRoot.groupExplore"), pages: MacPage.explore)
                     if libraries.filter(\.enabled).count > 1 {
-                        Text("当前曲库")
+                        Text(L10n("macRoot.currentLibrary"))
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(.secondary)
                             .padding(.horizontal, 12)
                             .padding(.top, 16)
-                        libraryButton("默认曲库", selected: session.selectedLibraryID == nil) {
+                        libraryButton(L10n("macRoot.defaultLibrary"), selected: session.selectedLibraryID == nil) {
                             session.selectLibrary(nil)
                         }
                         ForEach(libraries.filter(\.enabled)) { library in
@@ -539,7 +541,7 @@ private struct MacShellView: View {
             Rectangle().fill(sidebarBorder).frame(height: 1)
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
-                    Text("工作区").font(MacTheme.micro).foregroundStyle(sidebarFaint)
+                    Text(L10n("macRoot.workspaceSection")).font(MacTheme.micro).foregroundStyle(sidebarFaint)
                     Spacer()
                     footerButton(.notifications)
                     footerButton(.settings)
@@ -564,7 +566,7 @@ private struct MacShellView: View {
 
     private var serverMenu: some View {
         Menu {
-            Section("切换服务器") {
+            Section(L10n("macRoot.menuSwitchServer")) {
                 ForEach(session.servers) { server in
                     Button {
                         Task { await session.switchServer(server) }
@@ -574,20 +576,20 @@ private struct MacShellView: View {
                     }
                     .disabled(session.logicalServerAddress == server.address)
                 }
-                Button("连接其他服务器…", systemImage: "plus") { session.addServer() }
+                Button(L10n("macRoot.connectOtherServer"), systemImage: "plus") { session.addServer() }
             }
             Divider()
-            Button("服务器名称与线路…", systemImage: "network") { session.showRoutes = true }
-            Button("跨设备继续", systemImage: MacPage.devices.symbol) { session.page = .devices }
-            Button("待确认草案", systemImage: MacPage.drafts.symbol) { session.page = .drafts }
+            Button(L10n("macRoot.serverNameAndRoutes"), systemImage: "network") { session.showRoutes = true }
+            Button(L10n("macRoot.devicesPage"), systemImage: MacPage.devices.symbol) { session.page = .devices }
+            Button(L10n("macRoot.draftsPage"), systemImage: MacPage.drafts.symbol) { session.page = .drafts }
             if session.canManage {
-                Button("管理", systemImage: MacPage.manage.symbol) { session.page = .manage }
+                Button(L10n("macRoot.managePage"), systemImage: MacPage.manage.symbol) { session.page = .manage }
             }
             Divider()
-            Button("退出当前服务器…", systemImage: "rectangle.portrait.and.arrow.right", role: .destructive) {
+            Button(L10n("macRoot.logoutCurrentServer"), systemImage: "rectangle.portrait.and.arrow.right", role: .destructive) {
                 session.confirmLogout = true
             }
-            Button("删除当前服务器…", systemImage: "trash", role: .destructive) {
+            Button(L10n("macRoot.deleteCurrentServer"), systemImage: "trash", role: .destructive) {
                 if let current = session.servers.first(where: { $0.address == session.logicalServerAddress }) {
                     session.serverToDelete = current
                 }
@@ -605,8 +607,8 @@ private struct MacShellView: View {
                 .foregroundStyle(sidebarFaint).allowsHitTesting(false)
         }
         .disabled(session.isBusy)
-        .help("账号与服务器 · 点击切换服务器")
-        .accessibilityLabel("账号与服务器")
+        .help(L10n("macRoot.serverMenuHelp"))
+        .accessibilityLabel(L10n("macRoot.serverMenuAccessibility"))
     }
 
     private var serverCard: some View {
@@ -620,17 +622,17 @@ private struct MacShellView: View {
                 HStack(spacing: 5) {
                     Circle().fill(session.connection.map { connectionColor($0.status) } ?? sidebarFaint)
                         .frame(width: 7, height: 7)
-                    Text(session.connection?.label ?? "连接中…")
+                    Text(session.connection?.label ?? L10n("macRoot.connecting"))
                         .font(MacTheme.mono(10)).foregroundStyle(sidebarMuted)
                         .lineLimit(1).fixedSize(horizontal: true, vertical: false)
                 }
-                .help(session.connection?.label ?? "连接中…")
+                .help(session.connection?.label ?? L10n("macRoot.connecting"))
             }
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(sidebarAccentSoft.opacity(0.5), in: RoundedRectangle(cornerRadius: 10))
-        .help("\(session.routes?.activeName ?? "默认线路") · \(session.connection?.label ?? "连接中…")")
+        .help("\(session.routes?.activeName ?? L10n("macRoot.defaultRoute")) · \(session.connection?.label ?? L10n("macRoot.connecting"))")
     }
 
     private func footerButton(_ page: MacPage) -> some View {

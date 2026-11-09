@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useTranslation } from 'react-i18next';
 import { api, type User } from './api';
 import { DialogCloseButton } from './dialog-close';
 import type { MusicLibrary } from './music-libraries';
@@ -14,6 +15,7 @@ export function UserLibraryAccessDialog({
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const { t } = useTranslation();
   const dialog = useRef<HTMLDialogElement>(null);
   const [libraries, setLibraries] = useState<MusicLibrary[]>([]);
   const [access, setAccess] = useState<Access | null>(null);
@@ -58,7 +60,7 @@ export function UserLibraryAccessDialog({
       window.dispatchEvent(new Event('wildstring:libraries-updated'));
       onSaved();
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '库权限保存失败。');
+      setError(reason instanceof Error ? reason.message : t('userLibraryAccess.saveFailed'));
       setReload((value) => value + 1);
     } finally {
       setBusy(false);
@@ -68,7 +70,7 @@ export function UserLibraryAccessDialog({
     <dialog
       ref={dialog}
       className="playlist-editor user-library-dialog"
-      aria-label={`${user.username} 的库权限`}
+      aria-label={t('userLibraryAccess.dialogAria', { username: user.username })}
       onCancel={(event) => {
         event.preventDefault();
         if (!busy) onClose();
@@ -76,17 +78,21 @@ export function UserLibraryAccessDialog({
     >
       <div className="editor-heading">
         <div>
-          <h2>库权限</h2>
+          <h2>{t('userLibraryAccess.title')}</h2>
           <p className="muted">{user.username}</p>
         </div>
-        <DialogCloseButton aria-label="关闭库权限" disabled={busy} onClick={onClose} />
+        <DialogCloseButton
+          aria-label={t('userLibraryAccess.closeAria')}
+          disabled={busy}
+          onClick={onClose}
+        />
       </div>
-      <p className="muted">选择这个账号可以浏览和播放的音乐库。编辑、导入等能力由账号角色决定。</p>
+      <p className="muted">{t('userLibraryAccess.description')}</p>
       <form className="account-form" onSubmit={save}>
-        {loading && <p role="status">正在读取库权限…</p>}
+        {loading && <p role="status">{t('userLibraryAccess.loading')}</p>}
         {!loading && access && (
           <fieldset className="music-library-options" disabled={busy}>
-            <legend>可访问音乐库</legend>
+            <legend>{t('userLibraryAccess.accessibleLibraries')}</legend>
             {libraries.map((library) => (
               <label className="music-library-grant-option" key={library.id}>
                 <input
@@ -105,9 +111,9 @@ export function UserLibraryAccessDialog({
               </label>
             ))}
             {libraries.length === 0 && (
-              <p className="muted">暂无已启用的音乐库，请先在设置中创建。</p>
+              <p className="muted">{t('userLibraryAccess.noLibraries')}</p>
             )}
-            <small>未勾选时仍可使用个人播客关注等功能。保存后，新请求会使用新的授权范围。</small>
+            <small>{t('userLibraryAccess.hint')}</small>
           </fieldset>
         )}
         {error && (
@@ -115,17 +121,17 @@ export function UserLibraryAccessDialog({
             <p>{error}</p>
             {!loading && !access && (
               <button type="button" onClick={() => setReload((value) => value + 1)}>
-                重新读取库权限
+                {t('userLibraryAccess.reload')}
               </button>
             )}
           </div>
         )}
         <div className="editor-footer">
           <button type="button" disabled={busy} onClick={onClose}>
-            取消
+            {t('userLibraryAccess.cancel')}
           </button>
           <button className="primary" disabled={busy || loading || !access}>
-            {busy ? '保存中…' : '保存库权限'}
+            {busy ? t('userLibraryAccess.saving') : t('userLibraryAccess.save')}
           </button>
         </div>
       </form>

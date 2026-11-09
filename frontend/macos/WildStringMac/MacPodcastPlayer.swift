@@ -44,14 +44,14 @@ struct MacPodcastPlayer: View {
                     Button { session.showFullscreen = false } label: {
                         Image(systemName: "chevron.down").frame(width: 32, height: 32)
                             .background(.primary.opacity(0.06), in: Circle())
-                    }.buttonStyle(.plain).help("返回电台（Esc）").accessibilityLabel("收起播客播放")
+                    }.buttonStyle(.plain).help(L10n("macPodcastPlayer.backToPodcastsHelp")).accessibilityLabel(L10n("macPodcastPlayer.dismissPlayer"))
                     Spacer()
-                    Label(playback.isBuffering ? "正在缓冲" : playback.isPlaying ? "正在收听" : "已暂停",
+                    Label(playback.isBuffering ? L10n("macPodcastPlayer.buffering") : playback.isPlaying ? L10n("macPodcastPlayer.listening") : L10n("macPodcastPlayer.paused"),
                         systemImage: "antenna.radiowaves.left.and.right")
                         .font(.callout).foregroundStyle(.secondary)
                     Spacer()
                     Button { showQueue.toggle() } label: {
-                        Label(showQueue ? "本期内容" : "播放队列", systemImage: showQueue ? "doc.text" : "list.number")
+                        Label(showQueue ? L10n("macPodcastPlayer.showNotes") : L10n("macPodcastPlayer.playQueue"), systemImage: showQueue ? "doc.text" : "list.number")
                     }.buttonStyle(.bordered)
                 }
                 HStack(alignment: .top, spacing: 36) {
@@ -87,13 +87,13 @@ struct MacPodcastPlayer: View {
             HStack(spacing: 14) {
                 MacPodcastArtwork(url: show?.coverURL, side: 76)
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(show?.title ?? playback.currentItem?.album ?? "播客")
+                    Text(show?.title ?? playback.currentItem?.album ?? L10n("macPodcastPlayer.defaultPodcastTitle"))
                         .font(.headline).fixedSize(horizontal: false, vertical: true)
                     Text(show?.author ?? playback.currentItem?.artist ?? "")
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }
-            Text(playback.currentItem?.title ?? "选择一期节目")
+            Text(playback.currentItem?.title ?? L10n("macPodcastPlayer.selectAnEpisode"))
                 .font(.system(size: 25, weight: .semibold))
                 .fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
             if let episode {
@@ -105,7 +105,7 @@ struct MacPodcastPlayer: View {
                 HStack {
                     Text(macPlaybackClock(playback.currentTime))
                     Spacer()
-                    Text(playback.duration > 0 ? "剩余 \(macPlaybackClock(max(0, playback.duration - playback.currentTime)))" : "时长加载中")
+                    Text(playback.duration > 0 ? L10n("macPodcastPlayer.remainingTime", macPlaybackClock(max(0, playback.duration - playback.currentTime))) : L10n("macPodcastPlayer.durationLoading"))
                 }.font(.caption.monospacedDigit()).foregroundStyle(.secondary)
             }
             HStack(spacing: 14) {
@@ -113,22 +113,22 @@ struct MacPodcastPlayer: View {
                 Spacer(minLength: 8)
                 Button { playback.skipPodcastEpisode(.previous) } label: {
                     Image(systemName: "backward.end.fill").font(.title3)
-                }.help("上一集").accessibilityLabel("上一集")
+                }.help(L10n("macPodcastPlayer.previousEpisode")).accessibilityLabel(L10n("macPodcastPlayer.previousEpisode"))
                 Button { playback.seek(to: max(0, playback.currentTime - 15)) } label: {
                     Image(systemName: "gobackward.15").font(.title2)
-                }.help("后退 15 秒").accessibilityLabel("后退 15 秒")
+                }.help(L10n("macPodcastPlayer.skipBackward15")).accessibilityLabel(L10n("macPodcastPlayer.skipBackward15"))
                 Button { playback.togglePlayPause() } label: {
                     Image(systemName: playback.isPlaying ? "pause.fill" : "play.fill")
                         .font(.title2).foregroundStyle(.white).frame(width: 54, height: 54)
                         .background(MacTheme.accentDeep, in: Circle())
-                }.help(playback.isPlaying ? "暂停" : "继续收听")
-                    .accessibilityLabel(playback.isPlaying ? "暂停" : "继续收听")
+                }.help(playback.isPlaying ? L10n("macPodcastPlayer.pause") : L10n("macPodcastPlayer.resume"))
+                    .accessibilityLabel(playback.isPlaying ? L10n("macPodcastPlayer.pause") : L10n("macPodcastPlayer.resume"))
                 Button { playback.seek(to: playback.currentTime + 30) } label: {
                     Image(systemName: "goforward.30").font(.title2)
-                }.help("前进 30 秒").accessibilityLabel("前进 30 秒")
+                }.help(L10n("macPodcastPlayer.skipForward30")).accessibilityLabel(L10n("macPodcastPlayer.skipForward30"))
                 Button { playback.skipPodcastEpisode(.next) } label: {
                     Image(systemName: "forward.end.fill").font(.title3)
-                }.help("下一集").accessibilityLabel("下一集")
+                }.help(L10n("macPodcastPlayer.nextEpisode")).accessibilityLabel(L10n("macPodcastPlayer.nextEpisode"))
                 Spacer(minLength: 8)
             }.buttonStyle(.plain)
             MacSleepMenu(playback: playback, podcast: true)
@@ -140,22 +140,22 @@ struct MacPodcastPlayer: View {
                 PodcastCloudStatus(cloud: cloud)
             }
             HStack {
-                Text("接下来").font(.headline)
+                Text(L10n("macPodcastPlayer.upNextHeading")).font(.headline)
                 Spacer()
-                Text("\(queuedUpcoming.count) 集")
+                Text(L10n("macPodcastPlayer.episodeCount", queuedUpcoming.count))
                     .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
             }
             if cloud?.loading == true, queuedUpcoming.isEmpty, cloud?.items.isEmpty != false {
                 HStack(spacing: 8) {
                     ProgressView().controlSize(.small)
-                    Text("正在同步待播队列…").font(.callout).foregroundStyle(.secondary)
+                    Text(L10n("macPodcastPlayer.syncingQueue")).font(.callout).foregroundStyle(.secondary)
                 }
             } else if queuedUpcoming.isEmpty {
-                Text(playback.podcastAutoContinueEnabled ? "播完会接下一集" : "已关闭，播完即停")
+                Text(playback.podcastAutoContinueEnabled ? L10n("macPodcastPlayer.autoContinueOn") : L10n("macPodcastPlayer.autoContinueOff"))
                     .font(.callout).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             } else {
-                Button("查看与调整队列") { showQueue = true }.buttonStyle(.plain)
+                Button(L10n("macPodcastPlayer.viewAndEditQueue")) { showQueue = true }.buttonStyle(.plain)
                     .font(.caption).foregroundStyle(MacTheme.accentDeep)
                 LazyVStack(alignment: .leading, spacing: 16) {
                     ForEach(queuedUpcoming) { item in
@@ -171,15 +171,15 @@ struct MacPodcastPlayer: View {
                 }
             }
             if !autoPreview.isEmpty {
-                Text("自动续播").font(.caption.weight(.medium)).foregroundStyle(.secondary)
-                Text("不会写入待播队列").font(.caption2).foregroundStyle(.tertiary)
+                Text(L10n("macPodcastPlayer.autoContinueSection")).font(.caption.weight(.medium)).foregroundStyle(.secondary)
+                Text(L10n("macPodcastPlayer.wontWriteToQueue")).font(.caption2).foregroundStyle(.tertiary)
                 LazyVStack(alignment: .leading, spacing: 10) {
                     ForEach(autoPreview) { item in
                         HStack(alignment: .firstTextBaseline, spacing: 8) {
                             Text(item.title).font(.callout).foregroundStyle(.secondary)
                                 .lineLimit(2).multilineTextAlignment(.leading)
                             Spacer(minLength: 8)
-                            Button("加入待播") {
+                            Button(L10n("macPodcastPlayer.addToQueue")) {
                                 guard let episodeID = PlaybackService.podcastEpisodeID(item.trackID) else { return }
                                 cloud?.enqueueEpisode(episodeID, next: false, currentEpisodeID: currentEpisodeID)
                             }
@@ -195,16 +195,16 @@ struct MacPodcastPlayer: View {
 
     private var queuePane: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("待播队列").font(.headline)
+            Text(L10n("macPodcastPlayer.queueTitle")).font(.headline)
             if let cloud {
                 PodcastCloudStatus(cloud: cloud)
                 if cloud.loading, cloud.items.isEmpty {
                     HStack(spacing: 8) {
                         ProgressView().controlSize(.small)
-                        Text("正在同步待播队列…").font(.callout).foregroundStyle(.secondary)
+                        Text(L10n("macPodcastPlayer.syncingQueue")).font(.callout).foregroundStyle(.secondary)
                     }
                 } else if cloud.items.isEmpty {
-                    Text(playback.podcastAutoContinueEnabled ? "播完会接下一集" : "已关闭，播完即停")
+                    Text(playback.podcastAutoContinueEnabled ? L10n("macPodcastPlayer.autoContinueOn") : L10n("macPodcastPlayer.autoContinueOff"))
                         .font(.callout).foregroundStyle(.secondary)
                 } else {
                     List {
@@ -214,7 +214,7 @@ struct MacPodcastPlayer: View {
                                     .lineLimit(2)
                                 Spacer(minLength: 8)
                                 if item.episodeId == currentEpisodeID {
-                                    Text("正在收听").font(.caption).foregroundStyle(.secondary)
+                                    Text(L10n("macPodcastPlayer.listeningBadge")).font(.caption).foregroundStyle(.secondary)
                                 }
                             }
                         }
@@ -224,7 +224,7 @@ struct MacPodcastPlayer: View {
                 }
             }
             if !autoPreview.isEmpty {
-                Text("自动续播").font(.caption.weight(.medium)).foregroundStyle(.secondary)
+                Text(L10n("macPodcastPlayer.autoContinueSection")).font(.caption.weight(.medium)).foregroundStyle(.secondary)
                 ForEach(autoPreview) { item in
                     Text(item.title).font(.callout).foregroundStyle(.secondary).lineLimit(2)
                 }
@@ -236,7 +236,7 @@ struct MacPodcastPlayer: View {
 
     private func playQueued(_ episodeID: String) async {
         guard let item = await cloud?.playbackItem(for: episodeID) else {
-            actionError = "这集暂时打不开。待播队列还在，可以重试。"
+            actionError = L10n("macPodcastPlayer.cannotOpenEpisode")
             return
         }
         actionError = nil
@@ -246,7 +246,7 @@ struct MacPodcastPlayer: View {
     private var articlePane: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                Label("本期内容", systemImage: "doc.text").font(.callout.weight(.medium))
+                Label(L10n("macPodcastPlayer.showNotes"), systemImage: "doc.text").font(.callout.weight(.medium))
                     .foregroundStyle(MacTheme.accentDeep)
                 Text(playback.currentItem?.title ?? "")
                     .font(.system(size: 27, weight: .semibold, design: .serif))
@@ -264,13 +264,13 @@ struct MacPodcastPlayer: View {
                             return ["https", "http"].contains(url.scheme) ? .systemAction : .discarded
                         })
                 } else if loading {
-                    ProgressView("正在加载单集内容…")
+                    ProgressView(L10n("macPodcastPlayer.loadingEpisodeContent"))
                 } else if error == nil {
-                    Text("这期节目还没有提供文字内容。").foregroundStyle(.secondary)
+                    Text(L10n("macPodcastPlayer.noArticleContent")).foregroundStyle(.secondary)
                 }
                 if let error {
                     Text(error).font(.callout).foregroundStyle(.secondary)
-                    Button("重新加载") { Task { await load() } }
+                    Button(L10n("macPodcastPlayer.reload")) { Task { await load() } }
                 }
             }.frame(maxWidth: 720, alignment: .leading).padding(32)
                 .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -293,7 +293,7 @@ struct MacPodcastPlayer: View {
             let detail = try await client.podcast(id: loaded.podcastId)
             guard !Task.isCancelled, playback.currentItem?.trackID == trackID else { return }
             show = detail.podcast
-            let artist = detail.podcast.author.isEmpty ? "电台" : detail.podcast.author
+            let artist = detail.podcast.author.isEmpty ? L10n("macPodcastPlayer.defaultArtist") : detail.podcast.author
             let refs = detail.episodes.enumerated().map { index, ep in
                 PodcastContinuation.Episode(
                     id: ep.id,
@@ -330,8 +330,8 @@ struct PodcastCloudStatus: View {
                     .foregroundStyle(.orange)
                     .fixedSize(horizontal: false, vertical: true)
                 HStack(spacing: 8) {
-                    Button("使用服务器上的队列") { cloud.adoptServerQueue() }
-                    Button("用本机覆盖") { cloud.overwriteWithLocal() }
+                    Button(L10n("macPodcastPlayer.adoptServerQueue")) { cloud.adoptServerQueue() }
+                    Button(L10n("macPodcastPlayer.overwriteWithLocal")) { cloud.overwriteWithLocal() }
                 }
             }
         } else if let syncError = cloud.syncError {
@@ -340,7 +340,7 @@ struct PodcastCloudStatus: View {
                     .font(.callout)
                     .foregroundStyle(.orange)
                     .fixedSize(horizontal: false, vertical: true)
-                Button("重试") { Task { await cloud.retrySync() } }
+                Button(L10n("macPodcastPlayer.retry")) { Task { await cloud.retrySync() } }
             }
         }
     }
@@ -365,7 +365,7 @@ struct MacPlaybackRateMenu: View {
             }
         } label: {
             HStack(spacing: 4) {
-                Text("倍速 \(playback.podcastPlaybackRate.formatted())×")
+                Text(L10n("macPodcastPlayer.playbackRate", playback.podcastPlaybackRate.formatted()))
                 Image(systemName: "chevron.down").font(.system(size: 8, weight: .semibold))
             }
                 .font(.system(size: 11, weight: .semibold, design: .rounded).monospacedDigit())
@@ -385,8 +385,8 @@ struct MacPlaybackRateMenu: View {
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
         .fixedSize()
-        .help("播放速度")
-        .accessibilityLabel("播放速度")
+        .help(L10n("macPodcastPlayer.playbackSpeed"))
+        .accessibilityLabel(L10n("macPodcastPlayer.playbackSpeed"))
     }
 }
 
@@ -402,10 +402,10 @@ struct MacSleepMenu: View {
     var body: some View {
         Menu {
             ForEach([15, 30, 60], id: \.self) { minutes in
-                Button("\(minutes) 分钟后暂停") { playback.setSleepTimer(minutes: minutes) }
+                Button(L10n("macPodcastPlayer.sleepTimerMinutes", minutes)) { playback.setSleepTimer(minutes: minutes) }
             }
-            Button(podcast ? "本集播完后暂停" : "这首播完后暂停") { playback.sleepAfterCurrentTrack() }
-            Button("取消定时") { playback.cancelSleepTimer() }
+            Button(podcast ? L10n("macPodcastPlayer.sleepAfterEpisode") : L10n("macPodcastPlayer.sleepAfterTrack")) { playback.sleepAfterCurrentTrack() }
+            Button(L10n("macPodcastPlayer.cancelSleepTimer")) { playback.cancelSleepTimer() }
         } label: {
             if iconOnly {
                 Image(systemName: isActive ? "moon.fill" : "moon.zzz")
@@ -415,9 +415,9 @@ struct MacSleepMenu: View {
             } else {
                 Label {
                     if let end = playback.sleepTimerEnd {
-                        Text("\(end, style: .time) 暂停")
+                        Text(L10n("macPodcastPlayer.sleepAtTime", end.formatted(date: .omitted, time: .shortened)))
                     } else {
-                        Text(playback.pauseAfterCurrentTrack ? (podcast ? "本集结束后暂停" : "本曲结束后暂停") : "定时暂停")
+                        Text(playback.pauseAfterCurrentTrack ? (podcast ? L10n("macPodcastPlayer.sleepAfterEpisodeEnd") : L10n("macPodcastPlayer.sleepAfterTrackEnd")) : L10n("macPodcastPlayer.sleepTimerDefault"))
                     }
                 } icon: {
                     Image(systemName: isActive ? "moon.fill" : "moon")
@@ -427,8 +427,8 @@ struct MacSleepMenu: View {
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
         .fixedSize()
-        .help("睡眠定时")
-        .accessibilityLabel("睡眠定时")
+        .help(L10n("macPodcastPlayer.sleepTimer"))
+        .accessibilityLabel(L10n("macPodcastPlayer.sleepTimer"))
     }
 }
 

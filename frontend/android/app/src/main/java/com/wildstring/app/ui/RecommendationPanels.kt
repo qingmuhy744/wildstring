@@ -35,6 +35,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.google.gson.JsonObject
+import com.wildstring.app.AppLanguage
 import com.wildstring.app.R
 import com.wildstring.app.data.*
 import kotlinx.coroutines.CancellationException
@@ -47,22 +48,22 @@ internal val recommendationSourceLabels = linkedMapOf("personal" to R.string.rec
     "lastfm_similar" to R.string.recommendation_source_lastfm_similar, "lastfm_charts" to R.string.recommendation_source_lastfm_charts, "lastfm_tags" to R.string.recommendation_source_lastfm_tags)
 @Composable internal fun recommendationSource(id: String): String = recommendationSourceLabels[id]?.let { stringResource(it) } ?: if (id == "ai") "AI" else id
 internal fun recommendationIssue(code: String): String = when {
-    code.contains("budget") -> "AI 预算不足，保留本地结果"
-    code.contains("connection") || code.contains("not_found") -> "所选连接不可用，保留本地结果"
-    code.contains("unavailable") || code.contains("failed") || code.contains("timeout") -> "暂时无法获取，已使用可用来源"
-    code.contains("disabled") || code.contains("not_configured") -> "来源未启用或未配置"
-    code.contains("empty") || code.contains("no_match") -> "暂无可用匹配"
-    else -> "本次未能使用此来源"
+    code.contains("budget") -> AppLanguage.string(R.string.rec_panel_issue_budget)
+    code.contains("connection") || code.contains("not_found") -> AppLanguage.string(R.string.rec_panel_issue_connection)
+    code.contains("unavailable") || code.contains("failed") || code.contains("timeout") -> AppLanguage.string(R.string.rec_panel_issue_unavailable)
+    code.contains("disabled") || code.contains("not_configured") -> AppLanguage.string(R.string.rec_panel_issue_disabled)
+    code.contains("empty") || code.contains("no_match") -> AppLanguage.string(R.string.rec_panel_issue_empty)
+    else -> AppLanguage.string(R.string.rec_panel_issue_default)
 }
 
 @Composable private fun RecommendationEvidence(statuses: List<RecommendationSourceStatus>, warnings: List<RecommendationWarning>, degraded: Boolean, engine: String) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(if (engine == "ai") "AI 编排 · 仅播放本库音乐" else "本地规则 · 仅播放本库音乐", style = MaterialTheme.typography.labelMedium)
+        Text(if (engine == "ai") stringResource(R.string.rec_panel_evidence_engine_ai) else stringResource(R.string.rec_panel_evidence_engine_local), style = MaterialTheme.typography.labelMedium)
         statuses.filter { it.status != "disabled" }.forEach { source ->
-            val status = when (source.status) { "ok" -> "${source.matched} 首匹配"; "empty" -> "暂无匹配"; else -> "暂不可用" }
-            Text("${recommendationSource(source.id)} · $status${if (source.cached) " · 缓存" else ""}", style = MaterialTheme.typography.bodySmall)
+            val status = when (source.status) { "ok" -> stringResource(R.string.rec_panel_evidence_status_matched, source.matched); "empty" -> stringResource(R.string.rec_panel_evidence_status_empty); else -> stringResource(R.string.rec_panel_evidence_status_unavailable) }
+            Text("${recommendationSource(source.id)} · $status${if (source.cached) stringResource(R.string.rec_panel_evidence_cached_suffix) else ""}", style = MaterialTheme.typography.bodySmall)
         }
-        if (degraded && warnings.isEmpty()) Text("部分来源暂不可用，已保留可用推荐。", style = MaterialTheme.typography.bodySmall)
+        if (degraded && warnings.isEmpty()) Text(stringResource(R.string.rec_panel_evidence_degraded_hint), style = MaterialTheme.typography.bodySmall)
         warnings.distinct().forEach { Text("${recommendationSource(it.source)}：${recommendationIssue(it.code)}", style = MaterialTheme.typography.bodySmall) }
     }
 }
@@ -84,7 +85,7 @@ internal fun recommendationIssue(code: String): String = when {
     var selectedIds by remember { mutableStateOf(setOf<String>()) }
     var playlistTracks by remember { mutableStateOf<List<Track>?>(null) }
     var lyricTrack by remember { mutableStateOf<Track?>(null) }
-    // Bumped by 换一批 so a slower background load cannot replace the batch the user just asked for.
+    // Bumped by refresh so a slower background load cannot replace the batch the user just asked for.
     var batch by remember { mutableIntStateOf(0) }
     LaunchedEffect(Unit) {
         val cached = vm.repository.cachedDaily()?.also { daily = it }
@@ -97,7 +98,7 @@ internal fun recommendationIssue(code: String): String = when {
         // Reopening shows the last batch at once and refreshes it quietly; only a cold start shows progress.
         if (cached == null) action.run { load() }
         else try { load() } catch (cancel: CancellationException) { throw cancel } catch (error: Exception) { action.message = friendlyError(error) }
-        if (action.message == "已完成") action.message = null
+        if (action.message == DONE_STATUS) action.message = null
     }
     if (rankings) { RankingsPanel(vm) { rankings = false }; return }
     if (external) { ExternalMusicPanel(vm) {
@@ -145,7 +146,7 @@ internal fun recommendationIssue(code: String): String = when {
                                     onClick = { panelMenu = false; evidence = !evidence }, modifier = Modifier.testTag("recommendation-evidence"))
                                 HorizontalDivider()
                                 DropdownMenuItem(text = { Text(stringResource(R.string.listening_rankings)) }, leadingIcon = { Icon(Icons.Default.Leaderboard, null) }, onClick = { panelMenu = false; rankings = true }, modifier = Modifier.testTag("daily-rankings"))
-                                DropdownMenuItem(text = { Text(stringResource(R.string.discover_new_music)) }, leadingIcon = { Icon(Icons.Default.Explore, null) }, onClick = { panelMenu = false; external = true }, modifier = Modifier.testTag("daily-external"))
+                                DropdownMenuItem(text = { Text(stringResource(R.string.discover_new_music)) }, leadingIcon = { Icon(Icons.Default.Public, null) }, onClick = { panelMenu = false; external = true }, modifier = Modifier.testTag("daily-external"))
                             }
                         }
                     }
@@ -224,7 +225,7 @@ internal fun recommendationIssue(code: String): String = when {
     } }
     lyricTrack?.let { track -> RecommendationLyricsDialog(vm, track) { lyricTrack = null } }
     if (settings) preferences?.let { original -> RecommendationSettings(original, connections, connectionsError, action.busy, action.message, { settings = false }) { updated ->
-        scope.launch { action.run { preferences = vm.repository.api().saveRecommendationPreferences(updated); settings = false; action.message = "偏好已保存，下次换一批生效" } }
+        scope.launch { action.run { preferences = vm.repository.api().saveRecommendationPreferences(updated); settings = false; action.message = AppLanguage.string(R.string.rec_panel_prefs_saved) } }
     } }
 }
 
@@ -267,17 +268,17 @@ internal fun recommendationIssue(code: String): String = when {
 
 @Composable private fun RecommendationSettings(original: RecommendationPreferences, connections: List<JsonObject>, error: String?, busy: Boolean, message: String?, dismiss: () -> Unit, save: (RecommendationPreferences) -> Unit) {
     var value by remember { mutableStateOf(original) }; var tags by remember { mutableStateOf(original.lastfmTags.joinToString(", ")) }
-    AlertDialog(onDismissRequest = dismiss, title = { Text("推荐设置") }, text = {
+    AlertDialog(onDismissRequest = dismiss, title = { Text(stringResource(R.string.rec_panel_settings_title)) }, text = {
         Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
             message?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
-            Text("每个账号单独保存。只从所选来源推荐本库可播放的音乐。", style = MaterialTheme.typography.bodySmall)
+            Text(stringResource(R.string.rec_panel_settings_hint), style = MaterialTheme.typography.bodySmall)
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("每天 ${value.count} 首", Modifier.weight(1f))
-                IconButton({ value = value.copy(count = (value.count - 5).coerceAtLeast(1)) }) { Icon(Icons.Default.Remove, "减少推荐数量") }
-                IconButton({ value = value.copy(count = (value.count + 5).coerceAtMost(50)) }) { Icon(Icons.Default.Add, "增加推荐数量") }
+                Text(stringResource(R.string.rec_panel_daily_count, value.count), Modifier.weight(1f))
+                IconButton({ value = value.copy(count = (value.count - 5).coerceAtLeast(1)) }) { Icon(Icons.Default.Remove, stringResource(R.string.rec_panel_decrease_count)) }
+                IconButton({ value = value.copy(count = (value.count + 5).coerceAtMost(50)) }) { Icon(Icons.Default.Add, stringResource(R.string.rec_panel_increase_count)) }
             }
-            Text("推荐来源", style = MaterialTheme.typography.titleSmall)
+            Text(stringResource(R.string.rec_panel_sources_title), style = MaterialTheme.typography.titleSmall)
             recommendationSourceLabels.forEach { (id, name) ->
                 val checked = id in value.sources
                 val toggle = { next: Boolean -> value = value.copy(sources = if (next) (value.sources + id).distinct() else value.sources - id) }
@@ -286,11 +287,11 @@ internal fun recommendationIssue(code: String): String = when {
                     Text(stringResource(name), Modifier.weight(1f))
                 }
             }
-            if ("lastfm_tags" in value.sources) OutlinedTextField(tags, { tags = it.take(200) }, label = { Text("公共标签（逗号分隔，最多 3 个）") }, modifier = Modifier.fillMaxWidth())
-            Text("每日定时生成", style = MaterialTheme.typography.titleSmall)
+            if ("lastfm_tags" in value.sources) OutlinedTextField(tags, { tags = it.take(200) }, label = { Text(stringResource(R.string.rec_panel_public_tags_label)) }, modifier = Modifier.fillMaxWidth())
+            Text(stringResource(R.string.rec_panel_daily_schedule_title), style = MaterialTheme.typography.titleSmall)
             Row(Modifier.fillMaxWidth().clickable { value = value.copy(dailyEnabled = !value.dailyEnabled) }, verticalAlignment = Alignment.CenterVertically) {
                 Checkbox(value.dailyEnabled, { checked -> value = value.copy(dailyEnabled = checked) })
-                Text("按设定时间自动生成每日推荐", Modifier.weight(1f))
+                Text(stringResource(R.string.rec_panel_daily_schedule_label), Modifier.weight(1f))
             }
             if (value.dailyEnabled) {
                 OutlinedTextField(
@@ -299,17 +300,17 @@ internal fun recommendationIssue(code: String): String = when {
                         val clean = input.filter { it.isDigit() || it == ':' }.take(5)
                         value = value.copy(dailyTime = clean)
                     },
-                    label = { Text("每天生成时间 (HH:MM)") },
+                    label = { Text(stringResource(R.string.rec_panel_daily_time_label)) },
                     placeholder = { Text("00:00") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
             }
-            Text("AI 编排", style = MaterialTheme.typography.titleSmall)
+            Text(stringResource(R.string.rec_panel_ai_curation_title), style = MaterialTheme.typography.titleSmall)
             AgentConnectionChoice(connections, value.connectionId.takeUnless { it == "local" }) { selected -> value = value.copy(connectionId = selected ?: "local", useAi = selected != null) }
             error?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
         }
-    }, confirmButton = { TextButton({ save(value.copy(useAi = value.connectionId != "local", useLastfm = value.sources.any { it.startsWith("lastfm_") }, lastfmTags = tags.split(',', '，').map(String::trim).filter(String::isNotBlank).distinct().take(3))) }, enabled = !busy && value.sources.isNotEmpty()) { Text("保存偏好") } }, dismissButton = { TextButton(dismiss) { Text("取消") } })
+    }, confirmButton = { TextButton({ save(value.copy(useAi = value.connectionId != "local", useLastfm = value.sources.any { it.startsWith("lastfm_") }, lastfmTags = tags.split(',', '，').map(String::trim).filter(String::isNotBlank).distinct().take(3))) }, enabled = !busy && value.sources.isNotEmpty()) { Text(stringResource(R.string.rec_panel_save_preferences)) } }, dismissButton = { TextButton(dismiss) { Text(stringResource(R.string.rec_panel_cancel)) } })
 }
 
 @Composable internal fun AiPanel(vm: MusicViewModel) {
@@ -323,17 +324,17 @@ internal fun recommendationIssue(code: String): String = when {
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
         AgentConnectionChoice(connections, connection, !action.busy) { connection = it }
         connectionError?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
-        OutlinedTextField(prompt, { prompt = it.take(2000) }, Modifier.fillMaxWidth(), label = { Text("想听什么？") }, placeholder = { Text("来半小时我很久没听过的摇滚") }, minLines = 2)
-        Button({ keyboard?.hide(); scope.launch { action.run { result = vm.repository.agentApi().discover(DiscoveryRequest(prompt, connectionId = connection ?: "local")); draftName = result!!.title; excluded = emptySet(); action.message = if (result?.mode == "local") "当前使用本地检索" else "已生成候选，请预览后保存" } } }, enabled = !action.busy && prompt.isNotBlank()) { Text(if (action.busy) "正在找歌…" else "生成候选") }
+        OutlinedTextField(prompt, { prompt = it.take(2000) }, Modifier.fillMaxWidth(), label = { Text(stringResource(R.string.rec_panel_ai_prompt_label)) }, placeholder = { Text(stringResource(R.string.rec_panel_ai_prompt_placeholder)) }, minLines = 2)
+        Button({ keyboard?.hide(); scope.launch { action.run { result = vm.repository.agentApi().discover(DiscoveryRequest(prompt, connectionId = connection ?: "local")); draftName = result!!.title; excluded = emptySet(); action.message = if (result?.mode == "local") AppLanguage.string(R.string.rec_panel_ai_local_search) else AppLanguage.string(R.string.rec_panel_ai_candidates_ready) } } }, enabled = !action.busy && prompt.isNotBlank()) { Text(if (action.busy) stringResource(R.string.rec_panel_ai_finding_music) else stringResource(R.string.rec_panel_ai_generate_candidates)) }
         ActionStatus(action)
         result?.let { draft ->
             val selected = draft.items.filter { it.track.id !in excluded }
-            OutlinedTextField(draftName, { draftName = it.take(100) }, Modifier.fillMaxWidth(), label = { Text("歌单名称") }, singleLine = true)
+            OutlinedTextField(draftName, { draftName = it.take(100) }, Modifier.fillMaxWidth(), label = { Text(stringResource(R.string.rec_panel_playlist_name_label)) }, singleLine = true)
             RecommendationEvidence(draft.sourceStatus, draft.warnings, draft.degraded, draft.mode)
             if (draft.warning != null && draft.warnings.isEmpty()) Text(recommendationIssue(draft.warning), style = MaterialTheme.typography.bodySmall)
             Row {
-                TextButton({ vm.play(selected.map { it.track }) }, enabled = selected.isNotEmpty()) { Text("试听候选") }
-                TextButton({ scope.launch { action.run { saveRecommendations(vm, draftName, selected); action.message = "歌单已保存" } } }, enabled = !action.busy && selected.isNotEmpty() && draftName.isNotBlank()) { Text("确认保存歌单") }
+                TextButton({ vm.play(selected.map { it.track }) }, enabled = selected.isNotEmpty()) { Text(stringResource(R.string.rec_panel_preview_candidates)) }
+                TextButton({ scope.launch { action.run { saveRecommendations(vm, draftName, selected); action.message = AppLanguage.string(R.string.rec_panel_playlist_saved) } } }, enabled = !action.busy && selected.isNotEmpty() && draftName.isNotBlank()) { Text(stringResource(R.string.rec_panel_confirm_save_playlist)) }
             }
             LazyColumn(Modifier.weight(1f)) { items(draft.items, key = { it.track.id }) { item -> ListItem(headlineContent = { Text(item.track.title) }, supportingContent = { Text(item.track.artist + " · " + item.reason) }, leadingContent = { Checkbox(item.track.id !in excluded, { checked -> excluded = if (checked) excluded - item.track.id else excluded + item.track.id }) }) } }
         }
@@ -344,23 +345,23 @@ internal fun recommendationIssue(code: String): String = when {
     var scope by remember { mutableStateOf("personal") }; var period by remember { mutableStateOf("30d") }; var metric by remember { mutableStateOf("plays") }
     var ranking by remember { mutableStateOf<ListeningRankings?>(null) }; val action = remember { FeatureAction() }; val coroutine = rememberCoroutineScope()
     suspend fun load() { ranking = vm.repository.api().listeningRankings(scope, period, metric) }
-    LaunchedEffect(scope, period, metric) { action.run { ranking = null; load() }; if (action.message == "已完成") action.message = null }
+    LaunchedEffect(scope, period, metric) { action.run { ranking = null; load() }; if (action.message == DONE_STATUS) action.message = null }
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp).testTag("listening-rankings")) {
-        back?.let { TextButton(it) { Text("返回每日推荐") } }
-        PrimaryTabRow(if (scope == "personal") 0 else 1) { listOf("personal" to "我常听", "community" to "大家常听").forEach { (id, label) -> Tab(scope == id, { scope = id }, text = { Text(label) }) } }
+        back?.let { TextButton(it) { Text(stringResource(R.string.rec_panel_back_daily_rec)) } }
+        PrimaryTabRow(if (scope == "personal") 0 else 1) { listOf("personal" to stringResource(R.string.rec_panel_ranking_personal), "community" to stringResource(R.string.rec_panel_ranking_community)).forEach { (id, label) -> Tab(scope == id, { scope = id }, text = { Text(label) }) } }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            SimpleRecommendationChoice(listOf("7d" to "近 7 天", "30d" to "近 30 天", "90d" to "近 90 天", "all" to "全部时间"), period) { period = it }
-            SimpleRecommendationChoice(listOf("plays" to "播放次数", "listened_ms" to "收听时长"), metric) { metric = it }
-            IconButton({ coroutine.launch { action.run { load() } } }, enabled = !action.busy) { Icon(Icons.Default.Refresh, "刷新排行") }
+            SimpleRecommendationChoice(listOf("7d" to stringResource(R.string.rec_panel_ranking_7d), "30d" to stringResource(R.string.rec_panel_ranking_30d), "90d" to stringResource(R.string.rec_panel_ranking_90d), "all" to stringResource(R.string.rec_panel_ranking_all)), period) { period = it }
+            SimpleRecommendationChoice(listOf("plays" to stringResource(R.string.rec_panel_metric_plays), "listened_ms" to stringResource(R.string.rec_panel_metric_duration)), metric) { metric = it }
+            IconButton({ coroutine.launch { action.run { load() } } }, enabled = !action.busy) { Icon(Icons.Default.Refresh, stringResource(R.string.rec_panel_refresh_rankings)) }
         }
-        Text(if (scope == "community") "所有用户的汇总收听排行，不展示其他账号信息。" else "仅依据本账号收听记录。", style = MaterialTheme.typography.bodySmall)
+        Text(if (scope == "community") stringResource(R.string.rec_panel_rankings_community_hint) else stringResource(R.string.rec_panel_rankings_personal_hint), style = MaterialTheme.typography.bodySmall)
         ActionStatus(action)
         ranking?.let { page ->
-            Row { Button({ vm.play(page.items.map { it.track }) }, enabled = page.items.isNotEmpty()) { Text("播放排行") }
-                Text("前 ${page.items.size} 首", Modifier.padding(16.dp), style = MaterialTheme.typography.bodySmall) }
+            Row { Button({ vm.play(page.items.map { it.track }) }, enabled = page.items.isNotEmpty()) { Text(stringResource(R.string.rec_panel_play_rankings)) }
+                Text(stringResource(R.string.rec_panel_top_count, page.items.size), Modifier.padding(16.dp), style = MaterialTheme.typography.bodySmall) }
             LazyColumn(Modifier.weight(1f)) {
-                items(page.items, key = { it.track.id }) { item -> ListItem(headlineContent = { Text(item.track.title) }, supportingContent = { Text("${item.track.artist} · ${item.playCount} 次 · ${item.listenedMs / 60000} 分钟") }, leadingContent = { Text(item.rank.toString()) }, modifier = Modifier.clickable { vm.play(page.items.map { it.track }, page.items.indexOf(item)) }) }
-                if (page.items.isEmpty()) item { Text("还没有收听记录。", Modifier.padding(16.dp)) }
+                items(page.items, key = { it.track.id }) { item -> ListItem(headlineContent = { Text(item.track.title) }, supportingContent = { Text(stringResource(R.string.rec_panel_track_ranking_summary, item.track.artist, item.playCount, item.listenedMs / 60000)) }, leadingContent = { Text(item.rank.toString()) }, modifier = Modifier.clickable { vm.play(page.items.map { it.track }, page.items.indexOf(item)) }) }
+                if (page.items.isEmpty()) item { Text(stringResource(R.string.rec_panel_no_listening_records), Modifier.padding(16.dp)) }
             }
         }
     }

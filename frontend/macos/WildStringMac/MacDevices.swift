@@ -62,7 +62,7 @@ final class MacPlaybackSync {
             version = remote.version
             message = nil
         } catch {
-            message = "无法读取其他设备的进度"
+            message = L10n("macDevices.cannotReadProgress")
         }
     }
 
@@ -78,7 +78,7 @@ final class MacPlaybackSync {
         busy = true
         defer { busy = false }
         await publishCurrent()
-        if message == nil { message = "当前队列与进度已共享" }
+        if message == nil { message = L10n("macDevices.sharedCurrentProgress") }
     }
 
     func loadRemote() async {
@@ -93,9 +93,9 @@ final class MacPlaybackSync {
                 position: Double(snapshot.positionMs) / 1000,
                 mode: snapshot.mode
             )
-            message = "已载入这条进度，先保持暂停"
+            message = L10n("macDevices.loadedPaused")
         } catch {
-            message = "有些歌曲已经不可用，没能载入"
+            message = L10n("macDevices.someTracksUnavailable")
         }
     }
 
@@ -108,7 +108,7 @@ final class MacPlaybackSync {
             mode: handoff.state.mode
         )
         self.handoff = nil
-        message = "已接上其他设备的暂停位置"
+        message = L10n("macDevices.connectedPausePosition")
     }
 
     private func poll() async {
@@ -146,7 +146,7 @@ final class MacPlaybackSync {
         } catch let error as APIError where error.statusCode == 409 {
             return false
         } catch {
-            message = "进度没有共享出去"
+            message = L10n("macDevices.failedToShare")
             return true
         }
     }
@@ -185,12 +185,12 @@ struct MacDevicesView: View {
                 if let sync {
                     if let snapshot = sync.snapshot, !snapshot.trackIds.isEmpty {
                         VStack(spacing: 0) {
-                            infoRow("队列", "\(snapshot.trackIds.count) 首")
+                            infoRow(L10n("macDevices.queue"), L10n("macDevices.trackCount", snapshot.trackIds.count))
                             infoRow(
-                                "位置",
-                                "第 \(snapshot.index + 1) 首 · \(clock(Double(snapshot.positionMs) / 1000))"
+                                L10n("macDevices.position"),
+                                L10n("macDevices.positionDetail", snapshot.index + 1, clock(Double(snapshot.positionMs) / 1000))
                             )
-                            infoRow("方式", modeName(snapshot.mode))
+                            infoRow(L10n("macDevices.mode"), modeName(snapshot.mode))
                         }
                         .background(
                             MacTheme.panel,
@@ -201,23 +201,23 @@ struct MacDevicesView: View {
                                 .strokeBorder(MacTheme.border, lineWidth: 1)
                         )
                     } else {
-                        Text("还没有共享的播放进度")
+                        Text(L10n("macDevices.noSharedProgress"))
                             .font(MacTheme.caption)
                             .foregroundStyle(MacTheme.muted)
                     }
                     HStack(spacing: 10) {
-                        Button(sync.busy ? "处理中…" : "读取最新进度") {
+                        Button(sync.busy ? L10n("macDevices.processing") : L10n("macDevices.fetchLatest")) {
                             Task { await sync.refresh() }
                         }
                         .buttonStyle(.borderedProminent)
                         .tint(MacTheme.accentDeep)
                         .disabled(sync.busy)
-                        Button("共享当前播放进度") {
+                        Button(L10n("macDevices.shareCurrent")) {
                             Task { await sync.shareCurrent() }
                         }
                         .buttonStyle(.bordered)
                         .disabled(sync.busy || playback.currentItem == nil)
-                        Button("载入并暂停在这里") {
+                        Button(L10n("macDevices.loadAndPause")) {
                             Task { await sync.loadRemote() }
                         }
                         .buttonStyle(.bordered)
@@ -228,7 +228,7 @@ struct MacDevicesView: View {
                             .font(MacTheme.caption)
                             .foregroundStyle(MacTheme.accentDeep)
                     }
-                    Text("暂停时会记下进度。其他设备最近一次暂停会出现在窗口顶部，载入后先不播放。")
+                    Text(L10n("macDevices.syncHint"))
                         .font(MacTheme.caption)
                         .foregroundStyle(MacTheme.muted)
                 }
@@ -238,7 +238,7 @@ struct MacDevicesView: View {
             .frame(maxWidth: .infinity, alignment: .top)
         }
         .background(MacTheme.canvas)
-        .navigationTitle("跨设备继续")
+        .navigationTitle(L10n("macDevices.title"))
     }
 
     private func infoRow(_ label: String, _ value: String) -> some View {
@@ -259,10 +259,10 @@ struct MacDevicesView: View {
 
     private func modeName(_ mode: String) -> String {
         switch mode {
-        case "shuffle": return "随机"
-        case "repeat_one": return "单曲循环"
-        case "repeat_all": return "列表循环"
-        default: return "顺序播放"
+        case "shuffle": return L10n("macDevices.modeShuffle")
+        case "repeat_one": return L10n("macDevices.modeRepeatOne")
+        case "repeat_all": return L10n("macDevices.modeRepeatAll")
+        default: return L10n("macDevices.modeSequential")
         }
     }
 

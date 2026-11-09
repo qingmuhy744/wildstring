@@ -6,8 +6,10 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.google.gson.JsonObject
+import com.wildstring.app.R
 import com.wildstring.app.data.*
 import kotlinx.coroutines.launch
 
@@ -21,18 +23,25 @@ import kotlinx.coroutines.launch
         mode = value.text("mode"); kinds = value.getAsJsonArray("kinds")?.map { it.asString }?.toSet() ?: emptySet()
     }
     LaunchedEffect(Unit) { action.run { load() }; action.message = null }
-    val labels = mapOf("playlist" to "我的歌单", "metadata" to "单曲信息", "metadata_batch" to "专辑批量信息", "cover" to "封面", "lyrics" to "歌词", "intake" to "导入整理")
+    val labels = mapOf(
+        "playlist" to stringResource(R.string.agent_pol_kind_playlist),
+        "metadata" to stringResource(R.string.agent_pol_kind_metadata),
+        "metadata_batch" to stringResource(R.string.agent_pol_kind_metadata_batch),
+        "cover" to stringResource(R.string.agent_pol_kind_cover),
+        "lyrics" to stringResource(R.string.agent_pol_kind_lyrics),
+        "intake" to stringResource(R.string.agent_pol_kind_intake)
+    )
     Column(Modifier.fillMaxWidth().testTag("application-policy"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("整理方式", style = MaterialTheme.typography.titleLarge)
-        Text("按账号保存，助手、巡检和 MCP 共用。MCP 还需授予应用草案权限。", style = MaterialTheme.typography.bodySmall)
+        Text(stringResource(R.string.agent_pol_title), style = MaterialTheme.typography.titleLarge)
+        Text(stringResource(R.string.agent_pol_description), style = MaterialTheme.typography.bodySmall)
         if (policy != null) {
-            listOf("manual" to "审核后应用", "automatic" to "自动整理").forEach { (key, label) ->
+            listOf("manual" to stringResource(R.string.agent_pol_mode_manual), "automatic" to stringResource(R.string.agent_pol_mode_automatic)).forEach { (key, label) ->
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     RadioButton(mode == key, { mode = key }, enabled = !action.busy, modifier = Modifier.testTag("application-mode-$key"))
                     Text(label)
                 }
             }
-            Text(if (mode == "manual") "查看草案后，点击接受即可直接应用。" else "新草案中勾选的类型会直接应用，并保留修改记录。", style = MaterialTheme.typography.bodySmall)
+            Text(if (mode == "manual") stringResource(R.string.agent_pol_manual_hint) else stringResource(R.string.agent_pol_automatic_hint), style = MaterialTheme.typography.bodySmall)
             policy?.getAsJsonArray("allowed_kinds")?.forEach { value ->
                 val kind = value.asString
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -40,13 +49,13 @@ import kotlinx.coroutines.launch
                     Text(labels[kind] ?: kind)
                 }
             }
-            Text("已有待确认草案保持原状。资料保存在应用内，导入源不变。", style = MaterialTheme.typography.bodySmall)
+            Text(stringResource(R.string.agent_pol_draft_retention_hint), style = MaterialTheme.typography.bodySmall)
             Button({ scope.launch { action.run {
                 val saved = vm.agent.request("application-policy", "PUT", jsonBody("mode" to mode, "kinds" to jsonStrings(kinds.toList()), "version" to policy!!.number("version")))
                 policy = saved
-            } } }, enabled = !action.busy && (mode == "manual" || kinds.isNotEmpty())) { Text("保存整理方式") }
-            TextButton({ scope.launch { action.run { load() } } }, enabled = !action.busy) { Text("重新读取整理方式") }
-        } else TextButton({ scope.launch { action.run { load() } } }, enabled = !action.busy) { Text("重新读取整理方式") }
+            } } }, enabled = !action.busy && (mode == "manual" || kinds.isNotEmpty())) { Text(stringResource(R.string.agent_pol_save)) }
+            TextButton({ scope.launch { action.run { load() } } }, enabled = !action.busy) { Text(stringResource(R.string.agent_pol_reload)) }
+        } else TextButton({ scope.launch { action.run { load() } } }, enabled = !action.busy) { Text(stringResource(R.string.agent_pol_reload)) }
         ActionStatus(action)
     }
 }

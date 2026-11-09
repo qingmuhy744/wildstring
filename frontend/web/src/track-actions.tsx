@@ -1,4 +1,5 @@
 import { useId, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import type { Playlist, Track } from './api';
 import { FavoriteButton, type Favorites } from './favorites';
 import type { Player } from './player';
@@ -28,6 +29,7 @@ export function TrackActions({
   operations: TrackOperations;
   onNotice: (message: string) => void;
 }) {
+  const { t } = useTranslation();
   const id = useId(),
     panel = useRef<HTMLDivElement>(null);
   function hide() {
@@ -39,8 +41,8 @@ export function TrackActions({
       <button
         className="icon-button track-more"
         popoverTarget={id}
-        aria-label={`歌曲操作 ${track.title}`}
-        data-help="更多操作"
+        aria-label={t('trackActions.trackOperations', { title: track.title })}
+        data-help={t('trackActions.moreOperations')}
         onClick={(event) => {
           const box = event.currentTarget.getBoundingClientRect();
           if (panel.current) {
@@ -63,7 +65,7 @@ export function TrackActions({
         popover="auto"
         className="track-popover"
         role="group"
-        aria-label={`操作 ${track.title}`}
+        aria-label={t('trackActions.operationsFor', { title: track.title })}
       >
         <p className="ellipsis">{track.title}</p>
         {operations.onOpenAlbum && track.album_id && (
@@ -74,7 +76,7 @@ export function TrackActions({
             }}
           >
             <Icon name="album" />
-            <span>查看所属专辑</span>
+            <span>{t('trackActions.viewAlbum')}</span>
             <Icon name="chevron" className="menu-chevron" />
           </button>
         )}
@@ -86,7 +88,7 @@ export function TrackActions({
             }}
           >
             <Icon name="edit" />
-            <span>编辑歌曲信息</span>
+            <span>{t('trackActions.editTrack')}</span>
           </button>
         )}
         {operations.onRefresh && (
@@ -97,7 +99,7 @@ export function TrackActions({
             }}
           >
             <Icon name="refresh" />
-            <span>更新元数据</span>
+            <span>{t('trackActions.refreshMetadata')}</span>
           </button>
         )}
         {operations.onFileInfo && (
@@ -108,37 +110,39 @@ export function TrackActions({
             }}
           >
             <Icon name="info" />
-            <span>文件属性与路径</span>
+            <span>{t('trackActions.fileInfo')}</span>
           </button>
         )}
         <button
           onClick={() => {
-            if (player.playNext(track)) onNotice(`下一首播放：${track.title}`);
-            else onNotice('播放队列已满，请先移除一些歌曲。');
+            if (player.playNext(track))
+              onNotice(t('trackActions.playNextNotice', { title: track.title }));
+            else onNotice(t('trackActions.queueFull'));
             hide();
           }}
         >
           <Icon name="next" />
-          <span>下一首播放</span>
+          <span>{t('trackActions.playNext')}</span>
         </button>
         <button
-          aria-label={`将 ${track.title} 加入队列`}
+          aria-label={t('trackActions.addToQueueAria', { title: track.title })}
           onClick={() => {
-            if (player.enqueue(track)) onNotice(`已加入队列：${track.title}`);
-            else onNotice('播放队列已满，请先移除一些歌曲。');
+            if (player.enqueue(track))
+              onNotice(t('trackActions.enqueuedNotice', { title: track.title }));
+            else onNotice(t('trackActions.queueFull'));
             hide();
           }}
         >
           <Icon name="queue" />
-          <span>加入播放队列</span>
+          <span>{t('trackActions.addToQueue')}</span>
         </button>
         <label>
           <span className="track-menu-label">
             <Icon name="playlist" />
-            <span>加入歌单</span>
+            <span>{t('trackActions.addToPlaylist')}</span>
           </span>
           <select
-            aria-label={`将 ${track.title} 加入歌单`}
+            aria-label={t('trackActions.addToPlaylistAria', { title: track.title })}
             value=""
             disabled={!operations.playlists.length}
             onChange={(event) => {
@@ -150,7 +154,9 @@ export function TrackActions({
             }}
           >
             <option value="">
-              {operations.playlists.length ? '选择普通歌单…' : '还没有普通歌单'}
+              {operations.playlists.length
+                ? t('trackActions.selectPlaylist')
+                : t('trackActions.noPlaylists')}
             </option>
             {operations.playlists.map((list) => (
               <option value={list.id} key={list.id}>
@@ -166,7 +172,7 @@ export function TrackActions({
           }}
         >
           <Icon name="add" />
-          <span>新建歌单…</span>
+          <span>{t('trackActions.newPlaylist')}</span>
         </button>
         {operations.onDownload && (
           <button
@@ -176,7 +182,7 @@ export function TrackActions({
             }}
           >
             <Icon name="download" />
-            <span>保存离线</span>
+            <span>{t('trackActions.saveOffline')}</span>
           </button>
         )}
         {operations.onMove && (
@@ -188,7 +194,7 @@ export function TrackActions({
               }}
             >
               <Icon name="up" />
-              <span>歌单中上移</span>
+              <span>{t('trackActions.moveUp')}</span>
             </button>
             <button
               onClick={() => {
@@ -197,7 +203,7 @@ export function TrackActions({
               }}
             >
               <Icon name="down" />
-              <span>歌单中下移</span>
+              <span>{t('trackActions.moveDown')}</span>
             </button>
           </div>
         )}
@@ -210,7 +216,7 @@ export function TrackActions({
             }}
           >
             <Icon name="remove" />
-            <span>从歌单移除</span>
+            <span>{t('trackActions.removeFromPlaylist')}</span>
           </button>
         )}
       </div>

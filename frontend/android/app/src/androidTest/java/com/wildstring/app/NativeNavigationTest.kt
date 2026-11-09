@@ -131,25 +131,11 @@ class NativeNavigationTest {
                 compose.onNodeWithText(uiString(R.string.recently_played)).assertIsDisplayed()
                 compose.onNodeWithTag("discovery-page").performScrollToIndex(0)
                 capture("reference-phone-discovery.png")
-                compose.onNodeWithTag("catalog-global-more").performClick()
-                compose.onNodeWithTag("catalog-open-queue").assertIsDisplayed()
-                compose.onNodeWithTag("catalog-open-recent").assertIsDisplayed()
-                compose.onNodeWithTag("catalog-open-offline").assertIsDisplayed()
+                compose.onNodeWithTag("catalog-global-more").assertDoesNotExist()
+                compose.onNodeWithTag("open-notifications").assertIsDisplayed()
+                compose.onNodeWithContentDescription(uiString(R.string.settings_title)).assertIsDisplayed()
                 compose.onNodeWithText("刷新曲库").assertDoesNotExist()
                 capture("discovery-actions.png")
-                compose.onNodeWithTag("catalog-open-queue").performClick()
-                compose.onNodeWithText("${uiString(R.string.play_queue)} · ", substring = true).assertIsDisplayed()
-                compose.runOnUiThread { compose.activity.onBackPressedDispatcher.onBackPressed() }
-                compose.waitUntil(5_000) { compose.onAllNodesWithText("${uiString(R.string.play_queue)} · ", substring = true).fetchSemanticsNodes().isEmpty() }
-                compose.onNodeWithTag("catalog-global-more").performClick()
-                compose.onNodeWithTag("catalog-open-offline").performClick()
-                compose.onNodeWithTag("feature-offline").assertIsDisplayed()
-                compose.onNodeWithContentDescription(uiString(R.string.back)).performClick()
-                compose.onNodeWithTag("catalog-global-more").performClick()
-                compose.onNodeWithTag("catalog-open-recent").performClick()
-                compose.waitUntil(10_000) { vm.state.value.kind == "recent" && !vm.state.value.loading }
-                compose.onNodeWithContentDescription(uiString(R.string.back_previous)).performClick()
-                compose.waitUntil(10_000) { vm.state.value.kind == "discover" && !vm.state.value.loading }
                 val beforePull = connectionRequests.count { it == "/api/v1/albums" }
                 slowRefresh.set(true)
                 // The shortcut tiles are now inside the vertical list, so a pull

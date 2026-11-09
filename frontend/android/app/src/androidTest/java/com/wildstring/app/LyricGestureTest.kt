@@ -57,6 +57,20 @@ class LyricGestureTest {
         compose.onNodeWithTag("lyric-seek-preview").assertDoesNotExist()
     }
 
+    @Test fun scrollingToTopAllowsSelectingTheFirstLyricLine() {
+        show()
+        val viewport = compose.onNodeWithTag("lyrics-viewport").fetchSemanticsNode().boundsInRoot
+        val initialRow0 = compose.onNodeWithTag("lyric-row-0").fetchSemanticsNode().boundsInRoot
+        assertTrue("first lyric row starts near the top in auto-follow mode", initialRow0.top - viewport.top < viewport.height * 0.25f)
+        compose.onNodeWithTag("lyric-scroll").performTouchInput { swipeUp(durationMillis = 300) }
+        compose.onNodeWithTag("lyric-scroll").performTouchInput { swipeDown(durationMillis = 300) }
+        compose.onNodeWithTag("lyric-scroll").performTouchInput { swipeDown(durationMillis = 300) }
+        compose.onNodeWithTag("lyric-seek-confirm").assertIsDisplayed()
+        compose.onNodeWithTag("lyric-seek-confirm").performClick()
+        compose.runOnIdle { assertEquals(listOf(0L), seeks); assertEquals(0, toggles) }
+        compose.onNodeWithTag("lyric-seek-preview").assertDoesNotExist()
+    }
+
     @Test fun tappingTextTogglesWithoutSeekingAndBlankSpaceToggles() {
         show()
         compose.onNodeWithTag("lyric-line-0").performTouchInput { click(center) }

@@ -1,5 +1,6 @@
 import { HelpLabel } from './desktop-help';
 import { useEffect, useState, type FormEvent } from 'react';
+import { useTranslation } from 'react-i18next';
 import { api } from './api';
 interface Settings {
   version: number;
@@ -12,6 +13,7 @@ interface Settings {
   ffmpeg_available: boolean;
 }
 export function TranscodingSettings() {
+  const { t } = useTranslation();
   const [record, setRecord] = useState<Settings | null>(null);
   const [days, setDays] = useState('7'),
     [size, setSize] = useState('10240'),
@@ -56,7 +58,7 @@ export function TranscodingSettings() {
           }),
         }),
       );
-      setNotice('转码缓存设置已保存。');
+      setNotice(t('transcodingSettings.saved'));
     } catch (reason) {
       setError((reason as Error).message);
     } finally {
@@ -73,7 +75,9 @@ export function TranscodingSettings() {
       });
       populate(result.cache);
       setNotice(
-        result.deferred ? '缓存已清理，正在播放的缓存会在使用结束后删除。' : '转码缓存已清空。',
+        result.deferred
+          ? t('transcodingSettings.cacheClearedDeferred')
+          : t('transcodingSettings.cacheCleared'),
       );
     } catch (reason) {
       setError((reason as Error).message);
@@ -82,25 +86,30 @@ export function TranscodingSettings() {
     }
   }
   return (
-    <form className="management-card account-form" aria-label="AAC 转码设置" onSubmit={save}>
-      <h2>AAC 转码与缓存</h2>
-      <p className="muted">
-        播放器选择 AAC 时，无损歌曲按所选码率转换；MP3、AAC 等有损歌曲保持原音。
-      </p>
+    <form
+      className="management-card account-form"
+      aria-label={t('transcodingSettings.ariaLabel')}
+      onSubmit={save}
+    >
+      <h2>{t('transcodingSettings.title')}</h2>
+      <p className="muted">{t('transcodingSettings.description')}</p>
       {record && (
         <p className="muted">
-          已缓存 {(record.cache_bytes / 1048576).toFixed(1)} MiB · {record.cache_entries} 项 ·
-          正在转换 {record.active_jobs} 项
+          {t('transcodingSettings.cacheStats', {
+            size: (record.cache_bytes / 1048576).toFixed(1),
+            entries: record.cache_entries,
+            jobs: record.active_jobs,
+          })}
         </p>
       )}
       {record && !record.ffmpeg_available && (
         <p className="error" role="alert">
-          FFmpeg 不可用，AAC 转码暂不可用。官方 Docker 镜像已内置。
+          {t('transcodingSettings.ffmpegUnavailable')}
         </p>
       )}
       <div className="transcoding-fields">
         <label>
-          <HelpLabel hint="cacheDays">保留天数（自上次使用）</HelpLabel>
+          <HelpLabel hint="cacheDays">{t('transcodingSettings.retentionDays')}</HelpLabel>
           <input
             type="number"
             disabled={!record || busy}
@@ -112,7 +121,7 @@ export function TranscodingSettings() {
           />
         </label>
         <label>
-          <HelpLabel hint="cacheSize">缓存上限（MiB）</HelpLabel>
+          <HelpLabel hint="cacheSize">{t('transcodingSettings.cacheLimit')}</HelpLabel>
           <input
             type="number"
             disabled={!record || busy}
@@ -124,7 +133,7 @@ export function TranscodingSettings() {
           />
         </label>
         <label>
-          <HelpLabel hint="transcodeJobs">同时转码任务数</HelpLabel>
+          <HelpLabel hint="transcodeJobs">{t('transcodingSettings.maxConcurrent')}</HelpLabel>
           <input
             type="number"
             disabled={!record || busy}
@@ -144,13 +153,13 @@ export function TranscodingSettings() {
       {notice && <p role="status">{notice}</p>}
       <div className="settings-actions">
         <button className="primary" disabled={!record || busy}>
-          保存转码设置
+          {t('transcodingSettings.save')}
         </button>
         <button type="button" disabled={!record || busy} onClick={() => void clear()}>
-          清理转码缓存
+          {t('transcodingSettings.clearCache')}
         </button>
         <button type="button" disabled={busy} onClick={() => void refresh()}>
-          刷新缓存用量
+          {t('transcodingSettings.refresh')}
         </button>
       </div>
     </form>

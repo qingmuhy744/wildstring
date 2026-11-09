@@ -14,17 +14,17 @@ struct ConnectionView: View {
                         .keyboardType(.URL)
                         .textContentType(.URL)
                 } header: {
-                    Text("服务器地址")
+                    Text(L10n("connView.serverAddressHeader"))
                 } footer: {
-                    Text("未填写协议时默认使用 HTTPS。HTTP 仅在你明确确认风险后使用。")
+                    Text(L10n("connView.serverAddressFooter"))
                 }
 
-                Section("账号") {
-                    TextField("用户名", text: $model.username)
+                Section(L10n("connView.accountSection")) {
+                    TextField(L10n("connView.usernamePlaceholder"), text: $model.username)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .textContentType(.username)
-                    SecureField("密码", text: $model.password)
+                    SecureField(L10n("connView.passwordPlaceholder"), text: $model.password)
                         .textContentType(.password)
                 }
 
@@ -44,7 +44,7 @@ struct ConnectionView: View {
                             if model.isBusy {
                                 ProgressView()
                             } else {
-                                Text("连接并登录").bold()
+                                Text(L10n("connView.connectAndLogin")).bold()
                             }
                             Spacer()
                         }
@@ -52,23 +52,23 @@ struct ConnectionView: View {
                     .disabled(model.isBusy || !model.canSubmit)
                 }
             }
-            .navigationTitle("野弦")
+            .navigationTitle(L10n("connView.brandTitle"))
             .toolbar {
                 if !model.servers.isEmpty {
                     ToolbarItem(placement: .topBarLeading) {
                         Button {
                             model.showServers()
                         } label: {
-                            Label("服务器", systemImage: "chevron.backward")
+                            Label(L10n("connView.servers"), systemImage: "chevron.backward")
                         }
                     }
                 }
             }
-            .alert("使用未加密 HTTP？", isPresented: $model.showInsecureHTTPWarning) {
-                Button("我了解风险，继续") { model.confirmInsecureHTTP() }
-                Button("取消", role: .cancel) {}
+            .alert(L10n("connView.insecureHTTPTitle"), isPresented: $model.showInsecureHTTPWarning) {
+                Button(L10n("connView.insecureHTTPConfirm")) { model.confirmInsecureHTTP() }
+                Button(L10n("connView.cancel"), role: .cancel) {}
             } message: {
-                Text("账号密码、播放记录和音频会以明文传输。请只在你信任的网络中使用；公网 HTTP 也不会被自动阻挡，但风险由你确认。")
+                Text(L10n("connView.insecureHTTPMessage"))
             }
         }
     }

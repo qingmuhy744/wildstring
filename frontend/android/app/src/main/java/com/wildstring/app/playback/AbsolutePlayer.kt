@@ -8,6 +8,8 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.ForwardingTimeline
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
+import com.wildstring.app.AppLanguage
+import com.wildstring.app.R
 import com.wildstring.app.data.PlaybackRequest
 
 /** Exposes a whole-song timeline to both the app and lock-screen controllers. */
@@ -48,7 +50,7 @@ internal class AbsolutePlayer(private val engine: ExoPlayer, private val resolve
         val total = duration(item)
         val plan = resolver.plan(uri(item))
         val label = if (plan?.mode == "transcode") "AAC · ${plan.output.bitrateKbps} kbps"
-            else "原音" + (plan?.output?.codec ?: item.mediaMetadata.extras?.getString("format"))?.takeIf { it.isNotBlank() }?.let { " · ${it.uppercase()}" }.orEmpty()
+            else AppLanguage.string(R.string.abs_player_quality_original) + (plan?.output?.codec ?: item.mediaMetadata.extras?.getString("format"))?.takeIf { it.isNotBlank() }?.let { " · ${it.uppercase()}" }.orEmpty()
         // A chunked AAC response has no container duration until encoding finishes.
         // SystemUI reads standard metadata; our private duration_ms extra is invisible there.
         val metadata = state.currentMetadata.buildUpon().setDurationMs(total.takeIf { it > 0 }

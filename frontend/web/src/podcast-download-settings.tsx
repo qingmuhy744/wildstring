@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { api, ApiError } from './api';
 import { DialogCloseButton } from './dialog-close';
 import type { PodcastSummary } from './podcasts';
@@ -9,14 +10,22 @@ export interface PodcastDownloadSettings {
   retention_policy: 'keep' | 'delete_after_played';
   active: boolean;
 }
-const choices: [PodcastDownloadSettings['download_policy'], string][] = [
-  ['none', '关闭自动下载'],
-  ['latest_3', '最新 3 集'],
-  ['latest_5', '最新 5 集'],
-  ['latest_10', '最新 10 集'],
-  ['unplayed', '所有未听完单集'],
-  ['all', '全部历史单集'],
+const POLICY_CHOICES: PodcastDownloadSettings['download_policy'][] = [
+  'none',
+  'latest_3',
+  'latest_5',
+  'latest_10',
+  'unplayed',
+  'all',
 ];
+const POLICY_LABEL_KEYS: Record<PodcastDownloadSettings['download_policy'], string> = {
+  none: 'policyNone',
+  latest_3: 'policyLatest3',
+  latest_5: 'policyLatest5',
+  latest_10: 'policyLatest10',
+  unplayed: 'policyUnplayed',
+  all: 'policyAll',
+};
 export function PodcastDownloadDialog({
   podcast,
   onClose,
@@ -26,6 +35,7 @@ export function PodcastDownloadDialog({
   onClose: () => void;
   onSaved: (value: PodcastDownloadSettings) => void;
 }) {
+  const { t } = useTranslation();
   const dialog = useRef<HTMLDialogElement>(null);
   const [value, setValue] = useState<PodcastDownloadSettings | null>(null);
   const [error, setError] = useState('');
@@ -46,7 +56,8 @@ export function PodcastDownloadDialog({
     )
       .then(setValue)
       .catch((err: unknown) => {
-        if (!controller.signal.aborted) setError(err instanceof Error ? err.message : '读取失败');
+        if (!controller.signal.aborted)
+          setError(err instanceof Error ? err.message : t('podcastDownloadSettings.loadFailed'));
       });
     return () => controller.abort();
   }, [podcast.id, reload]);
@@ -71,10 +82,10 @@ export function PodcastDownloadDialog({
     } catch (err) {
       setError(
         err instanceof ApiError && err.status === 409
-          ? '设置已发生变化或节目已取消关注，请重新读取后再试。'
+          ? t('podcastDownloadSettings.conflictNotice')
           : err instanceof Error
             ? err.message
-            : '保存失败',
+            : t('podcastDownloadSettings.saveFailed'),
       );
     } finally {
       setBusy(false);
@@ -96,11 +107,11 @@ export function PodcastDownloadDialog({
       <header className="podcasts-modal-header">
         <div>
           <p className="storage-podcast-name">{podcast.title}</p>
-          <h3 id="personal-download-title">自动下载设置</h3>
+          <h3 id="personal-download-title">{t('podcastDownloadSettings.dialogTitle')}</h3>
         </div>
         <DialogCloseButton
           className="modal-close-btn"
-          aria-label="关闭自动下载设置"
+          aria-label={t('podcastDownloadSettings.closeDialog')}
           disabled={busy}
           onClick={onClose}
         />
@@ -113,19 +124,17 @@ export function PodcastDownloadDialog({
         }}
       >
         <div className="podcast-storage-body">
-          <p className="podcast-settings-desc">
-            仅对当前账号关注的这个节目生效。服务器音频共享，你的保存记录与其他用户独立。
-          </p>
-          {!value && !error && <p role="status">正在读取…</p>}
+          <p className="podcast-settings-desc">{t('podcastDownloadSettings.settingsDesc')}</p>
+          {!value && !error && <p role="status">{t('podcastDownloadSettings.loading')}</p>}
           {value && (
             <>
               {!value.active && (
-                <p role="status">已取消关注，自动下载暂停。重新关注后恢复此设置。</p>
+                <p role="status">{t('podcastDownloadSettings.unfollowedNotice')}</p>
               )}
               <fieldset className="storage-policy-group" disabled={busy || !value.active}>
-                <legend>自动下载范围</legend>
+                <legend>{t('podcastDownloadSettings.downloadScopeLegend')}</legend>
                 <div className="storage-policy-options">
-                  {choices.map(([key, label]) => (
+                  {POLICY_CHOICES.map((key) => (
                     <label className="storage-choice" key={key}>
                       <input
                         type="radio"
@@ -134,21 +143,21 @@ export function PodcastDownloadDialog({
                         checked={value.download_policy === key}
                         onChange={() => setValue({ ...value, download_policy: key })}
                       />
-                      <span>{label}</span>
+                      <span>{t(`podcastDownloadSettings.${POLICY_LABEL_KEYS[key]}`)}</span>
                     </label>
                   ))}
                 </div>
                 <p className="podcast-settings-desc">
-                  最新 N 集始终按发布时间取固定范围，已有音频直接复用；不会逐轮补下更旧的单集。
+                  {t('podcastDownloadSettings.downloadScopeHelp')}
                 </p>
               </fieldset>
               <fieldset className="storage-policy-group" disabled={busy || !value.active}>
-                <legend>听完后</legend>
+                <legend>{t('podcastDownloadSettings.retentionLegend')}</legend>
                 <div className="storage-policy-options">
                   {(
                     [
-                      ['keep', '保留自动保存'],
-                      ['delete_after_played', '释放我的自动保存'],
+                      ['keep', t('podcastDownloadSettings.retentionKeep')],
+                      ['delete_after_played', t('podcastDownloadSettings.retentionDelete')],
                     ] as const
                   ).map(([key, label]) => (
                     <label className="storage-choice" key={key}>
@@ -163,7 +172,7 @@ export function PodcastDownloadDialog({
                   ))}
                 </div>
                 <p className="podcast-settings-desc">
-                  关闭自动下载、取消关注或移出范围会释放自动引用。手动保存继续保留；文件只有在无人引用时才进入服务器清理规则。
+                  {t('podcastDownloadSettings.retentionHelp')}
                 </p>
               </fieldset>
             </>
@@ -180,20 +189,20 @@ export function PodcastDownloadDialog({
               disabled={busy}
               onClick={() => setReload((n) => n + 1)}
             >
-              重新读取设置
+              {t('podcastDownloadSettings.reloadSettings')}
             </button>
           )}
         </div>
         <footer className="storage-settings-footer">
           <button type="button" className="modal-cancel-btn" disabled={busy} onClick={onClose}>
-            取消
+            {t('podcastDownloadSettings.cancel')}
           </button>
           <button
             type="submit"
             className="modal-submit-btn primary"
             disabled={!value || busy || !value.active}
           >
-            {busy ? '保存中…' : '保存设置'}
+            {busy ? t('podcastDownloadSettings.saving') : t('podcastDownloadSettings.saveButton')}
           </button>
         </footer>
       </form>

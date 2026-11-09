@@ -27,8 +27,8 @@ struct MacQueueView: View {
             VStack(alignment: .leading, spacing: 10) {
                 if showsHeader {
                     HStack(alignment: .firstTextBaseline) {
-                        Text("播放队列").font(MacTheme.section(15))
-                        Text("\(entries.count) \(podcastsOnly ? "集" : "项")")
+                        Text(L10n("macQueue.title")).font(MacTheme.section(15))
+                        Text(podcastsOnly ? L10n("macQueue.countEpisodes", entries.count) : L10n("macQueue.countItems", entries.count))
                             .font(MacTheme.micro).foregroundStyle(MacTheme.muted)
                         Spacer()
                         Button {
@@ -40,7 +40,7 @@ struct MacQueueView: View {
                             Image(systemName: "scope")
                         }
                         .buttonStyle(.borderless)
-                        .help("定位当前播放")
+                        .help(L10n("macQueue.locateCurrent"))
                         .disabled(playback.currentItem == nil)
 
                         if let onClose {
@@ -51,12 +51,12 @@ struct MacQueueView: View {
                                     .frame(width: 22, height: 22)
                             }
                             .buttonStyle(.plain)
-                            .help("收起队列（Esc）")
-                            .accessibilityLabel("收起队列")
+                            .help(L10n("macQueue.collapseQueueShortcut"))
+                            .accessibilityLabel(L10n("macQueue.collapseQueue"))
                         }
                     }
                 }
-                Text(playback.isShuffled ? "随机播放顺序 · 拖动可调整" : "拖动调整顺序 · 双击播放")
+                Text(playback.isShuffled ? L10n("macQueue.dragToReorderShuffle") : L10n("macQueue.dragToReorder"))
                     .font(MacTheme.micro).foregroundStyle(MacTheme.muted)
                 // No native List selection: its square grey highlight ignores the row's rounded shape.
                 List {
@@ -79,8 +79,8 @@ struct MacQueueView: View {
                 .scrollContentBackground(.hidden)
                 .overlay {
                     if entries.isEmpty {
-                        ContentUnavailableView("队列是空的", systemImage: "text.line.first.and.arrowtriangle.forward",
-                            description: Text(podcastsOnly ? "从电台单集挑几集加入。" : "从曲库或每日推荐挑几首歌加入。"))
+                        ContentUnavailableView(L10n("macQueue.emptyTitle"), systemImage: "text.line.first.and.arrowtriangle.forward",
+                            description: Text(podcastsOnly ? L10n("macQueue.emptyDescPodcasts") : L10n("macQueue.emptyDescMusic")))
                     }
                 }
 
@@ -94,10 +94,10 @@ struct MacQueueView: View {
     private var continuationSection: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Text("自动续播")
+                Text(L10n("macQueue.autoContinuation"))
                     .font(MacTheme.section(12))
                     .foregroundStyle(MacTheme.ink)
-                Text("按规则续播 · 不会写入云端待播")
+                Text(L10n("macQueue.autoContinuationHint"))
                     .font(MacTheme.micro)
                     .foregroundStyle(MacTheme.muted)
             }
@@ -111,7 +111,7 @@ struct MacQueueView: View {
                         .foregroundStyle(MacTheme.muted)
                         .lineLimit(1)
                     Spacer()
-                    Button("+ 待播") {
+                    Button(L10n("macQueue.addToQueue")) {
                         if let epID = PlaybackService.podcastEpisodeID(item.trackID) {
                             let curID = PlaybackService.podcastEpisodeID(playback.currentItem?.trackID ?? "")
                             playback.podcastCloud?.enqueueEpisode(epID, next: false, currentEpisodeID: curID)
@@ -136,7 +136,7 @@ struct MacQueueView: View {
         return HStack(spacing: 9) {
             Image(systemName: "line.3.horizontal")
                 .font(.caption2).foregroundStyle(.tertiary)
-                .help("拖动调整顺序")
+                .help(L10n("macQueue.dragReorderHelp"))
             Button { play(item) } label: {
                 ZStack {
                     MacCover(client: client, trackID: item.trackID, side: 34,
@@ -149,7 +149,7 @@ struct MacQueueView: View {
                 }.frame(width: 34, height: 34)
             }
             .buttonStyle(.plain)
-            .help(current ? (playback.isPlaying ? "暂停" : "继续播放") : "播放 \(item.title)")
+            .help(current ? (playback.isPlaying ? L10n("macQueue.pause") : L10n("macQueue.resume")) : L10n("macQueue.playTrack", item.title))
             VStack(alignment: .leading, spacing: 3) {
                 Text(item.title)
                     .font(.system(size: 13, weight: current ? .semibold : .regular))
@@ -157,14 +157,14 @@ struct MacQueueView: View {
                     .lineLimit(item.trackID.hasPrefix("podcast_ep_") ? 2 : 1)
                 Text(item.artist).font(MacTheme.caption).foregroundStyle(MacTheme.muted).lineLimit(1)
             }.frame(maxWidth: .infinity, alignment: .leading)
-            Text(current ? (playback.isPlaying ? "播放中" : "已暂停") : String(format: "%02d", position + 1))
+            Text(current ? (playback.isPlaying ? L10n("macQueue.playing") : L10n("macQueue.paused")) : String(format: "%02d", position + 1))
                 .font(MacTheme.mono(10))
                 .foregroundStyle(current ? MacTheme.accentDeep : MacTheme.faint)
             Menu { actions(item, position: position) } label: {
                 Image(systemName: "ellipsis").frame(width: 24, height: 28)
             }
             .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
-            .accessibilityLabel("\(item.title)的队列操作")
+            .accessibilityLabel(L10n("macQueue.trackActions", item.title))
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 7)
@@ -183,18 +183,18 @@ struct MacQueueView: View {
 
     @ViewBuilder
     private func actions(_ item: PlaybackService.Item, position: Int) -> some View {
-        Button(item.id == playback.currentItem?.id ? (playback.isPlaying ? "暂停" : "继续播放") : "立即播放") {
+        Button(item.id == playback.currentItem?.id ? (playback.isPlaying ? L10n("macQueue.pause") : L10n("macQueue.resume")) : L10n("macQueue.playNow")) {
             play(item)
         }
         if let current = entries.firstIndex(where: { $0.id == playback.currentItem?.id }) {
-            Button(podcastsOnly ? "移到下一集" : "移到下一首") { move(position, to: current + 1) }
+            Button(podcastsOnly ? L10n("macQueue.playNextEpisode") : L10n("macQueue.playNextTrack")) { move(position, to: current + 1) }
                 .disabled(position == current || position == current + 1)
         }
         Divider()
-        Button("上移") { move(position, to: position - 1) }.disabled(position == 0)
-        Button("下移") { move(position, to: position + 2) }.disabled(position == entries.count - 1)
+        Button(L10n("macQueue.moveUp")) { move(position, to: position - 1) }.disabled(position == 0)
+        Button(L10n("macQueue.moveDown")) { move(position, to: position + 2) }.disabled(position == entries.count - 1)
         Divider()
-        Button("从队列移除", role: .destructive) {
+        Button(L10n("macQueue.removeFromQueue"), role: .destructive) {
             if let index = playback.items.firstIndex(where: { $0.id == item.id }) {
                 playback.removeQueueEntry(at: index)
             }

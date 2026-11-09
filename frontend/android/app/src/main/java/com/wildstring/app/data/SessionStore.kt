@@ -6,6 +6,8 @@ import android.security.keystore.KeyProperties
 import android.util.Base64
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
+import com.wildstring.app.AppLanguage
+import com.wildstring.app.R
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.security.KeyStore
 import javax.crypto.Cipher
@@ -127,7 +129,7 @@ class SessionStore @Inject constructor(@ApplicationContext context: Context) : C
     private fun routesFor(id: String?): List<ServerRoute> {
         val server = records().firstOrNull { it.id == id } ?: return emptyList()
         val stored = prefs.getString(field("routes", id), null)
-        return if (stored == null) listOf(ServerRoute("默认线路", server.url, server.allowLocalHttp)) else
+        return if (stored == null) listOf(ServerRoute(AppLanguage.string(R.string.sess_store_default_route_name), server.url, server.allowLocalHttp)) else
             gson.fromJson(stored, object : TypeToken<List<ServerRoute>>() {}.type)
     }
     private fun cookieField(id: String? = activeServerId, url: String? = null): String {
@@ -162,9 +164,9 @@ class SessionStore @Inject constructor(@ApplicationContext context: Context) : C
     @Synchronized fun saveServer(id: String?, raw: String, name: String, allowLocalHttp: Boolean): ServerConfiguration {
         val base = ServerAddress.normalize(raw, allowLocalHttp).toString()
         val records = records()
-        val existing = id?.let { key -> records.firstOrNull { it.id == key } ?: error("服务器配置不存在。") }
-        require(records.none { it.url == base && it.id != id }) { "这个服务器已经保存，请直接选择。" }
-        require(name.trim().length <= 80) { "服务器名称最多 80 个字符。" }
+        val existing = id?.let { key -> records.firstOrNull { it.id == key } ?: error(AppLanguage.string(R.string.sess_store_server_not_found)) }
+        require(records.none { it.url == base && it.id != id }) { AppLanguage.string(R.string.sess_store_server_already_exists) }
+        require(name.trim().length <= 80) { AppLanguage.string(R.string.sess_store_server_name_length) }
         val value = ServerConfiguration(existing?.id ?: UUID.randomUUID().toString(), base, name.trim(), allowLocalHttp, existing?.serverName?.takeIf { existing.url == base }, existing?.instanceId?.takeIf { existing.url == base })
         val edit = prefs.edit().putString("servers_v1", gson.toJson(if (existing == null) records + value else records.map { if (it.id == id) value else it }))
         if (existing != null && existing.url != base) {
@@ -180,7 +182,7 @@ class SessionStore @Inject constructor(@ApplicationContext context: Context) : C
         check(prefs.edit().putString("servers_v1", gson.toJson(values)).commit()); publish()
     }
     @Synchronized fun selectServer(id: String) {
-        require(records().any { it.id == id }) { "服务器配置不存在。" }
+        require(records().any { it.id == id }) { AppLanguage.string(R.string.sess_store_server_not_found) }
         if (id == activeServerId) return
         check(prefs.edit().putString("active_server", id).commit())
         generation = UUID.randomUUID().toString(); validUntil = 0; publish()
@@ -244,7 +246,7 @@ class SessionStore @Inject constructor(@ApplicationContext context: Context) : C
             edit.remove(cookieField()).remove(field("cache_profile")).remove(field("account")).remove(field("account_ciphertext"))
             generation = UUID.randomUUID().toString(); validUntil = 0
         } else {
-            check(activeServerId != null) { "请先选择服务器。" }
+            check(activeServerId != null) { AppLanguage.string(R.string.sess_store_select_server_first) }
             if (!prefs.contains(field("cache_profile"))) edit.putString(field("cache_profile"), UUID.randomUUID().toString())
             validUntil = endpoint?.let { Cookie.parse(it, value)?.expiresAt } ?: 0
             edit.putString(cookieField(), encrypt(value))
