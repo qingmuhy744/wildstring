@@ -140,6 +140,12 @@ enum MacErrorText {
         case "ai_daily_budget_exhausted", "ai_budget_exhausted": return L10n("macChrome.errorAiBudgetExhausted")
         case "connection_not_found", "ai_connection_not_found": return L10n("macChrome.errorAiConnectionNotFound")
         case "podcast_subscriptions_disabled": return L10n("macChrome.errorPodcastSubsDisabled")
+        case "podcast_not_found": return L10n("macChrome.errorPodcastNotFound")
+        case "podcast_publisher_not_found": return L10n("macChrome.errorPodcastPublisherNotFound")
+        case "podcast_publisher_conflict": return L10n("macChrome.errorPodcastPublisherConflict")
+        case "podcast_playback_settings_not_found": return L10n("macChrome.errorPodcastPlaybackSettingsNotFound")
+        case "episode_not_found": return L10n("macChrome.errorEpisodeNotFound")
+        case "episode_unavailable": return L10n("macChrome.errorEpisodeUnavailable")
         case "podcast_search_timeout", "podcast_search_upstream_failed": return L10n("macChrome.errorPodcastSearchFailed")
         case "podcast_feed_fetch_failed", "podcast_feed_parse_failed": return L10n("macChrome.errorPodcastFeedFailed")
         default: break
