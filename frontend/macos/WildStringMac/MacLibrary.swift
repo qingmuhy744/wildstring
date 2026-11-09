@@ -150,6 +150,7 @@ struct MacSettingsView: View {
                 Picker(L10n("settings.language"), selection: Binding(
                     get: { InterfaceLanguage(preference: language) },
                     set: { selected in
+                        language = selected.rawValue
                         InterfaceLanguage.store(selected.rawValue)
                         if let client = session.client {
                             Task { _ = try? await client.updateLanguage(selected.rawValue) }
