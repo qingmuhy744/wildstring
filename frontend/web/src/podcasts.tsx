@@ -145,12 +145,6 @@ export interface DownloadQueueInfo {
   failed: DownloadTaskItem[];
 }
 
-const PRESET_PODCASTS = [
-  { name: '声东击西', url: 'https://etw.fm/rss' },
-  { name: '疯投圈', url: 'https://crazy.capital/feed' },
-  { name: 'NPR News Now', url: 'https://feeds.npr.org/500005/podcast.xml' },
-];
-
 function formatDuration(seconds: number): string {
   if (!seconds || seconds <= 0) return '';
   const h = Math.floor(seconds / 3600);
@@ -250,7 +244,6 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
 
   // Download queue state
   const [queueInfo, setQueueInfo] = useState<DownloadQueueInfo | null>(null);
-  const [queueError, setQueueError] = useState<string | null>(null);
 
   // Context menu state
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
@@ -279,7 +272,6 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
   );
   const [sortOrder, setSortOrder] = useState<'desc' | 'asc'>('desc');
   const [filterMode, setFilterMode] = useState<'all' | 'unplayed' | 'favorited'>('all');
-  const filterUnplayed = filterMode === 'unplayed';
   const [episodeScope, setEpisodeScope] = useState<EpisodeScope>(() => readEpisodeScope(userId));
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -777,9 +769,8 @@ export const PodcastsPage: React.FC<PodcastsProps> = ({
     try {
       const q = await api<DownloadQueueInfo>('/podcasts/downloads/queue');
       setQueueInfo(q);
-      setQueueError(null);
-    } catch (err) {
-      setQueueError(err instanceof Error ? err.message : t('podcasts.queueLoadFailed'));
+    } catch {
+      // Polling only refreshes completed downloads; keep the last known queue on failure.
     }
   };
 

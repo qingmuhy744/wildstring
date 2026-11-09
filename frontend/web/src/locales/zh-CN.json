@@ -3440,7 +3440,6 @@
     "publisherLabel": "出品方：{{name}}",
     "publisherSaved": "出品方归属已保存",
     "publisherShowsLoadFailed": "出品方节目加载失败",
-    "queueLoadFailed": "下载状态加载失败，请重试",
     "queuePlaybackStarted": "开始播放待播清单",
     "queueStateAdd": "加入待播清单",
     "queueStatePlaying": "当前正在播放该单集",

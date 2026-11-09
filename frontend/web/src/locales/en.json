@@ -3440,7 +3440,6 @@
     "publisherLabel": "Publisher: {{name}}",
     "publisherSaved": "Publisher affiliation saved",
     "publisherShowsLoadFailed": "Couldn't load publisher shows",
-    "queueLoadFailed": "Couldn't load download status. Try again.",
     "queuePlaybackStarted": "Playing your queue",
     "queueStateAdd": "Add to queue",
     "queueStatePlaying": "Now playing this episode",
