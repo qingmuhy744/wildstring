@@ -6376,23 +6376,6 @@
         }
       }
     },
-    "macAssistant.librarySearch": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Library Search"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "曲库检索"
-          }
-        }
-      }
-    },
     "macAssistant.loadMore": {
       "extractionState": "manual",
       "localizations": {
@@ -6457,23 +6440,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "曲库中的匹配歌曲"
-          }
-        }
-      }
-    },
-    "macAssistant.modelAssistant": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Model Assistant"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "模型助手"
           }
         }
       }
@@ -6750,23 +6716,6 @@
         }
       }
     },
-    "macAssistant.subtitle": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Find the sounds you want to hear from your library"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "从你的曲库，找到想听的声音"
-          }
-        }
-      }
-    },
     "macAssistant.suggestLocal1": {
       "extractionState": "manual",
       "localizations": {
@@ -6886,23 +6835,6 @@
         }
       }
     },
-    "macAssistant.useSelectedConnection": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Using selected model connection"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "使用所选模型连接"
-          }
-        }
-      }
-    },
     "macAssistant.user": {
       "extractionState": "manual",
       "localizations": {
@@ -6943,13 +6875,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Search the library directly by title, artist, or album. Select a model connection above to describe moods, scenes, or playlist requests in natural language."
+            "value": "Choose a model connection below to describe moods, scenes, or playlists in natural language."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "输入歌名、艺人或专辑，直接检索当前曲库。选择上方的模型连接后，可以用自然语言描述心情、场景或歌单要求。"
+            "value": "在输入框下方选择模型连接，可以用自然语言描述心情、场景或歌单要求。"
           }
         }
       }
@@ -6960,13 +6892,13 @@
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Describe your ideas, and the assistant will find real tracks and explain why. Generated playlists can be auditioned before confirming and saving."
+            "value": "Describe a mood or scene. The assistant finds real tracks and explains why."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "描述你的想法，助手会查找真实曲目并说明依据。生成的歌单可先试听，再确认保存。"
+            "value": "描述心情或场景，助手会查找真实曲目并说明依据。"
           }
         }
       }
@@ -18969,23 +18901,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "野弦"
-          }
-        }
-      }
-    },
-    "macRoot.brandTagline": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Personal Sound Archive"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "个人声音档案"
           }
         }
       }

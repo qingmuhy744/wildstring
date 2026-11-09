@@ -75,6 +75,7 @@ enum MacTheme {
     static let accentSoft = adaptive(light: 0xDDE2D0, dark: 0x2B2521)
     static let olive = adaptive(light: 0x57492F, dark: 0xB4C09E)
     static let oliveSoft = adaptive(light: 0xE4E7DB, dark: 0x2E2924)
+    static let success = adaptive(light: 0x496332, dark: 0xB2C69A)
     static let onAccent = adaptive(light: 0xFFFAF3, dark: 0x211B17)
 
     static let cardRadius: CGFloat = 14

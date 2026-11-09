@@ -15,12 +15,12 @@ struct MacAssistantView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            conversationHeader
             messages
             composer
         }
         .background(MacTheme.canvas)
-        .navigationTitle(L10n("macAssistant.title"))
+        .navigationTitle(model.detail?.title ?? L10n("macAssistant.title"))
+        .toolbar { conversationActions }
         .task { await model.prepare() }
         .task(id: model.pollingID) { await model.poll() }
         .sheet(
@@ -72,66 +72,67 @@ struct MacAssistantView: View {
         }
     }
 
-    private var conversationHeader: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 12) {
-                Image(systemName: "sparkles")
-                    .font(.system(size: 18))
-                    .foregroundStyle(MacTheme.accentDeep)
-                    .frame(width: 38, height: 38)
-                    .background(MacTheme.accentSoft, in: RoundedRectangle(cornerRadius: 12))
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(model.detail?.title ?? L10n("macAssistant.title"))
-                        .font(MacTheme.section(16)).foregroundStyle(MacTheme.ink).lineLimit(2)
-                    Text(L10n("macAssistant.subtitle"))
-                        .font(MacTheme.caption).foregroundStyle(MacTheme.muted)
-                }
-                Spacer(minLength: 8)
-                HStack(spacing: 6) {
-                    Button { showHistory.toggle() } label: {
-                        Label(L10n("macAssistant.history"), systemImage: "clock.arrow.circlepath").frame(width: 30, height: 30)
-                    }
-                    .help(L10n("macAssistant.history"))
-                    .popover(isPresented: $showHistory, arrowEdge: .bottom) { history }
-                    Button {
-                        model.newConversation()
-                        inputFocused = true
-                    } label: {
-                        Label(L10n("macAssistant.newConversation"), systemImage: "square.and.pencil").frame(width: 30, height: 30)
-                    }
-                    .disabled(model.busy).help(L10n("macAssistant.newConversation"))
-                    Button { Task { await model.refresh() } } label: {
-                        Label(L10n("macAssistant.refresh"), systemImage: "arrow.clockwise").frame(width: 30, height: 30)
-                    }
-                    .disabled(model.isLoading || model.isSending).help(L10n("macAssistant.refresh"))
-                }
-                .labelStyle(.iconOnly)
-                .buttonStyle(.plain)
-                .foregroundStyle(MacTheme.muted)
+    @ToolbarContentBuilder private var conversationActions: some ToolbarContent {
+        ToolbarItemGroup(placement: .primaryAction) {
+            Button { showHistory.toggle() } label: {
+                Label(L10n("macAssistant.history"), systemImage: "clock.arrow.circlepath")
             }
-            HStack(spacing: 10) {
-                Text(L10n("macAssistant.retrievalMode")).font(MacTheme.micro).foregroundStyle(MacTheme.muted)
-                Picker(L10n("macAssistant.retrievalMode"), selection: $model.connectionID) {
-                    Text(L10n("macAssistant.localRetrieval")).tag("local")
-                    ForEach(model.connections.filter { $0.enabled || $0.id == model.connectionID }) {
-                        connection in
-                        Text("\(connection.name) · \(connection.model)")
-                            .tag(connection.id).disabled(!connection.enabled)
-                    }
-                    if model.connectionID != "local", model.selectedConnection == nil {
-                        Text(L10n("macAssistant.previousConnectionUnavailable")).tag(model.connectionID)
-                    }
-                }
-                .labelsHidden().controlSize(.small)
-                .frame(maxWidth: 320).disabled(model.busy)
-                Spacer(minLength: 0)
+            .help(L10n("macAssistant.history"))
+            .popover(isPresented: $showHistory, arrowEdge: .bottom) { history }
+            Button {
+                model.newConversation()
+                inputFocused = true
+            } label: {
+                Label(L10n("macAssistant.newConversation"), systemImage: "square.and.pencil")
             }
+            .disabled(model.busy).help(L10n("macAssistant.newConversation"))
+            Button { Task { await model.refresh() } } label: {
+                Label(L10n("macAssistant.refresh"), systemImage: "arrow.clockwise")
+            }
+            .disabled(model.isLoading || model.isSending).help(L10n("macAssistant.refresh"))
         }
-        .macPanel(padding: 18, radius: 18)
-        .frame(maxWidth: 876)
-        .padding(.horizontal, 24)
-        .padding(.top, 18)
-        .frame(maxWidth: .infinity)
+    }
+
+    /// Retrieval mode lives in the composer so the mode and its input read as one unit.
+    private var retrievalPicker: some View {
+        Menu {
+            Picker(L10n("macAssistant.retrievalMode"), selection: $model.connectionID) {
+                Text(L10n("macAssistant.localRetrieval")).tag("local")
+                ForEach(model.connections.filter { $0.enabled || $0.id == model.connectionID }) {
+                    connection in
+                    Text("\(connection.name) · \(connection.model)")
+                        .tag(connection.id).disabled(!connection.enabled)
+                }
+                if model.connectionID != "local", model.selectedConnection == nil {
+                    Text(L10n("macAssistant.previousConnectionUnavailable")).tag(model.connectionID)
+                }
+            }
+            .pickerStyle(.inline)
+            .labelsHidden()
+        } label: {
+            // Explicit label colours: system menu styles tint text with the accent colour.
+            HStack(spacing: 4) {
+                Text(retrievalTitle).lineLimit(1)
+                Image(systemName: "chevron.up.chevron.down").font(.system(size: 9))
+            }
+            .font(MacTheme.caption)
+            .foregroundStyle(MacTheme.muted)
+            .contentShape(Rectangle())
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .disabled(model.busy)
+        .help(model.connectionID == "local" ? L10n("macAssistant.localNoQuota") : L10n("macAssistant.retrievalMode"))
+        .accessibilityLabel(L10n("macAssistant.retrievalMode"))
+        .accessibilityValue(retrievalTitle)
+    }
+
+    private var retrievalTitle: String {
+        if model.connectionID == "local" { return L10n("macAssistant.localRetrieval") }
+        if let connection = model.selectedConnection { return "\(connection.name) · \(connection.model)" }
+        return L10n("macAssistant.previousConnectionUnavailable")
     }
 
     private var messages: some View {
@@ -226,7 +227,7 @@ struct MacAssistantView: View {
             Button(suggestion) {
                 model.input = suggestion
                 inputFocused = true
-            }.buttonStyle(.bordered)
+            }.buttonStyle(MacSuggestionChipStyle())
         }
     }
 
@@ -284,10 +285,11 @@ struct MacAssistantView: View {
                 .focused($inputFocused)
                 .disabled(model.isSending || model.running)
                 .padding(2)
-                HStack {
-                    Label(model.connectionID == "local" ? L10n("macAssistant.librarySearch") : L10n("macAssistant.modelAssistant"),
-                        systemImage: model.connectionID == "local" ? "magnifyingglass" : "sparkles")
+                HStack(spacing: 6) {
+                    Image(systemName: model.connectionID == "local" ? "magnifyingglass" : "sparkles")
                         .font(MacTheme.caption).foregroundStyle(MacTheme.muted)
+                        .accessibilityHidden(true)
+                    retrievalPicker
                     Spacer()
                     Button {
                         Task { await model.send() }
@@ -308,11 +310,11 @@ struct MacAssistantView: View {
             .macPanel(padding: 16, radius: 18, fill: MacTheme.raised)
             .shadow(color: .black.opacity(0.03), radius: 10, y: 4)
             HStack {
-                Text(
-                    model.connectionID == "local"
-                        ? L10n("macAssistant.localNoQuota")
-                        : model.selectedConnection?.dailyCallsRemaining.map { L10n("macAssistant.dailyCallsRemaining", $0) } ?? L10n("macAssistant.useSelectedConnection")
-                )
+                if model.connectionID != "local",
+                    let remaining = model.selectedConnection?.dailyCallsRemaining
+                {
+                    Text(L10n("macAssistant.dailyCallsRemaining", remaining))
+                }
                 Spacer()
                 Text(model.input.count > 8_000 ? L10n("macAssistant.inputTooLong") : L10n("macAssistant.shortcutHint"))
             }
@@ -373,6 +375,20 @@ struct MacAssistantView: View {
             }
         }
         .frame(width: 350, height: 420)
+    }
+}
+
+/// Neutral capsule for starter prompts; accent colour stays reserved for primary actions.
+private struct MacSuggestionChipStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(MacTheme.caption)
+            .foregroundStyle(MacTheme.ink)
+            .padding(.horizontal, 12).padding(.vertical, 6)
+            .background(MacTheme.raised, in: Capsule())
+            .overlay(Capsule().strokeBorder(MacTheme.border))
+            .contentShape(Capsule())
+            .opacity(configuration.isPressed ? 0.7 : 1)
     }
 }
 

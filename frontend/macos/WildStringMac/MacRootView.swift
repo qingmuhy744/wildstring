@@ -488,14 +488,9 @@ private struct MacShellView: View {
                         sidebarAccentSoft,
                         in: RoundedRectangle(cornerRadius: 9, style: .continuous)
                     )
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(L10n("macRoot.brandName"))
-                        .font(MacTheme.display(18))
-                        .foregroundStyle(sidebarInk)
-                    Text(L10n("macRoot.brandTagline"))
-                        .font(MacTheme.micro)
-                        .foregroundStyle(sidebarFaint)
-                }
+                Text(L10n("macRoot.brandName"))
+                    .font(MacTheme.display(18))
+                    .foregroundStyle(sidebarInk)
             }
             .padding(.horizontal, 18)
             .padding(.top, 18)
@@ -557,7 +552,7 @@ private struct MacShellView: View {
 
     private func connectionColor(_ status: MacConnectionMonitor.Status) -> Color {
         switch status {
-        case .online: return MacTheme.olive
+        case .online: return MacTheme.success
         case .slow: return MacTheme.accentDeep
         case .offline: return .red.opacity(0.9)
         case .checking: return sidebarFaint
@@ -595,17 +590,21 @@ private struct MacShellView: View {
                 }
             }
         } label: {
-            Text(session.serverLabel)
-                .font(MacTheme.section(12))
-                .lineLimit(1)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            // Explicit label colours: the system menu styles tint text with the accent colour.
+            HStack(spacing: 6) {
+                Text(session.serverLabel)
+                    .font(MacTheme.section(12))
+                    .foregroundStyle(sidebarInk)
+                    .lineLimit(1)
+                Image(systemName: "chevron.up.chevron.down").font(.system(size: 9))
+                    .foregroundStyle(sidebarFaint)
+                Spacer(minLength: 0)
+            }
+            .contentShape(Rectangle())
         }
-        .menuStyle(.borderlessButton)
+        .menuStyle(.button)
+        .buttonStyle(.plain)
         .menuIndicator(.hidden)
-        .overlay(alignment: .trailing) {
-            Image(systemName: "chevron.up.chevron.down").font(.system(size: 9))
-                .foregroundStyle(sidebarFaint).allowsHitTesting(false)
-        }
         .disabled(session.isBusy)
         .help(L10n("macRoot.serverMenuHelp"))
         .accessibilityLabel(L10n("macRoot.serverMenuAccessibility"))

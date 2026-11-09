@@ -67,6 +67,7 @@ struct MacTransportBar: View {
     }
 
     private var trailingTimeText: String {
+        guard playback.currentItem != nil else { return macPlaybackClock(0) }
         guard effectiveDuration > 0 else { return "—:—" }
         if isPodcast {
             let remaining = max(0, effectiveDuration - playback.currentTime)
@@ -174,17 +175,13 @@ struct MacTransportBar: View {
                         .buttonStyle(.plain)
                         .help(playback.volume <= 0.01 ? L10n("macPlayer.unmute") : L10n("macPlayer.mute"))
 
-                        Slider(
+                        MacVolumeSlider(
                             value: Binding(
                                 get: { Double(playback.volume) },
                                 set: { playback.volume = Float($0) }
-                            ),
-                            in: 0...1
+                            )
                         )
-                        .controlSize(.mini)
                         .frame(width: 72)
-                        .tint(MacTheme.muted)
-                        .accessibilityLabel(L10n("macPlayer.volume"))
                     }
                     .padding(.trailing, 4)
 
@@ -194,7 +191,7 @@ struct MacTransportBar: View {
                     transportButton("list.number", help: L10n("macPlayer.queue"), active: session.showQueue) { session.showQueue.toggle() }
                     transportButton("arrow.up.left.and.arrow.down.right", help: L10n("macPlayer.fullscreen")) { session.showFullscreen = true }
                     if !isPodcast {
-                        transportButton("captions.bubble", help: session.desktopLyricsVisible ? L10n("macPlayer.closeDesktopLyrics") : L10n("macPlayer.openDesktopLyrics"),
+                        transportButton("macwindow", help: session.desktopLyricsVisible ? L10n("macPlayer.closeDesktopLyrics") : L10n("macPlayer.openDesktopLyrics"),
                             active: session.desktopLyricsVisible) {
                             NotificationCenter.default.post(name: .wildstringShowDesktopLyrics, object: nil)
                         }
@@ -219,13 +216,16 @@ struct MacTransportBar: View {
         }
     }
 
+    /// Panels that work without a track (lyrics, queue, desktop lyrics) stay enabled when idle.
     private func transportButton(
         _ symbol: String,
         help: String,
         active: Bool = false,
         action: @escaping () -> Void
     ) -> some View {
-        Button(action: action) {
+        let isDisabled = playback.currentItem == nil
+            && !["quote.bubble", "list.number", "macwindow"].contains(symbol)
+        return Button(action: action) {
             Image(systemName: symbol)
                 .font(.system(size: 16))
                 .foregroundStyle(active ? MacTheme.accentDeep : MacTheme.muted)
@@ -233,7 +233,62 @@ struct MacTransportBar: View {
         }
         .buttonStyle(.borderless)
         .help(help)
-        .disabled(playback.currentItem == nil && symbol != "quote.bubble" && symbol != "list.number" && symbol != "captions.bubble")
+        .disabled(isDisabled)
+        .opacity(isDisabled ? 0.4 : 1)
+    }
+}
+
+/// Thin volume control drawn like `PlaybackSlider`; the system slider's white thumb
+/// disappears on the paper-coloured transport bar and cannot be restyled.
+struct MacVolumeSlider: View {
+    @Binding var value: Double
+    private let step = 0.05
+    private let thumbSize: CGFloat = 12
+
+    var body: some View {
+        GeometryReader { geo in
+            let width = max(1, geo.size.width)
+            let filled = width * CGFloat(min(1, max(0, value)))
+            ZStack(alignment: .leading) {
+                Capsule().fill(MacTheme.border).frame(height: 4)
+                Capsule().fill(MacTheme.muted).frame(width: filled, height: 4)
+                Circle()
+                    .fill(MacTheme.raised)
+                    .frame(width: thumbSize, height: thumbSize)
+                    .overlay(Circle().strokeBorder(MacTheme.muted, lineWidth: 2))
+                    .offset(x: min(max(0, filled - thumbSize / 2), max(0, width - thumbSize)))
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0).onChanged { drag in
+                    value = min(1, max(0, Double(drag.location.x / width)))
+                }
+            )
+        }
+        .frame(height: 18)
+        .focusable()
+        .onMoveCommand { direction in
+            switch direction {
+            case .left, .down: adjust(-step)
+            case .right, .up: adjust(step)
+            default: break
+            }
+        }
+        .accessibilityElement()
+        .accessibilityLabel(L10n("macPlayer.volume"))
+        .accessibilityValue("\(Int((value * 100).rounded()))%")
+        .accessibilityAdjustableAction { direction in
+            switch direction {
+            case .increment: adjust(step)
+            case .decrement: adjust(-step)
+            @unknown default: break
+            }
+        }
+    }
+
+    private func adjust(_ delta: Double) {
+        value = min(1, max(0, value + delta))
     }
 }
 
