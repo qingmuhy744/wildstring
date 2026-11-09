@@ -26,7 +26,7 @@ def follow(database, user_id, podcast_id, followed, *, admitted=False):
     with database.connect(write=True) as db:
         db.execute("BEGIN IMMEDIATE")
         if db.execute("SELECT id FROM podcasts WHERE id=?", (podcast_id,)).fetchone() is None:
-            raise HTTPException(404, "播客未找到")
+            raise HTTPException(404, "podcast_not_found")
         if not admitted:
             require_programme(db, user_id, podcast_id)
         if followed:

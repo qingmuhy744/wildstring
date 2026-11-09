@@ -37,6 +37,17 @@ def statistics(repository, scope="personal", period="30d"):
     }
 
 
+def is_english_user(repository) -> bool:
+    try:
+        with repository.database.connect() as connection:
+            row = connection.execute(
+                "SELECT language FROM users WHERE id=?", (repository.database.user_id,)
+            ).fetchone()
+        return bool(row and row["language"] == "en")
+    except Exception:
+        return False
+
+
 def rankings(repository, scope="personal", period="30d", metric="plays", limit=20, offset=0):
     stats = statistics(repository, scope, period)
     field = "play_count" if metric == "plays" else "listened_ms"
@@ -44,9 +55,18 @@ def rankings(repository, scope="personal", period="30d", metric="plays", limit=2
         stats,
         key=lambda identity: (-stats[identity][field], -stats[identity]["listened_ms"], identity),
     )
-    reason = ("你的" if scope == "personal" else "曲库用户汇总的") + (
-        "累计收听统计" if period == "all" else f"近{period[:-1]}天实际收听记录"
-    )
+    if is_english_user(repository):
+        prefix = "Your " if scope == "personal" else "Library-wide "
+        window = (
+            "all-time listening stats"
+            if period == "all"
+            else f"listening in the last {period[:-1]} days"
+        )
+        reason = prefix + window
+    else:
+        reason = ("你的" if scope == "personal" else "曲库用户汇总的") + (
+            "累计收听统计" if period == "all" else f"近{period[:-1]}天实际收听记录"
+        )
     items = []
     for index, identity in enumerate(identities[offset : offset + limit], start=offset + 1):
         track = repository.track(identity)
