@@ -36,6 +36,18 @@ private fun externalSourceLabels(): Map<String, String> = linkedMapOf(
     "lastfm_tags" to AppLanguage.string(R.string.ext_music_src_lastfm_tags),
     "lastfm_artists" to AppLanguage.string(R.string.ext_music_src_lastfm_artists)
 )
+private fun localizeExternalSummary(summary: String): String = when (summary) {
+    "Last.fm 歌曲相似关系" -> AppLanguage.string(R.string.ext_music_src_lastfm_similar)
+    "Last.fm 公共热门榜" -> AppLanguage.string(R.string.ext_music_src_lastfm_charts)
+    "Last.fm 标签热门歌曲" -> AppLanguage.string(R.string.ext_music_src_lastfm_tags)
+    "Last.fm 艺人关联与热门歌曲" -> AppLanguage.string(R.string.ext_music_src_lastfm_artists)
+    else -> summary
+}
+private fun localizeExternalReason(reason: String): String {
+    if (!reason.endsWith("；尚未与本库精确匹配")) return reason
+    val prefix = reason.removeSuffix("；尚未与本库精确匹配").split(" / ").joinToString(" / ") { localizeExternalSummary(it) }
+    return AppLanguage.string(R.string.ext_music_unmatched_reason, prefix)
+}
 private fun musicDate(value: String?): String? = value?.let { runCatching { DateTimeFormatter.ofPattern(AppLanguage.string(R.string.ext_music_date_format), java.util.Locale.getDefault()).withZone(ZoneId.systemDefault()).format(Instant.parse(it)) }.getOrNull() }
 internal fun musicSourceUrl(value: String?): String? = value?.takeIf {
     runCatching { val uri = java.net.URI(it); uri.scheme == "https" && !uri.host.isNullOrBlank() && uri.userInfo == null }.getOrDefault(false)
@@ -85,8 +97,8 @@ internal fun musicSourceUrl(value: String?): String? = value?.takeIf {
                     Text(item.name, style = MaterialTheme.typography.titleMedium)
                     Text(item.artists.joinToString(" / "), style = MaterialTheme.typography.bodyMedium)
                     item.album?.takeIf(String::isNotBlank)?.let { Text(stringResource(R.string.ext_music_album_prefix, it), style = MaterialTheme.typography.bodySmall) }
-                    Text(item.reason, style = MaterialTheme.typography.bodySmall)
-                    item.evidence.forEach { Text("${externalSourceLabels()[it.source] ?: recommendationSource(it.source)} · ${it.summary}", style = MaterialTheme.typography.labelSmall) }
+                    Text(localizeExternalReason(item.reason), style = MaterialTheme.typography.bodySmall)
+                    item.evidence.forEach { Text("${externalSourceLabels()[it.source] ?: recommendationSource(it.source)} · ${localizeExternalSummary(it.summary)}", style = MaterialTheme.typography.labelSmall) }
                     Text(if (item.localTrack == null) stringResource(R.string.ext_music_external_unimported) else stringResource(R.string.ext_music_in_library), style = MaterialTheme.typography.labelMedium)
                     Row {
                         TextButton({ clipboard?.setPrimaryClip(ClipData.newPlainText("track", item.artists.joinToString(" / ") + " - " + item.name)); action.message = AppLanguage.string(R.string.ext_music_copied_artist_title) }) { Text(stringResource(R.string.ext_music_copy_title)) }
