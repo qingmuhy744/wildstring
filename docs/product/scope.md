@@ -1,11 +1,11 @@
 # 产品范围
 
-更新日期：2026-11-07。本文只保留定位、能力边界与后置清单；各批次的实现与验证记录见 [范围变更记录](scope-history.md)，各版本发布说明见 `docs/releases/`。
+更新日期：2026-11-10。本文只保留定位、能力边界与后置清单；各批次的实现与验证记录见 [范围变更记录](scope-history.md)，各版本发布说明见 `docs/releases/`。
 
 ## 当前状态
 
-- 数据库 schema 50（`SCHEMA_VERSION`），最近发布 0.8.7，开发分支为 0.8.8（[发布说明](../releases/v0.8.7.md)）。
-- 开发分支进行中：[播客待播列表、新集自动待播与单集收藏](../../contracts/podcast-queue.md)、[库存储与播客共享资源清理防护](../../contracts/storage-and-podcast-resources.md)、[歌词视图跨端契约](../../contracts/lyric-view.md)。统一待播列表、新集自动待播三选项、单集级收藏及服务端音频防清理保护跨端对齐；歌词视图的验证边界见契约第 6 节。
+- 数据库 schema 50（`SCHEMA_VERSION`），最近发布 0.8.8（[发布说明](../releases/v0.8.8.md)）。
+- 0.8.8 已交付[播客待播列表、新集自动待播与单集收藏](../../contracts/podcast-queue.md)、[库存储与播客共享资源清理防护](../../contracts/storage-and-podcast-resources.md)与[歌词视图跨端契约](../../contracts/lyric-view.md)；四端界面语言、Warm Carbon 暗色与 Android 卡带播放器同批发布，验证边界见 [0.8.8 发布说明](../releases/v0.8.8.md)。
 - 实现状态以对应契约、发布说明和 [范围变更记录](scope-history.md) 为准；文档中的计划不代表已实现。
 
 ## 定位
