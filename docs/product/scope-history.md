@@ -2,6 +2,8 @@
 
 按批次记录各版本的实现与验证边界，新条目放最前。当前产品范围见 [scope.md](scope.md)；此处内容是历史，不代表当前状态，当前数据库 schema 以 `backend/src/wildstring/database.py` 的 `SCHEMA_VERSION` 为准。
 
+当前开发分支补齐四端剩余硬编码文案、服务端英文文案与播客错误码：播客与出品方接口改用稳定错误码（`podcast_not_found`、`podcast_publisher_not_found`、`podcast_publisher_conflict`、`podcast_playback_settings_not_found`、`episode_not_found`、`episode_unavailable`），四端错误映射同步；站内通知的标题、摘要与动作，Telegram 验证码与测试消息，推荐理由与发现歌单默认标题，Last.fm 证据说明，歌词质量等级，巡检结论与规则摘要，播客下载队列错误在英文界面显示英文。服务端只在账号显式选择 `en` 时生成英文，`auto` 与 `zh` 仍返回中文、由客户端映射兜底；Telegram 按账号语言一次性生成。macOS 助手把历史／新对话／刷新移入窗口工具栏、检索方式并入输入区，侧栏去掉品牌标语，播放条改用自绘音量滑杆；Android 浅色 Material 调色板对齐 [DESIGN.md](../../DESIGN.md) §3.1 Warm Paper，并收紧发现页卡片与间距。验证：`make check` 全绿；受影响的 backend pytest 230 项、Playwright 19 个 spec（桌面与手机；一次登录夹具偶发失败，单独重跑该 spec 9 项通过）、`make ios-test` 105 项、`make macos-test` 37 项、`make android-test` 通过（Gradle 判定输入未变，任务均为 up-to-date）。边界：未做逐页视觉矩阵、真机与 `make ci`，发布另行核验；界面语言约定见[界面语言](../../contracts/interface-language.md)，调色板记录见[暗色主题契约](../../contracts/dark-theme.md)。
+
 当前开发分支新增播客稍后听、待播队列与新集处理的统一契约：订阅与自动入队解耦，按服务端首次见到的 guid 建立基线，待播队列与稍后听由服务端按用户持久化并跨设备同步，自动续播降级为客户端策略、不写队列。后端为 schema 49。Web、Android、macOS 与 iOS 已接独立端点。Web 播客播放测试 30 项通过；Android 队列单测 24 项通过；Apple 队列与续播单测 18 项通过。跨设备冲突、视觉矩阵、真机与发布未覆盖。实现与验证边界见[播客稍后听、待播队列与新集处理](../../contracts/podcast-queue.md)。
 
 当前开发分支新增[歌词视图跨端契约](../../contracts/lyric-view.md)：由歌词内容决定可滚动区间，当前行在区间内尽量居中，歌曲开头从上方显示、短歌词整块居中且不滚动；只高亮播放进度所在行，已播与未播行统一弱化；播放中手动浏览停止约 2 秒自动恢复跟随，暂停挂起，触屏与键鼠共用状态机。Web 全屏页、Android、macOS 与 iOS 都已按该规则改代码。Web 上一轮有桌面与触屏自动化测试；Android 仪器测试、Mac／iOS 构建和四端截图本批未重跑。实现与验证边界见契约第 6 节。

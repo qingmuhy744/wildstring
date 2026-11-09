@@ -35,7 +35,7 @@
 
 | 端 | 状态 | 需要改的位置 |
 | --- | --- | --- |
-| Android | 已按规范实现并提交，**未做截图验收**：只在一台真机看过发现页，没有逐页走查 | `ui/WildStringApp.kt` 的 `classicDarkColors`；`ui/PlaybackVisual.kt` 黑胶；`res/values/styles.xml` 窗口背景 |
+| Android | 暗色已按规范实现并提交；2026-11-09 同轮把 `classicLightColors` 从旧橙／绿值对齐到 `DESIGN.md` §3.1 Warm Paper，并在仪器测试里新增深色发现页截图采集。**仍未做逐页截图走查**：只在一台真机看过发现页 | `ui/Appearance.kt` 的 `classicLightColors`；`ui/WildStringApp.kt` 的 `classicDarkColors`；`ui/PlaybackVisual.kt` 黑胶；`res/values/styles.xml` 窗口背景；`androidTest/.../SettingsExperienceTest.kt` |
 | Web | 已实现（2026-11-09）：令牌、散落暗色值、黑胶盘面/纹路/唱臂/枢轴、`theme-color` 全部换暖；`podcast-player.spec.ts` 两处旧色断言同步更新 | `src/style.css`、`src/theme.tsx`、`index.html`、`src/workspace.css`、`src/podcasts.css`、`src/completion.css`、`src/browse.css`、`src/desktop-help.css`、`src/podcast-player.css`、`src/playback-style.css`、`tests/podcast-player.spec.ts` |
 | macOS | 已实现（2026-11-09）：`MacTheme` 与 `MacRootView` 侧栏的暗色分量全量换暖；黑胶盘面、纹路、唱臂、唱头、枢轴同步 §6.7 | `WildStringMac/MacChrome.swift`、`WildStringMac/MacRootView.swift`、`WildStringMac/MacFullscreen.swift` |
 | iOS | 已实现（2026-11-09）：仅播放器自定义绘制面（背景画布、黑胶盘面/纹路/轴心）换暖；列表等系统色界面保持 iOS 原生外观，未引入令牌 | `WildString/NowPlayingView.swift` |
@@ -69,6 +69,7 @@
 - 未覆盖：Android 仍无逐页截图走查；iOS 未做模拟器渲染截图（仅单元测试 + 编译）；Web 的 Loading/Error 边界状态、播放器样式切换（封面/磁带）与真实播放走查未逐项执行；`make ci` 未跑（发布前需要）。
 - 实现方式备忘：Web 在令牌精确映射之外，对残留的暗色橄榄色相写死值做了保明度、色相归 30° 的程序化转换（限暗色作用域，饱和度封顶 22%），使历史漂移的表面/边框色保持层级地并入暖色族；磁带外壳随动换暖，浅色作用域与语义绿（成功/在线）不参与。
 - 去硬编码（2026-11-09 第二轮）：Web 补齐 `--faint` 双主题令牌，`podcast-*`/`workspace-*`/`--paper` 别名定义改为引用共享令牌，组件规则中与令牌等值的写死色值替换为 `var()`（`var()` 回退值、深色遮罩 `#181614aa/bb`、黑胶与磁带等主题无关的绘制面、无对应令牌的漂移色除外）；macOS `MacRootView` 侧栏色板改为别名 `MacTheme`（仅 `sidebarFaint` 因亮色值有意不同而保留本地定义）；iOS 新增 `Color.playerCanvas` 动态令牌供播放器画布使用。`make check`、`make test-affected`（含浅深色断言）与浅深截图对照确认渲染不变。
+- Android 浅色与截图采集（2026-11-09 第三轮）：`ui/Appearance.kt` 的 `classicLightColors` 由旧橙／绿改为 §3.1 Warm Paper 令牌，暗色 `classicDarkColors` 未改；`SettingsExperienceTest` 新增深色发现页截图采集，仍非逐页走查。
 
 ## 6. 已知风险
 
