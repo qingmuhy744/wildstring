@@ -14,8 +14,8 @@ public struct Track: Decodable, Equatable, Sendable, Identifiable {
 
     public var unavailableReason: String? {
         switch status {
-        case "missing": return "文件缺失"
-        case "unreadable": return "文件无法读取"
+        case "missing": return KitL10n("kit.track.missing")
+        case "unreadable": return KitL10n("kit.track.unreadable")
         default: return nil
         }
     }

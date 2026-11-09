@@ -6,7 +6,9 @@ import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
 import android.os.Build
 import androidx.core.content.ContextCompat
+import com.wildstring.app.AppLanguage
 import com.wildstring.app.BuildConfig
+import com.wildstring.app.R
 import java.io.File
 import java.security.MessageDigest
 import kotlinx.coroutines.*
@@ -75,7 +77,7 @@ class AppUpdater private constructor(private val context: Context) {
                 preferences.edit().putString("metadata", text).putString("etag", metadata.etag).putLong("checked", checkedAt).apply()
                 val newer = UpdatePolicy.isNewer(release.version, BuildConfig.VERSION_NAME)
                 mutable.value = UpdateState(if (newer) UpdatePhase.Available else UpdatePhase.Latest, if (newer) release else null,
-                    if (!newer) "已经是最新稳定版本。" else null, checkedAt = checkedAt,
+                    if (!newer) AppLanguage.string(R.string.app_upd_already_latest) else null, checkedAt = checkedAt,
                     prompt = !manual && newer && preferences.getString("dismissed", null) != release.tag)
             } catch (_: CancellationException) { throw CancellationException() }
             catch (error: Exception) { mutable.value = before.copy(phase = UpdatePhase.Error, message = updateMessage(error)) }
@@ -88,11 +90,11 @@ class AppUpdater private constructor(private val context: Context) {
     @Synchronized fun requestDownload() {
         val release = mutable.value.release ?: return
         if (downloading || requested != null || mutable.value.phase == UpdatePhase.Checking) return
-        if (context.packageName != "com.wildstring.app") { mutable.value = mutable.value.copy(message = "调试包与正式包相互隔离，请从 GitHub Releases 安装正式版本。"); return }
+        if (context.packageName != "com.wildstring.app") { mutable.value = mutable.value.copy(message = AppLanguage.string(R.string.app_upd_debug_build_isolation)); return }
         requested = release
         mutable.value = mutable.value.copy(phase = UpdatePhase.Downloading, message = null, downloaded = 0, total = release.apk.size, prompt = false)
         try { ContextCompat.startForegroundService(context, Intent(context, UpdateDownloadService::class.java)) }
-        catch (_: Exception) { requested = null; mutable.value = mutable.value.copy(phase = UpdatePhase.Error, message = "无法启动更新下载，请回到前台后重试。") }
+        catch (_: Exception) { requested = null; mutable.value = mutable.value.copy(phase = UpdatePhase.Error, message = AppLanguage.string(R.string.app_upd_cannot_start_download)) }
     }
     suspend fun download(progress: (Long, Long) -> Unit) = withContext(Dispatchers.IO) {
         // Claiming a download and resetting its client must be atomic with cancellation.
@@ -114,11 +116,11 @@ class AppUpdater private constructor(private val context: Context) {
             UpdatePolicy.verifyPackage(ApkVerifier.archive(context, partial), ApkVerifier.installed(context), release)
             downloadClient.ensureActive()
             if (!partial.renameTo(ready)) throw UpdateFailure("storage_failed")
-            readyHash = expected; mutable.value = mutable.value.copy(phase = UpdatePhase.Ready, message = "安装包已校验。点击安装后，仍需在系统界面确认。")
-        } catch (_: CancellationException) { partial.delete(); mutable.value = mutable.value.copy(phase = UpdatePhase.Cancelled, message = "下载已取消，可重新下载。"); throw CancellationException() }
+            readyHash = expected; mutable.value = mutable.value.copy(phase = UpdatePhase.Ready, message = AppLanguage.string(R.string.app_upd_ready_confirm_install))
+        } catch (_: CancellationException) { partial.delete(); mutable.value = mutable.value.copy(phase = UpdatePhase.Cancelled, message = AppLanguage.string(R.string.app_upd_download_cancelled)); throw CancellationException() }
         catch (error: Exception) { partial.delete(); ready.delete(); readyHash = null
             val cancelled = downloadClient.wasCancelled() || error is UpdateFailure && error.reason == "cancelled"
-            mutable.value = mutable.value.copy(phase = if (cancelled) UpdatePhase.Cancelled else UpdatePhase.Error, message = if (cancelled) "下载已取消，可重新下载。" else updateMessage(error))
+            mutable.value = mutable.value.copy(phase = if (cancelled) UpdatePhase.Cancelled else UpdatePhase.Error, message = if (cancelled) AppLanguage.string(R.string.app_upd_download_cancelled) else updateMessage(error))
         }
         finally { downloading = false }
     }
@@ -126,7 +128,7 @@ class AppUpdater private constructor(private val context: Context) {
         if (requested == null && !downloading) return
         requested = null; downloadClient.cancel()
         mutable.value = mutable.value.copy(phase = if (downloading) mutable.value.phase else UpdatePhase.Cancelled,
-            message = if (downloading) "正在取消下载…" else "下载已取消，可重新下载。", prompt = false)
+            message = if (downloading) AppLanguage.string(R.string.app_upd_cancelling_download) else AppLanguage.string(R.string.app_upd_download_cancelled), prompt = false)
     }
     suspend fun installationFile(): File = withContext(Dispatchers.IO) {
         val release = mutable.value.release ?: throw UpdateFailure("download_invalid")
@@ -142,15 +144,15 @@ class AppUpdater private constructor(private val context: Context) {
         fun get(context: Context): AppUpdater = instance ?: synchronized(this) { instance ?: AppUpdater(context.applicationContext).also { instance = it } }
     }
 }
-fun updateMessage(error: Exception): String = if (error is java.io.IOException) "下载或保存更新失败，请检查网络与剩余空间后重试。" else when ((error as? UpdateFailure)?.reason) {
-    "cancelled" -> "下载已取消，可重新下载。"
-    "github_rate_limit" -> "GitHub 暂时限制了检查请求，请稍后重试。"
-    "network_failed", "github_unavailable" -> "无法连接 GitHub，请检查手机网络后重试；音乐服务仍可使用。"
-    "asset_missing" -> "最新版本暂未提供完整 Android 安装包，请稍后重试。"
-    "checksum_missing", "checksum_mismatch" -> "安装包校验失败，已停止更新，请重新检查版本并下载。"
-    "package_mismatch", "signature_mismatch" -> "安装包与当前应用的包名或签名不一致，已阻止安装。"
-    "version_not_newer", "version_mismatch" -> "安装包版本不符合更新要求，已阻止安装。"
-    "unsafe_download_url" -> "下载地址不是受信任的 GitHub Release 资产，已停止下载。"
-    "storage_failed" -> "无法保存安装包，请检查手机剩余空间后重试。"
-    else -> "更新未完成或安装包无效，请重新检查版本后重试。"
+fun updateMessage(error: Exception): String = if (error is java.io.IOException) AppLanguage.string(R.string.app_upd_io_error) else when ((error as? UpdateFailure)?.reason) {
+    "cancelled" -> AppLanguage.string(R.string.app_upd_download_cancelled)
+    "github_rate_limit" -> AppLanguage.string(R.string.app_upd_rate_limited)
+    "network_failed", "github_unavailable" -> AppLanguage.string(R.string.app_upd_github_unreachable)
+    "asset_missing" -> AppLanguage.string(R.string.app_upd_asset_missing)
+    "checksum_missing", "checksum_mismatch" -> AppLanguage.string(R.string.app_upd_checksum_mismatch)
+    "package_mismatch", "signature_mismatch" -> AppLanguage.string(R.string.app_upd_signature_mismatch)
+    "version_not_newer", "version_mismatch" -> AppLanguage.string(R.string.app_upd_version_invalid)
+    "unsafe_download_url" -> AppLanguage.string(R.string.app_upd_untrusted_url)
+    "storage_failed" -> AppLanguage.string(R.string.app_upd_storage_failed)
+    else -> AppLanguage.string(R.string.app_upd_generic_error)
 }

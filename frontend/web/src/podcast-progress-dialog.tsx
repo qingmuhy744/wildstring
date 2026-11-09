@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { DialogCloseButton } from './dialog-close';
 import { time } from './api';
 import type { Player } from './player';
@@ -9,17 +10,21 @@ export interface PodcastProgressPrompt {
   conflict: boolean;
 }
 export function PodcastProgressDialog({ player }: { player: Player }) {
+  const { t } = useTranslation();
   const prompt = player.podcastProgressPrompt;
   if (!prompt)
     return player.podcastProgressMessage && player.current?.podcast_id ? (
       <aside className="device-resume-notice" role="status">
         <p>{player.podcastProgressMessage}</p>
-        <button onClick={player.reviewPodcastProgress}>选择接续位置</button>
+        <button onClick={player.reviewPodcastProgress}>
+          {t('podcastProgressDialog.chooseResumePosition')}
+        </button>
       </aside>
     ) : null;
   return <ProgressPrompt player={player} prompt={prompt} />;
 }
 function ProgressPrompt({ player, prompt }: { player: Player; prompt: PodcastProgressPrompt }) {
+  const { t } = useTranslation();
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     const node = dialog.current;
@@ -30,28 +35,36 @@ function ProgressPrompt({ player, prompt }: { player: Player; prompt: PodcastPro
     <dialog
       ref={dialog}
       className="podcast-progress-dialog"
-      aria-label="播客单集进度"
+      aria-label={t('podcastProgressDialog.dialogAriaLabel')}
       onCancel={() => player.answerPodcastProgress(null)}
     >
       <header>
-        <h2>{prompt.conflict ? '选择本集接续位置' : '继续收听这集？'}</h2>
+        <h2>
+          {prompt.conflict
+            ? t('podcastProgressDialog.choosePositionTitle')
+            : t('podcastProgressDialog.resumePromptTitle')}
+        </h2>
         <DialogCloseButton
-          aria-label="取消接续"
+          aria-label={t('podcastProgressDialog.cancelResume')}
           onClick={() => player.answerPodcastProgress(null)}
         />
       </header>
       <p>{prompt.title}</p>
       <p>
-        已同步至 {time(prompt.remote)}
-        {prompt.conflict ? ` · 本机听到 ${time(prompt.local)}` : ''}
+        {t('podcastProgressDialog.syncedTo', { time: time(prompt.remote) })}
+        {prompt.conflict
+          ? t('podcastProgressDialog.localPosition', { time: time(prompt.local) })
+          : ''}
       </p>
-      {prompt.conflict && <p className="muted">两份位置都已保留。选择后从该位置继续收听。</p>}
+      {prompt.conflict && <p className="muted">{t('podcastProgressDialog.conflictHelp')}</p>}
       <footer>
         <button onClick={() => player.answerPodcastProgress('local')}>
-          {prompt.conflict ? `继续本机 ${time(prompt.local)}` : '从头播放'}
+          {prompt.conflict
+            ? t('podcastProgressDialog.resumeLocal', { time: time(prompt.local) })
+            : t('podcastProgressDialog.playFromStart')}
         </button>
         <button className="primary" onClick={() => player.answerPodcastProgress('remote')}>
-          继续 {time(prompt.remote)}
+          {t('podcastProgressDialog.resumeRemote', { time: time(prompt.remote) })}
         </button>
       </footer>
     </dialog>

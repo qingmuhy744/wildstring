@@ -13,22 +13,22 @@ enum CatalogSorting {
 
     static func label(_ sort: TrackSort) -> String {
         switch sort {
-        case .title, .name: "名称"
-        case .trackNumber: "曲序"
-        case .addedAt: "入库时间"
-        case .duration: "时长"
-        case .playCount: "播放次数"
-        case .listened: "收听时长"
-        case .lastPlayed: "最近听过"
+        case .title, .name: L10n("catalogSort.name")
+        case .trackNumber: L10n("catalogSort.trackNumber")
+        case .addedAt: L10n("catalogSort.addedAt")
+        case .duration: L10n("catalogSort.duration")
+        case .playCount: L10n("catalogSort.playCount")
+        case .listened: L10n("catalogSort.listened")
+        case .lastPlayed: L10n("catalogSort.lastPlayed")
         }
     }
 
     static func label(_ sort: AlbumSort) -> String {
         switch sort {
-        case .title: "专辑名"
-        case .artist: "艺人"
-        case .addedAt: "入库时间"
-        case .releaseDate: "发行时间"
+        case .title: L10n("catalogSort.albumTitle")
+        case .artist: L10n("catalogSort.artist")
+        case .addedAt: L10n("catalogSort.addedAt")
+        case .releaseDate: L10n("catalogSort.releaseDate")
         }
     }
 

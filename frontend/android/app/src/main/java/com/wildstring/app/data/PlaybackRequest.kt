@@ -1,5 +1,7 @@
 package com.wildstring.app.data
 
+import com.wildstring.app.AppLanguage
+import com.wildstring.app.R
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
 
@@ -18,10 +20,10 @@ object PlaybackRequest {
     fun isAac(url: String) = url.toHttpUrl().queryParameter("format") == "aac"
     fun offset(url: String) = url.toHttpUrl().queryParameter("start_ms")?.toLongOrNull()?.coerceAtLeast(0) ?: 0L
     fun stream(base: HttpUrl, requested: HttpUrl, returned: String): HttpUrl {
-        val resolved = base.resolve(returned.removePrefix("/")) ?: throw IllegalArgumentException("无效播放地址。")
+        val resolved = base.resolve(returned.removePrefix("/")) ?: throw IllegalArgumentException(AppLanguage.string(R.string.pb_req_invalid_stream_url))
         require(ServerAddress.contains(base, resolved) && resolved.username.isEmpty() && resolved.password.isEmpty() &&
             resolved.encodedPath == requested.encodedPath && resolved.fragment == null &&
-            resolved.queryParameterNames.all { it in setOf("format", "bitrate_kbps", "start_ms") }) { "服务器返回了不安全的播放地址。" }
+            resolved.queryParameterNames.all { it in setOf("format", "bitrate_kbps", "start_ms") }) { AppLanguage.string(R.string.pb_req_unsafe_stream_url) }
         return resolved
     }
 }

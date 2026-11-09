@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { api } from './api';
 import { regionName } from './podcast-search';
 
@@ -16,6 +17,7 @@ export type PodcastSearchSettingsValue = {
 const URL = '/podcasts/search-settings';
 
 export function PodcastSearchSettings() {
+  const { t } = useTranslation();
   const [saved, setSaved] = useState<PodcastSearchSettingsValue | null>(null);
   const [regions, setRegions] = useState<string[]>([]);
   const [filterExplicit, setFilterExplicit] = useState(false);
@@ -60,9 +62,9 @@ export function PodcastSearchSettings() {
           }),
         }),
       );
-      setMessage('播客搜索设置已保存。');
+      setMessage(t('podcastSearchSettings.saveSuccess'));
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : '保存失败');
+      setMessage(error instanceof Error ? error.message : t('podcastSearchSettings.saveFailed'));
       const fresh = await api<PodcastSearchSettingsValue>(URL).catch(() => null);
       if (fresh) apply(fresh);
     } finally {
@@ -85,15 +87,15 @@ export function PodcastSearchSettings() {
     !saved.custom_regions;
 
   return (
-    <section className="management-card" aria-label="播客目录搜索">
-      <h2>播客目录搜索</h2>
-      <p className="muted">
-        搜索节目时并行查询这些 Apple Podcasts 区域，结果合并去重，并按这里的顺序排序。区域越多，
-        越容易触发 Apple 的频率限制（每个区域各算一次调用）。
-      </p>
+    <section className="management-card" aria-label={t('podcastSearchSettings.cardTitle')}>
+      <h2>{t('podcastSearchSettings.cardTitle')}</h2>
+      <p className="muted">{t('podcastSearchSettings.description')}</p>
       {saved && (
         <>
-          <ol className="podcast-search-settings-regions" aria-label="搜索区域">
+          <ol
+            className="podcast-search-settings-regions"
+            aria-label={t('podcastSearchSettings.regionsAriaLabel')}
+          >
             {regions.map((code, index) => (
               <li key={code}>
                 <span>
@@ -101,7 +103,7 @@ export function PodcastSearchSettings() {
                 </span>
                 <button
                   type="button"
-                  aria-label={`上移${regionName(code)}`}
+                  aria-label={t('podcastSearchSettings.moveUp', { region: regionName(code) })}
                   disabled={busy || index === 0}
                   onClick={() => move(index, -1)}
                 >
@@ -109,7 +111,7 @@ export function PodcastSearchSettings() {
                 </button>
                 <button
                   type="button"
-                  aria-label={`下移${regionName(code)}`}
+                  aria-label={t('podcastSearchSettings.moveDown', { region: regionName(code) })}
                   disabled={busy || index === regions.length - 1}
                   onClick={() => move(index, 1)}
                 >
@@ -117,27 +119,30 @@ export function PodcastSearchSettings() {
                 </button>
                 <button
                   type="button"
-                  aria-label={`移除${regionName(code)}`}
+                  aria-label={t('podcastSearchSettings.removeRegion', { region: regionName(code) })}
                   disabled={busy || regions.length === 1}
                   onClick={() => setRegions(regions.filter((item) => item !== code))}
                 >
-                  移除
+                  {t('podcastSearchSettings.remove')}
                 </button>
               </li>
             ))}
           </ol>
           <div className="podcast-search-settings-add">
             <label>
-              <span>添加区域</span>
+              <span>{t('podcastSearchSettings.addRegionLabel')}</span>
               <select
                 value={adding}
                 disabled={busy || regions.length >= saved.max_regions}
                 onChange={(event) => setAdding(event.target.value)}
               >
-                <option value="">选择区域…</option>
+                <option value="">{t('podcastSearchSettings.selectRegionPrompt')}</option>
                 {available.map((code) => (
                   <option key={code} value={code}>
-                    {regionName(code)}（{code.toUpperCase()}）
+                    {t('podcastSearchSettings.regionOption', {
+                      region: regionName(code),
+                      code: code.toUpperCase(),
+                    })}
                   </option>
                 ))}
               </select>
@@ -150,13 +155,17 @@ export function PodcastSearchSettings() {
                 setAdding('');
               }}
             >
-              添加
+              {t('podcastSearchSettings.add')}
             </button>
           </div>
           <p className="muted">
-            最多 {saved.max_regions} 个区域。服务器默认：
-            {saved.default_regions.map(regionName).join('、')}
-            {isDefault ? '（当前使用默认）' : ''}
+            {t('podcastSearchSettings.maxRegionsNotice', {
+              max: saved.max_regions,
+              defaults: saved.default_regions
+                .map(regionName)
+                .join(t('podcastSearchSettings.regionSeparator')),
+              currentDefault: isDefault ? t('podcastSearchSettings.currentUsingDefault') : '',
+            })}
           </p>
           <label className="music-library-grant-option">
             <input
@@ -165,15 +174,15 @@ export function PodcastSearchSettings() {
               disabled={busy}
               onChange={(event) => setFilterExplicit(event.target.checked)}
             />
-            <span>从搜索结果中隐藏含成人内容的节目</span>
+            <span>{t('podcastSearchSettings.filterExplicit')}</span>
           </label>
-          <p className="muted">关闭时（默认）只在结果上显示「成人」标记。已添加的节目不受影响。</p>
+          <p className="muted">{t('podcastSearchSettings.filterExplicitHelp')}</p>
           <div className="podcast-search-settings-actions">
             <button type="button" disabled={busy} onClick={() => void save(regions)}>
-              {busy ? '保存中…' : '保存播客搜索设置'}
+              {busy ? t('podcastSearchSettings.saving') : t('podcastSearchSettings.saveButton')}
             </button>
             <button type="button" disabled={busy} onClick={() => void save(null)}>
-              恢复默认区域
+              {t('podcastSearchSettings.restoreDefault')}
             </button>
           </div>
         </>

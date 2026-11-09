@@ -4,6 +4,7 @@ import { DefaultArtwork } from './default-artwork';
 import { Icon } from './icons';
 import { DialogCloseButton } from './dialog-close';
 import { splitMultiValue } from './metadata-parser';
+import { useTranslation } from 'react-i18next';
 
 export function AlbumEditor({
   albumId,
@@ -17,6 +18,7 @@ export function AlbumEditor({
   onSaved: (savedAlbumId?: string) => Promise<void> | void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
+  const { t } = useTranslation();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [record, setRecord] = useState<AlbumMetadataRecord | null>(null);
   const [loading, setLoading] = useState(true);
@@ -68,7 +70,7 @@ export function AlbumEditor({
       })
       .catch((err) => {
         if (!active) return;
-        setError(err.message || '加载专辑元数据失败');
+        setError(err.message || t('albumEditor.loadFailed'));
         setLoading(false);
       });
     return () => {
@@ -79,7 +81,7 @@ export function AlbumEditor({
   // 处理选择图片
   const handleFileSelect = (file: File) => {
     if (!file.type.startsWith('image/')) {
-      setError('请选择 JPG、PNG 或 WEBP 格式的图片文件');
+      setError(t('albumEditor.invalidImageType'));
       return;
     }
     setNewCoverFile(file);
@@ -130,7 +132,7 @@ export function AlbumEditor({
 
   const handleSave = async () => {
     if (!title.trim()) {
-      setError('专辑名称不能为空');
+      setError(t('albumEditor.titleRequired'));
       return;
     }
     setSaving(true);
@@ -187,7 +189,7 @@ export function AlbumEditor({
       onClose();
     } catch (err: unknown) {
       const errorObj = err as { message?: string };
-      setError(errorObj.message || '保存失败，请检查网络或字段格式');
+      setError(errorObj.message || t('albumEditor.saveFailed'));
     } finally {
       setSaving(false);
     }
@@ -205,31 +207,33 @@ export function AlbumEditor({
       <div className="editor-heading">
         <div>
           <span className="eyebrow">FLAC ALBUM METADATA & ARTWORK</span>
-          <h2>编辑专辑</h2>
+          <h2>{t('albumEditor.title')}</h2>
           <p className="muted">{initialTitle || record?.primary_title || albumId}</p>
         </div>
-        <DialogCloseButton disabled={saving} aria-label="关闭" onClick={onClose} />
+        <DialogCloseButton
+          disabled={saving}
+          aria-label={t('albumEditor.closeAria')}
+          onClick={onClose}
+        />
       </div>
 
       {loading ? (
         <div style={{ padding: '40px 0', textAlign: 'center' }} className="muted">
-          正在读取专辑曲目与标签信息...
+          {t('albumEditor.loading')}
         </div>
       ) : (
         <div className="album-editor-content">
           {record?.warning && (
             <div className="album-warning-banner" role="alert">
               <Icon name="info" />
-              <span>
-                检测到该专辑内曲目名称或艺人存在不一致。保存后将自动把统一的规范标签同步至全专全部曲目。
-              </span>
+              <span>{t('albumEditor.inconsistentWarning')}</span>
             </div>
           )}
 
           <div className="album-editor-grid">
             {/* 左侧：封面管理区 */}
             <div className="album-cover-column">
-              <span className="metadata-field-label">专辑封面</span>
+              <span className="metadata-field-label">{t('albumEditor.coverLabel')}</span>
               <div
                 className="album-cover-dropzone"
                 onDrop={handleDrop}
@@ -239,13 +243,13 @@ export function AlbumEditor({
                 {previewCoverUrl ? (
                   <img
                     src={previewCoverUrl}
-                    alt="新选专辑封面预览"
+                    alt={t('albumEditor.newCoverAlt')}
                     className="album-cover-preview"
                   />
                 ) : existingCoverUrl && !coverDeleted ? (
                   <img
                     src={existingCoverUrl}
-                    alt="专辑封面"
+                    alt={t('albumEditor.coverAlt')}
                     className="album-cover-preview"
                     onError={() => setExistingFailed(true)}
                   />
@@ -257,7 +261,7 @@ export function AlbumEditor({
                   />
                 )}
                 <div className="cover-hover-overlay">
-                  <span>点击或拖拽更换封面</span>
+                  <span>{t('albumEditor.coverDropHint')}</span>
                 </div>
               </div>
 
@@ -282,8 +286,8 @@ export function AlbumEditor({
                 >
                   <Icon name="download" />
                   {previewCoverUrl || (existingCoverUrl && !coverDeleted)
-                    ? '更换封面图片'
-                    : '上传本地封面'}
+                    ? t('albumEditor.changeCover')
+                    : t('albumEditor.uploadCover')}
                 </button>
 
                 {newCoverFile && (
@@ -293,7 +297,7 @@ export function AlbumEditor({
                     disabled={saving}
                     onClick={handleCancelNewCover}
                   >
-                    取消新选
+                    {t('albumEditor.cancelNewCover')}
                   </button>
                 )}
 
@@ -304,7 +308,7 @@ export function AlbumEditor({
                     disabled={saving}
                     onClick={handleRemoveCover}
                   >
-                    <Icon name="remove" /> 移除封面
+                    <Icon name="remove" /> {t('albumEditor.removeCover')}
                   </button>
                 )}
               </div>
@@ -315,32 +319,30 @@ export function AlbumEditor({
                   checked={saveSidecar}
                   onChange={(e) => setSaveSidecar(e.target.checked)}
                 />
-                <span>同时在专辑目录保存 cover.jpg 实体文件</span>
+                <span>{t('albumEditor.saveSidecarLabel')}</span>
               </label>
-              <p className="field-hint">
-                发烧友规范：自动在专辑受控文件夹写入标准的 cover.jpg 独立封面文件。
-              </p>
+              <p className="field-hint">{t('albumEditor.sidecarHint')}</p>
             </div>
 
             {/* 右侧：FLAC 元数据表单 */}
             <div className="album-fields-column">
               <label className="metadata-field">
-                <span className="metadata-field-label">专辑名称 (ALBUM)</span>
+                <span className="metadata-field-label">{t('albumEditor.fieldAlbum')}</span>
                 <input
                   type="text"
                   value={title}
-                  placeholder="请输入专辑名称"
+                  placeholder={t('albumEditor.albumPlaceholder')}
                   disabled={saving}
                   onChange={(e) => setTitle(e.target.value)}
                 />
               </label>
 
               <label className="metadata-field">
-                <span className="metadata-field-label">专辑艺人 (ALBUMARTIST)</span>
+                <span className="metadata-field-label">{t('albumEditor.fieldAlbumArtist')}</span>
                 <input
                   type="text"
                   value={albumArtists}
-                  placeholder="如：崔健 / 支持用斜杠、逗号或顿号分隔"
+                  placeholder={t('albumEditor.artistsPlaceholder')}
                   disabled={saving}
                   onChange={(e) => setAlbumArtists(e.target.value)}
                 />
@@ -348,22 +350,22 @@ export function AlbumEditor({
 
               <div className="fields-row-2">
                 <label className="metadata-field">
-                  <span className="metadata-field-label">发行日期 (DATE)</span>
+                  <span className="metadata-field-label">{t('albumEditor.fieldReleaseDate')}</span>
                   <input
                     type="text"
                     value={releaseDate}
-                    placeholder="如：1989 或 1989-02-01"
+                    placeholder={t('albumEditor.releaseDatePlaceholder')}
                     disabled={saving}
                     onChange={(e) => setReleaseDate(e.target.value)}
                   />
                 </label>
 
                 <label className="metadata-field">
-                  <span className="metadata-field-label">首次发行年份 (ORIGINALDATE)</span>
+                  <span className="metadata-field-label">{t('albumEditor.fieldOriginalDate')}</span>
                   <input
                     type="text"
                     value={originalDate}
-                    placeholder="首版年份或首次录音日期"
+                    placeholder={t('albumEditor.originalDatePlaceholder')}
                     disabled={saving}
                     onChange={(e) => setOriginalDate(e.target.value)}
                   />
@@ -371,11 +373,11 @@ export function AlbumEditor({
               </div>
 
               <label className="metadata-field">
-                <span className="metadata-field-label">流派风格 (GENRE)</span>
+                <span className="metadata-field-label">{t('albumEditor.fieldGenre')}</span>
                 <input
                   type="text"
                   value={genres}
-                  placeholder="如：摇滚 / 民谣 / 流行（支持斜杠、逗号或顿号）"
+                  placeholder={t('albumEditor.genrePlaceholder')}
                   disabled={saving}
                   onChange={(e) => setGenres(e.target.value)}
                 />
@@ -389,7 +391,9 @@ export function AlbumEditor({
                   onClick={() => setShowAdvanced(!showAdvanced)}
                 >
                   <Icon name={showAdvanced ? 'up' : 'down'} />
-                  {showAdvanced ? '收起唱片厂牌与高级标签' : '展开唱片厂牌、编号与高级标签'}
+                  {showAdvanced
+                    ? t('albumEditor.collapseAdvanced')
+                    : t('albumEditor.expandAdvanced')}
                 </button>
               </div>
 
@@ -397,22 +401,24 @@ export function AlbumEditor({
                 <div className="advanced-fields-box">
                   <div className="fields-row-2">
                     <label className="metadata-field">
-                      <span className="metadata-field-label">唱片厂牌 (LABEL / ORGANIZATION)</span>
+                      <span className="metadata-field-label">{t('albumEditor.fieldLabel')}</span>
                       <input
                         type="text"
                         value={label}
-                        placeholder="如：中国旅游声像出版社"
+                        placeholder={t('albumEditor.labelPlaceholder')}
                         disabled={saving}
                         onChange={(e) => setLabel(e.target.value)}
                       />
                     </label>
 
                     <label className="metadata-field">
-                      <span className="metadata-field-label">唱片编号 (CATALOGNUMBER)</span>
+                      <span className="metadata-field-label">
+                        {t('albumEditor.fieldCatalogNumber')}
+                      </span>
                       <input
                         type="text"
                         value={catalogNumber}
-                        placeholder="如：CS-001 / CD-099"
+                        placeholder={t('albumEditor.catalogPlaceholder')}
                         disabled={saving}
                         onChange={(e) => setCatalogNumber(e.target.value)}
                       />
@@ -421,7 +427,9 @@ export function AlbumEditor({
 
                   <div className="fields-row-2">
                     <label className="metadata-field">
-                      <span className="metadata-field-label">总碟数 (DISCTOTAL)</span>
+                      <span className="metadata-field-label">
+                        {t('albumEditor.fieldDiscTotal')}
+                      </span>
                       <input
                         type="number"
                         min="1"
@@ -435,12 +443,12 @@ export function AlbumEditor({
 
                   <label className="metadata-field">
                     <span className="metadata-field-label">
-                      专辑介绍 / 注释 (DESCRIPTION / COMMENT)
+                      {t('albumEditor.fieldDescription')}
                     </span>
                     <textarea
                       rows={3}
                       value={description}
-                      placeholder="专辑创作背景、出版说明或私人收藏备注..."
+                      placeholder={t('albumEditor.descriptionPlaceholder')}
                       disabled={saving}
                       onChange={(e) => setDescription(e.target.value)}
                     />
@@ -454,17 +462,21 @@ export function AlbumEditor({
           {record?.tracks && record.tracks.length > 0 && (
             <div className="album-tracks-summary">
               <span className="metadata-field-label">
-                本专辑包含曲目 ({record.tracks.length} 首
-                {record.discs && record.discs.length > 1 ? `，共 ${record.discs.length} 碟` : ''})
+                {record.discs && record.discs.length > 1
+                  ? t('albumEditor.tracksSummaryMulti', {
+                      count: record.tracks.length,
+                      discs: record.discs.length,
+                    })
+                  : t('albumEditor.tracksSummary', { count: record.tracks.length })}
               </span>
               <div className="album-tracks-table-wrap">
                 <table className="album-tracks-table">
                   <thead>
                     <tr>
-                      <th style={{ width: 44 }}>碟</th>
-                      <th style={{ width: 50 }}>曲号</th>
-                      <th>歌曲标题</th>
-                      <th>曲目艺人</th>
+                      <th style={{ width: 44 }}>{t('albumEditor.colDisc')}</th>
+                      <th style={{ width: 50 }}>{t('albumEditor.colTrackNo')}</th>
+                      <th>{t('albumEditor.colTitle')}</th>
+                      <th>{t('albumEditor.colArtists')}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -492,10 +504,10 @@ export function AlbumEditor({
 
       <div className="editor-footer">
         <button type="button" className="text-button" disabled={saving} onClick={onClose}>
-          取消
+          {t('albumEditor.cancel')}
         </button>
         <button type="button" className="primary" disabled={saving || loading} onClick={handleSave}>
-          {saving ? '正在保存专辑...' : '保存专辑'}
+          {saving ? t('albumEditor.saving') : t('albumEditor.save')}
         </button>
       </div>
     </dialog>

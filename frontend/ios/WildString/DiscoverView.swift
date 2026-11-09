@@ -17,30 +17,30 @@ struct DiscoverView: View {
     var body: some View {
         NavigationStack {
             List {
-                Section("收听") {
+                Section(L10n("discoverView.listeningSection")) {
                     if let summary {
-                        LabeledContent("播放次数", value: "\(summary.playCount)")
-                        LabeledContent("收听时长", value: durationText(summary.listenedMs))
-                        LabeledContent("听过的歌", value: "\(summary.tracksPlayed)")
-                        LabeledContent("收藏", value: "\(summary.favorites)")
+                        LabeledContent(L10n("discoverView.playCount"), value: "\(summary.playCount)")
+                        LabeledContent(L10n("discoverView.listeningTime"), value: durationText(summary.listenedMs))
+                        LabeledContent(L10n("discoverView.tracksPlayed"), value: "\(summary.tracksPlayed)")
+                        LabeledContent(L10n("discoverView.favorites"), value: "\(summary.favorites)")
                     } else if message == nil {
                         ProgressView()
                     }
                 }
                 Section {
-                    Picker("范围", selection: $scope) {
-                        Text("我的").tag("personal")
-                        Text("大家").tag("community")
+                    Picker(L10n("discoverView.scope"), selection: $scope) {
+                        Text(L10n("discoverView.scopePersonal")).tag("personal")
+                        Text(L10n("discoverView.scopeCommunity")).tag("community")
                     }
                     .pickerStyle(.segmented)
-                    Picker("时间", selection: $period) {
-                        Text("7 天").tag("7d")
-                        Text("30 天").tag("30d")
-                        Text("90 天").tag("90d")
-                        Text("全部").tag("all")
+                    Picker(L10n("discoverView.period"), selection: $period) {
+                        Text(L10n("discoverView.period7d")).tag("7d")
+                        Text(L10n("discoverView.period30d")).tag("30d")
+                        Text(L10n("discoverView.period90d")).tag("90d")
+                        Text(L10n("discoverView.periodAll")).tag("all")
                     }
                     if rankings.isEmpty {
-                        Text("这段时间还没有收听记录。")
+                        Text(L10n("discoverView.emptyRankings"))
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     } else {
@@ -64,11 +64,11 @@ struct DiscoverView: View {
                         }
                     }
                 } header: {
-                    Text("收听排行")
+                    Text(L10n("discoverView.rankings"))
                 }
-                Section("最近听过") {
+                Section(L10n("discoverView.recentlyPlayed")) {
                     if recent.isEmpty {
-                        Text("听过的歌曲会出现在这里。")
+                        Text(L10n("discoverView.emptyRecent"))
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     } else {
@@ -86,7 +86,7 @@ struct DiscoverView: View {
                         }
                     }
                 }
-                Section("每日推荐") {
+                Section(L10n("discoverView.dailyRecommendations")) {
                     DailyRecommendationsView(client: client, playback: playback, embedded: true)
                 }
                 if let message {
@@ -97,7 +97,7 @@ struct DiscoverView: View {
                     }
                 }
             }
-            .navigationTitle("发现")
+            .navigationTitle(L10n("discoverView.title"))
             .miniPlayer(playback, client: client)
             .task { await load() }
             .refreshable { await load() }
@@ -149,7 +149,7 @@ struct DiscoverView: View {
 
     private func durationText(_ milliseconds: Int64) -> String {
         let minutes = max(0, milliseconds) / 60_000
-        if minutes < 60 { return "\(minutes) 分钟" }
-        return "\(minutes / 60) 小时 \(minutes % 60) 分钟"
+        if minutes < 60 { return L10n("discoverView.minutes", Int(minutes)) }
+        return L10n("discoverView.hoursMinutes", Int(minutes / 60), Int(minutes % 60))
     }
 }

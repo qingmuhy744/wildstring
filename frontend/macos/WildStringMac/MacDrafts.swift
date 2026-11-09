@@ -13,11 +13,11 @@ struct MacDraftsView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            Picker("草案状态", selection: $filter) {
-                Text("待确认").tag("pending")
-                Text("已批准待应用").tag("approved")
-                Text("已应用").tag("applied")
-                Text("已拒绝").tag("rejected")
+            Picker(L10n("macDrafts.filterTitle"), selection: $filter) {
+                Text(L10n("macDrafts.statusPending")).tag("pending")
+                Text(L10n("macDrafts.statusApproved")).tag("approved")
+                Text(L10n("macDrafts.statusApplied")).tag("applied")
+                Text(L10n("macDrafts.statusRejected")).tag("rejected")
             }.pickerStyle(.segmented).padding(16)
             List(drafts) { draft in
                 Button {
@@ -36,30 +36,30 @@ struct MacDraftsView: View {
                             }
                         }
                         Spacer()
-                        Text("查看详情").font(.callout).foregroundStyle(.secondary)
+                        Text(L10n("macDrafts.viewDetails")).font(.callout).foregroundStyle(.secondary)
                         Image(systemName: "chevron.right").foregroundStyle(.secondary)
                     }.padding(.vertical, 10).contentShape(Rectangle())
                 }.buttonStyle(.plain)
             }
             .overlay {
                 if loading {
-                    ProgressView("正在加载草案…")
+                    ProgressView(L10n("macDrafts.loadingDrafts"))
                 } else if drafts.isEmpty {
                     ContentUnavailableView(
-                        errorMessage ?? "这里还没有草案", systemImage: "checklist",
-                        description: Text("助手生成的建议会保存在这里，查看内容后再决定是否采用。"))
+                        errorMessage ?? L10n("macDrafts.emptyTitle"), systemImage: "checklist",
+                        description: Text(L10n("macDrafts.emptyDesc")))
                 }
             }
             if let errorMessage, !drafts.isEmpty {
                 Text(errorMessage).font(.callout).foregroundStyle(.orange).padding()
             }
         }
-        .navigationTitle("助手草案")
+        .navigationTitle(L10n("macDrafts.title"))
         .toolbar {
             Button {
                 Task { await load() }
             } label: {
-                Label("刷新", systemImage: "arrow.clockwise")
+                Label(L10n("macDrafts.refresh"), systemImage: "arrow.clockwise")
             }.disabled(loading)
         }
         .task(id: filter) { await load() }
@@ -107,11 +107,11 @@ struct MacDraftPreview: View {
         VStack(spacing: 0) {
             HStack {
                 VStack(alignment: .leading, spacing: 5) {
-                    Text(draft?.title ?? "草案详情").font(.title2.bold()).lineLimit(2)
+                    Text(draft?.title ?? L10n("macDrafts.draftDetails")).font(.title2.bold()).lineLimit(2)
                     if let draft { Text(macDraftStatus(draft)).font(.caption).foregroundStyle(.secondary) }
                 }
                 Spacer()
-                Button("关闭") { dismiss() }.keyboardShortcut(.cancelAction).disabled(busy)
+                Button(L10n("macDrafts.close")) { dismiss() }.keyboardShortcut(.cancelAction).disabled(busy)
             }.padding(24)
             Divider()
             ScrollView {
@@ -119,21 +119,21 @@ struct MacDraftPreview: View {
                     if let draft {
                         if draft.kind == "playlist" {
                             Text(draft.payload?.name ?? draft.title).font(.headline)
-                            Text("\(draft.payload?.trackIds?.count ?? 0) 首歌曲 · 点击歌曲可试听")
+                            Text(L10n("macDrafts.tracksPreviewCount", draft.payload?.trackIds?.count ?? 0))
                                 .font(.callout).foregroundStyle(.secondary)
                             if draft.payload?.playlistID != nil, !draft.isApplied {
-                                Label("保存后会替换原歌单的名称与曲目顺序。", systemImage: "arrow.triangle.2.circlepath")
+                                Label(L10n("macDrafts.replacePlaylistWarning"), systemImage: "arrow.triangle.2.circlepath")
                                     .font(.callout).foregroundStyle(.orange)
                             }
                             MacAssistantTracks(client: client, playback: playback, tracks: tracks)
                         } else {
-                            Label("这份草案需要对照资料差异，请在网页版查看完整预览后处理。", systemImage: "doc.text.magnifyingglass")
+                            Label(L10n("macDrafts.webDiffNotice"), systemImage: "doc.text.magnifyingglass")
                                 .font(.callout)
-                            Link("打开网页版查看", destination: client.server.url)
+                            Link(L10n("macDrafts.openWebVersion"), destination: client.server.url)
                         }
                         if !draft.evidence.isEmpty {
                             Divider()
-                            Text("生成依据").font(.headline)
+                            Text(L10n("macDrafts.evidence")).font(.headline)
                             ForEach(Array(draft.evidence.enumerated()), id: \.offset) { _, evidence in
                                 VStack(alignment: .leading, spacing: 5) {
                                     Text(evidence.summary).textSelection(.enabled)
@@ -146,7 +146,7 @@ struct MacDraftPreview: View {
                             }
                         }
                     }
-                    if loading { ProgressView("正在加载预览…").frame(maxWidth: .infinity) }
+                    if loading { ProgressView(L10n("macDrafts.loadingPreview")).frame(maxWidth: .infinity) }
                     if let errorMessage {
                         Label(errorMessage, systemImage: "exclamationmark.circle").foregroundStyle(.orange)
                     }
@@ -154,19 +154,19 @@ struct MacDraftPreview: View {
             }
             Divider()
             HStack(spacing: 12) {
-                Button("刷新预览") { Task { await load() } }.disabled(loading || busy)
+                Button(L10n("macDrafts.refreshPreview")) { Task { await load() } }.disabled(loading || busy)
                 Spacer()
                 if busy { ProgressView().controlSize(.small) }
                 if let draft, draft.kind == "playlist", draft.isPending || draft.isApproved {
-                    Button("拒绝", role: .destructive) { Task { await reject(draft) } }.disabled(
+                    Button(L10n("macDrafts.reject"), role: .destructive) { Task { await reject(draft) } }.disabled(
                         loading || busy)
-                    Button(draft.payload?.playlistID == nil ? "保存为歌单" : "更新歌单") {
+                    Button(draft.payload?.playlistID == nil ? L10n("macDrafts.saveAsPlaylist") : L10n("macDrafts.updatePlaylist")) {
                         Task { await save(draft) }
                     }
                     .buttonStyle(.borderedProminent)
                     .disabled(loading || busy || errorMessage != nil)
                 } else if draft?.isApplied == true {
-                    Label(draft?.kind == "playlist" ? "歌单已保存" : "已应用", systemImage: "checkmark.circle.fill")
+                    Label(draft?.kind == "playlist" ? L10n("macDrafts.playlistSaved") : L10n("macDrafts.statusApplied"), systemImage: "checkmark.circle.fill")
                         .foregroundStyle(.green)
                 }
             }.padding(20)
@@ -205,7 +205,7 @@ struct MacDraftPreview: View {
                 }
             }
         } catch {
-            errorMessage = "预览未完整加载：\(MacErrorText.message(for: error))"
+            errorMessage = L10n("macDrafts.previewIncomplete", MacErrorText.message(for: error))
         }
     }
 
@@ -218,9 +218,9 @@ struct MacDraftPreview: View {
                 id: value.id, version: value.version, previewDigest: value.previewDigest,
                 idempotencyKey: idempotencyKey
             )
-            errorMessage = draft?.isApplied == true ? nil : "服务器尚未确认保存，请刷新查看最新状态。"
+            errorMessage = draft?.isApplied == true ? nil : L10n("macDrafts.serverNotConfirmed")
         } catch {
-            errorMessage = "\(MacErrorText.message(for: error))。请刷新预览确认保存状态。"
+            errorMessage = L10n("macDrafts.saveErrorRefreshHint", MacErrorText.message(for: error))
         }
     }
 
@@ -239,10 +239,10 @@ struct MacDraftPreview: View {
 
 private func macDraftStatus(_ draft: Draft) -> String {
     switch draft.status {
-    case "pending": return "待确认 · 尚未保存"
-    case "approved": return "已批准 · 尚未应用"
-    case "applied": return draft.kind == "playlist" ? "已应用 · 歌单已保存" : "已应用"
-    case "rejected": return "已拒绝"
+    case "pending": return L10n("macDrafts.statusPendingDetail")
+    case "approved": return L10n("macDrafts.statusApprovedDetail")
+    case "applied": return draft.kind == "playlist" ? L10n("macDrafts.statusAppliedPlaylist") : L10n("macDrafts.statusApplied")
+    case "rejected": return L10n("macDrafts.statusRejected")
     default: return draft.status
     }
 }

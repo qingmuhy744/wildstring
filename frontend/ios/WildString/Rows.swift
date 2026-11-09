@@ -69,7 +69,7 @@ struct AlbumRow: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
-                Text("\(album.trackCount) 首")
+                Text(L10n("rows.trackCount", album.trackCount))
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }
@@ -92,7 +92,7 @@ struct ArtistRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(artist.name)
                     .lineLimit(1)
-                Text("\(artist.trackCount) 首 · \(artist.albumCount) 张专辑")
+                Text(L10n("rows.artistSummary", artist.trackCount, artist.albumCount))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -147,7 +147,7 @@ struct LoadedList<Element: Decodable & Identifiable & Sendable, Row: View>: View
                 ContentUnavailableView(
                     emptyTitle,
                     systemImage: emptyIcon,
-                    description: Text(loader.errorMessage ?? "没有可显示的内容")
+                    description: Text(loader.errorMessage ?? L10n("rows.emptyContent"))
                 )
             }
         }
@@ -164,7 +164,7 @@ func playTracks(_ tracks: [Track], startingAt track: Track, using playback: Play
 extension Track {
     var artistDisplay: String {
         let joined = artists.joined(separator: " / ")
-        return joined.isEmpty ? "未知艺人" : joined
+        return joined.isEmpty ? L10n("rows.unknownArtist") : joined
     }
 
     var durationText: String {
@@ -188,6 +188,6 @@ extension Track {
 extension Album {
     var artistDisplay: String {
         let joined = artists.joined(separator: " / ")
-        return joined.isEmpty ? "未知艺人" : joined
+        return joined.isEmpty ? L10n("rows.unknownArtist") : joined
     }
 }

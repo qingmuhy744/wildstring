@@ -21,20 +21,20 @@ struct AssistantView: View {
                     messageList(conversation)
                 } else if let errorMessage {
                     ContentUnavailableView(
-                        "无法打开助手",
+                        L10n("assistant.unavailableTitle"),
                         systemImage: "sparkles",
                         description: Text(errorMessage)
                     )
                 } else {
-                    ProgressView("正在准备对话…")
+                    ProgressView(L10n("assistant.preparingConversation"))
                 }
             }
-            .navigationTitle("AI 找歌")
+            .navigationTitle(L10n("assistant.title"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     if showsDismiss {
-                        Button("关闭") { dismiss() }
+                        Button(L10n("assistant.close")) { dismiss() }
                     }
                 }
                 ToolbarItemGroup(placement: .topBarTrailing) {
@@ -72,7 +72,7 @@ struct AssistantView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 10) {
                     if conversation.messages.isEmpty {
-                        Text("试试：帮我找几首适合晚上听的歌")
+                        Text(L10n("assistant.examplePrompt"))
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                             .padding(.top, 8)
@@ -96,7 +96,7 @@ struct AssistantView: View {
                     if isSending {
                         HStack(spacing: 8) {
                             ProgressView()
-                            Text("思考中…")
+                            Text(L10n("assistant.thinking"))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -119,7 +119,7 @@ struct AssistantView: View {
 
     private var inputBar: some View {
         HStack(spacing: 8) {
-            TextField("想让助手找什么歌？", text: $input, axis: .vertical)
+            TextField(L10n("assistant.inputPlaceholder"), text: $input, axis: .vertical)
                 .lineLimit(1...4)
                 .textFieldStyle(.roundedBorder)
             Button {

@@ -1,5 +1,8 @@
 package com.wildstring.app.ui
 
+import androidx.compose.ui.res.stringResource
+import com.wildstring.app.AppLanguage
+import com.wildstring.app.R
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -34,17 +37,17 @@ internal fun PlaylistEditor(vm: MusicViewModel, existing: Playlist?, dismiss: ()
         }
     }
     Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        OutlinedTextField(name, { name = it.take(100) }, Modifier.fillMaxWidth(), label = { Text("歌单名称") }, singleLine = true, enabled = !action.busy)
-        if (existing == null) Row(Modifier.fillMaxWidth().clickable { smart = !smart }, verticalAlignment = Alignment.CenterVertically) { Switch(smart, { smart = it }); Text("规则歌单", Modifier.padding(start = 12.dp)) }
+        OutlinedTextField(name, { name = it.take(100) }, Modifier.fillMaxWidth(), label = { Text(stringResource(R.string.pl_tools_playlist_name)) }, singleLine = true, enabled = !action.busy)
+        if (existing == null) Row(Modifier.fillMaxWidth().clickable { smart = !smart }, verticalAlignment = Alignment.CenterVertically) { Switch(smart, { smart = it }); Text(stringResource(R.string.pl_tools_smart_playlist), Modifier.padding(start = 12.dp)) }
         if (smart) {
-            Text("根据当前曲库自动选歌；修改规则不打断已有播放。", style = MaterialTheme.typography.bodySmall)
-            Row(Modifier.fillMaxWidth().clickable { advanced = !advanced }, verticalAlignment = Alignment.CenterVertically) { Switch(advanced, { advanced = it }); Text("高级规则 JSON", Modifier.padding(start = 12.dp)) }
-            if (advanced) OutlinedTextField(definition, { definition = it.take(32000) }, Modifier.fillMaxWidth().heightIn(min = 220.dp), label = { Text("规则（all / any、排序与数量）") })
+            Text(stringResource(R.string.pl_tools_smart_playlist_hint), style = MaterialTheme.typography.bodySmall)
+            Row(Modifier.fillMaxWidth().clickable { advanced = !advanced }, verticalAlignment = Alignment.CenterVertically) { Switch(advanced, { advanced = it }); Text(stringResource(R.string.pl_tools_advanced_json), Modifier.padding(start = 12.dp)) }
+            if (advanced) OutlinedTextField(definition, { definition = it.take(32000) }, Modifier.fillMaxWidth().heightIn(min = 220.dp), label = { Text(stringResource(R.string.pl_tools_rules_label)) })
             else {
-                Row(Modifier.fillMaxWidth().clickable { onlyLoved = !onlyLoved }, verticalAlignment = Alignment.CenterVertically) { Checkbox(onlyLoved, { onlyLoved = it }); Text("只选我喜欢的音乐") }
-                OutlinedTextField(artist, { artist = it.take(200) }, Modifier.fillMaxWidth(), label = { Text("艺人包含（可留空）") })
-                OutlinedTextField(days, { days = it.filter(Char::isDigit).take(4) }, Modifier.fillMaxWidth(), label = { Text("多少天没有听过（留空不限）") })
-                Text("按最近播放从旧到新，最多 100 首。", style = MaterialTheme.typography.bodySmall)
+                Row(Modifier.fillMaxWidth().clickable { onlyLoved = !onlyLoved }, verticalAlignment = Alignment.CenterVertically) { Checkbox(onlyLoved, { onlyLoved = it }); Text(stringResource(R.string.pl_tools_only_loved)) }
+                OutlinedTextField(artist, { artist = it.take(200) }, Modifier.fillMaxWidth(), label = { Text(stringResource(R.string.pl_tools_artist_contains)) })
+                OutlinedTextField(days, { days = it.filter(Char::isDigit).take(4) }, Modifier.fillMaxWidth(), label = { Text(stringResource(R.string.pl_tools_days_unplayed)) })
+                Text(stringResource(R.string.pl_tools_smart_sort_hint), style = MaterialTheme.typography.bodySmall)
             }
         }
         ActionStatus(action)
@@ -54,11 +57,11 @@ internal fun PlaylistEditor(vm: MusicViewModel, existing: Playlist?, dismiss: ()
                 if (onlyLoved) all.add(JsonObject().apply { add("is", JsonObject().apply { addProperty("loved", true) }) })
                 if (artist.isNotBlank()) all.add(JsonObject().apply { add("contains", JsonObject().apply { addProperty("artist", artist.trim()) }) })
                 days.toIntOrNull()?.takeIf { it > 0 }?.let { number -> all.add(JsonObject().apply { add("notInTheLast", JsonObject().apply { addProperty("lastPlayed", number) }) }) }
-                require(all.size() > 0) { "请至少设置一个条件。" }
+                require(all.size() > 0) { AppLanguage.string(R.string.pl_tools_set_at_least_one_condition) }
                 add("all", all); addProperty("sort", "lastPlayed"); addProperty("order", "asc"); addProperty("limit", 100)
             }
             vm.savePlaylist(name.trim(), rule, serverRecord); dismiss()
-        } } }, enabled = !action.busy && name.isNotBlank()) { Text(if (action.busy) "正在保存…" else "保存歌单") }
+        } } }, enabled = !action.busy && name.isNotBlank()) { Text(if (action.busy) stringResource(R.string.pl_tools_saving) else stringResource(R.string.pl_tools_save_playlist)) }
     }
 }
 
@@ -82,8 +85,8 @@ internal fun PlaylistOrder(vm: MusicViewModel, playlist: Playlist, dismiss: () -
                 }, onMove = { id, destination ->
                     val from = tracks.indexOfFirst { it.id == id }
                     if (!action.busy && from >= 0 && destination in tracks.indices) tracks = tracks.toMutableList().apply { add(destination, removeAt(from)) }
-                }, onHaptic = feedback, allowRemove = !action.busy, title = "拖动排序，或移除曲目")
-        Button({ scope.launch { action.run { vm.reorderPlaylist(record, tracks.map { it.id }); dismiss() } } }, enabled = !action.busy && tracks.isNotEmpty(), modifier = Modifier.fillMaxWidth()) { Text("保存顺序") }
+                }, onHaptic = feedback, allowRemove = !action.busy, title = stringResource(R.string.pl_tools_drag_to_reorder))
+        Button({ scope.launch { action.run { vm.reorderPlaylist(record, tracks.map { it.id }); dismiss() } } }, enabled = !action.busy && tracks.isNotEmpty(), modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.pl_tools_save_order)) }
     }
 }
 
@@ -100,22 +103,22 @@ internal fun MultiSelectPanel(vm: MusicViewModel, dismiss: () -> Unit) {
     } }
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
         ActionStatus(action)
-        Row { TextButton({ selected = tracks.map { it.id }.toSet() }) { Text("全选") }; TextButton({ selected = emptySet() }) { Text("清空") }; Text("已选 ${selected.size} 首", Modifier.padding(12.dp)) }
+        Row { TextButton({ selected = tracks.map { it.id }.toSet() }) { Text(stringResource(R.string.pl_tools_select_all)) }; TextButton({ selected = emptySet() }) { Text(stringResource(R.string.pl_tools_clear_selection)) }; Text(stringResource(R.string.pl_tools_selected_count, selected.size), Modifier.padding(12.dp)) }
         if (action.busy && tracks.isEmpty()) CatalogSkeleton("tracks", Modifier.weight(1f))
         else LazyColumn(Modifier.weight(1f)) { items(tracks, key = { it.id }) { track ->
             Row(Modifier.fillMaxWidth().clickable { selected = if (track.id in selected) selected - track.id else selected + track.id }, verticalAlignment = Alignment.CenterVertically) {
                 Checkbox(track.id in selected, null); Column(Modifier.padding(12.dp)) { Text(track.title); Text(track.artist, style = MaterialTheme.typography.bodySmall) }
             }
         } }
-        Button({ scope.launch { action.run { choices = vm.playlistsForAdd() } } }, enabled = !action.busy && selected.isNotEmpty(), modifier = Modifier.fillMaxWidth()) { Text("加入歌单") }
+        Button({ scope.launch { action.run { choices = vm.playlistsForAdd() } } }, enabled = !action.busy && selected.isNotEmpty(), modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.pl_tools_add_to_playlist)) }
     }
-    choices?.let { playlists -> AlertDialog(onDismissRequest = { choices = null }, title = { Text("选择歌单") }, text = {
+    choices?.let { playlists -> AlertDialog(onDismissRequest = { choices = null }, title = { Text(stringResource(R.string.pl_tools_choose_playlist_title)) }, text = {
         Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {
-            if (playlists.isEmpty()) Text("请先创建普通歌单。")
+            if (playlists.isEmpty()) Text(stringResource(R.string.pl_tools_create_manual_first))
             playlists.forEach { item ->
                 ListItem(
                     headlineContent = { Text(item.name) },
-                    supportingContent = { Text("${item.trackCount} 首") },
+                    supportingContent = { Text(stringResource(R.string.pl_tools_track_count, item.trackCount)) },
                     colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
                     modifier = Modifier.fillMaxWidth().clickable(enabled = !action.busy) {
                         scope.launch { action.run { vm.addTracksToPlaylist(tracks.filter { it.id in selected }, item); choices = null; dismiss() } }
@@ -123,5 +126,5 @@ internal fun MultiSelectPanel(vm: MusicViewModel, dismiss: () -> Unit) {
                 )
             }
         }
-    }, confirmButton = { TextButton({ choices = null }) { Text("关闭") } }) }
+    }, confirmButton = { TextButton({ choices = null }) { Text(stringResource(R.string.pl_tools_close)) } }) }
 }

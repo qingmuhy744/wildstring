@@ -1,14 +1,16 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { api } from './api';
+import i18n from './i18n';
 import type { PodcastStorageInfo, PodcastSummary } from './podcasts';
 
 type FilterScope = 'all' | 'unfollowed' | 'cached';
 
 function formatSyncTime(value: string | null): string {
-  if (!value) return '尚未同步';
+  if (!value) return i18n.t('podcastProgrammesAdmin.notSyncedYet');
   const parsed = Date.parse(value);
   if (Number.isNaN(parsed)) return value;
-  return new Date(parsed).toLocaleString('zh-CN', {
+  return new Date(parsed).toLocaleString(i18n.language === 'zh' ? 'zh-CN' : 'en-US', {
     month: 'short',
     day: 'numeric',
     hour: '2-digit',
@@ -23,6 +25,7 @@ export function PodcastProgrammesAdmin({
   canCleanResources: boolean;
   onView: (podcastId: string) => void;
 }) {
+  const { t } = useTranslation();
   const [podcasts, setPodcasts] = useState<PodcastSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [filterScope, setFilterScope] = useState<FilterScope>('all');
@@ -40,7 +43,9 @@ export function PodcastProgrammesAdmin({
       const list = await api<PodcastSummary[]>('/podcasts');
       setPodcasts(list);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '无法加载本服节目列表');
+      setError(
+        reason instanceof Error ? reason.message : t('podcastProgrammesAdmin.loadListFailed'),
+      );
     } finally {
       if (!silent) setLoading(false);
     }
@@ -84,10 +89,12 @@ export function PodcastProgrammesAdmin({
     setError(null);
     try {
       const res = await api<{ updated_count: number }>('/podcasts/refresh-all', { method: 'POST' });
-      setNotice(`已检查 ${res.updated_count} 档有订阅节目的源端更新。`);
+      setNotice(t('podcastProgrammesAdmin.refreshAllNotice', { count: res.updated_count }));
       await load(true);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '全部同步失败');
+      setError(
+        reason instanceof Error ? reason.message : t('podcastProgrammesAdmin.refreshAllFailed'),
+      );
     } finally {
       setRefreshingAll(false);
     }
@@ -99,10 +106,12 @@ export function PodcastProgrammesAdmin({
     setError(null);
     try {
       await api(`/podcasts/${encodeURIComponent(podcast.id)}/refresh`, { method: 'POST' });
-      setNotice(`已同步《${podcast.title}》的最新单集。`);
+      setNotice(t('podcastProgrammesAdmin.refreshSingleNotice', { title: podcast.title }));
       await load(true);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '同步节目失败');
+      setError(
+        reason instanceof Error ? reason.message : t('podcastProgrammesAdmin.refreshSingleFailed'),
+      );
     } finally {
       setBusyId(null);
     }
@@ -115,7 +124,9 @@ export function PodcastProgrammesAdmin({
       );
       setStorageById((prev) => ({ ...prev, [podcast.id]: info }));
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '无法读取节目磁盘占用');
+      setError(
+        reason instanceof Error ? reason.message : t('podcastProgrammesAdmin.readStorageFailed'),
+      );
     }
   }
 
@@ -131,7 +142,11 @@ export function PodcastProgrammesAdmin({
       );
       if (
         !confirm(
-          `《${podcast.title}》可清理 ${preview.candidate_count} 个零引用音频文件，共 ${(preview.candidate_bytes / 1048576).toFixed(1)} MB。确认立即清理？`,
+          t('podcastProgrammesAdmin.confirmCleanCache', {
+            title: podcast.title,
+            count: preview.candidate_count,
+            mb: (preview.candidate_bytes / 1048576).toFixed(1),
+          }),
         )
       ) {
         return;
@@ -141,23 +156,25 @@ export function PodcastProgrammesAdmin({
         { method: 'POST' },
       );
       setNotice(
-        `《${podcast.title}》已清理 ${res.deleted_count} 个零引用文件，释放 ${(res.freed_bytes / 1048576).toFixed(1)} MB。`,
+        t('podcastProgrammesAdmin.cleanCacheNotice', {
+          title: podcast.title,
+          count: res.deleted_count,
+          mb: (res.freed_bytes / 1048576).toFixed(1),
+        }),
       );
       await load(true);
       if (storageById[podcast.id]) await inspectStorage(podcast);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '清理音频缓存失败');
+      setError(
+        reason instanceof Error ? reason.message : t('podcastProgrammesAdmin.cleanCacheFailed'),
+      );
     } finally {
       setBusyId(null);
     }
   }
 
   async function deleteProgramme(podcast: PodcastSummary) {
-    if (
-      !confirm(
-        `确认从本服彻底删除《${podcast.title}》？\n这会移除所有用户的关注关系、收听记录以及本地已缓存的音频文件。`,
-      )
-    ) {
+    if (!confirm(t('podcastProgrammesAdmin.confirmDeleteProgramme', { title: podcast.title }))) {
       return;
     }
     setBusyId(podcast.id);
@@ -166,73 +183,86 @@ export function PodcastProgrammesAdmin({
     try {
       await api(`/podcasts/${encodeURIComponent(podcast.id)}`, { method: 'DELETE' });
       setPodcasts((items) => items.filter((item) => item.id !== podcast.id));
-      setNotice(`已从本服删除《${podcast.title}》。`);
+      setNotice(t('podcastProgrammesAdmin.deleteProgrammeNotice', { title: podcast.title }));
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '删除节目失败');
+      setError(
+        reason instanceof Error
+          ? reason.message
+          : t('podcastProgrammesAdmin.deleteProgrammeFailed'),
+      );
     } finally {
       setBusyId(null);
     }
   }
 
   return (
-    <section className="management-card podcast-programmes-admin" aria-label="全服节目管理">
+    <section
+      className="management-card podcast-programmes-admin"
+      aria-label={t('podcastProgrammesAdmin.cardAriaLabel')}
+    >
       <div className="management-section-heading">
         <div>
-          <h2>全服节目</h2>
-          <p className="muted">无人关注的节目会暂停定时更新，已有资料与缓存保留。</p>
+          <h2>{t('podcastProgrammesAdmin.heading')}</h2>
+          <p className="muted">{t('podcastProgrammesAdmin.headingHelp')}</p>
         </div>
         <button type="button" disabled={refreshingAll || loading} onClick={() => void refreshAll()}>
-          {refreshingAll ? '正在同步…' : '同步活跃节目'}
+          {refreshingAll
+            ? t('podcastProgrammesAdmin.refreshing')
+            : t('podcastProgrammesAdmin.refreshActiveShows')}
         </button>
       </div>
 
-      <div className="management-metrics" aria-label="本服节目统计">
+      <div className="management-metrics" aria-label={t('podcastProgrammesAdmin.metricsAriaLabel')}>
         <div>
           <strong>{counts.total}</strong>
-          <span>本服节目总数</span>
+          <span>{t('podcastProgrammesAdmin.totalProgrammes')}</span>
         </div>
         <div>
           <strong>{counts.active}</strong>
-          <span>有人关注 · 定时更新</span>
+          <span>{t('podcastProgrammesAdmin.activeProgrammes')}</span>
         </div>
         <div>
           <strong>{counts.unfollowed}</strong>
-          <span>0 人关注 · 已休眠</span>
+          <span>{t('podcastProgrammesAdmin.dormantProgrammes')}</span>
         </div>
         <div>
           <strong>{counts.totalDownloaded}</strong>
-          <span>本地缓存单集</span>
+          <span>{t('podcastProgrammesAdmin.cachedEpisodes')}</span>
         </div>
       </div>
 
       <div className="podcast-admin-toolbar">
-        <div className="podcast-catalog-tabs" role="group" aria-label="节目筛选">
+        <div
+          className="podcast-catalog-tabs"
+          role="group"
+          aria-label={t('podcastProgrammesAdmin.filterTabsAria')}
+        >
           <button
             type="button"
             aria-pressed={filterScope === 'all'}
             onClick={() => setFilterScope('all')}
           >
-            全部 ({counts.total})
+            {t('podcastProgrammesAdmin.tabAll', { count: counts.total })}
           </button>
           <button
             type="button"
             aria-pressed={filterScope === 'unfollowed'}
             onClick={() => setFilterScope('unfollowed')}
           >
-            0 人关注 · 已休眠 ({counts.unfollowed})
+            {t('podcastProgrammesAdmin.tabUnfollowed', { count: counts.unfollowed })}
           </button>
           <button
             type="button"
             aria-pressed={filterScope === 'cached'}
             onClick={() => setFilterScope('cached')}
           >
-            有本地缓存 ({counts.cachedProgrammes})
+            {t('podcastProgrammesAdmin.tabCached', { count: counts.cachedProgrammes })}
           </button>
         </div>
         <input
           type="search"
-          aria-label="筛选全服节目"
-          placeholder="搜索节目名称、作者或 RSS 地址"
+          aria-label={t('podcastProgrammesAdmin.searchAriaLabel')}
+          placeholder={t('podcastProgrammesAdmin.searchPlaceholder')}
           value={search}
           onChange={(event) => setSearch(event.target.value)}
         />
@@ -246,9 +276,9 @@ export function PodcastProgrammesAdmin({
       )}
 
       {loading ? (
-        <p role="status">正在读取全服节目…</p>
+        <p role="status">{t('podcastProgrammesAdmin.loading')}</p>
       ) : filtered.length === 0 ? (
-        <p className="management-empty">当前筛选条件下没有节目。</p>
+        <p className="management-empty">{t('podcastProgrammesAdmin.noProgrammes')}</p>
       ) : (
         <div className="podcast-resource-list">
           {filtered.map((podcast) => {
@@ -264,26 +294,36 @@ export function PodcastProgrammesAdmin({
                       className={`candidate-pill${followers === 0 ? ' is-dormant' : ''}`}
                       title={
                         followers === 0
-                          ? '当前无人关注该节目，已自动暂停定时 RSS 抓取'
-                          : `当前有 ${followers} 位用户关注，保持定时更新`
+                          ? t('podcastProgrammesAdmin.dormantTooltip')
+                          : t('podcastProgrammesAdmin.activeTooltip', { count: followers })
                       }
                     >
-                      {followers === 0 ? '0 人关注 · 已休眠' : `${followers} 人关注`}
+                      {followers === 0
+                        ? t('podcastProgrammesAdmin.dormantPill')
+                        : t('podcastProgrammesAdmin.followersCountPill', { count: followers })}
                     </span>
                     {podcast.downloaded_episodes > 0 && (
                       <span className="candidate-pill">
-                        已缓存 {podcast.downloaded_episodes} 集
+                        {t('podcastProgrammesAdmin.cachedCount', {
+                          count: podcast.downloaded_episodes,
+                        })}
                         {storage ? ` · ${storage.disk_usage_human}` : ''}
                       </span>
                     )}
                   </div>
                   <p>
-                    {podcast.author || '未知创作者'} · 共 {podcast.total_episodes} 集 · 上次同步：
-                    {formatSyncTime(podcast.last_updated_at)}
+                    {t('podcastProgrammesAdmin.showMeta', {
+                      author: podcast.author || t('podcastProgrammesAdmin.unknownAuthor'),
+                      total: podcast.total_episodes,
+                      syncTime: formatSyncTime(podcast.last_updated_at),
+                    })}
                   </p>
                   {storage && (
                     <p className="candidate-path" title={storage.storage_path}>
-                      路径：{storage.storage_path}（占用 {storage.disk_usage_human}）
+                      {t('podcastProgrammesAdmin.storagePath', {
+                        path: storage.storage_path,
+                        usage: storage.disk_usage_human,
+                      })}
                     </p>
                   )}
                 </div>
@@ -294,18 +334,18 @@ export function PodcastProgrammesAdmin({
                       disabled={isBusy}
                       onClick={() => void inspectStorage(podcast)}
                     >
-                      查看占用
+                      {t('podcastProgrammesAdmin.viewStorage')}
                     </button>
                   )}
                   <button type="button" onClick={() => onView(podcast.id)}>
-                    查看单集
+                    {t('podcastProgrammesAdmin.viewEpisodes')}
                   </button>
                   <button
                     type="button"
                     disabled={isBusy}
                     onClick={() => void refreshSingle(podcast)}
                   >
-                    立即同步
+                    {t('podcastProgrammesAdmin.syncNow')}
                   </button>
                   {canCleanResources && podcast.downloaded_episodes > 0 && (
                     <button
@@ -313,7 +353,7 @@ export function PodcastProgrammesAdmin({
                       disabled={isBusy}
                       onClick={() => void cleanPodcastCache(podcast)}
                     >
-                      清理零引用缓存
+                      {t('podcastProgrammesAdmin.cleanZeroRefCache')}
                     </button>
                   )}
                   <button
@@ -322,7 +362,7 @@ export function PodcastProgrammesAdmin({
                     disabled={isBusy}
                     onClick={() => void deleteProgramme(podcast)}
                   >
-                    从本服删除
+                    {t('podcastProgrammesAdmin.deleteFromServer')}
                   </button>
                 </div>
               </article>

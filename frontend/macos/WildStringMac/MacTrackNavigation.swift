@@ -44,7 +44,7 @@ struct MacTrackCollectionView: View {
         VStack(spacing: 0) {
             MacCollectionHeading(
                 title: destination.title,
-                subtitle: "\(tracks.count) 首",
+                subtitle: L10n("macTrackNav.trackCount", tracks.count),
                 symbol: symbol,
                 canPlay: !tracks.isEmpty,
                 coverTrackID: coverTrackID,
@@ -60,7 +60,7 @@ struct MacTrackCollectionView: View {
                 playback: playback,
                 favorites: favorites,
                 tracks: tracks,
-                emptyTitle: error == nil ? "暂无歌曲" : "暂时无法打开",
+                emptyTitle: error == nil ? L10n("macTrackNav.emptyTitle") : L10n("macTrackNav.errorTitle"),
                 emptyDetail: error,
                 canManage: canManage,
                 isLoading: loading
@@ -75,7 +75,7 @@ struct MacTrackCollectionView: View {
                 } label: {
                     Image(systemName: "chevron.backward")
                 }
-                .help("返回")
+                .help(L10n("macTrackNav.back"))
                 .keyboardShortcut("[", modifiers: .command)
             }
         }
@@ -95,7 +95,7 @@ struct MacTrackCollectionView: View {
                         if let artist = artists.first(where: { $0.name.caseInsensitiveCompare(name) == .orderedSame }) {
                             tracks = try await MacPages.artistTracks(client: client, artistId: artist.id)
                         } else {
-                            error = "未找到「\(name)」的艺人资料。"
+                            error = L10n("macTrackNav.artistNotFound", name)
                         }
                     }
                 } catch {

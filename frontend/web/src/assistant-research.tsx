@@ -1,5 +1,6 @@
 import { HelpLabel } from './desktop-help';
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { api } from './api';
 import type { AgentPage } from './agent-api';
 import { errorText, useWorkspaceResource, WorkspaceNotice } from './workspace-ui';
@@ -24,6 +25,7 @@ interface Preferences {
 }
 
 export function ResearchSettings() {
+  const { t } = useTranslation();
   const search = useWorkspaceResource<SearchSettings>('/agent/search-settings');
   const memories = useWorkspaceResource<AgentPage<Memory>>('/agent/memories');
   const prefs = useWorkspaceResource<Preferences>('/agent/assistant-preferences');
@@ -96,11 +98,12 @@ export function ResearchSettings() {
     }
   }
   return (
-    <section className="workspace-card assistant-research" aria-label="联网与记忆设置">
-      <h2>联网搜索</h2>
-      <p className="muted">
-        模型通过搜索和正文读取核对库外最新发行。需要独立搜索服务密钥，按服务商规则计费；不上传音频或整份曲库。关闭后仍可本地找歌。
-      </p>
+    <section
+      className="workspace-card assistant-research"
+      aria-label={t('assistantResearch.ariaLabel')}
+    >
+      <h2>{t('assistantResearch.searchTitle')}</h2>
+      <p className="muted">{t('assistantResearch.searchDescription')}</p>
       <WorkspaceNotice
         error={error || search.error || memories.error || prefs.error}
         notice={notice}
@@ -108,39 +111,43 @@ export function ResearchSettings() {
       <form
         onSubmit={(e) => {
           e.preventDefault();
-          void act(saveSearch, '联网搜索设置已保存。');
+          void act(saveSearch, t('assistantResearch.searchSavedNotice'));
         }}
       >
         <div className="workspace-form">
           <label>
-            <HelpLabel hint="searchService">搜索服务</HelpLabel>
+            <HelpLabel hint="searchService">{t('assistantResearch.searchService')}</HelpLabel>
             <select
-              aria-label="搜索服务"
+              aria-label={t('assistantResearch.searchServiceAriaLabel')}
               value={provider}
               onChange={(e) => {
                 setProvider(e.target.value);
                 setKey('');
               }}
             >
-              <option value="deepseek">DeepSeek 官方 Search / Fetch</option>
-              <option value="tavily">Tavily Search / Extract</option>
+              <option value="deepseek">{t('assistantResearch.serviceDeepseek')}</option>
+              <option value="tavily">{t('assistantResearch.serviceTavily')}</option>
             </select>
           </label>
           <label>
-            <HelpLabel hint="savedSecret">搜索 API Key</HelpLabel>
+            <HelpLabel hint="savedSecret">{t('assistantResearch.searchApiKey')}</HelpLabel>
             <input
-              aria-label="搜索 API Key"
+              aria-label={t('assistantResearch.searchApiKeyAriaLabel')}
               type="password"
               autoComplete="new-password"
               value={key}
-              placeholder={search.value?.has_api_key ? '已保存，留空保留' : '仅保存在服务端'}
+              placeholder={
+                search.value?.has_api_key
+                  ? t('assistantResearch.placeholderSaved')
+                  : t('assistantResearch.placeholderEmpty')
+              }
               onChange={(e) => setKey(e.target.value)}
             />
           </label>
           <label>
-            <HelpLabel hint="searchBudget">每日搜索与读取请求上限</HelpLabel>
+            <HelpLabel hint="searchBudget">{t('assistantResearch.dailyBudget')}</HelpLabel>
             <input
-              aria-label="每日搜索请求上限"
+              aria-label={t('assistantResearch.dailyBudgetAriaLabel')}
               type="number"
               min="0"
               max="10000"
@@ -154,7 +161,7 @@ export function ResearchSettings() {
               checked={enabled}
               onChange={(e) => setEnabled(e.target.checked)}
             />
-            启用聊天联网搜索
+            {t('assistantResearch.enableSearch')}
           </label>
           <label className="workspace-check">
             <input
@@ -162,14 +169,15 @@ export function ResearchSettings() {
               checked={clearKey}
               onChange={(e) => setClearKey(e.target.checked)}
             />
-            清除已保存的搜索密钥
+            {t('assistantResearch.clearApiKey')}
           </label>
         </div>
         <p className="muted">
-          今日已请求 {search.value?.requests_today ?? 0} 次；每轮聊天最多 4
-          次独立搜索或读取。失败请求也预留额度，避免超时后重复计费。
+          {t('assistantResearch.requestsTodayInfo', { count: search.value?.requests_today ?? 0 })}
         </p>
-        <button disabled={busy || !search.value}>保存搜索设置</button>{' '}
+        <button disabled={busy || !search.value}>
+          {t('assistantResearch.saveSearchSettings')}
+        </button>{' '}
         <button
           type="button"
           disabled={busy || !search.value?.enabled}
@@ -180,28 +188,28 @@ export function ResearchSettings() {
                 body: '{}',
               });
               await search.reload();
-              if (!result.sources.length) throw new Error('服务已响应，但本次没有可用来源。');
-            }, '搜索接口已返回可核对来源。')
+              if (!result.sources.length) throw new Error(t('assistantResearch.testNoSources'));
+            }, t('assistantResearch.testSearchSuccess'))
           }
         >
-          测试搜索（计入额度）
+          {t('assistantResearch.testSearchButton')}
         </button>
       </form>
-      <h2>上下文与长期记忆</h2>
-      <p className="muted">
-        长对话会压缩较早内容，摘要可能有遗漏，可在对话中查看或清除。摘要消耗一次模型调用，并计入本轮和每日预算。长期记忆只保存你明确提交的内容，最多
-        50 条；删除对话不会删除记忆。
-      </p>
+      <h2>{t('assistantResearch.memoryTitle')}</h2>
+      <p className="muted">{t('assistantResearch.memoryDescription')}</p>
       <label>
         <input
           type="checkbox"
           checked={prefs.value?.context_summary ?? true}
           disabled={busy || !prefs.value}
           onChange={(e) =>
-            void act(() => preference('context_summary', e.target.checked), '上下文设置已保存。')
+            void act(
+              () => preference('context_summary', e.target.checked),
+              t('assistantResearch.contextSavedNotice'),
+            )
           }
         />
-        <HelpLabel hint="summary">启用长对话摘要</HelpLabel>
+        <HelpLabel hint="summary">{t('assistantResearch.enableSummary')}</HelpLabel>
       </label>{' '}
       <label>
         <input
@@ -209,29 +217,34 @@ export function ResearchSettings() {
           checked={prefs.value?.long_term_memory ?? true}
           disabled={busy || !prefs.value}
           onChange={(e) =>
-            void act(() => preference('long_term_memory', e.target.checked), '记忆使用设置已保存。')
+            void act(
+              () => preference('long_term_memory', e.target.checked),
+              t('assistantResearch.memorySavedNotice'),
+            )
           }
         />
-        <HelpLabel hint="memory">在聊天中使用已保存的记忆</HelpLabel>
+        <HelpLabel hint="memory">{t('assistantResearch.useSavedMemories')}</HelpLabel>
       </label>
       <form
         onSubmit={(e) => {
           e.preventDefault();
-          void act(saveMemory, '长期记忆已保存。');
+          void act(saveMemory, t('assistantResearch.memorySavedSuccessNotice'));
         }}
       >
         <label>
-          {editing ? '编辑长期记忆' : '明确保存的音乐偏好'}
+          {editing ? t('assistantResearch.editingMemory') : t('assistantResearch.savedPreference')}
           <textarea
-            aria-label="长期记忆内容"
+            aria-label={t('assistantResearch.memoryContentAriaLabel')}
             value={content}
             onChange={(e) => setContent(e.target.value)}
             maxLength={1000}
             required
-            placeholder="例如：优先录音室版本，通常不听现场版。"
+            placeholder={t('assistantResearch.memoryPlaceholder')}
           />
         </label>
-        <button disabled={busy || !content.trim()}>{editing ? '更新记忆' : '保存长期记忆'}</button>{' '}
+        <button disabled={busy || !content.trim()}>
+          {editing ? t('assistantResearch.updateMemory') : t('assistantResearch.saveMemory')}
+        </button>{' '}
         {editing && (
           <button
             type="button"
@@ -240,7 +253,7 @@ export function ResearchSettings() {
               setContent('');
             }}
           >
-            取消编辑
+            {t('assistantResearch.cancelEdit')}
           </button>
         )}
       </form>
@@ -255,12 +268,12 @@ export function ResearchSettings() {
                 setContent(memory.content);
               }}
             >
-              编辑记忆
+              {t('assistantResearch.editMemory')}
             </button>
             <button
               disabled={busy}
               onClick={() => {
-                if (confirm('删除这条长期记忆？已有对话和草案会保留。'))
+                if (confirm(t('assistantResearch.confirmDelete')))
                   void act(async () => {
                     await api(`/agent/memories/${memory.id}`, { method: 'DELETE' });
                     if (editing?.id === memory.id) {
@@ -268,10 +281,10 @@ export function ResearchSettings() {
                       setContent('');
                     }
                     await memories.reload();
-                  }, '记忆已删除。');
+                  }, t('assistantResearch.deleteSuccessNotice'));
               }}
             >
-              删除记忆
+              {t('assistantResearch.deleteMemory')}
             </button>
           </div>
         </article>

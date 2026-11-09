@@ -1,5 +1,6 @@
 import { HelpLabel } from './desktop-help';
 import { useEffect, useState, type FormEvent } from 'react';
+import { useTranslation } from 'react-i18next';
 import { api } from './api';
 interface Settings {
   enabled: boolean;
@@ -7,6 +8,7 @@ interface Settings {
   version: number;
 }
 export function HostSettings() {
+  const { t } = useTranslation();
   const [record, setRecord] = useState<Settings | null>(null),
     [enabled, setEnabled] = useState(false),
     [text, setText] = useState('');
@@ -48,9 +50,9 @@ export function HostSettings() {
       });
       setRecord(result);
       setText(result.hosts.join('\n'));
-      setNotice('域名白名单已保存并生效。');
+      setNotice(t('hostSettings.savedNotice'));
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '保存未完成，请重试。');
+      setError(reason instanceof Error ? reason.message : t('hostSettings.saveFailed'));
     } finally {
       setBusy(false);
     }
@@ -59,14 +61,15 @@ export function HostSettings() {
     <form
       className="management-card account-form host-settings"
       onSubmit={save}
-      aria-label="域名白名单设置"
+      aria-label={t('hostSettings.sectionAria')}
     >
-      <h2>域名白名单</h2>
-      <p className="muted">默认不限制访问域名。启用后，只有列表中的域名或 IP 能访问网页和 API。</p>
+      <h2>{t('hostSettings.title')}</h2>
+      <p className="muted">{t('hostSettings.description')}</p>
       <p className="access-warning" role="note">
-        <strong>配置错误可能导致无法访问。</strong>
-        如果设置后无法打开网站，只能直接修改数据库关闭白名单。请包含所有客户端使用的访问域名或
-        IP。当前访问地址：<code>{location.hostname}</code>。
+        <strong>{t('hostSettings.warningPrefix')}</strong>
+        {t('hostSettings.warningDetail')}
+        <code>{location.hostname}</code>
+        {t('hostSettings.warningSuffix')}
       </p>
       <label className="check-label">
         <input
@@ -78,10 +81,10 @@ export function HostSettings() {
             setNotice('');
           }}
         />
-        启用域名白名单
+        {t('hostSettings.enableAllowlist')}
       </label>
       <label>
-        <HelpLabel hint="hostAllowlist">允许访问的域名或 IP</HelpLabel>
+        <HelpLabel hint="hostAllowlist">{t('hostSettings.allowedHostsLabel')}</HelpLabel>
         <textarea
           rows={5}
           placeholder={'music.example.com\n192.168.10.65'}
@@ -93,9 +96,7 @@ export function HostSettings() {
           }}
         />
       </label>
-      <p className="muted">
-        每行一个，填写主机名或 IP，不含协议、端口和路径，不支持通配符。反向代理须保留访问时的 Host。
-      </p>
+      <p className="muted">{t('hostSettings.hostsFormatHint')}</p>
       {error && (
         <p className="error" role="alert">
           {error}
@@ -107,7 +108,7 @@ export function HostSettings() {
         </p>
       )}
       <button className="primary" disabled={!record || busy}>
-        {busy ? '保存中…' : '保存域名白名单'}
+        {busy ? t('hostSettings.saving') : t('hostSettings.saveBtn')}
       </button>
     </form>
   );

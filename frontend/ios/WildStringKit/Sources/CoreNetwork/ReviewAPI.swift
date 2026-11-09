@@ -40,12 +40,12 @@ public indirect enum MetadataValue: Decodable, Equatable, Sendable {
         case .string(let value): value
         case .number(let value):
             value.rounded() == value ? String(Int(value)) : String(value)
-        case .bool(let value): value ? "是" : "否"
+        case .bool(let value): value ? KitL10n("kit.review.yes") : KitL10n("kit.review.no")
         case .list(let values):
-            values.map(\.display).filter { !$0.isEmpty }.joined(separator: "、")
+            values.map(\.display).filter { !$0.isEmpty }.joined(separator: KitL10n("kit.metadata.listSeparator"))
         case .object(let values):
-            values.keys.sorted().map { "\($0)：\(values[$0]?.display ?? "")" }
-                .joined(separator: "；")
+            values.keys.sorted().map { KitL10n("kit.review.keyValueFormat", $0, values[$0]?.display ?? "") }
+                .joined(separator: KitL10n("kit.review.pairSeparator"))
         case .null: "—"
         }
     }

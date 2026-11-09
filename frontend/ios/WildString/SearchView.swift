@@ -49,28 +49,28 @@ struct SearchView: View {
             .overlay {
                 if !hasSearched, query.trimmingCharacters(in: .whitespaces).isEmpty {
                     ContentUnavailableView(
-                        "搜索曲库",
+                        L10n("searchView.emptyTitle"),
                         systemImage: "magnifyingglass",
-                        description: Text("输入歌名、艺人或专辑关键词。")
+                        description: Text(L10n("searchView.emptyDescription"))
                     )
                 } else if hasSearched, tracks.isEmpty, !isSearching {
                     ContentUnavailableView.search(text: query)
                 }
             }
-            .navigationTitle("搜索")
+            .navigationTitle(L10n("searchView.title"))
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         showingAssistant = true
                     } label: {
-                        Label("AI 找歌", systemImage: "sparkles")
+                        Label(L10n("searchView.aiSearch"), systemImage: "sparkles")
                     }
                 }
             }
             .sheet(isPresented: $showingAssistant) {
                 AssistantView(client: client)
             }
-            .searchable(text: $query, prompt: "歌曲、艺人或专辑")
+            .searchable(text: $query, prompt: Text(L10n("searchView.prompt")))
             .task(id: query) { await runSearch() }
             .task { await openAssistantForDemoIfNeeded() }
             .miniPlayer(playback, client: client)

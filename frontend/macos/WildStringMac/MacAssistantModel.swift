@@ -46,11 +46,11 @@ final class MacAssistantModel {
     }
     var progressText: String {
         switch detail?.runs?.first(where: { $0.status == "running" })?.stage {
-        case "tools": return "正在查询曲库与整理结果…"
-        case "search": return "正在检索资料…"
-        case "summary": return "正在整理对话上下文…"
-        case "writing": return "正在生成回答…"
-        default: return connectionID == "local" ? "正在检索曲库…" : "助手正在思考与生成回答…"
+        case "tools": return L10n("macAssistantModel.stageTools")
+        case "search": return L10n("macAssistantModel.stageSearch")
+        case "summary": return L10n("macAssistantModel.stageSummary")
+        case "writing": return L10n("macAssistantModel.stageWriting")
+        default: return connectionID == "local" ? L10n("macAssistantModel.searchingLibrary") : L10n("macAssistantModel.thinking")
         }
     }
 
@@ -102,7 +102,7 @@ final class MacAssistantModel {
             connections = items
             connectionError = nil
         } catch {
-            connectionError = "模型连接暂时无法加载：\(MacErrorText.message(for: error))"
+            connectionError = L10n("macAssistantModel.connectionLoadFailed", MacErrorText.message(for: error))
         }
     }
 
@@ -156,7 +156,7 @@ final class MacAssistantModel {
             input = ""
             await loadLocalResults()
         } catch {
-            errorMessage = "\(MacErrorText.message(for: error))。输入已保留；可刷新对话检查服务器是否已收到。"
+            errorMessage = L10n("macAssistantModel.sendErrorRetained", MacErrorText.message(for: error))
             // A timeout can happen after the server accepted the message. Recover saved
             // state before offering a resend, so a retry does not duplicate the turn.
             if let id = detail?.id, let recovered = try? await client.conversation(id: id) {
@@ -167,8 +167,8 @@ final class MacAssistantModel {
                     input = ""
                     errorMessage =
                         running
-                        ? "消息已收到，服务器仍在处理，正在恢复结果…"
-                        : "消息已收到，已恢复服务器保存的结果。"
+                        ? L10n("macAssistantModel.messageReceivedProcessing")
+                        : L10n("macAssistantModel.messageReceivedRestored")
                     await loadLocalResults()
                 }
             }
@@ -212,7 +212,7 @@ final class MacAssistantModel {
         do {
             localResults = try await client.tracks(limit: 10, query: String(prompt.prefix(256))).items
         } catch {
-            errorMessage = "对话已加载，但试听结果暂时不可用：\(MacErrorText.message(for: error))"
+            errorMessage = L10n("macAssistantModel.previewUnavailable", MacErrorText.message(for: error))
         }
     }
 

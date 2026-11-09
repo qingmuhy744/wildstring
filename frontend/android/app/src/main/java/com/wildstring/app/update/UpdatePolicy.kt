@@ -1,6 +1,8 @@
 package com.wildstring.app.update
 
 import com.google.gson.JsonParser
+import com.wildstring.app.AppLanguage
+import com.wildstring.app.R
 import java.io.File
 import java.security.MessageDigest
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
@@ -44,7 +46,7 @@ object UpdatePolicy {
                 if (digest != null && !Regex("sha256:[a-fA-F0-9]{64}").matches(digest)) throw UpdateFailure("asset_invalid")
                 return ReleaseAsset(name, url, size, digest?.removePrefix("sha256:")?.lowercase())
             }
-            return AppRelease(value, tag, root["body"]?.takeUnless { it.isJsonNull }?.asString?.take(16000) ?: "暂无版本说明。",
+            return AppRelease(value, tag, root["body"]?.takeUnless { it.isJsonNull }?.asString?.take(16000) ?: AppLanguage.string(R.string.upd_pol_no_release_notes),
                 asset("wildstring-$value-release.apk", MAX_APK), asset("SHA256SUMS", 128 * 1024))
         } catch (error: UpdateFailure) { throw error }
         catch (_: Exception) { throw UpdateFailure("release_invalid") }

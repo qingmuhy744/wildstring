@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ApplicationPolicySettings } from './application-policy';
 import type { User } from './api';
 import { AgentConnections, AssistantPreferences, ToolCredentials } from './agent-settings';
@@ -16,23 +17,24 @@ export function AssistantSettings({
   initialTab?: AssistantSettingsTab;
   embedded?: boolean;
 }) {
+  const { t } = useTranslation();
   const [tab, setTab] = useState(initialTab);
   return (
-    <section className="workspace-page" aria-label="助手与通知设置">
+    <section className="workspace-page" aria-label={t('assistantSettings.ariaLabel')}>
       {!embedded && (
         <WorkspaceHeader
-          title="助手设置"
-          description="选择模型、授权范围和结果通知；关闭外部服务后，音乐仍照常播放。"
+          title={t('assistantSettings.title')}
+          description={t('assistantSettings.description')}
         />
       )}
-      <nav className="settings-tabs" aria-label="助手设置分类">
+      <nav className="settings-tabs" aria-label={t('assistantSettings.tabsAriaLabel')}>
         {[
-          ['connections', '模型连接'],
-          ['application', '整理方式'],
-          ['telegram', '通知与 Telegram'],
-          ['credentials', 'MCP 工具凭据'],
-          ['history', '对话历史'],
-          ['research', '联网与记忆'],
+          ['connections', t('assistantSettings.tabConnections')],
+          ['application', t('assistantSettings.tabApplication')],
+          ['telegram', t('assistantSettings.tabTelegram')],
+          ['credentials', t('assistantSettings.tabCredentials')],
+          ['history', t('assistantSettings.tabHistory')],
+          ['research', t('assistantSettings.tabResearch')],
         ].map(([key, label]) => (
           <button
             key={key}

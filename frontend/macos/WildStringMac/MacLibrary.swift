@@ -22,14 +22,14 @@ struct MacMusicView: View {
             playback: playback,
             favorites: favorites,
             tracks: tracks,
-            emptyTitle: message == nil ? (query.isEmpty ? "曲库是空的" : "没有找到「\(query)」") : "无法加载曲库",
+            emptyTitle: message == nil ? (query.isEmpty ? L10n("macLibrary.emptyLibrary") : L10n("macLibrary.noSearchResults", query)) : L10n("macLibrary.loadFailed"),
             emptyDetail: message,
             canManage: canManage,
             isLoading: loading
         )
-        .navigationTitle("全部歌曲")
+        .navigationTitle(L10n("macLibrary.allTracksTitle"))
         .toolbar {
-            TextField("搜索歌曲、艺人或专辑", text: $query)
+            TextField(L10n("macLibrary.searchPlaceholder"), text: $query)
                 .textFieldStyle(.roundedBorder).frame(width: 260).focused($searchFocused)
         }
         .onChange(of: focusSearch) { _, requested in
@@ -40,7 +40,7 @@ struct MacMusicView: View {
         }
         .safeAreaInset(edge: .bottom) {
             if tracks.count < total {
-                Button("还有 \(total - tracks.count) 首") { Task { await load(reset: false) } }
+                Button(L10n("macLibrary.moreTracksRemaining", total - tracks.count)) { Task { await load(reset: false) } }
                     .buttonStyle(.bordered)
                     .padding(8)
             }
@@ -84,15 +84,16 @@ struct MacSettingsView: View {
     @AppStorage("lyricsShowTranslation") private var showTranslation = true
     @AppStorage("lyricsShowRomanization") private var showRomanization = false
     @AppStorage("macAppearance") private var appearance = "system"
+    @AppStorage(InterfaceLanguage.storageKey) private var language = InterfaceLanguage.auto.rawValue
 
     var body: some View {
         GeometryReader { geometry in
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("让野弦更合你的习惯")
+                        Text(L10n("macLibrary.settingsHeaderTitle"))
                             .font(MacTheme.display(28))
-                        Text("调整外观、聆听体验与服务器连接。")
+                        Text(L10n("macLibrary.settingsHeaderSubtitle"))
                             .font(MacTheme.body)
                             .foregroundStyle(MacTheme.muted)
                     }
@@ -125,33 +126,54 @@ struct MacSettingsView: View {
         .tint(MacTheme.accent)
         .font(MacTheme.body)
         .toggleStyle(.switch)
-        .navigationTitle("设置")
+        .navigationTitle(L10n("macLibrary.settingsNavTitle"))
         .onChange(of: preferredBitrate) { _, value in
             session.playback?.preferredBitrateKbps = value == 0 ? nil : value
         }
     }
 
     private var appearanceCard: some View {
-        card("外观", symbol: "circle.lefthalf.filled") {
-            Picker("日夜模式", selection: $appearance) {
-                Text("跟随系统").tag("system")
-                Text("浅色").tag("light")
-                Text("深色").tag("dark")
+        card(L10n("macLibrary.cardAppearance"), symbol: "circle.lefthalf.filled") {
+            Picker(L10n("macLibrary.appearanceMode"), selection: $appearance) {
+                Text(L10n("macLibrary.themeSystem")).tag("system")
+                Text(L10n("macLibrary.themeLight")).tag("light")
+                Text(L10n("macLibrary.themeDark")).tag("dark")
             }
             .pickerStyle(.segmented)
             .labelsHidden()
-            .accessibilityLabel("日夜模式")
-            note("同时应用于曲库、歌词和全屏播放页。")
+            .accessibilityLabel(L10n("macLibrary.appearanceMode"))
+            note(L10n("macLibrary.appearanceNote"))
+            Divider()
+            HStack {
+                Text(L10n("settings.language"))
+                Spacer(minLength: 12)
+                Picker(L10n("settings.language"), selection: Binding(
+                    get: { InterfaceLanguage(preference: language) },
+                    set: { selected in
+                        InterfaceLanguage.store(selected.rawValue)
+                        if let client = session.client {
+                            Task { _ = try? await client.updateLanguage(selected.rawValue) }
+                        }
+                    }
+                )) {
+                    ForEach(InterfaceLanguage.allCases, id: \.rawValue) { option in
+                        Text(option.labelString).tag(option)
+                    }
+                }
+                .labelsHidden()
+                .frame(width: 164)
+                .accessibilityLabel(L10n("settings.language"))
+            }
         }
     }
 
     private var playbackCard: some View {
-        card("播放", symbol: "waveform") {
+        card(L10n("macLibrary.cardPlayback"), symbol: "waveform") {
             HStack {
-                Text("播放音质")
+                Text(L10n("macLibrary.playbackQuality"))
                 Spacer(minLength: 12)
-                Picker("播放音质", selection: $preferredBitrate) {
-                    Text("原音").tag(0)
+                Picker(L10n("macLibrary.playbackQuality"), selection: $preferredBitrate) {
+                    Text(L10n("macLibrary.qualityLossless")).tag(0)
                     Text("AAC · 128 kbps").tag(128)
                     Text("AAC · 192 kbps").tag(192)
                     Text("AAC · 256 kbps").tag(256)
@@ -159,44 +181,44 @@ struct MacSettingsView: View {
                 }
                 .labelsHidden()
                 .frame(width: 164)
-                .accessibilityLabel("播放音质")
+                .accessibilityLabel(L10n("macLibrary.playbackQuality"))
             }
-            note("音质切换从下次播放生效。AAC 适用于无损音源，已有有损音源保持原音。")
+            note(L10n("macLibrary.playbackQualityNote"))
             Divider()
-            settingToggle("在菜单栏显示播放器", isOn: $menuBarPlayerEnabled)
+            settingToggle(L10n("macLibrary.showMenuBarPlayer"), isOn: $menuBarPlayerEnabled)
         }
     }
 
     private var lyricsCard: some View {
-        card("歌词", symbol: "text.quote") {
-            settingToggle("逐字高亮", isOn: $wordHighlight)
-            note("歌词包含单字时间时逐字高亮，普通歌词仍按行显示。")
+        card(L10n("macLibrary.cardLyrics"), symbol: "text.quote") {
+            settingToggle(L10n("macLibrary.wordHighlight"), isOn: $wordHighlight)
+            note(L10n("macLibrary.wordHighlightNote"))
             Divider()
-            settingToggle("显示翻译", isOn: $showTranslation)
+            settingToggle(L10n("macLibrary.showTranslation"), isOn: $showTranslation)
             Divider()
-            settingToggle("显示音译", isOn: $showRomanization)
+            settingToggle(L10n("macLibrary.showRomanization"), isOn: $showRomanization)
         }
     }
 
     private var desktopLyricsCard: some View {
-        card("桌面歌词", symbol: "macwindow") {
+        card(L10n("macLibrary.cardDesktopLyrics"), symbol: "macwindow") {
             HStack {
-                Text(session.desktopLyricsVisible ? "桌面歌词已打开" : "在桌面上显示歌词")
+                Text(session.desktopLyricsVisible ? L10n("macLibrary.desktopLyricsOpen") : L10n("macLibrary.showDesktopLyrics"))
                 Spacer(minLength: 12)
-                Button(session.desktopLyricsVisible ? "关闭" : "打开") {
+                Button(session.desktopLyricsVisible ? L10n("macLibrary.closeDesktopLyrics") : L10n("macLibrary.openDesktopLyrics")) {
                     NotificationCenter.default.post(name: .wildstringShowDesktopLyrics, object: nil)
                 }
                 .buttonStyle(.bordered)
-                .accessibilityLabel(session.desktopLyricsVisible ? "关闭桌面歌词" : "打开桌面歌词")
+                .accessibilityLabel(session.desktopLyricsVisible ? L10n("macLibrary.closeDesktopLyricsAccessibility") : L10n("macLibrary.openDesktopLyricsAccessibility"))
             }
             Divider()
-            settingToggle("穿透点击", isOn: $clickThrough)
-            note("开启后可点击歌词下方的窗口。移动或关闭歌词前，请先关闭穿透。")
+            settingToggle(L10n("macLibrary.clickThrough"), isOn: $clickThrough)
+            note(L10n("macLibrary.clickThroughNote"))
         }
     }
 
     private var accountCard: some View {
-        card("账号与服务器", symbol: "server.rack") {
+        card(L10n("macLibrary.cardAccountServer"), symbol: "server.rack") {
             VStack(alignment: .leading, spacing: 6) {
                 Text(session.serverLabel)
                     .font(MacTheme.section(18))
@@ -205,7 +227,7 @@ struct MacSettingsView: View {
                 Text(session.username)
                     .foregroundStyle(MacTheme.muted)
                     .textSelection(.enabled)
-                Text("\(session.routes?.activeName ?? "默认线路") · \(session.connection?.label ?? "连接中…")")
+                Text("\(session.routes?.activeName ?? L10n("macLibrary.defaultRoute")) · \(session.connection?.label ?? L10n("macLibrary.connecting"))")
                     .font(MacTheme.caption)
                     .foregroundStyle(MacTheme.muted)
                     .fixedSize(horizontal: false, vertical: true)
@@ -214,7 +236,7 @@ struct MacSettingsView: View {
 
             if let server = session.client?.server {
                 Link(destination: server.url) {
-                    Label("打开网页版", systemImage: "arrow.up.right.square")
+                    Label(L10n("macLibrary.openWeb"), systemImage: "arrow.up.right.square")
                 }
                 .help(server.description)
             }
@@ -223,7 +245,7 @@ struct MacSettingsView: View {
                 session.showRoutes = true
             } label: {
                 HStack {
-                    Label("服务器名称与线路", systemImage: "network")
+                    Label(L10n("macLibrary.serverNameAndRoutes"), systemImage: "network")
                     Spacer()
                     Image(systemName: "chevron.right").font(.caption)
                 }
@@ -231,11 +253,11 @@ struct MacSettingsView: View {
             }
             .buttonStyle(.plain)
             .disabled(session.isBusy || session.routes == nil)
-            note("为这台服务器设置本机别名，管理线路与切换方式。账号资料和曲库管理请前往网页版。")
+            note(L10n("macLibrary.serverSettingsNote"))
             Divider()
             if session.servers.count > 1 {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("已保存的服务器")
+                    Text(L10n("macLibrary.savedServers"))
                         .font(MacTheme.caption)
                         .foregroundStyle(MacTheme.muted)
                     ForEach(session.servers) { server in
@@ -245,7 +267,7 @@ struct MacSettingsView: View {
                                     Text(server.label)
                                         .font(MacTheme.section(13))
                                     if server.address == session.logicalServerAddress {
-                                        Text("当前")
+                                        Text(L10n("macLibrary.currentServerTag"))
                                             .font(MacTheme.caption)
                                             .foregroundStyle(MacTheme.accent)
                                     }
@@ -256,7 +278,7 @@ struct MacSettingsView: View {
                             }
                             Spacer()
                             if server.address != session.logicalServerAddress {
-                                Button("切换") {
+                                Button(L10n("macLibrary.switchServer")) {
                                     Task { await session.switchServer(server) }
                                 }
                                 .buttonStyle(.bordered)
@@ -269,7 +291,7 @@ struct MacSettingsView: View {
                                     .foregroundStyle(MacTheme.muted)
                             }
                             .buttonStyle(.plain)
-                            .help("删除服务器")
+                            .help(L10n("macLibrary.deleteServerHelp"))
                         }
                         .padding(.vertical, 2)
                     }
@@ -278,14 +300,14 @@ struct MacSettingsView: View {
             }
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: 10) {
-                    Button("连接其他服务器…", systemImage: "plus") { session.addServer() }
+                    Button(L10n("macLibrary.connectOtherServer"), systemImage: "plus") { session.addServer() }
                         .buttonStyle(.bordered)
                     Spacer()
-                    Button("退出当前服务器…", systemImage: "rectangle.portrait.and.arrow.right") {
+                    Button(L10n("macLibrary.logoutCurrentServer"), systemImage: "rectangle.portrait.and.arrow.right") {
                         session.confirmLogout = true
                     }
                     .buttonStyle(.bordered)
-                    Button("删除当前服务器…", systemImage: "trash", role: .destructive) {
+                    Button(L10n("macLibrary.deleteCurrentServer"), systemImage: "trash", role: .destructive) {
                         if let current = session.servers.first(where: { $0.address == session.logicalServerAddress }) {
                             session.serverToDelete = current
                         }
@@ -294,14 +316,14 @@ struct MacSettingsView: View {
                     .tint(.red)
                 }
                 VStack(alignment: .leading, spacing: 10) {
-                    Button("连接其他服务器…", systemImage: "plus") { session.addServer() }
+                    Button(L10n("macLibrary.connectOtherServer"), systemImage: "plus") { session.addServer() }
                         .buttonStyle(.bordered)
                     HStack(spacing: 10) {
-                        Button("退出当前服务器…", systemImage: "rectangle.portrait.and.arrow.right") {
+                        Button(L10n("macLibrary.logoutCurrentServer"), systemImage: "rectangle.portrait.and.arrow.right") {
                             session.confirmLogout = true
                         }
                         .buttonStyle(.bordered)
-                        Button("删除当前服务器…", systemImage: "trash", role: .destructive) {
+                        Button(L10n("macLibrary.deleteCurrentServer"), systemImage: "trash", role: .destructive) {
                             if let current = session.servers.first(where: { $0.address == session.logicalServerAddress }) {
                                 session.serverToDelete = current
                             }
@@ -316,23 +338,23 @@ struct MacSettingsView: View {
     }
 
     private var softwareUpdateCard: some View {
-        card("软件更新", symbol: "arrow.triangle.2.circlepath") {
+        card(L10n("macLibrary.cardSoftwareUpdate"), symbol: "arrow.triangle.2.circlepath") {
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("当前版本：v\(session.updater.currentVersion)")
+                    Text(L10n("macLibrary.currentVersion", session.updater.currentVersion))
                         .font(MacTheme.section(14))
                     if let date = session.updater.lastCheckedAt {
-                        Text("上次检查：\(date.formatted(date: .numeric, time: .shortened))")
+                        Text(L10n("macLibrary.lastChecked", date.formatted(date: .numeric, time: .shortened)))
                             .font(MacTheme.caption)
                             .foregroundStyle(MacTheme.muted)
                     } else {
-                        Text("尚未检查更新")
+                        Text(L10n("macLibrary.neverChecked"))
                             .font(MacTheme.caption)
                             .foregroundStyle(MacTheme.muted)
                     }
                 }
                 Spacer(minLength: 12)
-                Button(session.updater.phase == .checking ? "正在检查…" : "检查更新") {
+                Button(session.updater.phase == .checking ? L10n("macLibrary.checkingUpdates") : L10n("macLibrary.checkUpdates")) {
                     Task { await session.updater.checkForUpdates(manual: true) }
                 }
                 .buttonStyle(.bordered)
@@ -345,7 +367,7 @@ struct MacSettingsView: View {
                     HStack(spacing: 6) {
                         Image(systemName: "sparkles")
                             .foregroundStyle(MacTheme.accent)
-                        Text("发现新版本 v\(release.version)")
+                        Text(L10n("macLibrary.newVersionFound", release.version))
                             .font(MacTheme.section(14))
                             .foregroundStyle(MacTheme.accent)
                     }
@@ -359,12 +381,12 @@ struct MacSettingsView: View {
                             .background(MacTheme.panel, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                     }
                     HStack(spacing: 10) {
-                        Button("下载更新 (DMG)") {
+                        Button(L10n("macLibrary.downloadDMG")) {
                             session.updater.openDownload(for: release)
                         }
                         .buttonStyle(.borderedProminent)
 
-                        Button("查看发布说明 ↗") {
+                        Button(L10n("macLibrary.viewReleaseNotes")) {
                             session.updater.openReleasePage(for: release)
                         }
                         .buttonStyle(.plain)
@@ -379,7 +401,7 @@ struct MacSettingsView: View {
                     HStack(spacing: 6) {
                         Image(systemName: "checkmark.circle.fill")
                             .foregroundStyle(.green)
-                        Text("当前已是最新版本")
+                        Text(L10n("macLibrary.upToDate"))
                             .font(MacTheme.caption)
                             .foregroundStyle(MacTheme.muted)
                     }
@@ -401,11 +423,11 @@ struct MacSettingsView: View {
             }
 
             Divider()
-            settingToggle("自动检查更新", isOn: Binding(
+            settingToggle(L10n("macLibrary.autoCheckUpdates"), isOn: Binding(
                 get: { session.updater.autoCheckEnabled },
                 set: { session.updater.autoCheckEnabled = $0 }
             ))
-            note("开启后将在后台静默检测新版本；发现新版本时在设置与菜单中提示。")
+            note(L10n("macLibrary.autoCheckUpdatesNote"))
         }
     }
 

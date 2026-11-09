@@ -25,7 +25,7 @@ struct DailyRecommendationsView: View {
     private var embeddedContent: some View {
         Group {
             if degraded {
-                Text("部分来源暂不可用，展示本地推荐。")
+                Text(L10n("dailyRec.degradedNotice"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -33,11 +33,11 @@ struct DailyRecommendationsView: View {
             if isLoading || isRefreshing {
                 ProgressView()
             } else if items.isEmpty {
-                Text(errorMessage ?? "今天没有推荐。多听一些再回来看看。")
+                Text(errorMessage ?? L10n("dailyRec.emptyMessage"))
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
-            Button("换一批") { Task { await refresh() } }
+            Button(L10n("dailyRec.refresh")) { Task { await refresh() } }
                 .disabled(isRefreshing || isLoading)
         }
         .task { await load() }
@@ -47,7 +47,7 @@ struct DailyRecommendationsView: View {
         NavigationStack {
             List {
                 if degraded {
-                    Text("部分来源暂不可用，展示本地推荐。")
+                    Text(L10n("dailyRec.degradedNotice"))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -67,19 +67,19 @@ struct DailyRecommendationsView: View {
                     ProgressView()
                 } else if items.isEmpty, let errorMessage {
                     ContentUnavailableView(
-                        "无法加载推荐",
+                        L10n("dailyRec.loadFailed"),
                         systemImage: "sparkles",
                         description: Text(errorMessage)
                     )
                 } else if items.isEmpty {
                     ContentUnavailableView(
-                        "今天没有推荐",
+                        L10n("dailyRec.emptyTitle"),
                         systemImage: "sparkles",
-                        description: Text("多听一些再回来看看。")
+                        description: Text(L10n("dailyRec.emptyDescription"))
                     )
                 }
             }
-            .navigationTitle("每日推荐")
+            .navigationTitle(L10n("dailyRec.title"))
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
@@ -88,7 +88,7 @@ struct DailyRecommendationsView: View {
                         if isRefreshing {
                             ProgressView()
                         } else {
-                            Text("换一批")
+                            Text(L10n("dailyRec.refresh"))
                         }
                     }
                     .disabled(isRefreshing || isLoading)

@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { api } from './api';
 import { Icon } from './icons';
 import type { DownloadQueueInfo, DownloadTaskItem } from './podcasts';
 type DownloadQueueView = 'active' | 'failed' | 'completed';
 export function PodcastDownloadManager() {
+  const { t } = useTranslation();
   const [notice, showNotice] = useState('');
   const [queueInfo, setQueueInfo] = useState<DownloadQueueInfo | null>(null);
   const [retryingFailed, setRetryingFailed] = useState(false);
@@ -26,7 +28,7 @@ export function PodcastDownloadManager() {
       setQueueInfo(q);
       setQueueError(null);
     } catch (err) {
-      setQueueError(err instanceof Error ? err.message : '下载状态加载失败，请重试');
+      setQueueError(err instanceof Error ? err.message : t('podcastDownloads.loadStatusFailed'));
     }
   };
 
@@ -36,11 +38,11 @@ export function PodcastDownloadManager() {
       const res = await api<{ retried_count: number }>('/podcasts/downloads/retry-failed', {
         method: 'POST',
       });
-      showNotice(`已将 ${res.retried_count} 个失败任务重新加入下载队列`);
+      showNotice(t('podcastDownloads.requeuedNotice', { count: res.retried_count }));
       await fetchQueue();
       if (res.retried_count > 0) setQueueView('active');
     } catch (err) {
-      setQueueError(err instanceof Error ? err.message : '重试任务失败');
+      setQueueError(err instanceof Error ? err.message : t('podcastDownloads.retryTasksFailed'));
     } finally {
       setRetryingFailed(false);
     }
@@ -50,9 +52,9 @@ export function PodcastDownloadManager() {
     try {
       await api('/podcasts/downloads/clear-completed', { method: 'POST' });
       await fetchQueue();
-      showNotice('已清除完成记录，下载的音频仍保留');
+      showNotice(t('podcastDownloads.clearCompletedNotice'));
     } catch (err) {
-      setQueueError(err instanceof Error ? err.message : '清除记录失败，请重试');
+      setQueueError(err instanceof Error ? err.message : t('podcastDownloads.clearRecordsFailed'));
     }
   };
 
@@ -64,7 +66,7 @@ export function PodcastDownloadManager() {
       await fetchQueue();
       setQueueView('active');
     } catch (err) {
-      setQueueError(err instanceof Error ? err.message : '重新下载失败，请重试');
+      setQueueError(err instanceof Error ? err.message : t('podcastDownloads.redownloadFailed'));
     }
   };
 
@@ -76,18 +78,30 @@ export function PodcastDownloadManager() {
     return () => window.clearInterval(timer);
   }, []);
   return (
-    <section className="podcast-download-content" aria-label="下载管理">
-      <h2>下载管理</h2>
-      <p className="muted">这里是服务器共享音频的下载任务，所有账号按各自保存策略复用。</p>
+    <section className="podcast-download-content" aria-label={t('podcastDownloads.title')}>
+      <h2>{t('podcastDownloads.title')}</h2>
+      <p className="muted">{t('podcastDownloads.description')}</p>
       {notice && <p role="status">{notice}</p>}
-      <div className="download-views" role="group" aria-label="下载状态">
+      <div
+        className="download-views"
+        role="group"
+        aria-label={t('podcastDownloads.downloadStatusAria')}
+      >
         {(
           [
-            { value: 'active', label: '进行中', count: queueInfo?.total_pending || 0 },
-            { value: 'failed', label: '需重试', count: queueInfo?.failed_count || 0 },
+            {
+              value: 'active',
+              label: t('podcastDownloads.tabActive'),
+              count: queueInfo?.total_pending || 0,
+            },
+            {
+              value: 'failed',
+              label: t('podcastDownloads.tabFailed'),
+              count: queueInfo?.failed_count || 0,
+            },
             {
               value: 'completed',
-              label: '已完成',
+              label: t('podcastDownloads.tabCompleted'),
               count: queueInfo?.recent_completed.length || 0,
             },
           ] as const
@@ -107,7 +121,7 @@ export function PodcastDownloadManager() {
         <div className="download-error" role="alert">
           <span>{queueError}</span>
           <button type="button" onClick={() => void fetchQueue()}>
-            重新加载
+            {t('podcastDownloads.reload')}
           </button>
         </div>
       )}
@@ -116,14 +130,15 @@ export function PodcastDownloadManager() {
         {activeQueueView === 'failed' && queueInfo && queueInfo.failed.length > 0 && (
           <div className="queue-block">
             <h4>
-              <span>下载失败 ({queueInfo.failed.length})</span>
+              <span>{t('podcastDownloads.failedCount', { count: queueInfo.failed.length })}</span>
               <button
                 type="button"
                 className="podcast-toolbar-btn"
                 disabled={retryingFailed}
                 onClick={handleRetryFailed}
               >
-                <Icon name="refresh" /> {retryingFailed ? '重试中…' : '全部重试'}
+                <Icon name="refresh" />{' '}
+                {retryingFailed ? t('podcastDownloads.retrying') : t('podcastDownloads.retryAll')}
               </button>
             </h4>
             <div className="queue-cards-group">
@@ -133,7 +148,7 @@ export function PodcastDownloadManager() {
                     <div className="queue-task-title">{task.episode_title}</div>
                     <div className="queue-task-sub">{task.podcast_title}</div>
                     <div className="queue-task-error">
-                      {task.error || '源站下载未成功，请检查网络或重试'}
+                      {task.error || t('podcastDownloads.defaultTaskError')}
                     </div>
                   </div>
                   <button
@@ -141,7 +156,7 @@ export function PodcastDownloadManager() {
                     className="queue-retry-single-btn"
                     onClick={() => void handleRetryDownload(task)}
                   >
-                    重试
+                    {t('podcastDownloads.retry')}
                   </button>
                 </div>
               ))}
@@ -154,7 +169,10 @@ export function PodcastDownloadManager() {
           <div className="queue-block">
             <h4>
               <span>
-                {queueInfo.active_count} 集正在下载 · {queueInfo.queued_count} 集等待中
+                {t('podcastDownloads.activeCountSummary', {
+                  active: queueInfo.active_count,
+                  queued: queueInfo.queued_count,
+                })}
               </span>
             </h4>
             <div className="queue-cards-group">
@@ -170,7 +188,9 @@ export function PodcastDownloadManager() {
                         <div
                           className="queue-progress-bar-bg"
                           role="progressbar"
-                          aria-label={`${task.episode_title}下载进度`}
+                          aria-label={t('podcastDownloads.progressAria', {
+                            title: task.episode_title,
+                          })}
                           aria-valuemin={0}
                           aria-valuemax={100}
                           aria-valuenow={pct ?? undefined}
@@ -182,13 +202,13 @@ export function PodcastDownloadManager() {
                         </div>
                         <div className="queue-task-metrics">
                           <span className="queue-task-speed">
-                            {task.slow_mode ? '平缓下载 · ' : ''}
-                            {task.speed_human || '正在拉取数据…'}
+                            {task.slow_mode ? t('podcastDownloads.slowModePrefix') : ''}
+                            {task.speed_human || t('podcastDownloads.fetchingData')}
                           </span>
                           <span>
                             {task.downloaded_human
-                              ? `${task.downloaded_human} / ${task.total_human || '未知'}`
-                              : '连接中…'}
+                              ? `${task.downloaded_human} / ${task.total_human || t('podcastDownloads.unknownTotal')}`
+                              : t('podcastDownloads.connecting')}
                           </span>
                         </div>
                       </div>
@@ -197,10 +217,13 @@ export function PodcastDownloadManager() {
                       className={`queue-task-status ${task.status === 'retrying' ? 'queued' : 'downloading'}`}
                     >
                       {task.status === 'retrying'
-                        ? `重试等待 (${task.attempt || 1}/${task.max_retries || 3})`
+                        ? t('podcastDownloads.retryWaiting', {
+                            attempt: task.attempt || 1,
+                            max: task.max_retries || 3,
+                          })
                         : pct != null
                           ? `${pct}%`
-                          : '下载中'}
+                          : t('podcastDownloads.downloading')}
                     </span>
                   </div>
                 );
@@ -211,7 +234,9 @@ export function PodcastDownloadManager() {
                     <div className="queue-task-title">{task.episode_title}</div>
                     <div className="queue-task-sub">{task.podcast_title}</div>
                   </div>
-                  <span className="queue-task-status queued">排队 #{idx + 1}</span>
+                  <span className="queue-task-status queued">
+                    {t('podcastDownloads.queuedOrder', { order: idx + 1 })}
+                  </span>
                 </div>
               ))}
             </div>
@@ -222,9 +247,13 @@ export function PodcastDownloadManager() {
         {activeQueueView === 'completed' && queueInfo && queueInfo.recent_completed.length > 0 && (
           <div className="queue-block">
             <h4>
-              <span>近期已完成 ({queueInfo.recent_completed.length})</span>
+              <span>
+                {t('podcastDownloads.recentCompletedCount', {
+                  count: queueInfo.recent_completed.length,
+                })}
+              </span>
               <button type="button" className="queue-clear-btn" onClick={handleClearCompleted}>
-                清除记录
+                {t('podcastDownloads.clearRecords')}
               </button>
             </h4>
             <div className="queue-cards-group">
@@ -234,16 +263,20 @@ export function PodcastDownloadManager() {
                     <div className="queue-task-title">{task.episode_title}</div>
                     <div className="queue-task-sub">{task.podcast_title}</div>
                   </div>
-                  <span className="queue-task-status downloaded">✓ 已下载</span>
+                  <span className="queue-task-status downloaded">
+                    {t('podcastDownloads.downloadedCheck')}
+                  </span>
                 </div>
               ))}
             </div>
-            <p className="download-records-note">清除记录不会删除已下载的音频。</p>
+            <p className="download-records-note">{t('podcastDownloads.clearRecordsNote')}</p>
           </div>
         )}
 
         {/* Empty State */}
-        {!queueInfo && !queueError && <p className="queue-empty-state">正在加载下载状态…</p>}
+        {!queueInfo && !queueError && (
+          <p className="queue-empty-state">{t('podcastDownloads.loadingQueue')}</p>
+        )}
         {queueInfo &&
           ((activeQueueView === 'active' && queueInfo.total_pending === 0) ||
             (activeQueueView === 'failed' && queueInfo.failed.length === 0) ||
@@ -252,17 +285,17 @@ export function PodcastDownloadManager() {
               <Icon name={activeQueueView === 'completed' ? 'history' : 'download'} />
               <strong>
                 {activeQueueView === 'active'
-                  ? '当前没有下载任务'
+                  ? t('podcastDownloads.emptyTitleActive')
                   : activeQueueView === 'failed'
-                    ? '没有需要重试的单集'
-                    : '暂无已完成记录'}
+                    ? t('podcastDownloads.emptyTitleFailed')
+                    : t('podcastDownloads.emptyTitleCompleted')}
               </strong>
               <p>
                 {activeQueueView === 'active'
-                  ? '播放时自动缓存，或从单集列表选择保存到服务器。'
+                  ? t('podcastDownloads.emptyDescActive')
                   : activeQueueView === 'failed'
-                    ? '下载遇到问题时，可以在这里查看原因并重试。'
-                    : '后续完成的下载会出现在这里。'}
+                    ? t('podcastDownloads.emptyDescFailed')
+                    : t('podcastDownloads.emptyDescCompleted')}
               </p>
             </div>
           )}

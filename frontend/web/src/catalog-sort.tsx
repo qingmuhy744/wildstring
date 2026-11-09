@@ -1,20 +1,32 @@
 import { hints } from './help-content';
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import i18n from './i18n';
 
 export type CatalogSort = { sort: string; order: 'asc' | 'desc' };
-export const albumSorts = [
-  ['title', '专辑名称'],
-  ['added_at', '入库时间'],
-  ['release_date', '发行时间'],
-  ['artist', '艺人名称'],
+
+function makeSortItem(key: string, labelKey: string): [string, string] {
+  const item = [key, ''];
+  Object.defineProperty(item, 1, {
+    get: () => i18n.t(labelKey),
+    enumerable: true,
+  });
+  return item as [string, string];
+}
+
+export const albumSorts: [string, string][] = [
+  makeSortItem('title', 'catalogSort.title'),
+  makeSortItem('added_at', 'catalogSort.added_at'),
+  makeSortItem('release_date', 'catalogSort.release_date'),
+  makeSortItem('artist', 'catalogSort.artist'),
 ];
-export const trackSorts = [
-  ['name', '歌曲名称'],
-  ['added_at', '入库时间'],
-  ['duration_ms', '歌曲时长'],
-  ['play_count', '播放次数'],
-  ['listened_ms', '收听时长'],
-  ['last_played_at', '最近听过'],
+export const trackSorts: [string, string][] = [
+  makeSortItem('name', 'catalogSort.name'),
+  makeSortItem('added_at', 'catalogSort.added_at'),
+  makeSortItem('duration_ms', 'catalogSort.duration_ms'),
+  makeSortItem('play_count', 'catalogSort.play_count'),
+  makeSortItem('listened_ms', 'catalogSort.listened_ms'),
+  makeSortItem('last_played_at', 'catalogSort.last_played_at'),
 ];
 export function defaultSort(context: string): CatalogSort {
   return context === 'album-tracks'
@@ -23,11 +35,11 @@ export function defaultSort(context: string): CatalogSort {
       ? { sort: 'last_played_at', order: 'desc' }
       : { sort: 'title', order: 'asc' };
 }
-export function sortChoices(context: string) {
+export function sortChoices(context: string): [string, string][] {
   return context.endsWith('albums')
     ? albumSorts
     : context === 'album-tracks'
-      ? [['track_number', '碟号与曲序'], ...trackSorts]
+      ? [makeSortItem('track_number', 'catalogSort.track_number'), ...trackSorts]
       : trackSorts.map(([key, label]) => [key === 'name' ? 'title' : key, label]);
 }
 export function useCatalogSorting(userId: string, context: string) {
@@ -68,10 +80,11 @@ export function CatalogSortControl({
   selection: CatalogSort;
   change: (value: CatalogSort) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="catalog-sort-control" data-help={hints.sorting}>
       <select
-        aria-label="列表排序"
+        aria-label={t('catalogSort.ariaLabel')}
         value={selection.sort}
         onChange={(event) => {
           const sort = event.target.value;
@@ -89,13 +102,15 @@ export function CatalogSortControl({
       </select>
       <button
         className="text-button"
-        aria-label={selection.order === 'asc' ? '切换为降序' : '切换为升序'}
+        aria-label={
+          selection.order === 'asc' ? t('catalogSort.orderDescAria') : t('catalogSort.orderAscAria')
+        }
         data-help={
-          selection.order === 'asc' ? '当前升序，点击切换为降序。' : '当前降序，点击切换为升序。'
+          selection.order === 'asc' ? t('catalogSort.orderDescHelp') : t('catalogSort.orderAscHelp')
         }
         onClick={() => change({ ...selection, order: selection.order === 'asc' ? 'desc' : 'asc' })}
       >
-        {selection.order === 'asc' ? '↑ 升序' : '↓ 降序'}
+        {selection.order === 'asc' ? t('catalogSort.asc') : t('catalogSort.desc')}
       </button>
     </div>
   );

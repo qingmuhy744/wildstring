@@ -1,5 +1,6 @@
 import { useLyricPreferences } from './lyric-preferences';
 import { useEffect, useRef, useState, type CSSProperties, type PointerEvent } from 'react';
+import { useTranslation } from 'react-i18next';
 import { api, time, type Lyrics } from './api';
 import { Cover, coverUrl } from './cover';
 import { PlaybackVisual, usePlaybackStyle } from './playback-style';
@@ -74,6 +75,7 @@ export function NowPlaying({
   onOpenArtist: (name: string) => void;
   statusMessage: string;
 }) {
+  const { t } = useTranslation();
   const dialog = useRef<HTMLElement>(null);
   const close = useRef<HTMLButtonElement>(null);
   const queueToggle = useRef<HTMLButtonElement>(null);
@@ -221,7 +223,9 @@ export function NowPlaying({
         ref={dialog}
         role="dialog"
         aria-modal="true"
-        aria-label={isPodcast ? '播客全屏播放' : '全屏播放'}
+        aria-label={
+          isPodcast ? t('nowPlaying.podcastFullscreenAria') : t('nowPlaying.fullscreenAria')
+        }
         data-player-kind={isPodcast ? 'podcast' : 'music'}
         data-music-style={isPodcast ? undefined : style}
         data-panel={panel || 'cover'}
@@ -304,13 +308,13 @@ export function NowPlaying({
           <button
             ref={close}
             className="collapse-player"
-            aria-label="收起全屏播放"
+            aria-label={t('nowPlaying.collapsePlayer')}
             onClick={onClose}
           >
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path d="m5 9 7 7 7-7" />
             </svg>
-            <span>收起</span>
+            <span>{t('nowPlaying.collapse')}</span>
           </button>
           <span className="eyebrow">
             野弦 <span aria-hidden="true">/</span> WILDSTRING
@@ -382,13 +386,15 @@ export function NowPlaying({
                           <button
                             type="button"
                             className="player-meta-link player-album-link"
-                            aria-label={`查看所属专辑 ${current.album || '未知专辑'}`}
+                            aria-label={t('nowPlaying.viewAlbumAria', {
+                              album: current.album || t('nowPlaying.unknownAlbum'),
+                            })}
                             onClick={() => onOpenAlbum(current)}
                           >
                             {current.album}
                           </button>
                         ) : (
-                          <span>{current.album || '未知专辑'}</span>
+                          <span>{current.album || t('nowPlaying.unknownAlbum')}</span>
                         )}
                       </span>
                     </div>
@@ -416,14 +422,14 @@ export function NowPlaying({
             </div>
           )
         ) : (
-          <p className="lyric-empty">先播放一首喜欢的歌。</p>
+          <p className="lyric-empty">{t('nowPlaying.playFirst')}</p>
         )}
         {current && !isPodcast && queueOpen && (
           <>
             <button
               type="button"
               className="fullscreen-queue-scrim"
-              aria-label="关闭播放队列"
+              aria-label={t('nowPlaying.closeQueue')}
               tabIndex={-1}
               onClick={() => setQueueOpen(false)}
             />
@@ -446,8 +452,11 @@ export function NowPlaying({
             <span>
               {player.playbackLabel}
               <small>
-                第 {player.index + 1} {isPodcast ? '集' : '首'} / 共 {player.queue.length}{' '}
-                {isPodcast ? '集' : '首'}
+                {t('nowPlaying.trackProgress', {
+                  current: player.index + 1,
+                  total: player.queue.length,
+                  unit: isPodcast ? t('nowPlaying.unitEpisode') : t('nowPlaying.unitTrack'),
+                })}
               </small>
             </span>
           </div>
@@ -457,22 +466,26 @@ export function NowPlaying({
             <SleepControl player={player} />
             {!isPodcast && <QualityControl player={player} />}
             <VolumeControl player={player} />
-            <div className="fullscreen-panel-switches" role="group" aria-label="全屏显示内容">
+            <div
+              className="fullscreen-panel-switches"
+              role="group"
+              aria-label={t('nowPlaying.panelSwitchesAria')}
+            >
               {!isPodcast && (
                 <button
-                  aria-label="显示歌词"
+                  aria-label={t('nowPlaying.showLyrics')}
                   aria-pressed={panel === 'lyrics'}
-                  data-help="查看同步歌词"
+                  data-help={t('nowPlaying.viewSyncedLyrics')}
                   onClick={() => setPanel((current) => (current === 'lyrics' ? null : 'lyrics'))}
                 >
-                  词
+                  {t('nowPlaying.lyricsShort')}
                 </button>
               )}
               <button
                 ref={queueToggle}
-                aria-label={isPodcast ? '显示接下来播放' : '显示播放队列'}
+                aria-label={isPodcast ? t('nowPlaying.showUpNext') : t('nowPlaying.showQueue')}
                 aria-pressed={isPodcast ? panel === 'queue' : queueOpen}
-                data-help={isPodcast ? '查看接下来播放' : '查看播放队列'}
+                data-help={isPodcast ? t('nowPlaying.viewUpNext') : t('nowPlaying.viewQueue')}
                 onClick={() =>
                   isPodcast
                     ? setPanel((current) => (current === 'queue' ? null : 'queue'))
@@ -504,7 +517,7 @@ export function NowPlaying({
         <dialog
           ref={artworkDialog}
           className="artwork-preview"
-          aria-label="大封面"
+          aria-label={t('nowPlaying.artworkPreviewAria')}
           onPointerDown={() => {
             gesture.current.held = false;
           }}
@@ -529,15 +542,15 @@ export function NowPlaying({
             <a
               className="artwork-preview-download"
               href={coverUrl(current.id, 768)}
-              download={`${current.title.replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_').slice(0, 100) || 'WildString'}-封面.jpg`}
+              download={`${current.title.replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_').slice(0, 100) || 'WildString'}-${t('nowPlaying.coverFilename')}.jpg`}
             >
-              下载封面
+              {t('nowPlaying.downloadCover')}
             </a>
           )}
           <button
             autoFocus
             className="artwork-preview-close"
-            aria-label="关闭大封面"
+            aria-label={t('nowPlaying.closeArtwork')}
             onClick={() => setArtwork(false)}
           >
             ×
@@ -552,6 +565,7 @@ export function NowPlaying({
 type LyricSize = 'small' | 'medium' | 'large';
 
 function LyricsPanel({ player, onTogglePanel }: { player: Player; onTogglePanel: () => void }) {
+  const { t } = useTranslation();
   const current = player.current;
   const [lyrics, setLyrics] = useState<Lyrics | null>(null);
   const [error, setError] = useState(false);
@@ -733,14 +747,14 @@ function LyricsPanel({ player, onTogglePanel }: { player: Player; onTogglePanel:
 
   const source =
     lyrics?.source === 'sidecar_lrc'
-      ? '同名 LRC'
+      ? t('nowPlaying.sourceLrc')
       : lyrics?.source === 'sidecar_text'
-        ? '同名文本'
+        ? t('nowPlaying.sourceText')
         : lyrics?.source === 'user'
-          ? '自定义歌词'
+          ? t('nowPlaying.sourceUser')
           : lyrics?.source_url
-            ? `歌词 · ${lyrics.source}`
-            : '内嵌歌词';
+            ? t('nowPlaying.sourceNamed', { source: lyrics.source })
+            : t('nowPlaying.sourceEmbedded');
   return (
     <div className={`fullscreen-lyrics lyric-size-${lyricSize}`}>
       <div className="lyrics-toolbar">
@@ -750,7 +764,7 @@ function LyricsPanel({ player, onTogglePanel }: { player: Player; onTogglePanel:
           </a>
         ) : (
           <span className="lyrics-source">
-            {lyrics && lyrics.kind !== 'none' ? source : '歌词'}
+            {lyrics && lyrics.kind !== 'none' ? source : t('nowPlaying.lyrics')}
           </span>
         )}
         {lyrics?.lines.some((line) => line.translation) && (
@@ -759,7 +773,7 @@ function LyricsPanel({ player, onTogglePanel }: { player: Player; onTogglePanel:
             aria-pressed={showTranslation}
             onClick={() => setLyricPreferences({ translation: !showTranslation })}
           >
-            译文
+            {t('nowPlaying.translation')}
           </button>
         )}
         {lyrics?.lines.some((line) => line.romanization) && (
@@ -768,21 +782,36 @@ function LyricsPanel({ player, onTogglePanel }: { player: Player; onTogglePanel:
             aria-pressed={showRomanization}
             onClick={() => setLyricPreferences({ romanization: !showRomanization })}
           >
-            音译
+            {t('nowPlaying.romanization')}
           </button>
         )}
-        <span className="lyrics-size-control" role="group" aria-label="歌词大小">
+        <span
+          className="lyrics-size-control"
+          role="group"
+          aria-label={t('nowPlaying.lyricsSizeAria')}
+        >
           {(['small', 'medium', 'large'] as LyricSize[]).map((size) => (
             <button
               key={size}
               className="text-button"
-              aria-label={`歌词大小：${size === 'small' ? '小' : size === 'medium' ? '中' : '大'}`}
+              aria-label={t('nowPlaying.lyricsSizeOption', {
+                size:
+                  size === 'small'
+                    ? t('nowPlaying.sizeSmall')
+                    : size === 'medium'
+                      ? t('nowPlaying.sizeMedium')
+                      : t('nowPlaying.sizeLarge'),
+              })}
               aria-pressed={lyricSize === size}
               onClick={() => {
                 setLyricPreferences({ size });
               }}
             >
-              {size === 'small' ? '小' : size === 'medium' ? '中' : '大'}
+              {size === 'small'
+                ? t('nowPlaying.sizeSmall')
+                : size === 'medium'
+                  ? t('nowPlaying.sizeMedium')
+                  : t('nowPlaying.sizeLarge')}
             </button>
           ))}
         </span>
@@ -791,11 +820,11 @@ function LyricsPanel({ player, onTogglePanel }: { player: Player; onTogglePanel:
           onClick={() => setFollow(true)}
           disabled={lyrics?.kind !== 'synced' || follow}
         >
-          跟随播放
+          {t('nowPlaying.follow')}
         </button>
         <button
           className="text-button"
-          aria-label="重新读取歌词"
+          aria-label={t('nowPlaying.reloadLyrics')}
           onClick={() => setRevision((value) => value + 1)}
         >
           ↻
@@ -827,19 +856,22 @@ function LyricsPanel({ player, onTogglePanel }: { player: Player; onTogglePanel:
         >
           {error ? (
             <p className="lyric-empty" role="status">
-              暂时无法读取歌词。播放不受影响，可点击上方 ↻ 重试。
+              {t('nowPlaying.lyricsError')}
             </p>
           ) : !lyrics ? (
             <p className="lyric-empty" role="status">
-              正在读取歌词…
+              {t('nowPlaying.lyricsLoading')}
             </p>
           ) : lyrics.kind === 'none' ? (
             <div className="lyric-empty">
-              <span>让旋律先说话。</span>
-              <p>暂无本地歌词。支持音频内嵌歌词，或在同目录放入同名 .lrc 文件。</p>
+              <span>{t('nowPlaying.noLyricsTitle')}</span>
+              <p>{t('nowPlaying.noLyricsHint')}</p>
             </div>
           ) : (
-            <ol aria-label="歌词" className={lyrics.kind === 'plain' ? 'plain-lyrics' : ''}>
+            <ol
+              aria-label={t('nowPlaying.lyrics')}
+              className={lyrics.kind === 'plain' ? 'plain-lyrics' : ''}
+            >
               {lyrics.lines.map((line, index) => (
                 <li key={index}>
                   {line.time_ms === null ? (
@@ -861,8 +893,14 @@ function LyricsPanel({ player, onTogglePanel }: { player: Player; onTogglePanel:
                       aria-current={active === index ? 'true' : undefined}
                       aria-label={
                         coarse
-                          ? `切换到封面 ${time(line.time_ms / 1000)}：${line.text || '间奏'}`
-                          : `跳转到 ${time(line.time_ms / 1000)}：${line.text || '间奏'}`
+                          ? t('nowPlaying.switchToCoverAt', {
+                              time: time(line.time_ms / 1000),
+                              text: line.text || t('nowPlaying.interlude'),
+                            })
+                          : t('nowPlaying.jumpToAt', {
+                              time: time(line.time_ms / 1000),
+                              text: line.text || t('nowPlaying.interlude'),
+                            })
                       }
                       disabled={!player.duration}
                       onClick={() => {
@@ -914,10 +952,16 @@ function LyricsPanel({ player, onTogglePanel }: { player: Player; onTogglePanel:
         </div>
         {/* Coarse pointers switch to the cover on tap, so only they need an explicit seek confirm. */}
         {coarse && !follow && preview !== null && lyrics?.lines[preview]?.time_ms != null && (
-          <div className="lyric-seek-preview" role="group" aria-label="歌词跳转预览">
+          <div
+            className="lyric-seek-preview"
+            role="group"
+            aria-label={t('nowPlaying.seekPreviewAria')}
+          >
             <span>{time(lyrics.lines[preview].time_ms! / 1000)}</span>
             <button
-              aria-label={`确认跳转到 ${time(lyrics.lines[preview].time_ms! / 1000)}`}
+              aria-label={t('nowPlaying.confirmJumpTo', {
+                time: time(lyrics.lines[preview].time_ms! / 1000),
+              })}
               onClick={() => {
                 player.seek(lyrics.lines[preview!].time_ms! / 1000);
                 setPreview(null);

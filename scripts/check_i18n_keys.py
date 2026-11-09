@@ -4,6 +4,7 @@
 Web:     frontend/web/src/locales/en.json vs zh-CN.json (same keys, same {{placeholders}})
 Android: res/values/strings.xml vs res/values-zh/strings.xml (same names, same %1$s args)
 iOS:     WildString/Localizable.xcstrings (every key translated to en and zh-Hans)
+macOS:   WildStringMac/Localizable.xcstrings (every key translated to en and zh-Hans)
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ ROOT = Path(__file__).resolve().parent.parent
 WEB = ROOT / "frontend/web/src/locales"
 ANDROID = ROOT / "frontend/android/app/src/main/res"
 IOS = ROOT / "frontend/ios/WildString/Localizable.xcstrings"
+MACOS = ROOT / "frontend/macos/WildStringMac/Localizable.xcstrings"
 
 WEB_PLACEHOLDER = re.compile(r"\{\{\s*([\w.]+)\s*\}\}")
 FORMAT_ARG = re.compile(r"%(?:\d+\$)?[-#+ 0,]*\d*(?:\.\d+)?(?:ll|l|h)?[@dDuUxXoOfFeEgGcCsSaAp]")
@@ -48,8 +50,12 @@ def compare(
     for key in sorted(left.keys() & right.keys()):
         if not left[key].strip() or not right[key].strip():
             problems.append(f"{platform}: '{key}' has an empty translation")
-        a = sorted(placeholders.findall(left[key]))
-        b = sorted(placeholders.findall(right[key]))
+        if placeholders is WEB_PLACEHOLDER:
+            a = sorted(set(placeholders.findall(left[key])))
+            b = sorted(set(placeholders.findall(right[key])))
+        else:
+            a = sorted(placeholders.findall(left[key]))
+            b = sorted(placeholders.findall(right[key]))
         if a != b:
             problems.append(f"{platform}: '{key}' placeholders differ ({a} vs {b})")
     return problems
@@ -72,11 +78,11 @@ def check_android() -> list[str]:
     return compare("android", "values", en, "values-zh", zh, FORMAT_ARG)
 
 
-def check_ios() -> list[str]:
-    document = json.loads(IOS.read_text(encoding="utf-8"))
+def check_xcstrings(platform: str, xcstrings_path: Path) -> list[str]:
+    document = json.loads(xcstrings_path.read_text(encoding="utf-8"))
     problems = []
     if document.get("sourceLanguage") != "en":
-        problems.append("ios: Localizable.xcstrings sourceLanguage must be 'en'")
+        problems.append(f"{platform}: Localizable.xcstrings sourceLanguage must be 'en'")
     en: dict[str, str] = {}
     zh: dict[str, str] = {}
     for key, entry in document.get("strings", {}).items():
@@ -85,17 +91,22 @@ def check_ios() -> list[str]:
             unit = localizations.get(language, {}).get("stringUnit", {})
             if unit.get("state") == "translated" and unit.get("value"):
                 target[key] = unit["value"]
-    return problems + compare("ios", "en", en, "zh-Hans", zh, FORMAT_ARG)
+    return problems + compare(platform, "en", en, "zh-Hans", zh, FORMAT_ARG)
 
 
 def main() -> int:
-    problems = check_web() + check_android() + check_ios()
+    problems = (
+        check_web()
+        + check_android()
+        + check_xcstrings("ios", IOS)
+        + check_xcstrings("macos", MACOS)
+    )
     for problem in problems:
         print(problem, file=sys.stderr)
     if problems:
         print(f"{len(problems)} i18n problem(s) found.", file=sys.stderr)
         return 1
-    print("i18n keys match for web, Android and iOS.")
+    print("i18n keys match for web, Android, iOS and macOS.")
     return 0
 
 

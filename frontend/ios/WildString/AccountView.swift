@@ -26,15 +26,15 @@ struct AccountView: View {
     var body: some View {
         NavigationStack(path: $path) {
             List {
-                Section("音乐") {
+                Section(L10n("account.musicSection")) {
                     NavigationLink {
                         FavoritesView(client: client, playback: playback)
                     } label: {
-                        Label("我喜欢的音乐", systemImage: "heart.fill")
+                        Label(L10n("account.favoriteTracks"), systemImage: "heart.fill")
                             .foregroundStyle(.pink)
                     }
                 }
-                Section("歌单") {
+                Section(L10n("account.playlistsSection")) {
                     ForEach(playlists) { playlist in
                         NavigationLink(value: playlist) {
                             PlaylistListRow(client: client, playlist: playlist)
@@ -45,12 +45,12 @@ struct AccountView: View {
                                     renameText = playlist.name
                                     renaming = playlist
                                 } label: {
-                                    Label("重命名", systemImage: "pencil")
+                                    Label(L10n("account.rename"), systemImage: "pencil")
                                 }
                                 Button(role: .destructive) {
                                     deleting = playlist
                                 } label: {
-                                    Label("删除", systemImage: "trash")
+                                    Label(L10n("account.delete"), systemImage: "trash")
                                 }
                             }
                         }
@@ -66,7 +66,7 @@ struct AccountView: View {
                         newName = ""
                         showingCreate = true
                     } label: {
-                        Label("新建歌单", systemImage: "plus")
+                        Label(L10n("account.newPlaylist"), systemImage: "plus")
                     }
                 }
                 if let message {
@@ -76,12 +76,12 @@ struct AccountView: View {
                             .foregroundStyle(.red)
                     }
                 }
-                Section("动态") {
+                Section(L10n("account.activitySection")) {
                     NavigationLink {
                         NotificationsView(client: client)
                     } label: {
                         HStack {
-                            Label("通知", systemImage: "bell")
+                            Label(L10n("account.notifications"), systemImage: "bell")
                             Spacer()
                             if unreadNotifications > 0 {
                                 Text("\(unreadNotifications)")
@@ -94,18 +94,18 @@ struct AccountView: View {
                         }
                     }
                 }
-                Section("账号") {
-                    LabeledContent("用户名", value: username)
-                    LabeledContent("服务器", value: connection.servers.first { $0.address == server }?.label ?? server)
+                Section(L10n("account.accountSection")) {
+                    LabeledContent(L10n("account.username"), value: username)
+                    LabeledContent(L10n("account.server"), value: connection.servers.first { $0.address == server }?.label ?? server)
                 }
                 Section {
                     NavigationLink(value: SettingsMarker()) {
-                        Label("设置", systemImage: "gearshape")
+                        Label(L10n("account.settings"), systemImage: "gearshape")
                     }
-                    Button("退出登录", role: .destructive, action: onLogout)
+                    Button(L10n("account.logout"), role: .destructive, action: onLogout)
                 }
             }
-            .navigationTitle("我的")
+            .navigationTitle(L10n("account.title"))
             .navigationDestination(for: Playlist.self) { playlist in
                 PlaylistDetailView(client: client, playback: playback, playlist: playlist)
             }
@@ -137,23 +137,23 @@ struct AccountView: View {
                     (try? await client.notifications(limit: 1))?.unreadCount ?? 0
             }
             .refreshable { await load() }
-            .alert("新建歌单", isPresented: $showingCreate) {
-                TextField("歌单名称", text: $newName)
-                Button("创建") { Task { await create() } }
-                Button("取消", role: .cancel) {}
+            .alert(L10n("account.createPlaylistTitle"), isPresented: $showingCreate) {
+                TextField(L10n("account.playlistNamePlaceholder"), text: $newName)
+                Button(L10n("account.create")) { Task { await create() } }
+                Button(L10n("account.cancel"), role: .cancel) {}
             }
-            .alert("重命名歌单", isPresented: renamingActive) {
-                TextField("歌单名称", text: $renameText)
-                Button("保存") { Task { await rename() } }
-                Button("取消", role: .cancel) {}
+            .alert(L10n("account.renamePlaylistTitle"), isPresented: renamingActive) {
+                TextField(L10n("account.playlistNamePlaceholder"), text: $renameText)
+                Button(L10n("account.save")) { Task { await rename() } }
+                Button(L10n("account.cancel"), role: .cancel) {}
             }
             .confirmationDialog(
-                "删除「\(deleting?.name ?? "")」？",
+                L10n("account.deleteConfirmTitle", deleting?.name ?? ""),
                 isPresented: deletingActive,
                 titleVisibility: .visible
             ) {
-                Button("删除", role: .destructive) { Task { await delete() } }
-                Button("取消", role: .cancel) {}
+                Button(L10n("account.delete"), role: .destructive) { Task { await delete() } }
+                Button(L10n("account.cancel"), role: .cancel) {}
             }
         }
     }
@@ -235,7 +235,7 @@ struct AccountView: View {
             await load()
         } catch let error as APIError where error.statusCode == 409 {
             await load()
-            message = "歌单已更新，已刷新列表，请重试"
+            message = L10n("account.playlistConflictRefresh")
         } catch {
             message = ErrorText.message(for: error)
         }
@@ -249,7 +249,7 @@ struct AccountView: View {
             await load()
         } catch let error as APIError where error.statusCode == 409 {
             await load()
-            message = "歌单已更新，已刷新列表，请重试"
+            message = L10n("account.playlistConflictRefresh")
         } catch {
             message = ErrorText.message(for: error)
         }
@@ -280,9 +280,9 @@ private struct PlaylistListRow: View {
     }
 
     private var meta: String {
-        var parts = ["\(playlist.trackCount) 首"]
+        var parts = [L10n("account.trackCount", playlist.trackCount)]
         if playlist.isSmart {
-            parts.append("规则")
+            parts.append(L10n("account.smartPlaylist"))
         }
         return parts.joined(separator: " · ")
     }

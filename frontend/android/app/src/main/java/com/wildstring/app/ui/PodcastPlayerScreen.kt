@@ -91,7 +91,7 @@ internal fun PodcastPlayerScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
                 IconButton(tactile(onBack)) {
-                    Icon(Icons.Default.KeyboardArrowDown, "返回单集列表")
+                    Icon(Icons.Default.KeyboardArrowDown, stringResource(R.string.pod_player_back_to_episodes))
                 }
                 Surface(
                     shape = RoundedCornerShape(18.dp),
@@ -104,13 +104,13 @@ internal fun PodcastPlayerScreen(
                     ) {
                         PodcastModeTab(
                             selected = !article,
-                            label = "封面",
+                            label = stringResource(R.string.pod_player_tab_cover),
                             tag = "podcast-cover-tab",
                             onClick = tactile { article = false },
                         )
                         PodcastModeTab(
                             selected = article,
-                            label = "文章",
+                            label = stringResource(R.string.pod_player_tab_article),
                             tag = "podcast-article-tab",
                             onClick = tactile { article = true },
                         )
@@ -119,7 +119,7 @@ internal fun PodcastPlayerScreen(
                 IconButton(tactile(onSleep)) {
                     Icon(
                         Icons.Default.Bedtime,
-                        "睡眠定时",
+                        stringResource(R.string.pod_player_sleep_timer),
                         tint = if (sleep.deadline != null || sleep.entryId != null) MaterialTheme.colorScheme.primary else LocalContentColor.current,
                     )
                 }
@@ -149,7 +149,7 @@ internal fun PodcastPlayerScreen(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
                             Text(
-                                (track.album ?: track.artist).ifBlank { "播客" },
+                                (track.album ?: track.artist).ifBlank { stringResource(R.string.pod_player_fallback_album) },
                                 style = MaterialTheme.typography.labelMedium,
                                 color = MaterialTheme.colorScheme.primary,
                                 maxLines = 1,
@@ -166,11 +166,11 @@ internal fun PodcastPlayerScreen(
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f))
                         val description = episode?.description.orEmpty()
                         if (description.isNotBlank()) PodcastArticleText(description, Modifier.fillMaxWidth(), duration) { vm.seek(it) }
-                        else if (loading) { LinearProgressIndicator(Modifier.fillMaxWidth()); Text("正在加载文章…") }
-                        else if (error == null) Text("这期节目暂未提供文章。", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        else if (loading) { LinearProgressIndicator(Modifier.fillMaxWidth()); Text(stringResource(R.string.pod_player_loading_article)) }
+                        else if (error == null) Text(stringResource(R.string.pod_player_no_article), color = MaterialTheme.colorScheme.onSurfaceVariant)
                         error?.let { message ->
-                            Text(if (episode != null) "当前显示已保存的文章。" else message, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            TextButton({ reload++ }) { Text("重新加载") }
+                            Text(if (episode != null) stringResource(R.string.pod_player_saved_article) else message, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            TextButton({ reload++ }) { Text(stringResource(R.string.pod_player_reload)) }
                         }
                     }
                 } else BoxWithConstraints(modifier, contentAlignment = Alignment.Center) {
@@ -417,12 +417,12 @@ private fun PodcastPlayerControls(
                     ) {
                         Icon(
                             Icons.AutoMirrored.Filled.QueueMusic,
-                            contentDescription = "播放队列",
+                            contentDescription = stringResource(R.string.pod_player_queue_desc),
                             modifier = Modifier.size(15.dp),
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                         Text(
-                            text = "队列",
+                            text = stringResource(R.string.pod_player_queue_label),
                             fontSize = 12.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
@@ -453,7 +453,7 @@ private fun PodcastPlayerControls(
             }
             IconButton(tactile { vm.seek((position - 15_000).coerceAtLeast(0)) }) {
                 Box(contentAlignment = Alignment.Center) {
-                    Icon(Icons.Default.Replay, "后退 15 秒", Modifier.size(if (compact) 26.dp else 28.dp))
+                    Icon(Icons.Default.Replay, stringResource(R.string.pod_player_rewind_15), Modifier.size(if (compact) 26.dp else 28.dp))
                     Text("15", fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 3.dp))
                 }
             }
@@ -472,14 +472,14 @@ private fun PodcastPlayerControls(
                     Crossfade(state.playing, animationSpec = tween(130), label = "podcast-play-pause") { playing ->
                         Icon(
                             if (playing) Icons.Default.Pause else Icons.Default.PlayArrow,
-                            if (playing) "暂停" else "播放",
+                            if (playing) stringResource(R.string.pod_player_pause) else stringResource(R.string.pod_player_play),
                             Modifier.size(if (compact) 28.dp else 34.dp),
                         )
                     }
                 }
             }
             IconButton(tactile { vm.seek((position + 30_000).let { if (duration > 0) it.coerceAtMost(duration) else it }) }) {
-                Icon(Icons.Default.Forward30, "前进 30 秒", Modifier.size(if (compact) 26.dp else 28.dp))
+                Icon(Icons.Default.Forward30, stringResource(R.string.pod_player_forward_30), Modifier.size(if (compact) 26.dp else 28.dp))
             }
             IconButton(tactile { vm.skipPodcastEpisode(1) }) {
                 Icon(
@@ -495,7 +495,7 @@ private fun PodcastPlayerControls(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(message, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, color = if (state.playbackError != null) MaterialTheme.colorScheme.error else Color(0xFFE98A6D))
                 if (state.playbackError != null) {
-                    TextButton(tactile(vm::toggle)) { Text("重试") }
+                    TextButton(tactile(vm::toggle)) { Text(stringResource(R.string.pod_player_retry)) }
                 }
             }
         }

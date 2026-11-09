@@ -127,10 +127,10 @@ test('recommendation page, preferences and charts are translated', async ({ page
     charts.getByRole('button', { name: 'Community repeats', exact: true }),
   ).toBeVisible();
 
-  await panel.getByRole('button', { name: 'New finds', exact: true }).click();
-  await expect(page.getByRole('region', { name: 'New finds', exact: true })).toContainText(
-    'Sounds not on your shelves yet.',
-  );
+  await panel.getByRole('button', { name: 'Beyond your library', exact: true }).click();
+  await expect(
+    page.getByRole('region', { name: 'Beyond your library', exact: true }),
+  ).toContainText('Sounds not on your shelves yet.');
 });
 
 test('assistant chat uses English labels and fallback text', async ({ page }, info) => {

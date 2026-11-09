@@ -1,5 +1,7 @@
 package com.wildstring.app.data
 
+import com.wildstring.app.AppLanguage
+import com.wildstring.app.R
 import com.google.gson.JsonArray
 import com.google.gson.JsonElement
 import com.google.gson.JsonObject
@@ -34,62 +36,62 @@ class AgentApiException(val status: Int, val code: String, val traceId: String?)
 internal fun diagnosticId(value: String?): String? = value?.takeIf { it.matches(Regex("[a-fA-F0-9]{16,64}")) }
 internal fun agentError(status: Int, code: String, traceId: String?): String {
     val description = when {
-        code == "podcast_subscriptions_disabled" -> "管理员尚未开放添加节目。"
-        code == "podcast_search_upstream_rate_limited" -> "播客目录暂时限制了请求，请稍后重试。"
-        code == "podcast_search_rate_limited" -> "探索或搜索较频繁，请稍后重试。"
-        code in listOf("podcast_search_timeout", "podcast_search_upstream_failed") -> "播客目录暂时不可用，请稍后重试。"
-        code in listOf("podcast_feed_fetch_failed", "podcast_feed_parse_failed") -> "无法读取这个节目的 RSS，请稍后重试。"
-        code == "invalid_avatar" -> "请选择有效的 JPG、PNG 或 WebP 图片，分辨率不超过 2500 万像素。"
-        code == "avatar_too_large" -> "头像图片超过 5 MiB，请压缩后重试。"
-        code == "source_plugin_invalid_zip" -> "插件 ZIP 不符合格式，请检查包结构与 API 版本。"
-        code == "source_plugin_identity_conflict" -> "此 ZIP 的插件 ID 不同，请选择对应插件的升级包。"
-        code == "source_plugin_dependency_missing" -> "运行环境缺少插件依赖，请按插件说明配置。"
-        code == "source_plugins_disabled" -> "请先导入并启用提供歌词的数据源插件。"
-        code == "source_plugin_auth_or_rejected" -> "上游拒绝请求，请检查插件服务和平台授权。"
-        code == "source_plugin_timeout" -> "插件查询超时，请检查服务地址或稍后重试。"
-        code == "source_plugin_disabled" -> "请先启用并保存此插件，再测试。"
-        code == "source_plugin_configuration_changed" -> "插件配置已变化，请刷新并保存后再测试。"
-        code == "source_plugin_worker_failed" -> "插件运行失败，请检查插件版本与运行环境；可用诊断编号排查。"
-        code == "loudness_tool_missing" -> "服务端缺少 FFmpeg，请更新官方镜像或安装后重试。"
-        code == "conversation_busy" -> "这段对话正在生成回复，请完成后再操作。"
-        code == "search_provider_key_required" -> "请填写所选搜索服务的 API Key，再启用联网。"
-        code == "search_daily_budget_exhausted" -> "今日搜索与读取请求已达到上限。"
-        code == "native_search_requires_deepseek_pro" -> "DeepSeek 原生联网需要支持该功能的 Pro 模型。"
-        code == "ai_output_incomplete" -> "模型输出未完成，请提高输出 Token 上限或缩小问题范围。"
-        code == "application_policy_version_conflict" -> "整理设置已在其他设备更新，请重新读取后保存。"
-        code == "draft_preview_required" -> "请使用新版客户端查看完整图片或逐曲差异后，再批准此草案。"
-        code == "album_membership_changed" -> "专辑曲目范围已变化，请重新读取并生成整批草案。"
-        code == "cover_candidate_changed" -> "封面候选已变化，请重新生成草案。"
-        code == "cover_snapshot_unavailable" -> "封面快照不可用，请重新生成草案后核对。"
-        code == "metadata_version_conflict" -> "歌曲信息已变化，本次未应用。请重新生成草案。"
-        code == "ai_output_limit" -> "模型达到输出 Token 上限，分析未完成。请在 AI 连接中提高上限或降低推理强度；旧连接请新建可配置连接。调整后再恢复，恢复可能产生费用。"
-        code == "ai_content_filtered" -> "模型服务过滤了本次输出。请调整问题范围后再恢复，恢复可能产生费用。"
-        code == "ai_response_failed" -> "模型服务未能完成本次响应，请检查服务状态后再恢复，恢复可能产生费用。"
-        code == "memory_limit_reached" -> "长期记忆已达 50 条，请先整理旧条目。"
-        status == 401 -> "登录已失效，请重新登录。"
-        status == 403 -> "当前账号没有这项操作的权限。"
-        status == 404 -> "此功能或内容在当前服务器不可用，请确认服务端已同步升级。"
-        status == 409 -> "内容或版本已变化，请刷新并重新核对。"
-        status == 410 -> "通知同步位置已过期，正在重新读取。"
-        status == 429 -> "已达到调用或预算限制，请稍后重试。"
-        code.contains("endpoint") || code.contains("host") -> "此 AI 地址不符合服务端端点策略，请联系管理员。"
-        code.contains("capabil") || code.contains("tool") -> "此连接尚未通过工具调用检测，请先检测连接。"
-        code.contains("budget") -> "调用预算不足，请调整预算或稍后重试。"
-        code.contains("connection") -> "AI 连接不可用，请检查连接、权限和设置。"
-        code.contains("verif") -> "目标尚未验证或验证码已失效，请重新验证。"
-        status == 422 || status == 400 -> "输入未通过校验，请检查内容后重试。"
-        else -> "操作未完成，请刷新状态后重试（$status）。"
+        code == "podcast_subscriptions_disabled" -> AppLanguage.string(R.string.agent_plat_err_podcast_subscriptions_disabled)
+        code == "podcast_search_upstream_rate_limited" -> AppLanguage.string(R.string.agent_plat_err_podcast_search_upstream_rate_limited)
+        code == "podcast_search_rate_limited" -> AppLanguage.string(R.string.agent_plat_err_podcast_search_rate_limited)
+        code in listOf("podcast_search_timeout", "podcast_search_upstream_failed") -> AppLanguage.string(R.string.agent_plat_err_podcast_search_failed)
+        code in listOf("podcast_feed_fetch_failed", "podcast_feed_parse_failed") -> AppLanguage.string(R.string.agent_plat_err_podcast_feed_failed)
+        code == "invalid_avatar" -> AppLanguage.string(R.string.agent_plat_err_invalid_avatar)
+        code == "avatar_too_large" -> AppLanguage.string(R.string.agent_plat_err_avatar_too_large)
+        code == "source_plugin_invalid_zip" -> AppLanguage.string(R.string.agent_plat_err_source_plugin_invalid_zip)
+        code == "source_plugin_identity_conflict" -> AppLanguage.string(R.string.agent_plat_err_source_plugin_identity_conflict)
+        code == "source_plugin_dependency_missing" -> AppLanguage.string(R.string.agent_plat_err_source_plugin_dependency_missing)
+        code == "source_plugins_disabled" -> AppLanguage.string(R.string.agent_plat_err_source_plugins_disabled)
+        code == "source_plugin_auth_or_rejected" -> AppLanguage.string(R.string.agent_plat_err_source_plugin_auth_or_rejected)
+        code == "source_plugin_timeout" -> AppLanguage.string(R.string.agent_plat_err_source_plugin_timeout)
+        code == "source_plugin_disabled" -> AppLanguage.string(R.string.agent_plat_err_source_plugin_disabled)
+        code == "source_plugin_configuration_changed" -> AppLanguage.string(R.string.agent_plat_err_source_plugin_configuration_changed)
+        code == "source_plugin_worker_failed" -> AppLanguage.string(R.string.agent_plat_err_source_plugin_worker_failed)
+        code == "loudness_tool_missing" -> AppLanguage.string(R.string.agent_plat_err_loudness_tool_missing)
+        code == "conversation_busy" -> AppLanguage.string(R.string.agent_plat_err_conversation_busy)
+        code == "search_provider_key_required" -> AppLanguage.string(R.string.agent_plat_err_search_provider_key_required)
+        code == "search_daily_budget_exhausted" -> AppLanguage.string(R.string.agent_plat_err_search_daily_budget_exhausted)
+        code == "native_search_requires_deepseek_pro" -> AppLanguage.string(R.string.agent_plat_err_native_search_requires_deepseek_pro)
+        code == "ai_output_incomplete" -> AppLanguage.string(R.string.agent_plat_err_ai_output_incomplete)
+        code == "application_policy_version_conflict" -> AppLanguage.string(R.string.agent_plat_err_application_policy_version_conflict)
+        code == "draft_preview_required" -> AppLanguage.string(R.string.agent_plat_err_draft_preview_required)
+        code == "album_membership_changed" -> AppLanguage.string(R.string.agent_plat_err_album_membership_changed)
+        code == "cover_candidate_changed" -> AppLanguage.string(R.string.agent_plat_err_cover_candidate_changed)
+        code == "cover_snapshot_unavailable" -> AppLanguage.string(R.string.agent_plat_err_cover_snapshot_unavailable)
+        code == "metadata_version_conflict" -> AppLanguage.string(R.string.agent_plat_err_metadata_version_conflict)
+        code == "ai_output_limit" -> AppLanguage.string(R.string.agent_plat_err_ai_output_limit)
+        code == "ai_content_filtered" -> AppLanguage.string(R.string.agent_plat_err_ai_content_filtered)
+        code == "ai_response_failed" -> AppLanguage.string(R.string.agent_plat_err_ai_response_failed)
+        code == "memory_limit_reached" -> AppLanguage.string(R.string.agent_plat_err_memory_limit_reached)
+        status == 401 -> AppLanguage.string(R.string.agent_plat_err_status_401)
+        status == 403 -> AppLanguage.string(R.string.agent_plat_err_status_403)
+        status == 404 -> AppLanguage.string(R.string.agent_plat_err_status_404)
+        status == 409 -> AppLanguage.string(R.string.agent_plat_err_status_409)
+        status == 410 -> AppLanguage.string(R.string.agent_plat_err_status_410)
+        status == 429 -> AppLanguage.string(R.string.agent_plat_err_status_429)
+        code.contains("endpoint") || code.contains("host") -> AppLanguage.string(R.string.agent_plat_err_endpoint_policy)
+        code.contains("capabil") || code.contains("tool") -> AppLanguage.string(R.string.agent_plat_err_tool_capability)
+        code.contains("budget") -> AppLanguage.string(R.string.agent_plat_err_budget_insufficient)
+        code.contains("connection") -> AppLanguage.string(R.string.agent_plat_err_connection_unavailable)
+        code.contains("verif") -> AppLanguage.string(R.string.agent_plat_err_verification_failed)
+        status == 422 || status == 400 -> AppLanguage.string(R.string.agent_plat_err_validation_failed)
+        else -> AppLanguage.string(R.string.agent_plat_err_generic, status)
     }
-    return description + diagnosticId(traceId)?.let { "\n诊断编号：$it" }.orEmpty()
+    return description + diagnosticId(traceId)?.let { "\n" + AppLanguage.string(R.string.agent_plat_diagnostic_id, it) }.orEmpty()
 }
 
 internal fun inspectionStage(stage: String, status: String): String = when (stage) {
-    "completed" -> if (status == "succeeded") "处理结束" else "处理结束，未全部完成"
-    "rules" -> "检查本地信息"
-    "model_call" -> "AI 分析依据"
-    "analysis_complete" -> "分析完成"
-    "queued" -> "等待开始"
-    else -> "检查已暂停"
+    "completed" -> if (status == "succeeded") AppLanguage.string(R.string.agent_plat_stage_completed_succeeded) else AppLanguage.string(R.string.agent_plat_stage_completed_partial)
+    "rules" -> AppLanguage.string(R.string.agent_plat_stage_rules)
+    "model_call" -> AppLanguage.string(R.string.agent_plat_stage_model_call)
+    "analysis_complete" -> AppLanguage.string(R.string.agent_plat_stage_analysis_complete)
+    "queued" -> AppLanguage.string(R.string.agent_plat_stage_queued)
+    else -> AppLanguage.string(R.string.agent_plat_stage_paused)
 }
 
 data class AgentInboxState(val owner: String? = null, val items: List<JsonObject> = emptyList(), val unread: Int = 0,
@@ -102,7 +104,7 @@ class AgentPlatform(private val repository: Repository) {
     val inbox = inboxMutable.asStateFlow()
     private val syncLock = Mutex()
     fun reset() { inboxMutable.value = AgentInboxState(owner = repository.session.cacheScope()) }
-    private fun requireOwner(owner: String?) { if (owner == null || owner != repository.session.cacheScope()) throw CancellationException("服务器或账号已变化。") }
+    private fun requireOwner(owner: String?) { if (owner == null || owner != repository.session.cacheScope()) throw CancellationException(AppLanguage.string(R.string.agent_plat_err_session_changed)) }
     suspend fun request(path: String, method: String = "GET", body: JsonObject = JsonObject(), query: Map<String, String> = emptyMap()): JsonObject {
         val owner = repository.session.cacheScope(); requireOwner(owner)
         val segments = path.split('/').filter { it.isNotBlank() }
@@ -131,7 +133,7 @@ class AgentPlatform(private val repository: Repository) {
             val items = page.objects()
             result += items; offset += items.size
             if (offset >= page.number("total").toInt()) return result
-            require(items.isNotEmpty() && offset < 10_000) { "列表过大或读取不完整，请在网页中筛选。" }
+            require(items.isNotEmpty() && offset < 10_000) { AppLanguage.string(R.string.agent_plat_err_list_too_large) }
         } while (true)
     }
     suspend fun refreshInbox(force: Boolean = false) = syncLock.withLock {
@@ -171,10 +173,10 @@ class AgentPlatform(private val repository: Repository) {
                 if (full && snapshotCursor != null) syncInbox(owner, full = false)
                 return
             }
-            require(items.isNotEmpty() && (full || cursor != null)) { "通知读取不完整，请刷新重试。" }
+            require(items.isNotEmpty() && (full || cursor != null)) { AppLanguage.string(R.string.agent_plat_err_notifications_incomplete) }
         }
         // Do not advance the cursor on an incomplete sync: the next retry can safely replay it.
-        throw IOException("通知较多，请稍后重试或在网页中处理。")
+        throw IOException(AppLanguage.string(R.string.agent_plat_err_notifications_too_many))
     }
     suspend fun readNotification(id: String) {
         request("notifications/read", "POST", jsonBody("ids" to jsonStrings(listOf(id))))

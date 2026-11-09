@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { api, artist, type Track } from './api';
 import { DialogCloseButton } from './dialog-close';
 
@@ -42,12 +43,14 @@ export function TrackFileInfoDialog({
   onClose: () => void;
   onReorganized?: () => void;
 }) {
+  const { t } = useTranslation();
   const dialogRef = useRef<HTMLDialogElement>(null);
   const [info, setInfo] = useState<TrackFileInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [reorganizing, setReorganizing] = useState(false);
   const [actionMessage, setActionMessage] = useState('');
+  const [actionStatus, setActionStatus] = useState<'success' | 'error' | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
   async function load() {
@@ -57,7 +60,7 @@ export function TrackFileInfoDialog({
       const data = await api<TrackFileInfo>(`/tracks/${encodeURIComponent(track.id)}/file-info`);
       setInfo(data);
     } catch (err) {
-      setError(err instanceof Error ? err.message : '无法获取文件信息');
+      setError(err instanceof Error ? err.message : t('trackFileInfoDialog.fetchError'));
     } finally {
       setLoading(false);
     }
@@ -85,6 +88,7 @@ export function TrackFileInfoDialog({
   async function handleReorganize() {
     setReorganizing(true);
     setActionMessage('');
+    setActionStatus(null);
     try {
       const res = await api<ReorganizeResult>(
         `/manage/tracks/${encodeURIComponent(track.id)}/reorganize-file`,
@@ -93,15 +97,20 @@ export function TrackFileInfoDialog({
       await load();
       if (res.changed) {
         const sidecars = res.moved_sidecars?.length
-          ? `（同时已迁移 ${res.moved_sidecars.length} 个关联文件，如歌词）`
+          ? t('trackFileInfoDialog.reorganizeSidecars', { count: res.moved_sidecars.length })
           : '';
-        setActionMessage(`物理文件已规范重排到新路径！${sidecars}`);
+        setActionMessage(t('trackFileInfoDialog.reorganizeSuccess', { sidecars }));
+        setActionStatus('success');
       } else {
-        setActionMessage('文件物理路径已经是最新规范状态，无需移动。');
+        setActionMessage(t('trackFileInfoDialog.reorganizeNoop'));
+        setActionStatus('success');
       }
       onReorganized?.();
     } catch (err) {
-      setActionMessage(err instanceof Error ? err.message : '重排物理文件失败');
+      setActionMessage(
+        err instanceof Error ? err.message : t('trackFileInfoDialog.reorganizeError'),
+      );
+      setActionStatus('error');
     } finally {
       setReorganizing(false);
     }
@@ -117,48 +126,52 @@ export function TrackFileInfoDialog({
       <div className="file-info-content">
         <header className="file-info-header">
           <div className="file-info-title-group">
-            <h3 id="file-info-title">歌曲文件与属性</h3>
+            <h3 id="file-info-title">{t('trackFileInfoDialog.title')}</h3>
             <p className="file-info-track-name ellipsis">
               {track.title} · {artist(track)}
             </p>
           </div>
-          <DialogCloseButton aria-label="关闭" onClick={onClose} />
+          <DialogCloseButton aria-label={t('trackFileInfoDialog.close')} onClick={onClose} />
         </header>
 
         {loading ? (
           <div className="file-info-loading" role="status">
-            正在读取磁盘文件信息…
+            {t('trackFileInfoDialog.loading')}
           </div>
         ) : error ? (
           <div className="file-info-error" role="alert">
             <p>{error}</p>
             <button type="button" className="text-button" onClick={load}>
-              重试
+              {t('trackFileInfoDialog.retry')}
             </button>
           </div>
         ) : info ? (
           <div className="file-info-body">
             <div className="file-info-meta-grid">
               <div className="meta-item">
-                <span className="meta-label">音频格式</span>
+                <span className="meta-label">{t('trackFileInfoDialog.audioFormat')}</span>
                 <span className="meta-value format-badge">{info.format.toUpperCase()}</span>
               </div>
               <div className="meta-item">
-                <span className="meta-label">文件大小</span>
+                <span className="meta-label">{t('trackFileInfoDialog.fileSize')}</span>
                 <span className="meta-value">{formatBytes(info.size_bytes)}</span>
               </div>
               <div className="meta-item">
-                <span className="meta-label">文件状态</span>
+                <span className="meta-label">{t('trackFileInfoDialog.fileStatus')}</span>
                 <span className={`meta-value ${info.file_exists ? 'status-ok' : 'status-missing'}`}>
-                  {info.file_exists ? '正常存在' : '文件丢失'}
+                  {info.file_exists
+                    ? t('trackFileInfoDialog.statusExists')
+                    : t('trackFileInfoDialog.statusMissing')}
                 </span>
               </div>
               <div className="meta-item">
-                <span className="meta-label">路径对齐</span>
+                <span className="meta-label">{t('trackFileInfoDialog.pathSync')}</span>
                 <span
                   className={`meta-value sync-tag ${info.in_sync ? 'tag-synced' : 'tag-desynced'}`}
                 >
-                  {info.in_sync ? '已对齐最新元数据' : '路径未对齐'}
+                  {info.in_sync
+                    ? t('trackFileInfoDialog.synced')
+                    : t('trackFileInfoDialog.desynced')}
                 </span>
               </div>
             </div>
@@ -166,13 +179,15 @@ export function TrackFileInfoDialog({
             {info.source_filename && (
               <div className="file-info-section">
                 <div className="section-label-row">
-                  <span className="section-title">原始导入/上传文件名</span>
+                  <span className="section-title">{t('trackFileInfoDialog.sourceFilename')}</span>
                   <button
                     type="button"
                     className="text-copy-button"
                     onClick={() => copyText(info.source_filename!, 'source')}
                   >
-                    {copiedKey === 'source' ? '已复制' : '复制'}
+                    {copiedKey === 'source'
+                      ? t('trackFileInfoDialog.copied')
+                      : t('trackFileInfoDialog.copy')}
                   </button>
                 </div>
                 <div className="path-display-box">
@@ -183,13 +198,17 @@ export function TrackFileInfoDialog({
 
             <div className="file-info-section">
               <div className="section-label-row">
-                <span className="section-title">托管曲库相对路径</span>
+                <span className="section-title">
+                  {t('trackFileInfoDialog.relativeLibraryPath')}
+                </span>
                 <button
                   type="button"
                   className="text-copy-button"
                   onClick={() => copyText(info.path, 'rel')}
                 >
-                  {copiedKey === 'rel' ? '已复制' : '复制'}
+                  {copiedKey === 'rel'
+                    ? t('trackFileInfoDialog.copied')
+                    : t('trackFileInfoDialog.copy')}
                 </button>
               </div>
               <div className="path-display-box">
@@ -199,13 +218,15 @@ export function TrackFileInfoDialog({
 
             <div className="file-info-section">
               <div className="section-label-row">
-                <span className="section-title">服务器绝对物理路径</span>
+                <span className="section-title">{t('trackFileInfoDialog.serverAbsolutePath')}</span>
                 <button
                   type="button"
                   className="text-copy-button"
                   onClick={() => copyText(info.absolute_path, 'abs')}
                 >
-                  {copiedKey === 'abs' ? '已复制' : '复制'}
+                  {copiedKey === 'abs'
+                    ? t('trackFileInfoDialog.copied')
+                    : t('trackFileInfoDialog.copy')}
                 </button>
               </div>
               <div className="path-display-box">
@@ -217,19 +238,21 @@ export function TrackFileInfoDialog({
               <div className="file-info-desync-box">
                 <div className="desync-header">
                   <span className="desync-icon">⚠</span>
-                  <strong>物理路径与最新元数据未对齐</strong>
+                  <strong>{t('trackFileInfoDialog.desyncTitle')}</strong>
                 </div>
-                <p className="desync-hint">
-                  这首歌曲的元数据（如艺人、专辑或音轨编号）发生过修改，但磁盘上的文件及目录尚未重组。
-                </p>
+                <p className="desync-hint">{t('trackFileInfoDialog.desyncHint')}</p>
                 <div className="section-label-row">
-                  <span className="section-title">规范目标路径</span>
+                  <span className="section-title">
+                    {t('trackFileInfoDialog.canonicalTargetPath')}
+                  </span>
                   <button
                     type="button"
                     className="text-copy-button"
                     onClick={() => copyText(info.suggested_path, 'suggested')}
                   >
-                    {copiedKey === 'suggested' ? '已复制' : '复制'}
+                    {copiedKey === 'suggested'
+                      ? t('trackFileInfoDialog.copied')
+                      : t('trackFileInfoDialog.copy')}
                   </button>
                 </div>
                 <div className="path-display-box suggested">
@@ -244,18 +267,20 @@ export function TrackFileInfoDialog({
                       disabled={reorganizing}
                       onClick={handleReorganize}
                     >
-                      {reorganizing ? '正在重排物理文件…' : '按最新元数据重排物理文件'}
+                      {reorganizing
+                        ? t('trackFileInfoDialog.reorganizing')
+                        : t('trackFileInfoDialog.reorganizeButton')}
                     </button>
                   </div>
                 ) : (
-                  <p className="desync-note">管理员账号可在本页面一键重排物理文件。</p>
+                  <p className="desync-note">{t('trackFileInfoDialog.adminOnlyNotice')}</p>
                 )}
               </div>
             )}
 
             {actionMessage && (
               <p
-                className={`action-message ${actionMessage.includes('失败') ? 'error' : 'success'}`}
+                className={`action-message ${actionStatus === 'error' ? 'error' : 'success'}`}
                 role="status"
               >
                 {actionMessage}
@@ -266,7 +291,7 @@ export function TrackFileInfoDialog({
 
         <footer className="file-info-footer">
           <button type="button" onClick={onClose}>
-            关闭
+            {t('trackFileInfoDialog.close')}
           </button>
         </footer>
       </div>

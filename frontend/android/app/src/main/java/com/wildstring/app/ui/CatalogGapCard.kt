@@ -1,5 +1,7 @@
 package com.wildstring.app.ui
 
+import androidx.compose.ui.res.stringResource
+import com.wildstring.app.R
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
@@ -69,14 +71,14 @@ fun CatalogGapCard(
                 Column(Modifier.weight(1f)) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text(
-                            text = "${data.artist} · 曲库查漏补缺",
+                            text = stringResource(R.string.gap_card_title, data.artist),
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
                         )
                     }
                     Spacer(Modifier.height(3.dp))
                     Text(
-                        text = "全网权威榜单代表作对比",
+                        text = stringResource(R.string.gap_card_subtitle),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -86,7 +88,7 @@ fun CatalogGapCard(
                     color = if (data.coveragePercent == 100) Color(0xFF10B981).copy(alpha = 0.2f) else MaterialTheme.colorScheme.primaryContainer,
                 ) {
                     Text(
-                        text = "${data.coveragePercent}% 收录",
+                        text = stringResource(R.string.gap_card_coverage, data.coveragePercent),
                         style = MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.Bold,
                         color = if (data.coveragePercent == 100) Color(0xFF10B981) else MaterialTheme.colorScheme.primary,
@@ -115,17 +117,17 @@ fun CatalogGapCard(
 
             Spacer(Modifier.height(14.dp))
 
-            // Toggle Tabs: 待补齐 vs 已拥有
+            // Toggle Tabs: Missing vs Collected
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 FilterChip(
                     selected = selectedTab == 1,
                     onClick = { selectedTab = 1 },
-                    label = { Text("待补齐 (${data.missingCount})", fontSize = 12.sp) },
+                    label = { Text(stringResource(R.string.gap_card_tab_missing, data.missingCount), fontSize = 12.sp) },
                 )
                 FilterChip(
                     selected = selectedTab == 0,
                     onClick = { selectedTab = 0 },
-                    label = { Text("已收录 (${data.matchedCount})", fontSize = 12.sp) },
+                    label = { Text(stringResource(R.string.gap_card_tab_collected, data.matchedCount), fontSize = 12.sp) },
                 )
             }
 
@@ -134,7 +136,7 @@ fun CatalogGapCard(
             // List
             if (selectedTab == 1) {
                 if (data.missing.isEmpty()) {
-                    Text("全网榜单代表作已全部收录！👏", style = MaterialTheme.typography.bodySmall, color = Color(0xFF10B981))
+                    Text(stringResource(R.string.gap_card_all_collected), style = MaterialTheme.typography.bodySmall, color = Color(0xFF10B981))
                 } else {
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         data.missing.forEach { item ->
@@ -161,7 +163,7 @@ fun CatalogGapCard(
                                         color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f),
                                     ) {
                                         Text(
-                                            "暂缺",
+                                            stringResource(R.string.gap_card_status_missing),
                                             style = MaterialTheme.typography.labelSmall,
                                             color = MaterialTheme.colorScheme.error,
                                             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
@@ -174,7 +176,7 @@ fun CatalogGapCard(
                 }
             } else {
                 if (data.matched.isEmpty()) {
-                    Text("本地暂无该歌手的匹配收录", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(stringResource(R.string.gap_card_no_local_match), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 } else {
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         data.matched.forEach { item ->
@@ -205,7 +207,7 @@ fun CatalogGapCard(
                                             contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
                                         ),
                                     ) {
-                                        Icon(Icons.Default.PlayArrow, contentDescription = "播放", modifier = Modifier.size(18.dp))
+                                        Icon(Icons.Default.PlayArrow, contentDescription = stringResource(R.string.gap_card_play), modifier = Modifier.size(18.dp))
                                     }
                                 }
                             }

@@ -303,8 +303,8 @@ test('库外收歌建议只给线索，想收跨批保留，失败回滚与库�
     if (body.action === 'want') wanted.push({ ...item, wanted: true });
     return route.fulfill({ json: { ok: true } });
   });
-  await page.getByRole('button', { name: '发现新音乐', exact: true }).click();
-  const panel = page.getByRole('region', { name: '发现新音乐', exact: true });
+  await page.getByRole('button', { name: '库外推荐', exact: true }).click();
+  const panel = page.getByRole('region', { name: '库外推荐', exact: true });
   await expect(panel.locator('.external-suggestion')).toHaveCount(2);
   const card = panel
     .locator('.external-suggestion')

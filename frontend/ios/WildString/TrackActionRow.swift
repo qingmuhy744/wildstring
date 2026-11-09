@@ -34,26 +34,26 @@ struct TrackActionRow<Content: View>: View {
                     Task { await favorites.toggle(track.id) }
                 } label: {
                     Label(
-                        favorites.isFavorite(track.id) ? "取消收藏" : "收藏",
+                        favorites.isFavorite(track.id) ? L10n("trackAction.unfavorite") : L10n("trackAction.favorite"),
                         systemImage: favorites.isFavorite(track.id) ? "heart.slash" : "heart"
                     )
                 }
                 Button {
                     addingToPlaylist = true
                 } label: {
-                    Label("加入歌单", systemImage: "text.badge.plus")
+                    Label(L10n("trackAction.addToPlaylist"), systemImage: "text.badge.plus")
                 }
                 if isDownloaded {
                     Button(role: .destructive) {
                         Task { await offline.remove(trackID: track.id) }
                     } label: {
-                        Label("删除下载", systemImage: "arrow.down.circle.slash")
+                        Label(L10n("trackAction.removeDownload"), systemImage: "arrow.down.circle.slash")
                     }
                 } else {
                     Button {
                         Task { await offline.download(track) }
                     } label: {
-                        Label("下载", systemImage: "arrow.down.circle")
+                        Label(L10n("trackAction.download"), systemImage: "arrow.down.circle")
                     }
                     .disabled(isDownloading)
                 }
@@ -61,22 +61,22 @@ struct TrackActionRow<Content: View>: View {
                     Button {
                         editingMetadata = true
                     } label: {
-                        Label("编辑元数据", systemImage: "square.and.pencil")
+                        Label(L10n("trackAction.editMetadata"), systemImage: "square.and.pencil")
                     }
                     Button {
                         editingLyrics = true
                     } label: {
-                        Label("编辑歌词", systemImage: "text.quote")
+                        Label(L10n("trackAction.editLyrics"), systemImage: "text.quote")
                     }
                     Button {
                         editingSuggestions = true
                     } label: {
-                        Label("更新元数据与建议", systemImage: "sparkles")
+                        Label(L10n("trackAction.updateSuggestions"), systemImage: "sparkles")
                     }
                     Button {
                         reviewingMetadata = true
                     } label: {
-                        Label("批量核对资料", systemImage: "checklist")
+                        Label(L10n("trackAction.batchReview"), systemImage: "checklist")
                     }
                 }
             }
@@ -113,7 +113,7 @@ struct AddToPlaylistSheet: View {
         NavigationStack {
             List {
                 if !playlists.isEmpty {
-                    Section("加入歌单") {
+                    Section(L10n("trackAction.addToPlaylist")) {
                         ForEach(playlists) { playlist in
                             Button {
                                 Task { await add(to: playlist) }
@@ -121,7 +121,7 @@ struct AddToPlaylistSheet: View {
                                 HStack {
                                     Text(playlist.name)
                                     Spacer()
-                                    Text("\(playlist.trackCount) 首")
+                                    Text(L10n("trackAction.trackCount", playlist.trackCount))
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                 }
@@ -130,10 +130,10 @@ struct AddToPlaylistSheet: View {
                         }
                     }
                 }
-                Section("新建歌单") {
+                Section(L10n("trackAction.newPlaylist")) {
                     HStack {
-                        TextField("歌单名称", text: $newName)
-                        Button("新建并加入") {
+                        TextField(L10n("trackAction.playlistName"), text: $newName)
+                        Button(L10n("trackAction.createAndAdd")) {
                             Task { await createAndAdd() }
                         }
                         .disabled(
@@ -149,11 +149,11 @@ struct AddToPlaylistSheet: View {
                     }
                 }
             }
-            .navigationTitle("加入歌单")
+            .navigationTitle(L10n("trackAction.addToPlaylist"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button("取消") { dismiss() }
+                    Button(L10n("trackAction.cancel")) { dismiss() }
                 }
             }
             .task { await load() }
@@ -184,7 +184,7 @@ struct AddToPlaylistSheet: View {
             dismiss()
         } catch let error as APIError where error.statusCode == 409 {
             await load()
-            message = "歌单已更新，已刷新列表，请重试"
+            message = L10n("trackAction.playlistConflict")
         } catch {
             message = ErrorText.message(for: error)
         }

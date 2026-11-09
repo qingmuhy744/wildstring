@@ -1,5 +1,6 @@
 import { HelpLabel } from './desktop-help';
 import { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { api } from './api';
 import { ProviderPriority } from './metadata-refresh';
 import { ProviderNetworkTest } from './provider-diagnostics';
@@ -24,6 +25,7 @@ type Config = {
   proxy_configured: boolean;
 };
 export function ProviderSettings() {
+  const { t } = useTranslation();
   const [config, setConfig] = useState<Config | null>(null);
   const [key, setKey] = useState(''),
     [acoustidKey, setAcoustidKey] = useState(''),
@@ -36,14 +38,14 @@ export function ProviderSettings() {
     api<Config>('/manage/providers', { signal: c.signal })
       .then(setConfig)
       .catch(() => {
-        if (!c.signal.aborted) setMessage('无法读取联网设置。');
+        if (!c.signal.aborted) setMessage(t('providersPage.loadSettingsError'));
       });
     return () => c.abort();
-  }, []);
+  }, [t]);
   async function save() {
     if (!config || busy) return;
     setBusy(true);
-    setMessage('正在保存…');
+    setMessage(t('providersPage.saving'));
     try {
       const {
         lastfm_configured: _configured,
@@ -69,30 +71,26 @@ export function ProviderSettings() {
       setSecret('');
       setAcoustidKey('');
       setProxy('');
-      setMessage('联网设置已保存。');
+      setMessage(t('providersPage.savedNotice'));
     } catch (error) {
-      setMessage(
-        error instanceof Error ? error.message : '设置未保存，请检查地址、密钥或重新打开设置。',
-      );
+      setMessage(error instanceof Error ? error.message : t('providersPage.saveSettingsError'));
     } finally {
       setBusy(false);
     }
   }
   return (
     <section className="management-card settings-section account-form">
-      <h2>联网资料</h2>
-      <p className="muted">
-        MusicBrainz 与 Last.fm 提供资料建议；Cover Art Archive 提供封面候选，确认后才应用。
-      </p>
+      <h2>{t('providersPage.title')}</h2>
+      <p className="muted">{t('providersPage.description')}</p>
       {config && (
         <fieldset disabled={busy}>
           {(
             [
-              ['enabled', '启用联网资料'],
-              ['auto_new', '新导入自动查询（旧库手动查询）'],
-              ['musicbrainz', 'MusicBrainz'],
-              ['lastfm', 'Last.fm 资料'],
-              ['caa', '缺少封面时查询 Cover Art Archive'],
+              ['enabled', t('providersPage.enableOnlineMetadata')],
+              ['auto_new', t('providersPage.autoQueryNew')],
+              ['musicbrainz', t('providersPage.musicbrainz')],
+              ['lastfm', t('providersPage.lastfmData')],
+              ['caa', t('providersPage.caaWhenMissingCover')],
             ] as const
           ).map(([field, label]) => (
             <label className="check-label" key={field}>
@@ -123,72 +121,69 @@ export function ProviderSettings() {
                 })
               }
             />
-            AcoustID 音频指纹识别
+            {t('providersPage.acoustidRecognition')}
           </label>
-          <p className="muted">
-            先识别录音，再由 MusicBrainz 补充资料；只发送指纹和时长。没有匹配时按现有标签查询。
-          </p>
+          <p className="muted">{t('providersPage.acoustidDescription')}</p>
           {!config.fingerprint_available && (
-            <p role="status">服务端缺少指纹工具，请更新 Docker 镜像或安装 Chromaprint。</p>
+            <p role="status">{t('providersPage.missingChromaprint')}</p>
           )}
           <label>
-            <HelpLabel hint="acoustid">AcoustID Application API Key</HelpLabel>
+            <HelpLabel hint="acoustid">{t('providersPage.acoustidKeyLabel')}</HelpLabel>
             <input
               type="password"
               autoComplete="new-password"
               value={acoustidKey}
               onChange={(e) => setAcoustidKey(e.target.value)}
-              placeholder={config.acoustid_configured ? '已配置，留空保留' : 'Application API Key'}
+              placeholder={
+                config.acoustid_configured
+                  ? t('providersPage.configuredPlaceholder')
+                  : t('providersPage.acoustidPlaceholder')
+              }
             />
           </label>
-          <p className="muted">
-            请使用注册应用后获得的 Application API Key。账号页的 User API Key
-            用于提交指纹，不能用于查询识别。
-          </p>
+          <p className="muted">{t('providersPage.acoustidKeyHint')}</p>
           <ProviderPriority
             value={config.priority}
             onChange={(priority) => setConfig({ ...config, priority })}
           />
-          <p className="muted">
-            人工修改保留，已有本地封面优先。AcoustID 用于识别录音，封面由 CAA
-            提供候选；它们不参与资料字段排序。
-          </p>
+          <p className="muted">{t('providersPage.priorityHint')}</p>
           <label>
-            <HelpLabel hint="proxy">联网代理</HelpLabel>
+            <HelpLabel hint="proxy">{t('providersPage.proxyLabel')}</HelpLabel>
             <select
-              aria-label="联网代理"
+              aria-label={t('providersPage.proxyAria')}
               value={config.proxy_mode}
               onChange={(e) =>
                 setConfig({ ...config, proxy_mode: e.target.value as Config['proxy_mode'] })
               }
             >
-              <option value="environment">跟随环境变量</option>
-              <option value="custom">手动指定</option>
-              <option value="direct">直接连接</option>
+              <option value="environment">{t('providersPage.proxyEnv')}</option>
+              <option value="custom">{t('providersPage.proxyCustom')}</option>
+              <option value="direct">{t('providersPage.proxyDirect')}</option>
             </select>
           </label>
           <p className="muted">
             {config.environment_proxy_configured
-              ? '服务端环境变量中已配置代理。'
-              : '环境变量中未配置代理，将直接连接。'}
-            支持 HTTP_PROXY、HTTPS_PROXY、ALL_PROXY 和 NO_PROXY。
+              ? t('providersPage.proxyEnvConfigured')
+              : t('providersPage.proxyEnvNotConfigured')}
           </p>
           <label>
-            <HelpLabel hint="proxy">HTTP 代理地址</HelpLabel>
+            <HelpLabel hint="proxy">{t('providersPage.proxyUrlLabel')}</HelpLabel>
             <input
               type="password"
               autoComplete="new-password"
               value={proxy}
               onChange={(e) => setProxy(e.target.value)}
-              placeholder={config.proxy_configured ? '已配置，留空保留' : 'http://127.0.0.1:7890'}
+              placeholder={
+                config.proxy_configured
+                  ? t('providersPage.configuredPlaceholder')
+                  : 'http://127.0.0.1:7890'
+              }
             />
           </label>
-          <p className="muted">
-            HTTP/HTTPS 联网请求共用此代理，可包含用户名和密码。Docker 中请填写容器能访问的代理地址。
-          </p>
+          <p className="muted">{t('providersPage.proxyHint')}</p>
           <ProviderNetworkTest mode={config.proxy_mode} proxy={proxy} disabled={busy} />
           <label>
-            <HelpLabel hint="publicUrl">公开访问地址</HelpLabel>
+            <HelpLabel hint="publicUrl">{t('providersPage.publicUrlLabel')}</HelpLabel>
             <input
               type="url"
               placeholder="https://music.example.com"
@@ -196,27 +191,31 @@ export function ProviderSettings() {
               onChange={(e) => setConfig({ ...config, public_url: e.target.value })}
             />
           </label>
-          <p className="muted">Last.fm 授权回到此地址。请填写手机和浏览器都能访问的地址。</p>
+          <p className="muted">{t('providersPage.publicUrlHint')}</p>
           <label>
-            <HelpLabel hint="savedSecret">Last.fm API Key</HelpLabel>
+            <HelpLabel hint="savedSecret">{t('providersPage.lastfmKeyLabel')}</HelpLabel>
             <input
               autoComplete="off"
               value={key}
               onChange={(e) => setKey(e.target.value)}
-              placeholder={config.lastfm_configured ? '已配置，留空保留' : '32 位 API Key'}
+              placeholder={
+                config.lastfm_configured
+                  ? t('providersPage.configuredPlaceholder')
+                  : t('providersPage.lastfmKeyPlaceholder')
+              }
             />
           </label>
           <label>
-            <HelpLabel hint="savedSecret">Last.fm API Secret</HelpLabel>
+            <HelpLabel hint="savedSecret">{t('providersPage.lastfmSecretLabel')}</HelpLabel>
             <input
               type="password"
               autoComplete="new-password"
               value={secret}
               onChange={(e) => setSecret(e.target.value)}
-              placeholder="留空保留"
+              placeholder={t('providersPage.leaveEmptyPlaceholder')}
             />
           </label>
-          <button onClick={() => void save()}>保存联网设置</button>
+          <button onClick={() => void save()}>{t('providersPage.saveSettings')}</button>
         </fieldset>
       )}
       <p role="status">{message}</p>
@@ -226,11 +225,11 @@ export function ProviderSettings() {
         </a>{' '}
         ·{' '}
         <a href="https://acoustid.org/new-application" target="_blank" rel="noreferrer">
-          注册 AcoustID 应用并获取密钥
+          {t('providersPage.registerAcoustid')}
         </a>{' '}
         ·{' '}
         <a href="https://www.last.fm/api/account/create" target="_blank" rel="noreferrer">
-          申请 Last.fm API Key
+          {t('providersPage.applyLastfmKey')}
         </a>{' '}
         ·{' '}
         <a href="https://coverartarchive.org" target="_blank" rel="noreferrer">
@@ -253,6 +252,7 @@ type Binding = {
   queue: Record<string, number>;
 };
 export function LastfmAccount() {
+  const { t } = useTranslation();
   const [value, setValue] = useState<Binding | null>(null),
     [error, setError] = useState('');
   const pending = useRef(false);
@@ -262,10 +262,10 @@ export function LastfmAccount() {
     api<Binding>('/lastfm', { signal: c.signal })
       .then(setValue)
       .catch(() => {
-        if (!c.signal.aborted) setError('无法读取 Last.fm。');
+        if (!c.signal.aborted) setError(t('providersPage.loadLastfmError'));
       });
     return () => c.abort();
-  }, []);
+  }, [t]);
   async function change(field: 'scrobble' | 'now_playing', checked: boolean) {
     if (!value || pending.current) return;
     pending.current = true;
@@ -287,7 +287,7 @@ export function LastfmAccount() {
       );
     } catch {
       setValue(before);
-      setError('同步设置未保存，已恢复，请重新读取后重试。');
+      setError(t('providersPage.syncSettingsError'));
     } finally {
       pending.current = false;
       setBusy(false);
@@ -302,7 +302,7 @@ export function LastfmAccount() {
       const result = await api<{ url: string }>('/lastfm/authorize', { method: 'POST' });
       location.assign(result.url);
     } catch {
-      setError('请先由管理员启用联网资料，配置 Last.fm 密钥和公开访问地址。');
+      setError(t('providersPage.connectPrerequisiteError'));
     } finally {
       pending.current = false;
       setBusy(false);
@@ -316,7 +316,7 @@ export function LastfmAccount() {
       await api('/lastfm', { method: 'DELETE' });
       setValue(await api<Binding>('/lastfm'));
     } catch {
-      setError('断开失败，请重试。');
+      setError(t('providersPage.disconnectError'));
     } finally {
       pending.current = false;
       setBusy(false);
@@ -328,8 +328,8 @@ export function LastfmAccount() {
       {value?.connected ? (
         <>
           <p>
-            已连接：{value.username}
-            {value.needs_auth ? ' · 需要重新授权' : ''}
+            {t('providersPage.connectedStatus', { username: value.username })}
+            {value.needs_auth ? t('providersPage.needsReauth') : ''}
           </p>
           <label className="check-label">
             <input
@@ -338,7 +338,7 @@ export function LastfmAccount() {
               disabled={busy}
               onChange={(e) => void change('scrobble', e.target.checked)}
             />
-            同步已听记录
+            {t('providersPage.syncScrobble')}
           </label>
           <label className="check-label">
             <input
@@ -347,24 +347,26 @@ export function LastfmAccount() {
               disabled={busy}
               onChange={(e) => void change('now_playing', e.target.checked)}
             />
-            同步正在播放
+            {t('providersPage.syncNowPlaying')}
           </label>
           <p className="muted">
-            仅同步启用后实际收听的歌曲。待同步 {value.queue.queued || 0} · 失败{' '}
-            {value.queue.failed || 0}
+            {t('providersPage.syncQueueInfo', {
+              queued: value.queue.queued || 0,
+              failed: value.queue.failed || 0,
+            })}
           </p>
           <button disabled={busy} onClick={() => void disconnect()}>
-            断开 Last.fm
+            {t('providersPage.disconnectLastfm')}
           </button>
         </>
       ) : (
         <button disabled={busy || !value} onClick={() => void connect()}>
-          连接 Last.fm
+          {t('providersPage.connectLastfm')}
         </button>
       )}
       {value?.needs_auth && (
         <button disabled={busy} onClick={() => void connect()}>
-          重新授权
+          {t('providersPage.reauthorizeLastfm')}
         </button>
       )}
       {error && (

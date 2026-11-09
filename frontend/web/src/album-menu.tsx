@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import type { Album } from './api';
 import { Icon } from './icons';
 
@@ -21,6 +22,7 @@ export function AlbumMenu({
   onPlay: () => void;
   onEdit: () => void;
 }) {
+  const { t } = useTranslation();
   const menu = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -43,7 +45,7 @@ export function AlbumMenu({
     };
   }, [onClose]);
 
-  // 防止菜单超出屏幕右侧或下侧
+  // Prevent menu from overflowing right or bottom edge
   const left = Math.min(x, window.innerWidth - 220);
   const top = Math.min(y, window.innerHeight - 200);
 
@@ -52,7 +54,7 @@ export function AlbumMenu({
       ref={menu}
       className="playlist-context"
       role="menu"
-      aria-label={`专辑 ${album.title} 快捷菜单`}
+      aria-label={t('albumMenu.ariaLabel', { title: album.title })}
       style={{
         position: 'fixed',
         left: Math.max(10, left),
@@ -73,7 +75,7 @@ export function AlbumMenu({
           onClose();
         }}
       >
-        <Icon name="album" /> 打开专辑
+        <Icon name="album" /> {t('albumMenu.open')}
       </button>
       <button
         role="menuitem"
@@ -82,7 +84,7 @@ export function AlbumMenu({
           onClose();
         }}
       >
-        <Icon name="play" /> 播放全专
+        <Icon name="play" /> {t('albumMenu.playAll')}
       </button>
       {canManage && (
         <button
@@ -92,7 +94,7 @@ export function AlbumMenu({
             onClose();
           }}
         >
-          <Icon name="edit" /> 编辑专辑与封面
+          <Icon name="edit" /> {t('albumMenu.edit')}
         </button>
       )}
       <button
@@ -102,7 +104,7 @@ export function AlbumMenu({
           onClose();
         }}
       >
-        <Icon name="draft" /> 复制专辑名
+        <Icon name="draft" /> {t('albumMenu.copyTitle')}
       </button>
     </div>
   );

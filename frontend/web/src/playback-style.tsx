@@ -13,9 +13,9 @@ import './playback-style.css';
 export type PlaybackStyle = 'cover' | 'vinyl' | 'cassette';
 const KEY = 'wildstring-playback-style';
 export const playbackStyles: [PlaybackStyle, string][] = [
-  ['cover', '封面'],
-  ['vinyl', '黑胶'],
-  ['cassette', '磁带'],
+  ['cover', 'cover'],
+  ['vinyl', 'vinyl'],
+  ['cassette', 'cassette'],
 ];
 function valid(value: unknown): value is PlaybackStyle {
   return playbackStyles.some(([style]) => style === value);
@@ -107,6 +107,7 @@ export function PlaybackVisual({
   onImage: (image: HTMLImageElement) => void;
   onPreview: () => void;
 }) {
+  const { t } = useTranslation();
   const root = useRef<HTMLDivElement>(null);
   const [motion, setMotion] = useState(false);
   const [settled, setSettled] = useState(false);
@@ -154,8 +155,8 @@ export function PlaybackVisual({
       data-engaged={playing && settled}
       role={podcast ? 'button' : 'img'}
       tabIndex={0}
-      aria-label={podcast ? '播客封面，点击查看大图' : '歌曲封面，长按或按回车查看大图'}
-      data-help={podcast ? '点击或右键查看大封面' : '右键或长按查看大封面'}
+      aria-label={podcast ? t('playbackStyle.podcastCoverAria') : t('playbackStyle.trackCoverAria')}
+      data-help={podcast ? t('playbackStyle.podcastCoverHelp') : t('playbackStyle.trackCoverHelp')}
       style={
         {
           '--left-pack': `${38 - progress * 13}%`,
@@ -196,8 +197,8 @@ export function PlaybackVisual({
               onImage={onImage}
             />
             <span className="radio-display-copy">
-              <strong>{playing ? '播出中' : '待命'}</strong>
-              <span>{track.album || '播客节目'}</span>
+              <strong>{playing ? t('playbackStyle.onAir') : t('playbackStyle.standby')}</strong>
+              <span>{track.album || t('playbackStyle.podcastFallback')}</span>
               <small className="radio-display-duration">
                 {duration > 0 ? `${time(position)} / ${time(duration)}` : '--:--'}
               </small>

@@ -32,10 +32,10 @@ final class MacConnectionMonitor {
 
     var label: String {
         switch status {
-        case .checking: return "连接中…"
-        case .online: return "已连接 · \(latencyMs ?? 0)ms"
-        case .slow: return "连接较慢 · \(latencyMs ?? 0)ms"
-        case .offline: return "未连接"
+        case .checking: return L10n("macConnMon.checking")
+        case .online: return L10n("macConnMon.online", latencyMs ?? 0)
+        case .slow: return L10n("macConnMon.slow", latencyMs ?? 0)
+        case .offline: return L10n("macConnMon.offline")
         }
     }
 

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
+import { useTranslation } from 'react-i18next';
 import { api } from './api';
 import { Icon } from './icons';
 import { DialogCloseButton } from './dialog-close';
@@ -23,6 +24,7 @@ export function FolderPicker({
   onSelect: (path: string) => void;
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
   const dialog = useRef<HTMLDialogElement>(null);
   const request = useRef<AbortController | null>(null);
   const pathRevision = useRef(0);
@@ -35,32 +37,35 @@ export function FolderPicker({
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState('');
   const [notice, setNotice] = useState('');
-  const load = useCallback(async (next?: string) => {
-    request.current?.abort();
-    const controller = new AbortController();
-    request.current = controller;
-    const revision = pathRevision.current;
-    setBusy(true);
-    setError('');
-    setShowCreate(false);
-    setFolderName('');
-    setCreateError('');
-    setNotice('');
-    try {
-      const value = await api<FolderListing>(
-        `/libraries/folders${next ? `?path=${encodeURIComponent(next)}` : ''}`,
-        { signal: controller.signal },
-      );
-      if (controller.signal.aborted) return;
-      setListing(value);
-      if (pathRevision.current === revision) setPath(value.path || '');
-    } catch (reason) {
-      if (!controller.signal.aborted)
-        setError(reason instanceof Error ? reason.message : '无法读取目录');
-    } finally {
-      if (!controller.signal.aborted) setBusy(false);
-    }
-  }, []);
+  const load = useCallback(
+    async (next?: string) => {
+      request.current?.abort();
+      const controller = new AbortController();
+      request.current = controller;
+      const revision = pathRevision.current;
+      setBusy(true);
+      setError('');
+      setShowCreate(false);
+      setFolderName('');
+      setCreateError('');
+      setNotice('');
+      try {
+        const value = await api<FolderListing>(
+          `/libraries/folders${next ? `?path=${encodeURIComponent(next)}` : ''}`,
+          { signal: controller.signal },
+        );
+        if (controller.signal.aborted) return;
+        setListing(value);
+        if (pathRevision.current === revision) setPath(value.path || '');
+      } catch (reason) {
+        if (!controller.signal.aborted)
+          setError(reason instanceof Error ? reason.message : t('folderPicker.readFailed'));
+      } finally {
+        if (!controller.signal.aborted) setBusy(false);
+      }
+    },
+    [t],
+  );
   useEffect(() => {
     dialog.current?.showModal();
     void load(initialPath || undefined);
@@ -88,10 +93,10 @@ export function FolderPicker({
       setPath(value.path || '');
       setShowCreate(false);
       setFolderName('');
-      setNotice('文件夹已创建，可选择此文件夹。');
+      setNotice(t('folderPicker.createdNotice'));
     } catch (reason) {
       if (!controller.signal.aborted)
-        setCreateError(reason instanceof Error ? reason.message : '无法创建文件夹');
+        setCreateError(reason instanceof Error ? reason.message : t('folderPicker.createFailed'));
     } finally {
       if (!controller.signal.aborted) setCreating(false);
     }
@@ -117,18 +122,20 @@ export function FolderPicker({
           <span className="eyebrow">SERVER FOLDERS</span>
           <h2>{title}</h2>
         </div>
-        <DialogCloseButton aria-label="关闭文件夹选择" disabled={creating} onClick={onClose} />
+        <DialogCloseButton
+          aria-label={t('folderPicker.closeAria')}
+          disabled={creating}
+          onClick={onClose}
+        />
       </header>
       <div className="folder-picker-body">
-        <p className="muted">
-          浏览服务器上的目录。Docker 中显示容器内路径，选择文件夹不会修改源文件。
-        </p>
+        <p className="muted">{t('folderPicker.description')}</p>
         <div className="folder-path-entry">
           <input
-            aria-label="服务器目录路径"
+            aria-label={t('folderPicker.pathAria')}
             value={path}
             disabled={creating}
-            placeholder="输入完整路径，如 /music"
+            placeholder={t('folderPicker.pathPlaceholder')}
             onChange={(event) => {
               pathRevision.current += 1;
               setPath(event.target.value);
@@ -145,7 +152,7 @@ export function FolderPicker({
             disabled={busy || creating || !path.trim()}
             onClick={() => void load(path.trim())}
           >
-            打开路径
+            {t('folderPicker.openPath')}
           </button>
           <button
             type="button"
@@ -156,12 +163,12 @@ export function FolderPicker({
               setNotice('');
             }}
           >
-            <Icon name="add" /> 新建文件夹
+            <Icon name="add" /> {t('folderPicker.newFolder')}
           </button>
         </div>
-        <nav aria-label="服务器目录导航">
+        <nav aria-label={t('folderPicker.navAria')}>
           <button type="button" disabled={creating} onClick={() => void load()}>
-            常用位置
+            {t('folderPicker.commonLocations')}
           </button>
           {listing?.path && (
             <button type="button" disabled={creating} onClick={() => void load('/')}>
@@ -182,30 +189,34 @@ export function FolderPicker({
         {listing?.creation_blocked_reason && (
           <p className="folder-picker-hint">
             {listing?.creation_blocked_reason === 'read_only_source'
-              ? '音乐来源保持只读'
-              : '当前目录不可写'}
+              ? t('folderPicker.sourceReadOnly')
+              : t('folderPicker.dirNotWritable')}
           </p>
         )}
         {showCreate && (
-          <form className="folder-create-form" aria-label="新建文件夹" onSubmit={createFolder}>
+          <form
+            className="folder-create-form"
+            aria-label={t('folderPicker.createFolderFormAria')}
+            onSubmit={createFolder}
+          >
             <label>
-              文件夹名称
+              {t('folderPicker.folderNameLabel')}
               <input
                 autoFocus
                 required
                 maxLength={255}
                 value={folderName}
                 onChange={(event) => setFolderName(event.target.value)}
-                placeholder="输入新文件夹名称"
+                placeholder={t('folderPicker.folderNamePlaceholder')}
                 disabled={creating}
               />
             </label>
             <div className="folder-create-actions">
               <button type="button" disabled={creating} onClick={() => setShowCreate(false)}>
-                取消新建
+                {t('folderPicker.cancelCreate')}
               </button>
               <button className="primary" disabled={creating || !folderName.trim()}>
-                {creating ? '创建中…' : '创建文件夹'}
+                {creating ? t('folderPicker.creating') : t('folderPicker.createFolderBtn')}
               </button>
             </div>
             {createError && (
@@ -223,13 +234,15 @@ export function FolderPicker({
         {error && <p role="alert">{error}</p>}
         <div className="folder-picker-list" aria-busy={busy || creating}>
           {busy || creating ? (
-            <p role="status">{creating ? '正在创建文件夹…' : '正在读取目录…'}</p>
+            <p role="status">
+              {creating ? t('folderPicker.statusCreating') : t('folderPicker.statusReading')}
+            </p>
           ) : (
             <>
               {listing?.parent && (
                 <button type="button" onClick={() => void load(listing.parent!)}>
                   <Icon name="up" />
-                  <span className="folder-entry-label">上一级</span>
+                  <span className="folder-entry-label">{t('folderPicker.parentFolder')}</span>
                 </button>
               )}
               {listing?.items.map((item) => (
@@ -242,22 +255,22 @@ export function FolderPicker({
                   <Icon name="chevron" />
                 </button>
               ))}
-              {listing?.items.length === 0 && <p className="muted">没有可浏览的子文件夹。</p>}
-              {listing?.truncated && (
-                <p className="muted">仅显示前 500 个目录，可输入完整路径继续查找。</p>
+              {listing?.items.length === 0 && (
+                <p className="muted">{t('folderPicker.noSubfolders')}</p>
               )}
+              {listing?.truncated && <p className="muted">{t('folderPicker.limitHint')}</p>}
             </>
           )}
         </div>
       </div>
       <footer>
         <div className="folder-picker-current">
-          <span>当前目录</span>
-          <span className="storage-path">{listing?.path || '请选择目录'}</span>
+          <span>{t('folderPicker.currentDirLabel')}</span>
+          <span className="storage-path">{listing?.path || t('folderPicker.pleaseSelectDir')}</span>
         </div>
         <div className="folder-picker-actions">
           <button type="button" disabled={creating} onClick={onClose}>
-            取消
+            {t('folderPicker.cancel')}
           </button>
           <button
             type="button"
@@ -267,7 +280,7 @@ export function FolderPicker({
               if (listing?.path) onSelect(listing.path);
             }}
           >
-            选择此文件夹
+            {t('folderPicker.selectThisFolder')}
           </button>
         </div>
       </footer>

@@ -49,6 +49,8 @@ const reasonKeys: Record<string, string> = {
   你已超过30天没有重听这首歌: 'discover.reasons.revisit30',
   'Last.fm 公共来源中找到与本库标题、艺人一致的歌曲': 'discover.reasons.lastfm',
   从本地曲库中选取: 'discover.reasons.localPick',
+  本地关键词匹配: 'discoverPage.reasons.localMatch',
+  本地曲库候选: 'discoverPage.reasons.localCandidate',
 };
 function explanation(t: TFunction, reason: unknown): string {
   if (typeof reason !== 'string') return t('discover.row.reasonFallback');
@@ -458,7 +460,10 @@ export function Discover({
         );
         result = {
           title: prompt.trim().slice(0, 100),
-          items: page.items.map((track) => ({ track, reason: '本地关键词匹配' })),
+          items: page.items.map((track) => ({
+            track,
+            reason: t('discoverPage.reasons.localMatch'),
+          })),
           mode: 'local',
         };
       } else
@@ -671,7 +676,7 @@ export function Discover({
                       engine: 'local',
                       items: page.items.map((track) => ({
                         track,
-                        reason: '本地曲库候选',
+                        reason: t('discoverPage.reasons.localCandidate'),
                       })),
                     });
                     return;
@@ -860,6 +865,7 @@ interface SharedPlayback {
   handoff_supported?: boolean;
 }
 export function Devices({ player, user }: { player: Player; user: User }) {
+  const { t } = useTranslation();
   const [snapshot, setSnapshot] = useState<SharedPlayback | null>(null),
     [busy, setBusy] = useState(''),
     [message, setMessage] = useState('');
@@ -878,7 +884,7 @@ export function Devices({ player, user }: { player: Player; user: User }) {
     try {
       await fn();
     } catch (e) {
-      setMessage(e instanceof Error ? e.message : '未完成，请重新读取。');
+      setMessage(e instanceof Error ? e.message : t('discoverPage.devices.incomplete'));
     } finally {
       request.current = false;
       setBusy('');
@@ -891,45 +897,51 @@ export function Devices({ player, user }: { player: Player; user: User }) {
         if (!controller.signal.aborted) setSnapshot(v);
       })
       .catch(() => {
-        if (!controller.signal.aborted) setMessage('无法读取设备进度。');
+        if (!controller.signal.aborted) setMessage(t('discoverPage.devices.readFailed'));
       });
     return () => controller.abort();
-  }, []);
+  }, [t]);
   return (
-    <section className="completion-page" aria-label="跨设备继续">
-      <h1>跨设备继续</h1>
-      <p className="muted">
-        暂停时自动保存进度。仅对其他设备最近 30
-        分钟内的暂停显示一次轻提示；载入后保持暂停，旧记录仍可手动载入。
-      </p>
+    <section className="completion-page" aria-label={t('discoverPage.devices.ariaLabel')}>
+      <h1>{t('discoverPage.devices.title')}</h1>
+      <p className="muted">{t('discoverPage.devices.description')}</p>
       <SyncModeControl userId={user.id} />
       <div className="management-card">
-        <h2>账号共享进度</h2>
+        <h2>{t('discoverPage.devices.sharedTitle')}</h2>
         <p>
           {snapshot?.track_ids.length
-            ? `${snapshot.track_ids.length} 首队列 · 第 ${snapshot.index + 1} 首 · ${time(snapshot.position_ms / 1000)} · ${modeNames[snapshot.mode]}`
-            : '还没有共享的播放进度。'}
+            ? t('discoverPage.devices.progressSummary', {
+                count: snapshot.track_ids.length,
+                index: snapshot.index + 1,
+                time: time(snapshot.position_ms / 1000),
+                mode: t(`discoverPage.devices.modes.${snapshot.mode}`, {
+                  defaultValue: modeNames[snapshot.mode],
+                }),
+              })
+            : t('discoverPage.devices.noSharedProgress')}
         </p>
         <p className="muted">
           {snapshot?.updated_at
-            ? `更新时间：${new Date(snapshot.updated_at).toLocaleString()}`
+            ? t('discoverPage.devices.updatedAt', {
+                time: new Date(snapshot.updated_at).toLocaleString(),
+              })
             : ''}
         </p>
         <div className="toolbar-actions">
           <button
             disabled={!!busy}
             onClick={() =>
-              void run('正在读取…', async () =>
+              void run(t('discoverPage.devices.reading'), async () =>
                 setSnapshot(await api<SharedPlayback>('/playback/state')),
               )
             }
           >
-            读取最新进度
+            {t('discoverPage.devices.readLatest')}
           </button>
           <button
             disabled={!!busy || !snapshot || !player.current}
             onClick={() =>
-              void run('正在共享…', async () => {
+              void run(t('discoverPage.devices.sharing'), async () => {
                 const result = await api<SharedPlayback>('/playback/state', {
                   method: 'PUT',
                   body: JSON.stringify({
@@ -951,22 +963,20 @@ export function Devices({ player, user }: { player: Player; user: User }) {
                   }),
                 });
                 setSnapshot(result);
-                setMessage('当前队列与进度已共享。');
+                setMessage(t('discoverPage.devices.shareSuccess'));
               })
             }
           >
-            共享当前播放进度
+            {t('discoverPage.devices.shareCurrent')}
           </button>
           <button
             className="primary"
             disabled={!!busy || !snapshot?.track_ids.length}
             onClick={() =>
-              void run('正在准备继续…', async () => {
+              void run(t('discoverPage.devices.preparing'), async () => {
                 const state = snapshot!;
                 if (state.track_ids.length > QUEUE_LIMIT)
-                  throw new Error(
-                    `这个队列超过网页 ${QUEUE_LIMIT} 首上限，请在原设备缩小后重新共享。`,
-                  );
+                  throw new Error(t('discoverPage.devices.queueExceeded', { limit: QUEUE_LIMIT }));
                 const tracks: Track[] = [];
                 for (let i = 0; i < state.track_ids.length; i += 10)
                   tracks.push(
@@ -978,11 +988,11 @@ export function Devices({ player, user }: { player: Player; user: User }) {
                   );
                 player.setMode(state.mode);
                 player.start(tracks, state.index, state.position_ms / 1000, false);
-                setMessage('已载入共享进度，点击播放继续。');
+                setMessage(t('discoverPage.devices.loaded'));
               })
             }
           >
-            在本设备继续
+            {t('discoverPage.devices.continueHere')}
           </button>
         </div>
       </div>

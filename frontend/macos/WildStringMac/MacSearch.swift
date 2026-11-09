@@ -112,7 +112,7 @@ struct MacSearchView: View {
       results
     }
     .background(MacTheme.canvas)
-    .navigationTitle("搜索")
+    .navigationTitle(L10n("macSearch.title"))
     .overlay(alignment: .bottom) {
       if let notice {
         Text(notice)
@@ -149,11 +149,11 @@ struct MacSearchView: View {
   private var searchHeader: some View {
     VStack(alignment: .leading, spacing: 14) {
       HStack(alignment: .firstTextBaseline) {
-        Text("搜索")
+        Text(L10n("macSearch.title"))
           .font(MacTheme.display(26))
           .foregroundStyle(MacTheme.ink)
         if model.hasQuery && !model.loading {
-          Text("共 \(model.resultCount) 项匹配")
+          Text(L10n("macSearch.matchCount", model.resultCount))
             .font(MacTheme.caption)
             .foregroundStyle(MacTheme.muted)
         }
@@ -162,7 +162,7 @@ struct MacSearchView: View {
           Button {
             MacPlayback.play(model.tracks, startingAt: first, playback: playback)
           } label: {
-            Label("播放歌曲", systemImage: "play.fill")
+            Label(L10n("macSearch.playTracks"), systemImage: "play.fill")
               .font(MacTheme.section(12))
           }
           .buttonStyle(.borderedProminent)
@@ -175,7 +175,7 @@ struct MacSearchView: View {
         Image(systemName: "magnifyingglass")
           .font(.system(size: 14, weight: .medium))
           .foregroundStyle(searchFocused ? MacTheme.accentDeep : MacTheme.muted)
-        TextField("搜索歌曲、专辑或艺人…", text: $query)
+        TextField(L10n("macSearch.searchPlaceholder"), text: $query)
           .textFieldStyle(.plain)
           .font(.system(size: 14))
           .foregroundStyle(MacTheme.ink)
@@ -192,7 +192,7 @@ struct MacSearchView: View {
               .foregroundStyle(MacTheme.muted)
           }
           .buttonStyle(.plain)
-          .accessibilityLabel("清除搜索")
+          .accessibilityLabel(L10n("macSearch.clearSearch"))
         }
       }
       .padding(.horizontal, 14)
@@ -208,15 +208,15 @@ struct MacSearchView: View {
 
       if model.hasQuery && model.resultCount > 0 {
         HStack(spacing: 8) {
-          categoryChip("全部", id: "all", count: model.resultCount)
+          categoryChip(L10n("macSearch.categoryAll"), id: "all", count: model.resultCount)
           if !model.tracks.isEmpty {
-            categoryChip("歌曲", id: "tracks", count: model.tracks.count)
+            categoryChip(L10n("macSearch.categoryTracks"), id: "tracks", count: model.tracks.count)
           }
           if !model.albums.isEmpty {
-            categoryChip("专辑", id: "albums", count: model.albums.count)
+            categoryChip(L10n("macSearch.categoryAlbums"), id: "albums", count: model.albums.count)
           }
           if !model.artists.isEmpty {
-            categoryChip("艺人", id: "artists", count: model.artists.count)
+            categoryChip(L10n("macSearch.categoryArtists"), id: "artists", count: model.artists.count)
           }
         }
       }
@@ -256,19 +256,19 @@ struct MacSearchView: View {
   private var results: some View {
     if !model.hasQuery {
       ContentUnavailableView(
-        "搜索整个曲库",
+        L10n("macSearch.emptyTitle"),
         systemImage: "magnifyingglass",
-        description: Text("输入歌曲、专辑或艺人，三类结果会同时显示。")
+        description: Text(L10n("macSearch.emptyDesc"))
       )
       .frame(maxWidth: .infinity, maxHeight: .infinity)
       .background(MacTheme.canvas)
     } else if model.loading, model.resultCount == 0 {
-      ProgressView("正在搜索…")
+      ProgressView(L10n("macSearch.searching"))
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(MacTheme.canvas)
     } else if let error = model.error, model.resultCount == 0 {
       ContentUnavailableView(
-        "无法完成搜索",
+        L10n("macSearch.searchFailed"),
         systemImage: "wifi.exclamationmark",
         description: Text(error)
       )
@@ -287,7 +287,7 @@ struct MacSearchView: View {
               .foregroundStyle(MacTheme.accentDeep)
           }
           if !model.tracks.isEmpty && (category == "all" || category == "tracks") {
-            resultSection("歌曲", count: model.tracks.count, symbol: "music.note") {
+            resultSection(L10n("macSearch.categoryTracks"), count: model.tracks.count, symbol: "music.note") {
               VStack(spacing: 6) {
                 ForEach(model.tracks) { track in
                   searchTrackRow(track)
@@ -296,7 +296,7 @@ struct MacSearchView: View {
             }
           }
           if !model.albums.isEmpty && (category == "all" || category == "albums") {
-            resultSection("专辑", count: model.albums.count, symbol: "square.stack") {
+            resultSection(L10n("macSearch.categoryAlbums"), count: model.albums.count, symbol: "square.stack") {
               LazyVGrid(
                 columns: [GridItem(.adaptive(minimum: 168, maximum: 196), spacing: 16)],
                 spacing: 16
@@ -314,7 +314,7 @@ struct MacSearchView: View {
             }
           }
           if !model.artists.isEmpty && (category == "all" || category == "artists") {
-            resultSection("艺人", count: model.artists.count, symbol: "person.2") {
+            resultSection(L10n("macSearch.categoryArtists"), count: model.artists.count, symbol: "person.2") {
               LazyVGrid(
                 columns: [GridItem(.adaptive(minimum: 220, maximum: 300), spacing: 14)],
                 spacing: 14
@@ -337,7 +337,7 @@ struct MacSearchView: View {
                           .font(.system(size: 13, weight: .semibold))
                           .foregroundStyle(MacTheme.ink)
                           .lineLimit(1)
-                        Text("\(artist.albumCount) 张专辑 · \(artist.trackCount) 首")
+                        Text(L10n("macSearch.artistCounts", artist.albumCount, artist.trackCount))
                           .font(MacTheme.caption)
                           .foregroundStyle(MacTheme.muted)
                       }
@@ -383,7 +383,7 @@ struct MacSearchView: View {
         )
       }
       .buttonStyle(.plain)
-      .help("播放 \(track.title)")
+      .help(L10n("macSearch.playTrack", track.title))
 
       VStack(alignment: .leading, spacing: 3) {
         Button {
@@ -423,7 +423,7 @@ struct MacSearchView: View {
               .foregroundStyle(favorites.isFavorite(track.id) ? MacTheme.accentDeep : MacTheme.faint)
           }
           .buttonStyle(.plain)
-          .help(favorites.isFavorite(track.id) ? "取消红心" : "红心")
+          .help(favorites.isFavorite(track.id) ? L10n("macSearch.unfavorite") : L10n("macSearch.favorite"))
         }
         if current {
           Image(systemName: playback.isPlaying ? "speaker.wave.2.fill" : "pause.fill")
@@ -447,7 +447,7 @@ struct MacSearchView: View {
       .menuStyle(.borderlessButton)
       .menuIndicator(.hidden)
       .fixedSize()
-      .accessibilityLabel("\(track.title)的更多操作")
+      .accessibilityLabel(L10n("macSearch.moreActionsFor", track.title))
     }
     .padding(.horizontal, 12)
     .padding(.vertical, 8)
@@ -482,7 +482,7 @@ struct MacSearchView: View {
       }
       .buttonStyle(.plain)
       .foregroundStyle(MacTheme.muted)
-      .help("查看艺人：\(name)")
+      .help(L10n("macSearch.viewArtist", name))
     } else if track.artists.count > 1 {
       Menu {
         ForEach(track.artists, id: \.self) { name in
@@ -509,7 +509,7 @@ struct MacSearchView: View {
       }
       .buttonStyle(.plain)
       .foregroundStyle(MacTheme.muted)
-      .help("查看专辑：\(title)")
+      .help(L10n("macSearch.viewAlbum", title))
     } else if let title = track.album, !title.isEmpty {
       Text(title).lineLimit(1).foregroundStyle(MacTheme.muted)
     }
@@ -517,19 +517,19 @@ struct MacSearchView: View {
 
   @ViewBuilder
   private func trackMenu(_ track: Track) -> some View {
-    Button("下一首播放") { enqueue([track], next: true) }
-    Button("加入播放队列") { enqueue([track]) }
-    Button("加入歌单…") { playlistSelection = MacPlaylistSelection(tracks: [track]) }
-    Button("查看歌词") { lyricTrack = track }
+    Button(L10n("macSearch.playNext")) { enqueue([track], next: true) }
+    Button(L10n("macSearch.addToQueue")) { enqueue([track]) }
+    Button(L10n("macSearch.addToPlaylist")) { playlistSelection = MacPlaylistSelection(tracks: [track]) }
+    Button(L10n("macSearch.viewLyrics")) { lyricTrack = track }
     if let id = track.albumId, let title = track.album, !title.isEmpty {
-      Button("查看专辑") { navigate(.album(id: id, title: title)) }
+      Button(L10n("macSearch.viewAlbumMenu")) { navigate(.album(id: id, title: title)) }
     }
     ForEach(track.artists, id: \.self) { name in
-      Button("查看艺人：\(name)") { navigate(.artist(name: name)) }
+      Button(L10n("macSearch.viewArtist", name)) { navigate(.artist(name: name)) }
     }
     if let favorites {
       Divider()
-      Button(favorites.isFavorite(track.id) ? "取消红心" : "红心") {
+      Button(favorites.isFavorite(track.id) ? L10n("macSearch.unfavorite") : L10n("macSearch.favorite")) {
         Task { await favorites.toggle(track.id) }
       }
     }
@@ -537,7 +537,7 @@ struct MacSearchView: View {
 
   private func enqueue(_ tracks: [Track], next: Bool = false) {
     if playback.enqueue(items: tracks.map(MacPlayback.item), next: next) {
-      showNotice("已将 \(tracks.count) 首\(next ? "安排为接下来播放" : "加入播放队列")")
+      showNotice(next ? L10n("macSearch.enqueuedNext", tracks.count) : L10n("macSearch.enqueuedEnd", tracks.count))
     } else if let error = playback.errorMessage {
       showNotice(error)
     }

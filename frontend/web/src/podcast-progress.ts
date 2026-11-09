@@ -1,4 +1,5 @@
 import { eventId } from './api';
+import i18n from './i18n';
 
 export type PodcastProgressEvent = 'play' | 'progress' | 'pause' | 'seek' | 'stop' | 'ended';
 export interface EpisodeProgress {
@@ -94,7 +95,7 @@ export class PodcastProgressStore {
       this.volatile.delete(id);
     } catch {
       this.volatile.set(id, record);
-      this.changed(id, '浏览器无法在本机保存单集进度，请检查存储空间。');
+      this.changed(id, i18n.t('podcastProgress.localStorageError'));
     }
   }
   private async request(id: string, body?: object) {
@@ -230,7 +231,7 @@ export class PodcastProgressStore {
         this.save(id, { ...latest, conflict: true });
         // Continue saving the audible position locally; the conflicted outbox cannot
         // upload again until an explicit choice starts a new listening session.
-        this.changed(id, '另一台设备更新了本集进度，本机位置已保留，请选择接续位置。');
+        this.changed(id, i18n.t('podcastProgress.conflictNotice'));
       } else if (response.ok) {
         const remote: EpisodeProgress = await response.json();
         if (this.controller.signal.aborted) return;
@@ -245,8 +246,8 @@ export class PodcastProgressStore {
         this.changed(
           id,
           response.status === 422
-            ? '服务器需要更新才能同步播客进度；本机进度已保存。'
-            : '单集进度暂未同步，已保存在本机。',
+            ? i18n.t('podcastProgress.serverUpdateNeeded')
+            : i18n.t('podcastProgress.syncPending'),
         );
       }
     } catch {

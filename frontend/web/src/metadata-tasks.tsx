@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import { hints } from './help-content';
 import { useEffect, useRef, useState } from 'react';
 import { api } from './api';
@@ -31,17 +32,17 @@ interface TaskPage {
   snapshot_at: number;
   retention_days: number;
 }
-const names: Record<View, string> = {
-  active: '进行中',
-  pending: '待确认',
-  attention: '需处理',
-  history: '历史记录',
+const viewKeys: Record<View, string> = {
+  active: 'metadataTasks.viewActive',
+  pending: 'metadataTasks.viewPending',
+  attention: 'metadataTasks.viewAttention',
+  history: 'metadataTasks.viewHistory',
 };
-const empty: Record<View, string> = {
-  active: '当前没有进行中的查询。查询结束后自动归档，待确认的建议会继续保留。',
-  pending: '没有待确认的建议。',
-  attention: '没有需要处理的问题。',
-  history: '没有已归档的查询。',
+const emptyKeys: Record<View, string> = {
+  active: 'metadataTasks.emptyActive',
+  pending: 'metadataTasks.emptyPending',
+  attention: 'metadataTasks.emptyAttention',
+  history: 'metadataTasks.emptyHistory',
 };
 
 export function MetadataJobs({
@@ -51,6 +52,7 @@ export function MetadataJobs({
   onInspect: (id: string) => void;
   batchId?: string;
 }) {
+  const { t } = useTranslation();
   const [reviewOpen, setReviewOpen] = useState(false);
   const [reviewTrackId, setReviewTrackId] = useState<string>();
   const [view, setView] = useState<View>('active');
@@ -97,7 +99,7 @@ export function MetadataJobs({
           }
         }
       } catch {
-        if (!controller.signal.aborted) setError('无法读取元数据任务。');
+        if (!controller.signal.aborted) setError(t('metadataTasks.loadError'));
       }
       if (!controller.signal.aborted) timer = setTimeout(() => void load(), 2000);
     }
@@ -126,7 +128,7 @@ export function MetadataJobs({
         setHistoryError('');
       })
       .catch(() => {
-        if (!controller.signal.aborted) setHistoryError('无法读取历史记录。');
+        if (!controller.signal.aborted) setHistoryError(t('metadataTasks.historyLoadError'));
       });
     return () => controller.abort();
   }, [historyOpen, historyOffset, tick, value?.counts.history, batchId]);
@@ -142,7 +144,7 @@ export function MetadataJobs({
       setMessage(success);
       setTick((n) => n + 1);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : '操作未完成，请重试。');
+      setError(cause instanceof Error ? cause.message : t('metadataTasks.mutateFailed'));
     } finally {
       request.current = false;
       setBusy(false);
@@ -152,20 +154,20 @@ export function MetadataJobs({
     if (!value || (view !== 'pending' && view !== 'attention')) return;
     const prompt =
       view === 'pending'
-        ? `忽略“${task.title}”当前待确认的建议？已应用的元数据会保留。`
-        : `忽略“${task.title}”当前的问题并归档？`;
+        ? t('metadataTasks.ignorePendingConfirm', { title: task.title })
+        : t('metadataTasks.ignoreAttentionConfirm', { title: task.title });
     if (!confirm(prompt)) return;
     void mutate(
       `/manage/providers/tasks/tracks/${encodeURIComponent(task.track_id)}/review`,
       { view, through: value.snapshot_at, ...(batchId ? { batch_id: batchId } : {}) },
-      '已处理的记录已归档。',
+      t('metadataTasks.processedArchived'),
     );
   }
   function rows(page: TaskPage, current: View) {
     return page.items.length ? (
       <ul
         className="manage-track-list metadata-task-list"
-        aria-label={`${names[current]}的元数据任务`}
+        aria-label={t('metadataTasks.taskListAria', { view: t(viewKeys[current]) })}
       >
         {page.items.map((task) => (
           <li key={task.track_id}>
@@ -176,22 +178,32 @@ export function MetadataJobs({
                 className={task.requires_attention ? 'metadata-task-warning' : ''}
               >
                 {task.status === 'completed' && task.has_issue
-                  ? '部分完成'
+                  ? t('metadataTasks.partialCompleted')
                   : current === 'history' && task.status === 'completed'
-                    ? '查询完成'
-                    : jobStatus[task.status] || '状态待确认'}
-                {current === 'pending' ? ` · ${task.suggestion_count} 条待确认建议` : ''}
-                {task.has_issue && !task.requires_attention ? ' · 问题已处理' : ''}
+                    ? t('metadataTasks.queryCompleted')
+                    : t(jobStatus[task.status] || 'providerDiagnostics.statusUnknown')}
+                {current === 'pending'
+                  ? t('metadataTasks.pendingSuggestions', { count: task.suggestion_count })
+                  : ''}
+                {task.has_issue && !task.requires_attention ? t('metadataTasks.issueResolved') : ''}
               </span>
               <small>
                 {new Date(task.created_at * 1000).toLocaleString()}
-                {task.job_count > 1 ? ` · 合并 ${task.job_count} 次查询` : ''}
+                {task.job_count > 1
+                  ? t('metadataTasks.mergedQueries', { count: task.job_count })
+                  : ''}
               </small>
               <JobDiagnostics job={task} />
             </div>
             <div className="metadata-task-actions">
               <button
-                aria-label={`${current === 'history' ? '查看' : '核对'} ${task.title} 的资料结果`}
+                aria-label={t('metadataTasks.inspectTrackAria', {
+                  action:
+                    current === 'history'
+                      ? t('metadataTasks.actionView')
+                      : t('metadataTasks.actionReview'),
+                  title: task.title,
+                })}
                 onClick={() => {
                   if (current === 'history') onInspect(task.track_id);
                   else {
@@ -201,30 +213,32 @@ export function MetadataJobs({
                 }}
               >
                 {current === 'history'
-                  ? '查看详情'
+                  ? t('metadataTasks.viewDetails')
                   : task.requires_attention
-                    ? '查看旧结果'
-                    : '查看候选'}
+                    ? t('metadataTasks.viewOldResults')
+                    : t('metadataTasks.viewCandidates')}
               </button>
               {['pending', 'attention'].includes(current) && !!task.requires_attention && (
                 <button
                   disabled={busy}
-                  aria-label={`重新查询 ${task.title}`}
+                  aria-label={t('metadataTasks.retryTrackAria', { title: task.title })}
                   onClick={() =>
                     void mutate(
                       `/manage/providers/tasks/${encodeURIComponent(task.id)}/retry`,
                       {},
-                      '已重新排队查询，现有建议继续保留。',
+                      t('metadataTasks.retryQueued'),
                     )
                   }
                 >
                   <Icon name="refresh" />
-                  重新查询
+                  {t('metadataTasks.requery')}
                 </button>
               )}
               {(current === 'pending' || current === 'attention') && (
                 <button disabled={busy} onClick={() => review(task)}>
-                  {current === 'pending' ? '忽略建议' : '忽略问题'}
+                  {current === 'pending'
+                    ? t('metadataTasks.ignoreSuggestions')
+                    : t('metadataTasks.ignoreIssue')}
                 </button>
               )}
             </div>
@@ -232,11 +246,11 @@ export function MetadataJobs({
         ))}
       </ul>
     ) : (
-      <p className="metadata-task-empty">{empty[current]}</p>
+      <p className="metadata-task-empty">{t(emptyKeys[current])}</p>
     );
   }
   return (
-    <section className="management-card metadata-tasks" aria-label="元数据更新任务">
+    <section className="management-card metadata-tasks" aria-label={t('metadataTasks.sectionAria')}>
       {reviewOpen && (
         <MetadataReviewDialog
           onClose={() => {
@@ -250,21 +264,25 @@ export function MetadataJobs({
       )}
       <div className="management-section-heading">
         <div>
-          <h2>元数据候选中心</h2>
+          <h2>{t('metadataTasks.headingTitle')}</h2>
           <button
             onClick={() => {
               setReviewTrackId(undefined);
               setReviewOpen(true);
             }}
           >
-            {batchId ? '核对本批次候选' : '批量核对资料'}
+            {batchId
+              ? t('metadataTasks.reviewBatchCandidates')
+              : t('metadataTasks.reviewMetadataBatch')}
           </button>
           <p className="muted" role="status">
-            {value ? `等待 ${value.queued} 首 · 查询中 ${value.running} 首` : '正在读取任务…'}
+            {value
+              ? t('metadataTasks.queueStatus', { queued: value.queued, running: value.running })
+              : t('metadataTasks.loadingTasks')}
           </p>
           {view === 'attention' && !!value?.counts.attention && (
             <p className="muted metadata-task-guidance" role="note">
-              包含查询失败、网络异常或需人工核对的任务。可单曲重试，也可一键忽略归档至历史记录。
+              {t('metadataTasks.attentionGuidance')}
             </p>
           )}
         </div>
@@ -275,46 +293,50 @@ export function MetadataJobs({
               onClick={() => {
                 if (
                   confirm(
-                    `忽略全部 ${value.counts.attention} 个需处理问题？相关异常记录将归档到历史记录中。`,
+                    t('metadataTasks.ignoreAllAttentionConfirm', {
+                      count: value.counts.attention,
+                    }),
                   )
                 ) {
                   void mutate(
                     '/manage/providers/tasks/attention/clear',
                     { through: value.snapshot_at, batch_id: batchId },
-                    `已忽略 ${value.counts.attention} 个问题。`,
+                    t('metadataTasks.ignoredAllAttentionNotice', {
+                      count: value.counts.attention,
+                    }),
                   );
                 }
               }}
             >
-              忽略全部问题（{value.counts.attention}）
+              {t('metadataTasks.ignoreAllAttention', { count: value.counts.attention })}
             </button>
           ) : null}
           {value?.queued ? (
             <button
               disabled={busy}
               onClick={() => {
-                if (
-                  confirm(
-                    `清空等待队列中的 ${value.queued} 首歌曲？正在查询的歌曲不会停止，已有候选和历史记录会保留。`,
-                  )
-                )
+                if (confirm(t('metadataTasks.clearQueuedConfirm', { count: value.queued })))
                   void mutate(
                     '/manage/providers/tasks/clear-queued',
                     {},
-                    `已取消 ${value.queued} 首等待中的查询。`,
+                    t('metadataTasks.clearedQueuedNotice', { count: value.queued }),
                   );
               }}
             >
-              清空等待队列（{value.queued}）
+              {t('metadataTasks.clearQueued', { count: value.queued })}
             </button>
           ) : null}
           <button onClick={() => setTick((n) => n + 1)}>
             <Icon name="refresh" />
-            刷新
+            {t('metadataTasks.refresh')}
           </button>
         </div>
       </div>
-      <nav className="metadata-task-tabs" aria-label="元数据任务分类" data-help={hints.taskHistory}>
+      <nav
+        className="metadata-task-tabs"
+        aria-label={t('metadataTasks.tabsAria')}
+        data-help={hints.taskHistory}
+      >
         {(['active', 'pending', 'attention'] as const).map((name) => (
           <button
             key={name}
@@ -324,7 +346,7 @@ export function MetadataJobs({
               setOffset(0);
             }}
           >
-            {names[name]}
+            {t(viewKeys[name])}
             <span>{value?.counts[name] ?? '—'}</span>
           </button>
         ))}
@@ -338,39 +360,40 @@ export function MetadataJobs({
       {value?.view === view ? (
         <>
           {rows(value, view)}
-          {value.total > value.limit && <Pagination page={value} onOffset={setOffset} unit="首" />}
+          {value.total > value.limit && (
+            <Pagination page={value} onOffset={setOffset} unit={t('metadataTasks.unitTracks')} />
+          )}
         </>
       ) : (
-        <p role="status">正在读取…</p>
+        <p role="status">{t('metadataTasks.loading')}</p>
       )}
       <details
         className="metadata-task-history"
         open={historyOpen}
         onToggle={(event) => setHistoryOpen(event.currentTarget.open)}
       >
-        <summary>历史记录{value ? ` · ${value.counts.history} 首` : ''}</summary>
+        <summary>
+          {t('metadataTasks.historySummary', {
+            countSuffix: value
+              ? t('metadataTasks.historyCountSuffix', { count: value.counts.history })
+              : '',
+          })}
+        </summary>
         <div className="management-section-heading">
-          <p className="muted">
-            已处理记录自动归档，默认展示最近 30 天。待确认建议及未处理问题保留。
-          </p>
+          <p className="muted">{t('metadataTasks.historyMuted')}</p>
           <button
             disabled={busy || !history?.total}
             onClick={() => {
-              if (
-                history &&
-                confirm(
-                  '清理已归档的元数据查询记录？待确认建议、未处理问题和已应用的元数据会保留。',
-                )
-              )
+              if (history && confirm(t('metadataTasks.clearHistoryConfirm')))
                 void mutate(
                   '/manage/providers/tasks/history/clear',
                   { through: history.snapshot_at },
-                  '已清理归档记录。',
+                  t('metadataTasks.clearedHistoryNotice'),
                 );
             }}
           >
             <Icon name="remove" />
-            清理历史
+            {t('metadataTasks.clearHistory')}
           </button>
         </div>
         {historyError && (
@@ -382,11 +405,15 @@ export function MetadataJobs({
           <>
             {rows(history, 'history')}
             {history.total > history.limit && (
-              <Pagination page={history} onOffset={setHistoryOffset} unit="首" />
+              <Pagination
+                page={history}
+                onOffset={setHistoryOffset}
+                unit={t('metadataTasks.unitTracks')}
+              />
             )}
           </>
         ) : (
-          <p role="status">正在读取历史…</p>
+          <p role="status">{t('metadataTasks.loadingHistory')}</p>
         )}
       </details>
     </section>

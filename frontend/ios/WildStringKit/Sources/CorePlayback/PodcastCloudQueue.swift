@@ -86,8 +86,9 @@ public final class PodcastCloudQueue {
     private var hasLoaded = false
     private var pendingWrite = false
 
-    public static let conflictMessage =
-        "队列在其他设备上有更新。本机队列已保留。可以选择使用服务器上的队列，或用本机覆盖。"
+    public static var conflictMessage: String {
+        KitL10n("kit.podcast.conflictMessage")
+    }
 
     public init(
         client: WildstringClient,
@@ -108,7 +109,7 @@ public final class PodcastCloudQueue {
     }
 
     public func title(for episodeID: String) -> String {
-        episodes[episodeID]?.title ?? inboxEpisodes[episodeID]?.title ?? "正在读取单集…"
+        episodes[episodeID]?.title ?? inboxEpisodes[episodeID]?.title ?? KitL10n("kit.podcast.loadingEpisode")
     }
 
     public func upcoming(after episodeID: String?) -> [PodcastQueueItem] {
@@ -152,7 +153,7 @@ public final class PodcastCloudQueue {
             inboxError = nil
             await resolveInbox()
         } catch {
-            inboxError = "暂时读不到稍后听。\(Self.explain(error)) 可以重试。"
+            inboxError = KitL10n("kit.podcast.inboxReadFailed", Self.explain(error))
         }
     }
 
@@ -164,7 +165,7 @@ public final class PodcastCloudQueue {
             preferenceError = nil
             onPreferencesChanged?()
         } catch {
-            preferenceError = "暂时读不到新集处理。\(Self.explain(error)) 可以重试。"
+            preferenceError = KitL10n("kit.podcast.prefReadFailed", Self.explain(error))
             onPreferencesChanged?()
         }
     }
@@ -184,7 +185,7 @@ public final class PodcastCloudQueue {
             }
             let exists = self.items.contains { $0.episodeId == episodeID }
             if !exists, self.items.count >= PodcastQueueMerge.limit {
-                self.syncError = "待播队列已有 \(PodcastQueueMerge.limit) 集，这一集没有加入。"
+                self.syncError = KitL10n("kit.podcast.queueFull", PodcastQueueMerge.limit)
                 return
             }
             await self.edit { items in
@@ -192,7 +193,7 @@ public final class PodcastCloudQueue {
                     episodeID, queue: items, next: next, after: currentEpisodeID
                 )
             }
-            self.notice = next ? "已加入待播 · 下一集播放" : "已加入待播"
+            self.notice = next ? KitL10n("kit.podcast.enqueuedNext") : KitL10n("kit.podcast.enqueued")
         }
     }
 
@@ -204,7 +205,7 @@ public final class PodcastCloudQueue {
             if self.inbox.items.contains(where: { $0.episodeId == episodeID }) {
                 await self.removeFromInbox(episodeID: episodeID)
             }
-            self.notice = "已从待播清单移除"
+            self.notice = KitL10n("kit.podcast.removedFromQueue")
         }
     }
 
@@ -280,7 +281,7 @@ public final class PodcastCloudQueue {
         return PlaybackService.Item(
             trackID: "podcast_ep_\(episode.id)",
             title: episode.title,
-            artist: "电台",
+            artist: KitL10n("kit.podcast.defaultArtist"),
             album: nil,
             streamPath: "api/v1/podcasts/episodes/\(episode.id)/stream?proxy=1&cache=1"
         )
@@ -293,7 +294,7 @@ public final class PodcastCloudQueue {
             await refreshInbox()
             return nil
         } catch {
-            let message = "没能加入稍后听。\(Self.explain(error)) 可以重试。"
+            let message = KitL10n("kit.podcast.inboxAddFailed", Self.explain(error))
             inboxError = message
             return message
         }
@@ -305,7 +306,7 @@ public final class PodcastCloudQueue {
             inbox.items.removeAll { $0.episodeId == episodeID }
             inboxError = nil
         } catch {
-            inboxError = "没能移出稍后听。\(Self.explain(error)) 可以重试。"
+            inboxError = KitL10n("kit.podcast.inboxRemoveFailed", Self.explain(error))
         }
     }
 
@@ -337,7 +338,7 @@ public final class PodcastCloudQueue {
                     self.preferenceError = nil
                     self.onPreferencesChanged?()
                 } catch {
-                    self.preferenceError = "没能保存新集处理。\(Self.explain(error)) 可以重试。"
+                    self.preferenceError = KitL10n("kit.podcast.prefSaveFailed", Self.explain(error))
                 }
                 continuation.resume()
             }
@@ -359,7 +360,7 @@ public final class PodcastCloudQueue {
                     self.preferenceError = nil
                     self.onPreferencesChanged?()
                 } catch {
-                    self.preferenceError = "没能保存新集处理。\(Self.explain(error)) 可以重试。"
+                    self.preferenceError = KitL10n("kit.podcast.prefSaveFailed", Self.explain(error))
                 }
                 continuation.resume()
             }
@@ -385,7 +386,7 @@ public final class PodcastCloudQueue {
         let showID = try await podcastID(forEpisodeID: episodeID)
         let detail = try await client.podcast(id: showID)
         let show = detail.podcast
-        let artist = show.author.isEmpty ? "电台" : show.author
+        let artist = show.author.isEmpty ? KitL10n("kit.podcast.defaultArtist") : show.author
         let refs = detail.episodes.enumerated().map { index, ep in
             PodcastContinuation.Episode(
                 id: ep.id,
@@ -489,7 +490,7 @@ public final class PodcastCloudQueue {
             if conflict == nil, !pendingWrite { syncError = nil }
             await resolveMissing()
         } catch {
-            syncError = "暂时无法同步，本机播放不受影响。\(Self.explain(error)) 可以重试。"
+            syncError = KitL10n("kit.podcast.syncFailed", Self.explain(error))
         }
     }
 
@@ -513,7 +514,7 @@ public final class PodcastCloudQueue {
             hasLoaded = true
             syncError = Self.conflictMessage
         } catch {
-            syncError = "暂时无法同步，本机播放不受影响。\(Self.explain(error)) 可以重试。"
+            syncError = KitL10n("kit.podcast.syncFailed", Self.explain(error))
         }
     }
 
@@ -562,14 +563,14 @@ public final class PodcastCloudQueue {
     private static func explain(_ error: Error) -> String {
         if let api = error as? APIError {
             switch api.statusCode {
-            case 401: return "登录已失效，请重新登录后再试。"
-            case 403: return "没有权限修改这个列表。"
-            case 404: return "这集已经不在服务器上。"
-            case 422: return "服务器没有接受这次修改。"
-            default: return "服务器返回 \(api.statusCode)。"
+            case 401: return KitL10n("kit.podcast.err401")
+            case 403: return KitL10n("kit.podcast.err403")
+            case 404: return KitL10n("kit.podcast.err404")
+            case 422: return KitL10n("kit.podcast.err422")
+            default: return KitL10n("kit.podcast.errStatus", api.statusCode)
             }
         }
-        if error is URLError { return "网络连接中断。" }
-        return "网络或数据暂时不可用。"
+        if error is URLError { return KitL10n("kit.podcast.errNetwork") }
+        return KitL10n("kit.podcast.errUnavailable")
     }
 }

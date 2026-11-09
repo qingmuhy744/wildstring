@@ -1,5 +1,6 @@
 import { HelpLabel } from './desktop-help';
 import { useEffect, useState, type FormEvent } from 'react';
+import { useTranslation } from 'react-i18next';
 import { api } from './api';
 import type { AgentPage, Delivery, NotificationPreferences, TelegramTarget } from './agent-api';
 import {
@@ -11,16 +12,9 @@ import {
   WorkspaceNotice,
 } from './workspace-ui';
 import { WorkspacePagination } from './agent-workbench';
-const events: Record<string, string> = {
-  'task.completed': '任务完成',
-  'task.failed': '任务失败',
-  'task.partial': '部分完成',
-  'task.paused': '任务暂停，需要处理',
-  'draft.pending': '草案待确认',
-  'draft.applied': '草案已应用',
-  'dependency.changed': '外部依赖状态变化',
-};
+
 export function TelegramSettings() {
+  const { t } = useTranslation();
   const targets = useWorkspaceResource<AgentPage<TelegramTarget>>(
       '/agent/telegram-targets?limit=100',
     ),
@@ -29,7 +23,7 @@ export function TelegramSettings() {
     deliveries = useWorkspaceResource<AgentPage<Delivery>>(
       `/agent/deliveries?limit=20&offset=${offset}`,
     );
-  const [name, setName] = useState('我的 Telegram'),
+  const [name, setName] = useState(() => t('telegramSettings.defaultName')),
     [token, setToken] = useState(''),
     [chat, setChat] = useState(''),
     [topic, setTopic] = useState(''),
@@ -46,6 +40,17 @@ export function TelegramSettings() {
     quiet_end: null,
     timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Shanghai',
   });
+
+  const eventKeys: [string, string][] = [
+    ['task.completed', t('telegramSettings.event_task_completed')],
+    ['task.failed', t('telegramSettings.event_task_failed')],
+    ['task.partial', t('telegramSettings.event_task_partial')],
+    ['task.paused', t('telegramSettings.event_task_paused')],
+    ['draft.pending', t('telegramSettings.event_draft_pending')],
+    ['draft.applied', t('telegramSettings.event_draft_applied')],
+    ['dependency.changed', t('telegramSettings.event_dependency_changed')],
+  ];
+
   useEffect(() => {
     if (preferences.value) setPrefs(preferences.value);
   }, [preferences.value]);
@@ -80,7 +85,7 @@ export function TelegramSettings() {
           proxy_mode: proxy,
           enabled: false,
         },
-        '目标已保存，先发送验证码并回填，验证后才能接收私人结果。',
+        t('telegramSettings.targetSavedNotice'),
       )
     ) {
       setToken('');
@@ -90,13 +95,11 @@ export function TelegramSettings() {
   }
   return (
     <>
-      <section className="workspace-card" aria-label="Telegram 通知设置">
+      <section className="workspace-card" aria-label={t('telegramSettings.sectionAria')}>
         <div className="workspace-card-head">
           <div>
-            <h2>Telegram 通知</h2>
-            <p className="muted">
-              站内通知始终可用。Telegram 是可选的出站渠道，所有修改仍在野弦内确认。
-            </p>
+            <h2>{t('telegramSettings.title')}</h2>
+            <p className="muted">{t('telegramSettings.description')}</p>
           </div>
           <button
             disabled={targets.loading || busy}
@@ -105,7 +108,7 @@ export function TelegramSettings() {
               void deliveries.reload();
             }}
           >
-            刷新渠道
+            {t('telegramSettings.refreshChannels')}
           </button>
         </div>
         <WorkspaceNotice
@@ -118,10 +121,15 @@ export function TelegramSettings() {
             <form
               onSubmit={(e) => {
                 e.preventDefault();
-                void perform('/agent/notification-preferences', 'PUT', prefs, '通知订阅已保存。');
+                void perform(
+                  '/agent/notification-preferences',
+                  'PUT',
+                  prefs,
+                  t('telegramSettings.prefsSavedNotice'),
+                );
               }}
             >
-              <h3>订阅偏好</h3>
+              <h3>{t('telegramSettings.subscriptionTitle')}</h3>
               <div className="workspace-form">
                 <label className="workspace-check span-all">
                   <input
@@ -129,21 +137,21 @@ export function TelegramSettings() {
                     checked={prefs.telegram_enabled}
                     onChange={(e) => setPrefs({ ...prefs, telegram_enabled: e.target.checked })}
                   />
-                  启用 Telegram 结果通知
+                  {t('telegramSettings.enableNotifications')}
                 </label>
                 <label>
-                  最低提醒级别
+                  {t('telegramSettings.minSeverityLabel')}
                   <select
                     value={prefs.min_severity}
                     onChange={(e) => setPrefs({ ...prefs, min_severity: e.target.value })}
                   >
-                    <option value="info">全部结果</option>
-                    <option value="warning">需要留意及错误</option>
-                    <option value="error">仅错误</option>
+                    <option value="info">{t('telegramSettings.severityInfo')}</option>
+                    <option value="warning">{t('telegramSettings.severityWarning')}</option>
+                    <option value="error">{t('telegramSettings.severityError')}</option>
                   </select>
                 </label>
                 <label>
-                  <HelpLabel hint="telegramQuiet">静默时区</HelpLabel>
+                  <HelpLabel hint="telegramQuiet">{t('telegramSettings.quietTimezone')}</HelpLabel>
                   <input
                     required
                     value={prefs.timezone}
@@ -151,7 +159,7 @@ export function TelegramSettings() {
                   />
                 </label>
                 <label>
-                  静默开始
+                  {t('telegramSettings.quietStart')}
                   <input
                     type="time"
                     value={prefs.quiet_start || ''}
@@ -159,7 +167,7 @@ export function TelegramSettings() {
                   />
                 </label>
                 <label>
-                  静默结束
+                  {t('telegramSettings.quietEnd')}
                   <input
                     type="time"
                     value={prefs.quiet_end || ''}
@@ -167,9 +175,9 @@ export function TelegramSettings() {
                   />
                 </label>
                 <fieldset className="span-all">
-                  <legend>事件（不选则接收所有符合级别的结果）</legend>
+                  <legend>{t('telegramSettings.eventsLegend')}</legend>
                   <div className="workspace-check-grid">
-                    {Object.entries(events).map(([key, label]) => (
+                    {eventKeys.map(([key, label]) => (
                       <label className="workspace-check" key={key}>
                         <input
                           type="checkbox"
@@ -189,19 +197,26 @@ export function TelegramSettings() {
                   </div>
                 </fieldset>
                 <div className="span-all">
-                  <button disabled={busy || !preferences.value}>保存通知偏好</button>
+                  <button disabled={busy || !preferences.value}>
+                    {t('telegramSettings.savePreferences')}
+                  </button>
                 </div>
               </div>
             </form>
-            <h3>接收目标</h3>
+            <h3>{t('telegramSettings.targetsTitle')}</h3>
             {targets.value?.items.map((target) => (
               <article className="telegram-target workspace-card" key={target.id}>
                 <div className="workspace-card-head">
                   <div>
                     <h3>{target.name}</h3>
                     <small>
-                      {target.verified ? '目标已验证' : '等待目标验证'} ·{' '}
-                      {target.enabled ? '已开启' : '已关闭'}
+                      {target.verified
+                        ? t('telegramSettings.targetVerified')
+                        : t('telegramSettings.targetPendingVerification')}{' '}
+                      ·{' '}
+                      {target.enabled
+                        ? t('telegramSettings.targetEnabled')
+                        : t('telegramSettings.targetDisabled')}
                     </small>
                   </div>
                   <div className="workspace-actions">
@@ -214,11 +229,15 @@ export function TelegramSettings() {
                               `/agent/telegram-targets/${target.id}`,
                               'PATCH',
                               { version: target.version, enabled: !target.enabled },
-                              target.enabled ? '目标已关闭。' : '目标已开启。',
+                              target.enabled
+                                ? t('telegramSettings.targetClosedNotice')
+                                : t('telegramSettings.targetOpenedNotice'),
                             )
                           }
                         >
-                          {target.enabled ? '关闭目标' : '开启目标'}
+                          {target.enabled
+                            ? t('telegramSettings.closeTarget')
+                            : t('telegramSettings.openTarget')}
                         </button>
                         <button
                           disabled={busy}
@@ -227,27 +246,27 @@ export function TelegramSettings() {
                               `/agent/telegram-targets/${target.id}/test`,
                               'POST',
                               {},
-                              '测试消息已提交；接口确认不代表已读。',
+                              t('telegramSettings.testSentNotice'),
                             )
                           }
                         >
-                          发送测试消息
+                          {t('telegramSettings.sendTestMessage')}
                         </button>
                       </>
                     )}
                     <button
                       disabled={busy}
                       onClick={() => {
-                        if (confirm(`删除目标“${target.name}”？尚未发送的投递会取消。`))
+                        if (confirm(t('telegramSettings.confirmDelete', { name: target.name })))
                           void perform(
                             `/agent/telegram-targets/${target.id}`,
                             'DELETE',
                             null,
-                            '接收目标已删除。',
+                            t('telegramSettings.targetDeletedNotice'),
                           );
                       }}
                     >
-                      删除目标
+                      {t('telegramSettings.deleteTarget')}
                     </button>
                   </div>
                 </div>
@@ -260,16 +279,16 @@ export function TelegramSettings() {
                           `/agent/telegram-targets/${target.id}/verify-send`,
                           'POST',
                           {},
-                          '验证码已向该目标发送，请在 Telegram 中查看并回填。',
+                          t('telegramSettings.verifyCodeSentNotice'),
                         )
                       }
                     >
-                      发送验证消息
+                      {t('telegramSettings.sendVerifyMessage')}
                     </button>
                     <label>
-                      验证码
+                      {t('telegramSettings.verifyCodeLabel')}
                       <input
-                        aria-label={`${target.name} 的验证码`}
+                        aria-label={t('telegramSettings.verifyCodeAria', { name: target.name })}
                         inputMode="numeric"
                         autoComplete="one-time-code"
                         maxLength={16}
@@ -284,23 +303,23 @@ export function TelegramSettings() {
                           `/agent/telegram-targets/${target.id}/verify`,
                           'POST',
                           { code: codes[target.id] },
-                          '目标验证成功，已启用接收。',
+                          t('telegramSettings.verifySuccessNotice'),
                         )
                       }
                     >
-                      确认验证码
+                      {t('telegramSettings.confirmVerifyCode')}
                     </button>
                   </div>
                 )}
               </article>
             ))}
             <details>
-              <summary>添加 Telegram 接收目标</summary>
+              <summary>{t('telegramSettings.addTargetSummary')}</summary>
               <form onSubmit={(e) => void create(e)} className="workspace-form">
                 <label>
-                  目标名称
+                  {t('telegramSettings.targetNameLabel')}
                   <input
-                    aria-label="Telegram 目标名称"
+                    aria-label={t('telegramSettings.targetNameAria')}
                     required
                     maxLength={100}
                     value={name}
@@ -308,9 +327,9 @@ export function TelegramSettings() {
                   />
                 </label>
                 <label>
-                  Bot Token
+                  {t('telegramSettings.botTokenLabel')}
                   <input
-                    aria-label="Telegram Bot Token"
+                    aria-label={t('telegramSettings.botTokenAria')}
                     type="password"
                     autoComplete="new-password"
                     required
@@ -320,9 +339,9 @@ export function TelegramSettings() {
                   />
                 </label>
                 <label>
-                  <HelpLabel hint="telegramTarget">Chat ID</HelpLabel>
+                  <HelpLabel hint="telegramTarget">{t('telegramSettings.chatIdLabel')}</HelpLabel>
                   <input
-                    aria-label="Telegram Chat ID"
+                    aria-label={t('telegramSettings.chatIdAria')}
                     required
                     maxLength={80}
                     value={chat}
@@ -330,9 +349,9 @@ export function TelegramSettings() {
                   />
                 </label>
                 <label>
-                  <HelpLabel hint="telegramTarget">Topic ID（可选）</HelpLabel>
+                  <HelpLabel hint="telegramTarget">{t('telegramSettings.topicIdLabel')}</HelpLabel>
                   <input
-                    aria-label="Telegram Topic ID"
+                    aria-label={t('telegramSettings.topicIdAria')}
                     type="number"
                     min={1}
                     value={topic}
@@ -340,23 +359,21 @@ export function TelegramSettings() {
                   />
                 </label>
                 <label>
-                  连接策略
+                  {t('telegramSettings.proxyPolicyLabel')}
                   <select
-                    aria-label="Telegram 代理策略"
+                    aria-label={t('telegramSettings.proxyPolicyAria')}
                     value={proxy}
                     onChange={(e) => setProxy(e.target.value)}
                   >
-                    <option value="inherit">跟随服务端网络代理</option>
-                    <option value="direct">直接连接</option>
+                    <option value="inherit">{t('telegramSettings.proxyInherit')}</option>
+                    <option value="direct">{t('telegramSettings.proxyDirect')}</option>
                   </select>
                 </label>
                 <div className="span-all">
                   <button className="primary" disabled={busy}>
-                    保存待验证目标
+                    {t('telegramSettings.saveTargetButton')}
                   </button>
-                  <p className="muted">
-                    保存不会发送消息。请显式发送验证消息，验证码只会出现在目标聊天中。
-                  </p>
+                  <p className="muted">{t('telegramSettings.saveTargetHint')}</p>
                 </div>
               </form>
             </details>
@@ -364,21 +381,24 @@ export function TelegramSettings() {
         )}
       </section>
       {!targets.unsupported && (
-        <section className="workspace-card" aria-label="Telegram 投递记录">
-          <h2>外部投递记录</h2>
-          <p className="muted">
-            “接口已确认发送”不代表已读。结果不明时先核对 Telegram，显式重试可能产生重复消息。
-          </p>
+        <section
+          className="workspace-card"
+          aria-label={t('telegramSettings.deliveriesSectionAria')}
+        >
+          <h2>{t('telegramSettings.deliveriesTitle')}</h2>
+          <p className="muted">{t('telegramSettings.deliveriesDescription')}</p>
           {deliveries.value?.items.map((item) => (
             <div className="workspace-row" key={item.id}>
               <div className="workspace-row-main">
                 <strong>
                   {targets.value?.items.find((target) => target.id === item.target_id)?.name ||
-                    '已撤销目标'}
+                    t('telegramSettings.revokedTarget')}
                 </strong>
                 <small>
-                  尝试 {item.attempt} 次
-                  {item.next_attempt_at ? ` · 下次 ${localDate(item.next_attempt_at)}` : ''}
+                  {t('telegramSettings.attemptCount', { count: item.attempt })}
+                  {item.next_attempt_at
+                    ? t('telegramSettings.nextAttempt', { date: localDate(item.next_attempt_at) })
+                    : ''}
                   {item.error_code ? ` · ${item.error_code}` : ''}
                 </small>
                 <DiagnosticId id={item.trace_id} />
@@ -390,24 +410,24 @@ export function TelegramSettings() {
                   onClick={() => {
                     if (
                       item.status === 'unknown' &&
-                      !confirm('消息可能已发送。请先在 Telegram 中核对，仍要重试吗？')
+                      !confirm(t('telegramSettings.confirmRetryUnknown'))
                     )
                       return;
                     void perform(
                       `/agent/deliveries/${item.id}/retry`,
                       'POST',
                       { ...(item.status === 'unknown' ? { acknowledge_unknown: true } : {}) },
-                      '已提交重试；业务任务结果保持不变。',
+                      t('telegramSettings.retrySubmittedNotice'),
                     );
                   }}
                 >
-                  重试投递
+                  {t('telegramSettings.retryDelivery')}
                 </button>
               )}
             </div>
           ))}
           {!deliveries.value?.items.length && (
-            <p className="workspace-empty">还没有外部投递记录。</p>
+            <p className="workspace-empty">{t('telegramSettings.noDeliveries')}</p>
           )}
           <WorkspacePagination
             total={deliveries.value?.total || 0}

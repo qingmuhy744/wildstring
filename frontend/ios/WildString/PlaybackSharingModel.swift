@@ -129,7 +129,7 @@ final class PlaybackSharingModel {
         } catch let error as APIError where error.statusCode == 409 {
             return false
         } catch {
-            message = "跨设备接续保存失败"
+            message = L10n("playbackShare.saveFailed")
             return true
         }
     }
@@ -151,7 +151,7 @@ final class PlaybackSharingModel {
             else {
                 recordVersion(latest.version)
                 self.handoff = nil
-                message = "其他设备已恢复播放，或进度已更新"
+                message = L10n("playbackShare.otherDeviceResumed")
                 return
             }
             let items = handoff.tracks.map(\.playbackItem)
@@ -170,7 +170,7 @@ final class PlaybackSharingModel {
             self.handoff = nil
             message = nil
         } catch {
-            message = "接续失败，请重试"
+            message = L10n("playbackShare.handoffFailed")
         }
     }
 

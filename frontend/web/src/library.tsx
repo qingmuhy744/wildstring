@@ -103,8 +103,9 @@ type Result =
   | { kind: 'playlists'; page: PlaylistPage };
 
 function AlbumSkeleton() {
+  const { t } = useTranslation();
   return (
-    <div className="album-view-skeleton" role="status" aria-label="正在加载专辑">
+    <div className="album-view-skeleton" role="status" aria-label={t('library.loadingAlbums')}>
       <span className="skeleton-block skeleton-cover" />
       <div className="skeleton-track-list">
         {Array.from({ length: 6 }, (_, index) => (
@@ -116,21 +117,21 @@ function AlbumSkeleton() {
 }
 // Display names come from locales (`views.*`); this map only lists valid views.
 const labels: Record<View, string> = {
-  tracks: '全部歌曲',
-  albums: '专辑',
-  artists: '艺人',
-  playlists: '歌单',
-  favorites: '我喜欢',
-  listening: '收听记录',
-  discover: '推荐',
-  podcasts: '电台 · 播客',
-  offline: '离线音乐',
-  devices: '跨设备继续',
-  assistant: '音乐助手',
-  drafts: '待确认草案',
-  tasks: '巡检与任务',
-  notifications: '通知中心',
-  'assistant-settings': '助手设置',
+  tracks: 'views.tracks',
+  albums: 'views.albums',
+  artists: 'views.artists',
+  playlists: 'views.playlists',
+  favorites: 'views.favorites',
+  listening: 'views.listening',
+  discover: 'views.discover',
+  podcasts: 'views.podcasts',
+  offline: 'views.offline',
+  devices: 'views.devices',
+  assistant: 'views.assistant',
+  drafts: 'views.drafts',
+  tasks: 'views.tasks',
+  notifications: 'views.notifications',
+  'assistant-settings': 'views.assistant-settings',
 };
 const viewIcons: Record<
   View,
@@ -391,7 +392,13 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
   const statsSort = catalogSort.sort;
   const sortable = !specialView && !activePlaylist && !artistGrid && !playlistGrid;
   const unit =
-    kind === 'artists' ? '位' : kind === 'albums' ? '张' : kind === 'playlists' ? '个' : '首';
+    kind === 'artists'
+      ? t('library.unitArtists')
+      : kind === 'albums'
+        ? t('library.unitAlbums')
+        : kind === 'playlists'
+          ? t('library.unitPlaylists')
+          : t('library.unitTracks');
   const liveRules = activePlaylist?.kind === 'smart' || activePlaylist?.kind === 'favorites';
   useEffect(
     () => () => {
@@ -441,7 +448,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
     }
     void load()
       .catch(() => {
-        if (!controller.signal.aborted) setNotice('歌单暂时无法读取，请刷新重试。');
+        if (!controller.signal.aborted) setNotice(t('library.playlistsLoadFailed'));
       })
       .finally(() => {
         if (!controller.signal.aborted) setCollectionsLoading(false);
@@ -460,7 +467,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
     api<ListeningSummary>('/listening/summary', { signal: controller.signal })
       .then(setStats)
       .catch(() => {
-        if (!controller.signal.aborted) setNotice('暂时无法读取收听记录。');
+        if (!controller.signal.aborted) setNotice(t('library.listeningLoadFailed'));
       });
     return () => controller.abort();
   }, [view, revision, listeningRevision, favorites.change]);
@@ -498,7 +505,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
     localError ||
     browse.error ||
     (view === 'favorites' && !activePlaylist && !collectionsLoading
-      ? '暂时无法读取我喜欢歌单，请刷新重试。'
+      ? t('library.favoritesLoadFailed')
       : '');
   function setResult(update: SetStateAction<Result | null>) {
     browse.setPage((before) => {
@@ -733,7 +740,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
   async function openArtistName(name: string) {
     const query = name.trim();
     if (!query) return;
-    setNotice(`正在打开艺人“${query}”…`);
+    setNotice(t('library.openingArtist', { name: query }));
     try {
       const result = await api<ArtistPage>(
         `/artists?q=${encodeURIComponent(query)}&limit=20&offset=0`,
@@ -746,14 +753,14 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
         ) ||
         (result.items.length === 1 ? result.items[0] : undefined);
       if (!item) {
-        setNotice(`没有找到艺人“${query}”，可以用顶部搜索查看。`);
+        setNotice(t('library.artistNotFound', { name: query }));
         return;
       }
       setLyricsOpen(false);
       setQueueOpen(false);
       openArtist(item);
     } catch (error) {
-      setNotice(error instanceof ApiError ? error.message : '艺人暂时无法打开，请稍后重试。');
+      setNotice(error instanceof ApiError ? error.message : t('library.artistOpenFailed'));
     }
   }
   function openPlaylist(item: Playlist) {
@@ -775,7 +782,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
     albumRequest.current = controller;
     setAlbum({
       id: track.album_id,
-      title: track.album || '未知专辑',
+      title: track.album || t('library.unknownAlbum'),
       artists: track.artists,
       track_count: 0,
       duration_ms: 0,
@@ -804,7 +811,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
         albumRequest.current?.abort();
         setNavigation((items) => items.slice(0, -1));
         restoreLocation(previousLocation);
-        setNotice('所属专辑已变化或不可用');
+        setNotice(t('library.albumGone'));
       }
     } finally {
       if (albumRequest.current === controller) albumRequest.current = null;
@@ -822,7 +829,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
     setRevision((value) => value + 1);
   }
   function logout() {
-    void onLogout().catch(() => setError('退出失败，请重试。'));
+    void onLogout().catch(() => setError(t('library.logoutFailed')));
   }
   function updateList(list: Playlist) {
     setPlaylist((current) => (current?.id === list.id ? list : current));
@@ -833,16 +840,16 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
     if (playlistPending.current.has(list.id)) return;
     playlistPending.current.add(list.id);
     mutationEpoch.current++;
-    setNotice(`正在加入：${list.name}`);
+    setNotice(t('library.addingTo', { name: list.name }));
     try {
       const updated = await api<Playlist>(`/playlists/${list.id}/tracks`, {
         method: 'POST',
         body: JSON.stringify({ version: list.version, track_ids: [track.id] }),
       });
       updateList(updated);
-      setNotice(`已加入：${list.name}`);
+      setNotice(t('library.addedTo', { name: list.name }));
     } catch (reason) {
-      setNotice(reason instanceof ApiError ? reason.message : '歌曲未加入歌单，请重试。');
+      setNotice(reason instanceof ApiError ? reason.message : t('library.addFailed'));
       setCollectionRevision((value) => value + 1);
     } finally {
       playlistPending.current.delete(list.id);
@@ -870,7 +877,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
         setResult(optimistic);
       }
     }
-    setNotice(direction ? '正在保存顺序…' : '正在移除…');
+    setNotice(direction ? t('library.savingOrder') : t('library.removing'));
     try {
       const updated = await api<Playlist>(
         direction
@@ -884,10 +891,10 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
         },
       );
       updateList(updated);
-      setNotice(direction ? '已调整歌单顺序' : '已从歌单移除');
+      setNotice(direction ? t('library.orderUpdated') : t('library.removedFromPlaylist'));
     } catch (reason) {
       setResult((current) => (current?.page === optimistic?.page ? before : current));
-      setNotice(reason instanceof ApiError ? reason.message : '歌单未修改，已恢复，请重试。');
+      setNotice(reason instanceof ApiError ? reason.message : t('library.playlistChangeReverted'));
       setCollectionRevision((value) => value + 1);
     } finally {
       playlistPending.current.delete(list.id);
@@ -914,29 +921,32 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
     const controller = new AbortController();
     collectionRequest.current = controller;
     setCollectionBusy(true);
-    setNotice(download ? '正在准备离线歌曲…' : '正在读取完整播放列表…');
+    setNotice(download ? t('library.preparingOffline') : t('library.loadingFullQueue'));
     try {
       const collection = await collectTracks(collectionPath(), controller.signal);
       if (target && trackUnavailableReason(target)) {
         throw new Error(
-          `「${target.title}」${trackUnavailableReason(target)}。请恢复文件并重新扫描，刷新列表后重试。`,
+          t('library.trackUnavailable', {
+            title: target.title,
+            reason: trackUnavailableReason(target),
+          }),
         );
       }
       const tracks = collection.filter((track) => !trackUnavailableReason(track));
-      if (!tracks.length) throw new Error('没有可播放的歌曲，请恢复文件并重新扫描后重试。');
+      if (!tracks.length) throw new Error(t('library.noPlayableTracks'));
       if (controller.signal.aborted) return;
       if (download) {
         await saveDownloads(tracks);
-        setNotice(`已添加 ${tracks.length} 首到离线下载，可在“离线音乐”查看。`);
+        setNotice(t('library.offlineAdded', { count: tracks.length }));
       } else {
         const index = target ? tracks.findIndex((t) => t.id === target.id) : 0;
-        if (index < 0) throw new Error('歌曲已从集合移除，请刷新。');
+        if (index < 0) throw new Error(t('library.trackRemovedFromCollection'));
         player.start(tracks, index);
-        setNotice(`完整队列已就位，共 ${tracks.length} 首。`);
+        setNotice(t('library.fullQueueReady', { count: tracks.length }));
       }
     } catch (e) {
       if (!controller.signal.aborted)
-        setNotice(e instanceof Error ? e.message : '完整集合未读取成功，请重试。');
+        setNotice(e instanceof Error ? e.message : t('library.fullCollectionFailed'));
     } finally {
       if (collectionRequest.current === controller) {
         collectionRequest.current = null;
@@ -949,8 +959,8 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
     onOpenAlbum: (track) => void openTrackAlbum(track),
     onDownload: (track) => {
       void saveDownloads([track])
-        .then(() => setNotice('已添加到离线下载。'))
-        .catch((e) => setNotice(e instanceof Error ? e.message : '离线保存未完成。'));
+        .then(() => setNotice(t('library.offlineDownloadAdded')))
+        .catch((e) => setNotice(e instanceof Error ? e.message : t('library.offlineSaveFailed')));
     },
     playlists: catalog.filter((item) => item.kind === 'manual'),
     onAdd: addToPlaylist,
@@ -976,7 +986,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
           body: JSON.stringify({ version: list.version, track_ids: [editor.track.id] }),
         });
       } catch {
-        setNotice('歌单已建立，歌曲未加入；可从歌曲操作重试。');
+        setNotice(t('library.playlistCreatedAddFailed'));
       }
     }
     setEditor(null);
@@ -984,7 +994,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
     openPlaylist(selected);
   }
   async function deletePlaylist(target = activePlaylist) {
-    if (!target || !confirm(`删除歌单“${target.name}”？歌曲文件会保留。`)) return;
+    if (!target || !confirm(t('library.deletePlaylistConfirm', { name: target.name }))) return;
     try {
       await api(`/playlists/${target.id}?version=${target.version}`, {
         method: 'DELETE',
@@ -993,7 +1003,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
       followPlaylist(currentUser.id, target.id, false);
       setCollectionRevision((value) => value + 1);
     } catch (reason) {
-      setNotice(reason instanceof ApiError ? reason.message : '歌单未删除，请重试。');
+      setNotice(reason instanceof ApiError ? reason.message : t('library.playlistDeleteFailed'));
     }
   }
   async function bulkAdd() {
@@ -1009,10 +1019,10 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
         }),
       });
       updateList(updated);
-      setNotice(`已加载歌曲已加入：${list.name}`);
+      setNotice(t('library.bulkAdded', { name: list.name }));
       setBulkTarget('');
     } catch (reason) {
-      setNotice(reason instanceof ApiError ? reason.message : '歌曲未加入歌单。');
+      setNotice(reason instanceof ApiError ? reason.message : t('library.bulkAddFailed'));
     } finally {
       setBulkBusy(false);
     }
@@ -1027,11 +1037,18 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
         ? t('collection.tracks')
         : t(`views.${view}`));
   const subtitle = album
-    ? `${selectedArtist?.name || album.artists.join(' / ') || '未知艺人'} · ${time(album.duration_ms / 1000)}`
+    ? `${selectedArtist?.name || album.artists.join(' / ') || t('library.unknownArtist')} · ${time(album.duration_ms / 1000)}`
     : selectedArtist
-      ? `${selectedArtist.album_count} 张专辑 · ${selectedArtist.track_count} 首歌曲 · ${time(selectedArtist.duration_ms / 1000)}`
+      ? t('library.artistSubtitle', {
+          albums: selectedArtist.album_count,
+          tracks: selectedArtist.track_count,
+          duration: time(selectedArtist.duration_ms / 1000),
+        })
       : activePlaylist
-        ? `${activePlaylist.track_count} 首歌曲 · ${time(activePlaylist.duration_ms / 1000)}`
+        ? t('library.playlistSubtitle', {
+            count: activePlaylist.track_count,
+            duration: time(activePlaylist.duration_ms / 1000),
+          })
         : query
           ? `“${query}”`
           : '';
@@ -1130,7 +1147,9 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
             }}
             onEdit={setEditingTrack}
             onChanged={refreshLibrary}
-            onRefresh={() => setMetadataRefresh({ scope: 'library', label: '整个曲库' })}
+            onRefresh={() =>
+              setMetadataRefresh({ scope: 'library', label: t('library.entireLibrary') })
+            }
             onOpenConnections={openModelConnections}
             onViewPodcast={(id) => {
               setFocusPodcastId(id);
@@ -1240,7 +1259,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
               onConnections={openModelConnections}
               onSaved={(list) => {
                 setCollectionRevision((v) => v + 1);
-                setNotice(`已保存：${list.name}`);
+                setNotice(t('library.savedName', { name: list.name }));
               }}
             />
           )}
@@ -1254,7 +1273,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
           <Suspense
             fallback={
               <p role="status" className="workspace-empty">
-                正在打开工作台…
+                {t('library.openingWorkspace')}
               </p>
             }
           >
@@ -1278,7 +1297,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
                 }}
                 onPlayTrack={(track) => {
                   void player.playPodcastEpisode(track);
-                  setNotice(`正在播放播客《${track.title}》`);
+                  setNotice(t('library.playingPodcast', { title: track.title }));
                 }}
                 onPlayQueue={() => {
                   void player.playPodcastQueue();
@@ -1325,14 +1344,14 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
                     <button className="back-button text-button" onClick={backToLocation}>
                       ←{' '}
                       {navigation.at(-1)?.playerOpen
-                        ? '返回播放'
+                        ? t('library.backToPlayer')
                         : album
                           ? selectedArtist
-                            ? `返回 ${selectedArtist.name}`
-                            : '返回专辑'
+                            ? t('library.backToName', { name: selectedArtist.name })
+                            : t('library.backToAlbum')
                           : selectedArtist
-                            ? '返回艺人'
-                            : '返回歌单'}
+                            ? t('library.backToArtists')
+                            : t('library.backToPlaylists')}
                     </button>
                   )}
                   <h1>{title}</h1>
@@ -1356,29 +1375,33 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
               </div>
             </section>
             {view === 'listening' && (
-              <div className="listening-summary" aria-label="收听统计">
+              <div className="listening-summary" aria-label={t('library.listeningStatsAria')}>
                 <div>
                   <strong>{stats?.play_count ?? 0}</strong>
-                  <span data-help="累计听过半首或 4 分钟计一次；同一次播放只计一次">播放次数</span>
+                  <span data-help={t('library.playCountHelp')}>{t('library.playCount')}</span>
                 </div>
                 <div>
                   <strong>{listeningTime(stats?.listened_ms || 0)}</strong>
-                  <span>累计收听</span>
+                  <span>{t('library.totalListening')}</span>
                 </div>
                 <div>
                   <strong>{stats?.tracks_played ?? 0}</strong>
-                  <span>听过的歌曲</span>
+                  <span>{t('library.tracksPlayed')}</span>
                 </div>
                 <div>
                   <strong>{stats?.favorites ?? 0}</strong>
-                  <span>喜欢的歌曲</span>
+                  <span>{t('library.favoriteTracks')}</span>
                 </div>
               </div>
             )}
             <div className="library-toolbar">
               <div className="toolbar-actions">
                 {!album && (
-                  <div className="view-switch" role="group" aria-label="曲库显示方式">
+                  <div
+                    className="view-switch"
+                    role="group"
+                    aria-label={t('library.viewSwitchAria')}
+                  >
                     <button
                       aria-pressed={
                         !artistGrid &&
@@ -1388,27 +1411,27 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
                       }
                       onClick={() => switchTab('tracks')}
                     >
-                      歌曲
+                      {t('library.tabTracks')}
                     </button>
                     <button aria-pressed={albumGrid || !!album} onClick={() => switchTab('albums')}>
-                      专辑
+                      {t('library.tabAlbums')}
                     </button>
                     <button aria-pressed={artistGrid} onClick={() => switchView('artists')}>
-                      艺人
+                      {t('library.tabArtists')}
                     </button>
                     <button
                       aria-pressed={view === 'playlists' || view === 'favorites'}
                       onClick={() => switchView('playlists')}
                     >
-                      歌单
+                      {t('library.tabPlaylists')}
                     </button>
                   </div>
                 )}
                 {view === 'artists' && !album && (
                   <label className="artist-role">
-                    参与角色{' '}
+                    {t('library.roleLabel')}{' '}
                     <select
-                      aria-label="艺人参与角色"
+                      aria-label={t('library.roleSelectAria')}
                       value={artistRole}
                       onChange={(e) => {
                         setArtistRole(e.target.value);
@@ -1416,13 +1439,13 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
                         setAlbum(null);
                       }}
                     >
-                      <option value="">全部角色</option>
-                      <option value="album_artist">专辑艺人</option>
-                      <option value="artist">歌曲艺人</option>
-                      <option value="vocalist">演唱</option>
-                      <option value="lyricist">作词</option>
-                      <option value="composer">作曲</option>
-                      <option value="arranger">编曲</option>
+                      <option value="">{t('library.roleAll')}</option>
+                      <option value="album_artist">{t('library.roleAlbumArtist')}</option>
+                      <option value="artist">{t('library.roleArtist')}</option>
+                      <option value="vocalist">{t('library.roleVocalist')}</option>
+                      <option value="lyricist">{t('library.roleLyricist')}</option>
+                      <option value="composer">{t('library.roleComposer')}</option>
+                      <option value="arranger">{t('library.roleArranger')}</option>
                     </select>
                   </label>
                 )}
@@ -1434,20 +1457,20 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
                   >
                     <span aria-hidden="true">▶ </span>
                     {collectionBusy
-                      ? '准备中…'
+                      ? t('library.preparing')
                       : album
-                        ? '播放专辑'
+                        ? t('library.playAlbum')
                         : selectedArtist
-                          ? '播放艺人'
+                          ? t('library.playArtist')
                           : activePlaylist
-                            ? '播放歌单'
-                            : '播放全部'}
+                            ? t('library.playPlaylist')
+                            : t('library.playAll')}
                   </button>
                 )}
                 {kind === 'tracks' && (
                   <>
                     <details className="collection-menu">
-                      <summary aria-label="集合更多操作">
+                      <summary aria-label={t('library.collectionMoreAria')}>
                         <Icon name="more" />
                       </summary>
                       <div>
@@ -1456,7 +1479,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
                           onClick={() => void completeCollection(undefined, true)}
                         >
                           <Icon name="download" />
-                          保存整个集合离线
+                          {t('library.saveCollectionOffline')}
                         </button>
                         {album && canManage && (
                           <button
@@ -1466,7 +1489,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
                             }}
                           >
                             <Icon name="edit" />
-                            编辑专辑与封面
+                            {t('library.editAlbumAndCover')}
                           </button>
                         )}
                         {album && canImport && (
@@ -1476,7 +1499,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
                               setLyricScanAlbum(album.id);
                             }}
                           >
-                            歌词补全与洗版
+                            {t('library.lyricTools')}
                           </button>
                         )}
                         {album && canImport && (
@@ -1491,7 +1514,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
                             }}
                           >
                             <Icon name="refresh" />
-                            更新专辑元数据
+                            {t('library.refreshAlbumMetadata')}
                           </button>
                         )}
                       </div>
@@ -1503,16 +1526,16 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
                     className="primary"
                     onClick={() => setEditor({ initial: null, track: null })}
                   >
-                    ＋ 新建歌单
+                    {t('library.newPlaylist')}
                   </button>
                 )}
                 {activePlaylist && activePlaylist.kind !== 'favorites' && (
                   <>
                     <button onClick={() => setEditor({ initial: activePlaylist, track: null })}>
-                      编辑歌单
+                      {t('library.editPlaylist')}
                     </button>
                     <button className="text-button" onClick={() => void deletePlaylist()}>
-                      删除歌单
+                      {t('library.deletePlaylist')}
                     </button>
                   </>
                 )}
@@ -1525,7 +1548,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
                 )}
                 {query && !album && (
                   <button className="text-button" onClick={clearSearch}>
-                    清除搜索
+                    {t('library.clearSearch')}
                   </button>
                 )}
               </div>
@@ -1534,13 +1557,13 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
                 onClick={() => setRevision((value) => value + 1)}
                 disabled={loading}
               >
-                {loading ? '读取中…' : '刷新曲库 ↻'}
+                {loading ? t('library.loading') : t('library.refreshLibrary')}
               </button>
             </div>
             {localError && visible && (
               <div className="browse-error" role="alert">
                 <span>{localError}</span>
-                <button onClick={() => setError('')}>关闭</button>
+                <button onClick={() => setError('')}>{t('library.close')}</button>
               </div>
             )}
             {page &&
@@ -1549,16 +1572,16 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
               !loading &&
               !error && (
                 <details className="bulk-playlist-panel">
-                  <summary>批量加入歌单</summary>
+                  <summary>{t('library.bulkAddTitle')}</summary>
                   <div className="bulk-playlist">
                     <label>
-                      <span>把已加载歌曲留进歌单</span>
+                      <span>{t('library.bulkAddLabel')}</span>
                       <select
-                        aria-label="已加载歌曲加入歌单"
+                        aria-label={t('library.bulkAddSelectAria')}
                         value={bulkTarget}
                         onChange={(event) => setBulkTarget(event.target.value)}
                       >
-                        <option value="">选择普通歌单…</option>
+                        <option value="">{t('library.choosePlaylist')}</option>
                         {operations.playlists.map((item) => (
                           <option key={item.id} value={item.id}>
                             {item.name}
@@ -1567,14 +1590,14 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
                       </select>
                     </label>
                     <button disabled={!bulkTarget || bulkBusy} onClick={() => void bulkAdd()}>
-                      {bulkBusy ? '加入中…' : '加入已加载'}
+                      {bulkBusy ? t('library.adding') : t('library.addLoaded')}
                     </button>
                   </div>
                 </details>
               )}
             {error && !visible ? (
               <div className="empty" role="alert">
-                <h2>暂时无法读取曲库</h2>
+                <h2>{t('library.libraryUnavailable')}</h2>
                 <p>{error}</p>
                 <button
                   onClick={() => {
@@ -1582,7 +1605,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
                     browse.retry();
                   }}
                 >
-                  重新连接
+                  {t('library.reconnect')}
                 </button>
               </div>
             ) : loading ? (
@@ -1590,7 +1613,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
                 <AlbumSkeleton />
               ) : (
                 <div className="empty" role="status">
-                  正在读取你的音乐…
+                  {t('library.loadingMusic')}
                 </div>
               )
             ) : !visible?.items.length ? (
@@ -1598,31 +1621,37 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
                 <span className="empty-symbol">≋</span>
                 <h2>
                   {query
-                    ? `没有找到匹配的${kind === 'artists' ? '艺人' : kind === 'albums' ? '专辑' : kind === 'playlists' ? '歌单' : '歌曲'}`
+                    ? kind === 'artists'
+                      ? t('library.noMatchArtists')
+                      : kind === 'albums'
+                        ? t('library.noMatchAlbums')
+                        : kind === 'playlists'
+                          ? t('library.noMatchPlaylists')
+                          : t('library.noMatchTracks')
                     : activePlaylist?.kind === 'favorites'
-                      ? '喜欢的歌，留在这里。'
+                      ? t('library.emptyFavorites')
                       : activePlaylist?.kind === 'smart'
-                        ? '还没有符合规则的歌'
+                        ? t('library.emptySmart')
                         : activePlaylist
-                          ? '给这张歌单，选一首开场。'
+                          ? t('library.emptyPlaylist')
                           : view === 'listening'
-                            ? '从一首喜欢的歌开始。'
+                            ? t('library.emptyListening')
                             : artistGrid
-                              ? '还没有艺人信息'
-                              : '曲库还很安静'}
+                              ? t('library.emptyArtists')
+                              : t('library.emptyLibrary')}
                 </h2>
                 <p>
                   {query
-                    ? '试试其他关键词。'
+                    ? t('library.noMatchHint')
                     : activePlaylist?.kind === 'favorites'
-                      ? '点击歌曲旁的心形，收藏就会出现在这里。'
+                      ? t('library.favoritesHint')
                       : activePlaylist?.kind === 'smart'
-                        ? '可以编辑规则，换一种方式找歌。'
+                        ? t('library.smartHint')
                         : activePlaylist
-                          ? '从歌曲的更多操作加入，或批量加入已加载的歌曲。'
+                          ? t('library.playlistHint')
                           : view === 'listening'
-                            ? '听过的歌曲、次数和时长会留在这里。'
-                            : '导入音乐后，刷新曲库。'}
+                            ? t('library.listeningHint')
+                            : t('library.libraryHint')}
                 </p>
               </div>
             ) : (
@@ -1634,37 +1663,41 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
                 <div ref={listStart} className="browse-boundary">
                   {browse.hasPrevious && (
                     <button disabled={browse.busy} onClick={loadPrevious}>
-                      加载前面的{kind === 'tracks' ? '歌曲' : kind === 'albums' ? '专辑' : '艺人'}
+                      kind === 'tracks' ? t('library.loadPrevTracks') : kind === 'albums' ?
+                      t('library.loadPrevAlbums') : t('library.loadPrevArtists')
                     </button>
                   )}
                 </div>
                 {kind === 'artists' ? (
-                  <div className="artist-grid" aria-label="艺人列表">
+                  <div className="artist-grid" aria-label={t('library.artistsGridAria')}>
                     {(visible as ArtistPage).items.map((item) => (
                       <button
                         className="artist-card"
                         key={item.id}
                         data-browse-id={item.id}
-                        aria-label={`查看艺人 ${item.name}`}
+                        aria-label={t('library.viewArtistAria', { name: item.name })}
                         onClick={() => openArtist(item)}
                       >
                         <Cover trackId={item.cover_track_id} title={item.name} size={320} />
                         <strong>{item.name}</strong>
                         <small>
-                          {item.album_count} 张专辑 · {item.track_count} 首歌曲
+                          {t('library.artistCardStats', {
+                            albums: item.album_count,
+                            tracks: item.track_count,
+                          })}
                         </small>
                       </button>
                     ))}
                   </div>
                 ) : kind === 'playlists' ? (
-                  <div className="playlist-grid" aria-label="歌单列表">
+                  <div className="playlist-grid" aria-label={t('library.playlistsGridAria')}>
                     {(visible as PlaylistPage).items.map((item) => (
                       <div className="playlist-tile" key={item.id}>
                         <button
                           className={`playlist-card ${item.kind}`}
                           key={item.id}
                           data-browse-id={item.id}
-                          aria-label={`打开歌单 ${item.name}`}
+                          aria-label={t('library.openPlaylistAria', { name: item.name })}
                           onClick={() => openPlaylist(item)}
                           onContextMenu={(event) => {
                             event.preventDefault();
@@ -1690,16 +1723,16 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
                           <strong>{item.name}</strong>
                           <span>
                             {item.kind === 'favorites'
-                              ? '喜欢的声音'
+                              ? t('library.kindFavorites')
                               : item.kind === 'smart'
-                                ? '规则歌单'
-                                : '普通歌单'}{' '}
-                            · {item.track_count} 首
+                                ? t('library.kindSmart')
+                                : t('library.kindManual')}{' '}
+                            {t('library.playlistCardCount', { count: item.track_count })}
                           </span>
                         </button>
                         <button
                           className="playlist-menu-trigger icon-button"
-                          aria-label={`${item.name}的歌单操作`}
+                          aria-label={t('library.playlistActionsAria', { name: item.name })}
                           onClick={(event) => {
                             const rect = event.currentTarget.getBoundingClientRect();
                             setPlaylistMenu({ item, x: rect.right - 220, y: rect.bottom + 4 });
@@ -1711,7 +1744,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
                     ))}
                   </div>
                 ) : kind === 'albums' ? (
-                  <div className="album-grid" aria-label="专辑列表">
+                  <div className="album-grid" aria-label={t('library.albumsGridAria')}>
                     {(visible as AlbumPage).items.map((item) => (
                       <div
                         className="album-card"
@@ -1725,7 +1758,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
                         <button
                           type="button"
                           className="album-card-action"
-                          aria-label={`${item.title} 专辑操作`}
+                          aria-label={t('library.albumActionsAria', { name: item.title })}
                           onClick={(event) => {
                             event.stopPropagation();
                             const rect = event.currentTarget.getBoundingClientRect();
@@ -1736,7 +1769,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
                         </button>
                         <button
                           className="album-card-main"
-                          aria-label={`打开专辑 ${item.title}`}
+                          aria-label={t('library.openAlbumAria', { name: item.title })}
                           onClick={() => {
                             albumRequest.current?.abort();
                             rememberLocation();
@@ -1753,7 +1786,10 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
                           />
                           <strong>{item.title}</strong>
                           <small>
-                            {item.track_count} 首 · {time(item.duration_ms / 1000)}
+                            {t('library.albumCardStats', {
+                              count: item.track_count,
+                              duration: time(item.duration_ms / 1000),
+                            })}
                           </small>
                         </button>
                         <span className="album-card-artists">
@@ -1770,7 +1806,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
                                   </button>
                                 </span>
                               ))
-                            : '未知艺人'}
+                            : t('library.unknownArtist')}
                         </span>
                       </div>
                     ))}
@@ -1794,18 +1830,16 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
                 )}
                 <div ref={listEnd} className="browse-boundary" aria-live="polite">
                   {browse.busy ? (
-                    <span>正在加载更多…</span>
+                    <span>{t('library.loadingMore')}</span>
                   ) : browse.error ? (
                     <>
                       <span role="alert">{browse.error}</span>
-                      <button onClick={browse.retry}>重试加载</button>
+                      <button onClick={browse.retry}>{t('library.retryLoad')}</button>
                     </>
                   ) : browse.hasNext ? (
-                    <button onClick={() => void browse.loadNext()}>加载更多</button>
+                    <button onClick={() => void browse.loadNext()}>{t('library.loadMore')}</button>
                   ) : (
-                    <span>
-                      共 {visible.total} {unit} · 已到底
-                    </span>
+                    <span>{t('library.endOfList', { count: visible.total, unit })}</span>
                   )}
                 </div>
                 {indexEnabled && browseIndex?.identity === browseIdentity && (
@@ -1822,7 +1856,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
                     className="text-button"
                     onClick={() => setIndexRevision((value) => value + 1)}
                   >
-                    首字母索引未加载，重试
+                    {t('library.indexRetry')}
                   </button>
                 )}
               </div>
@@ -1832,7 +1866,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
         {queueOpen && (
           <button
             className="queue-dismiss-scrim"
-            aria-label="关闭播放队列"
+            aria-label={t('library.closeQueueAria')}
             onClick={() => setQueueOpen(false)}
           />
         )}
@@ -1895,7 +1929,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
           onEdit={() => {
             void api<Playlist>(`/playlists/${playlistMenu.item.id}?include_unavailable=true`)
               .then((initial) => setEditor({ initial, track: null }))
-              .catch(() => setNotice('无法读取歌单，请重试。'));
+              .catch(() => setNotice(t('library.playlistLoadFailed')));
             closePlaylistMenu();
           }}
           onDelete={() => {
@@ -1905,11 +1939,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
           onFollow={() => {
             const enabled = !followedPlaylists(currentUser.id).includes(playlistMenu.item.id);
             followPlaylist(currentUser.id, playlistMenu.item.id, enabled);
-            setNotice(
-              enabled
-                ? '已开启歌单自动下载，可在离线音乐中设置网络和音质。'
-                : '已关闭自动下载，离线音乐保留。',
-            );
+            setNotice(enabled ? t('library.autoDownloadOn') : t('library.autoDownloadOff'));
             closePlaylistMenu();
           }}
         />
@@ -1930,16 +1960,18 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
           }}
           onPlay={async () => {
             try {
-              setNotice(`正在读取专辑《${albumMenu.item.title}》歌曲…`);
+              setNotice(t('library.loadingAlbumTracks', { title: albumMenu.item.title }));
               const tracks = await collectTracks(
                 `/albums/${encodeURIComponent(albumMenu.item.id)}/tracks`,
               );
               if (tracks.length) {
                 player.start(tracks, 0);
-                setNotice(`正在播放《${albumMenu.item.title}》，共 ${tracks.length} 首。`);
+                setNotice(
+                  t('library.playingAlbum', { title: albumMenu.item.title, count: tracks.length }),
+                );
               }
             } catch (err) {
-              setNotice(err instanceof Error ? err.message : '播放专辑失败');
+              setNotice(err instanceof Error ? err.message : t('library.albumPlayFailed'));
             }
           }}
           onEdit={() => {
@@ -1964,7 +1996,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
                 // ignore
               }
             }
-            setNotice('专辑元数据与封面已成功保存');
+            setNotice(t('library.albumSaved'));
           }}
         />
       )}
@@ -1983,7 +2015,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
           onClose={() => setViewingFileTrack(null)}
           onReorganized={() => {
             setRevision((v) => v + 1);
-            setNotice('歌曲文件已按标准命名重排。');
+            setNotice(t('library.filesReorganized'));
           }}
         />
       )}
@@ -1998,7 +2030,7 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
             setAlbum(null);
             setSelectedArtist(null);
             refreshLibrary();
-            setNotice('歌曲信息已保存');
+            setNotice(t('library.trackInfoSaved'));
           }}
         />
       )}

@@ -17,7 +17,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import com.wildstring.app.R
 import com.wildstring.app.data.*
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
@@ -33,10 +35,10 @@ internal fun PublisherAffiliation(vm: MusicViewModel, podcast: PodcastSummary, c
         verticalArrangement = Arrangement.Center,
         itemVerticalAlignment = Alignment.CenterVertically,
     ) {
-        Text("出品方：", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(stringResource(R.string.pod_pub_label), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         val publisher = podcast.publisher
         if (publisher == null) {
-            Text("未确认", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(stringResource(R.string.pod_pub_unconfirmed), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         } else {
             Text(
                 text = publisher.name,
@@ -53,7 +55,7 @@ internal fun PublisherAffiliation(vm: MusicViewModel, podcast: PodcastSummary, c
         if (canEdit) {
             Text("·", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
             Text(
-                text = if (podcast.publisher == null) "确认出品方" else "修改出品方归属",
+                text = if (podcast.publisher == null) stringResource(R.string.pod_pub_confirm) else stringResource(R.string.pod_pub_edit),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.primary,
                 modifier = Modifier
@@ -83,23 +85,23 @@ internal fun PodcastPublisherPage(vm: MusicViewModel, publisher: PodcastPublishe
     val shows = detail?.podcasts.orEmpty().filter { !personalOnly || it.followed }
     Column(Modifier.fillMaxSize().testTag("podcast-publisher-page")) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回节目列表") }
+            IconButton(onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.pod_pub_back_to_list)) }
             Text(detail?.publisher?.name ?: publisher.name, style = MaterialTheme.typography.titleLarge,
                 maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
         }
-        Text("${if (personalOnly) "我关注的" else "本服已有"} ${shows.size} 档已确认节目", Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+        Text(stringResource(if (personalOnly) R.string.pod_pub_shows_personal else R.string.pod_pub_shows_server, shows.size), Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
         error?.let { message ->
             Text(message, Modifier.padding(20.dp), color = MaterialTheme.colorScheme.error)
-            TextButton({ reload++ }) { Text("重试") }
+            TextButton({ reload++ }) { Text(stringResource(R.string.pod_pub_retry)) }
         }
-        if (!loading && error == null && shows.isEmpty()) Text("该出品方暂无已关联节目", Modifier.padding(20.dp))
+        if (!loading && error == null && shows.isEmpty()) Text(stringResource(R.string.pod_pub_no_shows), Modifier.padding(20.dp))
         LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(16.dp, 8.dp, 16.dp, 96.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             items(shows, key = { it.id }) { podcast ->
                 Surface(Modifier.fillMaxWidth().clickable { onSelect(podcast) }, shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceContainerLow) {
                     ListItem(headlineContent = { Text(podcast.title, maxLines = 2, overflow = TextOverflow.Ellipsis) },
-                        supportingContent = { Text("${podcast.totalEpisodes} 集 · 还有 ${podcast.unplayedEpisodes} 集可听") },
+                        supportingContent = { Text(stringResource(R.string.pod_pub_episode_count, podcast.totalEpisodes, podcast.unplayedEpisodes)) },
                         leadingContent = { Icon(Icons.Default.Podcasts, null) },
                         colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow))
                 }
@@ -124,16 +126,18 @@ private fun PublisherAssignmentDialog(vm: MusicViewModel, podcast: PodcastSummar
         catch (e: CancellationException) { throw e }
         catch (e: Exception) { error = friendlyError(e) }
     }
-    AlertDialog(onDismissRequest = { if (!busy) onClose() }, title = { Text("出品方归属") },
+    AlertDialog(onDismissRequest = { if (!busy) onClose() }, title = { Text(stringResource(R.string.pod_pub_dialog_title)) },
         text = { Column(Modifier.fillMaxWidth().heightIn(max = 420.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(podcast.title, style = MaterialTheme.typography.titleSmall)
-            Text("来源作者：${podcast.author.ifBlank { "未提供" }}。作者署名仅作参考，确认后才会加入同出品方聚合。", style = MaterialTheme.typography.bodySmall)
-            Text("当前归属：${current.publisher?.name ?: "未确认"}", style = MaterialTheme.typography.bodySmall)
+            val authorText = podcast.author.ifBlank { stringResource(R.string.pod_pub_author_unprovided) }
+            Text(stringResource(R.string.pod_pub_author_hint, authorText), style = MaterialTheme.typography.bodySmall)
+            val currentAffiliation = current.publisher?.name ?: stringResource(R.string.pod_pub_unconfirmed)
+            Text(stringResource(R.string.pod_pub_current_affiliation, currentAffiliation), style = MaterialTheme.typography.bodySmall)
             val choices = buildList {
-                add("new" to "输入出品方名称")
+                add("new" to stringResource(R.string.pod_pub_choice_new))
                 current.publisher?.takeIf { candidate -> publishers.none { it.id == candidate.id } }?.let { add(it.id to it.name) }
-                publishers.forEach { add(it.id to "${it.name} · ${it.podcastCount} 档节目") }
-                add("none" to "解除出品方关联")
+                publishers.forEach { add(it.id to stringResource(R.string.pod_pub_show_count, it.name, it.podcastCount)) }
+                add("none" to stringResource(R.string.pod_pub_choice_none))
             }
             choices.forEach { (id, label) ->
                 Row(Modifier.fillMaxWidth().clickable(enabled = !busy) { choice = id }, verticalAlignment = Alignment.CenterVertically) {
@@ -141,7 +145,7 @@ private fun PublisherAssignmentDialog(vm: MusicViewModel, podcast: PodcastSummar
                     Text(label, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
                 }
             }
-            if (choice == "new") OutlinedTextField(name, { name = it }, label = { Text("出品方名称") }, singleLine = true,
+            if (choice == "new") OutlinedTextField(name, { name = it }, label = { Text(stringResource(R.string.pod_pub_name_label)) }, singleLine = true,
                 modifier = Modifier.fillMaxWidth(), enabled = !busy, isError = name.length > 120)
             error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
             if (conflict) TextButton({ scope.launch {
@@ -154,7 +158,7 @@ private fun PublisherAssignmentDialog(vm: MusicViewModel, podcast: PodcastSummar
                 } catch (e: CancellationException) { throw e }
                 catch (e: Exception) { error = friendlyError(e) }
                 finally { busy = false }
-            } }, enabled = !busy) { Text("重新读取当前归属") }
+            } }, enabled = !busy) { Text(stringResource(R.string.pod_pub_reload_affiliation)) }
         } },
         confirmButton = { TextButton({ scope.launch {
             busy = true; error = null
@@ -166,6 +170,6 @@ private fun PublisherAssignmentDialog(vm: MusicViewModel, podcast: PodcastSummar
             } catch (e: CancellationException) { throw e }
             catch (e: Exception) { conflict = e is HttpException && e.code() == 409; error = friendlyError(e) }
             finally { busy = false }
-        } }, enabled = !busy && !conflict && (choice != "new" || name.trim().length in 1..120)) { Text(if (busy) "保存中…" else "确认并保存") } },
-        dismissButton = { TextButton(onClose, enabled = !busy) { Text("取消") } })
+        } }, enabled = !busy && !conflict && (choice != "new" || name.trim().length in 1..120)) { Text(if (busy) stringResource(R.string.pod_pub_saving) else stringResource(R.string.pod_pub_confirm_save)) } },
+        dismissButton = { TextButton(onClose, enabled = !busy) { Text(stringResource(R.string.pod_pub_cancel)) } })
 }

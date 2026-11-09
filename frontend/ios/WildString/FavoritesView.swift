@@ -15,7 +15,7 @@ struct FavoritesView: View {
             if let loader {
                 LoadedList(
                     loader: loader,
-                    emptyTitle: "还没有收藏",
+                    emptyTitle: L10n("favoritesView.emptyTitle"),
                     emptyIcon: "heart"
                 ) { track in
                     TrackActionRow(client: client, track: track) {
@@ -33,7 +33,7 @@ struct FavoritesView: View {
                 }
             } else if let errorMessage {
                 ContentUnavailableView(
-                    "无法加载收藏",
+                    L10n("favoritesView.loadFailed"),
                     systemImage: "heart.slash",
                     description: Text(errorMessage)
                 )
@@ -41,7 +41,7 @@ struct FavoritesView: View {
                 ProgressView()
             }
         }
-        .navigationTitle("我喜欢的音乐")
+        .navigationTitle(L10n("favoritesView.title"))
         .navigationBarTitleDisplayMode(.inline)
         .miniPlayer(playback, client: client)
         .task { await load() }
@@ -52,7 +52,7 @@ struct FavoritesView: View {
         do {
             let page = try await client.playlists()
             guard let favorites = page.items.first(where: \.isFavorites) else {
-                errorMessage = "服务器上还没有默认收藏歌单"
+                errorMessage = L10n("favoritesView.noDefaultPlaylist")
                 return
             }
             let loader = PagedListModel<Track>(pageSize: 200) { [client, id = favorites.id] limit, offset in

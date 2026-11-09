@@ -38,21 +38,21 @@ struct MetadataSuggestionsView: View {
         NavigationStack {
             Form {
                 Section {
-                    Toggle("只补缺失信息", isOn: $missingOnly)
-                    Toggle("重新联网查询", isOn: $forceLookup)
-                    Button("更新元数据") { Task { await refresh() } }
+                    Toggle(L10n("suggestions.missingOnly"), isOn: $missingOnly)
+                    Toggle(L10n("suggestions.forceLookup"), isOn: $forceLookup)
+                    Button(L10n("suggestions.updateMetadata")) { Task { await refresh() } }
                         .disabled(isWorking)
                 } header: {
                     Text(track.title)
                 } footer: {
-                    Text("联网结果只作为建议保存；勾选后确认才会写入数据库，导入源与音频文件不变。")
+                    Text(L10n("suggestions.footerNotice"))
                 }
 
                 if let jobs = results?.jobs, !jobs.isEmpty {
-                    Section("查询任务") {
+                    Section(L10n("suggestions.queryTasks")) {
                         ForEach(jobs.prefix(3)) { job in
                             HStack {
-                                Text("任务")
+                                Text(L10n("suggestions.task"))
                                 Spacer()
                                 Text(statusText(job.status))
                                     .foregroundStyle(.secondary)
@@ -67,7 +67,7 @@ struct MetadataSuggestionsView: View {
                     }
                 } else if results != nil && !isWorking {
                     Section {
-                        Text("暂无候选。联网查询完成后，各来源的建议会显示在这里。")
+                        Text(L10n("suggestions.emptyCandidates"))
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
@@ -81,14 +81,14 @@ struct MetadataSuggestionsView: View {
                     }
                 }
             }
-            .navigationTitle("更新元数据与建议")
+            .navigationTitle(L10n("suggestions.title"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button("关闭") { dismiss() }
+                    Button(L10n("suggestions.close")) { dismiss() }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("批量核对") { showingReview = true }
+                    Button(L10n("suggestions.batchReview")) { showingReview = true }
                 }
             }
             .sheet(isPresented: $showingReview) {
@@ -96,30 +96,30 @@ struct MetadataSuggestionsView: View {
             }
             .task { await poll() }
             .alert(
-                "应用选中信息？",
+                L10n("suggestions.applyTitle"),
                 isPresented: Binding(
                     get: { pendingApply != nil },
                     set: { if !$0 { pendingApply = nil } }
                 ),
                 presenting: pendingApply
             ) { pending in
-                Button("确认应用") { Task { await apply(pending) } }
-                Button("取消", role: .cancel) {}
+                Button(L10n("suggestions.confirmApply")) { Task { await apply(pending) } }
+                Button(L10n("suggestions.cancel"), role: .cancel) {}
             } message: { pending in
-                Text("将覆盖这 \(pending.fields.count) 个字段的当前值。")
+                Text(L10n("suggestions.applyFieldsCountNotice", pending.fields.count))
             }
             .alert(
-                "采用此封面？",
+                L10n("suggestions.adoptCoverTitle"),
                 isPresented: Binding(
                     get: { pendingCover != nil },
                     set: { if !$0 { pendingCover = nil } }
                 ),
                 presenting: pendingCover
             ) { suggestion in
-                Button("确认采用") { Task { await applyCover(suggestion) } }
-                Button("取消", role: .cancel) {}
+                Button(L10n("suggestions.confirmAdoptCover")) { Task { await applyCover(suggestion) } }
+                Button(L10n("suggestions.cancel"), role: .cancel) {}
             } message: { _ in
-                Text("封面会保存到服务端曲库，导入源与音频文件不变。")
+                Text(L10n("suggestions.coverNotice"))
             }
         }
     }
@@ -134,7 +134,7 @@ struct MetadataSuggestionsView: View {
         let keys = orderedKeys(suggestion)
         return Section {
             if stale {
-                Text("歌曲信息已变化，请重新查询。")
+                Text(L10n("suggestions.trackChangedStale"))
                     .font(.caption)
                     .foregroundStyle(.red)
             }
@@ -170,10 +170,10 @@ struct MetadataSuggestionsView: View {
             if suggestion.coverURL != nil, !stale {
                 SuggestionCoverPreview(client: client, suggestionID: suggestion.id)
                     .frame(maxWidth: .infinity, alignment: .center)
-                Button("采用此封面") { pendingCover = suggestion }
+                Button(L10n("suggestions.adoptCoverButton")) { pendingCover = suggestion }
                     .disabled(isWorking)
             }
-            Button("应用选中信息") {
+            Button(L10n("suggestions.applySelectedButton")) {
                 pendingApply = PendingApply(
                     suggestionID: suggestion.id,
                     version: suggestion.metadataVersion,
@@ -186,7 +186,7 @@ struct MetadataSuggestionsView: View {
                 Text(providerName(suggestion.provider))
                 if let score = suggestion.match?.score {
                     Spacer()
-                    Text("匹配 \(Int((score * 100).rounded()))%")
+                    Text(L10n("suggestions.matchScore", Int((score * 100).rounded())))
                 }
             }
         }
@@ -200,19 +200,19 @@ struct MetadataSuggestionsView: View {
 
     private func fieldLabel(_ key: String) -> String {
         switch key {
-        case "title": return "歌曲名称"
-        case "artists": return "歌曲艺人"
-        case "album": return "专辑"
-        case "album_artists": return "专辑艺人"
-        case "vocalists": return "演唱"
-        case "lyricists": return "作词"
-        case "composers": return "作曲"
-        case "arrangers": return "编曲"
-        case "track_number": return "曲号"
-        case "disc_number": return "碟号"
-        case "release_date": return "发行日期"
-        case "tags": return "标签"
-        case "description": return "简介"
+        case "title": return L10n("suggestions.fieldTitle")
+        case "artists": return L10n("suggestions.fieldArtists")
+        case "album": return L10n("suggestions.fieldAlbum")
+        case "album_artists": return L10n("suggestions.fieldAlbumArtists")
+        case "vocalists": return L10n("suggestions.fieldVocalists")
+        case "lyricists": return L10n("suggestions.fieldLyricists")
+        case "composers": return L10n("suggestions.fieldComposers")
+        case "arrangers": return L10n("suggestions.fieldArrangers")
+        case "track_number": return L10n("suggestions.fieldTrackNumber")
+        case "disc_number": return L10n("suggestions.fieldDiscNumber")
+        case "release_date": return L10n("suggestions.fieldReleaseDate")
+        case "tags": return L10n("suggestions.fieldTags")
+        case "description": return L10n("suggestions.fieldDescription")
         default: return key
         }
     }
@@ -224,14 +224,14 @@ struct MetadataSuggestionsView: View {
 
     private func statusText(_ status: String?) -> String {
         switch status {
-        case "queued": return "等待中"
-        case "running": return "执行中"
-        case "completed": return "已完成"
-        case "completed_with_errors": return "完成，部分来源失败"
-        case "stale": return "来源已过期"
-        case "failed": return "失败"
-        case "interrupted": return "已中断"
-        case "review": return "待确认"
+        case "queued": return L10n("suggestions.statusQueued")
+        case "running": return L10n("suggestions.statusRunning")
+        case "completed": return L10n("suggestions.statusCompleted")
+        case "completed_with_errors": return L10n("suggestions.statusCompletedWithErrors")
+        case "stale": return L10n("suggestions.statusStale")
+        case "failed": return L10n("suggestions.statusFailed")
+        case "interrupted": return L10n("suggestions.statusInterrupted")
+        case "review": return L10n("suggestions.statusReview")
         case nil: return "—"
         default: return status ?? "—"
         }
@@ -273,7 +273,7 @@ struct MetadataSuggestionsView: View {
                 mode: missingOnly ? "missing" : "all",
                 force: forceLookup
             )
-            message = "已排队 \(queued.queued) 首，建议准备好后显示在这里"
+            message = L10n("suggestions.queuedMessage", queued.queued)
             messageIsError = false
             await load()
         } catch {
@@ -293,12 +293,12 @@ struct MetadataSuggestionsView: View {
                 fields: pending.fields
             )
             chosen[pending.suggestionID] = []
-            message = "建议已应用"
+            message = L10n("suggestions.appliedMessage")
             messageIsError = false
             await load()
         } catch let error as APIError where error.statusCode == 409 {
             await load()
-            message = "歌曲信息已变化，已刷新，请重新查询"
+            message = L10n("suggestions.trackChangedRefresh")
             messageIsError = true
         } catch {
             message = ErrorText.message(for: error)
@@ -315,12 +315,12 @@ struct MetadataSuggestionsView: View {
                 suggestionID: suggestion.id,
                 version: suggestion.metadataVersion
             )
-            message = "封面已保存"
+            message = L10n("suggestions.coverSavedMessage")
             messageIsError = false
             await load()
         } catch let error as APIError where error.statusCode == 409 {
             await load()
-            message = "歌曲信息已变化，已刷新，请重新查询"
+            message = L10n("suggestions.trackChangedRefresh")
             messageIsError = true
         } catch {
             message = ErrorText.message(for: error)
@@ -345,7 +345,7 @@ private struct SuggestionCoverPreview: View {
                     .resizable()
                     .scaledToFill()
             } else if failed {
-                Text("封面预览不可用")
+                Text(L10n("suggestions.coverPreviewUnavailable"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else {

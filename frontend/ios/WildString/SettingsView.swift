@@ -72,12 +72,12 @@ struct SettingsView: View {
                 }
             }
             if let routes = connection.routes {
-                Section("服务器") {
-                    TextField("本机别名（留空使用服务器名称）", text: Binding(get: { connection.servers.first { $0.address == routes.storageAddress }?.alias ?? "" }, set: { value in
+                Section(L10n("settingsView.serverSection")) {
+                    TextField(L10n("settingsView.aliasPlaceholder"), text: Binding(get: { connection.servers.first { $0.address == routes.storageAddress }?.alias ?? "" }, set: { value in
                         if let saved = connection.servers.first(where: { $0.address == routes.storageAddress }) { connection.setAlias(value, for: saved) }
                     }))
-                    NavigationLink("线路与故障切换") { ServerRoutesEditor(routes: routes).navigationTitle("服务器线路") }
-                    Text("当前线路：\(routes.activeName)").font(.caption).foregroundStyle(.secondary)
+                    NavigationLink(L10n("settingsView.routesAndFailover")) { ServerRoutesEditor(routes: routes).navigationTitle(L10n("settingsView.serverRoutesTitle")) }
+                    Text(L10n("settingsView.activeRoute", routes.activeName)).font(.caption).foregroundStyle(.secondary)
                     if let message = routes.message { Text(message).font(.caption).foregroundStyle(.secondary) }
                 }
             }
@@ -171,8 +171,8 @@ struct SettingsView: View {
                     Task { await offline.clearAll() }
                 }
                 .disabled(offline.items.isEmpty)
-                Toggle("允许使用蜂窝网络下载", isOn: $allowsCellular)
-                Text("当前正在进行的下载仍按连接时的设置。下次登录后，新的下载会改用这里的选择。")
+                Toggle(L10n("settingsView.allowCellularDownloads"), isOn: $allowsCellular)
+                Text(L10n("settingsView.cellularDownloadsNotice"))
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }

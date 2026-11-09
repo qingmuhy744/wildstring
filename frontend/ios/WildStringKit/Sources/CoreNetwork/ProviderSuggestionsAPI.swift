@@ -28,7 +28,7 @@ public enum MetadataFieldValue: Decodable, Equatable, Sendable {
     public var display: String {
         switch self {
         case .text(let value): value
-        case .list(let values): values.joined(separator: "、")
+        case .list(let values): values.joined(separator: KitL10n("kit.metadata.listSeparator"))
         case .number(let value): String(value)
         }
     }

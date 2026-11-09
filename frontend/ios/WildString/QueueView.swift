@@ -38,11 +38,11 @@ struct QueueView: View {
                     musicQueueList
                 }
             }
-            .navigationTitle(isPodcast ? "待播队列" : "播放队列")
+            .navigationTitle(isPodcast ? L10n("queueView.podcastQueue") : L10n("queueView.musicQueue"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button("关闭") { dismiss() }
+                    Button(L10n("queueView.close")) { dismiss() }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     EditButton()
@@ -104,8 +104,8 @@ struct QueueView: View {
                             .font(.footnote)
                             .foregroundStyle(.orange)
                         HStack(spacing: 12) {
-                            Button("使用服务器上的队列") { cloud.adoptServerQueue() }
-                            Button("用本机覆盖") { cloud.overwriteWithLocal() }
+                            Button(L10n("queueView.adoptServerQueue")) { cloud.adoptServerQueue() }
+                            Button(L10n("queueView.overwriteWithLocal")) { cloud.overwriteWithLocal() }
                         }
                     }
                 }
@@ -115,7 +115,7 @@ struct QueueView: View {
                         Text(syncError)
                             .font(.footnote)
                             .foregroundStyle(.orange)
-                        Button("重试") { Task { await cloud.retrySync() } }
+                        Button(L10n("queueView.retry")) { Task { await cloud.retrySync() } }
                     }
                 }
             }
@@ -126,14 +126,14 @@ struct QueueView: View {
                         .foregroundStyle(.orange)
                 }
             }
-            Section("待播队列") {
+            Section(L10n("queueView.podcastQueue")) {
                 if cloud.loading, cloud.items.isEmpty {
                     HStack(spacing: 8) {
                         ProgressView()
-                        Text("正在同步待播队列…").foregroundStyle(.secondary)
+                        Text(L10n("queueView.syncingQueue")).foregroundStyle(.secondary)
                     }
                 } else if cloud.items.isEmpty {
-                    Text(playback.podcastAutoContinueEnabled ? "播完会接下一集" : "已关闭，播完即停")
+                    Text(playback.podcastAutoContinueEnabled ? L10n("queueView.autoContinueOn") : L10n("queueView.autoContinueOff"))
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 } else {
@@ -153,7 +153,7 @@ struct QueueView: View {
                                 }
                                 Spacer(minLength: 8)
                                 if item.episodeId == currentEpisodeID {
-                                    Text("正在收听")
+                                    Text(L10n("queueView.nowListening"))
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                 }
@@ -175,7 +175,7 @@ struct QueueView: View {
                                 .foregroundStyle(.secondary)
                                 .lineLimit(2)
                             Spacer(minLength: 8)
-                            Button("加入待播") {
+                            Button(L10n("queueView.addToQueue")) {
                                 guard let episodeID = PlaybackService.podcastEpisodeID(item.trackID) else { return }
                                 cloud.enqueueEpisode(episodeID, next: false, currentEpisodeID: currentEpisodeID)
                             }
@@ -184,9 +184,9 @@ struct QueueView: View {
                         }
                     }
                 } header: {
-                    Text("自动续播")
+                    Text(L10n("queueView.autoContinuation"))
                 } footer: {
-                    Text("不会写入待播队列")
+                    Text(L10n("queueView.autoContinuationHint"))
                 }
             }
         }
@@ -195,7 +195,7 @@ struct QueueView: View {
 
     private func playQueued(_ episodeID: String, cloud: PodcastCloudQueue) async {
         guard let item = await cloud.playbackItem(for: episodeID) else {
-            actionError = "这集暂时打不开。待播队列还在，可以重试。"
+            actionError = L10n("queueView.cannotOpenEpisode")
             return
         }
         actionError = nil

@@ -23,6 +23,7 @@ import { PodcastIdentityAdmin } from './podcast-identity-admin';
 import { PodcastProgrammesAdmin } from './podcast-programmes-admin';
 import { PodcastSearchSettings } from './podcast-search-settings';
 import { PodcastCatalogSettings } from './podcast-catalog-settings';
+import { useTranslation } from 'react-i18next';
 
 type Directory = {
   path: string;
@@ -68,44 +69,44 @@ interface Overview {
   deployment: { host: string; port: number; cookie_secure: boolean; connection_policy?: string };
 }
 const statuses: Record<string, string> = {
-  queued: '排队中',
-  running: '执行中',
-  completed: '已完成',
-  completed_with_errors: '部分失败',
-  failed: '失败',
-  interrupted: '已中断',
+  queued: 'management.statusQueued',
+  running: 'management.statusRunning',
+  completed: 'management.statusCompleted',
+  completed_with_errors: 'management.statusCompletedWithErrors',
+  failed: 'management.statusFailed',
+  interrupted: 'management.statusInterrupted',
 };
 const counterLabels: Record<string, string> = {
-  visited: '检查',
-  added: '新增',
-  updated: '更新',
-  unchanged: '未变化',
-  errors: '错误',
-  missing: '缺失',
-  skipped: '跳过',
-  copied: '复制',
-  duplicates: '重复',
-  assets_copied: '附属文件',
-  conflicts: '冲突',
-  review: '待整理',
-  waiting: '等待稳定',
-  converted: '转换曲目',
+  visited: 'management.counterVisited',
+  added: 'management.counterAdded',
+  updated: 'management.counterUpdated',
+  unchanged: 'management.counterUnchanged',
+  errors: 'management.counterErrors',
+  missing: 'management.counterMissing',
+  skipped: 'management.counterSkipped',
+  copied: 'management.counterCopied',
+  duplicates: 'management.counterDuplicates',
+  assets_copied: 'management.counterAssetsCopied',
+  conflicts: 'management.counterConflicts',
+  review: 'management.counterReview',
+  waiting: 'management.counterWaiting',
+  converted: 'management.counterConverted',
 };
 const errorLabels: Record<string, string> = {
-  metadata_invalid: '标签无法读取',
-  file_unreadable: '文件无法读取',
-  file_changed: '文件已变化',
-  root_unavailable: '曲库路径不可用',
-  source_unavailable: '导入源不可用',
-  source_directory_unreadable: '目录无法读取',
-  import_file_unavailable: '文件导入失败',
-  intake_file_unavailable: '文件导入失败',
-  source_changed_managed_copy_preserved: '导入源已变化，已保留库内副本',
-  source_changed_during_import: '导入时文件发生变化',
-  directory_unreadable: '目录无法读取',
+  metadata_invalid: 'management.errorMetadataInvalid',
+  file_unreadable: 'management.errorFileUnreadable',
+  file_changed: 'management.errorFileChanged',
+  root_unavailable: 'management.errorRootUnavailable',
+  source_unavailable: 'management.errorSourceUnavailable',
+  source_directory_unreadable: 'management.errorSourceDirectoryUnreadable',
+  import_file_unavailable: 'management.errorImportFileUnavailable',
+  intake_file_unavailable: 'management.errorIntakeFileUnavailable',
+  source_changed_managed_copy_preserved: 'management.errorSourceChangedManagedCopyPreserved',
+  source_changed_during_import: 'management.errorSourceChangedDuringImport',
+  directory_unreadable: 'management.errorDirectoryUnreadable',
 };
 function bytes(value: number | null) {
-  if (value === null) return '不可用';
+  if (value === null) return 'management.sizeUnavailable';
   if (value < 1024 ** 2) return `${(value / 1024).toFixed(1)} KB`;
   if (value < 1024 ** 3) return `${(value / 1024 ** 2).toFixed(1)} MB`;
   return `${(value / 1024 ** 3).toFixed(1)} GB`;
@@ -114,16 +115,17 @@ function timestamp(value: string | null) {
   return value ? new Date(value).toLocaleString() : '—';
 }
 function RunDetail({ title, run }: { title: string; run: Run | null }) {
+  const { t } = useTranslation();
   return (
     run && (
       <section className="run-detail">
         <h4>
-          {title} · {statuses[run.status] || run.status}
+          {title} · {t(statuses[run.status] || run.status)}
         </h4>
         <div className="run-counters">
           {Object.entries(run.counts).map(([key, n]) => (
             <HelpText key={key} text={importCounterHelp[key]}>
-              {counterLabels[key] || key} <b>{n}</b>
+              {t(counterLabels[key] || key)} <b>{n}</b>
             </HelpText>
           ))}
         </div>
@@ -132,7 +134,7 @@ function RunDetail({ title, run }: { title: string; run: Run | null }) {
             {run.errors.map((item, i) => (
               <li key={i}>
                 <code>{item.path}</code>
-                <span>{errorLabels[item.code] || item.code}</span>
+                <span>{t(errorLabels[item.code] || item.code)}</span>
               </li>
             ))}
           </ul>
@@ -193,6 +195,7 @@ export function Management({
   const canImport = profile === 'owner' || profile === 'librarian';
   const canPodcastAdmin = canImport;
   const [tab, updateTab] = useState<ManagementTab>(initialTab);
+  const { t } = useTranslation();
   const [downloadQueue, setDownloadQueue] = useState<{
     total_pending: number;
     failed_count: number;
@@ -309,7 +312,7 @@ export function Management({
       setTick((v) => v + 1);
       onChanged();
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '任务提交失败。');
+      setError(reason instanceof Error ? reason.message : t('management.taskSubmitFailed'));
     } finally {
       setBusy(false);
     }
@@ -325,7 +328,7 @@ export function Management({
       });
       setOverview({ ...overview, preferences });
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '设置保存失败。');
+      setError(reason instanceof Error ? reason.message : t('management.settingsSaveFailed'));
     } finally {
       setBusy(false);
     }
@@ -333,17 +336,17 @@ export function Management({
   const groups: (SettingsCategory & { tabs: { id: ManagementTab; label: string }[] })[] = [
     {
       id: 'library',
-      label: '音乐库与导入',
-      description: '浏览库状态、导入音乐与整理资料',
+      label: t('management.groupLibrary'),
+      description: t('management.groupLibraryDescription'),
       icon: 'album',
       tabs: [
-        { id: 'overview', label: '概览' },
-        { id: 'tracks', label: '歌曲信息' },
-        ...(canImport ? [{ id: 'intake' as const, label: '导入与整理' }] : []),
+        { id: 'overview', label: t('management.tabOverview') },
+        { id: 'tracks', label: t('management.tabTracks') },
+        ...(canImport ? [{ id: 'intake' as const, label: t('management.tabIntake') }] : []),
         ...(canOwner
           ? [
-              { id: 'libraries' as const, label: '音乐库' },
-              { id: 'library-settings' as const, label: '当前音乐库设置' },
+              { id: 'libraries' as const, label: t('management.tabLibraries') },
+              { id: 'library-settings' as const, label: t('management.tabLibrarySettings') },
             ]
           : []),
       ],
@@ -352,26 +355,26 @@ export function Management({
       ? [
           {
             id: 'podcasts',
-            label: '播客',
-            description: '全服节目、目录搜索、节目准入、下载与共享音频',
+            label: t('management.groupPodcasts'),
+            description: t('management.groupPodcastsDescription'),
             icon: 'podcast' as const,
             tabs: [
-              { id: 'programmes' as const, label: '全服节目' },
-              { id: 'search' as const, label: '目录搜索' },
-              { id: 'identity' as const, label: '重复节目' },
+              { id: 'programmes' as const, label: t('management.tabProgrammes') },
+              { id: 'search' as const, label: t('management.tabSearch') },
+              { id: 'identity' as const, label: t('management.tabIdentity') },
               {
                 id: 'downloads' as const,
                 label:
                   downloadPending > 0
-                    ? `下载管理 (${downloadPending})`
+                    ? t('management.tabDownloadsPending', { pending: downloadPending })
                     : downloadQueue && downloadQueue.failed_count > 0
-                      ? `下载管理 (${downloadQueue.failed_count} 失败)`
-                      : '下载管理',
+                      ? t('management.tabDownloadsFailed', { failed: downloadQueue.failed_count })
+                      : t('management.tabDownloads'),
               },
               ...(canOwner
                 ? [
-                    { id: 'catalog' as const, label: '节目准入' },
-                    { id: 'resources' as const, label: '共享音频管理' },
+                    { id: 'catalog' as const, label: t('management.tabCatalog') },
+                    { id: 'resources' as const, label: t('management.tabResources') },
                   ]
                 : []),
             ],
@@ -382,34 +385,34 @@ export function Management({
       ? [
           {
             id: 'sources',
-            label: '数据源与模型',
-            description: '联网资料、来源插件与模型连接',
+            label: t('management.groupSources'),
+            description: t('management.groupSourcesDescription'),
             icon: 'assistant' as const,
             tabs: [
-              { id: 'providers' as const, label: '数据源' },
-              { id: 'models' as const, label: '模型连接' },
+              { id: 'providers' as const, label: t('management.tabProviders') },
+              { id: 'models' as const, label: t('management.tabModels') },
             ],
           },
           {
             id: 'users',
-            label: '用户与权限',
-            description: '账号档案、音乐库授权与密码重置',
+            label: t('management.groupUsers'),
+            description: t('management.groupUsersDescription'),
             icon: 'artist' as const,
-            tabs: [{ id: 'users' as const, label: '用户' }],
+            tabs: [{ id: 'users' as const, label: t('management.tabUsers') }],
           },
         ]
       : []),
     {
       id: 'operations',
-      label: '任务与诊断',
-      description: '后台任务、处理记录与服务状态',
+      label: t('management.groupOperations'),
+      description: t('management.groupOperationsDescription'),
       icon: 'task',
       tabs: [
-        { id: 'jobs', label: '任务记录' },
+        { id: 'jobs', label: t('management.tabJobs') },
         ...(canOwner
           ? [
-              { id: 'diagnostics' as const, label: '诊断' },
-              { id: 'status' as const, label: '服务状态' },
+              { id: 'diagnostics' as const, label: t('management.tabDiagnostics') },
+              { id: 'status' as const, label: t('management.tabStatus') },
             ]
           : []),
       ],
@@ -418,12 +421,12 @@ export function Management({
       ? [
           {
             id: 'server',
-            label: '服务器',
-            description: '播放转码、缓存与访问域名',
+            label: t('management.groupServer'),
+            description: t('management.groupServerDescription'),
             icon: 'settings' as const,
             tabs: [
-              { id: 'transcoding' as const, label: '转码与缓存' },
-              { id: 'access' as const, label: '访问设置' },
+              { id: 'transcoding' as const, label: t('management.tabTranscoding') },
+              { id: 'access' as const, label: t('management.tabAccess') },
             ],
           },
         ]
@@ -437,14 +440,14 @@ export function Management({
         <MetadataReviewDialog onClose={() => setReviewOpen(false)} onApplied={onChanged} />
       )}
       <SettingsLayout
-        title="管理中心"
+        title={t('management.title')}
         categories={groups}
         selected={group?.id ?? null}
         onSelect={(id) => setTab(id ? groups.find((item) => item.id === id)!.tabs[0].id : 'home')}
         onBack={onBack}
       >
         {group && (
-          <nav className="settings-tabs" aria-label="管理分类">
+          <nav className="settings-tabs" aria-label={t('management.categoryNav')}>
             {group.tabs.map((item) => (
               <button key={item.id} aria-pressed={tab === item.id} onClick={() => setTab(item.id)}>
                 {item.label}
@@ -459,12 +462,12 @@ export function Management({
           <p role="alert" className="error">
             {error}
             <button className="text-button" onClick={() => setTick((v) => v + 1)}>
-              重新读取
+              {t('management.reload')}
             </button>
           </p>
         )}
         {loading ? (
-          <p role="status">读取管理信息…</p>
+          <p role="status">{t('management.loadingOverview')}</p>
         ) : (
           overview && (
             <>
@@ -483,12 +486,15 @@ export function Management({
               {tab === 'users' && <UsersPanel />}
               {tab === 'overview' && (
                 <>
-                  <section className="management-metrics" aria-label="曲库概览">
+                  <section
+                    className="management-metrics"
+                    aria-label={t('management.libraryOverviewAria')}
+                  >
                     {[
-                      [overview.counts.tracks, '首歌曲'],
-                      [overview.albums, '张专辑'],
-                      [overview.artists, '位艺人'],
-                      [bytes(overview.counts.size_bytes), '音乐大小'],
+                      [overview.counts.tracks, t('management.metricTracks')],
+                      [overview.albums, t('management.metricAlbums')],
+                      [overview.artists, t('management.metricArtists')],
+                      [t(bytes(overview.counts.size_bytes)), t('management.metricMusicSize')],
                     ].map(([n, label]) => (
                       <div key={label}>
                         <strong>{n}</strong>
@@ -500,79 +506,87 @@ export function Management({
                     <h2>{overview.preferences.name}</h2>
                     {canOwner && (
                       <>
-                        <button onClick={onRefresh}>更新曲库元数据</button>
-                        <button onClick={() => setReviewOpen(true)}>批量核对资料</button>
+                        <button onClick={onRefresh}>
+                          {t('management.refreshLibraryMetadata')}
+                        </button>
+                        <button onClick={() => setReviewOpen(true)}>
+                          {t('management.batchMetadataReview')}
+                        </button>
                       </>
                     )}
                     <div className="library-locations">
                       {(
                         [
-                          ['导入源', overview.source],
-                          ['托管曲库', overview.library],
+                          [t('management.importSource'), overview.source],
+                          [t('management.managedLibrary'), overview.library],
                         ] as const
                       ).map(([label, item]) => (
                         <div key={label}>
                           <strong>
                             {label}
                             <span className={`availability ${item.available ? '' : 'unavailable'}`}>
-                              {item.available ? '可访问' : '不可访问'}
+                              {item.available
+                                ? t('management.available')
+                                : t('management.unavailable')}
                             </span>
                           </strong>
                           <code>{item.path}</code>
-                          <small>可用空间 {bytes(item.free_bytes)}</small>
+                          <small>
+                            {t('management.freeSpace')} {t(bytes(item.free_bytes))}
+                          </small>
                         </div>
                       ))}
                     </div>
                     {canImport && (
                       <div className="management-task-actions">
                         <div>
-                          <h3>导入新音乐</h3>
-                          <p className="muted">从导入源复制新歌曲到曲库，已有副本保留。</p>
+                          <h3>{t('management.importNewMusic')}</h3>
+                          <p className="muted">{t('management.importDescription')}</p>
                           <button
                             className="primary"
                             disabled={busy || active || !overview.source.available}
                             onClick={() => void start('import')}
                           >
-                            导入音乐
+                            {t('management.importMusic')}
                           </button>
                         </div>
                         <div>
-                          <h3>更新曲库信息</h3>
-                          <p className="muted">检查库内文件变化，保留人工编辑的信息。</p>
+                          <h3>{t('management.scanLibraryTitle')}</h3>
+                          <p className="muted">{t('management.scanDescription')}</p>
                           <label className="management-checkbox">
                             <input
                               type="checkbox"
                               checked={full}
                               onChange={(e) => setFull(e.target.checked)}
                             />
-                            重新读取全部标签
+                            {t('management.rereadAllTags')}
                           </label>
                           <button
                             disabled={busy || active || !overview.library.available}
                             onClick={() => void start('scan')}
                           >
-                            扫描曲库
+                            {t('management.scanLibrary')}
                           </button>
                         </div>
                       </div>
                     )}
                     {active && (
                       <p role="status" className="muted">
-                        曲库任务正在排队或执行，可在任务记录中查看进展。
+                        {t('management.jobActiveNotice')}
                       </p>
                     )}
                     {!!overview.counts.unavailable && (
                       <p className="muted">
-                        有 {overview.counts.unavailable} 首歌曲暂不可用。扫描任务会记录具体原因。
+                        {t('management.unavailableTracks', { count: overview.counts.unavailable })}
                       </p>
                     )}
                   </section>
                   <section className="management-card">
-                    <h2>最近一次扫描</h2>
+                    <h2>{t('management.lastScanTitle')}</h2>
                     {overview.last_scan ? (
-                      <RunDetail title="扫描" run={overview.last_scan} />
+                      <RunDetail title={t('management.runScan')} run={overview.last_scan} />
                     ) : (
-                      <p className="muted">还没有扫描记录。</p>
+                      <p className="muted">{t('management.noScanRecords')}</p>
                     )}
                   </section>
                   <FolderMetadataEditor onChanged={onChanged} />
@@ -582,8 +596,8 @@ export function Management({
                 <section className="management-card">
                   <div className="management-section-heading">
                     <div>
-                      <h2>整理歌曲信息</h2>
-                      <p className="muted">修改歌名、艺人与专辑，让每首歌回到它的位置。</p>
+                      <h2>{t('management.editTracksTitle')}</h2>
+                      <p className="muted">{t('management.editTracksDescription')}</p>
                     </div>
                     <form
                       className="manage-search"
@@ -594,13 +608,13 @@ export function Management({
                       }}
                     >
                       <input
-                        aria-label="搜索待编辑歌曲"
+                        aria-label={t('management.searchTracksAria')}
                         value={draft}
                         onChange={(e) => setDraft(e.target.value)}
-                        placeholder="搜索歌曲、艺人、专辑"
+                        placeholder={t('management.searchTracksPlaceholder')}
                         maxLength={256}
                       />
-                      <button>搜索歌曲</button>
+                      <button>{t('management.searchTracks')}</button>
                     </form>
                   </div>
                   {tracks ? (
@@ -610,19 +624,17 @@ export function Management({
                           disabled={busy || !tracks.items.length}
                           onClick={() => {
                             setBusy(true);
-                            setError('正在提交查询…');
+                            setError(t('management.querySubmitting'));
                             void api('/manage/providers/query', {
                               method: 'POST',
                               body: JSON.stringify({ track_ids: tracks.items.map((t) => t.id) }),
                             })
-                              .then(() =>
-                                setError('已提交本页资料查询，可在歌曲编辑的联网建议中查看。'),
-                              )
-                              .catch(() => setError('查询未提交，请先启用联网资料或稍后重试。'))
+                              .then(() => setError(t('management.querySubmitted')))
+                              .catch(() => setError(t('management.queryNotSubmitted')))
                               .finally(() => setBusy(false));
                           }}
                         >
-                          查询本页资料
+                          {t('management.queryPageMetadata')}
                         </button>
                       )}
                       <ul className="manage-track-list">
@@ -631,24 +643,28 @@ export function Management({
                             <div>
                               <strong>{track.title}</strong>
                               <span>
-                                {track.artists.join(' / ') || '未知艺人'} ·{' '}
-                                {track.album || '未知专辑'}
+                                {track.artists.join(' / ') || t('management.unknownArtists')} ·{' '}
+                                {track.album || t('management.unknownAlbum')}
                               </span>
                             </div>
                             <button
-                              aria-label={`编辑 ${track.title}`}
+                              aria-label={t('management.editTrackAria', { title: track.title })}
                               onClick={() => onEdit(track)}
                             >
-                              编辑信息
+                              {t('management.editInfo')}
                             </button>
                           </li>
                         ))}
                       </ul>
-                      {!tracks.total && <p className="muted">没有找到歌曲。</p>}
-                      <Pagination page={tracks} onOffset={setOffset} unit="首" />
+                      {!tracks.total && <p className="muted">{t('management.noTracksFound')}</p>}
+                      <Pagination
+                        page={tracks}
+                        onOffset={setOffset}
+                        unit={t('management.unitTracks')}
+                      />
                     </>
                   ) : (
-                    <p role="status">读取歌曲…</p>
+                    <p role="status">{t('management.loadingTracks')}</p>
                   )}
                 </section>
               )}
@@ -660,20 +676,20 @@ export function Management({
                       onInspect={(id) => {
                         void api<Track>(`/tracks/${id}`)
                           .then(onEdit)
-                          .catch(() => setError('无法读取歌曲，请刷新后重试。'));
+                          .catch(() => setError(t('management.trackLoadFailed')));
                       }}
                     />
                   )}
                   <div className="management-section-heading">
-                    <h2>任务记录</h2>
-                    <button onClick={() => setTick((v) => v + 1)}>刷新任务</button>
+                    <h2>{t('management.jobsTitle')}</h2>
+                    <button onClick={() => setTick((v) => v + 1)}>
+                      {t('management.refreshJobs')}
+                    </button>
                   </div>
-                  <p className="muted">任务在服务端继续执行，关闭页面不影响处理。</p>
+                  <p className="muted">{t('management.jobsServerNote')}</p>
                   {!jobs?.total && (
                     <p className="management-empty">
-                      {canImport
-                        ? '还没有网页任务。从概览开始导入或扫描。'
-                        : '还没有可查看的曲库任务。'}
+                      {canImport ? t('management.noJobsImporter') : t('management.noJobsViewer')}
                     </p>
                   )}
                   {jobs?.items.map((job) => (
@@ -681,36 +697,47 @@ export function Management({
                       <summary>
                         <div>
                           <strong>
-                            {job.kind === 'import' ? '导入音乐' : '扫描曲库'}
-                            {job.full ? ' · 全量标签' : ''}
+                            {job.kind === 'import'
+                              ? t('management.importMusic')
+                              : t('management.scanLibrary')}
+                            {job.full ? t('management.fullTags') : ''}
                           </strong>
                           <small>{timestamp(job.created_at)}</small>
                         </div>
-                        <span className={`job-status ${job.status}`}>{statuses[job.status]}</span>
+                        <span className={`job-status ${job.status}`}>
+                          {t(statuses[job.status])}
+                        </span>
                       </summary>
                       <div className="management-job-body">
                         <p className="muted">
-                          开始 {timestamp(job.started_at)} · 结束 {timestamp(job.finished_at)}
+                          {t('management.jobTimes', {
+                            start: timestamp(job.started_at),
+                            end: timestamp(job.finished_at),
+                          })}
                         </p>
                         {job.error && (
                           <p role="status">
                             {job.error === 'waiting_for_library'
-                              ? '等待其他曲库操作结束'
+                              ? t('management.jobWaitingForLibrary')
                               : job.error === 'worker_interrupted'
-                                ? '服务中断，任务未完成。可从概览重新提交。'
-                                : '执行未完成，请检查服务端日志后重新提交。'}
+                                ? t('management.jobWorkerInterrupted')
+                                : t('management.jobIncomplete')}
                           </p>
                         )}
-                        <RunDetail title="导入" run={job.import} />
-                        <RunDetail title="扫描" run={job.scan} />
+                        <RunDetail title={t('management.runImport')} run={job.import} />
+                        <RunDetail title={t('management.runScan')} run={job.scan} />
                         {job.status === 'queued' && !job.error && (
-                          <p className="muted">等待服务端开始处理。</p>
+                          <p className="muted">{t('management.jobQueuedNote')}</p>
                         )}
                       </div>
                     </details>
                   ))}
                   {jobs && jobs.total > 10 && (
-                    <Pagination page={jobs} onOffset={setJobOffset} unit="项" />
+                    <Pagination
+                      page={jobs}
+                      onOffset={setJobOffset}
+                      unit={t('management.unitItems')}
+                    />
                   )}
                 </section>
               )}
@@ -726,11 +753,9 @@ export function Management({
               {tab === 'providers' && canOwner && <ProviderSettings />}
               {tab === 'models' && canOwner && (
                 <section className="management-card">
-                  <h2>统一模型连接</h2>
-                  <p className="muted">
-                    个人连接与实例共享连接使用同一处配置。音乐助手、推荐和资料整理共同使用这些连接。
-                  </p>
-                  <button onClick={onOpenConnections}>管理统一模型连接</button>
+                  <h2>{t('management.modelsTitle')}</h2>
+                  <p className="muted">{t('management.modelsDescription')}</p>
+                  <button onClick={onOpenConnections}>{t('management.manageConnections')}</button>
                 </section>
               )}
               {tab === 'transcoding' && canOwner && <TranscodingSettings />}
@@ -742,11 +767,14 @@ export function Management({
               )}
               {tab === 'library-settings' && canOwner && (
                 <>
-                  <section className="management-library-settings" aria-label="当前音乐库设置">
+                  <section
+                    className="management-library-settings"
+                    aria-label={t('management.librarySettingsAria')}
+                  >
                     <LibrarySwitcher onChanged={onChanged} management />
                     <LyricScanEntry />
                     <section className="management-card">
-                      <h2>曲库设置</h2>
+                      <h2>{t('management.librarySettingsTitle')}</h2>
                       <form
                         className="library-settings-form"
                         onSubmit={(e) => {
@@ -755,7 +783,7 @@ export function Management({
                         }}
                       >
                         <label>
-                          曲库名称
+                          {t('management.libraryName')}
                           <input
                             required
                             maxLength={100}
@@ -767,7 +795,7 @@ export function Management({
                           className="primary"
                           disabled={busy || name.trim() === overview.preferences.name}
                         >
-                          {busy ? '保存中…' : '保存设置'}
+                          {busy ? t('management.saving') : t('management.saveSettings')}
                         </button>
                       </form>
                     </section>
@@ -777,23 +805,26 @@ export function Management({
               {tab === 'status' && canOwner && (
                 <>
                   <section className="management-card">
-                    <h2>服务状态</h2>
+                    <h2>{t('management.serverStatusTitle')}</h2>
                     <dl className="management-settings">
                       {[
-                        ['版本', overview.version],
-                        ['数据库版本', String(overview.schema_version)],
-                        ['运行数据', overview.data.path],
-                        ['服务端地址', `${overview.deployment.host}:${overview.deployment.port}`],
+                        [t('management.statusVersion'), overview.version],
+                        [t('management.statusSchemaVersion'), String(overview.schema_version)],
+                        [t('management.statusDataDir'), overview.data.path],
                         [
-                          '安全 Cookie',
+                          t('management.statusServerAddress'),
+                          `${overview.deployment.host}:${overview.deployment.port}`,
+                        ],
+                        [
+                          t('management.statusSecureCookie'),
                           overview.deployment.connection_policy &&
                           overview.deployment.connection_policy !== 'legacy'
-                            ? '按 HTTP / HTTPS 自动设置'
+                            ? t('management.cookieAuto')
                             : overview.deployment.cookie_secure
-                              ? '已启用'
-                              : '未启用',
+                              ? t('management.enabled')
+                              : t('management.notEnabled'),
                         ],
-                        ['媒体标签写回', '未启用'],
+                        [t('management.statusTagWriteback'), t('management.notEnabled')],
                       ].map(([key, value]) => (
                         <div key={key}>
                           <dt>{key}</dt>
@@ -802,8 +833,8 @@ export function Management({
                       ))}
                     </dl>
                     <p className="muted">
-                      路径与网络设置由服务端部署配置管理，修改后需重启服务。首次设置或重置密码使用{' '}
-                      <code>make docker-admin</code>。
+                      {t('management.deployNote')} <code>make docker-admin</code>
+                      {t('management.deployNotePeriod')}
                     </p>
                   </section>
                 </>

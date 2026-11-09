@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import type { Playlist } from './api';
 import { Icon } from './icons';
 
@@ -23,6 +24,7 @@ export function PlaylistMenu({
   onDelete: () => void;
   onFollow: () => void;
 }) {
+  const { t } = useTranslation();
   const menu = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -58,7 +60,7 @@ export function PlaylistMenu({
     <div
       className="playlist-context"
       role="menu"
-      aria-label={`${playlist.name}的歌单操作`}
+      aria-label={t('playlistMenu.ariaLabel', { name: playlist.name })}
       ref={menu}
       style={{
         left: Math.max(8, Math.min(x, window.innerWidth - 228)),
@@ -68,21 +70,21 @@ export function PlaylistMenu({
       <strong>{playlist.name}</strong>
       <button role="menuitem" onClick={onOpen}>
         <Icon name="playlist" />
-        打开歌单
+        {t('playlistMenu.open')}
       </button>
       <button role="menuitem" onClick={onFollow}>
         <Icon name="download" />
-        {following ? '关闭自动下载' : '自动下载歌单'}
+        {following ? t('playlistMenu.disableAutoDownload') : t('playlistMenu.enableAutoDownload')}
       </button>
       {playlist.kind !== 'favorites' && (
         <>
           <button role="menuitem" onClick={onEdit}>
             <Icon name="edit" />
-            编辑歌单
+            {t('playlistMenu.edit')}
           </button>
           <button role="menuitem" className="error" onClick={onDelete}>
             <Icon name="remove" />
-            删除歌单
+            {t('playlistMenu.delete')}
           </button>
         </>
       )}

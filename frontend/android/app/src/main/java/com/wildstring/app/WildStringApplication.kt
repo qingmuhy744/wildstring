@@ -22,6 +22,7 @@ import okhttp3.OkHttpClient
 class WildStringApplication : Application() {
     override fun onCreate() {
         super.onCreate()
+        AppLanguage.install(this)
         CrashHandler.install(this)
         restoreClassicLauncher()
     }

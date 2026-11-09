@@ -102,9 +102,9 @@ struct NowPlayingView: View {
                     .frame(width: 44, height: 44)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("关闭播放器")
+            .accessibilityLabel(L10n("nowPlaying.close"))
             Spacer()
-            Text("正在播放")
+            Text(L10n("nowPlaying.title"))
                 .font(.footnote)
                 .foregroundStyle(.secondary)
             Spacer()
@@ -114,7 +114,7 @@ struct NowPlayingView: View {
                 Button {
                     withAnimation(.easeInOut(duration: 0.2)) { showLyrics.toggle() }
                 } label: {
-                    Text("词")
+                    Text(L10n("nowPlaying.lyricsButton"))
                         .font(.footnote.bold())
                         .frame(width: 44, height: 44)
                         .background(
@@ -191,7 +191,7 @@ struct NowPlayingView: View {
                 }
                 progressSection
             } else {
-                ContentUnavailableView("暂无播放", systemImage: "music.note")
+                ContentUnavailableView(L10n("nowPlaying.noPlayback"), systemImage: "music.note")
             }
         }
         .padding(.horizontal, 24)
@@ -255,7 +255,7 @@ struct NowPlayingView: View {
                         .frame(width: 44, height: 44)
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel(isPodcast ? "后退 15 秒" : "上一首")
+                .accessibilityLabel(isPodcast ? L10n("nowPlaying.rewind15") : L10n("nowPlaying.previousTrack"))
                 Button {
                     Haptics.tap()
                     playback.togglePlayPause()
@@ -268,7 +268,7 @@ struct NowPlayingView: View {
                         .background(colorScheme == .dark ? Color.wildAccent : Color(red: 0.737, green: 0.329, blue: 0.22), in: Circle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel(playback.isPlaying ? "暂停" : "播放")
+                .accessibilityLabel(playback.isPlaying ? L10n("nowPlaying.pause") : L10n("nowPlaying.play"))
                 Button {
                     Haptics.tap()
                     if isPodcast {
@@ -282,7 +282,7 @@ struct NowPlayingView: View {
                         .frame(width: 44, height: 44)
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel(isPodcast ? "前进 30 秒" : "下一首")
+                .accessibilityLabel(isPodcast ? L10n("nowPlaying.forward30") : L10n("nowPlaying.nextTrack"))
                 Button {
                     Haptics.selection()
                     playback.cycleRepeatMode()
@@ -300,14 +300,14 @@ struct NowPlayingView: View {
                 sleepTimerMenu
                 AirPlayRouteButton()
                     .frame(width: 28, height: 28)
-                    .accessibilityLabel("隔空播放")
+                    .accessibilityLabel(L10n("nowPlaying.airPlay"))
                 Button {
                     showingQueue = true
                 } label: {
                     let count = (isPodcast && playback.podcastCloud != nil)
                         ? (playback.podcastCloud?.items.count ?? playback.items.count)
                         : playback.items.count
-                    Label("播放队列 · \(count)", systemImage: "list.bullet")
+                    Label(L10n("nowPlaying.queueCount", count), systemImage: "list.bullet")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
@@ -320,14 +320,14 @@ struct NowPlayingView: View {
 
     private var sleepTimerMenu: some View {
         Menu {
-            Button("15 分钟") { playback.setSleepTimer(minutes: 15) }
-            Button("30 分钟") { playback.setSleepTimer(minutes: 30) }
-            Button("45 分钟") { playback.setSleepTimer(minutes: 45) }
-            Button("60 分钟") { playback.setSleepTimer(minutes: 60) }
-            Button("播完本曲") { playback.sleepAfterCurrentTrack() }
+            Button(L10n("nowPlaying.sleepTimer15")) { playback.setSleepTimer(minutes: 15) }
+            Button(L10n("nowPlaying.sleepTimer30")) { playback.setSleepTimer(minutes: 30) }
+            Button(L10n("nowPlaying.sleepTimer45")) { playback.setSleepTimer(minutes: 45) }
+            Button(L10n("nowPlaying.sleepTimer60")) { playback.setSleepTimer(minutes: 60) }
+            Button(L10n("nowPlaying.sleepAfterCurrent")) { playback.sleepAfterCurrentTrack() }
             if sleepTimerActive {
                 Divider()
-                Button("关闭定时", role: .destructive) { playback.cancelSleepTimer() }
+                Button(L10n("nowPlaying.cancelSleepTimer"), role: .destructive) { playback.cancelSleepTimer() }
             }
         } label: {
             Label(sleepTimerLabel, systemImage: "moon.zzz")
@@ -341,12 +341,12 @@ struct NowPlayingView: View {
     }
 
     private var sleepTimerLabel: String {
-        if playback.pauseAfterCurrentTrack { return "播完本曲停止" }
+        if playback.pauseAfterCurrentTrack { return L10n("nowPlaying.stopAfterCurrent") }
         if let end = playback.sleepTimerEnd {
             let minutes = max(0, Int(ceil(end.timeIntervalSinceNow / 60)))
-            return "剩余 \(minutes) 分"
+            return L10n("nowPlaying.sleepTimerRemaining", minutes)
         }
-        return "定时"
+        return L10n("nowPlaying.sleepTimer")
     }
 
     @ViewBuilder
@@ -570,11 +570,11 @@ private struct ArtworkPreview: View {
                 }
                 .padding(24)
             }
-            .navigationTitle("封面")
+            .navigationTitle(L10n("nowPlaying.artwork"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("完成") { dismiss() }
+                    Button(L10n("nowPlaying.done")) { dismiss() }
                 }
             }
         }

@@ -23,6 +23,8 @@ import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import com.wildstring.app.AppLanguage
+import com.wildstring.app.R
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import com.google.common.util.concurrent.ListenableFuture
@@ -160,7 +162,7 @@ class PlaybackService : MediaSessionService() {
                     val owner = repository.session.cacheScope()
                     return if (owner != null && mediaItems.all { it.mediaMetadata.extras?.getString("profile") == owner })
                         com.google.common.util.concurrent.Futures.immediateFuture(mediaItems)
-                    else com.google.common.util.concurrent.Futures.immediateFailedFuture(SecurityException("服务器或账号已变化。"))
+                    else com.google.common.util.concurrent.Futures.immediateFailedFuture(SecurityException(AppLanguage.string(R.string.pb_svc_server_or_account_changed)))
                 }
                 override fun onConnectAsync(session: MediaSession, controller: MediaSession.ControllerInfo): ListenableFuture<MediaSession.ConnectionResult> {
                     val result = if (controller.uid == Process.myUid()) {

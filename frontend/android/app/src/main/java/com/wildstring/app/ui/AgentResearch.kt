@@ -1,5 +1,6 @@
 package com.wildstring.app.ui
 
+import com.wildstring.app.AppLanguage
 import com.wildstring.app.R
 import androidx.compose.ui.res.stringResource
 import androidx.compose.foundation.layout.*
@@ -21,7 +22,7 @@ import kotlinx.coroutines.launch
 @Composable internal fun ResearchChoice(label: String, value: String, choices: List<Pair<String, String>>, enabled: Boolean = true, changed: (String) -> Unit) {
     var expanded by remember { mutableStateOf(false) }
     Box {
-        OutlinedButton({ expanded = true }, enabled = enabled) { Text("$label：${choices.firstOrNull { it.first == value }?.second ?: value}") }
+        OutlinedButton({ expanded = true }, enabled = enabled) { Text(stringResource(R.string.agent_res_choice_button, label, choices.firstOrNull { it.first == value }?.second ?: value)) }
         DropdownMenu(expanded, { expanded = false }) { choices.forEach { (id, title) -> DropdownMenuItem(text = { Text(title) }, onClick = { changed(id); expanded = false }) } }
     }
 }
@@ -39,7 +40,7 @@ import kotlinx.coroutines.launch
         settings = vm.agent.request("search-settings"); preferences = vm.agent.request("assistant-preferences"); memories = vm.agent.all("memories")
         provider = settings!!.text("provider"); enabled = settings!!.flag("enabled"); budget = settings!!.number("daily_budget", 100).toString()
     }
-    LaunchedEffect(Unit) { action.run { load() }; if (action.message == "已完成") action.message = null }
+    LaunchedEffect(Unit) { action.run { load() }; if (action.message == AppLanguage.string(R.string.completed) || action.message == "\u5df2\u5b8c\u6210") action.message = null }
     LazyColumn(Modifier.fillMaxSize().testTag("agent-research"), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
             Text(stringResource(R.string.research_chat_search), style = MaterialTheme.typography.titleLarge)

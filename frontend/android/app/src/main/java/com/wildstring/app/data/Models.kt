@@ -1,6 +1,9 @@
 package com.wildstring.app.data
 
+import androidx.annotation.StringRes
 import com.google.gson.annotations.SerializedName
+import com.wildstring.app.AppLanguage
+import com.wildstring.app.R
 
 data class DiscSummary(val number: Int, @SerializedName("track_count") val trackCount: Int,
     @SerializedName("duration_ms") val durationMs: Long, val offset: Int)
@@ -12,12 +15,14 @@ data class Account(val id: String, val username: String,
     /** Interface language stored on the account: "auto" | "zh" | "en". */
     val language: String? = null) {
     val isOwner: Boolean get() = profile == "owner"
-    val profileLabel: String get() = when (profile) {
-        "owner" -> "所有者"
-        "librarian" -> "曲库管理员"
-        "editor" -> "资料编辑员"
-        else -> "听众"
+    @get:StringRes
+    val profileLabelRes: Int get() = when (profile) {
+        "owner" -> R.string.model_profile_owner
+        "librarian" -> R.string.model_profile_librarian
+        "editor" -> R.string.model_profile_editor
+        else -> R.string.model_profile_listener
     }
+    val profileLabel: String get() = AppLanguage.string(profileLabelRes)
 }
 data class ProfileUpdate(
     val version: Int,
@@ -43,16 +48,18 @@ data class Track(
     val podcast: PodcastTrackInfo? = null,
     @SerializedName("library_id") val libraryId: String? = null,
 ) {
-    val artist: String get() = artists.joinToString(" / ").ifBlank { "未知艺人" }
+    val artist: String get() = artists.joinToString(" / ").ifBlank { AppLanguage.string(R.string.model_artist_unknown) }
     val podcastEpisodeId: String? get() = podcastEpisodeId(id)
     val isPodcast: Boolean get() = podcastEpisodeId != null
     val mayHaveCover: Boolean get() = hasCover || !album.isNullOrBlank() || !albumId.isNullOrBlank() || isPodcast
     val coverId: String? get() = id.takeIf { mayHaveCover }
-    val unavailableReason: String? get() = when (status) {
-        "missing" -> "文件缺失"
-        "unreadable" -> "文件无法读取"
+    @get:StringRes
+    val unavailableReasonRes: Int? get() = when (status) {
+        "missing" -> R.string.model_unavailable_missing
+        "unreadable" -> R.string.model_unavailable_unreadable
         else -> null
     }
+    val unavailableReason: String? get() = unavailableReasonRes?.let { AppLanguage.string(it) }
     val isAvailable: Boolean get() = unavailableReason == null
 }
 data class PodcastTrackInfo(val podcastId: String, val coverUrl: String = "")

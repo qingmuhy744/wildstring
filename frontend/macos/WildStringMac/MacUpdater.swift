@@ -50,17 +50,17 @@ public enum MacUpdateError: LocalizedError, Equatable {
     public var errorDescription: String? {
         switch self {
         case .invalidJSON:
-            return "更新信息格式不正确"
+            return L10n("macUpdater.errorInvalidJSON")
         case .unstableRelease:
-            return "当前版本为预发布或草稿版本"
+            return L10n("macUpdater.errorUnstableRelease")
         case .invalidTag:
-            return "版本标签格式不符合规范"
+            return L10n("macUpdater.errorInvalidTag")
         case .networkFailed:
-            return "网络连接失败，请检查网络后重试"
+            return L10n("macUpdater.errorNetworkFailed")
         case .rateLimited:
-            return "检查更新过于频繁，请稍后再试"
+            return L10n("macUpdater.errorRateLimited")
         case .serverError(let code):
-            return "更新服务暂不可用 (HTTP \(code))"
+            return L10n("macUpdater.errorServerError", code)
         }
     }
 }
@@ -116,7 +116,7 @@ public enum MacUpdatePolicy {
             throw MacUpdateError.invalidTag
         }
         let body = (json["body"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let notes = (body?.isEmpty == false ? body : "暂无版本说明。") ?? "暂无版本说明。"
+        let notes = (body?.isEmpty == false ? body : L10n("macUpdater.noReleaseNotes")) ?? L10n("macUpdater.noReleaseNotes")
 
         let htmlString = (json["html_url"] as? String) ?? "\(repository)/releases/tag/\(tag)"
         let htmlURL = URL(string: htmlString) ?? URL(string: "\(repository)/releases/latest")!
@@ -228,7 +228,7 @@ public final class MacUpdater {
 
         let endpointString = MacUpdatePolicy.latestReleaseEndpoint
         guard let url = URL(string: endpointString) else {
-            finishError("更新检查地址无效", manual: manual)
+            finishError(L10n("macUpdater.invalidEndpoint"), manual: manual)
             return
         }
 
@@ -247,7 +247,7 @@ public final class MacUpdater {
         do {
             let (data, response) = try await session.data(for: request)
             guard let http = response as? HTTPURLResponse else {
-                finishError("服务器返回无效响应", manual: manual)
+                finishError(L10n("macUpdater.invalidResponse"), manual: manual)
                 return
             }
 

@@ -1,5 +1,8 @@
 package com.wildstring.app.data
 
+import com.wildstring.app.AppLanguage
+import com.wildstring.app.R
+
 /**
  * Pure podcast queue and auto-continue policy for contracts/podcast-queue.md.
  * Cloud reads and writes live in Repository; these functions never touch the network.
@@ -8,7 +11,7 @@ package com.wildstring.app.data
  */
 
 /** Shown when a queue write fails. Playback on this device still starts. */
-const val PODCAST_SYNC_FAILED = "暂时无法同步，本机播放不受影响"
+val PODCAST_SYNC_FAILED: String get() = AppLanguage.string(R.string.pod_qpol_sync_failed)
 
 const val PODCAST_QUEUE_LIMIT = 5000
 
@@ -234,12 +237,14 @@ fun podcastContinuePreferenceFor(
 
 fun podcastSyncFailureMessage(reason: String, headline: String = PODCAST_SYNC_FAILED): String {
     val detail = reason.trim()
-    return if (detail.isEmpty()) "$headline。可以重试。" else "$headline。$detail 可以重试。"
+    return if (detail.isEmpty()) AppLanguage.string(R.string.pod_qpol_sync_retry_empty, headline)
+    else AppLanguage.string(R.string.pod_qpol_sync_retry_detail, headline, detail)
 }
 
 fun podcastListFailure(reason: String): String {
     val text = reason.trim()
-    return if (text.contains("重试") || text.contains("请")) text else "$text 请重试。"
+    return if (text.contains("\u91cd\u8bd5") || text.contains("\u8bf7") || text.contains("retry", ignoreCase = true) || text.contains("please", ignoreCase = true)) text
+    else AppLanguage.string(R.string.pod_qpol_list_failure_suffix, text)
 }
 
 class PodcastQueueConflictException(val current: PodcastQueueSnapshot) : java.io.IOException("podcast_queue_conflict")

@@ -6,6 +6,8 @@ import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.TransferListener
 import com.google.gson.Gson
+import com.wildstring.app.AppLanguage
+import com.wildstring.app.R
 import com.wildstring.app.data.*
 import java.io.IOException
 import javax.inject.Inject
@@ -41,10 +43,10 @@ class PlaybackResolver @Inject constructor(private val session: SessionStore, pr
         else session.cacheScope()?.let { plans["$it:$uri"]?.value }
 
     private fun resolve(uri: String): PlaybackPlan {
-        val profile = session.cacheScope() ?: throw PlaybackResolutionException("登录已失效。")
-        val base = session.endpoint ?: throw PlaybackResolutionException("尚未连接服务器。")
+        val profile = session.cacheScope() ?: throw PlaybackResolutionException(AppLanguage.string(R.string.pb_res_login_expired))
+        val base = session.endpoint ?: throw PlaybackResolutionException(AppLanguage.string(R.string.pb_res_not_connected))
         val target = uri.toHttpUrl()
-        if (!ServerAddress.contains(base, target) || !target.encodedPath.endsWith("/stream")) throw PlaybackResolutionException("拒绝其他来源的音频。")
+        if (!ServerAddress.contains(base, target) || !target.encodedPath.endsWith("/stream")) throw PlaybackResolutionException(AppLanguage.string(R.string.pb_res_foreign_source_rejected))
         val key = "playback:$uri"
         val recent = synchronized(this) { plans["$profile:$uri"] }
         if (recent != null && android.os.SystemClock.elapsedRealtime() - recent.at < 15_000) return recent.value
@@ -55,27 +57,27 @@ class PlaybackResolver @Inject constructor(private val session: SessionStore, pr
             val probe = target.newBuilder().encodedPath(target.encodedPath.removeSuffix("/stream") + "/playback").build()
             client.newCall(Request.Builder().url(probe).build()).execute().use { response ->
                 if (!response.isSuccessful) throw PlaybackResolutionException(when (response.code) {
-                    401 -> "登录已失效，请重新登录。"
+                    401 -> AppLanguage.string(R.string.pb_res_login_expired_relogin)
                     404, 409 -> trackPlaybackMessage(response.code, response.peekBody(8192).string())
-                    429 -> "服务器转码繁忙，请稍后重试或切换原音。"
-                    503 -> "AAC 转码暂不可用，请重试或切换原音。"
-                    else -> "无法获取 AAC 播放信息，请重试或切换原音。"
+                    429 -> AppLanguage.string(R.string.pb_res_transcode_busy)
+                    503 -> AppLanguage.string(R.string.pb_res_transcode_unavailable)
+                    else -> AppLanguage.string(R.string.pb_res_info_failed)
                 })
                 val bytes = response.peekBody(128 * 1024L + 1).bytes()
-                if (bytes.size > 128 * 1024) throw PlaybackResolutionException("播放信息过大。")
+                if (bytes.size > 128 * 1024) throw PlaybackResolutionException(AppLanguage.string(R.string.pb_res_info_too_large))
                 runCatching { gson.fromJson(String(bytes, Charsets.UTF_8), PlaybackPlan::class.java) }
-                    .getOrElse { throw PlaybackResolutionException("服务器播放信息无效。") }
+                    .getOrElse { throw PlaybackResolutionException(AppLanguage.string(R.string.pb_res_invalid_info)) }
             }
         } catch (error: IOException) {
             if (error is javax.net.ssl.SSLException || error is PlaybackResolutionException || session.cacheScope() != profile) throw error
             cached ?: throw error
         }
-        if (profile != session.cacheScope()) throw PlaybackResolutionException("登录已失效。")
+        if (profile != session.cacheScope()) throw PlaybackResolutionException(AppLanguage.string(R.string.pb_res_login_expired))
         try {
             require(info.mode in listOf("original", "transcode") && info.startMs >= 0)
             require(info.mode != "transcode" || (info.output.codec == "aac" && info.durationMs > info.startMs && info.output.bitrateKbps in listOf(128, 192, 256, 320)))
             PlaybackRequest.stream(base, target, info.streamUrl)
-        } catch (_: Exception) { throw PlaybackResolutionException("服务器播放信息无效。") }
+        } catch (_: Exception) { throw PlaybackResolutionException(AppLanguage.string(R.string.pb_res_invalid_info)) }
         synchronized(this) { plans["$profile:$uri"] = Resolved(info, android.os.SystemClock.elapsedRealtime()) }
         cache.put(key, gson.toJson(info).toByteArray(), profile)
         changed.tryEmit(Unit)
@@ -94,7 +96,7 @@ class PlaybackResolver @Inject constructor(private val session: SessionStore, pr
                 }
                 if (!PlaybackRequest.isAac(uri)) return source.open(spec)
                 val plan = resolve(uri)
-                val base = session.endpoint ?: throw PlaybackResolutionException("尚未连接服务器。")
+                val base = session.endpoint ?: throw PlaybackResolutionException(AppLanguage.string(R.string.pb_res_not_connected))
                 val target = PlaybackRequest.stream(base, uri.toHttpUrl(), plan.streamUrl)
                 return source.open(spec.withUri(Uri.parse(target.toString())))
             }

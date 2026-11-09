@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ApiError, api } from './api';
 
 type BackfillRun = {
@@ -53,15 +54,16 @@ type MergeResult = {
 };
 
 const BASE = '/podcasts/identity';
-const REASONS: Record<string, string> = {
-  itunes_id: '同一个 Apple 编号',
-  feed: '订阅地址相同或重定向到同一地址',
-  title: '名称相同',
+const REASON_KEYS: Record<string, string> = {
+  itunes_id: 'reasonItunesId',
+  feed: 'reasonFeed',
+  title: 'reasonTitle',
 };
 
 const pairKey = (pair: DuplicatePair) => pair.podcasts.map((show) => show.id).join('+');
 
 export function PodcastIdentityAdmin() {
+  const { t } = useTranslation();
   const [status, setStatus] = useState<BackfillStatus | null>(null);
   const [pairs, setPairs] = useState<DuplicatePair[]>([]);
   const [hidden, setHidden] = useState(false);
@@ -83,10 +85,11 @@ export function PodcastIdentityAdmin() {
       return value;
     } catch (error) {
       if (error instanceof ApiError && error.status === 403) setHidden(true);
-      else setMessage(error instanceof Error ? error.message : '读取失败');
+      else
+        setMessage(error instanceof Error ? error.message : t('podcastIdentityAdmin.readFailed'));
       return null;
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     void loadStatus().then((value) => {
@@ -120,7 +123,9 @@ export function PodcastIdentityAdmin() {
         }),
       );
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : '无法开始回填');
+      setMessage(
+        error instanceof Error ? error.message : t('podcastIdentityAdmin.startBackfillFailed'),
+      );
     } finally {
       setBusy('');
     }
@@ -136,14 +141,18 @@ export function PodcastIdentityAdmin() {
         body: JSON.stringify({ podcast_ids: pair.podcasts.map((show) => show.id) }),
       });
       setMessage(
-        `已合并：移入 ${result.episodes_moved} 集，对齐 ${result.episodes_matched} 集，` +
-          `转移 ${result.follows_moved} 个关注、${result.progress_moved + result.progress_replaced} 条进度、` +
-          `${result.downloads_moved} 个已下载文件。`,
+        t('podcastIdentityAdmin.mergeSuccess', {
+          episodesMoved: result.episodes_moved,
+          episodesMatched: result.episodes_matched,
+          followsMoved: result.follows_moved,
+          progressMoved: result.progress_moved + result.progress_replaced,
+          downloadsMoved: result.downloads_moved,
+        }),
       );
       setConfirming('');
       await Promise.all([loadDuplicates(), loadStatus()]);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : '合并失败');
+      setMessage(error instanceof Error ? error.message : t('podcastIdentityAdmin.mergeFailed'));
     } finally {
       setBusy('');
     }
@@ -154,32 +163,38 @@ export function PodcastIdentityAdmin() {
   const possible = pairs.filter((pair) => pair.confidence === 'possible');
 
   return (
-    <section className="management-card" aria-label="播客去重与回填">
-      <h2>播客去重与回填</h2>
-      <p className="muted">
-        为早期添加的节目补上 Apple Podcasts 编号：按节目名称搜索，但只有 Apple 记录的 RSS
-        地址和本节目的地址（或它重定向到的地址）一致时才采用，绝不只凭名称匹配。查询与用户搜索共用
-        Apple
-        的调用额度，并给用户留出余量，所以节目多时会慢慢进行。服务器启动几分钟后会自动回填一次缺少编号的节目（未找到的
-        7 天内不再重试），自动回填只补编号、不会合并，重复节目需要在下面确认。
-      </p>
+    <section className="management-card" aria-label={t('podcastIdentityAdmin.cardTitle')}>
+      <h2>{t('podcastIdentityAdmin.cardTitle')}</h2>
+      <p className="muted">{t('podcastIdentityAdmin.description')}</p>
       {status && (
         <p>
-          共 {status.total} 个节目，已有 Apple 编号 {status.with_itunes_id} 个，待检查{' '}
-          {status.unchecked} 个。
+          {t('podcastIdentityAdmin.statusSummary', {
+            total: status.total,
+            withId: status.with_itunes_id,
+            unchecked: status.unchecked,
+          })}
         </p>
       )}
       {run && (
-        <p role="status" aria-label="回填进度">
+        <p role="status" aria-label={t('podcastIdentityAdmin.backfillProgressAria')}>
           {status?.running
             ? status.paused_until
-              ? `等待 Apple 频率限制…已检查 ${run.processed} 个`
-              : `正在检查…已检查 ${run.processed} 个`
-            : `${run.trigger === 'auto' ? '上次回填（启动后自动）' : '上次回填'}：检查 ${run.processed} 个`}
-          ，匹配 {run.matched}，未找到 {run.no_match}，失败 {run.failed}
-          {run.ambiguous ? `（${run.ambiguous} 个在 Apple 有多个编号，取最早的）` : ''}
+              ? t('podcastIdentityAdmin.waitingRateLimit', { processed: run.processed })
+              : t('podcastIdentityAdmin.checking', { processed: run.processed })
+            : run.trigger === 'auto'
+              ? t('podcastIdentityAdmin.lastBackfillAuto', { processed: run.processed })
+              : t('podcastIdentityAdmin.lastBackfillManual', { processed: run.processed })}
+          {t('podcastIdentityAdmin.statsTail', {
+            matched: run.matched,
+            noMatch: run.no_match,
+            failed: run.failed,
+          })}
+          {run.ambiguous ? t('podcastIdentityAdmin.ambiguousCount', { count: run.ambiguous }) : ''}
           {!status?.running && run.duplicates
-            ? `；发现已核实重复 ${run.duplicates.verified} 组、疑似 ${run.duplicates.possible} 组，待管理员确认`
+            ? t('podcastIdentityAdmin.duplicatesFound', {
+                verified: run.duplicates.verified,
+                possible: run.duplicates.possible,
+              })
             : ''}
         </p>
       )}
@@ -190,7 +205,7 @@ export function PodcastIdentityAdmin() {
           disabled={Boolean(busy) || status?.running}
           onChange={(event) => setRetryUnmatched(event.target.checked)}
         />
-        <span>重新检查此前未找到的节目</span>
+        <span>{t('podcastIdentityAdmin.retryUnmatched')}</span>
       </label>
       <div className="podcast-search-settings-actions">
         <button
@@ -198,18 +213,21 @@ export function PodcastIdentityAdmin() {
           disabled={Boolean(busy) || !status || status.running}
           onClick={() => void start()}
         >
-          {status?.running ? '回填进行中…' : '开始回填'}
+          {status?.running
+            ? t('podcastIdentityAdmin.backfillRunning')
+            : t('podcastIdentityAdmin.startBackfill')}
         </button>
       </div>
 
-      <h3>重复节目</h3>
-      <p className="muted">
-        合并时保留哪个节目由服务器决定：订阅地址没有重定向的优先；两个都重定向或都没有时，保留关注更多的。
-      </p>
+      <h3>{t('podcastIdentityAdmin.duplicateShowsHeading')}</h3>
+      <p className="muted">{t('podcastIdentityAdmin.mergeRuleHelp')}</p>
       {pairs.length === 0 ? (
-        <p className="muted">没有发现重复的节目。</p>
+        <p className="muted">{t('podcastIdentityAdmin.noDuplicatesFound')}</p>
       ) : (
-        <ul className="podcast-duplicates" aria-label="重复节目">
+        <ul
+          className="podcast-duplicates"
+          aria-label={t('podcastIdentityAdmin.duplicateShowsHeading')}
+        >
           {[...verified, ...possible].map((pair) => {
             const id = pairKey(pair);
             const keepId = pair.suggested_keep_id;
@@ -220,10 +238,20 @@ export function PodcastIdentityAdmin() {
                   <span
                     className={`podcast-duplicate-badge ${isVerified ? 'is-verified' : 'is-possible'}`}
                   >
-                    {isVerified ? '已核实' : '疑似'}
+                    {isVerified
+                      ? t('podcastIdentityAdmin.verified')
+                      : t('podcastIdentityAdmin.possible')}
                   </span>{' '}
-                  {pair.reasons.map((reason) => REASONS[reason] || reason).join('、')}
-                  {pair.itunes_id ? `（Apple 编号 ${pair.itunes_id}）` : ''}
+                  {pair.reasons
+                    .map((reason) =>
+                      REASON_KEYS[reason]
+                        ? t(`podcastIdentityAdmin.${REASON_KEYS[reason]}`)
+                        : reason,
+                    )
+                    .join(t('podcastIdentityAdmin.separator'))}
+                  {pair.itunes_id
+                    ? t('podcastIdentityAdmin.appleIdSuffix', { id: pair.itunes_id })
+                    : ''}
                 </p>
                 <div className="podcast-duplicate-shows">
                   {pair.podcasts.map((show) => (
@@ -240,17 +268,23 @@ export function PodcastIdentityAdmin() {
                           {isVerified && keepId === show.id && (
                             <>
                               {' '}
-                              <span className="podcast-duplicate-badge is-verified">将保留</span>
+                              <span className="podcast-duplicate-badge is-verified">
+                                {t('podcastIdentityAdmin.willKeep')}
+                              </span>
                             </>
                           )}
                         </span>
                         <small className="podcast-duplicate-feed">
                           {show.feed_url}
-                          {show.redirects ? '（已重定向）' : ''}
+                          {show.redirects ? t('podcastIdentityAdmin.redirected') : ''}
                         </small>
                         <small>
-                          关注 {show.followers} · 单集 {show.episodes} · 已下载 {show.downloaded}
-                          {show.itunes_id ? '' : ' · 无 Apple 编号'}
+                          {t('podcastIdentityAdmin.showMeta', {
+                            followers: show.followers,
+                            episodes: show.episodes,
+                            downloaded: show.downloaded,
+                            noItunesId: show.itunes_id ? '' : t('podcastIdentityAdmin.noAppleId'),
+                          })}
                         </small>
                       </span>
                     </div>
@@ -259,22 +293,22 @@ export function PodcastIdentityAdmin() {
                 {isVerified ? (
                   confirming === id ? (
                     <div className="podcast-search-settings-actions">
-                      <span>
-                        把另一个节目的单集、关注、播放进度和已下载文件并入标为「将保留」的节目，然后删除它？
-                      </span>
+                      <span>{t('podcastIdentityAdmin.confirmMergePrompt')}</span>
                       <button
                         type="button"
                         disabled={Boolean(busy)}
                         onClick={() => void merge(pair)}
                       >
-                        {busy === id ? '合并中…' : '确认合并'}
+                        {busy === id
+                          ? t('podcastIdentityAdmin.merging')
+                          : t('podcastIdentityAdmin.confirmMerge')}
                       </button>
                       <button
                         type="button"
                         disabled={Boolean(busy)}
                         onClick={() => setConfirming('')}
                       >
-                        取消
+                        {t('podcastIdentityAdmin.cancel')}
                       </button>
                     </div>
                   ) : (
@@ -284,14 +318,12 @@ export function PodcastIdentityAdmin() {
                         disabled={Boolean(busy)}
                         onClick={() => setConfirming(id)}
                       >
-                        合并…
+                        {t('podcastIdentityAdmin.mergeButton')}
                       </button>
                     </div>
                   )
                 ) : (
-                  <p className="muted">
-                    可信度不足，不会合并。请人工核对；如果确是同一节目，先运行回填核实 Apple 编号。
-                  </p>
+                  <p className="muted">{t('podcastIdentityAdmin.lowConfidenceHelp')}</p>
                 )}
               </li>
             );

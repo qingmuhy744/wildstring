@@ -1,5 +1,7 @@
 package com.wildstring.app.ui
 
+import com.wildstring.app.R
+import androidx.compose.ui.res.stringResource
 import android.os.SystemClock
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
@@ -84,11 +86,14 @@ import kotlin.math.roundToInt
     val secondaryStyle = MaterialTheme.typography.bodyMedium.copy(fontSize = (15 * scale).sp, lineHeight = (23 * scale).sp,
         textAlign = TextAlign.Center)
     val active = if (lyrics.kind == "synced") lines.indexOfLast { (it.timeMs ?: Long.MAX_VALUE) <= renderPosition } else -1
+    val toggleVisualsLabel = stringResource(R.string.lyric_vp_toggle_lyrics_animation)
+    val viewArtworkLabel = stringResource(R.string.lyric_vp_view_artwork)
+    val selectLineTimeLabel = stringResource(R.string.lyric_vp_select_line_time)
     BoxWithConstraints(modifier.testTag("lyrics-viewport").clipToBounds().pointerInput(onBlank, onArtwork) {
         detectTapGestures(onLongPress = { onArtwork() }, onTap = { onBlank() })
     }.semantics {
-        customActions = listOf(CustomAccessibilityAction("切换歌词与播放动画") { onBlank(); true },
-            CustomAccessibilityAction("查看大封面") { onArtwork(); true })
+        customActions = listOf(CustomAccessibilityAction(toggleVisualsLabel) { onBlank(); true },
+            CustomAccessibilityAction(viewArtworkLabel) { onArtwork(); true })
     }) {
         val hasLanguageChips = remember(lines) { lines.any { !it.translation.isNullOrBlank() || !it.romanization.isNullOrBlank() } }
         val baseTopPadding = if (hasLanguageChips) 48.dp else 24.dp
@@ -113,21 +118,34 @@ import kotlin.math.roundToInt
         val topPadding = if (isShortLyrics) {
             with(density) { ((viewportHeightPx - totalContentHeightPx) / 2f).coerceAtLeast(baseTopPaddingPx).toDp() }
         } else {
-            baseTopPadding
+            maxHeight / 2
         }
         val bottomPadding = if (isShortLyrics) topPadding else maxHeight / 2
         val topPaddingPx = with(density) { topPadding.toPx() }
-        val halfViewportPx = with(density) { (maxHeight / 2).toPx() } - topPaddingPx
+        val centerOffsetPx = viewportHeightPx / 2f - topPaddingPx
+        val topRestCenterPx = (viewportHeightPx / 2f - baseTopPaddingPx).coerceAtLeast(0f)
+        val topRestScrollPx = if (isShortLyrics) 0f else (topPaddingPx - baseTopPaddingPx).coerceAtLeast(0f)
         fun lineCenterFromTop(index: Int): Float {
             var sum = 0
             for (i in 0 until index) sum += measuredHeight(i)
             return sum + measuredHeight(index) / 2f
         }
+        fun scrollPosForOffsetFromTop(offsetFromTopPx: Float): Pair<Int, Int> {
+            if (lines.isEmpty()) return 0 to 0
+            var remaining = offsetFromTopPx.roundToInt().coerceAtLeast(0)
+            for (i in 0 until lines.lastIndex) {
+                val h = measuredHeight(i)
+                if (remaining < h) return i to remaining
+                remaining -= h
+            }
+            return lines.lastIndex to remaining
+        }
         val list = remember(lyrics) {
-            if (active > 0 && active in lines.indices && lineCenterFromTop(active) > halfViewportPx) {
-                LazyListState(active, (measuredHeight(active) / 2f - halfViewportPx).roundToInt())
+            if (active > 0 && active in lines.indices && lineCenterFromTop(active) > topRestCenterPx) {
+                LazyListState(active, (measuredHeight(active) / 2f - centerOffsetPx).roundToInt())
             } else {
-                LazyListState(0, 0)
+                val (firstIndex, firstOffset) = scrollPosForOffsetFromTop(topRestScrollPx)
+                LazyListState(firstIndex, firstOffset)
             }
         }
         val candidate by remember(list) {
@@ -141,15 +159,26 @@ import kotlin.math.roundToInt
         suspend fun centerLine(index: Int, animate: Boolean = true) {
             val layout = snapshotFlow { list.layoutInfo }.first { it.visibleItemsInfo.isNotEmpty() }
             val center = (layout.viewportStartOffset + layout.viewportEndOffset) / 2f
-            val shouldStayAtTop = isShortLyrics || index <= 0 || lineCenterFromTop(index) <= halfViewportPx
+            val shouldStayAtTop = isShortLyrics || index <= 0 || lineCenterFromTop(index) <= topRestCenterPx
             if (shouldStayAtTop) {
-                if (list.firstVisibleItemIndex == 0 && list.firstVisibleItemScrollOffset == 0) return
+                val (targetIndex, targetOffset) = scrollPosForOffsetFromTop(topRestScrollPx)
+                val item0 = layout.visibleItemsInfo.firstOrNull { it.index == 0 }
                 if (!animate) {
-                    list.scrollToItem(0, 0)
-                } else if (list.firstVisibleItemIndex == 0) {
-                    list.animateScrollBy(-list.firstVisibleItemScrollOffset.toFloat(), tween(480, easing = FastOutSlowInEasing))
+                    if (item0 != null) {
+                        val distance = item0.offset + topRestScrollPx
+                        if (abs(distance) > .5f) list.scrollBy(distance)
+                    } else {
+                        list.scrollToItem(targetIndex, targetOffset)
+                    }
+                    return
+                }
+                if (item0 != null) {
+                    val distance = item0.offset + topRestScrollPx
+                    if (abs(distance) > .5f) {
+                        list.animateScrollBy(distance, tween(480, easing = FastOutSlowInEasing))
+                    }
                 } else {
-                    list.animateScrollToItem(0, 0)
+                    list.animateScrollToItem(targetIndex, targetOffset)
                 }
                 return
             }
@@ -194,7 +223,12 @@ import kotlin.math.roundToInt
             }
         }
         val fadeEdge = with(density) { 44.dp.toPx() }
-        val showTopFade = list.canScrollBackward
+        val showTopFade by remember(list, topRestScrollPx) {
+            derivedStateOf {
+                val first = list.layoutInfo.visibleItemsInfo.firstOrNull() ?: return@derivedStateOf false
+                first.index > 0 || first.offset < -topRestScrollPx - 1f
+            }
+        }
         LazyColumn(state = list, contentPadding = PaddingValues(top = topPadding, bottom = bottomPadding),
             modifier = Modifier.fillMaxSize().testTag("lyric-scroll")
                 .graphicsLayer(compositingStrategy = CompositingStrategy.Offscreen)
@@ -233,7 +267,7 @@ import kotlin.math.roundToInt
                     val selection = if (line.timeMs != null) Modifier.combinedClickable(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null,
-                        onClickLabel = "选择歌词时间", onLongClickLabel = "查看大封面",
+                        onClickLabel = selectLineTimeLabel, onLongClickLabel = viewArtworkLabel,
                         onLongClick = onArtwork, hapticFeedbackEnabled = false, onClick = selectLine) else Modifier
                     val translation = line.translation?.takeIf { showTranslation && it.isNotBlank() }
                     val translationFirst = translation != null && containsCjk(translation) && !containsCjk(line.text)
@@ -258,19 +292,19 @@ import kotlin.math.roundToInt
         }
         Row(Modifier.align(Alignment.TopEnd).padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             if (lines.any { !it.translation.isNullOrBlank() })
-                FilterChip(showTranslation, { showTranslation = !showTranslation }, { Text("译文") }, modifier = Modifier.testTag("lyric-translation-toggle"))
+                FilterChip(showTranslation, { showTranslation = !showTranslation }, { Text(stringResource(R.string.lyric_vp_translation)) }, modifier = Modifier.testTag("lyric-translation-toggle"))
             if (lines.any { !it.romanization.isNullOrBlank() })
-                FilterChip(showRomanization, { showRomanization = !showRomanization }, { Text("音译") }, modifier = Modifier.testTag("lyric-romanization-toggle"))
+                FilterChip(showRomanization, { showRomanization = !showRomanization }, { Text(stringResource(R.string.lyric_vp_romanization)) }, modifier = Modifier.testTag("lyric-romanization-toggle"))
         }
         if (!follow) {
-            TextButton({ follow = true }, Modifier.align(Alignment.TopStart)) { Text("回到当前歌词", fontSize = 11.sp) }
+            TextButton({ follow = true }, Modifier.align(Alignment.TopStart)) { Text(stringResource(R.string.lyric_vp_resume_follow), fontSize = 11.sp) }
             val target = candidate?.let { lines.getOrNull(it)?.timeMs }
             if (target != null) Row(Modifier.align(Alignment.Center).fillMaxWidth().testTag("lyric-seek-preview"),
                 verticalAlignment = Alignment.CenterVertically) {
                 Text(formatTime(target), fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 HorizontalDivider(Modifier.weight(1f).padding(horizontal = 8.dp), color = MaterialTheme.colorScheme.onSurface.copy(alpha = .12f))
                 IconButton({ feedback(TactileKind.Tap); onSeek(target); follow = true }, Modifier.testTag("lyric-seek-confirm")) {
-                    Icon(Icons.Default.PlayArrow, "跳转到 ${formatTime(target)}")
+                    Icon(Icons.Default.PlayArrow, stringResource(R.string.lyric_vp_jump_to_time, formatTime(target)))
                 }
             }
         }

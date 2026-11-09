@@ -7,7 +7,7 @@ extension PodcastEpisode {
         PlaybackService.Item(
             trackID: "podcast_ep_\(id)",
             title: title,
-            artist: "电台",
+            artist: L10n("podcasts.defaultArtist"),
             album: nil,
             hasCover: false,
             streamPath: "api/v1/podcasts/episodes/\(id)/stream?proxy=1&cache=1"
@@ -32,7 +32,7 @@ struct PodcastsView: View {
                     PodcastUnifiedQueueView(client: client, playback: playback)
                 } label: {
                     HStack {
-                        Label("待播列表", systemImage: "list.bullet")
+                        Label(L10n("podcasts.pendingQueue"), systemImage: "list.bullet")
                         Spacer()
                         if pendingCount > 0 {
                             Text("\(pendingCount)")
@@ -45,7 +45,7 @@ struct PodcastsView: View {
                     Button {
                         playPendingQueue()
                     } label: {
-                        Label("播放待播 (\(pendingCount))", systemImage: "play.fill")
+                        Label(L10n("podcasts.playPendingQueueCount", pendingCount), systemImage: "play.fill")
                             .fontWeight(.semibold)
                     }
                 }
@@ -54,9 +54,9 @@ struct PodcastsView: View {
                 }
                 if shows.isEmpty, !isLoading {
                     ContentUnavailableView(
-                        "还没有订阅",
+                        L10n("podcasts.emptyShowsTitle"),
                         systemImage: "antenna.radiowaves.left.and.right",
-                        description: Text("点左上角的“探索”添加节目。")
+                        description: Text(L10n("podcasts.emptyShowsDescription"))
                     )
                 }
                 ForEach(shows) { show in
@@ -78,13 +78,13 @@ struct PodcastsView: View {
                         .foregroundStyle(.red)
                 }
             }
-            .navigationTitle("电台")
+            .navigationTitle(L10n("podcasts.title"))
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     NavigationLink {
                         PodcastDiscoverView(client: client, playback: playback)
                     } label: {
-                        Label("探索", systemImage: "safari")
+                        Label(L10n("podcasts.discover"), systemImage: "safari")
                     }
                 }
             }
@@ -101,10 +101,10 @@ struct PodcastsView: View {
     }
 
     private func subtitle(_ show: PodcastSummary) -> String {
-        let author = show.author.isEmpty ? "电台" : show.author
+        let author = show.author.isEmpty ? L10n("podcasts.defaultArtist") : show.author
         return show.unplayedEpisodes > 0
-            ? "\(author) · 还有 \(show.unplayedEpisodes) 集可听"
-            : "\(author) · 共 \(show.totalEpisodes) 集"
+            ? L10n("podcasts.showSubtitleUnplayed", author, show.unplayedEpisodes)
+            : L10n("podcasts.showSubtitleTotal", author, show.totalEpisodes)
     }
 
     private func load() async {
@@ -145,11 +145,11 @@ private struct PodcastDetailView: View {
         List {
             if let detail {
                 Section {
-                    Text(detail.podcast.description.isEmpty ? "没有简介" : detail.podcast.description)
+                    Text(detail.podcast.description.isEmpty ? L10n("podcasts.noDescription") : detail.podcast.description)
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                     HStack(spacing: 12) {
-                        Button(detail.podcast.followed ? "取消订阅" : "订阅") {
+                        Button(detail.podcast.followed ? L10n("podcasts.unfollow") : L10n("podcasts.follow")) {
                             Task { await toggleFollow(detail.podcast) }
                         }
                         let pendingQueueCount = playback.podcastCloud?.unifiedPendingEpisodes.count ?? 0
@@ -157,7 +157,7 @@ private struct PodcastDetailView: View {
                             Button {
                                 playPendingQueue()
                             } label: {
-                                Label("播放待播 (\(pendingQueueCount))", systemImage: "play.fill")
+                                Label(L10n("podcasts.playPendingQueueCount", pendingQueueCount), systemImage: "play.fill")
                                     .fontWeight(.semibold)
                             }
                         }
@@ -174,18 +174,18 @@ private struct PodcastDetailView: View {
                     }
                 }
                 Section {
-                    Picker("单集筛选", selection: $episodeFilter) {
-                        Text("全部").tag("all")
-                        Text("未播").tag("unplayed")
-                        Text("已播").tag("completed")
-                        Text("收藏").tag("favorite")
+                    Picker(L10n("podcasts.episodeFilter"), selection: $episodeFilter) {
+                        Text(L10n("podcasts.filterAll")).tag("all")
+                        Text(L10n("podcasts.filterUnplayed")).tag("unplayed")
+                        Text(L10n("podcasts.filterCompleted")).tag("completed")
+                        Text(L10n("podcasts.filterFavorite")).tag("favorite")
                     }
                     .pickerStyle(.segmented)
                 }
-                Section("单集") {
+                Section(L10n("podcasts.episodesSection")) {
                     let displayedEpisodes = filteredEpisodes(detail.episodes)
                     if displayedEpisodes.isEmpty {
-                        Text("暂无符合筛选条件的单集")
+                        Text(L10n("podcasts.noMatchingEpisodes"))
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                     }
@@ -208,7 +208,7 @@ private struct PodcastDetailView: View {
                                     .foregroundStyle(isQueued ? Color.secondary : Color.accentColor)
                             }
                             .buttonStyle(.plain)
-                            .accessibilityLabel(isQueued ? "从待播移除" : "加入待播")
+                            .accessibilityLabel(isQueued ? L10n("podcasts.removeFromQueue") : L10n("podcasts.addToQueue"))
 
                             Button {
                                 choose(episode, in: detail.episodes)
@@ -224,7 +224,7 @@ private struct PodcastDetailView: View {
                                             .lineLimit(2)
                                             .foregroundStyle(completed ? .secondary : .primary)
                                     }
-                                    Text(completed ? "已听完 · \(clock(max(episode.durationSeconds, 0)))" : progressText(episode))
+                                    Text(completed ? L10n("podcasts.completedDuration", clock(max(episode.durationSeconds, 0))) : progressText(episode))
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                 }
@@ -233,8 +233,8 @@ private struct PodcastDetailView: View {
                             .buttonStyle(.plain)
 
                             Menu {
-                                Button("下一集播放") { enqueue(episode, next: true) }
-                                Button(isQueued ? "从待播移除" : "加入待播") {
+                                Button(L10n("podcasts.playNext")) { enqueue(episode, next: true) }
+                                Button(isQueued ? L10n("podcasts.removeFromQueue") : L10n("podcasts.addToQueue")) {
                                     if isQueued {
                                         playback.podcastCloud?.removeEpisode(episode.id)
                                     } else {
@@ -242,17 +242,17 @@ private struct PodcastDetailView: View {
                                     }
                                 }
                                 Divider()
-                                Button(completed ? "标为未听" : "标为已听完") {
+                                Button(completed ? L10n("podcasts.markUnplayed") : L10n("podcasts.markCompleted")) {
                                     Task { await toggleCompleted(episode) }
                                 }
-                                Button(isFav ? "取消收藏" : "单集收藏") {
+                                Button(isFav ? L10n("podcasts.unfavoriteEpisode") : L10n("podcasts.favoriteEpisode")) {
                                     Task { await toggleFavorite(episode) }
                                 }
                             } label: {
                                 Image(systemName: "ellipsis")
                                     .frame(width: 32, height: 32)
                             }
-                            .accessibilityLabel("\(episode.title)的更多操作")
+                            .accessibilityLabel(L10n("podcasts.moreActionsForEpisode", episode.title))
                         }
                     }
                 }
@@ -266,33 +266,33 @@ private struct PodcastDetailView: View {
                 Text(message).font(.caption).foregroundStyle(.red)
             }
         }
-        .navigationTitle(detail?.podcast.title ?? "节目")
+        .navigationTitle(detail?.podcast.title ?? L10n("podcasts.defaultTitle"))
         .navigationBarTitleDisplayMode(.inline)
         .task {
             await load()
             await playback.podcastCloud?.refreshPreferences()
         }
         .confirmationDialog(
-            "从上次的位置继续？",
+            L10n("podcasts.resumeDialogTitle"),
             isPresented: Binding(
                 get: { resumeEpisode != nil },
                 set: { if !$0 { resumeEpisode = nil } }
             ),
             titleVisibility: .visible
         ) {
-            Button("继续") {
+            Button(L10n("podcasts.resume")) {
                 if let episode = resumeEpisode, let detail {
                     start(episode, in: detail.episodes, at: Double(episode.positionSeconds))
                 }
                 resumeEpisode = nil
             }
-            Button("从头播放") {
+            Button(L10n("podcasts.playFromBeginning")) {
                 if let episode = resumeEpisode, let detail {
                     start(episode, in: detail.episodes, at: 0)
                 }
                 resumeEpisode = nil
             }
-            Button("取消", role: .cancel) { resumeEpisode = nil }
+            Button(L10n("podcasts.cancel"), role: .cancel) { resumeEpisode = nil }
         }
     }
 
@@ -300,10 +300,10 @@ private struct PodcastDetailView: View {
         let total = max(episode.durationSeconds, 0)
         let position = min(max(episode.positionSeconds, 0), total > 0 ? total : episode.positionSeconds)
         if position > 0, total > 0 {
-            return "听到 \(clock(position)) / \(clock(total))"
+            return L10n("podcasts.listenedProgress", clock(position), clock(total))
         }
         if total > 0 { return clock(total) }
-        return "时长未知"
+        return L10n("podcasts.durationUnknown")
     }
 
     private func clock(_ seconds: Int) -> String {
@@ -348,12 +348,12 @@ private struct PodcastDetailView: View {
 
     private func enqueue(_ episode: PodcastEpisode, next: Bool) {
         guard let cloud = playback.podcastCloud else {
-            message = "暂时无法加入待播。请重新登录后再试。"
+            message = L10n("podcasts.enqueueFailedAuth")
             return
         }
         let current = PlaybackService.podcastEpisodeID(playback.currentItem?.trackID ?? "")
         cloud.enqueueEpisode(episode.id, next: next, currentEpisodeID: current)
-        notice = next ? "已加入待播 · 下一集播放" : "已加入待播"
+        notice = next ? L10n("podcasts.enqueuedNext") : L10n("podcasts.enqueued")
     }
 
     private func isCompleted(_ episode: PodcastEpisode) -> Bool {
@@ -384,7 +384,7 @@ private struct PodcastDetailView: View {
             try await client.markPodcastEpisodeCompleted(episodeID: episode.id, duration: episode.durationSeconds, completed: target)
             await load()
         } catch {
-            message = "标记完成失败：\(ErrorText.message(for: error))"
+            message = L10n("podcasts.markCompletedFailed", ErrorText.message(for: error))
         }
     }
 
@@ -432,8 +432,8 @@ private struct PodcastCloudStatusIOS: View {
                     .foregroundStyle(.orange)
                     .fixedSize(horizontal: false, vertical: true)
                 HStack(spacing: 12) {
-                    Button("使用服务器上的队列") { cloud.adoptServerQueue() }
-                    Button("用本机覆盖") { cloud.overwriteWithLocal() }
+                    Button(L10n("podcasts.useServerQueue")) { cloud.adoptServerQueue() }
+                    Button(L10n("podcasts.overwriteWithLocal")) { cloud.overwriteWithLocal() }
                 }
             }
         } else if let syncError = cloud.syncError {
@@ -442,7 +442,7 @@ private struct PodcastCloudStatusIOS: View {
                     .font(.footnote)
                     .foregroundStyle(.orange)
                     .fixedSize(horizontal: false, vertical: true)
-                Button("重试") { Task { await cloud.retrySync() } }
+                Button(L10n("podcasts.retry")) { Task { await cloud.retrySync() } }
             }
         }
     }
@@ -459,20 +459,20 @@ private struct PodcastIntakeSettingsIOS: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Picker("新集自动加入待播", selection: $action) {
-                Text("不处理").tag("ignore")
-                Text("加到队尾").tag("queue_last")
-                Text("插到当前之后").tag("queue_next")
+            Picker(L10n("podcasts.intakeAction"), selection: $action) {
+                Text(L10n("podcasts.actionIgnore")).tag("ignore")
+                Text(L10n("podcasts.actionQueueLast")).tag("queue_last")
+                Text(L10n("podcasts.actionQueueNext")).tag("queue_next")
             }
-            Picker("自动续播", selection: $order) {
-                Text("跟随列表").tag("follow")
-                Text("从旧到新").tag("asc")
-                Text("从新到旧").tag("desc")
-                Text("关闭").tag("off")
+            Picker(L10n("podcasts.autoContinue"), selection: $order) {
+                Text(L10n("podcasts.orderFollow")).tag("follow")
+                Text(L10n("podcasts.orderAsc")).tag("asc")
+                Text(L10n("podcasts.orderDesc")).tag("desc")
+                Text(L10n("podcasts.orderOff")).tag("off")
             }
             if let message = playback.podcastCloud?.preferenceError {
                 Text(message).font(.footnote).foregroundStyle(.orange)
-                Button("重试") { Task { await save() } }
+                Button(L10n("podcasts.retry")) { Task { await save() } }
             }
         }
         .task(id: podcastID) { await load() }
@@ -519,29 +519,29 @@ private struct PodcastUnifiedQueueView: View {
                     }
                 }
 
-                Section("待播单集") {
+                Section(L10n("podcasts.pendingEpisodesSection")) {
                     let items = cloud.unifiedPendingEpisodes
                     if cloud.loading && items.isEmpty {
                         HStack(spacing: 8) {
                             ProgressView()
-                            Text("正在同步待播列表…").foregroundStyle(.secondary)
+                            Text(L10n("podcasts.syncingQueue")).foregroundStyle(.secondary)
                         }
                     } else if items.isEmpty {
                         ContentUnavailableView(
-                            "待播列表是空的",
+                            L10n("podcasts.emptyQueueTitle"),
                             systemImage: "list.bullet",
-                            description: Text("从节目挑几集加入，或在下方开启新集自动加入待播。")
+                            description: Text(L10n("podcasts.emptyQueueDescription"))
                         )
                     } else {
                         HStack {
-                            Text("\(items.count) 集待播")
+                            Text(L10n("podcasts.pendingCount", items.count))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                             Spacer()
                             Button {
                                 playFirst(cloud)
                             } label: {
-                                Label("播放全部", systemImage: "play.fill")
+                                Label(L10n("podcasts.playAll"), systemImage: "play.fill")
                                     .font(.caption.weight(.semibold))
                             }
                         }
@@ -555,7 +555,7 @@ private struct PodcastUnifiedQueueView: View {
                                             .lineLimit(2)
                                             .foregroundStyle(Color.primary)
                                         if item.source == .inbox {
-                                            Text("稍后听")
+                                            Text(L10n("podcasts.listenLater"))
                                                 .font(.caption2)
                                                 .foregroundStyle(.secondary)
                                         }
@@ -572,17 +572,17 @@ private struct PodcastUnifiedQueueView: View {
                                         .foregroundStyle(.secondary)
                                 }
                                 .buttonStyle(.plain)
-                                .accessibilityLabel("移除")
+                                .accessibilityLabel(L10n("podcasts.remove"))
                             }
                         }
                     }
                 }
 
-                Section("新集自动加入待播") {
+                Section(L10n("podcasts.intakeSection")) {
                     if loadingShows && shows.isEmpty {
                         ProgressView()
                     } else if shows.isEmpty {
-                        Text("暂无已关注节目").foregroundStyle(.secondary)
+                        Text(L10n("podcasts.noFollowedShows")).foregroundStyle(.secondary)
                     } else {
                         ForEach(shows) { show in
                             PodcastDeliveryIOSRow(cloud: cloud, show: show)
@@ -590,10 +590,10 @@ private struct PodcastUnifiedQueueView: View {
                     }
                 }
             } else {
-                Text("暂时读不到待播列表。请重新登录后再试。").foregroundStyle(.secondary)
+                Text(L10n("podcasts.queueReadFailedAuth")).foregroundStyle(.secondary)
             }
         }
-        .navigationTitle("待播列表")
+        .navigationTitle(L10n("podcasts.pendingQueue"))
         .task {
             await playback.podcastCloud?.refreshInbox()
             await playback.podcastCloud?.refreshQueue()
@@ -634,7 +634,7 @@ private struct PodcastDeliveryIOSRow: View {
                 .lineLimit(1)
                 .font(.subheadline)
             Spacer()
-            Picker("处理方式", selection: Binding(
+            Picker(L10n("podcasts.deliveryAction"), selection: Binding(
                 get: { currentAction },
                 set: { newAction in
                     Task {
@@ -647,9 +647,9 @@ private struct PodcastDeliveryIOSRow: View {
                     }
                 }
             )) {
-                Text("不处理").tag("ignore")
-                Text("加到队尾").tag("queue_last")
-                Text("插到当前之后").tag("queue_next")
+                Text(L10n("podcasts.actionIgnore")).tag("ignore")
+                Text(L10n("podcasts.actionQueueLast")).tag("queue_last")
+                Text(L10n("podcasts.actionQueueNext")).tag("queue_next")
             }
             .labelsHidden()
             .pickerStyle(.menu)

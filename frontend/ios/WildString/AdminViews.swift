@@ -32,11 +32,11 @@ struct ScansView: View {
                             .foregroundStyle(.tertiary)
                     }
                     if let errors = scan.errors, !errors.isEmpty {
-                        Text("\(errors.count) 条错误")
+                        Text(L10n("adminView.errorCount", errors.count))
                             .font(.caption)
                             .foregroundStyle(.red)
                         ForEach(Array(errors.prefix(3).enumerated()), id: \.offset) { _, error in
-                            Text("· \(error.path ?? error.code ?? error.message ?? "错误")")
+                            Text("· \(error.path ?? error.code ?? error.message ?? L10n("adminView.errorFallback"))")
                                 .font(.caption2)
                                 .foregroundStyle(.red)
                                 .lineLimit(1)
@@ -52,7 +52,7 @@ struct ScansView: View {
                     Spacer()
                 }
             } else if scans.isEmpty {
-                Text("没有扫描记录")
+                Text(L10n("adminView.noScans"))
                     .foregroundStyle(.secondary)
             }
             if let message {
@@ -62,7 +62,7 @@ struct ScansView: View {
             }
         }
         .listStyle(.plain)
-        .navigationTitle("扫描任务")
+        .navigationTitle(L10n("adminView.scansTitle"))
         .navigationBarTitleDisplayMode(.inline)
         .task { await load() }
         .refreshable { await load() }
@@ -81,22 +81,22 @@ struct ScansView: View {
 
     private func countsText(_ counts: ScanCounts) -> String {
         var parts: [String] = []
-        if let value = counts.visited { parts.append("访问 \(value)") }
-        if let value = counts.added { parts.append("新增 \(value)") }
-        if let value = counts.updated { parts.append("更新 \(value)") }
-        if let value = counts.missing { parts.append("缺失 \(value)") }
-        if let value = counts.skipped { parts.append("跳过 \(value)") }
-        if let value = counts.errors, value > 0 { parts.append("错误 \(value)") }
+        if let value = counts.visited { parts.append(L10n("adminView.countsVisited", value)) }
+        if let value = counts.added { parts.append(L10n("adminView.countsAdded", value)) }
+        if let value = counts.updated { parts.append(L10n("adminView.countsUpdated", value)) }
+        if let value = counts.missing { parts.append(L10n("adminView.countsMissing", value)) }
+        if let value = counts.skipped { parts.append(L10n("adminView.countsSkipped", value)) }
+        if let value = counts.errors, value > 0 { parts.append(L10n("adminView.countsErrors", value)) }
         return parts.isEmpty ? "—" : parts.joined(separator: " · ")
     }
 
     private func statusText(_ status: String) -> String {
         switch status {
-        case "running": return "进行中"
-        case "completed": return "完成"
-        case "completed_with_errors": return "完成（有错误）"
-        case "failed": return "失败"
-        case "interrupted": return "中断"
+        case "running": return L10n("adminView.statusRunning")
+        case "completed": return L10n("adminView.statusCompleted")
+        case "completed_with_errors": return L10n("adminView.statusCompletedWithErrors")
+        case "failed": return L10n("adminView.statusFailed")
+        case "interrupted": return L10n("adminView.statusInterrupted")
         default: return status
         }
     }
@@ -148,7 +148,7 @@ struct ImportsView: View {
                             .foregroundStyle(.tertiary)
                     }
                     if let errors = record.errors, !errors.isEmpty {
-                        Text("\(errors.count) 条错误")
+                        Text(L10n("adminView.errorCount", errors.count))
                             .font(.caption)
                             .foregroundStyle(.red)
                     }
@@ -162,7 +162,7 @@ struct ImportsView: View {
                     Spacer()
                 }
             } else if imports.isEmpty {
-                Text("没有导入记录")
+                Text(L10n("adminView.noImports"))
                     .foregroundStyle(.secondary)
             }
             if let message {
@@ -172,7 +172,7 @@ struct ImportsView: View {
             }
         }
         .listStyle(.plain)
-        .navigationTitle("导入记录")
+        .navigationTitle(L10n("adminView.importsTitle"))
         .navigationBarTitleDisplayMode(.inline)
         .task { await load() }
         .refreshable { await load() }

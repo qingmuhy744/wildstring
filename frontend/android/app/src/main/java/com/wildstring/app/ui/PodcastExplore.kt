@@ -43,7 +43,15 @@ import kotlinx.coroutines.launch
     var previewError by remember { mutableStateOf<String?>(null) }
     var retry by remember { mutableIntStateOf(0) }
     val scope = rememberCoroutineScope()
-    val regions = listOf("" to "服务器默认", "tw" to "台湾", "cn" to "中国大陆", "hk" to "香港", "us" to "美国", "jp" to "日本", "gb" to "英国")
+    val regions = listOf(
+        "" to stringResource(R.string.pod_exp_region_default),
+        "tw" to stringResource(R.string.pod_exp_region_tw),
+        "cn" to stringResource(R.string.pod_exp_region_cn),
+        "hk" to stringResource(R.string.pod_exp_region_hk),
+        "us" to stringResource(R.string.pod_exp_region_us),
+        "jp" to stringResource(R.string.pod_exp_region_jp),
+        "gb" to stringResource(R.string.pod_exp_region_gb),
+    )
     val trimmedQuery = query.trim()
     val isRssUrl = trimmedQuery.startsWith("http://", ignoreCase = true) || trimmedQuery.startsWith("https://", ignoreCase = true)
     val activeFeedUrl = if (isRssUrl) trimmedQuery else selected?.feedUrl
@@ -84,10 +92,10 @@ import kotlinx.coroutines.launch
             Column(Modifier.fillMaxSize().widthIn(max = 840.dp).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     IconButton({ if (selected != null) selected = null else onDismiss() }) {
-                        Icon(if (selected != null) Icons.AutoMirrored.Filled.ArrowBack else Icons.Default.Close, if (selected != null) "返回探索列表" else "关闭探索")
+                        Icon(if (selected != null) Icons.AutoMirrored.Filled.ArrowBack else Icons.Default.Close, if (selected != null) stringResource(R.string.pod_exp_back_to_list) else stringResource(R.string.pod_exp_close_explore))
                     }
                     Text(
-                        text = if (canAdd) "探索与添加播客" else "探索播客",
+                        text = if (canAdd) stringResource(R.string.pod_exp_title_add) else stringResource(R.string.pod_exp_title),
                         style = MaterialTheme.typography.titleLarge,
                         modifier = Modifier.weight(1f),
                     )
@@ -101,12 +109,12 @@ import kotlinx.coroutines.launch
                 OutlinedTextField(
                     value = query,
                     onValueChange = { query = it.take(512) },
-                    label = { Text(if (canAdd) "搜索节目名称，或粘贴 RSS 地址" else "搜索节目名称") },
+                    label = { Text(if (canAdd) stringResource(R.string.pod_exp_search_label_rss) else stringResource(R.string.pod_exp_search_label)) },
                     singleLine = true,
                     trailingIcon = {
                         if (query.isNotEmpty() && !busy) {
                             IconButton({ query = ""; selected = null }) {
-                                Icon(Icons.Default.Close, contentDescription = "清空搜索")
+                                Icon(Icons.Default.Close, contentDescription = stringResource(R.string.pod_exp_clear_search))
                             }
                         }
                     },
@@ -115,19 +123,21 @@ import kotlinx.coroutines.launch
                 )
                 if (selected == null && !isRssUrl) {
                     Text(
-                        text = if (query.isBlank()) "Apple Podcasts 区域热门榜 · ${page?.regions.orEmpty().joinToString().uppercase()}" else "搜索 Apple Podcasts 公开目录",
+                        text = if (query.isBlank()) stringResource(R.string.pod_exp_hot_ranking, page?.regions.orEmpty().joinToString().uppercase()) else stringResource(R.string.pod_exp_search_apple),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
                     error?.let { Text(it, color = MaterialTheme.colorScheme.error); TextButton({ retry++ }) { Text(stringResource(R.string.retry)) } }
-                    if (page?.failedRegions?.isNotEmpty() == true) Text("部分区域暂时不可用，已保留可用结果。", style = MaterialTheme.typography.bodySmall)
-                    if ((page?.explicitHidden ?: 0) > 0) Text("已按管理员设置隐藏成人内容", style = MaterialTheme.typography.bodySmall)
+                    if (page?.failedRegions?.isNotEmpty() == true) Text(stringResource(R.string.pod_exp_partial_regions_failed), style = MaterialTheme.typography.bodySmall)
+                    if ((page?.explicitHidden ?: 0) > 0) Text(stringResource(R.string.pod_exp_explicit_hidden), style = MaterialTheme.typography.bodySmall)
+                    val followedBadge = stringResource(R.string.pod_exp_followed)
+                    val explicitBadge = stringResource(R.string.pod_exp_explicit)
                     LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         items(page?.results.orEmpty(), key = { it.feedUrl }) { item ->
                             ListItem(
                                 headlineContent = { Text(item.title, maxLines = 2, overflow = TextOverflow.Ellipsis) },
-                                supportingContent = { Text(listOf(item.author, if (item.followed) "已关注" else if (item.explicit) "成人内容" else item.genres.joinToString(" · ")).filter { it.isNotEmpty() }.joinToString("\n"), maxLines = 2) },
+                                supportingContent = { Text(listOf(item.author, if (item.followed) followedBadge else if (item.explicit) explicitBadge else item.genres.joinToString(" · ")).filter { it.isNotEmpty() }.joinToString("\n"), maxLines = 2) },
                                 leadingContent = {
                                     AsyncImage(
                                         model = item.artworkUrl,
@@ -139,7 +149,7 @@ import kotlinx.coroutines.launch
                                 modifier = Modifier.testTag("podcast-explore-${item.itunesId}").clickable { selected = item },
                             )
                         }
-                        if (!loading && error == null && page?.results?.isEmpty() == true) item { Text("暂无节目，试试其他区域或关键词。") }
+                        if (!loading && error == null && page?.results?.isEmpty() == true) item { Text(stringResource(R.string.pod_exp_no_results)) }
                     }
                 } else {
                     val titleText = preview?.title?.takeIf { it.isNotBlank() } ?: selected?.title ?: trimmedQuery
@@ -149,7 +159,7 @@ import kotlinx.coroutines.launch
                         if (isRssUrl) {
                             item {
                                 Text(
-                                    text = "已识别为 RSS 地址，正在直接预览该订阅源",
+                                    text = stringResource(R.string.pod_exp_rss_previewing),
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.primary,
                                 )
@@ -159,14 +169,18 @@ import kotlinx.coroutines.launch
                         if (previewing) item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
                         previewError?.let { message -> item { Text(message, color = MaterialTheme.colorScheme.error) } }
                         preview?.let { value ->
-                            item { Text("${value.author} · ${value.episodeCount} 集", style = MaterialTheme.typography.bodySmall) }
+                            item { Text(stringResource(R.string.pod_exp_author_episodes, value.author, value.episodeCount), style = MaterialTheme.typography.bodySmall) }
                             item { Text(android.text.Html.fromHtml(value.description, android.text.Html.FROM_HTML_MODE_COMPACT).toString().trim()) }
-                            item { Text("最新单集", style = MaterialTheme.typography.titleMedium) }
+                            item { Text(stringResource(R.string.pod_exp_latest_episodes), style = MaterialTheme.typography.titleMedium) }
                             items(value.latestEpisodes) { episode -> Text(episode.title) }
                         }
                     }
                     val canConfirm = !busy && !previewing && (preview != null || (isRssUrl && previewError != null)) && (canAdd || preview?.catalogPodcastId != null)
                     if (preview != null || isRssUrl) {
+                        val followingText = stringResource(R.string.pod_exp_following)
+                        val openShowText = stringResource(R.string.pod_exp_open_show)
+                        val addFollowText = stringResource(R.string.pod_exp_add_and_follow)
+                        val followText = stringResource(R.string.pod_exp_follow_show)
                         Button(
                             onClick = {
                                 busy = true; previewError = null
@@ -185,9 +199,9 @@ import kotlinx.coroutines.launch
                             modifier = Modifier.fillMaxWidth().testTag("podcast-explore-follow"),
                         ) {
                             val followed = preview?.followed == true
-                            Text(if (busy) "正在关注…" else if (followed) "打开节目" else if (isRssUrl && preview?.catalogPodcastId == null) "添加并关注" else "关注节目")
+                            Text(if (busy) followingText else if (followed) openShowText else if (isRssUrl && preview?.catalogPodcastId == null) addFollowText else followText)
                         }
-                        if (!canAdd && preview?.catalogPodcastId == null) Text("管理员尚未开放添加节目", style = MaterialTheme.typography.bodySmall)
+                        if (!canAdd && preview?.catalogPodcastId == null) Text(stringResource(R.string.pod_exp_cannot_add_hint), style = MaterialTheme.typography.bodySmall)
                     }
                 }
             }

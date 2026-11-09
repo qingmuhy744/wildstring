@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import { hints } from './help-content';
 import { useEffect, useRef, useState } from 'react';
 import { api } from './api';
@@ -25,6 +26,7 @@ export function MetadataRefreshDialog({
   onClose: () => void;
   onQueued?: () => void;
 }) {
+  const { t } = useTranslation();
   const dialog = useRef<HTMLDialogElement>(null),
     pending = useRef(false);
   const progress = useRef<HTMLParagraphElement>(null);
@@ -68,10 +70,7 @@ export function MetadataRefreshDialog({
         setStatusError('');
         if (response.queued + response.running > 0) timer = setTimeout(() => void load(), 2000);
       } catch {
-        if (!controller.signal.aborted)
-          setStatusError(
-            '本批状态暂时无法读取，任务不会重新提交。可以重试查询，或到管理的任务记录查看。',
-          );
+        if (!controller.signal.aborted) setStatusError(t('metadataRefresh.statusReadError'));
       }
     }
     void load();
@@ -84,7 +83,7 @@ export function MetadataRefreshDialog({
     if (pending.current || done) return;
     pending.current = true;
     setBusy(true);
-    setMessage('正在提交更新任务…');
+    setMessage(t('metadataRefresh.submitting'));
     try {
       const result = await api<{
         queued: number;
@@ -105,17 +104,22 @@ export function MetadataRefreshDialog({
       setMessage(
         result.total
           ? result.queued === 0 && result.already_active === result.total && !upgraded && !intents
-            ? `本批 ${result.total} 首已有查询在队列中，本次没有重复排队。查询完成后点击“重新读取”查看候选。`
-            : `已加入 ${result.queued} 首（新增排队 ${result.queued} 首，已有任务 ${result.already_active} 首${
-                upgraded || intents ? `，刷新意图已更新 ${upgraded + intents} 首` : ''
-              }）。`
-          : '当前范围没有可更新的歌曲。',
+            ? t('metadataRefresh.allAlreadyQueued', { total: result.total })
+            : t('metadataRefresh.queuedNotice', {
+                queued: result.queued,
+                alreadyActive: result.already_active,
+                intentSuffix:
+                  upgraded || intents
+                    ? t('metadataRefresh.refreshIntentUpdated', { count: upgraded + intents })
+                    : '',
+              })
+          : t('metadataRefresh.noTracksToUpdate'),
       );
       setDone(true);
       setBatchId(result.batch_id || '');
       onQueued?.();
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : '更新未提交，请检查联网设置后重试。');
+      setMessage(error instanceof Error ? error.message : t('metadataRefresh.submitFailed'));
     } finally {
       pending.current = false;
       setBusy(false);
@@ -127,7 +131,7 @@ export function MetadataRefreshDialog({
     <dialog
       className="metadata-refresh-dialog"
       ref={dialog}
-      aria-label="更新元数据"
+      aria-label={t('metadataRefresh.dialogAria')}
       onCancel={(event) => {
         event.preventDefault();
         event.stopPropagation();
@@ -135,63 +139,87 @@ export function MetadataRefreshDialog({
       }}
     >
       <header>
-        <h2>更新元数据</h2>
-        <DialogCloseButton aria-label="关闭元数据更新" disabled={busy} onClick={onClose} />
+        <h2>{t('metadataRefresh.heading')}</h2>
+        <DialogCloseButton
+          aria-label={t('metadataRefresh.closeAria')}
+          disabled={busy}
+          onClick={onClose}
+        />
       </header>
       <p>{target.label}</p>
       {!done ? (
         <fieldset disabled={busy}>
           <label>
-            更新方式
+            {t('metadataRefresh.updateMode')}
             <select value={mode} onChange={(e) => setMode(e.target.value)}>
-              <option value="missing">只查缺失资料</option>
-              <option value="all">查询全部资料</option>
+              <option value="missing">{t('metadataRefresh.modeMissing')}</option>
+              <option value="all">{t('metadataRefresh.modeAll')}</option>
             </select>
           </label>
           <label className="check-label">
             <input type="checkbox" checked={force} onChange={(e) => setForce(e.target.checked)} />
-            重新联网查询
+            {t('metadataRefresh.forceRequery')}
           </label>
-          <p className="muted">开启后重新向已启用的资料来源查询；关闭时可以复用近期结果。</p>
+          <p className="muted">{t('metadataRefresh.forceRequeryHelp')}</p>
         </fieldset>
       ) : (
         <p className="muted">
-          本次：{mode === 'all' ? '查询全部资料' : '只查缺失资料'} ·{' '}
-          {force ? '重新联网查询' : '可复用近期结果'}
+          {t('metadataRefresh.currentSettingsSummary', {
+            mode: mode === 'all' ? t('metadataRefresh.modeAll') : t('metadataRefresh.modeMissing'),
+            force: force
+              ? t('metadataRefresh.forceOnlineLabel')
+              : t('metadataRefresh.reuseRecentLabel'),
+          })}
         </p>
       )}
-      <p className="muted">更新先生成建议，在歌曲信息里确认后应用。人工修改和已有封面会保留。</p>
+      <p className="muted">{t('metadataRefresh.noticeSuggestionsFirst')}</p>
       <p ref={progress} tabIndex={-1} role="status" aria-live="polite">
-        {batch ? '本批更新已提交。' : message}
+        {batch ? t('metadataRefresh.batchSubmitted') : message}
         {batchId && (
           <>
             <br />
             {batch
-              ? `本批 ${batch.total} 首 · 已处理 ${finished} 首 · 排队 ${batch.queued} 首 · 查询中 ${batch.running} 首`
-              : '正在读取本批任务进度…'}
-            {batch && !active ? ' · 本批查询已结束。' : ''}
+              ? t('metadataRefresh.batchProgress', {
+                  total: batch.total,
+                  finished,
+                  queued: batch.queued,
+                  running: batch.running,
+                })
+              : t('metadataRefresh.loadingProgress')}
+            {batch && !active ? t('metadataRefresh.batchCompletedSuffix') : ''}
           </>
         )}
       </p>
       {batch && (
-        <section className="metadata-batch-results" aria-label="本批更新结果">
-          <progress aria-label="本批元数据更新进度" max={batch.total || 1} value={finished} />
+        <section
+          className="metadata-batch-results"
+          aria-label={t('metadataRefresh.batchResultsAria')}
+        >
+          <progress
+            aria-label={t('metadataRefresh.batchProgressAria')}
+            max={batch.total || 1}
+            value={finished}
+          />
           <p className="muted">
-            建议已生成 {batch.completed} 首 · 失败 {batch.failed} 首 · 没有新增资料 {batch.no_match}{' '}
-            首 · 信息已变化 {batch.stale} 首
+            {t('metadataRefresh.batchStats', {
+              completed: batch.completed,
+              failed: batch.failed,
+              noMatch: batch.no_match,
+              stale: batch.stale,
+            })}
           </p>
           <ul className="metadata-batch-tracks">
             {batch.items.map((job) => (
               <li key={job.id}>
-                <strong>{job.title || '歌曲'}</strong>
-                <span>{jobStatus[job.status] || '状态待确认'}</span>
+                <strong>{job.title || t('metadataRefresh.defaultTrackTitle')}</strong>
+                <span>{t(jobStatus[job.status] || 'providerDiagnostics.statusUnknown')}</span>
                 <JobDiagnostics job={job} />
               </li>
             ))}
           </ul>
           {batch.truncated && (
             <p className="muted">
-              逐曲列表仅展示前 {batch.items.length} 首，上方统计覆盖本批全部歌曲。
+              {t('metadataRefresh.truncatedNotice', { count: batch.items.length })}
             </p>
           )}
         </section>
@@ -199,17 +227,25 @@ export function MetadataRefreshDialog({
       {statusError && (
         <div className="error" role="alert">
           <p>{statusError}</p>
-          <button onClick={() => setRetry((value) => value + 1)}>重试查询进度</button>
+          <button onClick={() => setRetry((value) => value + 1)}>
+            {t('metadataRefresh.retryProgress')}
+          </button>
         </div>
       )}
-      {done && active && <p className="muted">关闭弹窗后，更新会在服务端继续执行。</p>}
+      {done && active && (
+        <p className="muted">{t('metadataRefresh.backgroundContinuationNotice')}</p>
+      )}
       <footer>
         <button onClick={onClose} disabled={busy}>
-          {done ? (active ? '关闭（后台继续）' : '完成') : '取消'}
+          {done
+            ? active
+              ? t('metadataRefresh.closeBackground')
+              : t('metadataRefresh.doneButton')
+            : t('metadataRefresh.cancelButton')}
         </button>
         {!done && (
           <button className="primary" disabled={busy} onClick={() => void submit()}>
-            {busy ? '正在提交…' : '开始更新'}
+            {busy ? t('metadataRefresh.submittingButton') : t('metadataRefresh.startButton')}
           </button>
         )}
       </footer>
@@ -224,6 +260,7 @@ export function ProviderPriority({
   value: string[];
   onChange: (value: string[]) => void;
 }) {
+  const { t } = useTranslation();
   const list = useRef<HTMLOListElement>(null);
   const drag = useRef<{ from: number; to: number; pointer: number; centers: number[] } | null>(
     null,
@@ -241,19 +278,21 @@ export function ProviderPriority({
   return (
     <>
       <p id="provider-priority-help" className="muted">
-        拖动调整来源优先级，也可用方向键。靠前来源优先推荐；同一录音的不同发行版仍需分别核对。
+        {t('metadataRefresh.providerPriorityHelp')}
       </p>
       <ol
         ref={list}
         className="provider-priority"
-        aria-label="元数据来源优先级"
+        aria-label={t('metadataRefresh.providerPriorityAria')}
         data-help={hints.providerPriority}
       >
         {value.map((source, index) => (
           <li key={source} className={over === index ? 'priority-target' : ''}>
             <button
               className="icon-button"
-              aria-label={`拖动 ${names[source]} 优先级`}
+              aria-label={t('metadataRefresh.dragPriorityAria', {
+                source: names[source] || source,
+              })}
               aria-describedby="provider-priority-help"
               onPointerDown={(event) => {
                 if (!event.isPrimary || event.button !== 0) return;

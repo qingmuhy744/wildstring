@@ -23,28 +23,13 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 
 @Composable internal fun CatalogTopBar(state: MusicState, back: () -> Unit, settings: () -> Unit, compact: Boolean = false,
-    unread: Int = 0, notifications: (() -> Unit)? = null, queue: (() -> Unit)? = null,
-    recent: (() -> Unit)? = null, offline: (() -> Unit)? = null, downloads: (() -> Unit)? = null) {
-    var menu by remember(state.contentKey) { mutableStateOf(false) }
+    unread: Int = 0, notifications: (() -> Unit)? = null) {
     val title: @Composable () -> Unit = { Text(catalogTitle(state), maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis) }
     val actions: @Composable RowScope.() -> Unit = {
         notifications?.let { open -> IconButton(open, Modifier.testTag("open-notifications")) {
             BadgedBox(badge = { if (unread > 0) Badge { Text(if (unread > 99) "99+" else unread.toString()) } }) { Icon(Icons.Default.NotificationsNone, stringResource(R.string.notifications)) }
         } }
         IconButton(settings) { Icon(Icons.Default.Settings, stringResource(R.string.settings_title)) }
-        if (queue != null || recent != null || offline != null || downloads != null) Box {
-            IconButton({ menu = true }, Modifier.testTag("catalog-global-more")) { Icon(Icons.Default.MoreVert, stringResource(R.string.more_options)) }
-            DropdownMenu(menu, { menu = false }) {
-                queue?.let { open -> DropdownMenuItem(text = { Text(stringResource(R.string.play_queue)) }, modifier = Modifier.testTag("catalog-open-queue"),
-                    leadingIcon = { Icon(Icons.AutoMirrored.Filled.QueueMusic, null) }, onClick = { menu = false; open() }) }
-                recent?.let { open -> DropdownMenuItem(text = { Text(stringResource(R.string.recently_played)) }, modifier = Modifier.testTag("catalog-open-recent"),
-                    leadingIcon = { Icon(Icons.Default.History, null) }, onClick = { menu = false; open() }) }
-                offline?.let { open -> DropdownMenuItem(text = { Text(stringResource(R.string.offline_music)) }, modifier = Modifier.testTag("catalog-open-offline"),
-                    leadingIcon = { Icon(Icons.Default.Download, null) }, onClick = { menu = false; open() }) }
-                downloads?.let { open -> DropdownMenuItem(text = { Text(stringResource(R.string.podcast_download_tasks)) }, modifier = Modifier.testTag("catalog-open-download-tasks"),
-                    leadingIcon = { Icon(Icons.Default.Downloading, null) }, onClick = { menu = false; open() }) }
-            }
-        }
     }
     val barColors = TopAppBarDefaults.topAppBarColors(
         containerColor = androidx.compose.ui.graphics.Color.Transparent,
@@ -121,8 +106,8 @@ import androidx.compose.ui.unit.dp
 @Composable internal fun catalogTitle(state: MusicState): String = when {
     state.collection != null -> state.title
     state.kind == "recent" -> stringResource(R.string.recently_played)
-    state.title == "最近添加的专辑" -> stringResource(R.string.recently_added_albums)
-    state.title == "最近添加的歌曲" -> stringResource(R.string.recently_added_tracks)
+    state.title == stringResource(R.string.recently_added_albums) || state.title == stringResource(R.string.lib_chrome_recently_added_albums) || state.title == "\u6700\u8fd1\u6dfb\u52a0\u7684\u4e13\u8f91" || state.title == "Recently added albums" -> stringResource(R.string.recently_added_albums)
+    state.title == stringResource(R.string.recently_added_tracks) || state.title == stringResource(R.string.lib_chrome_recently_added_tracks) || state.title == "\u6700\u8fd1\u6dfb\u52a0\u7684\u6b4c\u66f2" || state.title == "Recently added tracks" -> stringResource(R.string.recently_added_tracks)
     else -> stringResource(when (state.tab) {
         "mine" -> R.string.nav_mine
         "podcast" -> R.string.nav_radio

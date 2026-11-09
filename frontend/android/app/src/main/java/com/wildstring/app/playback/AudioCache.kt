@@ -8,6 +8,8 @@ import androidx.media3.database.StandaloneDatabaseProvider
 import androidx.media3.datasource.*
 import androidx.media3.datasource.cache.*
 import androidx.media3.datasource.okhttp.OkHttpDataSource
+import com.wildstring.app.AppLanguage
+import com.wildstring.app.R
 import com.wildstring.app.data.*
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
@@ -45,7 +47,7 @@ class AudioCache @Inject constructor(@ApplicationContext context: Context, priva
                 .newCall(Request.Builder().url(url).head().build()).execute()
         } catch (error: IOException) { if (error is javax.net.ssl.SSLException) throw error; return }
         response.use {
-            if (it.code in listOf(401, 403, 404, 409)) { cache.removeResource(key); throw IOException("音频已失效或无权访问。") }
+            if (it.code in listOf(401, 403, 404, 409)) { cache.removeResource(key); throw IOException(AppLanguage.string(R.string.aud_cache_invalid_or_unauthorized)) }
             if (!it.isSuccessful) return
             val etag = it.header("ETag")
             if (etag == null || etag != metadata.get("wildstring-etag", "")) cache.removeResource(key)
@@ -58,20 +60,20 @@ class AudioCache @Inject constructor(@ApplicationContext context: Context, priva
         var key: String? = null
         val upstream = OkHttpDataSource.Factory(client)
         val cached = CacheDataSource.Factory().setCache(cache).setUpstreamDataSourceFactory(upstream)
-            .setCacheKeyFactory { spec -> "${storage ?: throw IOException("登录已失效。")}:${spec.uri}" }
+            .setCacheKeyFactory { spec -> "${storage ?: throw IOException(AppLanguage.string(R.string.aud_cache_login_expired))}:${spec.uri}" }
             .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
         val source = if (settings.state.value.audioMb == 0) upstream.createDataSource() else cached.createDataSource()
         object : DataSource {
             override fun addTransferListener(listener: TransferListener) = source.addTransferListener(listener)
             override fun open(dataSpec: DataSpec): Long {
-                val base = session.endpoint ?: throw IOException("尚未连接服务器。")
-                val target = dataSpec.uri.toString().toHttpUrlOrNull() ?: throw IOException("无效音频地址。")
-                profile = session.cacheScope() ?: throw IOException("登录已失效。")
-                if (!ServerAddress.contains(base, target) || !target.encodedPath.endsWith("/stream")) throw IOException("拒绝其他来源的音频。")
-                storage = session.storageScope() ?: throw IOException("登录已失效。")
+                val base = session.endpoint ?: throw IOException(AppLanguage.string(R.string.aud_cache_not_connected))
+                val target = dataSpec.uri.toString().toHttpUrlOrNull() ?: throw IOException(AppLanguage.string(R.string.aud_cache_invalid_url))
+                profile = session.cacheScope() ?: throw IOException(AppLanguage.string(R.string.aud_cache_login_expired))
+                if (!ServerAddress.contains(base, target) || !target.encodedPath.endsWith("/stream")) throw IOException(AppLanguage.string(R.string.aud_cache_foreign_source_rejected))
+                storage = session.storageScope() ?: throw IOException(AppLanguage.string(R.string.aud_cache_login_expired))
                 key = "$storage:${dataSpec.uri}"
                 if (settings.state.value.audioMb > 0) validateCached(key, dataSpec.uri.toString(), client)
-                if (profile != session.cacheScope()) throw IOException("登录已失效。")
+                if (profile != session.cacheScope()) throw IOException(AppLanguage.string(R.string.aud_cache_login_expired))
                 val length = source.open(dataSpec)
                 val etag = source.responseHeaders.entries.firstOrNull { it.key.equals("ETag", true) }?.value?.firstOrNull()
                 if (etag != null && profile == session.cacheScope()) cache.applyContentMetadataMutations(key, ContentMetadataMutations()
@@ -79,7 +81,7 @@ class AudioCache @Inject constructor(@ApplicationContext context: Context, priva
                 return length
             }
             override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
-                if (profile == null || profile != session.cacheScope()) throw IOException("登录已失效。")
+                if (profile == null || profile != session.cacheScope()) throw IOException(AppLanguage.string(R.string.aud_cache_login_expired))
                 return source.read(buffer, offset, length)
             }
             override fun getUri(): Uri? = source.uri

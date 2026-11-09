@@ -46,9 +46,9 @@ export interface Track {
 
 export function trackUnavailableReason(track: Pick<Track, 'status'>): string | null {
   return track.status === 'missing'
-    ? '文件缺失'
+    ? i18n.t('apiHelpers.trackMissing')
     : track.status === 'unreadable'
-      ? '文件无法读取'
+      ? i18n.t('apiHelpers.trackUnreadable')
       : null;
 }
 
@@ -208,7 +208,8 @@ export async function api<T>(path: string, options: ApiOptions = {}): Promise<T>
   return value;
 }
 
-export const artist = (track: Track) => track.artists.join(' / ') || '未知艺人';
+export const artist = (track: Track) =>
+  track.artists.join(' / ') || i18n.t('apiHelpers.unknownArtist');
 export const streamUrl = (track: Track) => {
   if (track.id.startsWith('podcast_ep_')) {
     const connection = (navigator as Navigator & { connection?: { type?: string } }).connection;
@@ -336,11 +337,12 @@ export interface ListeningSummary {
   last_played_at: string | null;
 }
 export const listeningTime = (milliseconds: number) => {
-  if (milliseconds < 60000) return `${Math.floor(milliseconds / 1000)} 秒`;
+  if (milliseconds < 60000)
+    return i18n.t('apiHelpers.seconds', { count: Math.floor(milliseconds / 1000) });
   const minutes = Math.floor(milliseconds / 60000);
   return minutes >= 60
-    ? `${Math.floor(minutes / 60)} 小时 ${minutes % 60} 分钟`
-    : `${minutes} 分钟`;
+    ? i18n.t('apiHelpers.hoursMinutes', { hours: Math.floor(minutes / 60), minutes: minutes % 60 })
+    : i18n.t('apiHelpers.minutes', { count: minutes });
 };
 
 export interface User {

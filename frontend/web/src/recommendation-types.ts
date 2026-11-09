@@ -1,4 +1,5 @@
 import type { TFunction } from 'i18next';
+import i18n from './i18n';
 import type { Track } from './api';
 export type RecommendationChoice = { track: Track; reason: string; source_ids?: string[] };
 export interface SourceStatus {
@@ -40,18 +41,42 @@ export interface RecommendationPreferences {
   daily_time?: string;
 }
 export const recommendationSources: Record<string, string> = {
-  ai: '模型编排',
-  local: '本地规则',
-  personal: '我常听',
-  community: '大家常听',
-  discovery: '本地探索',
-  revisit: '很久没听',
-  lastfm_similar: 'Last.fm 相似关系',
-  lastfm_charts: 'Last.fm 公共榜单',
-  lastfm_tags: 'Last.fm 公共标签',
-  lastfm_artists: 'Last.fm 相关艺人',
+  get ai() {
+    return i18n.t('recommendationTypes.sources.ai');
+  },
+  get local() {
+    return i18n.t('recommendationTypes.sources.local');
+  },
+  get personal() {
+    return i18n.t('recommendationTypes.sources.personal');
+  },
+  get community() {
+    return i18n.t('recommendationTypes.sources.community');
+  },
+  get discovery() {
+    return i18n.t('recommendationTypes.sources.discovery');
+  },
+  get revisit() {
+    return i18n.t('recommendationTypes.sources.revisit');
+  },
+  get lastfm_similar() {
+    return i18n.t('recommendationTypes.sources.lastfm_similar');
+  },
+  get lastfm_charts() {
+    return i18n.t('recommendationTypes.sources.lastfm_charts');
+  },
+  get lastfm_tags() {
+    return i18n.t('recommendationTypes.sources.lastfm_tags');
+  },
+  get lastfm_artists() {
+    return i18n.t('recommendationTypes.sources.lastfm_artists');
+  },
 };
 /** Source ids are stable API values; Chinese labels remain the fallback for unknown ids. */
 export function recommendationSourceName(t: TFunction, id: string): string {
-  return t(`recommendations.sources.${id}`, { defaultValue: recommendationSources[id] || id });
+  return t(`recommendationTypes.sources.${id}`, {
+    defaultValue: t(`recommendations.sources.${id}`, {
+      defaultValue: recommendationSources[id] || id,
+    }),
+  });
 }

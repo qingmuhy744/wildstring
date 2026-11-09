@@ -41,9 +41,9 @@ struct MacDiscoverView: View {
     VStack(spacing: 0) {
       VStack(alignment: .leading, spacing: 14) {
         HStack(spacing: 12) {
-          Picker("发现分类", selection: $section) {
-            Text("每日推荐").tag("daily")
-            Text("收听排行").tag("rankings")
+          Picker(L10n("macRec.discoveryCategory"), selection: $section) {
+            Text(L10n("macRec.dailyRecommendations")).tag("daily")
+            Text(L10n("macRec.listeningRankings")).tag("rankings")
           }
           .pickerStyle(.segmented)
           .labelsHidden()
@@ -52,18 +52,18 @@ struct MacDiscoverView: View {
           Spacer()
 
           if section == "rankings" {
-            Picker("范围", selection: $scope) {
-              Text("我的").tag("personal")
-              Text("大家").tag("community")
+            Picker(L10n("macRec.scope"), selection: $scope) {
+              Text(L10n("macRec.scopeMine")).tag("personal")
+              Text(L10n("macRec.scopeCommunity")).tag("community")
             }
             .pickerStyle(.segmented)
             .labelsHidden()
             .frame(width: 140)
 
-            Picker("时间", selection: $period) {
-              Text("7 天").tag("7d")
-              Text("30 天").tag("30d")
-              Text("全部").tag("all")
+            Picker(L10n("macRec.period"), selection: $period) {
+              Text(L10n("macRec.period7d")).tag("7d")
+              Text(L10n("macRec.period30d")).tag("30d")
+              Text(L10n("macRec.periodAll")).tag("all")
             }
             .pickerStyle(.segmented)
             .labelsHidden()
@@ -84,7 +84,7 @@ struct MacDiscoverView: View {
                 .background(MacTheme.accentSoft, in: Capsule())
 
               if section == "daily", daily?.engine == "ai" {
-                Text("AI 整理")
+                Text(L10n("macRec.aiCurated"))
                   .font(MacTheme.micro)
                   .foregroundStyle(MacTheme.olive)
                   .padding(.horizontal, 8)
@@ -93,7 +93,7 @@ struct MacDiscoverView: View {
               }
             }
 
-            Text(section == "daily" ? "今天，听点喜欢的" : "常听的声音")
+            Text(section == "daily" ? L10n("macRec.dailyHeader") : L10n("macRec.rankingsHeader"))
               .font(MacTheme.display(24))
               .foregroundStyle(MacTheme.ink)
 
@@ -111,7 +111,7 @@ struct MacDiscoverView: View {
                 MacPlayback.play(tracks, startingAt: first, playback: playback)
               }
             } label: {
-              Label("播放全部", systemImage: "play.fill")
+              Label(L10n("macRec.playAll"), systemImage: "play.fill")
                 .font(MacTheme.section(13))
             }
             .disabled(tracks.isEmpty)
@@ -121,14 +121,14 @@ struct MacDiscoverView: View {
 
             HStack(spacing: 8) {
               if section == "daily" {
-                Button(refreshing ? "正在生成…" : "换一批") {
+                Button(refreshing ? L10n("macRec.generating") : L10n("macRec.generateNew")) {
                   Task { await refresh() }
                 }
                 .disabled(refreshing)
               }
-              Button("保存歌单…") { saving = true }
+              Button(L10n("macRec.savePlaylist")) { saving = true }
                 .disabled(tracks.isEmpty)
-              Button(selecting ? "完成挑选" : "挑选歌曲") {
+              Button(selecting ? L10n("macRec.finishSelecting") : L10n("macRec.selectTracks")) {
                 selecting.toggle()
               }
               .disabled(tracks.isEmpty && !selecting)
@@ -143,7 +143,7 @@ struct MacDiscoverView: View {
           Text(message).font(.callout).foregroundStyle(MacTheme.accentDeep).textSelection(.enabled)
         }
         if section == "daily", daily?.degraded == true {
-          Text("部分来源暂不可用，已保留可用推荐。")
+          Text(L10n("macRec.degradedNotice"))
             .font(MacTheme.caption)
             .foregroundStyle(MacTheme.muted)
         }
@@ -159,7 +159,7 @@ struct MacDiscoverView: View {
         playback: playback,
         favorites: favorites,
         tracks: tracks,
-        emptyTitle: message == nil ? "还没有推荐" : "暂时无法读取推荐",
+        emptyTitle: message == nil ? L10n("macRec.emptyRecommendations") : L10n("macRec.cannotLoadRecommendations"),
         emptyDetail: message,
         isLoading: loading,
         allowsSelection: true,
@@ -177,9 +177,9 @@ struct MacDiscoverView: View {
           guard let row = rankingByTrackID[track.id] else { return nil }
           let minutes = max(1, Int(row.listenedMs / 60_000))
           if row.reason.isEmpty {
-            return "播放 \(row.playCount) 次 · 约 \(minutes) 分钟"
+            return L10n("macRec.rankPlayCountMinutes", row.playCount, minutes)
           }
-          return "播放 \(row.playCount) 次 · \(row.reason)"
+          return L10n("macRec.rankPlayCountReason", row.playCount, row.reason)
         },
         onRecommendationFeedback: section == "daily"
           ? { track, action in await feedback(track, action: action) } : nil
@@ -187,11 +187,11 @@ struct MacDiscoverView: View {
       .id(section == "daily" ? daily?.id ?? "daily" : "rankings-\(scope)-\(period)")
     }
     .background(MacTheme.canvas)
-    .navigationTitle("每日推荐")
+    .navigationTitle(L10n("macRec.dailyRecommendations"))
     .toolbar {
-      Button(refreshing ? "正在生成…" : "换一批") { Task { await refresh() } }
+      Button(refreshing ? L10n("macRec.generating") : L10n("macRec.generateNew")) { Task { await refresh() } }
         .disabled(refreshing || section != "daily")
-      Button("刷新", systemImage: "arrow.clockwise") { Task { await load() } }.disabled(loading)
+      Button(L10n("macRec.refresh"), systemImage: "arrow.clockwise") { Task { await load() } }.disabled(loading)
     }
     .sheet(isPresented: $saving) {
       MacAddToPlaylistSheet(client: client, tracks: tracks) { message = $0 }
@@ -202,38 +202,38 @@ struct MacDiscoverView: View {
   }
 
   private var dailySubtitle: String {
-    let countText = "\(tracks.count) 首"
+    let countText = L10n("macRec.trackCount", tracks.count)
     guard let sources = daily?.sources else {
       return countText
     }
     let known = (sources["favorite"] ?? 0) + (sources["history"] ?? 0) + (sources["frequent"] ?? 0)
     let explore = (sources["explore"] ?? 0) + (sources["unheard"] ?? 0) + (sources["fresh"] ?? 0)
     if known > 0 && explore > 0 {
-      return "\(countText) · \(known) 首来自收藏与常听，\(explore) 首来自曲库探索"
+      return L10n("macRec.dailySubtitleBoth", countText, known, explore)
     }
     if known > 0 {
-      return "\(countText) · \(known) 首来自你的收藏与常听"
+      return L10n("macRec.dailySubtitleKnown", countText, known)
     }
     if explore > 0 {
-      return "\(countText) · \(explore) 首来自曲库探索"
+      return L10n("macRec.dailySubtitleExplore", countText, explore)
     }
     return countText
   }
 
   private var rankingKicker: String {
-    scope == "personal" ? "我的常听" : "大家都在听"
+    scope == "personal" ? L10n("macRec.scopeMineKicker") : L10n("macRec.scopeCommunityKicker")
   }
 
   private var rankingSubtitle: String {
-    let periodLabel = period == "7d" ? "最近 7 天" : period == "30d" ? "最近 30 天" : "全部时间"
-    return "\(tracks.count) 首 · \(periodLabel)实际收听排行"
+    let periodLabel = period == "7d" ? L10n("macRec.periodLabel7d") : (period == "30d" ? L10n("macRec.periodLabel30d") : L10n("macRec.periodLabelAll"))
+    return L10n("macRec.rankingSubtitle", tracks.count, periodLabel)
   }
 
   private func formattedDailyDate(_ raw: String?) -> String {
-    guard let raw, !raw.isEmpty else { return "今日推荐" }
+    guard let raw, !raw.isEmpty else { return L10n("macRec.todayRecommendation") }
     let parts = raw.split(separator: "-")
     if parts.count == 3, let month = Int(parts[1]), let day = Int(parts[2]) {
-      return "\(month)月\(day)日 · 今日推荐"
+      return L10n("macRec.formattedDailyDate", month, day)
     }
     return raw
   }
@@ -265,7 +265,7 @@ struct MacDiscoverView: View {
     do {
       try await client.recommendationFeedback(trackID: track.id, action: action)
       rejected.insert(track.id)
-      message = "已记录你的偏好"
+      message = L10n("macRec.preferenceSaved")
     } catch { message = MacErrorText.message(for: error) }
   }
 }
@@ -335,19 +335,19 @@ struct MacAddToPlaylistSheet: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 18) {
-      Text("加入歌单").font(.title2.bold())
-      Text("已选 \(tracks.count) 首 · 按列表顺序保存").foregroundStyle(.secondary)
-      Picker("目标歌单", selection: $target) {
-        Text("新建歌单…").tag("new")
+      Text(L10n("macRec.addToPlaylist")).font(.title2.bold())
+      Text(L10n("macRec.selectedTracksOrder", tracks.count)).foregroundStyle(.secondary)
+      Picker(L10n("macRec.targetPlaylist"), selection: $target) {
+        Text(L10n("macRec.newPlaylist")).tag("new")
         ForEach(playlists) { Text($0.name).tag($0.id) }
       }.disabled(busy || created != nil || loading)
-      if target == "new" { TextField("歌单名称", text: $name).disabled(busy || created != nil) }
+      if target == "new" { TextField(L10n("macRec.playlistName"), text: $name).disabled(busy || created != nil) }
       if loading { ProgressView() }
       if let message { Text(message).font(.callout).foregroundStyle(.orange) }
       HStack {
         Spacer()
-        Button("取消") { dismiss() }.keyboardShortcut(.cancelAction).disabled(busy)
-        Button(busy ? "正在加入…" : "确认加入") { Task { await save() } }
+        Button(L10n("macRec.cancel")) { dismiss() }.keyboardShortcut(.cancelAction).disabled(busy)
+        Button(busy ? L10n("macRec.adding") : L10n("macRec.confirmAdd")) { Task { await save() } }
           .buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
           .disabled(
             tracks.isEmpty || busy || loading
@@ -380,10 +380,10 @@ struct MacAddToPlaylistSheet: View {
       }
       try await client.addTracks(
         playlistID: playlist.id, trackIDs: tracks.map(\.id), version: playlist.version)
-      onSaved("已加入「\(playlist.name)」")
+      onSaved(L10n("macRec.addedToPlaylist", playlist.name))
       dismiss()
     } catch {
-      message = (created == nil ? "" : "歌单已创建，曲目尚未确认加入。") + MacErrorText.message(for: error)
+      message = (created == nil ? "" : L10n("macRec.playlistCreatedPendingTracks")) + MacErrorText.message(for: error)
     }
   }
 }
@@ -400,20 +400,20 @@ struct MacLyricsPreview: View {
       HStack {
         Text(track.title).font(.title2.bold())
         Spacer()
-        Button("关闭") { dismiss() }.keyboardShortcut(.cancelAction)
+        Button(L10n("macRec.close")) { dismiss() }.keyboardShortcut(.cancelAction)
       }
-      Text("\(track.artists.joined(separator: " / ")) · 歌词预览").foregroundStyle(.secondary)
+      Text(L10n("macRec.lyricsPreviewTitle", track.artists.joined(separator: " / "))).foregroundStyle(.secondary)
       ScrollView {
         VStack(alignment: .leading, spacing: 16) {
           if let message {
             Text(message).foregroundStyle(.orange)
           } else if let lyrics {
-            if lyrics.lines.isEmpty { Text("这首歌还没有歌词") }
+            if lyrics.lines.isEmpty { Text(L10n("macRec.noLyrics")) }
             ForEach(Array(lyrics.lines.enumerated()), id: \.offset) { _, line in
               Text(line.text).textSelection(.enabled)
             }
           } else {
-            ProgressView("正在读取歌词…")
+            ProgressView(L10n("macRec.loadingLyrics"))
           }
         }.frame(maxWidth: .infinity, alignment: .leading)
       }

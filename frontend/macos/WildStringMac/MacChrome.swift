@@ -128,30 +128,30 @@ enum MacErrorText {
     static func message(for error: Error) -> String {
         if let network = error as? URLError {
             switch network.code {
-            case .timedOut: return "连接超时"
-            case .notConnectedToInternet, .networkConnectionLost: return "网络连接已中断"
-            case .cannotConnectToHost, .cannotFindHost: return "暂时无法连接服务器"
-            default: return "网络请求未完成"
+            case .timedOut: return L10n("macChrome.errorTimedOut")
+            case .notConnectedToInternet, .networkConnectionLost: return L10n("macChrome.errorNetworkLost")
+            case .cannotConnectToHost, .cannotFindHost: return L10n("macChrome.errorCannotConnect")
+            default: return L10n("macChrome.errorNetworkDefault")
             }
         }
-        guard let api = error as? APIError else { return "网络或数据暂时不可用" }
+        guard let api = error as? APIError else { return L10n("macChrome.errorUnavailable") }
         switch api.code {
-        case "conversation_busy": return "这段对话仍在处理上一条消息"
-        case "ai_daily_budget_exhausted", "ai_budget_exhausted": return "所选模型今天的调用额度已用完"
-        case "connection_not_found", "ai_connection_not_found": return "所选模型连接已不可用，请重新选择"
-        case "podcast_subscriptions_disabled": return "管理员尚未开放添加节目"
-        case "podcast_search_timeout", "podcast_search_upstream_failed": return "播客目录暂时不可用，请稍后重试"
-        case "podcast_feed_fetch_failed", "podcast_feed_parse_failed": return "无法读取这个节目的 RSS，请稍后重试"
+        case "conversation_busy": return L10n("macChrome.errorConversationBusy")
+        case "ai_daily_budget_exhausted", "ai_budget_exhausted": return L10n("macChrome.errorAiBudgetExhausted")
+        case "connection_not_found", "ai_connection_not_found": return L10n("macChrome.errorAiConnectionNotFound")
+        case "podcast_subscriptions_disabled": return L10n("macChrome.errorPodcastSubsDisabled")
+        case "podcast_search_timeout", "podcast_search_upstream_failed": return L10n("macChrome.errorPodcastSearchFailed")
+        case "podcast_feed_fetch_failed", "podcast_feed_parse_failed": return L10n("macChrome.errorPodcastFeedFailed")
         default: break
         }
         switch api.statusCode {
-        case 401: return "登录已失效"
-        case 403: return "没有权限做这件事"
-        case 404: return "内容不存在"
-        case 409: return "内容和服务器上的版本不一致，请刷新后再试"
-        case 422: return "请求没有被接受（\(api.code)）"
-        case 429: return "请求较频繁，请稍后重试"
-        default: return "服务器返回 \(api.statusCode) \(api.code)"
+        case 401: return L10n("macChrome.errorAuthExpired")
+        case 403: return L10n("macChrome.errorForbidden")
+        case 404: return L10n("macChrome.errorNotFound")
+        case 409: return L10n("macChrome.errorConflict")
+        case 422: return L10n("macChrome.errorUnprocessable", api.code)
+        case 429: return L10n("macChrome.errorTooManyRequests")
+        default: return L10n("macChrome.errorServerDefault", api.statusCode, api.code)
         }
     }
 }
@@ -226,9 +226,9 @@ func macClock(milliseconds: Int64) -> String {
 func macTotalDurationText(_ tracks: [Track]) -> String {
   let minutes = Int(tracks.reduce(Int64(0)) { $0 + $1.durationMs } / 60_000)
   if minutes >= 60 {
-    return "\(minutes / 60) 小时 \(minutes % 60) 分钟"
+    return L10n("macChrome.durationHoursMinutes", minutes / 60, minutes % 60)
   }
-  return "\(max(minutes, 1)) 分钟"
+  return L10n("macChrome.durationMinutes", max(minutes, 1))
 }
 
 /// "3 分钟前"-style stamp for notification rows; nil when unparsable.
@@ -238,7 +238,7 @@ func macRelativeTime(_ iso: String) -> String? {
   fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
   guard let date = fractional.date(from: iso) ?? plain.date(from: iso) else { return nil }
   let relative = RelativeDateTimeFormatter()
-  relative.locale = Locale(identifier: "zh_CN")
+  relative.locale = InterfaceLanguage.current.locale
   relative.unitsStyle = .full
   return relative.localizedString(for: date, relativeTo: Date())
 }
@@ -268,7 +268,7 @@ struct MacCollectionHeading: View {
                         .overlay(Circle().strokeBorder(MacTheme.border))
                 }
                 .buttonStyle(.plain)
-                .help("返回")
+                .help(L10n("macChrome.back"))
                 .keyboardShortcut("[", modifiers: .command)
             }
             if let client, let coverTrackID, !coverTrackID.isEmpty {
@@ -312,7 +312,7 @@ struct MacCollectionHeading: View {
             }
             Spacer()
             Button(action: play) {
-                Label("播放全部", systemImage: "play.fill")
+                Label(L10n("macChrome.playAll"), systemImage: "play.fill")
                     .font(MacTheme.section(13))
             }
             .buttonStyle(.borderedProminent)
@@ -321,7 +321,7 @@ struct MacCollectionHeading: View {
             .disabled(!canPlay)
             if let onShuffle {
                 Button(action: onShuffle) {
-                    Label("随机", systemImage: "shuffle")
+                    Label(L10n("macChrome.shuffle"), systemImage: "shuffle")
                         .font(MacTheme.section(13))
                 }
                 .buttonStyle(.bordered)

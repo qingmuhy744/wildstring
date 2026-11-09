@@ -94,7 +94,7 @@ struct LyricsPane: View {
                 }
                 .overlay(alignment: .bottom) {
                     if !isFollowing, timeline?.isSynced == true, !failed {
-                        Button("回到当前歌词") {
+                        Button(L10n("lyricsView.jumpToCurrent")) {
                             isFollowing = true
                             if let index = highlightedIndex { reveal(index, proxy: proxy) }
                         }
@@ -105,21 +105,21 @@ struct LyricsPane: View {
                 }
                 .overlay {
                     if isLoading {
-                        ProgressView("正在读取歌词")
+                        ProgressView(L10n("lyricsView.loading"))
                     } else if failed {
                         VStack(spacing: 12) {
-                            Text("暂时无法读取歌词。网络恢复后可以重试。")
+                            Text(L10n("lyricsView.failedMessage"))
                                 .font(.callout)
                                 .multilineTextAlignment(.center)
                                 .foregroundStyle(.secondary)
-                            Button("重新读取") {
+                            Button(L10n("lyricsView.reload")) {
                                 loadedTrackID = nil
                                 Task { await load() }
                             }
                         }
                         .padding(24)
                     } else if let timeline, timeline.isEmpty {
-                        ContentUnavailableView("没有歌词", systemImage: "text.quote")
+                        ContentUnavailableView(L10n("lyricsView.empty"), systemImage: "text.quote")
                     }
                 }
             }

@@ -1,4 +1,5 @@
 import { Fragment, useLayoutEffect, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { trackUnavailableReason, listeningTime, time, type TrackPage } from './api';
 import { TrackActions, type TrackOperations } from './track-actions';
 import { Cover } from './cover';
@@ -32,6 +33,7 @@ export function TrackList({
   onPlay?: (track: TrackPage['items'][number]) => void;
   onOpenArtist?: (name: string) => void;
 }) {
+  const { t } = useTranslation();
   const listSize = useTrackListSize();
   const root = useRef<HTMLDivElement>(null);
   const anchor = useRef<{ id: string; top: number } | null>(null);
@@ -83,20 +85,20 @@ export function TrackList({
       data-list-size={listSize}
       ref={root}
       role="table"
-      aria-label="歌曲列表"
+      aria-label={t('trackList.ariaLabel')}
     >
       <div className="track-header" role="row">
         <span role="columnheader">#</span>
-        <span role="columnheader">歌曲 / 艺人</span>
+        <span role="columnheader">{t('trackList.headerTitleArtist')}</span>
         <span className="album-column" role="columnheader">
-          专辑
+          {t('trackList.headerAlbum')}
         </span>
         <span className="quality-column" role="columnheader">
-          格式
+          {t('trackList.headerFormat')}
         </span>
-        <span role="columnheader">时长</span>
+        <span role="columnheader">{t('trackList.headerDuration')}</span>
         <span role="columnheader">
-          <span className="sr-only">操作</span>
+          <span className="sr-only">{t('trackList.headerActions')}</span>
         </span>
       </div>
       {page.items.map((track, i) => (
@@ -108,7 +110,7 @@ export function TrackList({
                 <div className="disc-heading" role="row" aria-label={`Disc ${disc.number}`}>
                   <div role="cell" className="disc-heading-content">
                     <strong>DISC {String(disc.number).padStart(2, '0')}</strong>
-                    <small>{disc.track_count} 首</small>
+                    <small>{t('trackList.discTrackCount', { count: disc.track_count })}</small>
                     <span className="disc-rule" />
                   </div>
                 </div>
@@ -150,7 +152,7 @@ export function TrackList({
                 <button
                   className="track-title"
                   onClick={() => playTrack(track, i)}
-                  aria-label={`播放 ${track.title}`}
+                  aria-label={t('trackList.playTrackAria', { title: track.title })}
                 >
                   <strong>{track.title}</strong>
                   {trackUnavailableReason(track) && (
@@ -181,18 +183,20 @@ export function TrackList({
                           )}
                         </Fragment>
                       ))
-                    : '未知艺人'}
+                    : t('trackList.unknownArtist')}
                   {showStats && (
                     <span className="track-stat">
                       {' '}
                       ·{' '}
                       {statsSort === 'play_count'
-                        ? `${track.play_count} 次播放`
+                        ? t('trackList.playCount', { count: track.play_count })
                         : statsSort === 'listened_ms'
-                          ? `已听 ${listeningTime(track.listened_ms)}`
+                          ? t('trackList.listenedTime', { time: listeningTime(track.listened_ms) })
                           : track.last_played_at
-                            ? `${new Date(track.last_played_at).toLocaleDateString()} 听过`
-                            : '还未播放'}
+                            ? t('trackList.playedAt', {
+                                date: new Date(track.last_played_at).toLocaleDateString(),
+                              })
+                            : t('trackList.neverPlayed')}
                     </span>
                   )}
                 </small>
@@ -202,7 +206,7 @@ export function TrackList({
               {operations.onOpenAlbum && track.album_id ? (
                 <AlbumLink track={track} onOpen={operations.onOpenAlbum} />
               ) : (
-                track.album || '未知专辑'
+                track.album || t('trackList.unknownAlbum')
               )}
             </span>
             <span className="quality-column" role="cell">
@@ -232,23 +236,29 @@ export function Pagination({
   onOffset: (offset: number) => void;
   unit: string;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="pagination">
       <span>
-        第 {page.offset + 1}–{page.offset + page.items.length} {unit} / 共 {page.total} {unit}
+        {t('trackList.paginationRange', {
+          start: page.offset + 1,
+          end: page.offset + page.items.length,
+          total: page.total,
+          unit,
+        })}
       </span>
       <div>
         <button
           disabled={page.offset === 0}
           onClick={() => onOffset(Math.max(0, page.offset - page.limit))}
         >
-          上一页
+          {t('trackList.prevPage')}
         </button>
         <button
           disabled={page.offset + page.items.length >= page.total}
           onClick={() => onOffset(page.offset + page.limit)}
         >
-          下一页
+          {t('trackList.nextPage')}
         </button>
       </div>
     </div>

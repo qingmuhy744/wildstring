@@ -2,9 +2,11 @@ import { episodeId, episodeResumeMode } from './podcast-progress';
 import { HelpLabel } from './desktop-help';
 import { Icon } from './icons';
 import { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { api, ApiError, eventId, time, type Track } from './api';
 import { QUEUE_LIMIT, type PlaybackMode } from './playback-state';
 import type { Player } from './player';
+import i18n from './i18n';
 
 type SyncMode = 'off' | 'ask' | 'auto';
 interface SharedPlayback {
@@ -38,15 +40,16 @@ export function playbackSyncMode(id: string): SyncMode {
   return mode === 'off' || mode === 'auto' ? mode : 'ask';
 }
 export function SyncModeControl({ userId }: { userId: string }) {
+  const { t } = useTranslation();
   const [mode, setMode] = useState(() => playbackSyncMode(userId));
   const [podcastMode, setPodcastMode] = useState(() => episodeResumeMode(userId));
   return (
     <>
       <div className="sync-mode-controls">
         <label>
-          <HelpLabel hint="handoff">音乐跨设备接续</HelpLabel>
+          <HelpLabel hint="handoff">{t('playbackSync.musicHandoff')}</HelpLabel>
           <select
-            aria-label="跨设备接续方式"
+            aria-label={t('playbackSync.handoffModeAria')}
             value={mode}
             onChange={(event) => {
               const value = event.target.value as SyncMode;
@@ -55,15 +58,15 @@ export function SyncModeControl({ userId }: { userId: string }) {
               window.dispatchEvent(new Event(optionsEvent));
             }}
           >
-            <option value="off">关闭</option>
-            <option value="ask">轻提示（默认）</option>
-            <option value="auto">自动恢复</option>
+            <option value="off">{t('playbackSync.off')}</option>
+            <option value="ask">{t('playbackSync.ask')}</option>
+            <option value="auto">{t('playbackSync.auto')}</option>
           </select>
         </label>
         <label>
-          播客单集接续
+          {t('playbackSync.podcastResume')}
           <select
-            aria-label="播客单集接续"
+            aria-label={t('playbackSync.podcastResumeAria')}
             value={podcastMode}
             onChange={(event) => {
               const value = event.target.value as typeof podcastMode;
@@ -71,13 +74,13 @@ export function SyncModeControl({ userId }: { userId: string }) {
               localStorage.setItem(`wildstring:podcast-resume:${userId}`, value);
             }}
           >
-            <option value="auto">自动继续（默认）</option>
-            <option value="ask">询问</option>
-            <option value="restart">从头播放</option>
+            <option value="auto">{t('playbackSync.podcastAuto')}</option>
+            <option value="ask">{t('playbackSync.podcastAsk')}</option>
+            <option value="restart">{t('playbackSync.podcastRestart')}</option>
           </select>
         </label>
       </div>
-      <p className="muted">播客按单集保存进度；以上选择只影响开始收听的位置，进度始终自动保存。</p>
+      <p className="muted">{t('playbackSync.podcastNote')}</p>
     </>
   );
 }
@@ -85,6 +88,7 @@ export function SyncModeControl({ userId }: { userId: string }) {
 const COUNTDOWN_MS = 8000;
 
 export function PlaybackSync({ player, userId }: { player: Player; userId: string }) {
+  const { t } = useTranslation();
   const latest = useRef(player);
   latest.current = player;
   const [offer, setOffer] = useState<SharedPlayback | null>(null);
@@ -196,7 +200,7 @@ export function PlaybackSync({ player, userId }: { player: Player; userId: strin
           return;
         }
         if (state.track_ids.length > QUEUE_LIMIT)
-          throw new Error(`共享队列超过网页 ${QUEUE_LIMIT} 首上限。`);
+          throw new Error(i18n.t('playbackSync.queueLimitExceeded', { limit: QUEUE_LIMIT }));
         const tracks: Track[] = [];
         for (let offset = 0; offset < state.track_ids.length; offset += 10)
           tracks.push(
@@ -243,10 +247,10 @@ export function PlaybackSync({ player, userId }: { player: Player; userId: strin
           offered = verified.version;
           offeredPause = pauseEvent(verified);
           setOffer(verified);
-          setError('其他设备的进度已更新，请重新核对后载入。');
+          setError(i18n.t('playbackSync.progressUpdated'));
           return;
         }
-        if (!tracks.length) throw new Error('共享队列已经不可用。');
+        if (!tracks.length) throw new Error(i18n.t('playbackSync.queueUnavailable'));
         armed = false;
         version = state.version;
         seenVersion(state.version);
@@ -258,7 +262,7 @@ export function PlaybackSync({ player, userId }: { player: Player; userId: strin
         setOffer(null);
       } catch (reason) {
         if (!controller.signal.aborted) {
-          setError(reason instanceof Error ? reason.message : '进度未载入，请重试。');
+          setError(reason instanceof Error ? reason.message : i18n.t('playbackSync.loadFailed'));
           setOffer(saved);
         }
       } finally {
@@ -432,16 +436,16 @@ export function PlaybackSync({ player, userId }: { player: Player; userId: strin
     <aside
       className={`device-resume-notice ${isClosing ? 'is-closing' : ''}`}
       role="region"
-      aria-label="跨设备接续"
+      aria-label={t('playbackSync.handoffRegionAria')}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
     >
       <div className="device-resume-header">
-        <strong>其他设备有可接续的进度</strong>
+        <strong>{t('playbackSync.hasProgress')}</strong>
         <button
           type="button"
           className="device-resume-close"
-          aria-label="关闭提示"
+          aria-label={t('playbackSync.closeNotice')}
           disabled={busy}
           onClick={() => dismiss.current(offer.version)}
         >
@@ -449,9 +453,13 @@ export function PlaybackSync({ player, userId }: { player: Player; userId: strin
         </button>
       </div>
       <p>
-        {offer.track_ids.length} 首队列 · 第 {offer.index + 1} 首 · {time(offer.position_ms / 1000)}
+        {t('playbackSync.queueProgress', {
+          count: offer.track_ids.length,
+          index: offer.index + 1,
+          time: time(offer.position_ms / 1000),
+        })}
       </p>
-      <small className="muted">其他设备最近暂停 · 载入后保持暂停</small>
+      <small className="muted">{t('playbackSync.pausedHint')}</small>
       {error && (
         <p className="error" role="alert">
           {error}
@@ -459,10 +467,10 @@ export function PlaybackSync({ player, userId }: { player: Player; userId: strin
       )}
       <footer>
         <button disabled={busy} onClick={() => dismiss.current(offer.version)}>
-          暂不
+          {t('playbackSync.notNow')}
         </button>
         <button className="primary" disabled={busy} onClick={() => void accept.current(offer)}>
-          {busy ? '正在载入…' : '载入进度'}
+          {busy ? t('playbackSync.loading') : t('playbackSync.loadProgress')}
         </button>
       </footer>
       <div className="device-resume-progress" aria-hidden="true">

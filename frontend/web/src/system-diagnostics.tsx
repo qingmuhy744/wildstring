@@ -113,8 +113,8 @@ export function SystemDiagnostics() {
       });
       setNotice(
         result.debug_until
-          ? `临时详细日志已开启，将在 ${localDate(result.debug_until)} 自动恢复。`
-          : '临时详细日志已关闭。',
+          ? t('systemDiagnostics.debugEnabled', { time: localDate(result.debug_until) })
+          : t('systemDiagnostics.debugDisabled'),
       );
       void status.reload();
       void logs.reload();
@@ -139,7 +139,7 @@ export function SystemDiagnostics() {
       a.download = `wildstring-diagnostics-${new Date().toISOString().slice(0, 10)}.json`;
       a.click();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
-      setNotice('诊断包已下载，仅包含服务端允许的脱敏信息。');
+      setNotice(t('systemDiagnostics.bundleDownloaded'));
     } catch (reason) {
       setError(errorText(reason));
     } finally {
@@ -147,10 +147,10 @@ export function SystemDiagnostics() {
     }
   }
   return (
-    <section className="workspace-page" aria-label="系统诊断">
+    <section className="workspace-page" aria-label={t('systemDiagnostics.sectionAria')}>
       <WorkspaceHeader
-        title="诊断"
-        description="按诊断编号查看同一次操作。日志只展示受控摘要，修改审计独立保留。"
+        title={t('systemDiagnostics.title')}
+        description={t('systemDiagnostics.description')}
       >
         <RefreshWorkspace
           busy={logs.loading || status.loading}
@@ -170,17 +170,20 @@ export function SystemDiagnostics() {
       {!status.unsupported && (
         <>
           <div className="workspace-card">
-            <h2>运行状态</h2>
+            <h2>{t('systemDiagnostics.statusTitle')}</h2>
             {status.value && (
               <p className="muted">
-                版本 {status.value.version} · 数据库 {status.value.schema_version} · 日志保留{' '}
-                {status.value.logging.retention_days} 天 / 上限{' '}
-                {Math.round(status.value.logging.max_bytes / 1048576)} MiB
+                {t('systemDiagnostics.statusLine', {
+                  version: status.value.version,
+                  schemaVersion: status.value.schema_version,
+                  days: status.value.logging.retention_days,
+                  limit: Math.round(status.value.logging.max_bytes / 1048576),
+                })}
               </p>
             )}
             {(status.value?.logging.degraded || logs.value?.degraded) && (
               <p role="alert" className="error">
-                诊断日志存储已降级，部分事件可能缺失；音乐播放继续可用。
+                {t('systemDiagnostics.storageDegraded')}
               </p>
             )}
             <form
@@ -238,9 +241,9 @@ export function SystemDiagnostics() {
               }}
             >
               <label>
-                <HelpLabel hint="diagnostic">诊断编号</HelpLabel>
+                <HelpLabel hint="diagnostic">{t('systemDiagnostics.traceIdLabel')}</HelpLabel>
                 <input
-                  aria-label="筛选诊断编号"
+                  aria-label={t('systemDiagnostics.filterTraceAria')}
                   value={trace}
                   onChange={(e) => setTrace(e.target.value)}
                   maxLength={80}
@@ -248,31 +251,31 @@ export function SystemDiagnostics() {
                 />
               </label>
               <label>
-                日志级别
+                {t('systemDiagnostics.levelLabel')}
                 <select
-                  aria-label="日志级别"
+                  aria-label={t('systemDiagnostics.levelAria')}
                   value={level}
                   onChange={(e) => setLevel(e.target.value)}
                 >
-                  <option value="">全部</option>
+                  <option value="">{t('systemDiagnostics.levelAll')}</option>
                   {['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'].map((value) => (
                     <option key={value}>{value}</option>
                   ))}
                 </select>
               </label>
               <label>
-                事件名称
+                {t('systemDiagnostics.eventNameLabel')}
                 <input
-                  aria-label="事件名称"
+                  aria-label={t('systemDiagnostics.eventNameAria')}
                   value={event}
                   onChange={(e) => setEvent(e.target.value)}
                   maxLength={120}
                 />
               </label>
               <label>
-                任务编号
+                {t('systemDiagnostics.taskIdLabel')}
                 <input
-                  aria-label="筛选任务编号"
+                  aria-label={t('systemDiagnostics.filterTaskAria')}
                   value={task}
                   onChange={(e) => setTask(e.target.value)}
                   maxLength={100}
@@ -280,15 +283,15 @@ export function SystemDiagnostics() {
               </label>
               <div className="span-all workspace-actions">
                 <button className="primary" disabled={logs.loading}>
-                  查询日志
+                  {t('systemDiagnostics.queryLogs')}
                 </button>
                 <button type="button" disabled={busy} onClick={() => void bundle()}>
-                  下载脱敏诊断包
+                  {t('systemDiagnostics.downloadBundle')}
                 </button>
               </div>
             </form>
           </div>
-          <div className="workspace-card" aria-label="诊断事件列表">
+          <div className="workspace-card" aria-label={t('systemDiagnostics.eventsListAria')}>
             {displayed.map((item) => (
               <article className="workspace-row" key={item.id}>
                 <div className="workspace-row-main">
@@ -304,7 +307,9 @@ export function SystemDiagnostics() {
                     {item.elapsed_ms != null ? ` · ${item.elapsed_ms} ms` : ''}
                   </small>
                   <DiagnosticId id={item.trace_id} />
-                  {item.task_id && <small>任务 {item.task_id}</small>}
+                  {item.task_id && (
+                    <small>{t('systemDiagnostics.taskPrefix', { taskId: item.task_id })}</small>
+                  )}
                   {(item.exception_type || item.source) && (
                     <small>
                       {[item.exception_type, item.source, item.line].filter(Boolean).join(' · ')}
@@ -336,7 +341,9 @@ export function SystemDiagnostics() {
                 </div>
                 {item.trace_id && (
                   <button
-                    aria-label={`查看 ${item.trace_id} 的关联日志`}
+                    aria-label={t('systemDiagnostics.viewRelatedLogsAria', {
+                      traceId: item.trace_id,
+                    })}
                     onClick={() => {
                       setTrace(item.trace_id!);
                       setPages([]);
@@ -346,14 +353,16 @@ export function SystemDiagnostics() {
                       );
                     }}
                   >
-                    关联日志
+                    {t('systemDiagnostics.relatedLogs')}
                   </button>
                 )}
               </article>
             ))}
             {!displayed.length && (
               <p className="workspace-empty">
-                {logs.loading ? '读取日志中…' : '没有符合条件的事件。'}
+                {logs.loading
+                  ? t('systemDiagnostics.loadingLogs')
+                  : t('systemDiagnostics.noEvents')}
               </p>
             )}
             {logs.value?.next_cursor && (
@@ -364,32 +373,30 @@ export function SystemDiagnostics() {
                   setCursor(logs.value!.next_cursor!);
                 }}
               >
-                加载更多事件
+                {t('systemDiagnostics.loadMoreEvents')}
               </button>
             )}
           </div>
           <details className="workspace-card">
-            <summary>临时详细日志</summary>
-            <p className="muted">
-              最长 15 分钟后自动恢复。仍然脱敏，不记录对话、歌词、密钥或完整请求正文。
-            </p>
+            <summary>{t('systemDiagnostics.debugSummary')}</summary>
+            <p className="muted">{t('systemDiagnostics.debugHint')}</p>
             <div className="workspace-inline">
               <label>
-                范围
+                {t('systemDiagnostics.scopeLabel')}
                 <select
-                  aria-label="详细日志范围"
+                  aria-label={t('systemDiagnostics.scopeAria')}
                   value={debugModule}
                   onChange={(e) => setDebugModule(e.target.value)}
                 >
-                  <option value="outbound">外部请求</option>
-                  <option value="agent">助手与任务</option>
-                  <option value="all">全部受控模块</option>
+                  <option value="outbound">{t('systemDiagnostics.scopeOutbound')}</option>
+                  <option value="agent">{t('systemDiagnostics.scopeAgent')}</option>
+                  <option value="all">{t('systemDiagnostics.scopeAll')}</option>
                 </select>
               </label>
               <label>
-                分钟
+                {t('systemDiagnostics.minutesLabel')}
                 <input
-                  aria-label="详细日志分钟数"
+                  aria-label={t('systemDiagnostics.minutesAria')}
                   type="number"
                   min={1}
                   max={15}
@@ -398,14 +405,18 @@ export function SystemDiagnostics() {
                 />
               </label>
               <button disabled={busy || minutes < 1 || minutes > 15} onClick={() => void debug()}>
-                开启临时详细日志
+                {t('systemDiagnostics.enableDebug')}
               </button>
               <button disabled={busy} onClick={() => void debug(true)}>
-                立即关闭
+                {t('systemDiagnostics.disableDebug')}
               </button>
             </div>
             {status.value?.logging.debug_until && (
-              <p className="muted">自动结束：{localDate(status.value.logging.debug_until)}</p>
+              <p className="muted">
+                {t('systemDiagnostics.debugAutoEnds', {
+                  time: localDate(status.value.logging.debug_until),
+                })}
+              </p>
             )}
           </details>
         </>

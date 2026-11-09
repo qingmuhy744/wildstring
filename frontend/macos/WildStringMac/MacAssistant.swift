@@ -20,7 +20,7 @@ struct MacAssistantView: View {
             composer
         }
         .background(MacTheme.canvas)
-        .navigationTitle("音乐助手")
+        .navigationTitle(L10n("macAssistant.title"))
         .task { await model.prepare() }
         .task(id: model.pollingID) { await model.poll() }
         .sheet(
@@ -34,13 +34,13 @@ struct MacAssistantView: View {
         }
         .sheet(item: $renaming) { item in
             VStack(alignment: .leading, spacing: 16) {
-                Text("重命名对话").font(.headline)
-                TextField("对话名称", text: $renameText).textFieldStyle(.roundedBorder)
+                Text(L10n("macAssistant.renameConversation")).font(.headline)
+                TextField(L10n("macAssistant.conversationName"), text: $renameText).textFieldStyle(.roundedBorder)
                 if let error = model.errorMessage { Text(error).font(.caption).foregroundStyle(.red) }
                 HStack {
                     Spacer()
-                    Button("取消") { renaming = nil }.keyboardShortcut(.cancelAction)
-                    Button("保存") {
+                    Button(L10n("macAssistant.cancel")) { renaming = nil }.keyboardShortcut(.cancelAction)
+                    Button(L10n("macAssistant.save")) {
                         Task {
                             if await model.rename(
                                 item, title: renameText.trimmingCharacters(in: .whitespacesAndNewlines))
@@ -59,16 +59,16 @@ struct MacAssistantView: View {
             .frame(width: 380)
         }
         .confirmationDialog(
-            "删除这段对话？",
+            L10n("macAssistant.deleteConfirmTitle"),
             isPresented: Binding(
                 get: { deleting != nil }, set: { if !$0 { deleting = nil } }
             ), titleVisibility: .visible
         ) {
             if let item = deleting {
-                Button("删除对话", role: .destructive) { Task { await model.delete(item) } }
+                Button(L10n("macAssistant.deleteConversation"), role: .destructive) { Task { await model.delete(item) } }
             }
         } message: {
-            Text("对话记录无法恢复，已生成的草案与歌单会保留。")
+            Text(L10n("macAssistant.deleteConfirmMessage"))
         }
     }
 
@@ -81,45 +81,45 @@ struct MacAssistantView: View {
                     .frame(width: 38, height: 38)
                     .background(MacTheme.accentSoft, in: RoundedRectangle(cornerRadius: 12))
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(model.detail?.title ?? "音乐助手")
+                    Text(model.detail?.title ?? L10n("macAssistant.title"))
                         .font(MacTheme.section(16)).foregroundStyle(MacTheme.ink).lineLimit(2)
-                    Text("从你的曲库，找到想听的声音")
+                    Text(L10n("macAssistant.subtitle"))
                         .font(MacTheme.caption).foregroundStyle(MacTheme.muted)
                 }
                 Spacer(minLength: 8)
                 HStack(spacing: 6) {
                     Button { showHistory.toggle() } label: {
-                        Label("历史对话", systemImage: "clock.arrow.circlepath").frame(width: 30, height: 30)
+                        Label(L10n("macAssistant.history"), systemImage: "clock.arrow.circlepath").frame(width: 30, height: 30)
                     }
-                    .help("历史对话")
+                    .help(L10n("macAssistant.history"))
                     .popover(isPresented: $showHistory, arrowEdge: .bottom) { history }
                     Button {
                         model.newConversation()
                         inputFocused = true
                     } label: {
-                        Label("新对话", systemImage: "square.and.pencil").frame(width: 30, height: 30)
+                        Label(L10n("macAssistant.newConversation"), systemImage: "square.and.pencil").frame(width: 30, height: 30)
                     }
-                    .disabled(model.busy).help("新对话")
+                    .disabled(model.busy).help(L10n("macAssistant.newConversation"))
                     Button { Task { await model.refresh() } } label: {
-                        Label("刷新", systemImage: "arrow.clockwise").frame(width: 30, height: 30)
+                        Label(L10n("macAssistant.refresh"), systemImage: "arrow.clockwise").frame(width: 30, height: 30)
                     }
-                    .disabled(model.isLoading || model.isSending).help("刷新")
+                    .disabled(model.isLoading || model.isSending).help(L10n("macAssistant.refresh"))
                 }
                 .labelStyle(.iconOnly)
                 .buttonStyle(.plain)
                 .foregroundStyle(MacTheme.muted)
             }
             HStack(spacing: 10) {
-                Text("检索方式").font(MacTheme.micro).foregroundStyle(MacTheme.muted)
-                Picker("检索方式", selection: $model.connectionID) {
-                    Text("本地检索 · 不使用模型").tag("local")
+                Text(L10n("macAssistant.retrievalMode")).font(MacTheme.micro).foregroundStyle(MacTheme.muted)
+                Picker(L10n("macAssistant.retrievalMode"), selection: $model.connectionID) {
+                    Text(L10n("macAssistant.localRetrieval")).tag("local")
                     ForEach(model.connections.filter { $0.enabled || $0.id == model.connectionID }) {
                         connection in
                         Text("\(connection.name) · \(connection.model)")
                             .tag(connection.id).disabled(!connection.enabled)
                     }
                     if model.connectionID != "local", model.selectedConnection == nil {
-                        Text("之前的模型连接不可用").tag(model.connectionID)
+                        Text(L10n("macAssistant.previousConnectionUnavailable")).tag(model.connectionID)
                     }
                 }
                 .labelsHidden().controlSize(.small)
@@ -153,7 +153,7 @@ struct MacAssistantView: View {
                     }
                     if !model.localResults.isEmpty {
                         VStack(alignment: .leading, spacing: 12) {
-                            Label("曲库中的匹配歌曲", systemImage: "music.note.list").font(.headline)
+                            Label(L10n("macAssistant.matchedTracks"), systemImage: "music.note.list").font(.headline)
                             MacAssistantTracks(
                                 client: model.client, playback: playback, tracks: model.localResults)
                         }
@@ -171,7 +171,7 @@ struct MacAssistantView: View {
                         run.status == "failed" || run.status == "interrupted"
                     {
                         Label(
-                            "本次处理未完成\(run.errorCode.map { "：\($0)" } ?? "")",
+                            run.errorCode.map { L10n("macAssistant.runIncompleteWithCode", $0) } ?? L10n("macAssistant.runIncomplete"),
                             systemImage: "exclamationmark.triangle"
                         )
                         .font(.caption).foregroundStyle(.orange)
@@ -198,13 +198,13 @@ struct MacAssistantView: View {
                 .foregroundStyle(MacTheme.accentDeep)
                 .frame(width: 44, height: 44)
                 .background(MacTheme.accentSoft, in: Circle())
-            Text("今天想听什么？")
+            Text(L10n("macAssistant.welcomeTitle"))
                 .font(MacTheme.display(32))
                 .foregroundStyle(MacTheme.ink)
             Text(
                 model.connectionID == "local"
-                    ? "输入歌名、艺人或专辑，直接检索当前曲库。选择上方的模型连接后，可以用自然语言描述心情、场景或歌单要求。"
-                    : "描述你的想法，助手会查找真实曲目并说明依据。生成的歌单可先试听，再确认保存。"
+                    ? L10n("macAssistant.welcomeLocal")
+                    : L10n("macAssistant.welcomeModel")
             )
             .font(MacTheme.caption).foregroundStyle(MacTheme.muted).lineSpacing(5)
             ViewThatFits(in: .horizontal) {
@@ -218,9 +218,9 @@ struct MacAssistantView: View {
     @ViewBuilder private var suggestions: some View {
         ForEach(
             model.connectionID == "local"
-                ? ["周杰伦", "钢琴", "夜曲"]
+                ? [L10n("macAssistant.suggestLocal1"), L10n("macAssistant.suggestLocal2"), L10n("macAssistant.suggestLocal3")]
                 : [
-                    "从曲库找几首适合散步的歌", "用我喜欢的歌生成一份歌单草案", "帮我找一张适合完整听完的专辑",
+                    L10n("macAssistant.suggestModel1"), L10n("macAssistant.suggestModel2"), L10n("macAssistant.suggestModel3"),
                 ], id: \.self
         ) { suggestion in
             Button(suggestion) {
@@ -234,15 +234,15 @@ struct MacAssistantView: View {
         HStack(alignment: .top, spacing: 14) {
             if message.isUser { Spacer(minLength: 60) }
             VStack(alignment: .leading, spacing: 8) {
-                Text(message.isUser ? "你" : "野弦助手").font(.caption.weight(.semibold)).foregroundStyle(
+                Text(message.isUser ? L10n("macAssistant.user") : L10n("macAssistant.assistant")).font(.caption.weight(.semibold)).foregroundStyle(
                     .secondary)
                 if message.isUser {
                     Text(message.content).textSelection(.enabled)
                 } else {
-                    MacAssistantText(content: message.content.isEmpty ? "正在准备回答…" : message.content)
+                    MacAssistantText(content: message.content.isEmpty ? L10n("macAssistant.preparingAnswer") : message.content)
                 }
                 if message.partial == true {
-                    Text("正在生成…").font(.caption).foregroundStyle(.secondary)
+                    Text(L10n("macAssistant.generating")).font(.caption).foregroundStyle(.secondary)
                 }
                 if let sources = message.sources, !sources.isEmpty {
                     ForEach(sources) { source in
@@ -270,13 +270,13 @@ struct MacAssistantView: View {
                     Label(error, systemImage: "exclamationmark.circle").font(.callout).foregroundStyle(
                         .orange)
                     Spacer()
-                    Button("刷新") { Task { await model.refresh() } }.disabled(
+                    Button(L10n("macAssistant.refresh")) { Task { await model.refresh() } }.disabled(
                         model.isSending || model.isLoading)
                 }
             }
             VStack(alignment: .leading, spacing: 14) {
                 TextField(
-                    model.connectionID == "local" ? "输入歌名、艺人或专辑" : "描述想听的音乐，或让助手生成歌单", text: $model.input,
+                    model.connectionID == "local" ? L10n("macAssistant.inputPlaceholderLocal") : L10n("macAssistant.inputPlaceholderModel"), text: $model.input,
                     axis: .vertical
                 )
                 .textFieldStyle(.plain)
@@ -285,14 +285,14 @@ struct MacAssistantView: View {
                 .disabled(model.isSending || model.running)
                 .padding(2)
                 HStack {
-                    Label(model.connectionID == "local" ? "曲库检索" : "模型助手",
+                    Label(model.connectionID == "local" ? L10n("macAssistant.librarySearch") : L10n("macAssistant.modelAssistant"),
                         systemImage: model.connectionID == "local" ? "magnifyingglass" : "sparkles")
                         .font(MacTheme.caption).foregroundStyle(MacTheme.muted)
                     Spacer()
                     Button {
                         Task { await model.send() }
                     } label: {
-                        Label(model.isSending ? "处理中" : "发送", systemImage: "arrow.up")
+                        Label(model.isSending ? L10n("macAssistant.sending") : L10n("macAssistant.send"), systemImage: "arrow.up")
                             .labelStyle(.iconOnly)
                             .font(.system(size: 14, weight: .semibold))
                             .foregroundStyle(MacTheme.onAccent)
@@ -302,7 +302,7 @@ struct MacAssistantView: View {
                     .buttonStyle(.plain)
                     .keyboardShortcut(.return, modifiers: .command)
                     .disabled(!model.canSend)
-                    .help("发送 · ⌘ Return")
+                    .help(L10n("macAssistant.sendShortcutHelp"))
                 }
             }
             .macPanel(padding: 16, radius: 18, fill: MacTheme.raised)
@@ -310,11 +310,11 @@ struct MacAssistantView: View {
             HStack {
                 Text(
                     model.connectionID == "local"
-                        ? "本地检索不消耗模型额度"
-                        : model.selectedConnection?.dailyCallsRemaining.map { "今日模型调用剩余 \($0) 次" } ?? "使用所选模型连接"
+                        ? L10n("macAssistant.localNoQuota")
+                        : model.selectedConnection?.dailyCallsRemaining.map { L10n("macAssistant.dailyCallsRemaining", $0) } ?? L10n("macAssistant.useSelectedConnection")
                 )
                 Spacer()
-                Text(model.input.count > 8_000 ? "超过 8,000 字，请缩短内容" : "⌘ Return 发送 · Return 换行")
+                Text(model.input.count > 8_000 ? L10n("macAssistant.inputTooLong") : L10n("macAssistant.shortcutHint"))
             }
             .font(MacTheme.micro).foregroundStyle(MacTheme.faint)
             .padding(.horizontal, 4)
@@ -328,10 +328,10 @@ struct MacAssistantView: View {
 
     private var history: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("历史对话").font(.headline).padding(.horizontal, 16).padding(.top, 16)
+            Text(L10n("macAssistant.history")).font(.headline).padding(.horizontal, 16).padding(.top, 16)
             if let error = model.historyError {
                 Text(error).font(.caption).foregroundStyle(.orange).padding(.horizontal, 16)
-                Button("重新加载") { Task { await model.loadHistory() } }.padding(.horizontal, 16)
+                Button(L10n("macAssistant.reload")) { Task { await model.loadHistory() } }.padding(.horizontal, 16)
             }
             List(model.conversations) { item in
                 HStack {
@@ -346,12 +346,12 @@ struct MacAssistantView: View {
                         .lineLimit(2).frame(maxWidth: .infinity, alignment: .leading)
                     }.buttonStyle(.plain)
                     Menu {
-                        Button("重命名") {
+                        Button(L10n("macAssistant.rename")) {
                             showHistory = false
                             renameText = item.title
                             renaming = item
                         }
-                        Button("删除", role: .destructive) {
+                        Button(L10n("macAssistant.delete"), role: .destructive) {
                             showHistory = false
                             deleting = item
                         }
@@ -365,11 +365,11 @@ struct MacAssistantView: View {
             }
             .overlay {
                 if model.conversations.isEmpty, model.historyError == nil {
-                    Text("发送第一条消息后，对话会保存在这里").foregroundStyle(.secondary).padding()
+                    Text(L10n("macAssistant.historyEmptyHint")).foregroundStyle(.secondary).padding()
                 }
             }
             if model.conversations.count < model.historyTotal {
-                Button("加载更多") { Task { await model.loadHistory(more: true) } }.padding(12)
+                Button(L10n("macAssistant.loadMore")) { Task { await model.loadHistory(more: true) } }.padding(12)
             }
         }
         .frame(width: 350, height: 420)
@@ -474,7 +474,7 @@ struct MacAssistantTracks: View {
                     }.padding(.vertical, 8).contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("播放 \(track.title)，\(track.artists.joined(separator: " / "))")
+                .accessibilityLabel(L10n("macAssistant.playTrackBy", track.title, track.artists.joined(separator: " / ")))
                 if index < tracks.count - 1 { Divider() }
             }
         }
@@ -492,8 +492,8 @@ private struct MacAssistantDraftLink: View {
             HStack(spacing: 12) {
                 Image(systemName: "music.note.list").font(.title2).foregroundStyle(MacTheme.accentDeep)
                 VStack(alignment: .leading, spacing: 5) {
-                    Text(draft?.title ?? "查看助手草案").font(.headline)
-                    Text(draft?.isApplied == true ? "已应用 · 查看结果" : "预览内容与依据，再确认保存").font(.caption)
+                    Text(draft?.title ?? L10n("macAssistant.viewDraft")).font(.headline)
+                    Text(draft?.isApplied == true ? L10n("macAssistant.draftApplied") : L10n("macAssistant.draftPreview")).font(.caption)
                         .foregroundStyle(.secondary)
                 }
                 Spacer()

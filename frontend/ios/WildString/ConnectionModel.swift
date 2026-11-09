@@ -194,7 +194,7 @@ final class ConnectionModel {
             return
         }
         guard let address = try? makeAddress(server.address, allowInsecureHTTP: allowInsecureHTTP) else {
-            errorMessage = "服务器地址已失效"
+            errorMessage = L10n("connModel.serverAddressInvalid")
             return
         }
         isBusy = true
@@ -203,7 +203,7 @@ final class ConnectionModel {
         if savedRoutes.profile.routes.count > 1 {
             if let (candidate, selected, user) = await savedRoutes.restore() {
                 await activate(client: candidate, address: selected, username: user.username, profile: user.profile, routeProfile: savedRoutes)
-            } else { routes = savedRoutes; errorMessage = "已保存线路不可用，请检查网络或登录状态" }
+            } else { routes = savedRoutes; errorMessage = L10n("connModel.savedRoutesUnavailable") }
             return
         }
         let client = WildstringClient(server: address, store: store)
@@ -223,7 +223,7 @@ final class ConnectionModel {
                 await client.clearSession()
             } catch {
                 // Unreachable: keep the session for a later retry.
-                errorMessage = "无法连接该服务器，请检查网络或地址"
+                errorMessage = L10n("connModel.cannotConnectServer")
                 return
             }
         }
@@ -299,7 +299,7 @@ final class ConnectionModel {
     }
 
     private func makeRoutes(_ address: ServerAddress, allowHTTP: Bool) -> ServerRoutes {
-        let controller = ServerRoutes(primary: ServerRoute(name: "默认线路", address: address.description, allowHTTP: allowHTTP)) { [store] in WildstringClient(server: $0, store: store) }
+        let controller = ServerRoutes(primary: ServerRoute(name: L10n("connModel.defaultRouteName"), address: address.description, allowHTTP: allowHTTP)) { [store] in WildstringClient(server: $0, store: store) }
         controller.onSelected = { [weak self, weak controller] candidate, selected in
             guard let self, let controller, self.routes === controller,
                   let status = try? await candidate.authStatus(), let user = status.user else { return }
@@ -458,32 +458,32 @@ final class ConnectionModel {
     private static func message(for error: Error) -> String {
         if let error = error as? APIError {
             switch error.code {
-            case "https_required": return "服务器仅允许 HTTPS，请使用 HTTPS 线路登录"
-            case "invalid_credentials": return "用户名或密码错误"
-            case "login_throttled": return "尝试次数过多，请稍后再试"
-            case "owner_setup_required": return "服务器尚未初始化所有者，请先在服务端完成设置"
-            case "client_header_required": return "服务器版本过旧，暂不支持 iOS 客户端"
-            case "invalid_account_input": return "输入内容不符合要求"
-            default: return "服务器返回错误（\(error.statusCode)）"
+            case "https_required": return L10n("connModel.errorHttpsRequired")
+            case "invalid_credentials": return L10n("connModel.errorInvalidCredentials")
+            case "login_throttled": return L10n("connModel.errorLoginThrottled")
+            case "owner_setup_required": return L10n("connModel.errorOwnerSetupRequired")
+            case "client_header_required": return L10n("connModel.errorClientHeaderRequired")
+            case "invalid_account_input": return L10n("connModel.errorInvalidAccountInput")
+            default: return L10n("connModel.errorServerReturnedStatus", error.statusCode)
             }
         }
         if let error = error as? ServerAddress.ValidationError {
             switch error {
-            case .invalidURL: return "服务器地址格式不正确"
-            case .unsupportedScheme: return "仅支持 http 或 https 地址"
-            case .insecureHTTPNotAllowed: return "需要 HTTPS 地址，或先确认使用未加密 HTTP"
+            case .invalidURL: return L10n("connModel.errorInvalidURL")
+            case .unsupportedScheme: return L10n("connModel.errorUnsupportedScheme")
+            case .insecureHTTPNotAllowed: return L10n("connModel.errorInsecureHTTPNotAllowed")
             }
         }
         if let error = error as? URLError {
             switch error.code {
-            case .timedOut: return "连接超时，请检查地址和网络"
-            case .cannotConnectToHost, .cannotFindHost: return "无法连接服务器，请检查地址和网络"
-            case .notConnectedToInternet: return "当前网络不可用"
-            case .serverCertificateUntrusted, .secureConnectionFailed: return "TLS 证书校验失败"
-            case .appTransportSecurityRequiresSecureConnection: return "系统要求 HTTPS 连接"
-            default: return "网络错误（\(error.code.rawValue)）"
+            case .timedOut: return L10n("connModel.errorTimedOut")
+            case .cannotConnectToHost, .cannotFindHost: return L10n("connModel.errorCannotConnect")
+            case .notConnectedToInternet: return L10n("connModel.errorNotConnectedToInternet")
+            case .serverCertificateUntrusted, .secureConnectionFailed: return L10n("connModel.errorTLSFailed")
+            case .appTransportSecurityRequiresSecureConnection: return L10n("connModel.errorATSRequiresHTTPS")
+            default: return L10n("connModel.errorNetworkRaw", error.code.rawValue)
             }
         }
-        return "发生未知错误"
+        return L10n("connModel.errorUnknown")
     }
 }

@@ -1,5 +1,6 @@
 import { HelpLabel, HelpText } from './desktop-help';
 import { useEffect, useRef, useState, type RefObject } from 'react';
+import { useTranslation } from 'react-i18next';
 import { api } from './api';
 
 export type GainRecord = {
@@ -121,6 +122,7 @@ export function usePlaybackGain(
 }
 
 export function GainControls({ trackId }: { trackId?: string }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => {
@@ -154,7 +156,7 @@ export function GainControls({ trackId }: { trackId?: string }) {
       window.dispatchEvent(new Event('wildstring:gain-updated'));
       setMessage(success);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : '调整未保存。');
+      setMessage(error instanceof Error ? error.message : t('playbackGain.notSaved'));
     } finally {
       setBusy(false);
     }
@@ -162,7 +164,7 @@ export function GainControls({ trackId }: { trackId?: string }) {
   return (
     <>
       <button disabled={!trackId} onClick={() => setOpen(true)}>
-        响度
+        {t('playbackGain.loudness')}
       </button>
       {open && (
         <dialog
@@ -171,22 +173,20 @@ export function GainControls({ trackId }: { trackId?: string }) {
             event.preventDefault();
             setOpen(false);
           }}
-          aria-label="响度均衡与手动调整"
+          aria-label={t('playbackGain.dialogAria')}
           className="playlist-editor gain-dialog"
           style={{ maxHeight: '90dvh', overflow: 'auto' }}
         >
           <div className="editor-heading">
             <div>
               <span className="eyebrow">PLAYBACK GAIN</span>
-              <h2>响度均衡与手动调整</h2>
-              <p className="muted">
-                按账号保存，不修改音频。专辑整体调整与单曲额外微调叠加；自动均衡可独立关闭。
-              </p>
+              <h2>{t('playbackGain.dialogTitle')}</h2>
+              <p className="muted">{t('playbackGain.dialogDescription')}</p>
             </div>
             <button
               type="button"
               className="icon-button"
-              aria-label="关闭"
+              aria-label={t('playbackGain.close')}
               tabIndex={-1}
               onClick={() => setOpen(false)}
             >
@@ -197,7 +197,7 @@ export function GainControls({ trackId }: { trackId?: string }) {
           {record && (
             <fieldset disabled={busy}>
               <label>
-                <HelpLabel hint="replayGain">自动响度均衡</HelpLabel>
+                <HelpLabel hint="replayGain">{t('playbackGain.autoReplayGain')}</HelpLabel>
                 <select
                   value={record.settings.mode}
                   onChange={(e) =>
@@ -207,13 +207,13 @@ export function GainControls({ trackId }: { trackId?: string }) {
                     })
                   }
                 >
-                  <option value="off">关闭</option>
-                  <option value="track">单曲 ReplayGain</option>
-                  <option value="album">专辑 ReplayGain（缺少时使用单曲值）</option>
+                  <option value="off">{t('playbackGain.off')}</option>
+                  <option value="track">{t('playbackGain.trackGain')}</option>
+                  <option value="album">{t('playbackGain.albumGain')}</option>
                 </select>
               </label>
               <label>
-                <HelpLabel hint="gainPreamp">自动均衡前级（dB）</HelpLabel>
+                <HelpLabel hint="gainPreamp">{t('playbackGain.gainPreamp')}</HelpLabel>
                 <input
                   type="number"
                   min="-12"
@@ -239,7 +239,7 @@ export function GainControls({ trackId }: { trackId?: string }) {
                     })
                   }
                 />
-                <HelpLabel hint="clipping">根据峰值防止削波（未知峰值时只衰减）</HelpLabel>
+                <HelpLabel hint="clipping">{t('playbackGain.preventClipping')}</HelpLabel>
               </label>
               <button
                 onClick={() =>
@@ -249,21 +249,27 @@ export function GainControls({ trackId }: { trackId?: string }) {
                         method: 'PUT',
                         body: JSON.stringify(record.settings),
                       }),
-                    '均衡设置已保存。',
+                    t('playbackGain.eqSaved'),
                   )
                 }
               >
-                保存均衡设置
+                {t('playbackGain.saveEq')}
               </button>
               {(['album', 'track'] as const).map((scope) => (
                 <div key={scope}>
                   <label>
                     <HelpLabel hint={scope === 'album' ? 'albumGain' : 'trackGain'}>
-                      {scope === 'album' ? '整张专辑增减（dB）' : '本曲额外微调（dB）'}
+                      {scope === 'album'
+                        ? t('playbackGain.albumGainLabel')
+                        : t('playbackGain.trackGainLabel')}
                     </HelpLabel>
                     <input
                       type="number"
-                      aria-label={scope === 'album' ? '专辑增益 dB' : '单曲增益 dB'}
+                      aria-label={
+                        scope === 'album'
+                          ? t('playbackGain.albumGainAria')
+                          : t('playbackGain.trackGainAria')
+                      }
                       min="-12"
                       max="12"
                       step="0.5"
@@ -286,11 +292,13 @@ export function GainControls({ trackId }: { trackId?: string }) {
                             method: 'PUT',
                             body: JSON.stringify({ scope, ...record[scope] }),
                           }),
-                        '手动增益已保存。',
+                        t('playbackGain.manualGainSaved'),
                       )
                     }
                   >
-                    保存{scope === 'album' ? '专辑' : '单曲'}调整
+                    {scope === 'album'
+                      ? t('playbackGain.saveAlbumGain')
+                      : t('playbackGain.saveTrackGain')}
                   </button>
                   <button
                     disabled={scope === 'album' && !record.album_id}
@@ -305,19 +313,26 @@ export function GainControls({ trackId }: { trackId?: string }) {
                               gain_db: 0,
                             }),
                           }),
-                        '此项已归零。',
+                        t('playbackGain.resetNotice'),
                       )
                     }
                   >
-                    归零{scope === 'album' ? '专辑' : '单曲'}
+                    {scope === 'album'
+                      ? t('playbackGain.resetAlbum')
+                      : t('playbackGain.resetTrack')}
                   </button>
                 </div>
               ))}
               <p>
                 <HelpText hint="gainResult">
-                  请求增益 {record.requested_db.toFixed(1)} dB · 实际 {record.applied_db.toFixed(1)}{' '}
-                  dB{record.limited ? '（受峰值保护限制）' : ''} · 峰值
-                  {record.peak_known ? '已知' : '未知'}
+                  {t('playbackGain.gainStats', {
+                    requested: record.requested_db.toFixed(1),
+                    applied: record.applied_db.toFixed(1),
+                    limited: record.limited ? t('playbackGain.peakLimited') : '',
+                    peak: record.peak_known
+                      ? t('playbackGain.peakKnown')
+                      : t('playbackGain.peakUnknown'),
+                  })}
                 </HelpText>
               </p>
               {record.can_analyze && (
@@ -326,19 +341,25 @@ export function GainControls({ trackId }: { trackId?: string }) {
                   onClick={() =>
                     void run(
                       () => api(`/manage/tracks/${trackId}/analyze-loudness`, { method: 'POST' }),
-                      '已加入后台响度分析，不改写文件。',
+                      t('playbackGain.analysisEnqueued'),
                     )
                   }
                 >
-                  {scanning ? '正在分析…' : '分析本曲响度与峰值'}
+                  {scanning ? t('playbackGain.analyzing') : t('playbackGain.analyzeLoudness')}
                 </button>
               )}
-              {record.analysis.error && <p>分析未完成：{record.analysis.error}</p>}
+              {record.analysis.error && (
+                <p>
+                  {t('playbackGain.analysisIncomplete', {
+                    error: record.analysis.error,
+                  })}
+                </p>
+              )}
             </fieldset>
           )}
           <div className="editor-footer">
             <button type="button" onClick={() => setOpen(false)}>
-              关闭响度设置
+              {t('playbackGain.closeSettings')}
             </button>
           </div>
         </dialog>

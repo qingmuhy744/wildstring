@@ -35,6 +35,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import com.wildstring.app.AppLanguage
 import com.wildstring.app.R
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.customActions
@@ -103,7 +104,7 @@ fun PodcastChannelPage(
     val selectedDetail = selectedId?.let(browser.details::get).takeIf { browser.owner == owner }
     val selectedPodcast = selectedId?.let { id ->
         selectedDetail?.podcast ?: podcasts.find { it.id == id }
-        ?: PodcastSummary(id, state.current?.takeIf { it.podcast?.podcastId == id }?.album ?: "单集列表", feedUrl = "")
+        ?: PodcastSummary(id, state.current?.takeIf { it.podcast?.podcastId == id }?.album ?: stringResource(R.string.pod_scr_episodes_fallback), feedUrl = "")
     }
     val detailLoading = browser.owner != owner || (selectedId != null &&
         (selectedId !in browser.loadedDetails || selectedId in browser.loadingDetails))
@@ -188,7 +189,7 @@ fun PodcastChannelPage(
                             current?.let { detail -> vm.podcastBrowser.remember(detail.copy(episodes = detail.episodes.map { item ->
                                 if (item.id == episode.id) item.copy(resourceSaved = result.saved, downloadStatus = if (result.saved) (if (result.reused) "downloaded" else "queued") else item.downloadStatus) else item
                             })) }
-                            statusMessage = if (!result.saved) "已取消个人保存，共享音频由服务器按策略保留" else if (result.reused) "已复用服务器已有音频，无需重复下载" else "已保存，正在准备服务器音频"
+                            statusMessage = if (!result.saved) AppLanguage.string(R.string.pod_scr_unsaved_shared_retained) else if (result.reused) AppLanguage.string(R.string.pod_scr_saved_reused) else AppLanguage.string(R.string.pod_scr_saved_preparing)
                         } catch (e: CancellationException) { throw e }
                         catch (e: Exception) { statusMessage = friendlyError(e) }
                     } },
@@ -202,7 +203,7 @@ fun PodcastChannelPage(
                             },
                             onSaved = { detail ->
                                 vm.podcastBrowser.remember(detail)
-                                statusMessage = "出品方归属已保存"
+                                statusMessage = AppLanguage.string(R.string.pod_scr_publisher_saved)
                             })
                     },
                 )
@@ -250,10 +251,10 @@ fun PodcastChannelPage(
                             try {
                                 vm.repository.deletePodcast(p.id)
                                 if (owner == vm.repository.session.cacheScope()) vm.podcastBrowser.remove(p.id)
-                                statusMessage = "已从本服删除节目: ${p.title}"
+                                statusMessage = AppLanguage.string(R.string.pod_scr_deleted_show, p.title)
                             } catch (e: CancellationException) { throw e }
                             catch (e: Exception) {
-                                statusMessage = "删除节目失败: ${e.message}"
+                                statusMessage = AppLanguage.string(R.string.pod_scr_delete_failed, e.message.orEmpty())
                             }
                         }
                     },
@@ -264,7 +265,7 @@ fun PodcastChannelPage(
         autoDownloadPodcast?.let { podcast ->
             PodcastDownloadSettingsDialog(vm, podcast, onDismiss = { autoDownloadPodcast = null }, onSaved = {
                 vm.podcastBrowser.refresh(podcast.id, synchronize = false)
-                statusMessage = "已保存你的自动下载设置"
+                statusMessage = AppLanguage.string(R.string.pod_scr_download_settings_saved)
             })
         }
         if (exploring) key(owner) {
@@ -285,10 +286,10 @@ fun PodcastChannelPage(
                             if (owner != vm.repository.session.cacheScope()) return@launch
                             vm.podcastBrowser.remember(detail)
                             vm.openPodcast(detail.podcast.id)
-                            statusMessage = "已添加并关注: ${detail.podcast.title}"
+                            statusMessage = AppLanguage.string(R.string.pod_scr_added_and_followed, detail.podcast.title)
                         } catch (e: CancellationException) { throw e }
                         catch (e: Exception) {
-                            statusMessage = "订阅失败: ${e.message}"
+                            statusMessage = AppLanguage.string(R.string.pod_scr_subscribe_failed, e.message.orEmpty())
                         }
                     }
                 },
@@ -395,7 +396,7 @@ private fun PodcastUnifiedQueueBanner(
                         }
                     }
                     Text(
-                        if (pendingCount > 0) "共 $pendingCount 集待播 · 点击查看" else "待播列表为空 · 点击设置新集规则",
+                        if (pendingCount > 0) stringResource(R.string.pod_scr_pending_summary, pendingCount) else stringResource(R.string.pod_scr_pending_empty_prompt),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -407,7 +408,7 @@ private fun PodcastUnifiedQueueBanner(
                         shape = RoundedCornerShape(10.dp),
                         modifier = Modifier.height(34.dp).testTag("podcast-banner-play-all")
                     ) {
-                        Text("▶ 播放", fontSize = 12.sp)
+                        Text(stringResource(R.string.pod_scr_play_btn), fontSize = 12.sp)
                     }
                 } else {
                     OutlinedButton(
@@ -416,7 +417,7 @@ private fun PodcastUnifiedQueueBanner(
                         shape = RoundedCornerShape(10.dp),
                         modifier = Modifier.height(34.dp)
                     ) {
-                        Text("管理", fontSize = 12.sp)
+                        Text(stringResource(R.string.pod_scr_manage_btn), fontSize = 12.sp)
                     }
                 }
             }
@@ -481,7 +482,7 @@ private fun PodcastUnifiedQueueSheet(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     IconButton(onClick = onDismiss) {
-                        Icon(Icons.Default.Close, contentDescription = "关闭")
+                        Icon(Icons.Default.Close, contentDescription = stringResource(R.string.pod_scr_close))
                     }
                     Text(
                         text = stringResource(R.string.podcast_queue_unified_title),
@@ -549,7 +550,7 @@ private fun PodcastUnifiedQueueSheet(
                                             }
                                             if (followedShows.isNotEmpty()) {
                                                 TextButton(onClick = { sheetTab = "rules" }) {
-                                                    Text("配置自动待播规则")
+                                                    Text(stringResource(R.string.pod_scr_configure_rules))
                                                 }
                                             }
                                         }
@@ -569,7 +570,7 @@ private fun PodcastUnifiedQueueSheet(
                                     ) {
                                         Column(Modifier.weight(1f)) {
                                             Text(
-                                                text = row.title.ifBlank { "单集" },
+                                                text = row.title.ifBlank { stringResource(R.string.pod_scr_episode_fallback) },
                                                 style = MaterialTheme.typography.bodyMedium,
                                                 fontWeight = FontWeight.Medium,
                                                 maxLines = 2,
@@ -592,7 +593,7 @@ private fun PodcastUnifiedQueueSheet(
                                             contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
                                             modifier = Modifier.height(32.dp)
                                         ) {
-                                            Text("播放", fontSize = 12.sp, maxLines = 1, softWrap = false)
+                                            Text(stringResource(R.string.pod_scr_play), fontSize = 12.sp, maxLines = 1, softWrap = false)
                                         }
                                         Spacer(Modifier.width(6.dp))
                                         IconButton(
@@ -603,7 +604,7 @@ private fun PodcastUnifiedQueueSheet(
                                         ) {
                                             Icon(
                                                 Icons.Default.Close,
-                                                contentDescription = "移除",
+                                                contentDescription = stringResource(R.string.pod_scr_remove_action),
                                                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                                 modifier = Modifier.size(18.dp)
                                             )
@@ -626,7 +627,7 @@ private fun PodcastUnifiedQueueSheet(
                                         verticalArrangement = Arrangement.spacedBy(6.dp),
                                     ) {
                                         Text(
-                                            text = "暂无关注的节目",
+                                            text = stringResource(R.string.pod_scr_no_followed_shows),
                                             style = MaterialTheme.typography.bodyMedium,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         )
@@ -858,12 +859,12 @@ private fun PodcastListView(
             ) {
                 Icon(
                     if (canAdd) Icons.Default.Add else Icons.Default.Search,
-                    contentDescription = if (canAdd) "探索与添加" else "探索",
+                    contentDescription = if (canAdd) stringResource(R.string.pod_scr_explore_and_add) else stringResource(R.string.pod_scr_explore),
                     modifier = Modifier.size(22.dp),
                 )
             }
         }
-        PodcastRefreshBox(loading, onRefreshAll, "podcast-list-refresh", "刷新播客订阅") {
+        PodcastRefreshBox(loading, onRefreshAll, "podcast-list-refresh", stringResource(R.string.pod_scr_refresh_subscriptions)) {
             BoxWithConstraints(Modifier.fillMaxSize()) {
                 val columns = if (maxWidth >= 720.dp) 2 else 1
                 val rows = remember(podcasts, columns) { podcasts.chunked(columns) }
@@ -876,8 +877,8 @@ private fun PodcastListView(
                     if (podcasts.isEmpty() && !loading) item {
                         Box(Modifier.fillParentMaxSize()) {
                             Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text("还没有关注的节目")
-                                TextButton(onExplore) { Text(if (canAdd) "探索或添加节目" else "探索热门播客") }
+                                Text(stringResource(R.string.pod_scr_no_followed_shows_yet))
+                                TextButton(onExplore) { Text(if (canAdd) stringResource(R.string.pod_scr_explore_or_add) else stringResource(R.string.pod_scr_explore_trending)) }
                             }
                         }
                     }
@@ -985,7 +986,7 @@ private fun PodcastCardItem(
                     color = MaterialTheme.colorScheme.onSurface,
                 )
                 Text(
-                    text = podcast.author.ifBlank { "未知播客主" },
+                    text = podcast.author.ifBlank { stringResource(R.string.pod_scr_unknown_host) },
                     style = MaterialTheme.typography.bodySmall,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -997,13 +998,13 @@ private fun PodcastCardItem(
                     modifier = Modifier.padding(top = 2.dp),
                 ) {
                     Text(
-                        text = "${podcast.totalEpisodes} 集",
+                        text = stringResource(R.string.pod_scr_episodes_count, podcast.totalEpisodes),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     if (podcast.unplayedEpisodes > 0) {
                         Text(
-                            text = "还有 ${podcast.unplayedEpisodes} 集可听",
+                            text = stringResource(R.string.pod_scr_unplayed_count, podcast.unplayedEpisodes),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
@@ -1021,7 +1022,7 @@ private fun PodcastCardItem(
                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
                     modifier = Modifier.height(34.dp),
                 ) {
-                    Text("关注", fontSize = 12.sp, maxLines = 1, softWrap = false)
+                    Text(stringResource(R.string.pod_scr_follow), fontSize = 12.sp, maxLines = 1, softWrap = false)
                 }
             }
 
@@ -1033,7 +1034,7 @@ private fun PodcastCardItem(
                     ) {
                         Icon(
                             Icons.Default.MoreVert,
-                            contentDescription = "更多操作",
+                            contentDescription = stringResource(R.string.pod_scr_more_options),
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
@@ -1043,7 +1044,7 @@ private fun PodcastCardItem(
                     ) {
                         if (podcast.followed) {
                             DropdownMenuItem(
-                                text = { Text("自动下载设置") },
+                                text = { Text(stringResource(R.string.pod_scr_menu_auto_download)) },
                                 onClick = {
                                     showMenu = false
                                     onAutoDownload()
@@ -1053,7 +1054,7 @@ private fun PodcastCardItem(
                                 },
                             )
                             DropdownMenuItem(
-                                text = { Text("取消关注") },
+                                text = { Text(stringResource(R.string.pod_scr_menu_unfollow)) },
                                 onClick = {
                                     showMenu = false
                                     onFollow()
@@ -1065,7 +1066,7 @@ private fun PodcastCardItem(
                         }
                         if (canManage) {
                             DropdownMenuItem(
-                                text = { Text("删除共享节目", color = MaterialTheme.colorScheme.error) },
+                                text = { Text(stringResource(R.string.pod_scr_menu_delete_shared), color = MaterialTheme.colorScheme.error) },
                                 onClick = {
                                     showMenu = false
                                     deleting = true
@@ -1084,10 +1085,10 @@ private fun PodcastCardItem(
             }
         }
     }
-    if (deleting) AlertDialog(onDismissRequest = { deleting = false }, title = { Text("从本服删除节目？") },
-        text = { Text("删除《${podcast.title}》会移除所有用户的关注和收听记录。仅取消自己的关注，请使用“取消关注”。") },
-        confirmButton = { TextButton({ deleting = false; onDelete() }) { Text("删除共享节目") } },
-        dismissButton = { TextButton({ deleting = false }) { Text("保留节目") } })
+    if (deleting) AlertDialog(onDismissRequest = { deleting = false }, title = { Text(stringResource(R.string.pod_scr_delete_dialog_title)) },
+        text = { Text(stringResource(R.string.pod_scr_delete_dialog_body, podcast.title)) },
+        confirmButton = { TextButton({ deleting = false; onDelete() }) { Text(stringResource(R.string.pod_scr_confirm_delete_shared)) } },
+        dismissButton = { TextButton({ deleting = false }) { Text(stringResource(R.string.pod_scr_keep_show)) } })
 }
 
 @Composable
@@ -1118,13 +1119,13 @@ private fun EmptyPodcastState(
         }
         Spacer(Modifier.height(20.dp))
         Text(
-            text = "本服暂无节目",
+            text = stringResource(R.string.pod_scr_server_no_shows),
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.Bold,
         )
         Spacer(Modifier.height(8.dp))
         Text(
-            text = if (canAdd) "添加 RSS 节目后，所有用户可分别关注\n服务端会统一获取最新单集" else "节目管理员添加节目后\n即可浏览并关注感兴趣的节目",
+            text = if (canAdd) stringResource(R.string.pod_scr_empty_admin_hint) else stringResource(R.string.pod_scr_empty_user_hint),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = androidx.compose.ui.text.style.TextAlign.Center,
@@ -1136,7 +1137,7 @@ private fun EmptyPodcastState(
         ) {
             Icon(Icons.Default.Add, contentDescription = null)
             Spacer(Modifier.width(6.dp))
-            Text("添加节目")
+            Text(stringResource(R.string.pod_scr_add_show))
         }
     }
 }
@@ -1205,7 +1206,7 @@ private fun PodcastDetailView(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             IconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.pod_scr_back))
             }
             Text(
                 text = podcast.title,
@@ -1217,7 +1218,7 @@ private fun PodcastDetailView(
             )
         }
 
-        PodcastRefreshBox(loading, onRefresh, "podcast-detail-refresh", "刷新单集列表") {
+        PodcastRefreshBox(loading, onRefresh, "podcast-detail-refresh", stringResource(R.string.pod_scr_refresh_episodes)) {
             LazyColumn(
                 modifier = Modifier.fillMaxSize().testTag("podcast-episodes"),
                 contentPadding = PaddingValues(bottom = 96.dp),
@@ -1273,7 +1274,7 @@ private fun PodcastDetailView(
                                     overflow = TextOverflow.Ellipsis,
                                 )
                                 Text(
-                                    text = podcast.author.ifBlank { "未知创作者" },
+                                    text = podcast.author.ifBlank { stringResource(R.string.pod_scr_unknown_creator) },
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     maxLines = 1,
@@ -1292,7 +1293,7 @@ private fun PodcastDetailView(
                                             color = MaterialTheme.colorScheme.secondaryContainer,
                                         ) {
                                             Text(
-                                                text = "共 $episodeTotal 集",
+                                                text = stringResource(R.string.pod_scr_total_episodes, episodeTotal),
                                                 style = MaterialTheme.typography.labelSmall,
                                                 color = MaterialTheme.colorScheme.onSecondaryContainer,
                                                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
@@ -1300,7 +1301,7 @@ private fun PodcastDetailView(
                                         }
                                         if (podcast.unplayedEpisodes > 0) {
                                             Text(
-                                                text = "还有 ${podcast.unplayedEpisodes} 集可听",
+                                                text = stringResource(R.string.pod_scr_unplayed_episodes, podcast.unplayedEpisodes),
                                                 style = MaterialTheme.typography.labelSmall,
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                                 maxLines = 1,
@@ -1343,7 +1344,7 @@ private fun PodcastDetailView(
                                     contentPadding = PaddingValues(horizontal = 12.dp),
                                     modifier = Modifier.weight(1f).height(40.dp),
                                 ) {
-                                    Text(if (podcast.followed) "取消关注" else "关注节目", fontSize = 13.sp, maxLines = 1, softWrap = false)
+                                    Text(if (podcast.followed) stringResource(R.string.pod_scr_unfollow_show) else stringResource(R.string.pod_scr_follow_show), fontSize = 13.sp, maxLines = 1, softWrap = false)
                                 }
                                 if (podcast.followed) {
                                     OutlinedButton(
@@ -1352,7 +1353,7 @@ private fun PodcastDetailView(
                                         contentPadding = PaddingValues(horizontal = 12.dp),
                                         modifier = Modifier.weight(1f).height(40.dp),
                                     ) {
-                                        Text("自动下载", fontSize = 13.sp, maxLines = 1, softWrap = false)
+                                        Text(stringResource(R.string.pod_scr_auto_download), fontSize = 13.sp, maxLines = 1, softWrap = false)
                                     }
                                 }
                             }
@@ -1368,7 +1369,7 @@ private fun PodcastDetailView(
                                 .clickable { showDescription = true },
                         ) {
                             Text(
-                                text = podcastDescription(podcast.description).ifBlank { "暂无简介" },
+                                text = podcastDescription(podcast.description).ifBlank { stringResource(R.string.pod_scr_no_description) },
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 maxLines = 3,
@@ -1392,11 +1393,11 @@ private fun PodcastDetailView(
                             .padding(horizontal = 16.dp),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        FilterChip(episodeScope == "all", { episodeScope = "all" }, label = { Text("全部", maxLines = 1, softWrap = false) })
+                        FilterChip(episodeScope == "all", { episodeScope = "all" }, label = { Text(stringResource(R.string.pod_scr_filter_all), maxLines = 1, softWrap = false) })
                         FilterChip(episodeScope == "favorite", { episodeScope = "favorite" }, label = { Text(stringResource(R.string.podcast_filter_favorites), maxLines = 1, softWrap = false) })
-                        FilterChip(episodeScope == "saved", { episodeScope = "saved"; onReadDownloads() }, label = { Text("我的下载", maxLines = 1, softWrap = false) })
+                        FilterChip(episodeScope == "saved", { episodeScope = "saved"; onReadDownloads() }, label = { Text(stringResource(R.string.pod_scr_filter_my_downloads), maxLines = 1, softWrap = false) })
                     }
-                    if (episodeScope == "saved") Text("包含你的手动下载、自动下载和播放缓存。播放缓存可按服务器清理规则回收。",
+                    if (episodeScope == "saved") Text(stringResource(R.string.pod_scr_saved_hint),
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
@@ -1410,7 +1411,7 @@ private fun PodcastDetailView(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
-                            text = "单集列表 (${sortedEpisodes.size})",
+                            text = stringResource(R.string.pod_scr_episodes_header, sortedEpisodes.size),
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
                         )
@@ -1424,7 +1425,7 @@ private fun PodcastDetailView(
                                 modifier = Modifier.size(16.dp),
                             )
                             Spacer(Modifier.width(4.dp))
-                            Text(if (sortDescending) "最近更新" else "最早发布", fontSize = 12.sp)
+                            Text(if (sortDescending) stringResource(R.string.pod_scr_sort_latest) else stringResource(R.string.pod_scr_sort_oldest), fontSize = 12.sp)
                         }
                     }
                 }
@@ -1432,7 +1433,7 @@ private fun PodcastDetailView(
                 if (sortedEpisodes.isEmpty() && loading) {
                     item {
                         Box(Modifier.fillMaxWidth().padding(48.dp), contentAlignment = Alignment.Center) {
-                            Text("正在加载单集…", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(stringResource(R.string.pod_scr_loading_episodes), color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
                 } else if (sortedEpisodes.isEmpty() && !loading) {
@@ -1440,8 +1441,8 @@ private fun PodcastDetailView(
                         Box(Modifier.fillMaxWidth().padding(48.dp), contentAlignment = Alignment.Center) {
                             Text(when (episodeScope) {
                                 "favorite" -> stringResource(R.string.podcast_favorites_empty)
-                                "saved" -> "还没有你的下载，播放时缓存或选择保存后会显示在这里"
-                                else -> "暂无单集"
+                                "saved" -> stringResource(R.string.pod_scr_no_downloads)
+                                else -> stringResource(R.string.pod_scr_no_episodes)
                             }, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
@@ -1474,9 +1475,9 @@ private fun PodcastDetailView(
     if (showDescription) AlertDialog(onDismissRequest = { showDescription = false },
         title = { Text(podcast.title) },
         text = { Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
-            PodcastArticleText(podcast.description.ifBlank { "暂无节目介绍" }, Modifier.fillMaxWidth())
+            PodcastArticleText(podcast.description.ifBlank { stringResource(R.string.pod_scr_no_show_intro) }, Modifier.fillMaxWidth())
         } },
-        confirmButton = { TextButton({ showDescription = false }) { Text("关闭") } })
+        confirmButton = { TextButton({ showDescription = false }) { Text(stringResource(R.string.pod_scr_close_btn)) } })
 }
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -1504,7 +1505,7 @@ private fun EpisodeRowItem(
         modifier = Modifier
             .fillMaxWidth()
             .testTag("podcast-episode-${episode.id}")
-            .combinedClickable(onClick = { details = true }, onLongClick = { showMenu = true }, onLongClickLabel = "单集操作")
+            .combinedClickable(onClick = { details = true }, onLongClick = { showMenu = true }, onLongClickLabel = stringResource(R.string.pod_scr_episode_actions))
             .padding(horizontal = 16.dp, vertical = 6.dp),
         shape = RoundedCornerShape(12.dp),
         color = MaterialTheme.colorScheme.surfaceContainerLow,
@@ -1527,7 +1528,7 @@ private fun EpisodeRowItem(
                 ) {
                     Icon(
                         Icons.Default.PlayArrow,
-                        contentDescription = "播放单集",
+                        contentDescription = stringResource(R.string.pod_scr_play_episode_desc),
                         modifier = Modifier.size(20.dp),
                     )
                 }
@@ -1553,7 +1554,7 @@ private fun EpisodeRowItem(
                     ) {
                         Icon(
                             Icons.Default.MoreVert,
-                            contentDescription = "单集操作：${episode.title}",
+                            contentDescription = stringResource(R.string.pod_scr_episode_actions_title, episode.title),
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.size(18.dp),
                         )
@@ -1567,7 +1568,7 @@ private fun EpisodeRowItem(
                         )
                         if (isQueued) {
                             DropdownMenuItem(
-                                text = { Text("从待播移除") },
+                                text = { Text(stringResource(R.string.pod_scr_remove_from_queue)) },
                                 leadingIcon = { Icon(Icons.Default.DeleteOutline, null) },
                                 onClick = { showMenu = false; feedback(TactileKind.Tap); onRemoveFromQueue() },
                             )
@@ -1590,14 +1591,14 @@ private fun EpisodeRowItem(
                             onClick = { showMenu = false; feedback(TactileKind.Tap); onToggleFavorite(!isFavorite) },
                         )
                         DropdownMenuItem(
-                            text = { Text(if (episode.resourceSaved) "取消个人保存" else "保存到服务器") },
+                            text = { Text(if (episode.resourceSaved) stringResource(R.string.pod_scr_cancel_personal_save) else stringResource(R.string.pod_scr_save_to_server)) },
                             leadingIcon = { Icon(if (episode.resourceSaved) Icons.Default.BookmarkRemove else Icons.Default.BookmarkAdd, null) },
                             onClick = { showMenu = false; onSave() },
                             modifier = Modifier.testTag("podcast-episode-save-${episode.id}"),
                         )
                         HorizontalDivider()
                         DropdownMenuItem(
-                            text = { Text("单集详情") },
+                            text = { Text(stringResource(R.string.pod_scr_episode_details)) },
                             leadingIcon = { Icon(Icons.Default.Info, null) },
                             onClick = { showMenu = false; details = true },
                         )
@@ -1628,7 +1629,7 @@ private fun EpisodeRowItem(
                             )
                             Spacer(Modifier.width(2.dp))
                             Text(
-                                text = "已听完",
+                                text = stringResource(R.string.pod_scr_completed),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.outline,
                                 maxLines = 1,
@@ -1639,7 +1640,7 @@ private fun EpisodeRowItem(
                     if (isFavorite) {
                         Icon(
                             Icons.Default.Favorite,
-                            contentDescription = "已收藏",
+                            contentDescription = stringResource(R.string.pod_scr_favorite_desc),
                             modifier = Modifier.size(13.dp),
                             tint = MaterialTheme.colorScheme.error,
                         )
@@ -1664,7 +1665,7 @@ private fun EpisodeRowItem(
                     }
                     if (episode.resourceSaved || episode.resourceAutomatic) {
                         Text(
-                            text = if (episode.resourceSaved) "已保存" else "自动保存",
+                            text = if (episode.resourceSaved) stringResource(R.string.pod_scr_saved) else stringResource(R.string.pod_scr_auto_saved),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.primary,
                             maxLines = 1,
@@ -1672,7 +1673,7 @@ private fun EpisodeRowItem(
                         )
                     } else if (episode.resourcePlaybackCached) {
                         Text(
-                            text = "播放缓存",
+                            text = stringResource(R.string.pod_scr_playback_cached),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
@@ -1681,7 +1682,7 @@ private fun EpisodeRowItem(
                     }
                     if (!episode.completed && episode.positionSeconds > 0) {
                         Text(
-                            text = "已听至 ${episode.positionSeconds / 60}:${(episode.positionSeconds % 60).toString().padStart(2, '0')}",
+                            text = stringResource(R.string.pod_scr_listened_to, "${episode.positionSeconds / 60}:${(episode.positionSeconds % 60).toString().padStart(2, '0')}"),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.primary,
                             maxLines = 1,
@@ -1746,13 +1747,13 @@ private fun EpisodeRowItem(
             title = { Text(episode.title) },
             text = {
                 Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    PodcastArticleText(episode.description.ifBlank { "暂无单集简介" }, Modifier.fillMaxWidth())
-                    if (episode.pubDate.isNotBlank()) Text("发布时间：${episode.pubDate}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    if (durationText.isNotBlank()) Text("时长：$durationText", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    PodcastArticleText(episode.description.ifBlank { stringResource(R.string.pod_scr_no_episode_intro) }, Modifier.fillMaxWidth())
+                    if (episode.pubDate.isNotBlank()) Text(stringResource(R.string.pod_scr_pub_date, episode.pubDate), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    if (durationText.isNotBlank()) Text(stringResource(R.string.pod_scr_duration, durationText), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             },
-            confirmButton = { Button(onClick = { details = false; onPlay() }) { Text("播放单集") } },
-            dismissButton = { TextButton(onClick = { details = false }) { Text("关闭") } },
+            confirmButton = { Button(onClick = { details = false; onPlay() }) { Text(stringResource(R.string.pod_scr_play_episode_btn)) } },
+            dismissButton = { TextButton(onClick = { details = false }) { Text(stringResource(R.string.pod_scr_close_btn)) } },
         )
     }
 }
@@ -1786,21 +1787,21 @@ private fun SubscribePodcastDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("添加 RSS 并关注") },
+        title = { Text(stringResource(R.string.pod_scr_subscribe_dialog_title)) },
         text = {
             Column {
-                Text("输入节目 RSS 地址即可关注。已有节目会直接复用，你的关注和收听进度单独保存。", style = MaterialTheme.typography.bodySmall)
+                Text(stringResource(R.string.pod_scr_subscribe_dialog_hint), style = MaterialTheme.typography.bodySmall)
                 OutlinedTextField(
                     value = url,
                     onValueChange = { url = it },
-                    label = { Text("RSS 地址") },
+                    label = { Text(stringResource(R.string.pod_scr_rss_address_label)) },
                     placeholder = { Text("https://example.com/feed.xml") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Spacer(Modifier.height(14.dp))
                 Text(
-                    text = "或快速添加精选播客：",
+                    text = stringResource(R.string.pod_scr_quick_add_featured),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -1823,12 +1824,12 @@ private fun SubscribePodcastDialog(
                 onClick = { onConfirm(url.trim()) },
                 enabled = url.isNotBlank(),
             ) {
-                Text("订阅")
+                Text(stringResource(R.string.pod_scr_subscribe_btn))
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("取消")
+                Text(stringResource(R.string.pod_scr_cancel_btn))
             }
         },
     )

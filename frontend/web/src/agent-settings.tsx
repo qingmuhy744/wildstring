@@ -1,6 +1,7 @@
 import { McpOnboarding } from './mcp-onboarding';
 import { HelpLabel, HelpText } from './desktop-help';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useTranslation } from 'react-i18next';
 import { api, type User } from './api';
 import { AISettings } from './ai-settings';
 import { useModelConnections } from './model-connection';
@@ -35,6 +36,7 @@ const empty = {
 };
 const isOwner = (user: User) => user.profile === 'owner';
 export function AgentConnections({ user }: { user: User }) {
+  const { t } = useTranslation();
   const list = useModelConnections(),
     policy = useWorkspaceResource<{ allowed_hosts: string[]; allow_private: boolean }>(
       isOwner(user) ? '/agent/endpoint-policy' : null,
@@ -94,7 +96,7 @@ export function AgentConnections({ user }: { user: User }) {
       });
       setForm({ ...empty });
       setEditing(null);
-      setNotice('模型连接已保存，密钥仅保存在服务端。');
+      setNotice(t('agentSettings.saveSuccessNotice'));
       await list.reload();
     } catch (reason) {
       setError(errorText(reason));
@@ -104,7 +106,7 @@ export function AgentConnections({ user }: { user: User }) {
   }
   async function action(item: AgentConnection, kind: 'test' | 'delete') {
     if (busy) return;
-    if (kind === 'delete' && !confirm(`撤销连接“${item.name}”？依赖此连接的任务将无法继续使用。`))
+    if (kind === 'delete' && !confirm(t('agentSettings.deleteConfirm', { name: item.name })))
       return;
     setBusy(true);
     setError('');
@@ -120,7 +122,7 @@ export function AgentConnections({ user }: { user: User }) {
           setEditing(null);
           setForm({ ...empty });
         }
-        setNotice('连接已撤销。');
+        setNotice(t('agentSettings.deleteSuccessNotice'));
       }
       await list.reload();
     } catch (reason) {
@@ -143,7 +145,7 @@ export function AgentConnections({ user }: { user: User }) {
           allow_private: privateHosts,
         }),
       });
-      setNotice('个人连接的端点规则已保存。');
+      setNotice(t('agentSettings.policySavedNotice'));
       await policy.reload();
     } catch (reason) {
       setError(errorText(reason));
@@ -152,16 +154,14 @@ export function AgentConnections({ user }: { user: User }) {
     }
   }
   return (
-    <section className="workspace-card" aria-label="模型连接管理">
+    <section className="workspace-card" aria-label={t('agentSettings.ariaLabel')}>
       <div className="workspace-card-head">
         <div>
-          <h2>模型连接</h2>
-          <p className="muted">
-            个人连接归你所有；共享实例连接由管理员提供。不会自动切换付费连接。
-          </p>
+          <h2>{t('agentSettings.title')}</h2>
+          <p className="muted">{t('agentSettings.subtitle')}</p>
         </div>
         <button disabled={busy || list.loading} onClick={() => void list.reload()}>
-          刷新连接
+          {t('agentSettings.refresh')}
         </button>
       </div>
       <WorkspaceNotice error={error || list.error} notice={notice} unavailable={list.unsupported} />
@@ -174,37 +174,45 @@ export function AgentConnections({ user }: { user: User }) {
                   <strong>{item.name}</strong>
                   <small>
                     {item.model} ·{' '}
-                    {item.scope === 'personal' ? '仅本人' : item.shared ? '实例共享' : '管理员专用'}
-                    {item.id === 'legacy' ? ' · 原有实例配置' : item.read_only ? ' · 仅可使用' : ''}
+                    {item.scope === 'personal'
+                      ? t('agentSettings.scopePersonal')
+                      : item.shared
+                        ? t('agentSettings.scopeShared')
+                        : t('agentSettings.scopeAdmin')}
+                    {item.id === 'legacy'
+                      ? t('agentSettings.legacyBadge')
+                      : item.read_only
+                        ? t('agentSettings.readOnlyBadge')
+                        : ''}
                     <br />
-                    {item.background_allowed ? '允许自动巡检' : '可手动使用'} · 每日最多{' '}
-                    {item.daily_call_budget} 次
+                    {item.background_allowed
+                      ? t('agentSettings.backgroundAllowed')
+                      : t('agentSettings.manualAllowed')}{' '}
+                    · {t('agentSettings.dailyBudget', { count: item.daily_call_budget })}
                     {item.daily_calls_remaining != null
-                      ? ` · 今日剩余 ${item.daily_calls_remaining} 次`
+                      ? t('agentSettings.dailyRemaining', { count: item.daily_calls_remaining })
                       : ''}
-                    {item.my_usage?.calls != null ? ` · 我已用 ${item.my_usage.calls} 次` : ''}
+                    {item.my_usage?.calls != null
+                      ? t('agentSettings.myUsage', { count: item.my_usage.calls })
+                      : ''}
                   </small>
-                  {item.id === 'legacy' && (
-                    <small>
-                      沿用服务端已有 AI 配置，可用于手动巡检。定时巡检请添加并授权新连接。
-                    </small>
-                  )}
+                  {item.id === 'legacy' && <small>{t('agentSettings.legacyDescription')}</small>}
                 </div>
                 <StateBadge state={item.enabled ? 'ready' : 'disabled'} />
                 <div className="workspace-actions">
                   {!item.read_only && (
                     <>
                       <button disabled={busy} onClick={() => edit(item)}>
-                        编辑连接
+                        {t('agentSettings.editConnection')}
                       </button>
                       <button
                         disabled={busy || !item.enabled}
                         onClick={() => void action(item, 'test')}
                       >
-                        检测能力
+                        {t('agentSettings.testCapabilities')}
                       </button>
                       <button disabled={busy} onClick={() => void action(item, 'delete')}>
-                        撤销
+                        {t('agentSettings.revokeConnection')}
                       </button>
                     </>
                   )}
@@ -216,36 +224,38 @@ export function AgentConnections({ user }: { user: User }) {
             ))}
           </div>
           <form onSubmit={(e) => void save(e)}>
-            <h3>{editing ? '编辑模型连接' : '添加模型连接'}</h3>
+            <h3>{editing ? t('agentSettings.editTitle') : t('agentSettings.addTitle')}</h3>
             <div className="workspace-form">
               <label>
-                <HelpLabel hint="aiProtocol">API 协议</HelpLabel>
+                <HelpLabel hint="aiProtocol">{t('agentSettings.apiProtocol')}</HelpLabel>
                 <select
-                  aria-label="API 协议"
+                  aria-label={t('agentSettings.apiProtocol')}
                   value={form.protocol}
                   onChange={(e) =>
                     setForm({ ...form, protocol: e.target.value, native_search: false })
                   }
                 >
-                  <option value="chat_completions">Chat Completions（兼容接口）</option>
-                  <option value="responses">Responses</option>
+                  <option value="chat_completions">
+                    {t('agentSettings.protocolChatCompletions')}
+                  </option>
+                  <option value="responses">{t('agentSettings.protocolResponses')}</option>
                 </select>
               </label>
               <label>
-                <HelpLabel hint="aiProvider">供应商适配</HelpLabel>
+                <HelpLabel hint="aiProvider">{t('agentSettings.providerAdapter')}</HelpLabel>
                 <select
-                  aria-label="供应商适配"
+                  aria-label={t('agentSettings.providerAdapter')}
                   value={form.provider}
                   onChange={(e) =>
                     setForm({ ...form, provider: e.target.value, native_search: false })
                   }
                 >
                   {[
-                    ['generic', '通用兼容接口'],
-                    ['openai', 'OpenAI'],
-                    ['deepseek', 'DeepSeek'],
-                    ['qwen', '千问 / 百炼'],
-                    ['gemini', 'Gemini 兼容接口'],
+                    ['generic', t('agentSettings.providerGeneric')],
+                    ['openai', t('agentSettings.providerOpenai')],
+                    ['deepseek', t('agentSettings.providerDeepseek')],
+                    ['qwen', t('agentSettings.providerQwen')],
+                    ['gemini', t('agentSettings.providerGemini')],
                   ].map(([value, label]) => (
                     <option key={value} value={value}>
                       {label}
@@ -254,23 +264,23 @@ export function AgentConnections({ user }: { user: User }) {
                 </select>
               </label>
               <label>
-                <HelpLabel hint="reasoning">推理强度</HelpLabel>
+                <HelpLabel hint="reasoning">{t('agentSettings.reasoningEffort')}</HelpLabel>
                 <select
-                  aria-label="推理强度"
+                  aria-label={t('agentSettings.reasoningEffort')}
                   value={form.reasoning_effort}
                   onChange={(e) => setForm({ ...form, reasoning_effort: e.target.value })}
                 >
                   {['auto', 'none', 'low', 'medium', 'high', 'max', 'xhigh'].map((value) => (
                     <option key={value} value={value}>
-                      {value === 'auto' ? '沿用模型默认' : value}
+                      {value === 'auto' ? t('agentSettings.reasoningAuto') : value}
                     </option>
                   ))}
                 </select>
               </label>
               <label>
-                <HelpLabel hint="outputTokens">单次输出 Token 上限</HelpLabel>
+                <HelpLabel hint="outputTokens">{t('agentSettings.outputTokens')}</HelpLabel>
                 <input
-                  aria-label="单次输出 Token 上限"
+                  aria-label={t('agentSettings.outputTokens')}
                   type="number"
                   min="128"
                   max="32768"
@@ -284,7 +294,7 @@ export function AgentConnections({ user }: { user: User }) {
                   checked={form.stream_output}
                   onChange={(e) => setForm({ ...form, stream_output: e.target.checked })}
                 />
-                <HelpLabel hint="aiStream">逐步显示回答（兼容接口不支持时可关闭）</HelpLabel>
+                <HelpLabel hint="aiStream">{t('agentSettings.streamOutput')}</HelpLabel>
               </label>
               {form.protocol === 'responses' &&
                 ['openai', 'deepseek', 'qwen'].includes(form.provider) && (
@@ -294,13 +304,13 @@ export function AgentConnections({ user }: { user: User }) {
                       checked={form.native_search}
                       onChange={(e) => setForm({ ...form, native_search: e.target.checked })}
                     />
-                    <HelpLabel hint="nativeSearch">使用模型原生联网搜索（按供应商计费）</HelpLabel>
+                    <HelpLabel hint="nativeSearch">{t('agentSettings.nativeSearch')}</HelpLabel>
                   </label>
                 )}
               <label>
-                连接名称
+                {t('agentSettings.nameLabel')}
                 <input
-                  aria-label="连接名称"
+                  aria-label={t('agentSettings.nameLabel')}
                   required
                   maxLength={100}
                   value={form.name}
@@ -309,22 +319,22 @@ export function AgentConnections({ user }: { user: User }) {
               </label>
               {isOwner(user) && (
                 <label>
-                  连接归属
+                  {t('agentSettings.scopeLabel')}
                   <select
-                    aria-label="连接归属"
+                    aria-label={t('agentSettings.scopeLabel')}
                     value={form.scope}
                     disabled={!!editing}
                     onChange={(e) => setForm({ ...form, scope: e.target.value, shared: false })}
                   >
-                    <option value="personal">个人</option>
-                    <option value="instance">实例</option>
+                    <option value="personal">{t('agentSettings.scopeOptionPersonal')}</option>
+                    <option value="instance">{t('agentSettings.scopeOptionInstance')}</option>
                   </select>
                 </label>
               )}
               <label>
-                API 地址
+                {t('agentSettings.baseUrlLabel')}
                 <input
-                  aria-label="新连接 API 地址"
+                  aria-label={t('agentSettings.baseUrlAriaLabel')}
                   type="url"
                   required
                   maxLength={2048}
@@ -334,9 +344,9 @@ export function AgentConnections({ user }: { user: User }) {
                 />
               </label>
               <label>
-                模型 ID
+                {t('agentSettings.modelLabel')}
                 <input
-                  aria-label="新连接模型 ID"
+                  aria-label={t('agentSettings.modelAriaLabel')}
                   required
                   maxLength={200}
                   value={form.model}
@@ -344,20 +354,24 @@ export function AgentConnections({ user }: { user: User }) {
                 />
               </label>
               <label>
-                API Key
+                {t('agentSettings.keyLabel')}
                 <input
                   disabled={form.clear_api_key}
-                  aria-label="新连接 API Key"
+                  aria-label={t('agentSettings.keyAriaLabel')}
                   type="password"
                   autoComplete="new-password"
                   maxLength={4096}
-                  placeholder={editing?.has_api_key ? '已保存；留空保留原密钥' : '可留空'}
+                  placeholder={
+                    editing?.has_api_key
+                      ? t('agentSettings.keyPlaceholderSaved')
+                      : t('agentSettings.keyPlaceholderEmpty')
+                  }
                   value={form.api_key}
                   onChange={(e) => setForm({ ...form, api_key: e.target.value })}
                 />
               </label>
               <label>
-                <HelpLabel hint="aiTimeout">超时（秒）</HelpLabel>
+                <HelpLabel hint="aiTimeout">{t('agentSettings.timeoutLabel')}</HelpLabel>
                 <input
                   type="number"
                   min={1}
@@ -368,7 +382,7 @@ export function AgentConnections({ user }: { user: User }) {
                 />
               </label>
               <label>
-                <HelpLabel hint="aiBudget">每日模型调用上限</HelpLabel>
+                <HelpLabel hint="aiBudget">{t('agentSettings.dailyBudgetLabel')}</HelpLabel>
                 <input
                   type="number"
                   min={1}
@@ -388,7 +402,7 @@ export function AgentConnections({ user }: { user: User }) {
                         setForm({ ...form, clear_api_key: e.target.checked, api_key: '' })
                       }
                     />
-                    清除已保存的密钥
+                    {t('agentSettings.clearKey')}
                   </label>
                 )}
                 <label className="workspace-check">
@@ -397,7 +411,7 @@ export function AgentConnections({ user }: { user: User }) {
                     checked={form.enabled}
                     onChange={(e) => setForm({ ...form, enabled: e.target.checked })}
                   />
-                  启用连接
+                  {t('agentSettings.enableConnection')}
                 </label>
                 <label className="workspace-check">
                   <input
@@ -405,9 +419,9 @@ export function AgentConnections({ user }: { user: User }) {
                     checked={form.background_allowed}
                     onChange={(e) => setForm({ ...form, background_allowed: e.target.checked })}
                   />
-                  <HelpLabel hint="backgroundAI">允许自动巡检使用</HelpLabel>
+                  <HelpLabel hint="backgroundAI">{t('agentSettings.allowBackground')}</HelpLabel>
                 </label>
-                <p className="muted">用于定时巡检等自动任务；手动开始无需开启。</p>
+                <p className="muted">{t('agentSettings.backgroundHelp')}</p>
                 {isOwner(user) && form.scope === 'instance' && (
                   <label className="workspace-check">
                     <input
@@ -415,13 +429,17 @@ export function AgentConnections({ user }: { user: User }) {
                       checked={form.shared}
                       onChange={(e) => setForm({ ...form, shared: e.target.checked })}
                     />
-                    供其他用户共享
+                    {t('agentSettings.shareWithOthers')}
                   </label>
                 )}
               </div>
               <div className="span-all workspace-actions">
                 <button className="primary" disabled={busy}>
-                  {busy ? '处理中…' : editing ? '保存连接修改' : '添加连接'}
+                  {busy
+                    ? t('agentSettings.saving')
+                    : editing
+                      ? t('agentSettings.saveChanges')
+                      : t('agentSettings.addConnection')}
                 </button>
                 {editing && (
                   <button
@@ -432,35 +450,28 @@ export function AgentConnections({ user }: { user: User }) {
                       setForm({ ...empty });
                     }}
                   >
-                    取消编辑
+                    {t('agentSettings.cancelEdit')}
                   </button>
                 )}
-                <small className="muted">
-                  检测能力最多发送 4 次合成请求，计入模型额度和每日预算；保存不会触发检测。
-                </small>
+                <small className="muted">{t('agentSettings.capabilitiesNotice')}</small>
               </div>
             </div>
           </form>
           {isOwner(user) && (
             <details className="legacy-ai-compatibility">
-              <summary>原有实例连接（兼容配置）</summary>
-              <p className="muted">
-                这是连接列表中的 legacy
-                实例连接，为旧客户端保留。推荐优先添加具备共享控制与统一额度的新连接；修改这里不会更改当前功能已选中的连接。
-              </p>
+              <summary>{t('agentSettings.legacySummary')}</summary>
+              <p className="muted">{t('agentSettings.legacyNotice')}</p>
               <AISettings />
             </details>
           )}
           {isOwner(user) && (
             <details>
-              <summary>个人连接的端点规则</summary>
-              <p className="muted">
-                普通用户仅可使用允许的精确主机。私有网络需同时加入允许主机并开启下方选项。
-              </p>
+              <summary>{t('agentSettings.policySummary')}</summary>
+              <p className="muted">{t('agentSettings.policyNotice')}</p>
               <label>
-                允许的域名或 IP（每行一个）
+                {t('agentSettings.policyHostsLabel')}
                 <textarea
-                  aria-label="允许的 AI 端点主机"
+                  aria-label={t('agentSettings.policyHostsAriaLabel')}
                   value={hosts}
                   onChange={(e) => setHosts(e.target.value)}
                 />
@@ -471,10 +482,10 @@ export function AgentConnections({ user }: { user: User }) {
                   checked={privateHosts}
                   onChange={(e) => setPrivateHosts(e.target.checked)}
                 />
-                允许列表中的私有网络地址
+                {t('agentSettings.allowPrivateHosts')}
               </label>
               <button disabled={busy || !policy.value} onClick={() => void savePolicy()}>
-                保存端点规则
+                {t('agentSettings.savePolicy')}
               </button>
               <WorkspaceNotice error={policy.error} />
             </details>
@@ -485,23 +496,24 @@ export function AgentConnections({ user }: { user: User }) {
   );
 }
 function Capabilities({ value }: { value: Record<string, unknown> }) {
-  const names: Record<string, string> = {
-    text: '文本响应',
-    structured: '合成 JSON 输出',
-    tools_roundtrip: '工具结果回传闭环',
-    native_search: '原生搜索',
-    tools: '工具调用',
-    tool_calling: '工具调用',
-    checked_at: '检测时间',
-    tested_at: '检测时间',
-    trace_id: '诊断编号',
+  const { t } = useTranslation();
+  const capKeyMap: Record<string, string> = {
+    text: 'agentSettings.capText',
+    structured: 'agentSettings.capStructured',
+    tools_roundtrip: 'agentSettings.capToolsRoundtrip',
+    native_search: 'agentSettings.capNativeSearch',
+    tools: 'agentSettings.capTools',
+    tool_calling: 'agentSettings.capTools',
+    checked_at: 'agentSettings.capCheckedAt',
+    tested_at: 'agentSettings.capCheckedAt',
+    trace_id: 'agentSettings.capTraceId',
   };
   return (
     <div className="connection-capabilities">
-      <h4>能力检测</h4>
+      <h4>{t('agentSettings.capabilitiesHeading')}</h4>
       {Object.entries(value).map(([key, item]) => (
         <div key={key}>
-          <span>{names[key] || key}</span>
+          <span>{capKeyMap[key] ? t(capKeyMap[key]) : key}</span>
           {typeof item === 'boolean' ? (
             <StateBadge state={item ? 'ok' : 'error'} />
           ) : typeof item === 'object' && item ? (
@@ -522,19 +534,20 @@ function Capabilities({ value }: { value: Record<string, unknown> }) {
     </div>
   );
 }
-const scopes: Record<string, string> = {
-  'library:read': '读取共享曲库',
-  'library:manage': '管理导入、歌词和分析（管理员）',
-  'personal:write': '修改我的响度设置与调整',
-  'web:search': '使用我的联网检索与预算（需读取曲库权限）',
-  'personal:read': '读取我的歌单与历史',
-  'drafts:write': '创建和修改草案',
-  'drafts:apply': '应用草案（遵循我的整理方式）',
-  'tasks:write': '提交和管理巡检',
-  'diagnostics:read': '读取系统诊断（管理员）',
-  'notifications:read': '读取我的通知',
+const scopeKeys: Record<string, string> = {
+  'library:read': 'agentSettings.scopeLibraryRead',
+  'library:manage': 'agentSettings.scopeLibraryManage',
+  'personal:write': 'agentSettings.scopePersonalWrite',
+  'web:search': 'agentSettings.scopeWebSearch',
+  'personal:read': 'agentSettings.scopePersonalRead',
+  'drafts:write': 'agentSettings.scopeDraftsWrite',
+  'drafts:apply': 'agentSettings.scopeDraftsApply',
+  'tasks:write': 'agentSettings.scopeTasksWrite',
+  'diagnostics:read': 'agentSettings.scopeDiagnosticsRead',
+  'notifications:read': 'agentSettings.scopeNotificationsRead',
 };
 export function ToolCredentials({ user }: { user: User }) {
+  const { t } = useTranslation();
   const list = useWorkspaceResource<AgentPage<ToolCredential>>('/agent/credentials?limit=100');
   const [name, setName] = useState(''),
     [days, setDays] = useState(30),
@@ -546,9 +559,9 @@ export function ToolCredentials({ user }: { user: User }) {
   async function copyToken() {
     try {
       await navigator.clipboard.writeText(token);
-      setNotice('凭据已复制。');
+      setNotice(t('agentSettings.tokenCopied'));
     } catch {
-      setError('无法写入剪贴板，请手动复制上方凭据。');
+      setError(t('agentSettings.tokenCopyFailed'));
     }
   }
   async function create(e: FormEvent) {
@@ -573,13 +586,13 @@ export function ToolCredentials({ user }: { user: User }) {
     }
   }
   async function revoke(item: ToolCredential) {
-    if (!confirm(`撤销“${item.name}”的工具访问？`)) return;
+    if (!confirm(t('agentSettings.tokenRevokeConfirm', { name: item.name }))) return;
     setBusy(true);
     setError('');
     try {
       await api(`/agent/credentials/${item.id}`, { method: 'DELETE' });
       setToken('');
-      setNotice('凭据已撤销，后续请求立即失效。');
+      setNotice(t('agentSettings.tokenRevokedNotice'));
       await list.reload();
     } catch (reason) {
       setError(errorText(reason));
@@ -588,32 +601,29 @@ export function ToolCredentials({ user }: { user: User }) {
     }
   }
   return (
-    <section className="workspace-card" aria-label="MCP 工具凭据">
-      <h2>MCP 与外部工具</h2>
-      <p className="muted">
-        为 Codex 等工具生成独立凭据，按需选择最小权限。原生 HTTP MCP 地址为本站 /mcp，使用 Bearer
-        凭据；也可继续使用 stdio 桥接。工具不能批准草案，也不能读取模型密钥。
-      </p>
+    <section className="workspace-card" aria-label={t('agentSettings.credentialsAriaLabel')}>
+      <h2>{t('agentSettings.credentialsTitle')}</h2>
+      <p className="muted">{t('agentSettings.credentialsSubtitle')}</p>
       <WorkspaceNotice error={error || list.error} notice={notice} unavailable={list.unsupported} />
       {!list.unsupported && (
         <>
           <McpOnboarding />
           {token && (
             <div className="workspace-secret" role="status">
-              <strong>凭据只显示这一次，请保存到安全的位置。</strong>
+              <strong>{t('agentSettings.tokenSecretNotice')}</strong>
               <code>{token}</code>
               <div className="workspace-actions">
-                <button onClick={() => void copyToken()}>复制凭据</button>
-                <button onClick={() => setToken('')}>隐藏凭据</button>
+                <button onClick={() => void copyToken()}>{t('agentSettings.copyToken')}</button>
+                <button onClick={() => setToken('')}>{t('agentSettings.hideToken')}</button>
               </div>
             </div>
           )}
           <form onSubmit={(e) => void create(e)}>
             <div className="workspace-form">
               <label>
-                凭据名称
+                {t('agentSettings.credNameLabel')}
                 <input
-                  aria-label="工具凭据名称"
+                  aria-label={t('agentSettings.credNameAriaLabel')}
                   required
                   maxLength={100}
                   value={name}
@@ -621,7 +631,7 @@ export function ToolCredentials({ user }: { user: User }) {
                 />
               </label>
               <label>
-                有效期（天）
+                {t('agentSettings.credExpiryLabel')}
                 <input
                   type="number"
                   required
@@ -633,15 +643,15 @@ export function ToolCredentials({ user }: { user: User }) {
               </label>
               <fieldset className="span-all">
                 <legend>
-                  <HelpText hint="mcpScopes">允许的操作</HelpText>
+                  <HelpText hint="mcpScopes">{t('agentSettings.allowedScopesLegend')}</HelpText>
                 </legend>
                 <div className="workspace-check-grid">
-                  {Object.entries(scopes)
+                  {Object.keys(scopeKeys)
                     .filter(
-                      ([key]) =>
+                      (key) =>
                         isOwner(user) || !['diagnostics:read', 'library:manage'].includes(key),
                     )
-                    .map(([key, label]) => (
+                    .map((key) => (
                       <label className="workspace-check" key={key}>
                         <input
                           type="checkbox"
@@ -652,14 +662,14 @@ export function ToolCredentials({ user }: { user: User }) {
                             )
                           }
                         />
-                        {label}
+                        {t(scopeKeys[key])}
                       </label>
                     ))}
                 </div>
               </fieldset>
               <div className="span-all">
                 <button className="primary" disabled={busy || !selected.length}>
-                  生成工具凭据
+                  {t('agentSettings.generateCred')}
                 </button>
               </div>
             </div>
@@ -670,16 +680,16 @@ export function ToolCredentials({ user }: { user: User }) {
                 <div className="workspace-row-main">
                   <strong>{item.name}</strong>
                   <small>
-                    {item.scopes.map((s) => scopes[s] || s).join(' · ')}
+                    {item.scopes.map((s) => (scopeKeys[s] ? t(scopeKeys[s]) : s)).join(' · ')}
                     <br />
-                    到期 {localDate(item.expires_at)}
+                    {t('agentSettings.expiresAt', { date: localDate(item.expires_at) })}
                   </small>
                 </div>
                 {item.revoked_at ? (
                   <StateBadge state="revoked" />
                 ) : (
                   <button disabled={busy} onClick={() => void revoke(item)}>
-                    撤销凭据
+                    {t('agentSettings.revokeCred')}
                   </button>
                 )}
               </div>
@@ -691,6 +701,7 @@ export function ToolCredentials({ user }: { user: User }) {
   );
 }
 export function AssistantPreferences() {
+  const { t } = useTranslation();
   const prefs = useWorkspaceResource<{ retention_days: number; chat_max_calls?: number }>(
     '/agent/assistant-preferences',
   );
@@ -707,7 +718,7 @@ export function AssistantPreferences() {
     }
   }, [prefs.value]);
   async function act(clear = false) {
-    if (clear && !confirm('清除所有助手对话？草案和已保存的歌单会保留。')) return;
+    if (clear && !confirm(t('agentSettings.clearHistoryConfirm'))) return;
     setBusy(true);
     setError('');
     try {
@@ -721,7 +732,9 @@ export function AssistantPreferences() {
         edited.current = false;
         void prefs.reload();
       }
-      setNotice(clear ? '助手对话已清除。' : '对话保留时间已保存。');
+      setNotice(
+        clear ? t('agentSettings.clearHistoryNotice') : t('agentSettings.saveHistoryNotice'),
+      );
     } catch (reason) {
       setError(errorText(reason));
     } finally {
@@ -729,18 +742,15 @@ export function AssistantPreferences() {
     }
   }
   return prefs.unsupported ? null : (
-    <section className="workspace-card" aria-label="助手历史设置">
-      <h2>助手对话历史与调用轮数</h2>
-      <p className="muted">
-        按对话最后更新时间清理聊天记录，已有草案、歌单和音乐保留；单次对话最大调用轮数控制每次提问可连续执行的模型与工具步数上限（1–20
-        轮，默认 4 轮）。
-      </p>
+    <section className="workspace-card" aria-label={t('agentSettings.historyAriaLabel')}>
+      <h2>{t('agentSettings.historyTitle')}</h2>
+      <p className="muted">{t('agentSettings.historySubtitle')}</p>
       <WorkspaceNotice error={error || prefs.error} notice={notice} />
       <div className="workspace-inline">
         <label>
-          <HelpLabel hint="history">助手对话保留天数</HelpLabel>
+          <HelpLabel hint="history">{t('agentSettings.retentionDaysLabel')}</HelpLabel>
           <input
-            aria-label="助手历史保留天数"
+            aria-label={t('agentSettings.retentionDaysAriaLabel')}
             type="number"
             min={1}
             max={365}
@@ -753,9 +763,9 @@ export function AssistantPreferences() {
           />
         </label>
         <label>
-          <span>单次对话最大调用轮数</span>
+          <span>{t('agentSettings.chatMaxCallsLabel')}</span>
           <input
-            aria-label="单次对话最大调用轮数"
+            aria-label={t('agentSettings.chatMaxCallsAriaLabel')}
             type="number"
             min={1}
             max={20}
@@ -773,10 +783,10 @@ export function AssistantPreferences() {
           }
           onClick={() => void act()}
         >
-          保存保留时间
+          {t('agentSettings.saveRetention')}
         </button>
         <button disabled={busy} onClick={() => void act(true)}>
-          清除全部对话
+          {t('agentSettings.clearAllHistory')}
         </button>
       </div>
     </section>

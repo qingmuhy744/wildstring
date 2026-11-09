@@ -132,13 +132,13 @@ struct MacPlayableTracks: View {
           HStack(spacing: 16) {
             if isSelecting { Color.clear.frame(width: 18, height: 1) }
             Text("#").frame(width: 28, alignment: .trailing)
-            Text("歌曲标题")
+            Text(L10n("macCatalog.trackTitle"))
               .padding(.leading, 52)
               .frame(maxWidth: .infinity, alignment: .leading)
-            Text("艺人").frame(width: artistWidth, alignment: .leading)
-            Text("专辑").frame(width: albumWidth, alignment: .leading)
+            Text(L10n("macCatalog.artist")).frame(width: artistWidth, alignment: .leading)
+            Text(L10n("macCatalog.album")).frame(width: albumWidth, alignment: .leading)
             Color.clear.frame(width: 32, height: 1)
-            Text("时长").frame(width: 48, alignment: .trailing)
+            Text(L10n("macCatalog.duration")).frame(width: 48, alignment: .trailing)
             Color.clear.frame(width: 26, height: 1)
           }
           .font(MacTheme.micro)
@@ -202,23 +202,23 @@ struct MacPlayableTracks: View {
       if allowsSelection && (isSelecting || externalSelecting == nil) {
         VStack(alignment: .leading, spacing: 8) {
           HStack {
-            Text(isSelecting ? "已选 \(selectedTracks.count) 首" : "挑几首，放进自己的播放队列")
+            Text(isSelecting ? L10n("macCatalog.selectedCount", selectedTracks.count) : L10n("macCatalog.selectPrompt"))
               .font(MacTheme.caption).foregroundStyle(MacTheme.muted)
             Spacer()
             if isSelecting {
               HStack(spacing: 8) {
-                Button(selectedTracks.count == tracks.count ? "取消全选" : "全选") {
+                Button(selectedTracks.count == tracks.count ? L10n("macCatalog.deselectAll") : L10n("macCatalog.selectAll")) {
                   selected = selectedTracks.count == tracks.count ? [] : Set(tracks.map(\.id))
                 }
-                Button("下一首播放所选") { enqueue(selectedTracks, next: true) }
+                Button(L10n("macCatalog.playSelectedNext")) { enqueue(selectedTracks, next: true) }
                   .disabled(selectedTracks.isEmpty)
-                Button("加入播放队列") { enqueue(selectedTracks) }
+                Button(L10n("macCatalog.addToQueue")) { enqueue(selectedTracks) }
                   .disabled(selectedTracks.isEmpty)
-                Button("加入歌单…") { playlistSelection = MacPlaylistSelection(tracks: selectedTracks) }
+                Button(L10n("macCatalog.addToPlaylistEllipsis")) { playlistSelection = MacPlaylistSelection(tracks: selectedTracks) }
                   .disabled(selectedTracks.isEmpty)
               }.controlSize(.small)
             }
-            Button(isSelecting ? "完成挑选" : "挑选歌曲") {
+            Button(isSelecting ? L10n("macCatalog.doneSelecting") : L10n("macCatalog.selectTracks")) {
               setSelecting(!isSelecting)
               selected = []
             }
@@ -253,7 +253,7 @@ struct MacPlayableTracks: View {
       : (tracks.first(where: \.hasCover)?.id ?? (tracks.first?.album != nil ? tracks.first?.id : nil))
     return HStack(spacing: 16) {
       if isSelecting {
-        Toggle("选择 \(track.title)", isOn: Binding(
+        Toggle(L10n("macCatalog.selectTrack", track.title), isOn: Binding(
           get: { selected.contains(track.id) },
           set: { if $0 { selected.insert(track.id) } else { selected.remove(track.id) } }
         )).toggleStyle(.checkbox).labelsHidden().frame(width: 18)
@@ -281,7 +281,7 @@ struct MacPlayableTracks: View {
           MacCover(client: client, trackID: coverTrackID, side: 42)
         }
         .buttonStyle(.plain)
-        .help("播放 \(track.title)")
+        .help(L10n("macCatalog.playTrack", track.title))
 
         VStack(alignment: .leading, spacing: 3) {
           Button {
@@ -304,9 +304,9 @@ struct MacPlayableTracks: View {
           if let reason = track.unavailableReason {
             Label(reason, systemImage: "exclamationmark.circle")
               .font(MacTheme.caption).foregroundStyle(MacTheme.muted)
-              .help("恢复文件并重新扫描后，刷新列表重试")
+              .help(L10n("macCatalog.restoreFileHelp"))
           } else if current {
-            Text(playback.isPlaying ? "正在播放" : "已暂停")
+            Text(playback.isPlaying ? L10n("macCatalog.nowPlaying") : L10n("macCatalog.paused"))
               .font(.system(size: 11))
               .foregroundStyle(MacTheme.accentDeep)
               .lineLimit(1)
@@ -366,8 +366,8 @@ struct MacPlayableTracks: View {
       .menuStyle(.borderlessButton)
       .menuIndicator(.hidden)
       .fixedSize()
-      .accessibilityLabel("\(track.title)的更多操作")
-      .help("\(track.title)的更多操作")
+      .accessibilityLabel(L10n("macCatalog.moreActionsForTrack", track.title))
+      .help(L10n("macCatalog.moreActionsForTrack", track.title))
     }
     .padding(.vertical, 10)
     .background(
@@ -402,7 +402,7 @@ struct MacPlayableTracks: View {
     if track.artists.count == 1, let name = track.artists.first {
       Button { navigate(.artist(name: name)) } label: {
         Text(name).lineLimit(1)
-      }.buttonStyle(.plain).foregroundStyle(MacTheme.muted).help("查看艺人：\(name)")
+      }.buttonStyle(.plain).foregroundStyle(MacTheme.muted).help(L10n("macCatalog.viewArtist", name))
     } else if track.artists.count > 1 {
       Menu {
         ForEach(track.artists, id: \.self) { name in
@@ -411,7 +411,7 @@ struct MacPlayableTracks: View {
       } label: {
         Text(track.artists.joined(separator: " / ")).lineLimit(1)
       }.menuStyle(.borderlessButton).menuIndicator(.hidden)
-        .foregroundStyle(MacTheme.muted).help("选择艺人")
+        .foregroundStyle(MacTheme.muted).help(L10n("macCatalog.selectArtistHelp"))
     } else {
       Text("—").foregroundStyle(MacTheme.faint)
     }
@@ -422,7 +422,7 @@ struct MacPlayableTracks: View {
     if let id = track.albumId, let title = track.album, !title.isEmpty {
       Button { navigate(.album(id: id, title: title)) } label: {
         Text(title).lineLimit(1)
-      }.buttonStyle(.plain).foregroundStyle(MacTheme.muted).help("查看专辑：\(title)")
+      }.buttonStyle(.plain).foregroundStyle(MacTheme.muted).help(L10n("macCatalog.viewAlbumWithTitle", title))
     } else if let title = track.album, !title.isEmpty {
       Text(title).lineLimit(1).foregroundStyle(MacTheme.muted)
     } else {
@@ -434,7 +434,7 @@ struct MacPlayableTracks: View {
 
   private func enqueue(_ tracks: [Track], next: Bool = false) {
     if playback.enqueue(items: tracks.map(MacPlayback.item), next: next) {
-      notice = "已将 \(tracks.count) 首\(next ? "安排为接下来播放" : "加入播放队列")"
+      notice = next ? L10n("macCatalog.enqueuedSelectedNext", tracks.count) : L10n("macCatalog.enqueuedSelected", tracks.count)
       selected = []
       setSelecting(false)
     } else {
@@ -445,34 +445,34 @@ struct MacPlayableTracks: View {
 
   @ViewBuilder
   private func trackMenu(_ track: Track) -> some View {
-    Button("下一首播放") { enqueue([track], next: true) }
-    Button("加入播放队列") { enqueue([track]) }
-    Button("加入歌单…") { playlistSelection = MacPlaylistSelection(tracks: [track]) }
-    Button("查看歌词") { lyricTrack = track }
+    Button(L10n("macCatalog.playNext")) { enqueue([track], next: true) }
+    Button(L10n("macCatalog.addToQueue")) { enqueue([track]) }
+    Button(L10n("macCatalog.addToPlaylistEllipsis")) { playlistSelection = MacPlaylistSelection(tracks: [track]) }
+    Button(L10n("macCatalog.viewLyrics")) { lyricTrack = track }
     if let id = track.albumId, let title = track.album {
-      Button("查看专辑") { navigate(.album(id: id, title: title)) }
+      Button(L10n("macCatalog.viewAlbum")) { navigate(.album(id: id, title: title)) }
     }
     ForEach(track.artists, id: \.self) { name in
-      Button("查看艺人：\(name)") { navigate(.artist(name: name)) }
+      Button(L10n("macCatalog.viewArtist", name)) { navigate(.artist(name: name)) }
     }
     Divider()
     if let favorites {
-      Button(favorites.isFavorite(track.id) ? "取消红心" : "红心") {
+      Button(favorites.isFavorite(track.id) ? L10n("macCatalog.unfavorite") : L10n("macCatalog.favorite")) {
         Task { await favorites.toggle(track.id) }
       }
     }
     if let playlist, playlist.isEditable {
-      Button("从歌单移除", role: .destructive) {
+      Button(L10n("macCatalog.removeFromPlaylist"), role: .destructive) {
         Task { await remove(track, from: playlist) }
       }
     }
     if canManage {
-      Button("编辑歌曲信息") { editing = track }
+      Button(L10n("macCatalog.editMetadata")) { editing = track }
     }
     if let onRecommendationFeedback {
       Divider()
-      Button("不感兴趣") { Task { await onRecommendationFeedback(track, "dismiss_track") } }
-      Button("少推荐此艺人") { Task { await onRecommendationFeedback(track, "less_artist") } }
+      Button(L10n("macCatalog.notInterested")) { Task { await onRecommendationFeedback(track, "dismiss_track") } }
+      Button(L10n("macCatalog.recommendLessArtist")) { Task { await onRecommendationFeedback(track, "less_artist") } }
     }
   }
 
@@ -480,7 +480,7 @@ struct MacPlayableTracks: View {
     do {
       let fresh = try await client.playlist(id: playlist.id)
       try await client.removeTrack(playlistID: fresh.id, trackID: track.id, version: fresh.version)
-      notice = "已从「\(fresh.name)」移除"
+      notice = L10n("macCatalog.removedFromPlaylist", fresh.name)
       await onReload?()
     } catch {
       notice = MacErrorText.message(for: error)
@@ -527,13 +527,13 @@ struct MacAlbumsView: View {
       }
       .padding(24)
       if albums.count < total {
-        Button("还有 \(total - albums.count) 张专辑") { Task { await load(reset: false) } }
+        Button(L10n("macCatalog.remainingAlbums", total - albums.count)) { Task { await load(reset: false) } }
           .buttonStyle(.bordered)
           .padding(.bottom, 24)
       }
     }
-    .navigationTitle("专辑")
-    .searchable(text: $query, prompt: "搜索专辑")
+    .navigationTitle(L10n("macCatalog.albums"))
+    .searchable(text: $query, prompt: Text(L10n("macCatalog.searchAlbums")))
     .navigationDestination(for: Album.self) { album in
       MacAlbumDetail(
         client: client,
@@ -548,9 +548,9 @@ struct MacAlbumsView: View {
         if loading {
           ProgressView()
         } else if let message {
-          ContentUnavailableView("无法加载专辑", systemImage: "square.stack", description: Text(message))
+          ContentUnavailableView(L10n("macCatalog.cannotLoadAlbums"), systemImage: "square.stack", description: Text(message))
         } else {
-          ContentUnavailableView("没有匹配的专辑", systemImage: "square.stack")
+          ContentUnavailableView(L10n("macCatalog.noMatchingAlbums"), systemImage: "square.stack")
         }
       }
     }
@@ -600,7 +600,7 @@ private struct MacAlbumDetail: View {
     VStack(spacing: 0) {
       MacCollectionHeading(
         title: album.title,
-        subtitle: "\(album.trackCount) 首",
+        subtitle: L10n("macCatalog.trackCount", album.trackCount),
         symbol: "square.stack",
         canPlay: !tracks.isEmpty,
         coverTrackID: album.coverTrackId,
@@ -615,7 +615,7 @@ private struct MacAlbumDetail: View {
         playback: playback,
         favorites: favorites,
         tracks: tracks,
-        emptyTitle: message == nil ? "这张专辑还没有歌曲" : "无法加载专辑",
+        emptyTitle: message == nil ? L10n("macCatalog.albumEmpty") : L10n("macCatalog.cannotLoadAlbums"),
         emptyDetail: message,
         canManage: canManage,
         isLoading: loading
@@ -630,7 +630,7 @@ private struct MacAlbumDetail: View {
         } label: {
           Image(systemName: "chevron.backward")
         }
-        .help("返回")
+        .help(L10n("macCatalog.back"))
         .keyboardShortcut("[", modifiers: .command)
       }
     }
@@ -675,32 +675,32 @@ struct MacArtistsView: View {
             client: client,
             value: artist,
             title: artist.name,
-            subtitle: "\(artist.albumCount) 张专辑 · \(artist.trackCount) 首",
+            subtitle: L10n("macCatalog.artistSubtitle", artist.albumCount, artist.trackCount),
             cover: artist.coverTrackId
           )
         }
       }
       .padding(24)
       if artists.count < total {
-        Button("还有 \(total - artists.count) 位艺人") { Task { await load(reset: false) } }
+        Button(L10n("macCatalog.remainingArtists", total - artists.count)) { Task { await load(reset: false) } }
           .buttonStyle(.bordered)
           .padding(.bottom, 24)
       }
     }
-    .navigationTitle("艺人")
+    .navigationTitle(L10n("macCatalog.artists"))
     .toolbar {
-      Picker("参与角色", selection: $role) {
-        Text("歌曲艺人").tag("artist")
-        Text("专辑艺人").tag("album_artist")
-        Text("全部角色").tag("")
+      Picker(L10n("macCatalog.rolePicker"), selection: $role) {
+        Text(L10n("macCatalog.roleArtist")).tag("artist")
+        Text(L10n("macCatalog.roleAlbumArtist")).tag("album_artist")
+        Text(L10n("macCatalog.roleAll")).tag("")
         Divider()
-        Text("演唱").tag("vocalist")
-        Text("作词").tag("lyricist")
-        Text("作曲").tag("composer")
-        Text("编曲").tag("arranger")
-      }.pickerStyle(.menu).help("按在歌曲中的参与角色筛选艺人")
+        Text(L10n("macCatalog.roleVocalist")).tag("vocalist")
+        Text(L10n("macCatalog.roleLyricist")).tag("lyricist")
+        Text(L10n("macCatalog.roleComposer")).tag("composer")
+        Text(L10n("macCatalog.roleArranger")).tag("arranger")
+      }.pickerStyle(.menu).help(L10n("macCatalog.roleFilterHelp"))
     }
-    .searchable(text: $query, prompt: "搜索艺人")
+    .searchable(text: $query, prompt: Text(L10n("macCatalog.searchArtists")))
     .navigationDestination(for: Artist.self) { artist in
       MacArtistDetail(
         client: client,
@@ -715,9 +715,9 @@ struct MacArtistsView: View {
         if loading {
           ProgressView()
         } else if let message {
-          ContentUnavailableView("无法加载艺人", systemImage: "person.2", description: Text(message))
+          ContentUnavailableView(L10n("macCatalog.cannotLoadArtists"), systemImage: "person.2", description: Text(message))
         } else {
-          ContentUnavailableView("没有匹配的艺人", systemImage: "person.2")
+          ContentUnavailableView(L10n("macCatalog.noMatchingArtists"), systemImage: "person.2")
         }
       }
     }
@@ -768,7 +768,7 @@ private struct MacArtistDetail: View {
     VStack(spacing: 0) {
       MacCollectionHeading(
         title: artist.name,
-        subtitle: "\(artist.trackCount) 首",
+        subtitle: L10n("macCatalog.trackCount", artist.trackCount),
         symbol: "person.2",
         canPlay: !tracks.isEmpty,
         coverTrackID: artist.coverTrackId,
@@ -783,7 +783,7 @@ private struct MacArtistDetail: View {
         playback: playback,
         favorites: favorites,
         tracks: tracks,
-        emptyTitle: message == nil ? "这个艺人还没有歌曲" : "无法加载艺人",
+        emptyTitle: message == nil ? L10n("macCatalog.artistEmpty") : L10n("macCatalog.cannotLoadArtists"),
         emptyDetail: message,
         canManage: canManage,
         isLoading: loading
@@ -798,7 +798,7 @@ private struct MacArtistDetail: View {
         } label: {
           Image(systemName: "chevron.backward")
         }
-        .help("返回")
+        .help(L10n("macCatalog.back"))
         .keyboardShortcut("[", modifiers: .command)
       }
     }
@@ -847,25 +847,25 @@ struct MacPlaylistsView: View {
             client: client,
             value: playlist,
             title: playlist.name,
-            subtitle: "\(playlist.trackCount) 首",
+            subtitle: L10n("macCatalog.trackCount", playlist.trackCount),
             cover: playlist.coverTrackId
           )
           .contextMenu {
             if playlist.isEditable {
-              Button("重命名") {
+              Button(L10n("macCatalog.rename")) {
                 renameText = playlist.name
                 renaming = playlist
               }
-              Button("删除", role: .destructive) { Task { await delete(playlist) } }
+              Button(L10n("macCatalog.delete"), role: .destructive) { Task { await delete(playlist) } }
             }
           }
         }
       }
       .padding(24)
     }
-    .navigationTitle("歌单")
+    .navigationTitle(L10n("macCatalog.playlists"))
     .toolbar {
-      Button("新建歌单") { creating = true }
+      Button(L10n("macCatalog.newPlaylist")) { creating = true }
     }
     .navigationDestination(for: Playlist.self) { playlist in
       MacPlaylistDetail(
@@ -882,36 +882,36 @@ struct MacPlaylistsView: View {
           ProgressView()
         } else if let message {
           ContentUnavailableView(
-            "无法加载歌单", systemImage: "music.note.list", description: Text(message))
+            L10n("macCatalog.cannotLoadPlaylists"), systemImage: "music.note.list", description: Text(message))
         } else {
-          ContentUnavailableView("还没有自己的歌单", systemImage: "music.note.list")
+          ContentUnavailableView(L10n("macCatalog.noPlaylists"), systemImage: "music.note.list")
         }
       }
     }
-    .alert("新建歌单", isPresented: $creating) {
-      TextField("名称", text: $newName)
-      Button("创建") { Task { await create() } }
-      Button("取消", role: .cancel) { newName = "" }
+    .alert(L10n("macCatalog.newPlaylist"), isPresented: $creating) {
+      TextField(L10n("macCatalog.playlistNamePlaceholder"), text: $newName)
+      Button(L10n("macCatalog.create")) { Task { await create() } }
+      Button(L10n("macCatalog.cancel"), role: .cancel) { newName = "" }
     }
     .alert(
-      "重命名歌单",
+      L10n("macCatalog.renamePlaylist"),
       isPresented: Binding(
         get: { renaming != nil },
         set: { if !$0 { renaming = nil } }
       )
     ) {
-      TextField("名称", text: $renameText)
-      Button("保存") { Task { await rename() } }
-      Button("取消", role: .cancel) { renaming = nil }
+      TextField(L10n("macCatalog.playlistNamePlaceholder"), text: $renameText)
+      Button(L10n("macCatalog.save")) { Task { await rename() } }
+      Button(L10n("macCatalog.cancel"), role: .cancel) { renaming = nil }
     }
     .alert(
-      "没有完成",
+      L10n("macCatalog.actionIncomplete"),
       isPresented: Binding(
         get: { failure != nil },
         set: { if !$0 { failure = nil } }
       )
     ) {
-      Button("好") { failure = nil }
+      Button(L10n("macCatalog.ok")) { failure = nil }
     } message: {
       Text(failure ?? "")
     }
@@ -983,7 +983,7 @@ private struct MacPlaylistDetail: View {
     VStack(spacing: 0) {
       MacCollectionHeading(
         title: playlist.name,
-        subtitle: "\(tracks.count) 首",
+        subtitle: L10n("macCatalog.trackCount", tracks.count),
         symbol: "music.note.list",
         canPlay: !tracks.isEmpty,
         coverTrackID: playlist.coverTrackId,
@@ -998,7 +998,7 @@ private struct MacPlaylistDetail: View {
         playback: playback,
         favorites: favorites,
         tracks: tracks,
-        emptyTitle: message == nil ? "这个歌单还是空的" : "无法加载歌单",
+        emptyTitle: message == nil ? L10n("macCatalog.playlistEmpty") : L10n("macCatalog.cannotLoadPlaylists"),
         emptyDetail: message,
         canManage: canManage,
         playlist: playlist,
@@ -1015,7 +1015,7 @@ private struct MacPlaylistDetail: View {
         } label: {
           Image(systemName: "chevron.backward")
         }
-        .help("返回")
+        .help(L10n("macCatalog.back"))
         .keyboardShortcut("[", modifiers: .command)
       }
     }
@@ -1048,14 +1048,14 @@ struct MacFavoritesView: View {
   var body: some View {
     VStack(spacing: 0) {
       MacCollectionHeading(
-        title: "我喜欢",
+        title: L10n("macCatalog.favoritesTitle"),
         subtitle: loading && tracks.isEmpty
-          ? "正在读取"
-          : "\(tracks.count) 首歌曲 · 总时长 \(macTotalDurationText(tracks))",
+          ? L10n("macCatalog.loadingSubtitle")
+          : L10n("macCatalog.favoritesSubtitle", tracks.count, macTotalDurationText(tracks)),
         symbol: "heart.fill",
         canPlay: !tracks.isEmpty,
         tileSymbol: "heart",
-        badge: "收藏歌单",
+        badge: L10n("macCatalog.favoritesBadge"),
         onShuffle: {
           guard let pick = tracks.randomElement() else { return }
           if !playback.isShuffled { playback.toggleShuffle() }
@@ -1070,7 +1070,7 @@ struct MacFavoritesView: View {
         playback: playback,
         favorites: favorites,
         tracks: tracks,
-        emptyTitle: message == nil ? "还没有红心歌曲" : "无法加载红心",
+        emptyTitle: message == nil ? L10n("macCatalog.noFavorites") : L10n("macCatalog.cannotLoadFavorites"),
         emptyDetail: message,
         emptyIcon: "heart",
         canManage: canManage,
@@ -1078,9 +1078,9 @@ struct MacFavoritesView: View {
         isLoading: loading
       )
     }
-    .navigationTitle("我喜欢")
+    .navigationTitle(L10n("macCatalog.favoritesTitle"))
     .toolbar {
-      Button("刷新", systemImage: "arrow.clockwise") { Task { await load() } }
+      Button(L10n("macCatalog.refresh"), systemImage: "arrow.clockwise") { Task { await load() } }
         .disabled(loading)
     }
     .task { await load() }
@@ -1090,7 +1090,7 @@ struct MacFavoritesView: View {
     loading = tracks.isEmpty
     do {
       guard let playlist = try await MacPages.favoritesPlaylist(client: client) else {
-        message = "服务器上还没有「我喜欢」歌单"
+        message = L10n("macCatalog.noServerFavoritesPlaylist")
         tracks = []
         loading = false
         return
@@ -1122,15 +1122,15 @@ struct MacListeningView: View {
       playback: playback,
       favorites: favorites,
       tracks: tracks,
-      emptyTitle: message == nil ? "还没有收听记录" : "无法加载收听记录",
+      emptyTitle: message == nil ? L10n("macCatalog.noListeningHistory") : L10n("macCatalog.cannotLoadHistory"),
       emptyDetail: message,
       emptyIcon: "clock",
       canManage: canManage,
       isLoading: loading
     )
-    .navigationTitle("收听记录")
+    .navigationTitle(L10n("macCatalog.listeningHistoryTitle"))
     .toolbar {
-      Button("刷新", systemImage: "arrow.clockwise") { Task { await load() } }
+      Button(L10n("macCatalog.refresh"), systemImage: "arrow.clockwise") { Task { await load() } }
         .disabled(loading)
     }
     .task { await load() }
@@ -1168,18 +1168,18 @@ struct MacNotificationsView: View {
       if let page {
         VStack(spacing: 0) {
           HStack(alignment: .firstTextBaseline, spacing: 10) {
-            Text("通知")
+            Text(L10n("macCatalog.notificationsTitle"))
               .font(MacTheme.section(18))
               .foregroundStyle(MacTheme.ink)
             Text(
               page.unreadCount > 0
-                ? "\(page.unreadCount) 条未读 · 共 \(page.items.count) 条"
-                : "共 \(page.items.count) 条 · 都已读完"
+                ? L10n("macCatalog.notificationsUnreadSummary", page.unreadCount, page.items.count)
+                : L10n("macCatalog.notificationsAllReadSummary", page.items.count)
             )
             .font(MacTheme.caption)
             .foregroundStyle(MacTheme.muted)
             Spacer()
-            Button("全部标为已读") {
+            Button(L10n("macCatalog.markAllNotificationsRead")) {
               Task { await markAll(page.highWatermark) }
             }
             .buttonStyle(.bordered)
@@ -1199,17 +1199,17 @@ struct MacNotificationsView: View {
           }
         }
       } else if let message {
-        ContentUnavailableView("无法加载通知", systemImage: "bell", description: Text(message))
+        ContentUnavailableView(L10n("macCatalog.cannotLoadNotifications"), systemImage: "bell", description: Text(message))
       } else {
         ProgressView()
       }
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
     .background(MacTheme.canvas)
-    .navigationTitle("通知")
+    .navigationTitle(L10n("macCatalog.notificationsTitle"))
     .overlay {
       if page?.items.isEmpty == true {
-        ContentUnavailableView("没有通知", systemImage: "bell")
+        ContentUnavailableView(L10n("macCatalog.noNotifications"), systemImage: "bell")
       }
     }
     .task { await load() }
@@ -1261,7 +1261,7 @@ struct MacNotificationsView: View {
       page = try await client.notifications()
       message = nil
     } catch {
-      message = "通知暂时无法加载"
+      message = L10n("macCatalog.notificationsUnavailable")
     }
   }
 

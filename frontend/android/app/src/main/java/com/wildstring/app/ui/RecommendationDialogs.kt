@@ -1,5 +1,6 @@
 package com.wildstring.app.ui
 
+import com.wildstring.app.AppLanguage
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -27,19 +28,19 @@ internal fun RecommendationPlaylistDialog(vm: MusicViewModel, tracks: List<Track
     var loading by remember { mutableStateOf(true) }
     LaunchedEffect(Unit) {
         action.run { playlists = vm.playlistsForAdd() }
-        if (action.message == "已完成") action.message = null
+        if (action.message == DONE_STATUS) action.message = null
         loading = false
     }
     AlertDialog(
         onDismissRequest = { if (!action.busy) dismiss() },
-        title = { Text("加入歌单") },
+        title = { Text(stringResource(R.string.rec_dlg_title_add_to_playlist)) },
         text = {
             Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("已选 ${tracks.size} 首 · 按推荐中的顺序保存")
+                Text(stringResource(R.string.rec_dlg_selected_count_order, tracks.size))
                 if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
                 if (created == null) {
                     Row(Modifier.fillMaxWidth().clickable(enabled = !action.busy) { target = null }, verticalAlignment = Alignment.CenterVertically) {
-                        RadioButton(target == null, { target = null }, enabled = !action.busy); Text("新建歌单")
+                        RadioButton(target == null, { target = null }, enabled = !action.busy); Text(stringResource(R.string.rec_dlg_new_playlist))
                     }
                     playlists.forEach { playlist ->
                         Row(Modifier.fillMaxWidth().clickable(enabled = !action.busy) { target = playlist }, verticalAlignment = Alignment.CenterVertically) {
@@ -48,8 +49,8 @@ internal fun RecommendationPlaylistDialog(vm: MusicViewModel, tracks: List<Track
                         }
                     }
                 }
-                if (target == null) OutlinedTextField(name, { name = it }, label = { Text("歌单名称") }, enabled = !action.busy && created == null, singleLine = true, modifier = Modifier.fillMaxWidth())
-                if (created != null && action.message != null) Text("歌单已创建，再次确认会继续向该歌单加入曲目。", style = MaterialTheme.typography.bodySmall)
+                if (target == null) OutlinedTextField(name, { name = it }, label = { Text(stringResource(R.string.rec_dlg_playlist_name)) }, enabled = !action.busy && created == null, singleLine = true, modifier = Modifier.fillMaxWidth())
+                if (created != null && action.message != null) Text(stringResource(R.string.rec_dlg_playlist_created_hint), style = MaterialTheme.typography.bodySmall)
                 ActionStatus(action)
             }
         },
@@ -58,10 +59,10 @@ internal fun RecommendationPlaylistDialog(vm: MusicViewModel, tracks: List<Track
                 val selected = created ?: target ?: vm.repository.api().createPlaylist(PlaylistRequest(name.trim(), "manual")).also { created = it }
                 val fresh = vm.repository.api().playlist(vm.repository.url("api", "v1", "playlists", selected.id))
                 vm.addTracksToPlaylist(tracks, fresh)
-                saved("已加入「${fresh.name}」")
+                saved(AppLanguage.string(R.string.rec_dlg_added_to_named_playlist, fresh.name))
             } }
-        }, enabled = !loading && !action.busy && (target != null || name.isNotBlank())) { Text(if (action.busy) "正在加入…" else "确认加入") } },
-        dismissButton = { TextButton(dismiss, enabled = !action.busy) { Text("取消") } },
+        }, enabled = !loading && !action.busy && (target != null || name.isNotBlank())) { Text(if (action.busy) stringResource(R.string.rec_dlg_adding) else stringResource(R.string.rec_dlg_confirm_add)) } },
+        dismissButton = { TextButton(dismiss, enabled = !action.busy) { Text(stringResource(R.string.rec_dlg_cancel)) } },
     )
 }
 
@@ -76,11 +77,11 @@ internal fun RecommendationLyricsDialog(vm: MusicViewModel, track: Track, dismis
     }
     AlertDialog(onDismissRequest = dismiss, title = { Text(track.title) }, text = {
         Column(Modifier.heightIn(max = 460.dp).verticalScroll(rememberScrollState()).testTag("recommendation-lyrics"), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            Text("${track.artist} · 歌词预览", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(stringResource(R.string.rec_dlg_lyrics_preview, track.artist), color = MaterialTheme.colorScheme.onSurfaceVariant)
             when {
                 error != null -> Text(error.orEmpty())
                 lyrics == null -> CircularProgressIndicator()
-                lyrics!!.lines.isEmpty() -> Text("这首歌还没有歌词。")
+                lyrics!!.lines.isEmpty() -> Text(stringResource(R.string.rec_dlg_no_lyrics))
                 else -> lyrics!!.lines.forEach { Text(it.text) }
             }
         }

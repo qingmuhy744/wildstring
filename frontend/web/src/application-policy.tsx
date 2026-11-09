@@ -1,5 +1,6 @@
 import { HelpLabel } from './desktop-help';
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { api } from './api';
 import { errorText, useWorkspaceResource, WorkspaceNotice } from './workspace-ui';
 
@@ -9,16 +10,17 @@ type Policy = {
   version: number;
   allowed_kinds: string[];
 };
-const labels: Record<string, string> = {
-  playlist: '我的歌单',
-  metadata: '单曲信息',
-  metadata_batch: '专辑批量信息',
-  cover: '封面',
-  lyrics: '歌词',
-  intake: '导入整理',
+const labelKeys: Record<string, string> = {
+  playlist: 'applicationPolicy.typePlaylist',
+  metadata: 'applicationPolicy.typeMetadata',
+  metadata_batch: 'applicationPolicy.typeMetadataBatch',
+  cover: 'applicationPolicy.typeCover',
+  lyrics: 'applicationPolicy.typeLyrics',
+  intake: 'applicationPolicy.typeIntake',
 };
 
 export function ApplicationPolicySettings() {
+  const { t } = useTranslation();
   const resource = useWorkspaceResource<Policy>('/agent/application-policy');
   const [form, setForm] = useState<Policy | null>(null);
   const [busy, setBusy] = useState(false),
@@ -39,7 +41,7 @@ export function ApplicationPolicySettings() {
         body: JSON.stringify({ mode, kinds, version }),
       });
       setForm(saved);
-      setNotice('整理方式已保存。已有待确认草案保持原状。');
+      setNotice(t('applicationPolicy.savedNotice'));
     } catch (reason) {
       setError(errorText(reason));
     } finally {
@@ -47,33 +49,34 @@ export function ApplicationPolicySettings() {
     }
   }
   return (
-    <section className="workspace-card application-policy" aria-label="自动整理设置">
-      <h2>整理方式</h2>
-      <p className="muted">
-        按账号保存，助手、后台巡检和 MCP 共用。MCP 凭据还需授予“应用草案”权限。
-      </p>
+    <section
+      className="workspace-card application-policy"
+      aria-label={t('applicationPolicy.sectionAria')}
+    >
+      <h2>{t('applicationPolicy.title')}</h2>
+      <p className="muted">{t('applicationPolicy.description')}</p>
       <WorkspaceNotice error={error || resource.error} notice={notice} />
       {form ? (
         <>
           <label>
-            <HelpLabel hint="application">应用方式</HelpLabel>
+            <HelpLabel hint="application">{t('applicationPolicy.modeLabel')}</HelpLabel>
             <select
-              aria-label="应用方式"
+              aria-label={t('applicationPolicy.modeLabel')}
               value={form.mode}
               disabled={busy}
               onChange={(e) => setForm({ ...form, mode: e.target.value as Policy['mode'] })}
             >
-              <option value="manual">审核后应用</option>
-              <option value="automatic">自动整理</option>
+              <option value="manual">{t('applicationPolicy.modeManual')}</option>
+              <option value="automatic">{t('applicationPolicy.modeAutomatic')}</option>
             </select>
           </label>
           <p>
             {form.mode === 'manual'
-              ? '先生成草案；查看差异后，点击“接受并应用”即可完成。'
-              : '新草案中，勾选的类型会直接应用并记录结果。未勾选的类型继续等待审核。'}
+              ? t('applicationPolicy.manualHint')
+              : t('applicationPolicy.automaticHint')}
           </p>
           <fieldset disabled={busy || form.mode !== 'automatic'}>
-            <legend>允许自动应用的类型</legend>
+            <legend>{t('applicationPolicy.autoTypesLegend')}</legend>
             {form.allowed_kinds.map((kind) => (
               <label className="workspace-check" key={kind}>
                 <input
@@ -88,27 +91,25 @@ export function ApplicationPolicySettings() {
                     })
                   }
                 />
-                {labels[kind] || kind}
+                {labelKeys[kind] ? t(labelKeys[kind]) : kind}
               </label>
             ))}
           </fieldset>
-          <p className="muted">
-            保留修改前后的记录，仍检查数据版本与权限。资料保存在应用内；导入仅复制，不改动导入源。
-          </p>
+          <p className="muted">{t('applicationPolicy.safetyHint')}</p>
           <button
             className="primary"
             disabled={busy || (form.mode === 'automatic' && !form.kinds.length)}
             onClick={() => void save()}
           >
-            {busy ? '保存中…' : '保存整理方式'}
+            {busy ? t('applicationPolicy.saving') : t('applicationPolicy.savePolicy')}
           </button>
           <button disabled={busy} onClick={() => void resource.reload()}>
-            重新读取整理方式
+            {t('applicationPolicy.reloadPolicy')}
           </button>
         </>
       ) : (
         <button disabled={resource.loading} onClick={() => void resource.reload()}>
-          重新读取整理方式
+          {t('applicationPolicy.reloadPolicy')}
         </button>
       )}
     </section>

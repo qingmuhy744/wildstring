@@ -1,5 +1,8 @@
 package com.wildstring.app.data
 
+import com.wildstring.app.AppLanguage
+import com.wildstring.app.R
+
 data class CatalogSort(val sort: String, val order: String)
 fun catalogSortContext(kind: String, collection: String?, albumFilter: String?): String? = when {
     collection == "playlists" -> null
@@ -16,7 +19,21 @@ fun defaultCatalogSort(context: String) = when (context) {
     else -> CatalogSort("title", "asc")
 }
 fun catalogSortChoices(context: String): List<Pair<String, String>> {
-    if (context.endsWith("albums")) return listOf("title" to "专辑名称", "added_at" to "入库时间", "release_date" to "发行时间", "artist" to "艺人名称")
-    return (if (context == "album-tracks") listOf("track_number" to "碟号与曲序", "name" to "歌曲名称") else listOf("title" to "歌曲名称")) +
-        listOf("added_at" to "入库时间", "duration_ms" to "歌曲时长", "play_count" to "播放次数", "listened_ms" to "收听时长", "last_played_at" to "最近听过")
+    if (context.endsWith("albums")) return listOf(
+        "title" to AppLanguage.string(R.string.cat_sort_album_title),
+        "added_at" to AppLanguage.string(R.string.cat_sort_added_at),
+        "release_date" to AppLanguage.string(R.string.cat_sort_release_date),
+        "artist" to AppLanguage.string(R.string.cat_sort_artist_name)
+    )
+    return (if (context == "album-tracks") listOf(
+        "track_number" to AppLanguage.string(R.string.cat_sort_disc_and_track),
+        "name" to AppLanguage.string(R.string.cat_sort_track_title)
+    ) else listOf("title" to AppLanguage.string(R.string.cat_sort_track_title))) +
+        listOf(
+            "added_at" to AppLanguage.string(R.string.cat_sort_added_at),
+            "duration_ms" to AppLanguage.string(R.string.cat_sort_duration),
+            "play_count" to AppLanguage.string(R.string.cat_sort_play_count),
+            "listened_ms" to AppLanguage.string(R.string.cat_sort_listened_time),
+            "last_played_at" to AppLanguage.string(R.string.cat_sort_last_played)
+        )
 }

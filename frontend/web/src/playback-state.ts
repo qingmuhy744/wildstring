@@ -1,11 +1,20 @@
 import { api, type Track, type TrackPage } from './api';
+import i18n from './i18n';
 
 export type PlaybackMode = 'sequential' | 'repeat_all' | 'repeat_one' | 'shuffle';
 export const modeNames: Record<PlaybackMode, string> = {
-  sequential: '顺序播放',
-  repeat_all: '列表循环',
-  repeat_one: '单曲循环',
-  shuffle: '随机播放',
+  get sequential() {
+    return i18n.t('playbackState.sequential');
+  },
+  get repeat_all() {
+    return i18n.t('playbackState.repeatAll');
+  },
+  get repeat_one() {
+    return i18n.t('playbackState.repeatOne');
+  },
+  get shuffle() {
+    return i18n.t('playbackState.shuffle');
+  },
 };
 export const PLAYBACK_RATES = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2] as const;
 export type PlaybackRate = (typeof PLAYBACK_RATES)[number];
@@ -133,13 +142,14 @@ export async function collectTracks(path: string, signal?: AbortSignal): Promise
     url.searchParams.set('offset', String(cursor));
     const page = await api<TrackPage>(`${url.pathname}${url.search}`, { signal });
     if (!Number.isInteger(page.total) || page.total > QUEUE_LIMIT)
-      throw new Error(`整集合播放和保存最多 ${QUEUE_LIMIT} 首，请缩小搜索范围或建立歌单。`);
+      throw new Error(i18n.t('playbackState.collectionLimitExceeded', { limit: QUEUE_LIMIT }));
     if (total !== -1 && total !== page.total)
-      throw new Error('曲库内容已变化，请重新播放整个集合。');
+      throw new Error(i18n.t('playbackState.collectionChanged'));
     total = page.total;
-    if (!page.items.length && cursor < total) throw new Error('集合未读取完整，请重试。');
+    if (!page.items.length && cursor < total)
+      throw new Error(i18n.t('playbackState.collectionIncomplete'));
     for (const track of page.items) {
-      if (seen.has(track.id)) throw new Error('集合排序已变化，请重新读取。');
+      if (seen.has(track.id)) throw new Error(i18n.t('playbackState.collectionOrderChanged'));
       seen.add(track.id);
       items.push(track);
     }

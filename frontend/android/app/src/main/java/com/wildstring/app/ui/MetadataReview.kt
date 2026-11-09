@@ -1,5 +1,8 @@
 package com.wildstring.app.ui
 
+import com.wildstring.app.R
+import com.wildstring.app.AppLanguage
+import androidx.compose.ui.res.stringResource
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -37,11 +40,31 @@ private fun reviewCandidateLabel(source: JsonObject, track: JsonObject, names: J
     val score = source.getAsJsonObject("match")?.get("score")?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isNumber }?.asDouble
     return listOfNotNull(names.text(source.text("provider")).ifEmpty { source.text("provider") },
         fields.text("title").takeIf { it.isNotBlank() && it != track.text("title") },
-        fields.text("album").ifBlank { "未提供专辑" }, fields.text("release_date").takeIf { it.isNotBlank() },
-        score?.takeIf { it.isFinite() }?.let { "匹配度 ${kotlin.math.round(if (it <= 1) it * 100 else it).toInt()}%" },
-        source.text("stale_reason").takeIf { it.isNotBlank() } ?: "查询依据已变化".takeIf { stale(source) }).joinToString(" · ")
+        fields.text("album").ifBlank { AppLanguage.string(R.string.meta_rev_no_album) }, fields.text("release_date").takeIf { it.isNotBlank() },
+        score?.takeIf { it.isFinite() }?.let { AppLanguage.string(R.string.meta_rev_match_score, kotlin.math.round(if (it <= 1) it * 100 else it).toInt()) },
+        source.text("stale_reason").takeIf { it.isNotBlank() } ?: AppLanguage.string(R.string.meta_rev_stale_default_reason).takeIf { stale(source) }).joinToString(" · ")
 }
-private val reviewLabels = mapOf("title" to "歌名", "artists" to "歌曲艺人", "album" to "专辑", "album_artists" to "专辑艺人", "track_number" to "曲序", "disc_number" to "碟号", "track_total" to "总曲数", "disc_total" to "总碟数", "release_date" to "发行日期", "original_date" to "首次发行日期", "composers" to "作曲", "lyricists" to "作词", "arrangers" to "编曲", "vocalists" to "演唱", "genres" to "风格", "external_ids" to "外部标识", "description" to "简介")
+private val reviewLabelResIds = mapOf(
+    "title" to R.string.meta_rev_label_title,
+    "artists" to R.string.meta_rev_label_artists,
+    "album" to R.string.meta_rev_label_album,
+    "album_artists" to R.string.meta_rev_label_album_artists,
+    "track_number" to R.string.meta_rev_label_track_number,
+    "disc_number" to R.string.meta_rev_label_disc_number,
+    "track_total" to R.string.meta_rev_label_track_total,
+    "disc_total" to R.string.meta_rev_label_disc_total,
+    "release_date" to R.string.meta_rev_label_release_date,
+    "original_date" to R.string.meta_rev_label_original_date,
+    "composers" to R.string.meta_rev_label_composers,
+    "lyricists" to R.string.meta_rev_label_lyricists,
+    "arrangers" to R.string.meta_rev_label_arrangers,
+    "vocalists" to R.string.meta_rev_label_vocalists,
+    "genres" to R.string.meta_rev_label_genres,
+    "external_ids" to R.string.meta_rev_label_external_ids,
+    "description" to R.string.meta_rev_label_description,
+)
+private fun reviewLabel(key: String): String =
+    reviewLabelResIds[key]?.let { AppLanguage.string(it) } ?: key
 
 @Composable internal fun MetadataReviewPanel(vm: MusicViewModel, initialTrack: Track? = null, initialBatchId: String? = null, initialAlbumId: String? = null) {
     val action = remember { FeatureAction() }; val scope = rememberCoroutineScope(); val uri = LocalUriHandler.current
@@ -83,14 +106,14 @@ private val reviewLabels = mapOf("title" to "歌名", "artists" to "歌曲艺人
             if (id == identity) choice.copy(fields = emptySet())
             else if (old != null && row != null && versions[id] == row.number("metadata_version") && candidate(row, old) != null) old else choice
         }
-        loadAlbums(); rejectionNotice = "已拒绝当前候选，现有资料保持不变。"; action.message = rejectionNotice
+        loadAlbums(); rejectionNotice = AppLanguage.string(R.string.meta_rev_rejected_current_notice); action.message = rejectionNotice
     }
     suspend fun rejectAlbum() {
         val albumId = page?.text("album_id")?.takeIf { it.isNotBlank() } ?: current?.text("album_id") ?: return
         rejectionNotice = null
         vm.agent.request("metadata-review/reject", "POST", jsonBody("album_id" to albumId))
         val updatedAlbums = loadAlbums()
-        rejectionNotice = "已拒绝此专辑的所有建议；现有资料保持不变。"
+        rejectionNotice = AppLanguage.string(R.string.meta_rev_rejected_album_notice)
         action.message = rejectionNotice
         val nextAlbum = updatedAlbums.firstOrNull { it.text("id") != albumId }
         if (nextAlbum != null) {
@@ -104,7 +127,7 @@ private val reviewLabels = mapOf("title" to "歌名", "artists" to "歌曲艺人
         vm.agent.request("metadata-review/reject", "POST", jsonBody("track_id" to trackId))
         page?.let { load(currentQuery(it)) }
         loadAlbums()
-        rejectionNotice = "已拒绝该单曲的所有建议；现有资料保持不变。"
+        rejectionNotice = AppLanguage.string(R.string.meta_rev_rejected_track_notice)
         action.message = rejectionNotice
     }
     suspend fun purgeStale() {
@@ -112,7 +135,7 @@ private val reviewLabels = mapOf("title" to "歌名", "artists" to "歌曲艺人
             val res = vm.agent.request("metadata-review/stale/purge", "POST")
             val count = res.number("purged_count")
             val remaining = res.number("remaining_pending")
-            val msg = if (count > 0) "已清理 $count 个失效候选，剩余 $remaining 个待核对候选。" else "暂无失效候选，全部均为有效版本。"
+            val msg = if (count > 0) AppLanguage.string(R.string.meta_rev_purged_stale_count, count.toInt(), remaining.toInt()) else AppLanguage.string(R.string.meta_rev_no_stale_candidates)
             action.message = msg
             val updated = loadAlbums()
             if (updated.isNotEmpty() && page != null) {
@@ -132,11 +155,13 @@ private val reviewLabels = mapOf("title" to "歌名", "artists" to "歌曲艺人
         if (items.size() > 0) {
             val body = jsonBody("items" to items, "idempotency_key" to operationKey); snapshot?.let { body.addProperty("cover_draft_id", it.text("id")) }
             val result = vm.agent.request("metadata-review/accept", "POST", body)
-            if (result.text("status") != "applied") { conflicts = result.objects("conflicts").map { it.text("track_id") }.toSet(); action.message = "此批次未应用：歌曲或候选已变化，请重新读取后核对。"; return }
+            if (result.text("status") != "applied") { conflicts = result.objects("conflicts").map { it.text("track_id") }.toSet(); action.message = AppLanguage.string(R.string.meta_rev_conflicts_message); return }
         } else if (snapshot != null) vm.agent.request("drafts/${snapshot.text("id")}/accept", "POST", jsonBody("version" to snapshot.number("version"), "preview_digest" to snapshot.text("preview_digest"), "idempotency_key" to operationKey))
         else return
         val currentAlbumId = page?.text("album_id")
-        val updatedAlbums = loadAlbums(); vm.load(); action.message = "已应用 ${chosen.size} 首的所选资料${if (snapshot != null) "及固定封面" else ""}。"
+        val updatedAlbums = loadAlbums(); vm.load()
+        val coverSuffix = if (snapshot != null) AppLanguage.string(R.string.meta_rev_with_fixed_cover) else ""
+        action.message = AppLanguage.string(R.string.meta_rev_accepted_message, chosen.size, coverSuffix)
         if (advanceAlbum) {
             val nextAlbum = updatedAlbums.firstOrNull { it.text("id") != currentAlbumId }
             if (nextAlbum != null) {
@@ -149,83 +174,88 @@ private val reviewLabels = mapOf("title" to "歌名", "artists" to "歌曲艺人
             page?.let { load(currentQuery(it), nextId) }
         }
     }
-    LaunchedEffect(initialTrack?.id, initialBatchId, initialAlbumId) { action.run { val list = loadAlbums(); load(when { initialTrack != null -> mapOf("track_id" to initialTrack.id); initialBatchId != null -> mapOf("batch_id" to initialBatchId); initialAlbumId != null -> mapOf("album_id" to initialAlbumId); else -> mapOf("album_id" to list.firstOrNull()?.text("id").orEmpty()) }, initialTrack?.id) }; if (action.message == "已完成") action.message = null }
+    LaunchedEffect(initialTrack?.id, initialBatchId, initialAlbumId) { action.run { val list = loadAlbums(); load(when { initialTrack != null -> mapOf("track_id" to initialTrack.id); initialBatchId != null -> mapOf("batch_id" to initialBatchId); initialAlbumId != null -> mapOf("album_id" to initialAlbumId); else -> mapOf("album_id" to list.firstOrNull()?.text("id").orEmpty()) }, initialTrack?.id) }; if (action.message == "\u5df2\u5b8c\u6210") action.message = null }
     Column(Modifier.fillMaxSize().testTag("metadata-review")) {
         if (action.busy && page == null) {
             ActionStatus(action)
             ReviewSkeleton(Modifier.weight(1f))
         } else LazyColumn(Modifier.weight(1f).fillMaxWidth().testTag("review-scroll"), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            item { Text("批量核对资料", style = MaterialTheme.typography.titleLarge); Text("先对比，再接受。人工值默认保留，勾选后会替换该字段。", style = MaterialTheme.typography.bodySmall)
+            item { Text(stringResource(R.string.meta_rev_title), style = MaterialTheme.typography.titleLarge); Text(stringResource(R.string.meta_rev_hint), style = MaterialTheme.typography.bodySmall)
                 Row {
-                    TextButton({ showAlbums = true }, enabled = !action.busy) { Text("选择专辑") }
-                    TextButton({ scope.launch { action.run { page?.let { load(currentQuery(it), active) } } } }, enabled = !action.busy) { Text("重新读取") }
-                    TextButton({ scope.launch { purgeStale() } }, enabled = !action.busy) { Text("清理失效候选") }
+                    TextButton({ showAlbums = true }, enabled = !action.busy) { Text(stringResource(R.string.meta_rev_select_album)) }
+                    TextButton({ scope.launch { action.run { page?.let { load(currentQuery(it), active) } } } }, enabled = !action.busy) { Text(stringResource(R.string.meta_rev_reload)) }
+                    TextButton({ scope.launch { purgeStale() } }, enabled = !action.busy) { Text(stringResource(R.string.meta_rev_purge_stale)) }
                 }
-                Text(current?.text("album") ?: "暂无待核对专辑", style = MaterialTheme.typography.titleMedium)
-                Text("${page?.number("total") ?: 0} 首 · 本页 ${tracks.size} 首", style = MaterialTheme.typography.bodySmall); ActionStatus(action)
-                Row { TextButton({ choices = tracks.associate { it.text("id") to defaultReviewChoice(it) } }, enabled = !action.busy) { Text("勾选变化（保留人工值）") }; TextButton({ choices = choices.mapValues { it.value.copy(fields = emptySet()) } }, enabled = !action.busy) { Text("清空") } }
-                TextButton({ showSongs = !showSongs }, enabled = !action.busy) { Text(if (showSongs) "收起歌曲列表" else "选择歌曲（已选 ${selected.size} 首）") }
+                Text(current?.text("album") ?: stringResource(R.string.meta_rev_no_pending_albums), style = MaterialTheme.typography.titleMedium)
+                Text(stringResource(R.string.meta_rev_summary_tracks, page?.number("total")?.toInt() ?: 0, tracks.size), style = MaterialTheme.typography.bodySmall); ActionStatus(action)
+                Row { TextButton({ choices = tracks.associate { it.text("id") to defaultReviewChoice(it) } }, enabled = !action.busy) { Text(stringResource(R.string.meta_rev_check_changes)) }; TextButton({ choices = choices.mapValues { it.value.copy(fields = emptySet()) } }, enabled = !action.busy) { Text(stringResource(R.string.meta_rev_clear_selection)) } }
+                TextButton({ showSongs = !showSongs }, enabled = !action.busy) { Text(if (showSongs) stringResource(R.string.meta_rev_collapse_song_list) else stringResource(R.string.meta_rev_select_songs_count, selected.size)) }
             }
             if (showSongs) items(tracks, key = { it.text("id") }) { row -> Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Checkbox(choices[row.text("id")]?.fields?.isNotEmpty() == true, { checked -> choose(row.text("id"), if (checked) defaultReviewChoice(row).fields else emptySet()) }, enabled = !action.busy, modifier = Modifier.testTag("review-track-${row.text("id")}"))
-                Column(Modifier.weight(1f).clickable(enabled = !action.busy) { active = row.text("id"); showSongs = false; cover = null; coverReady = false; rejectionNotice = null; action.message = null }) { Text(row.text("title")); Text(if (row.text("id") in conflicts) "版本或候选冲突" else "${choices[row.text("id")]?.fields?.size ?: 0} 个字段已选", style = MaterialTheme.typography.bodySmall) }
+                Column(Modifier.weight(1f).clickable(enabled = !action.busy) { active = row.text("id"); showSongs = false; cover = null; coverReady = false; rejectionNotice = null; action.message = null }) { Text(row.text("title")); Text(if (row.text("id") in conflicts) stringResource(R.string.meta_rev_conflict_warning) else stringResource(R.string.meta_rev_fields_selected_count, choices[row.text("id")]?.fields?.size ?: 0), style = MaterialTheme.typography.bodySmall) }
             } }
-            if (page != null && page!!.number("total") > 500) item { Row { TextButton({ scope.launch { action.run { load(currentQuery(page!!, (page!!.number("offset") - 500).coerceAtLeast(0))) } } }, enabled = !action.busy && page!!.number("offset") > 0) { Text("上一页") }; TextButton({ scope.launch { action.run { load(currentQuery(page!!, page!!.number("offset") + 500)) } } }, enabled = !action.busy && page!!.number("offset") + 500 < page!!.number("total")) { Text("下一页") } } }
+            if (page != null && page!!.number("total") > 500) item { Row { TextButton({ scope.launch { action.run { load(currentQuery(page!!, (page!!.number("offset") - 500).coerceAtLeast(0))) } } }, enabled = !action.busy && page!!.number("offset") > 0) { Text(stringResource(R.string.meta_rev_prev_page)) }; TextButton({ scope.launch { action.run { load(currentQuery(page!!, page!!.number("offset") + 500)) } } }, enabled = !action.busy && page!!.number("offset") + 500 < page!!.number("total")) { Text(stringResource(R.string.meta_rev_next_page)) } } }
             if (current != null) {
                 item { Text(current.text("title"), style = MaterialTheme.typography.titleLarge); Text(current.getAsJsonArray("artists")?.joinToString(" / ") { it.asString }.orEmpty())
                     Row {
-                        TextButton({ showSources = true }, enabled = !action.busy, modifier = Modifier.weight(1f).testTag("review-source")) { Text(source?.let { reviewCandidateLabel(it, current, names) } ?: "选择候选来源", maxLines = 3, overflow = TextOverflow.Ellipsis) }
-                        TextButton({ refresh = true }, enabled = !action.busy) { Text("查询新资料") }
-                        TextButton({ scope.launch { action.run { rejectTrack(current.text("id")) } } }, enabled = !action.busy) { Text("拒绝本曲建议") }
+                        TextButton({ showSources = true }, enabled = !action.busy, modifier = Modifier.weight(1f).testTag("review-source")) { Text(source?.let { reviewCandidateLabel(it, current, names) } ?: stringResource(R.string.meta_rev_select_source), maxLines = 3, overflow = TextOverflow.Ellipsis) }
+                        TextButton({ refresh = true }, enabled = !action.busy) { Text(stringResource(R.string.meta_rev_query_new_metadata)) }
+                        TextButton({ scope.launch { action.run { rejectTrack(current.text("id")) } } }, enabled = !action.busy) { Text(stringResource(R.string.meta_rev_reject_track)) }
                     }
-                    if (source != null && source.number("duplicate_count") > 1) Text("已合并 ${source.number("duplicate_count")} 条相同候选记录，不同版本分别保留。", style = MaterialTheme.typography.bodySmall)
-                    Row { listOf("fields" to "文字资料", "cover" to "封面对比", "lyrics" to "歌词预览").forEach { (id, label) -> FilterChip(tab == id, { tab = id }, { Text(label) }, modifier = Modifier.padding(end = 6.dp)) } }
+                    if (source != null && source.number("duplicate_count") > 1) Text(stringResource(R.string.meta_rev_duplicate_merged_hint, source.number("duplicate_count").toInt()), style = MaterialTheme.typography.bodySmall)
+                    Row { listOf("fields" to R.string.meta_rev_tab_fields, "cover" to R.string.meta_rev_tab_cover, "lyrics" to R.string.meta_rev_tab_lyrics).forEach { (id, labelRes) -> FilterChip(tab == id, { tab = id }, { Text(stringResource(labelRes)) }, modifier = Modifier.padding(end = 6.dp)) } }
                 }
                 if (tab == "fields") {
-                    item { Row(verticalAlignment = Alignment.CenterVertically) { Checkbox(onlyChanges, { onlyChanges = it }); Text("只看变化字段") }
-                        if (source != null) { Text("信息版本 ${source.number("metadata_version")}${source.text("stale_reason").takeIf { it.isNotBlank() }?.let { " · $it" } ?: if (stale(source)) " · 查询依据已变化" else ""}", style = MaterialTheme.typography.bodySmall); if (source.text("source_url").isNotBlank()) TextButton({ uri.openUri(source.text("source_url")) }) { Text("查看来源依据") } }
-                        else Text("没有有效候选，可以查询资料或跳过。")
+                    item { Row(verticalAlignment = Alignment.CenterVertically) { Checkbox(onlyChanges, { onlyChanges = it }); Text(stringResource(R.string.meta_rev_only_changes)) }
+                        if (source != null) {
+                            val staleSuffix = source.text("stale_reason").takeIf { it.isNotBlank() }?.let { " · $it" } ?: if (stale(source)) stringResource(R.string.meta_rev_stale_changed_suffix) else ""
+                            Text(stringResource(R.string.meta_rev_version_prefix, source.number("metadata_version").toString(), staleSuffix), style = MaterialTheme.typography.bodySmall)
+                            if (source.text("source_url").isNotBlank()) TextButton({ uri.openUri(source.text("source_url")) }) { Text(stringResource(R.string.meta_rev_view_source_evidence)) }
+                        }
+                        else Text(stringResource(R.string.meta_rev_no_valid_candidates))
                     }
                     val fields = source?.getAsJsonObject("fields")?.entrySet()?.filter { !onlyChanges || current.getAsJsonObject("current")?.get(it.key) != it.value } ?: emptyList()
                     items(fields, key = { it.key }) { entry -> val field = entry.key; val chosen = choices[active]?.fields.orEmpty()
                         Surface(shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surfaceContainerLow) { Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) { Checkbox(field in chosen, { checked -> choose(active, if (checked) chosen + field else chosen - field) }, enabled = !action.busy && !stale(source), modifier = Modifier.testTag("review-field-$field")); Text(reviewLabels[field] ?: field, Modifier.weight(1f), style = MaterialTheme.typography.titleSmall); if (current.getAsJsonObject("overrides")?.has(field) == true) Text("人工值", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall) }
-                            Text("当前值", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant); Text(displayValue(current.getAsJsonObject("current")?.get(field)))
-                            HorizontalDivider(); Text("建议值", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary); Text(displayValue(entry.value))
-                            TextButton({ val on = field !in chosen; choices = choices.mapValues { (id, choice) -> val row = tracks.first { it.text("id") == id }; val c = candidate(row, choice); if (c?.getAsJsonObject("fields")?.has(field) == true && !stale(c)) choice.copy(fields = if (on) choice.fields + field else choice.fields - field) else choice } }, enabled = !action.busy) { Text("本页同字段${if (field in chosen) "取消" else "勾选"}") }
+                            Row(verticalAlignment = Alignment.CenterVertically) { Checkbox(field in chosen, { checked -> choose(active, if (checked) chosen + field else chosen - field) }, enabled = !action.busy && !stale(source), modifier = Modifier.testTag("review-field-$field")); Text(reviewLabel(field), Modifier.weight(1f), style = MaterialTheme.typography.titleSmall); if (current.getAsJsonObject("overrides")?.has(field) == true) Text(stringResource(R.string.meta_rev_manual_override_badge), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelSmall) }
+                            Text(stringResource(R.string.meta_rev_current_value_label), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant); Text(displayValue(current.getAsJsonObject("current")?.get(field)))
+                            HorizontalDivider(); Text(stringResource(R.string.meta_rev_suggested_value_label), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary); Text(displayValue(entry.value))
+                            TextButton({ val on = field !in chosen; choices = choices.mapValues { (id, choice) -> val row = tracks.first { it.text("id") == id }; val c = candidate(row, choice); if (c?.getAsJsonObject("fields")?.has(field) == true && !stale(c)) choice.copy(fields = if (on) choice.fields + field else choice.fields - field) else choice } }, enabled = !action.busy) { Text(if (field in chosen) stringResource(R.string.meta_rev_uncheck_same_field) else stringResource(R.string.meta_rev_check_same_field)) }
                         } }
                     }
-                    item { TextButton({ original = !original }) { Text("文件原始值与匹配依据") }; if (original) { current.getAsJsonObject("original")?.entrySet()?.forEach { (k, v) -> Text("${reviewLabels[k] ?: k}：${displayValue(v)}", style = MaterialTheme.typography.bodySmall) }; Text(source?.get("match")?.toString().orEmpty(), style = MaterialTheme.typography.bodySmall) } }
+                    item { TextButton({ original = !original }) { Text(stringResource(R.string.meta_rev_original_and_match)) }; if (original) { current.getAsJsonObject("original")?.entrySet()?.forEach { (k, v) -> Text("${reviewLabel(k)}：${displayValue(v)}", style = MaterialTheme.typography.bodySmall) }; Text(source?.get("match")?.toString().orEmpty(), style = MaterialTheme.typography.bodySmall) } }
                 }
                 if (tab == "cover") item {
-                    Row(verticalAlignment = Alignment.CenterVertically) { Checkbox(coverAll, { coverAll = it; cover = null; coverReady = false }, enabled = !action.busy); Text("用于本页同专辑歌曲（${if (coverAll) tracks.size else 1} 首）") }
+                    Row(verticalAlignment = Alignment.CenterVertically) { Checkbox(coverAll, { coverAll = it; cover = null; coverReady = false }, enabled = !action.busy); Text(stringResource(R.string.meta_rev_cover_all_checkbox, if (coverAll) tracks.size else 1)) }
                     Button({ scope.launch { action.run {
                         val targets = JsonArray().apply { (if (coverAll) tracks else listOf(current)).forEach { add(jsonBody("track_id" to it.text("id"), "metadata_version" to it.number("metadata_version"))) } }
-                        coverReady = false; cover = vm.agent.request("metadata-review/cover", "POST", jsonBody("kind" to "cover", "title" to "封面核对 · ${current.text("album")}", "payload" to jsonBody("suggestion_id" to source!!.text("id"), "metadata_version" to current.number("metadata_version"), "targets" to targets)))
-                    } } }, enabled = !action.busy && source?.text("cover_url")?.isNotBlank() == true && !stale(source)) { Text("固定并预览此封面") }
+                        coverReady = false; cover = vm.agent.request("metadata-review/cover", "POST", jsonBody("kind" to "cover", "title" to AppLanguage.string(R.string.meta_rev_cover_draft_title, current.text("album")), "payload" to jsonBody("suggestion_id" to source!!.text("id"), "metadata_version" to current.number("metadata_version"), "targets" to targets)))
+                    } } }, enabled = !action.busy && source?.text("cover_url")?.isNotBlank() == true && !stale(source)) { Text(stringResource(R.string.meta_rev_fix_and_preview_cover)) }
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Column(Modifier.weight(1f)) { Text("当前封面"); if (current.flag("has_cover")) AsyncImage(ImageRequest.Builder(LocalContext.current).data(vm.repository.url("api", "v1", "tracks", active, "cover") + "?size=320&v=${current.number("metadata_version")}").build(), "当前封面", imageLoader = vm.imageLoader, modifier = Modifier.fillMaxWidth().aspectRatio(1f)) else Text("暂无封面") }
-                        Column(Modifier.weight(1f)) { Text("将采用的封面"); cover?.let { snapshot -> AsyncImage(ImageRequest.Builder(LocalContext.current).data(vm.repository.url("api", "v1", "agent", "drafts", snapshot.text("id"), "cover-preview")).memoryCacheKey("${vm.repository.session.cacheScope()}:${snapshot.text("id")}").build(), "固定封面快照", imageLoader = vm.imageLoader, modifier = Modifier.fillMaxWidth().aspectRatio(1f), onSuccess = { coverReady = true }, onError = { coverReady = false; action.message = "封面无法显示，本次不能应用。" }) } }
+                        Column(Modifier.weight(1f)) { Text(stringResource(R.string.meta_rev_current_cover)); if (current.flag("has_cover")) AsyncImage(ImageRequest.Builder(LocalContext.current).data(vm.repository.url("api", "v1", "tracks", active, "cover") + "?size=320&v=${current.number("metadata_version")}").build(), stringResource(R.string.meta_rev_current_cover), imageLoader = vm.imageLoader, modifier = Modifier.fillMaxWidth().aspectRatio(1f)) else Text(stringResource(R.string.meta_rev_no_cover)) }
+                        Column(Modifier.weight(1f)) { Text(stringResource(R.string.meta_rev_target_cover)); cover?.let { snapshot -> AsyncImage(ImageRequest.Builder(LocalContext.current).data(vm.repository.url("api", "v1", "agent", "drafts", snapshot.text("id"), "cover-preview")).memoryCacheKey("${vm.repository.session.cacheScope()}:${snapshot.text("id")}").build(), stringResource(R.string.meta_rev_fixed_cover_snapshot), imageLoader = vm.imageLoader, modifier = Modifier.fillMaxWidth().aspectRatio(1f), onSuccess = { coverReady = true }, onError = { coverReady = false; action.message = AppLanguage.string(R.string.meta_rev_cover_load_error) }) } }
                     }
                 }
                 if (tab == "lyrics") item { key(active) { OnlineLyricsPanel(vm, Track(id = current.text("id"), title = current.text("title"), artists = current.getAsJsonArray("artists")?.map { it.asString } ?: emptyList(), album = current.text("album"), durationMs = 0, albumId = current.text("album_id"))) {} } }
             }
         }
         Surface(shadowElevation = 4.dp, color = MaterialTheme.colorScheme.surfaceContainer) { Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text("已选 ${selected.size} 首 · ${selected.sumOf { choices[it.text("id")]?.fields?.size ?: 0 }} 个字段${if (cover != null) " · 含固定封面" else ""}", style = MaterialTheme.typography.bodySmall)
+            val fixedCoverNotice = if (cover != null) stringResource(R.string.meta_rev_with_fixed_cover_suffix) else ""
+            Text(stringResource(R.string.meta_rev_footer_selection, selected.size, selected.sumOf { choices[it.text("id")]?.fields?.size ?: 0 }, fixedCoverNotice), style = MaterialTheme.typography.bodySmall)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton({ choose(active, emptySet()); next() }, enabled = !action.busy && current != null) { Text("本次跳过") }
-                Button({ scope.launch { action.run { accept(false) } } }, enabled = !action.busy && (selected.isNotEmpty() || cover != null) && (cover == null || coverReady), modifier = Modifier.testTag("review-accept-selected")) { Text("接受选中项") }
-                Button({ scope.launch { action.run { accept(false, advanceAlbum = true) } } }, enabled = !action.busy && (selected.isNotEmpty() || cover != null) && (cover == null || coverReady), modifier = Modifier.testTag("review-accept-next-album")) { Text("接受并下一专辑") }
+                OutlinedButton({ choose(active, emptySet()); next() }, enabled = !action.busy && current != null) { Text(stringResource(R.string.meta_rev_skip_this)) }
+                Button({ scope.launch { action.run { accept(false) } } }, enabled = !action.busy && (selected.isNotEmpty() || cover != null) && (cover == null || coverReady), modifier = Modifier.testTag("review-accept-selected")) { Text(stringResource(R.string.meta_rev_accept_selected)) }
+                Button({ scope.launch { action.run { accept(false, advanceAlbum = true) } } }, enabled = !action.busy && (selected.isNotEmpty() || cover != null) && (cover == null || coverReady), modifier = Modifier.testTag("review-accept-next-album")) { Text(stringResource(R.string.meta_rev_accept_next_album)) }
             }
             rejectionNotice?.let { Text(it, style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("review-rejection-notice")) }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton({ scope.launch { action.run { rejectAlbum() } } }, enabled = !action.busy && (page?.text("album_id")?.isNotBlank() == true || current?.text("album_id")?.isNotBlank() == true), modifier = Modifier.weight(1f).testTag("review-reject-album")) { Text("拒绝此专辑所有建议") }
-                TextButton({ scope.launch { action.run { rejectCurrent() } } }, enabled = !action.busy && source != null, modifier = Modifier.weight(1f).testTag("review-reject-current")) { Text("拒绝当前建议") }
+                TextButton({ scope.launch { action.run { rejectAlbum() } } }, enabled = !action.busy && (page?.text("album_id")?.isNotBlank() == true || current?.text("album_id")?.isNotBlank() == true), modifier = Modifier.weight(1f).testTag("review-reject-album")) { Text(stringResource(R.string.meta_rev_reject_album)) }
+                TextButton({ scope.launch { action.run { rejectCurrent() } } }, enabled = !action.busy && source != null, modifier = Modifier.weight(1f).testTag("review-reject-current")) { Text(stringResource(R.string.meta_rev_reject_current)) }
             }
         } }
     }
-    if (showAlbums) AlertDialog(onDismissRequest = { showAlbums = false }, title = { Text("待核对专辑") }, text = { Column { OutlinedTextField(filter, { filter = it }, label = { Text("筛选专辑") }); LazyColumn(Modifier.heightIn(max = 360.dp)) { items(albums.filter { (it.text("title") + it.text("artists")).contains(filter, true) }, key = { it.text("id") }) { album -> TextButton({ scope.launch { action.run { load(mapOf("album_id" to album.text("id"))); showAlbums = false } } }, enabled = !action.busy) { Text("${album.text("title")} · ${album.number("count")} 首") } }; if (albums.size < albumTotal) item { TextButton({ scope.launch { action.run { loadAlbums(true) } } }) { Text("更多专辑") } } } } }, confirmButton = { TextButton({ showAlbums = false }) { Text("关闭") } })
-    if (showSources && current != null) AlertDialog(onDismissRequest = { showSources = false }, title = { Text("候选来源") }, text = { Column(Modifier.verticalScroll(rememberScrollState())) { current.objects("suggestions").forEach { c -> TextButton({ choices = choices + (active to ReviewChoice(c.text("id"), if (stale(c)) emptySet() else c.getAsJsonObject("fields").entrySet().filter { (k, v) -> current.getAsJsonObject("current")?.get(k) != v && current.getAsJsonObject("overrides")?.has(k) != true }.map { it.key }.toSet())); cover = null; coverReady = false; showSources = false; rejectionNotice = null; action.message = null }) { Text(reviewCandidateLabel(c, current, names)) } } } }, confirmButton = { TextButton({ showSources = false }) { Text("关闭") } })
-    if (refresh && current != null) MetadataRefreshPrompt(vm, "album", current.text("album_id")) { refresh = false; action.message = "查询已排队，完成后重新读取。" }
+    if (showAlbums) AlertDialog(onDismissRequest = { showAlbums = false }, title = { Text(stringResource(R.string.meta_rev_pending_albums_dialog_title)) }, text = { Column { OutlinedTextField(filter, { filter = it }, label = { Text(stringResource(R.string.meta_rev_filter_albums_label)) }); LazyColumn(Modifier.heightIn(max = 360.dp)) { items(albums.filter { (it.text("title") + it.text("artists")).contains(filter, true) }, key = { it.text("id") }) { album -> TextButton({ scope.launch { action.run { load(mapOf("album_id" to album.text("id"))); showAlbums = false } } }, enabled = !action.busy) { Text(stringResource(R.string.meta_rev_album_item, album.text("title"), album.number("count").toInt())) } }; if (albums.size < albumTotal) item { TextButton({ scope.launch { action.run { loadAlbums(true) } } }) { Text(stringResource(R.string.meta_rev_more_albums)) } } } } }, confirmButton = { TextButton({ showAlbums = false }) { Text(stringResource(R.string.meta_rev_close)) } })
+    if (showSources && current != null) AlertDialog(onDismissRequest = { showSources = false }, title = { Text(stringResource(R.string.meta_rev_sources_dialog_title)) }, text = { Column(Modifier.verticalScroll(rememberScrollState())) { current.objects("suggestions").forEach { c -> TextButton({ choices = choices + (active to ReviewChoice(c.text("id"), if (stale(c)) emptySet() else c.getAsJsonObject("fields").entrySet().filter { (k, v) -> current.getAsJsonObject("current")?.get(k) != v && current.getAsJsonObject("overrides")?.has(k) != true }.map { it.key }.toSet())); cover = null; coverReady = false; showSources = false; rejectionNotice = null; action.message = null }) { Text(reviewCandidateLabel(c, current, names)) } } } }, confirmButton = { TextButton({ showSources = false }) { Text(stringResource(R.string.meta_rev_close)) } })
+    if (refresh && current != null) MetadataRefreshPrompt(vm, "album", current.text("album_id")) { refresh = false; action.message = AppLanguage.string(R.string.meta_rev_query_queued_notice) }
 }

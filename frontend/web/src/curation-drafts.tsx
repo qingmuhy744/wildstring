@@ -1,5 +1,6 @@
 import type { AgentDraft } from './agent-api';
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 interface BatchItem {
   track_id: string;
@@ -11,8 +12,8 @@ interface BeforeItem {
   title: string;
   effective: Record<string, unknown>;
 }
-const valueText = (value: unknown) =>
-  Array.isArray(value) ? value.join(' / ') || '（空）' : value == null ? '（空）' : String(value);
+const valueText = (value: unknown, empty = '') =>
+  Array.isArray(value) ? value.join(' / ') || empty : value == null ? empty : String(value);
 
 export function CurationDraftPreview({
   draft,
@@ -23,27 +24,31 @@ export function CurationDraftPreview({
   fields: Record<string, string>;
   onPreviewReady: (ready: boolean) => void;
 }) {
+  const { t } = useTranslation();
   const [failed, setFailed] = useState(false);
   if (draft.kind === 'cover') {
     return (
       <div className="cover-draft-preview" key={`${draft.id}:${draft.version}`}>
         <p>
-          歌曲：{String(draft.before?.title || '')} · 来源：{String(draft.before?.provider || '')}
+          {t('curationDrafts.trackInfo', {
+            title: String(draft.before?.title || ''),
+            provider: String(draft.before?.provider || ''),
+          })}
         </p>
         <div className="cover-draft-images">
           {draft.before?.has_cover === true && (
             <figure>
               <img
                 src={`/api/v1/tracks/${encodeURIComponent(String(draft.before.track_id))}/cover?size=320`}
-                alt="当前封面"
+                alt={t('curationDrafts.currentCoverAlt')}
               />
-              <figcaption>当前封面（实时）</figcaption>
+              <figcaption>{t('curationDrafts.currentCoverRealtime')}</figcaption>
             </figure>
           )}
           <figure>
             <img
               src={`/api/v1/agent/drafts/${encodeURIComponent(draft.id)}/cover-preview?v=${draft.version}`}
-              alt="草案封面快照"
+              alt={t('curationDrafts.draftCoverAlt')}
               onLoad={() => {
                 setFailed(false);
                 onPreviewReady(true);
@@ -53,13 +58,11 @@ export function CurationDraftPreview({
                 onPreviewReady(false);
               }}
             />
-            <figcaption>将采用的封面</figcaption>
+            <figcaption>{t('curationDrafts.targetCover')}</figcaption>
           </figure>
         </div>
-        {failed && <p role="alert">封面快照暂时无法显示，请核对图片后再批准。</p>}
-        <p className="muted">
-          只采用此草案保存的图片，不修改歌曲标签。图片或歌曲版本变化时会拒绝应用。
-        </p>
+        {failed && <p role="alert">{t('curationDrafts.coverLoadFailed')}</p>}
+        <p className="muted">{t('curationDrafts.coverNote')}</p>
       </div>
     );
   }
@@ -82,35 +85,41 @@ export function CurationDraftPreview({
           onPreviewReady={onPreviewReady}
         />
       )}
-      <p>{items.length} 首歌曲 · 整批应用，任一版本冲突时整批保留原值。</p>
+      <p>{t('curationDrafts.batchSummary', { count: items.length })}</p>
       {items.map((item) => (
         <details key={item.track_id} open={items.length <= 20}>
           <summary>
-            {before.get(item.track_id)?.title || item.track_id} · 信息版本 {item.metadata_version}
+            {t('curationDrafts.itemSummary', {
+              title: before.get(item.track_id)?.title || item.track_id,
+              version: item.metadata_version,
+            })}
           </summary>
           <table className="workspace-diff">
             <thead>
               <tr>
-                <th>字段</th>
-                <th>当前信息</th>
-                <th>建议值</th>
+                <th>{t('curationDrafts.field')}</th>
+                <th>{t('curationDrafts.currentInfo')}</th>
+                <th>{t('curationDrafts.suggestedValue')}</th>
               </tr>
             </thead>
             <tbody>
               {Object.entries(item.overrides).map(([field, value]) => (
                 <tr key={field}>
                   <th>{fields[field] || field}</th>
-                  <td>{valueText(before.get(item.track_id)?.effective[field])}</td>
-                  <td>{valueText(value)}</td>
+                  <td>
+                    {valueText(
+                      before.get(item.track_id)?.effective[field],
+                      t('curationDrafts.emptyValue'),
+                    )}
+                  </td>
+                  <td>{valueText(value, t('curationDrafts.emptyValue'))}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         </details>
       ))}
-      <p className="muted">
-        请核对专辑版本、曲序与署名。需要调整时可重新生成草案；确认仅保存到应用数据库。
-      </p>
+      <p className="muted">{t('curationDrafts.batchNote')}</p>
     </div>
   );
 }
