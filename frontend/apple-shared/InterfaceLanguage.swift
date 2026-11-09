@@ -51,16 +51,6 @@ enum InterfaceLanguage: String, CaseIterable {
         }
     }
 
-    private static var isRunningTests: Bool {
-        if NSClassFromString("XCTestCase") != nil { return true }
-        let info = ProcessInfo.processInfo
-        if info.environment["XCTestConfigurationFilePath"] != nil { return true }
-        let procName = info.processName.lowercased()
-        if procName.contains("test") { return true }
-        if info.arguments.contains(where: { $0.lowercased().contains("test") }) { return true }
-        return false
-    }
-
     /// Mirrors the account value locally; `nil` (signed out or an older server) means auto.
     static func store(_ preference: String?) {
         let value = InterfaceLanguage(preference: preference)
@@ -95,4 +85,14 @@ private func resolveBundleString(key: String, lang: String) -> String {
     }
     let fallback = Bundle.main.localizedString(forKey: key, value: key, table: nil)
     return fallback
+}
+
+private var isRunningTests: Bool {
+    if NSClassFromString("XCTestCase") != nil { return true }
+    let info = ProcessInfo.processInfo
+    if info.environment["XCTestConfigurationFilePath"] != nil { return true }
+    let procName = info.processName.lowercased()
+    if procName.contains("test") { return true }
+    if info.arguments.contains(where: { $0.lowercased().contains("test") }) { return true }
+    return false
 }
