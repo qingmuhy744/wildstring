@@ -43,12 +43,22 @@ enum InterfaceLanguage: String, CaseIterable {
         case .zh: return Locale(identifier: "zh-Hans")
         case .en: return Locale(identifier: "en")
         case .auto:
-            if NSClassFromString("XCTestCase") != nil {
+            if isRunningTests {
                 return Locale(identifier: "zh-Hans")
             }
             let system = Locale.preferredLanguages.first ?? "en"
             return Locale(identifier: system.lowercased().hasPrefix("zh") ? "zh-Hans" : "en")
         }
+    }
+
+    private static var isRunningTests: Bool {
+        if NSClassFromString("XCTestCase") != nil { return true }
+        let info = ProcessInfo.processInfo
+        if info.environment["XCTestConfigurationFilePath"] != nil { return true }
+        let procName = info.processName.lowercased()
+        if procName.contains("test") { return true }
+        if info.arguments.contains(where: { $0.lowercased().contains("test") }) { return true }
+        return false
     }
 
     /// Mirrors the account value locally; `nil` (signed out or an older server) means auto.

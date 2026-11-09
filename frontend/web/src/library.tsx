@@ -1663,8 +1663,11 @@ export function Library({ onLogout, user }: { onLogout: () => Promise<void>; use
                 <div ref={listStart} className="browse-boundary">
                   {browse.hasPrevious && (
                     <button disabled={browse.busy} onClick={loadPrevious}>
-                      kind === 'tracks' ? t('library.loadPrevTracks') : kind === 'albums' ?
-                      t('library.loadPrevAlbums') : t('library.loadPrevArtists')
+                      {kind === 'tracks'
+                        ? t('library.loadPrevTracks')
+                        : kind === 'albums'
+                          ? t('library.loadPrevAlbums')
+                          : t('library.loadPrevArtists')}
                     </button>
                   )}
                 </div>
