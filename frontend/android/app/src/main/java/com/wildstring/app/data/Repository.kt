@@ -80,6 +80,9 @@ class Repository @Inject constructor(@param:ApplicationContext private val conte
     private val discoveryCache = java.util.concurrent.ConcurrentHashMap<String, Pair<Long, PodcastDirectoryPage>>()
     val podcastFavoriteIds = kotlinx.coroutines.flow.MutableStateFlow<Set<String>>(emptySet())
 
+    /** Drops the in-memory directory cache; tests and scope switches start from a clean lookup. */
+    internal fun clearDiscoveryCache() = discoveryCache.clear()
+
     fun cachedPodcastDirectory(region: String = ""): PodcastDirectoryPage? {
         val key = region.trim()
         val entry = discoveryCache[key] ?: return null

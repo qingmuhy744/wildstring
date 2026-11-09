@@ -266,6 +266,7 @@ class RecommendationExperienceTest {
         Fixture(canAddPodcasts = false, profile = "listener").use { fixture ->
             fixture.directoryThrottled = true
             val vm = connect(fixture)
+            compose.runOnIdle { vm.repository.clearDiscoveryCache() }
             try {
                 compose.onNodeWithTag("nav-podcast").performClick()
                 compose.onNodeWithTag("podcast-open-explore").performClick()
