@@ -28,8 +28,8 @@ internal data class Atmosphere(val image: ImageBitmap, val tint: Color)
     val context = LocalContext.current
     val profile by vm.repository.session.profiles.collectAsStateWithLifecycle()
     val atmosphere by produceState<Atmosphere?>(null, track.id, track.mayHaveCover, track.podcast?.coverUrl, profile) {
-        value = null
-        if (!track.mayHaveCover || profile == null) return@produceState
+        // Keep the previous atmosphere until the next one is ready; resetting here fades the whole backdrop out and back on every track change.
+        if (!track.mayHaveCover || profile == null) { value = null; return@produceState }
         try {
             val result = vm.coverLoader(track.id).execute(ImageRequest.Builder(context).data(vm.repository.cover(track.id))
                 .memoryCacheKey("$profile:atmosphere:${vm.repository.cover(track.id)}").size(96).allowHardware(false).build())

@@ -55,6 +55,8 @@ class MusicViewModel @Inject constructor(
     val repository: Repository, val imageLoader: ImageLoader, val settings: AppSettings,
     val sharing: PlaybackSharing, val podcastProgress: PodcastProgress, val sleep: com.wildstring.app.playback.SleepTimer, val audioCache: AudioCache, val playbackHealth: com.wildstring.app.playback.PlaybackHealth, @ApplicationContext private val context: Context,
 ) : ViewModel() {
+    /** Player-only landscape the user asked for; most phones keep system auto-rotate off. Reset when the player collapses. */
+    val playerLandscape = MutableStateFlow(false)
     private val podcastImageLoader = ImageLoader.Builder(context).okHttpClient(repository.podcastImageClient).diskCache(null).build()
     fun coverLoader(id: String?) = if (id != null && podcastEpisodeId(id) != null) podcastImageLoader else imageLoader
     val agent = AgentPlatform(repository)

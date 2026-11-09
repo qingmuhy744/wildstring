@@ -9,6 +9,9 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.runtime.LaunchedEffect
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.compose.runtime.getValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dagger.hilt.android.AndroidEntryPoint
@@ -26,13 +29,22 @@ class MainActivity : ComponentActivity() {
             navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT))
         setContent {
             val preferences by model.settings.state.collectAsStateWithLifecycle()
-            LaunchedEffect(preferences.orientation) {
+            val playerLandscape by model.playerLandscape.collectAsStateWithLifecycle()
+            LaunchedEffect(preferences.orientation, playerLandscape) {
                 val isTablet = resources.configuration.smallestScreenWidthDp >= 600
-                requestedOrientation = when (preferences.orientation) {
+                requestedOrientation = if (playerLandscape) ActivityInfo.SCREEN_ORIENTATION_USER_LANDSCAPE else when (preferences.orientation) {
                     "portrait" -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
                     "sensor" -> ActivityInfo.SCREEN_ORIENTATION_SENSOR
                     else -> if (isTablet) ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED else ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
                 }
+            }
+            // Manual landscape is a docked listening mode: hide the system bars, and swipe from an edge to bring them back.
+            LaunchedEffect(playerLandscape) {
+                val controller = WindowCompat.getInsetsController(window, window.decorView)
+                if (playerLandscape) {
+                    controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                    controller.hide(WindowInsetsCompat.Type.systemBars())
+                } else controller.show(WindowInsetsCompat.Type.systemBars())
             }
             val music by model.state.collectAsStateWithLifecycle()
             // Signed in: the account language wins. Signed out: follow the system language.
