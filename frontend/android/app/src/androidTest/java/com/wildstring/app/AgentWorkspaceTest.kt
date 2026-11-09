@@ -191,38 +191,38 @@ class AgentWorkspaceTest {
             fixture.rejectHistoryDelete = true
             connect(vm, fixture)
             compose.onNodeWithTag("nav-assistant").performClick()
-            compose.waitUntil(15_000) { compose.onAllNodes(hasText("历史") and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
-            compose.onNodeWithText("历史", substring = false).performClick()
+            compose.waitUntil(15_000) { compose.onAllNodes(hasText(uiString(R.string.agent_ws_history)) and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithText(uiString(R.string.agent_ws_history), substring = false).performClick()
             compose.waitUntil(15_000) { compose.onAllNodesWithTag("history-open-history-b").fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithTag("history-open-history-b").performClick()
             compose.waitUntil(15_000) { compose.onAllNodesWithText("保留内容 b").fetchSemanticsNodes().isNotEmpty() }
-            compose.onNodeWithText("历史", substring = false).performClick()
+            compose.onNodeWithText(uiString(R.string.agent_ws_history), substring = false).performClick()
             compose.waitUntil(15_000) { compose.onAllNodesWithTag("history-actions-history-a").fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithTag("history-actions-history-a").performClick()
-            compose.onNodeWithText("改名", substring = false).performClick()
+            compose.onNodeWithText(uiString(R.string.agent_ws_rename), substring = false).performClick()
             compose.onNodeWithTag("conversation-title").performTextReplacement("   ")
-            compose.onNodeWithText("保存", substring = false).assertIsNotEnabled()
+            compose.onNodeWithText(uiString(R.string.agent_ws_save), substring = false).assertIsNotEnabled()
             compose.onNodeWithTag("conversation-title").performTextReplacement("  夜晚的摇滚歌单  ")
-            compose.onNodeWithText("保存", substring = false).performClick()
+            compose.onNodeWithText(uiString(R.string.agent_ws_save), substring = false).performClick()
             compose.waitUntil(15_000) { compose.onAllNodesWithTag("conversation-title").fetchSemanticsNodes().isEmpty() }
             assertEquals("夜晚的摇滚歌单", fixture.requests.single { it.first == "PATCH /api/v1/agent/conversations/history-a" }.second.text("title"))
             compose.onNodeWithText("夜晚的摇滚歌单", substring = false).assertExists()
             capture("history-actions-phone.png")
             compose.onNodeWithTag("history-actions-history-a").performClick()
-            compose.onNodeWithText("删除", substring = false).performClick()
-            compose.onNodeWithText("取消", substring = false).performClick()
+            compose.onNodeWithText(uiString(R.string.agent_ws_delete), substring = false).performClick()
+            compose.onNodeWithText(uiString(R.string.agent_ws_cancel), substring = false).performClick()
             assertFalse(fixture.requests.any { it.first == "DELETE /api/v1/agent/conversations/history-a" })
             compose.onNodeWithTag("history-actions-history-a").performClick()
-            compose.onNodeWithText("删除", substring = false).performClick()
-            compose.onNodeWithText("删除", substring = false).performClick()
+            compose.onNodeWithText(uiString(R.string.agent_ws_delete), substring = false).performClick()
+            compose.onNodeWithText(uiString(R.string.agent_ws_delete), substring = false).performClick()
             compose.waitUntil(15_000) { compose.onAllNodesWithText("这段对话正在生成回复", substring = true).fetchSemanticsNodes().isNotEmpty() }
-            compose.onNodeWithText("删除", substring = false).performClick()
+            compose.onNodeWithText(uiString(R.string.agent_ws_delete), substring = false).performClick()
             compose.waitUntil(15_000) { compose.onAllNodesWithTag("history-open-history-a").fetchSemanticsNodes().isEmpty() }
-            compose.onNode(hasText("关闭", substring = false) and hasAnyAncestor(hasTestTag("agent-history-dialog"))).performClick()
+            compose.onNode(hasText(uiString(R.string.agent_ws_close), substring = false) and hasAnyAncestor(hasTestTag("agent-history-dialog"))).performClick()
             compose.onNodeWithText("保留内容 b", substring = false).assertExists()
-            compose.onNodeWithContentDescription("更多").performClick()
-            compose.onNodeWithText("删除", substring = false).performClick()
-            compose.onNodeWithText("删除", substring = false).performClick()
+            compose.onNodeWithContentDescription(uiString(R.string.agent_ws_more)).performClick()
+            compose.onNodeWithText(uiString(R.string.agent_ws_delete), substring = false).performClick()
+            compose.onNodeWithText(uiString(R.string.agent_ws_delete), substring = false).performClick()
             compose.waitUntil(15_000) { compose.onAllNodesWithText("保留内容 b").fetchSemanticsNodes().isEmpty() }
             assertEquals(3, fixture.requests.count { it.first.startsWith("DELETE /api/v1/agent/conversations/") })
         } finally { compose.runOnIdle { vm.repository.session.invalidate() } } }
@@ -247,11 +247,11 @@ class AgentWorkspaceTest {
             compose.onNodeWithTag("agent-chat-input").assertDoesNotExist()
             compose.waitUntil(15_000) { compose.onAllNodesWithText("新草案待确认").fetchSemanticsNodes().isNotEmpty() }
             assertEquals("Opening the list is read-only", 0, fixture.writes.get())
-            compose.onNodeWithText("1 条未读").assertExists()
+            compose.onNodeWithText(uiString(R.string.agent_ws_unread_count, 1)).assertExists()
             capture("agent-notifications-phone.png")
             compose.onNodeWithTag("notice-read-notice-one").performClick()
             compose.waitUntil(15_000) { vm.agent.inbox.value.unread == 0 }
-            compose.onNodeWithText("0 条未读").assertExists()
+            compose.onNodeWithText(uiString(R.string.agent_ws_unread_count, 0)).assertExists()
             compose.onNodeWithText("新草案待确认").assertDoesNotExist()
             compose.onNodeWithTag("notice-filter-read").performClick()
             compose.onNodeWithText("新草案待确认").assertExists()
@@ -300,11 +300,11 @@ class AgentWorkspaceTest {
                 fixture.replacementDraft = JsonParser.parseString("""{"id":"draft-one","kind":"$kind","title":"资料候选","payload":{},"before":{},"evidence":[],"status":"pending","version":1}""").asJsonObject
                 connect(vm, fixture)
                 openNotifications()
-                compose.waitUntil(15_000) { compose.onAllNodesWithText("查看草案").fetchSemanticsNodes().isNotEmpty() }
-                compose.onNodeWithText("查看草案").performClick()
+                compose.waitUntil(15_000) { compose.onAllNodesWithText(uiString(R.string.agent_ws_view_draft)).fetchSemanticsNodes().isNotEmpty() }
+                compose.onNodeWithText(uiString(R.string.agent_ws_view_draft)).performClick()
                 compose.waitUntil(15_000) { compose.onAllNodesWithText(uiString(R.string.metadata_review_on_web)).fetchSemanticsNodes().isNotEmpty() }
                 compose.onNodeWithTag("draft-confirm").assertDoesNotExist()
-                compose.onNodeWithText("拒绝", substring = false).assertDoesNotExist()
+                compose.onNodeWithText(uiString(R.string.agent_ws_reject), substring = false).assertDoesNotExist()
                 assertEquals("pending", fixture.status)
                 assertFalse(fixture.requests.any { it.first.endsWith("/draft-one/accept") || it.first.endsWith("/draft-one/reject") || it.first.endsWith("/draft-one/cover-preview") })
                 if (kind == "lyrics") capture("candidate-web-only-phone.png")
@@ -339,7 +339,7 @@ class AgentWorkspaceTest {
             fixture.server.dispatcher = object : Dispatcher() { override fun dispatch(request: RecordedRequest) = fixture.json("""{"detail":"not_found"}""").setResponseCode(404) }
             runBlocking { vm.agent.refreshInbox(force = true) }
             assertEquals(false, vm.agent.inbox.value.supported)
-            assertTrue(vm.agent.inbox.value.error!!.contains("服务端"))
+            assertTrue(vm.agent.inbox.value.error!!.contains(uiString(R.string.agent_plat_err_status_404)))
             assertTrue(vm.agent.inbox.value.error!!.contains(fixture.trace))
             assertEquals(0, fixture.writes.get())
         } finally { compose.runOnIdle { vm.repository.session.invalidate() } } }

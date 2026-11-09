@@ -263,7 +263,7 @@ class NativePlaybackTest {
         // Android window focus. Send Back only once that actual window is active.
         waitForDialogWindow("artwork")
         compose.onNodeWithTag("artwork-preview").assertIsDisplayed()
-        compose.onNodeWithContentDescription("下载封面").assertIsDisplayed()
+        compose.onNodeWithContentDescription(uiString(R.string.art_prev_download)).assertIsDisplayed()
     }
 
     private fun exercisePlayback() {
@@ -423,7 +423,7 @@ class NativePlaybackTest {
                 waitForArtworkWindow()
                 if (key == "vinyl") capture("player-artwork-preview.png")
                 if (key == "cassette") InstrumentationRegistry.getInstrumentation().sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
-                else compose.onNodeWithContentDescription("关闭大封面").performClick()
+                else compose.onNodeWithContentDescription(uiString(R.string.art_prev_close)).performClick()
                 waitForActivityWindow()
                 compose.onNodeWithTag("artwork-preview").assertDoesNotExist()
                 compose.onNodeWithTag("playback-visual-$key").assertIsDisplayed()

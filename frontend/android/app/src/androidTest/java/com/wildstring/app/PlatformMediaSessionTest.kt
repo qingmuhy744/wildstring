@@ -124,7 +124,7 @@ class PlatformMediaSessionTest {
             system.transportControls.pause(); progress(system, paused = true, atLeast = 5900)
             compose.activityRule.scenario.moveToState(Lifecycle.State.RESUMED)
             onMain { vm.play(listOf(track.copy(id = "lossy", title = "有损直放合成测试", format = "mp3"))) }
-            await("AAC selection must preserve lossy original playback") { vm.state.value.playbackQuality == "原音 · MP3" && onMain { vm.controller!!.isPlaying } }
+            await("AAC selection must preserve lossy original playback") { vm.state.value.playbackQuality == uiString(R.string.abs_player_quality_original) + " · MP3" && onMain { vm.controller!!.isPlaying } }
             progress(system, paused = false)
             assertTrue(requests.any { it == "/api/v1/tracks/lossy/stream" })
         } } finally {
