@@ -102,7 +102,42 @@ jobs:
           profile: pixel_2
           ram-size: 2048M
           disable-animations: true
-          script: make android-connected-test ANDROID_TEST_ARGS=-Pandroid.testInstrumentationRunnerArguments.realBackend=http://10.0.2.2:19882/
+          # The instrumented suite asserts Chinese copy, so pin the emulator to
+          # zh-CN before running it; otherwise resource lookups follow the
+          # runner's default locale and every copy assertion misses.
+          script: &android-test-script |
+            adb root
+            adb shell setprop persist.sys.locale zh-CN
+            adb reboot
+            adb wait-for-device
+            for _ in $(seq 1 120); do
+              test "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" && break
+              sleep 2
+            done
+            make android-connected-test ANDROID_TEST_ARGS=-Pandroid.testInstrumentationRunnerArguments.realBackend=http://10.0.2.2:19882/
+      - name: Archive the first emulator attempt
+        if: ${{ steps.emulator_regression.outcome == 'failure' }}
+        run: |
+          mkdir -p artifacts/android-first-attempt
+          cp -R frontend/android/app/build/outputs/androidTest-results/connected/debug/. artifacts/android-first-attempt/ 2>/dev/null || true
+      - name: Restart the disposable synthetic API for the retry
+        if: ${{ steps.emulator_regression.outcome == 'failure' }}
+        run: |
+          # The suite mutates the synthetic library (reads, playlists, favorites),
+          # so the retry must start from a fresh backend to stay comparable.
+          if test -f "$RUNNER_TEMP/wildstring-synthetic-api.pid"; then
+            kill "$(cat "$RUNNER_TEMP/wildstring-synthetic-api.pid")" || true
+            rm -f "$RUNNER_TEMP/wildstring-synthetic-api.pid"
+            sleep 2
+          fi
+          WILDSTRING_WEB_TEST_PORT=19882 WILDSTRING_TEST_LARGE_LIBRARY=1 WILDSTRING_TEST_API_ONLY=1 uv run --frozen --project backend python scripts/serve_web_tests.py > artifacts/android-synthetic-api-retry.log 2>&1 &
+          echo $! > "$RUNNER_TEMP/wildstring-synthetic-api.pid"
+          for _ in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:19882/health/ready > /dev/null; then exit 0; fi
+            sleep 1
+          done
+          cat artifacts/android-synthetic-api-retry.log
+          exit 1
       - name: Native login, streaming and lyrics test (retry after flake)
         if: ${{ steps.emulator_regression.outcome == 'failure' }}
         timeout-minutes: 20
@@ -114,7 +149,7 @@ jobs:
           profile: pixel_2
           ram-size: 2048M
           disable-animations: true
-          script: make android-connected-test ANDROID_TEST_ARGS=-Pandroid.testInstrumentationRunnerArguments.realBackend=http://10.0.2.2:19882/
+          script: *android-test-script
       - name: Stop synthetic API
         if: ${{ always() && env.RUN_EMULATOR == 'true' }}
         run: |
@@ -135,6 +170,8 @@ jobs:
           name: android-test-reports
           path: |
             artifacts/android-synthetic-api.log
+            artifacts/android-synthetic-api-retry.log
+            artifacts/android-first-attempt/
             frontend/android/build/reports/
             frontend/android/app/build/reports/
             frontend/android/app/build/outputs/androidTest-results/
