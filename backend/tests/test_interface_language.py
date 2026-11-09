@@ -111,3 +111,42 @@ def test_schema_43_adds_language_to_existing_users(settings):
 def test_assistant_answers_in_the_question_language():
     assert "提问所用的语言回答" in SYSTEM_PROMPT
     assert "不要按界面语言切换" in SYSTEM_PROMPT
+
+
+def test_english_interface_translates_events_recommendations_and_podcast_codes(settings):
+    from wildstring.agent_notifications import translate_event_en
+    from wildstring.recommendation_external import localize_external_item
+    from wildstring.recommendations import localize_recommendation_items
+
+    title, summary = translate_event_en(
+        "导入任务结束",
+        "任务已完成，请到曲库管理查看逐项结果。",
+    )
+    assert title == "Import task completed"
+    assert summary == "Task completed. View item-by-item results in Library Management."
+
+    items = localize_recommendation_items(
+        [{"reason": "来自你的收藏", "signals": [{"source": "personal", "reason": "来自你的收藏"}]}],
+        True,
+    )
+    assert items[0]["reason"] == "From your favorites"
+    assert items[0]["signals"][0]["reason"] == "From your favorites"
+
+    ext = localize_external_item(
+        {
+            "reason": "Last.fm 公共热门榜；尚未与本库精确匹配",
+            "evidence": [{"source": "lastfm_charts", "summary": "Last.fm 公共热门榜"}],
+        },
+        True,
+    )
+    assert ext["reason"] == "Last.fm public charts; not yet matched in local library"
+    assert ext["evidence"][0]["summary"] == "Last.fm public charts"
+
+    settings.admin_password = SecretStr(PASSWORD)
+    with TestClient(create_app(settings)) as client:
+        login(client)
+        assert client.get("/api/v1/podcasts/missing").json()["detail"] == "podcast_not_found"
+        assert (
+            client.get("/api/v1/podcasts/publishers/missing").json()["detail"]
+            == "podcast_publisher_not_found"
+        )

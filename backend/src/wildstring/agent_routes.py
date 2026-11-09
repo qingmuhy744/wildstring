@@ -270,10 +270,18 @@ def agent_router(service):
         target = service.target(actor, identity)
         if not target["verified"]:
             raise HTTPException(409, "telegram_target_unverified")
+        with service.database.connect() as connection:
+            lang_row = connection.execute(
+                "SELECT language FROM users WHERE id=?", (actor.user_id,)
+            ).fetchone()
+            is_en = bool(lang_row and lang_row[0] == "en")
+        test_text = (
+            "WildString notification test: target verified. This message does not indicate any completed task."
+            if is_en
+            else "野弦通知测试：目标已验证。此消息不代表任何任务已完成。"
+        )
         try:
-            message_id = service.send_telegram(
-                target, "野弦通知测试：目标已验证。此消息不代表任何任务已完成。"
-            )
+            message_id = service.send_telegram(target, test_text)
         except HTTPException:
             raise
         except Exception as failure:

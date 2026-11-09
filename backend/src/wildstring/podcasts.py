@@ -1251,7 +1251,7 @@ class PodcastManager:
         with self.database.connect(write=True) as conn:
             row = conn.execute("SELECT * FROM podcasts WHERE id = ?", (podcast_id,)).fetchone()
             if not row:
-                raise HTTPException(status_code=404, detail="播客未找到")
+                raise HTTPException(status_code=404, detail="podcast_not_found")
             new_title = title if title is not None else row["title"]
             new_auto = (1 if auto_update else 0) if auto_update is not None else row["auto_update"]
             new_interval = (
@@ -1314,7 +1314,7 @@ class PodcastManager:
                 "SELECT feed_url FROM podcasts WHERE id = ?", (podcast_id,)
             ).fetchone()
             if not row:
-                raise HTTPException(status_code=404, detail="播客未找到")
+                raise HTTPException(status_code=404, detail="podcast_not_found")
             feed_url = row["feed_url"]
 
         proxy_mode, proxy_url = self.get_network_policy()
@@ -1684,7 +1684,7 @@ class PodcastManager:
                 "SELECT id, title FROM podcasts WHERE id = ?", (podcast_id,)
             ).fetchone()
             if not p:
-                raise HTTPException(status_code=404, detail="播客未找到")
+                raise HTTPException(status_code=404, detail="podcast_not_found")
             podcast_title = p["title"]
             ep_rows = conn.execute(
                 """
@@ -1821,7 +1821,7 @@ class PodcastManager:
                 (user_id,),
             ).fetchone()
         if row is None:
-            raise HTTPException(status_code=404, detail="播客播放设置不存在")
+            raise HTTPException(status_code=404, detail="podcast_playback_settings_not_found")
         return {
             "user_id": row["user_id"],
             "auto_cache_current": bool(row["auto_cache_current"]),
@@ -2109,7 +2109,7 @@ class PodcastManager:
                 (user_id, podcast_id),
             ).fetchone()
             if not p:
-                raise HTTPException(status_code=404, detail="播客未找到")
+                raise HTTPException(status_code=404, detail="podcast_not_found")
 
             ep_rows = conn.execute(
                 """
@@ -2719,7 +2719,7 @@ def podcast_router(
     ):
         ok = manager.delete_podcast(podcast_id)
         if not ok:
-            raise HTTPException(status_code=404, detail="播客未找到")
+            raise HTTPException(status_code=404, detail="podcast_not_found")
         return {"status": "deleted", "id": podcast_id}
 
     @router.get("/episodes/{episode_id}", response_model=PodcastEpisodeResponse)
@@ -2729,7 +2729,7 @@ def podcast_router(
     ):
         ep = manager.get_episode(episode_id, user["id"])
         if not ep:
-            raise HTTPException(status_code=404, detail="单集未找到")
+            raise HTTPException(status_code=404, detail="episode_not_found")
         return ep
 
     @router.get("/episodes/{episode_id}/stream")
@@ -2740,7 +2740,7 @@ def podcast_router(
     ):
         ep = manager.get_episode(episode_id, user["id"], include_local_path=True)
         if not ep or not ep.get("audio_url"):
-            raise HTTPException(status_code=404, detail="音频不可用")
+            raise HTTPException(status_code=404, detail="episode_unavailable")
         download = request.query_params.get("download") == "1"
         if not download and request.query_params.get("cache") == "1":
             manager.queue_playback_cache(

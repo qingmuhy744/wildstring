@@ -99,7 +99,7 @@ class PodcastPublishers:
                 (publisher_id,),
             ).fetchone()
             if row is None:
-                raise HTTPException(404, "出品方未找到")
+                raise HTTPException(404, "podcast_publisher_not_found")
             return dict(row)
 
     def assign(self, podcast_id: str, value: PublisherAssignment) -> None:
@@ -109,9 +109,9 @@ class PodcastPublishers:
                 "SELECT publisher_version FROM podcasts WHERE id=?", (podcast_id,)
             ).fetchone()
             if row is None:
-                raise HTTPException(404, "播客未找到")
+                raise HTTPException(404, "podcast_not_found")
             if row["publisher_version"] != value.version:
-                raise HTTPException(409, "出品方归属已被修改，请重新打开后再试。")
+                raise HTTPException(409, "podcast_publisher_conflict")
             publisher_id = value.publisher_id
             if publisher_id is not None:
                 if (
@@ -120,7 +120,7 @@ class PodcastPublishers:
                     ).fetchone()
                     is None
                 ):
-                    raise HTTPException(404, "出品方未找到")
+                    raise HTTPException(404, "podcast_publisher_not_found")
             elif value.name is not None:
                 name_key = unicodedata.normalize("NFKC", value.name).casefold()
                 existing = connection.execute(

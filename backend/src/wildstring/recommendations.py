@@ -16,7 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from wildstring.library.metadata import normalize
 from wildstring.library.repository import now
 from wildstring.recommendation_external import ExternalRecommendations
-from wildstring.recommendation_rankings import statistics
+from wildstring.recommendation_rankings import is_english_user, statistics
 from wildstring.recommendation_sources import (
     EXTERNAL_SOURCES,
     LOCAL_SOURCES,
@@ -24,6 +24,45 @@ from wildstring.recommendation_sources import (
     SourceUnavailable,
     local_matches,
 )
+
+REASON_EN = {
+    "来自你的收藏": "From your favorites",
+    "根据你之前的收听反馈": "Based on your listening feedback",
+    "来自你听过或收藏的艺人": "From artists you listen to or love",
+    "重听曲库里的熟悉旋律": "Revisit a familiar tune in your library",
+    "探索曲库中尚未听过的歌曲": "Discover an unplayed track in your library",
+    "探索本曲库中你尚未听过的歌曲": "Discover an unplayed track in this library",
+    "来自曲库用户近30天的实际收听热度": "Popular across the library in the last 30 days",
+    "你已超过30天没有重听这首歌": "You haven't revisited this track in over 30 days",
+    "Last.fm 公共来源中找到与本库标题、艺人一致的歌曲": "Matched in your library via public Last.fm charts/tags",
+    "根据你听过或收藏歌曲的 Last.fm 相似关系，在本地曲库找到": "Matched in your library via Last.fm similar tracks",
+    "从本地曲库中选取": "Selected from your local library",
+}
+DISCOVER_TITLE_EN = {
+    "为你选的歌": "Songs Picked for You",
+    "曲库中没有可推荐的歌曲": "No Recommendable Tracks in Library",
+    "曲库里的发现": "Library Discovery",
+}
+
+
+def localize_recommendation_items(items, english: bool):
+    if not english:
+        return items
+    localized = []
+    for item in items:
+        signals = [
+            signal | {"reason": REASON_EN.get(signal.get("reason"), signal.get("reason"))}
+            for signal in item.get("signals", [])
+        ]
+        localized.append(
+            item
+            | {
+                "reason": REASON_EN.get(item.get("reason"), item.get("reason")),
+                "signals": signals,
+            }
+        )
+    return localized
+
 
 # One server-side day boundary across devices; independent of the host's timezone.
 DAY_ZONE = timezone(timedelta(hours=8))
@@ -687,8 +726,11 @@ class Recommendations(ExternalRecommendations):
         details["connection_id"] = options["connection_id"]
         details = self.connection_warnings(details, options)
         if not candidates:
+            english = is_english_user(repository)
             return {
-                "title": "曲库中没有可推荐的歌曲",
+                "title": DISCOVER_TITLE_EN["曲库中没有可推荐的歌曲"]
+                if english
+                else "曲库中没有可推荐的歌曲",
                 "items": [],
                 "mode": "local",
                 "warning": "no_local_matches"
@@ -710,9 +752,16 @@ class Recommendations(ExternalRecommendations):
                 details["degraded"] = True
                 details["warnings"].append({"source": "ai", "code": str(failure.detail)})
                 result["warning"] = "ai_unavailable_local_fallback"
+        english = is_english_user(repository)
+        if english:
+            result = result | {
+                "title": DISCOVER_TITLE_EN.get(result["title"], result["title"]),
+                "items": localize_recommendation_items(result["items"], True),
+            }
         return result | details
 
     def materialize(self, repository, row):
+        english = is_english_user(repository)
         dismissed, _, _ = self.signals(repository)
         items, recordings = [], set()
         for item in json.loads(row["items"]):
@@ -732,6 +781,7 @@ class Recommendations(ExternalRecommendations):
                         "signals": item.get("signals", []),
                     }
                 )
+        items = localize_recommendation_items(items, english)
         details = json.loads(row["details"]) if row.get("details") else {}
         return {
             "id": row["id"],

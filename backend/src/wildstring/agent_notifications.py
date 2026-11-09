@@ -1,6 +1,7 @@
 """Transactional inbox and a separate, recoverable external notification outbox."""
 
 import json
+import re
 import secrets
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
@@ -13,6 +14,57 @@ from wildstring.agent_models import NotificationPreferences
 from wildstring.library.repository import now
 
 SEVERITY = {"info": 0, "warning": 1, "error": 2}
+EVENT_TITLES_EN = {
+    "整理方式已更新": "Curation policy updated",
+    "曲库巡检完成": "Library inspection completed",
+    "曲库巡检需要处理": "Library inspection needs attention",
+    "草案待确认": "Draft pending review",
+    "草案已应用": "Draft applied",
+    "歌词补全与洗版扫描结束": "Lyric scan completed",
+    "导入任务结束": "Import task completed",
+    "扫描任务结束": "Scan task completed",
+    "元数据查询结束": "Metadata lookup completed",
+}
+EVENT_SUMMARIES_EN = {
+    "自动应用": "Apply automatically",
+    "审核后应用": "Review before applying",
+    "任务已完成，请到曲库管理查看逐项结果。": "Task completed. View item-by-item results in Library Management.",
+    "任务已结束，存在需要处理的项目，请到曲库管理查看结果。": "Task finished with items needing attention. View results in Library Management.",
+}
+EVENT_ACTION_LABELS_EN = {
+    "查看扫描结果": "View scan results",
+    "查看候选": "View candidates",
+}
+
+
+def translate_event_en(title: str, summary: str) -> tuple[str, str]:
+    title_en = EVENT_TITLES_EN.get(title, title)
+    if summary in EVENT_SUMMARIES_EN:
+        return title_en, EVENT_SUMMARIES_EN[summary]
+    if m := re.match(r"^已检查 (\d+) 首，发现 (\d+) 项，失败 (\d+) 首。(?: 错误：(.+))?$", summary):
+        err = f" Error: {m.group(4)}" if m.group(4) else ""
+        return (
+            title_en,
+            f"Checked {m.group(1)} tracks, found {m.group(2)} issues, {m.group(3)} failed.{err}",
+        )
+    if m := re.match(
+        r"^可升级 (\d+) 首，待核对 (\d+) 首，未匹配 (\d+) 首，失败 (\d+) 首。请到歌词补全查看并确认。$",
+        summary,
+    ):
+        return (
+            title_en,
+            f"{m.group(1)} ready to upgrade, {m.group(2)} to review, {m.group(3)} unmatched, {m.group(4)} failed. Review and confirm in Lyric Completion.",
+        )
+    if m := re.match(
+        r"^查询结束：建议已生成 (\d+) 首，未匹配 (\d+) 首，失败 (\d+) 首，已变化 (\d+) 首。建议需要确认后应用。(?:其中 (\d+) 首有来源警告。)?$",
+        summary,
+    ):
+        warn = f" {m.group(5)} tracks have source warnings." if m.group(5) else ""
+        return (
+            title_en,
+            f"Lookup finished: {m.group(1)} suggestions ready, {m.group(2)} unmatched, {m.group(3)} failed, {m.group(4)} stale. Review before applying.{warn}",
+        )
+    return title_en, summary
 
 
 class Notifications:
@@ -166,6 +218,10 @@ class Notifications:
                 "SELECT count(*)" + base + " AND n.read_at IS NULL",
                 (actor.user_id,),
             ).fetchone()[0]
+            lang_row = connection.execute(
+                "SELECT language FROM users WHERE id=?", (actor.user_id,)
+            ).fetchone()
+            is_en = bool(lang_row and lang_row[0] == "en")
         items = []
         for row in rows:
             item = {
@@ -175,6 +231,13 @@ class Notifications:
             }
             item["counts"] = json.loads(row["counts"])
             item["actions"] = json.loads(row["actions"] or "[]")
+            if is_en:
+                item["title"], item["summary"] = translate_event_en(item["title"], item["summary"])
+                for action in item["actions"]:
+                    if isinstance(action, dict) and isinstance(action.get("label"), str):
+                        action["label"] = EVENT_ACTION_LABELS_EN.get(
+                            action["label"], action["label"]
+                        )
             item["detail_route"] = (
                 f"drafts/{row['draft_id']}"
                 if row["draft_id"]
@@ -305,10 +368,18 @@ class Notifications:
         if target["challenge_expires_at"] and target["challenge_expires_at"] > future(540):
             raise HTTPException(429, "telegram_verification_rate_limited")
         code = f"{secrets.randbelow(1000000):06d}"
+        with self.database.connect() as connection:
+            lang_row = connection.execute(
+                "SELECT language FROM users WHERE id=?", (actor.user_id,)
+            ).fetchone()
+            lang = lang_row[0] if lang_row and lang_row[0] else "zh-CN"
+        verify_text = (
+            f"WildString target verification: {code}\nEnter this code in settings within 10 minutes. Do not forward it."
+            if lang == "en"
+            else f"野弦目标验证：{code}\n10 分钟内在站内设置填写，勿转发验证码。"
+        )
         try:
-            message_id = self.send_telegram(
-                target, f"野弦目标验证：{code}\n10 分钟内在站内设置填写，勿转发验证码。"
-            )
+            message_id = self.send_telegram(target, verify_text)
         except Exception as failure:
             raise HTTPException(
                 502, getattr(failure, "code", "telegram_verification_send_failed")
@@ -433,7 +504,7 @@ class Notifications:
                 return False
             item = dict(row)
             target = connection.execute(
-                "SELECT t.*,u.enabled AS account_enabled,u.profile AS account_profile FROM agent_telegram_targets t JOIN users u ON u.id=t.user_id WHERE t.id=?",
+                "SELECT t.*,u.enabled AS account_enabled,u.profile AS account_profile,u.language AS account_language FROM agent_telegram_targets t JOIN users u ON u.id=t.user_id WHERE t.id=?",
                 (row["target_id"],),
             ).fetchone()
             prefrow = connection.execute(
@@ -488,20 +559,36 @@ class Notifications:
                 "UPDATE agent_deliveries SET status='sending',attempt=attempt+1,lease_until=? WHERE id=?",
                 (future(60), item["id"]),
             )
-            text = f"野弦 · {event['title']}\n{event['summary']}\n诊断编号：{event['trace_id']}"
-            if event["task_id"]:
-                text += f"\n任务：{event['task_id']}"
-            if event["draft_id"]:
-                hint = (
-                    "请在站内查看并确认" if event["kind"] == "draft.pending" else "请在站内查看结果"
-                )
-                text += f"\n草案：{event['draft_id']}（{hint}）"
+            is_en = target["account_language"] == "en"
+            if is_en:
+                ev_title, ev_summary = translate_event_en(event["title"], event["summary"])
+                text = f"WildString · {ev_title}\n{ev_summary}\nDiagnostic ID: {event['trace_id']}"
+                if event["task_id"]:
+                    text += f"\nTask: {event['task_id']}"
+                if event["draft_id"]:
+                    hint = (
+                        "Please review and confirm in the app"
+                        if event["kind"] == "draft.pending"
+                        else "Please view the result in the app"
+                    )
+                    text += f"\nDraft: {event['draft_id']} ({hint})"
+            else:
+                text = f"野弦 · {event['title']}\n{event['summary']}\n诊断编号：{event['trace_id']}"
+                if event["task_id"]:
+                    text += f"\n任务：{event['task_id']}"
+                if event["draft_id"]:
+                    hint = (
+                        "请在站内查看并确认"
+                        if event["kind"] == "draft.pending"
+                        else "请在站内查看结果"
+                    )
+                    text += f"\n草案：{event['draft_id']}（{hint}）"
             public_url = connection.execute(
                 "SELECT public_url FROM provider_settings WHERE id=1"
             ).fetchone()[0]
             detail_url = self.public_detail_url(public_url, event["draft_id"], event["task_id"])
             if detail_url:
-                text += "\n详情：" + detail_url
+                text += ("\nDetails: " if is_en else "\n详情：") + detail_url
         status, error, message_id, retry = "sent", None, None, None
         try:
             from wildstring.diagnostics import trace_context

@@ -10,11 +10,35 @@ from fastapi import HTTPException
 from filelock import FileLock, Timeout
 
 from wildstring.library.repository import now
+from wildstring.recommendation_rankings import is_english_user
 from wildstring.recommendation_sources import LastfmSources, SourceUnavailable, local_matches
+
+SOURCE_LABELS_EN = {
+    "Last.fm 歌曲相似关系": "Last.fm similar tracks",
+    "Last.fm 公共热门榜": "Last.fm public charts",
+    "Last.fm 标签热门歌曲": "Last.fm top tracks by tag",
+    "Last.fm 艺人关联与热门歌曲": "Last.fm related artists & top tracks",
+}
+
+
+def localize_external_item(item, english: bool):
+    if not english:
+        return item
+    evidence = [
+        entry | {"summary": SOURCE_LABELS_EN.get(entry.get("summary"), entry.get("summary"))}
+        for entry in item.get("evidence", [])
+    ]
+    reason = item.get("reason")
+    if isinstance(reason, str):
+        for zh, en in SOURCE_LABELS_EN.items():
+            reason = reason.replace(zh, en)
+        reason = reason.replace("；尚未与本库精确匹配", "; not yet matched in local library")
+    return item | {"evidence": evidence, "reason": reason}
 
 
 class ExternalRecommendations:
     def external_materialize(self, repository, row, *, cached=True):
+        english = is_english_user(repository)
         details = json.loads(row["details"])
         items = json.loads(row["items"])
         with repository.database.connect() as connection:
@@ -37,11 +61,14 @@ class ExternalRecommendations:
             if feedback.get(item["external_id"]) == "dismiss":
                 continue
             result.append(
-                item
-                | {
-                    "local_track": matches.get(item["external_id"]),
-                    "wanted": feedback.get(item["external_id"]) == "want",
-                }
+                localize_external_item(
+                    item
+                    | {
+                        "local_track": matches.get(item["external_id"]),
+                        "wanted": feedback.get(item["external_id"]) == "want",
+                    },
+                    english,
+                )
             )
         return {
             "id": row["id"],
