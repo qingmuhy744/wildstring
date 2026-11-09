@@ -2083,4 +2083,49 @@
     <string name="pod_dl_err_upstream_http">Origin HTTP request failed (%1$d)</string>
     <string name="pod_dl_err_network_reason">Network connection failed (%1$s)</string>
     <string name="pod_dl_err_exception_reason">Download error: %1$s</string>
+    <string name="player_landscape_enter">Landscape player</string>
+    <string name="player_landscape_exit">Exit landscape</string>
+    <string-array name="freedom_verses">
+        <item>Stone walls do not a prison make,\nNor iron bars a cage.\n— Richard Lovelace</item>
+        <item>I am the master of my fate,\nI am the captain of my soul.\n— W. E. Henley</item>
+        <item>Hope is the thing with feathers\nThat perches in the soul.\n— Emily Dickinson</item>
+        <item>I know why the caged bird sings.\n— Paul Laurence Dunbar</item>
+        <item>Give me liberty, or give me death!\n— Patrick Henry</item>
+        <item>Man is born free, and everywhere he is in chains.\n— Jean-Jacques Rousseau</item>
+        <item>The only freedom which deserves the name is that of pursuing our own good in our own way.\n— John Stuart Mill</item>
+        <item>Give me the liberty to know, to utter, and to argue freely according to conscience, above all liberties.\n— John Milton</item>
+        <item>Afoot and light-hearted I take to the open road,\nHealthy, free, the world before me.\n— Walt Whitman</item>
+        <item>I am large, I contain multitudes.\n— Walt Whitman</item>
+        <item>Resist much, obey little.\n— Walt Whitman</item>
+        <item>I went to the woods because I wished to live deliberately.\n— Henry David Thoreau</item>
+        <item>If a man does not keep pace with his companions, perhaps it is because he hears a different drummer.\n— Henry David Thoreau</item>
+        <item>Whoso would be a man must be a nonconformist.\n— Ralph Waldo Emerson</item>
+        <item>Nothing can bring you peace but yourself.\n— Ralph Waldo Emerson</item>
+        <item>To be great is to be misunderstood.\n— Ralph Waldo Emerson</item>
+        <item>If Winter comes, can Spring be far behind?\n— Percy Bysshe Shelley</item>
+        <item>Rise like Lions after slumber\nIn unvanquishable number!\n— Percy Bysshe Shelley</item>
+        <item>I must Create a System, or be enslav\'d by another Man\'s.\n— William Blake</item>
+        <item>Hereditary bondsmen! know ye not\nWho would be free themselves must strike the blow?\n— Lord Byron</item>
+        <item>Bliss was it in that dawn to be alive,\nBut to be young was very heaven!\n— William Wordsworth</item>
+        <item>I could be bounded in a nutshell, and count myself a king of infinite space.\n— William Shakespeare</item>
+        <item>Liberty! Freedom! Tyranny is dead!\n— William Shakespeare</item>
+        <item>Into that heaven of freedom, my Father,\nlet my country awake.\n— Rabindranath Tagore</item>
+        <item>Where the mind is without fear and the head is held high.\n— Rabindranath Tagore</item>
+        <item>He only earns his freedom and existence\nWho daily conquers them anew.\n— Goethe, trans. Bayard Taylor</item>
+        <item>Have courage to use your own understanding!\n— Immanuel Kant</item>
+        <item>Only the educated are free.\n— Epictetus</item>
+        <item>We are all slaves of the law in order that we may be free.\n— Cicero</item>
+        <item>The secret of happiness is freedom, and the secret of freedom is courage.\n— Thucydides</item>
+        <item>The world is my country, all mankind are my brethren, and to do good is my religion.\n— Thomas Paine</item>
+        <item>If there is no struggle, there is no progress.\n— Frederick Douglass</item>
+        <item>I do not wish them to have power over men; but over themselves.\n— Mary Wollstonecraft</item>
+        <item>We hold these truths to be self-evident, that all men are created equal.\n— Declaration of Independence</item>
+        <item>This nation, under God, shall have a new birth of freedom.\n— Abraham Lincoln</item>
+        <item>The caged bird longs for its old forest,\nthe pond fish pines for its native deep.\n— Tao Yuanming</item>
+        <item>The wren nests in the deep wood\nand needs no more than a single branch.\n— Zhuangzi</item>
+        <item>Why not whistle and stroll on?\nA lifetime of mist and rain, I take it as it comes.\n— Su Shi</item>
+        <item>Better to die than to have a mind that is not free.\n— Chen Yinque</item>
+    </string-array>
+    <string name="player_landscape_prompt">The phone is lying sideways. Switch to landscape player?</string>
+    <string name="player_landscape_prompt_action">Switch</string>
 </resources>

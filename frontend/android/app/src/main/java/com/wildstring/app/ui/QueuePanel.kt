@@ -60,6 +60,7 @@ internal fun QueuePanel(
     modifier: Modifier,
     headerModifier: Modifier = Modifier,
     onClose: (() -> Unit)? = null,
+    showClear: Boolean = true,
 ) {
     if (state.current?.isPodcast == true) {
         PodcastQueuePanel(vm, state, modifier, headerModifier, onClose)
@@ -70,7 +71,7 @@ internal fun QueuePanel(
         onPlay = { feedback(TactileKind.Tap); vm.playQueue(it.index) },
         onRemove = { feedback(TactileKind.Tap); vm.removeQueue(it.index) },
         onMove = vm::moveQueue, onHaptic = feedback, playing = state.playing, buffering = state.buffering,
-        onClear = if (state.queue.isNotEmpty()) ({ feedback(TactileKind.Tap); vm.clearQueue() }) else null,
+        onClear = if (showClear && state.queue.isNotEmpty()) ({ feedback(TactileKind.Tap); vm.clearQueue() }) else null,
         headerModifier = headerModifier,
         onClose = onClose)
 }

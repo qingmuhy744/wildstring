@@ -18,6 +18,9 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.border
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.horizontalScroll
@@ -46,6 +49,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -61,9 +66,11 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.input.pointer.util.addPointerInputChange
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringArrayResource
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.selected
@@ -73,6 +80,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -85,6 +93,8 @@ import com.wildstring.app.BuildConfig
 import com.wildstring.app.R
 import com.wildstring.app.data.*
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 
@@ -424,6 +434,7 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
     var localError by remember { mutableStateOf<String?>(null) }
     fun collapsePlayer() {
         vm.cancelAlbumNavigation()
+        vm.playerLandscape.value = false
         expanded = false
         queue = false
         if (state.current?.isPodcast == true) {
@@ -565,7 +576,7 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
         var wasWide by remember { mutableStateOf(wide) }
         LaunchedEffect(wide) { if (wasWide && !wide && expanded && !queue) lyrics = true; wasWide = wide }
         BackHandler(enabled = !settings && (expanded || queue || state.canGoBack || state.tab != "search")) {
-            when { queue && (!wide || state.current?.isPodcast == true) -> queue = false; lyrics && !wide && state.current?.isPodcast != true -> lyrics = false; expanded -> collapsePlayer(); state.tab == "podcast" && state.podcastId != null -> vm.back(); state.canGoBack -> vm.back(); else -> vm.navigate("search") }
+            when { queue && (!wide || state.current?.isPodcast == true) -> queue = false; lyrics && !wide && state.current?.isPodcast != true -> lyrics = false; expanded && vm.playerLandscape.value -> vm.playerLandscape.value = false; expanded -> collapsePlayer(); state.tab == "podcast" && state.podcastId != null -> vm.back(); state.canGoBack -> vm.back(); else -> vm.navigate("search") }
         }
         val baseDestinationContent by rememberUpdatedState<@Composable (String) -> Unit> { target ->
             Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))) {
@@ -899,6 +910,19 @@ private fun LibraryApp(vm: MusicViewModel, state: MusicState) {
                 Text(track.artist, style = MaterialTheme.typography.bodySmall, color = Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
+        if (expanded && track.id == state.current?.id && !track.isPodcast) {
+            val landscapeNow by vm.playerLandscape.collectAsStateWithLifecycle()
+            val preferences by vm.settings.state.collectAsStateWithLifecycle()
+            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).testTag("sheet-playback-style"), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                listOf("vinyl" to R.string.style_vinyl, "cassette" to R.string.style_cassette, "cover" to R.string.style_cover).forEach { (key, label) ->
+                    FilterChip(preferences.playbackStyle == key, tactile { vm.settings.playbackStyle(key) }, label = { Text(stringResource(label)) })
+                }
+            }
+            SongAction(stringResource(if (landscapeNow) R.string.player_landscape_exit else R.string.player_landscape_enter), Icons.Default.ScreenRotation) {
+                vm.playerLandscape.value = !landscapeNow; actions = null
+            }
+            HorizontalDivider(Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
+        }
         SongAction(stringResource(R.string.open_album), Icons.Default.Album, navigate = true) { openTrackAlbum(track) }
         track.artists.filter { it.isNotBlank() }.forEach { artist ->
             SongAction(if (track.artists.size > 1) stringResource(R.string.open_artist_named, artist) else stringResource(R.string.open_artist), Icons.Default.Person, navigate = true) { openTrackArtist(artist) }
@@ -1080,11 +1104,15 @@ private fun RowScope.BottomItems(state: MusicState, vm: MusicViewModel) {
 }
 
 @Composable
-internal fun Cover(vm: MusicViewModel, id: String?, title: String, modifier: Modifier, contentScale: ContentScale = ContentScale.Crop) {
+internal fun Cover(vm: MusicViewModel, id: String?, title: String, modifier: Modifier, contentScale: ContentScale = ContentScale.Crop,
+    keepPrevious: Boolean = false) {
     val profile by vm.repository.session.profiles.collectAsStateWithLifecycle()
     val fallback = painterResource(R.drawable.ic_wildstring)
-    AsyncImage(model = id?.let { ImageRequest.Builder(LocalContext.current).data(vm.repository.cover(it)).memoryCacheKey("${profile}:${vm.repository.cover(it)}").crossfade(180).build() }, imageLoader = vm.coverLoader(id), contentDescription = title,
-        placeholder = fallback, error = fallback, fallback = fallback,
+    // The player swaps covers on track change; holding the last image avoids flashing the app logo in between.
+    var previous by remember { mutableStateOf<androidx.compose.ui.graphics.painter.Painter?>(null) }
+    AsyncImage(model = id?.let { ImageRequest.Builder(LocalContext.current).data(vm.repository.cover(it)).memoryCacheKey("${profile}:${vm.repository.cover(it)}").crossfade(if (keepPrevious) 0 else 180).build() }, imageLoader = vm.coverLoader(id), contentDescription = title,
+        placeholder = if (keepPrevious) previous ?: fallback else fallback, error = fallback, fallback = fallback,
+        onSuccess = { if (keepPrevious) previous = it.painter },
         contentScale = contentScale, modifier = modifier.clip(RoundedCornerShape(10.dp)))
 }
 @Composable
@@ -1183,6 +1211,7 @@ private fun PlayerScreen(vm: MusicViewModel, state: MusicState, wide: Boolean, l
     onAdd: () -> Unit, onSleep: () -> Unit) {
     val preferences by vm.settings.state.collectAsStateWithLifecycle()
     val sleep by vm.sleep.state.collectAsStateWithLifecycle()
+    val sleepActive = sleep.deadline != null || sleep.entryId != null
     val feedback = LocalTactileFeedback.current
     val track = state.current ?: return
     // Draw the drag offset without moving pointer hit targets during the gesture. The empty
@@ -1204,29 +1233,63 @@ private fun PlayerScreen(vm: MusicViewModel, state: MusicState, wide: Boolean, l
     val dismissArtwork = remember { { artworkPreview = false } }
     val spinning = state.playing && !state.buffering && state.playbackError == null && !artworkPreview
     val thresholdTick = { feedback(TactileKind.Tap) }
+    // A phone propped on a stand reads landscape on the accelerometer even with auto-rotate off. Lying flat or being shaken does not count.
+    val context = LocalContext.current
+    val canPrompt = !wide && !landscape && preferences.playbackStyle == "cassette"
+    var heldLandscape by remember { mutableStateOf(false) }
+    var landscapePrompt by remember { mutableStateOf(false) }
+    DisposableEffect(canPrompt) {
+        val manager = context.getSystemService(android.content.Context.SENSOR_SERVICE) as android.hardware.SensorManager
+        val sensor = manager.getDefaultSensor(android.hardware.Sensor.TYPE_ACCELEROMETER)
+        val listener = object : android.hardware.SensorEventListener {
+            override fun onSensorChanged(event: android.hardware.SensorEvent) {
+                heldLandscape = isDockedLandscape(event.values[0], event.values[1], event.values[2])
+            }
+            override fun onAccuracyChanged(sensor: android.hardware.Sensor?, accuracy: Int) = Unit
+        }
+        if (canPrompt && sensor != null) manager.registerListener(listener, sensor, android.hardware.SensorManager.SENSOR_DELAY_NORMAL)
+        onDispose { manager.unregisterListener(listener); heldLandscape = false }
+    }
+    LaunchedEffect(heldLandscape, canPrompt) {
+        landscapePrompt = false
+        if (heldLandscape && canPrompt) {
+            delay(4_000)
+            landscapePrompt = true
+            delay(10_000)
+            landscapePrompt = false
+            // Stay quiet until the phone has been upright again.
+            snapshotFlow { heldLandscape }.first { !it }
+        }
+    }
     Box(playerModifier) {
     if (preferences.playbackStyle == "vinyl") {
         Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background))
     } else {
         ArtworkBackdrop(vm, track)
     }
+    // The cassette deck in landscape moves the top actions to a side rail and gives that height to the cassette.
+    val deckLayout = landscape && preferences.playbackStyle == "cassette"
     Column(Modifier.testTag(if (wide) "player-tablet" else if (landscape) "player-landscape" else "player-phone")
         .fillMaxSize()
-        .safeDrawingPadding()
-        .padding(horizontal = if (wide) 34.dp else 20.dp)) {
-        Row(Modifier.fillMaxWidth().dismissPlayerSwipe(true, onDismiss, onUpdateDrag, thresholdTick), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-            IconButton(onBack) {
-                Icon(
-                    Icons.Default.KeyboardArrowDown,
-                    stringResource(R.string.player_collapse),
-                )
-            }
+        // The landscape deck is full-bleed like a fullscreen video: it draws behind the cutout and keeps only its content clear of it.
+        .then(if (deckLayout) Modifier else Modifier.safeDrawingPadding().padding(horizontal = if (wide) 34.dp else 20.dp))) {
+        if (!deckLayout) Row(Modifier.fillMaxWidth().dismissPlayerSwipe(true, onDismiss, onUpdateDrag, thresholdTick), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+            PlayerCollapseButton(onBack)
             Spacer(Modifier.weight(1f))
-            IconButton(onSleep) { Icon(Icons.Default.Bedtime, stringResource(R.string.sleep_timer), tint = if (sleep.deadline != null || sleep.entryId != null) Accent else Muted) }
-            IconButton(onAdd) { Icon(Icons.Default.MoreVert, stringResource(R.string.current_track_actions)) }
+            PlayerSleepButton(sleepActive, onSleep)
+            PlayerMoreButton(onAdd)
         }
         val openQueueOnSwipeUp = { if (!queue) onQueue() }
-        if (landscape) Row(Modifier.weight(1f).fillMaxWidth().padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
+        if (deckLayout) CassetteDeckScreen(vm, track, state, spinning, rotation, queue, lyrics, sleepActive,
+            stageGestures = Modifier
+                .pointerInput(onLyrics, showArtwork, queue) { detectTapGestures(onLongPress = { if (!queue) showArtwork() }, onTap = { onLyrics() }) }
+                .dismissPlayerSwipe(!queue && !lyrics, onDismiss, onUpdateDrag, thresholdTick, openQueueOnSwipeUp)
+                .trackSwipeGestures(!queue && !lyrics,
+                    onPrevious = { feedback(TactileKind.Tap); vm.previous() },
+                    onNext = { feedback(TactileKind.Tap); vm.next() }),
+            onBack = { if (vm.playerLandscape.value) vm.playerLandscape.value = false else onBack() },
+            onLyrics = onLyrics, onQueue = onQueue, onSleep = onSleep, onAlbum = onAlbum, onArtist = onArtist, onArtwork = showArtwork)
+        else if (landscape) Row(Modifier.weight(1f).fillMaxWidth().padding(bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
             BoxWithConstraints(Modifier.weight(1f).fillMaxHeight().testTag("player-visual-stage")
                 .pointerInput(onLyrics, showArtwork, queue) {
                     detectTapGestures(
@@ -1312,7 +1375,14 @@ private fun PlayerScreen(vm: MusicViewModel, state: MusicState, wide: Boolean, l
                 val visualSize = minOf(370.dp, maxWidth, maxHeight)
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     if (lyrics) LyricsPanel(vm, state, Modifier.fillMaxSize().padding(top = 8.dp, bottom = 32.dp), onLyrics, showArtwork)
-                    else PlaybackVisual(vm, track, preferences.playbackStyle, spinning, true, state.duration, rotation,
+                    else if (preferences.playbackStyle == "cassette") {
+                        // A landscape cassette leaves vertical room in portrait: pin it high and give lyrics the rest.
+                        // The layout must not depend on lyric state, or the cassette jumps on every track change.
+                        Column(Modifier.fillMaxSize().padding(top = 12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                            CassetteStage(vm, track, spinning, state.duration, rotation, visualSize, showArtwork, onLyrics)
+                            LyricPreview(vm, track.id, state.lyrics, state.lyricsLoading, Modifier.weight(1f).fillMaxWidth().padding(top = 24.dp, bottom = 8.dp))
+                        }
+                    } else PlaybackVisual(vm, track, preferences.playbackStyle, spinning, true, state.duration, rotation,
                         Modifier.size(visualSize), showArtwork, onLyrics)
                 }
             }
@@ -1320,18 +1390,43 @@ private fun PlayerScreen(vm: MusicViewModel, state: MusicState, wide: Boolean, l
                 modifier = Modifier.dismissPlayerSwipe(true, onDismiss, onUpdateDrag, thresholdTick, openQueueOnSwipeUp))
         }
     }
+    AnimatedVisibility(landscapePrompt, Modifier.align(Alignment.TopCenter).safeDrawingPadding().padding(top = 4.dp), enter = fadeIn(), exit = fadeOut()) {
+        Surface(shape = RoundedCornerShape(999.dp), color = MaterialTheme.colorScheme.surfaceVariant, modifier = Modifier.testTag("landscape-prompt")) {
+            Row(Modifier.padding(start = 20.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(stringResource(R.string.player_landscape_prompt), style = MaterialTheme.typography.bodySmall)
+                TextButton({ landscapePrompt = false; vm.playerLandscape.value = true }) { Text(stringResource(R.string.player_landscape_prompt_action)) }
+            }
+        }
+    }
     }
     if (artworkPreview) ArtworkPreview(vm, track, dismissArtwork)
 }
 
+@Composable private fun PlayerCollapseButton(onBack: () -> Unit, modifier: Modifier = Modifier) = IconButton(onBack, modifier) { Icon(Icons.Default.KeyboardArrowDown, stringResource(R.string.player_collapse)) }
+@Composable private fun PlayerSleepButton(active: Boolean, onSleep: () -> Unit) =
+    IconButton(onSleep) { Icon(Icons.Default.Bedtime, stringResource(R.string.sleep_timer), tint = if (active) Accent else Muted) }
+@Composable private fun PlayerMoreButton(onAdd: () -> Unit) = IconButton(onAdd) { Icon(Icons.Default.MoreVert, stringResource(R.string.current_track_actions)) }
+
 @Composable
 private fun PlaybackControls(vm: MusicViewModel, state: MusicState, onQueue: () -> Unit, onAlbum: () -> Unit,
     onArtist: (String) -> Unit = {}, compact: Boolean = false, modifier: Modifier = Modifier) {
-    val track = state.current ?: return
+    if (state.current == null) return
     Column(modifier.fillMaxWidth()) {
+        PlaybackHeader(vm, state, onAlbum, onArtist, compact)
+        Spacer(Modifier.height(if (compact) 4.dp else 8.dp))
+        PlaybackSeekSection(vm, state.duration)
+        PlaybackTransport(vm, state, onQueue, compact)
+    }
+}
+
+/** Title, favorite, artists, album and quality badge. */
+@Composable
+private fun PlaybackHeader(vm: MusicViewModel, state: MusicState, onAlbum: () -> Unit, onArtist: (String) -> Unit, compact: Boolean, showQuality: Boolean = true, showFavorite: Boolean = true) {
+    val track = state.current ?: return
+    Column(Modifier.fillMaxWidth()) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
             Text(track.title, fontFamily = FontFamily.Serif, fontSize = if (compact) 20.sp else 23.sp, fontWeight = FontWeight.Medium, maxLines = if (compact) 1 else 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).padding(end = 8.dp))
-            FavoriteControl(track.loved, track.id in state.pendingFavorites, tactile { vm.favorite(track) })
+            if (showFavorite) FavoriteControl(track.loved, track.id in state.pendingFavorites, tactile { vm.favorite(track) })
         }
         Spacer(Modifier.height(if (compact) 2.dp else 4.dp))
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
@@ -1344,14 +1439,12 @@ private fun PlaybackControls(vm: MusicViewModel, state: MusicState, onQueue: () 
                         Row(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(4.dp))
-                                .clickable { onArtist(name) }
+                                .clickable(role = Role.Button) { onArtist(name) }
                                 .padding(vertical = 2.dp)
                                 .testTag("player-artist-$name"),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(name, color = Muted, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            Spacer(Modifier.width(2.dp))
-                            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, Modifier.size(13.dp), tint = Muted)
                         }
                     }
                 }
@@ -1359,17 +1452,15 @@ private fun PlaybackControls(vm: MusicViewModel, state: MusicState, onQueue: () 
                 Row(
                     modifier = Modifier
                         .clip(RoundedCornerShape(4.dp))
-                        .clickable { onAlbum() }
+                        .clickable(role = Role.Button) { onAlbum() }
                         .padding(vertical = 2.dp)
                         .testTag("player-album"),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(track.album ?: stringResource(R.string.unknown_album), color = Muted, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Spacer(Modifier.width(2.dp))
-                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, Modifier.size(13.dp), tint = Muted)
                 }
             }
-            if (state.playbackQuality.isNotBlank()) {
+            if (showQuality && state.playbackQuality.isNotBlank()) {
                 var qualityDialog by remember { mutableStateOf(false) }
                 val feedback = tactile {}
                 Spacer(Modifier.width(8.dp))
@@ -1418,8 +1509,13 @@ private fun PlaybackControls(vm: MusicViewModel, state: MusicState, onQueue: () 
                 }
             }
         }
-        Spacer(Modifier.height(if (compact) 4.dp else 8.dp))
-        PlaybackSeekSection(vm, state.duration)
+    }
+}
+
+/** Mode, previous, play/pause, next and queue; also shows the playback error. */
+@Composable
+private fun PlaybackTransport(vm: MusicViewModel, state: MusicState, onQueue: () -> Unit, compact: Boolean) {
+    Column(Modifier.fillMaxWidth()) {
         Row(Modifier.fillMaxWidth().padding(vertical = if (compact) 4.dp else 12.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             val modeIcon = if (state.shuffle) Icons.Default.Shuffle else if (state.repeatMode == Player.REPEAT_MODE_ONE) Icons.Default.RepeatOne else Icons.Default.Repeat
             IconButton(tactile(vm::cycleMode)) { Icon(modeIcon, stringResource(R.string.play_mode_change), tint = if (state.shuffle || state.repeatMode != Player.REPEAT_MODE_OFF) Accent else Muted) }
@@ -1447,18 +1543,206 @@ private fun PlaybackControls(vm: MusicViewModel, state: MusicState, onQueue: () 
 }
 
 @Composable
-internal fun PlaybackSeekSection(vm: MusicViewModel, duration: Long) {
+internal fun PlaybackSeekSection(vm: MusicViewModel, duration: Long, inline: Boolean = false) {
     val position by vm.position.collectAsStateWithLifecycle()
     var scrub by remember { mutableStateOf<Float?>(null) }
     val feedback = LocalTactileFeedback.current
-    Slider(value = scrub ?: position.coerceAtMost(duration).toFloat(), onValueChange = { scrub = it },
-        onValueChangeFinished = { scrub?.let { feedback(TactileKind.Tap); vm.seek(it.toLong()) }; scrub = null }, valueRange = 0f..duration.coerceAtLeast(1).toFloat(), enabled = duration > 0,
-        colors = SliderDefaults.colors(thumbColor = Accent, activeTrackColor = Accent,
-            inactiveTrackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = .14f),
-            activeTickColor = Color.Transparent, inactiveTickColor = Color.Transparent))
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-        Text(formatTime(scrub?.toLong() ?: position), color = Muted, fontFamily = FontFamily.Monospace, fontSize = 11.sp)
-        Text(formatTime(duration), color = Muted, fontFamily = FontFamily.Monospace, fontSize = 11.sp)
+    val elapsed = formatTime(scrub?.toLong() ?: position)
+    val total = formatTime(duration)
+    val timeStyle = @Composable { text: String -> Text(text, color = Muted, fontFamily = FontFamily.Monospace, fontSize = 11.sp) }
+    val slider = @Composable { modifier: Modifier ->
+        Slider(value = scrub ?: position.coerceAtMost(duration).toFloat(), onValueChange = { scrub = it }, modifier = modifier,
+            onValueChangeFinished = { scrub?.let { feedback(TactileKind.Tap); vm.seek(it.toLong()) }; scrub = null }, valueRange = 0f..duration.coerceAtLeast(1).toFloat(), enabled = duration > 0,
+            colors = SliderDefaults.colors(thumbColor = Accent, activeTrackColor = Accent,
+                inactiveTrackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = .14f),
+                activeTickColor = Color.Transparent, inactiveTickColor = Color.Transparent))
+    }
+    if (inline) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        timeStyle(elapsed); slider(Modifier.weight(1f)); timeStyle(total)
+    } else {
+        slider(Modifier)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { timeStyle(elapsed); timeStyle(total) }
+    }
+}
+
+/**
+ * Landscape cassette player that fills the screen: cassette, one-line progress and a row of deck keys on the left,
+ * a "display" with title and lyrics (or the queue) on the right, and a lone collapse arrow in the corner.
+ */
+@Composable
+private fun CassetteDeckScreen(vm: MusicViewModel, track: Track, state: MusicState, playing: Boolean, rotation: PlaybackRotation,
+    queue: Boolean, lyrics: Boolean, sleepActive: Boolean, stageGestures: Modifier,
+    onBack: () -> Unit, onLyrics: () -> Unit, onQueue: () -> Unit, onSleep: () -> Unit,
+    onAlbum: () -> Unit, onArtist: (String) -> Unit, onArtwork: () -> Unit) {
+    val dark = LocalDarkAppearance.current
+    Box(Modifier.fillMaxSize().testTag("cassette-deck")
+        .background(Brush.verticalGradient(if (dark) listOf(Color(0xFF2B2822), Color(0xFF211F1A)) else listOf(Color(0xFFE9E6DA), Color(0xFFDAD6C7))))) {
+    BoxWithConstraints(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.displayCutout)) {
+        val pad = 18.dp
+        val gap = 24.dp
+        // Left column: cassette body (62% of its width) + 4dp + 48dp progress + 6dp + 54dp keys.
+        val side = minOf((maxHeight - pad * 2 - 112.dp) / .62f, (maxWidth - pad * 2 - gap) * .58f).coerceAtLeast(160.dp)
+        Row(Modifier.fillMaxSize().padding(pad), horizontalArrangement = Arrangement.spacedBy(gap)) {
+            Column(Modifier.width(side).fillMaxHeight(), verticalArrangement = Arrangement.Center) {
+                Box(stageGestures.size(side, side * .62f).testTag("player-visual-stage")) {
+                    CassetteStage(vm, track, playing, state.duration, rotation, side, onArtwork, onLyrics)
+                }
+                Spacer(Modifier.height(4.dp))
+                PlaybackSeekSection(vm, state.duration, inline = true)
+                Spacer(Modifier.height(6.dp))
+                DeckKeys(vm, track, state, queue, sleepActive, onQueue, onSleep)
+            }
+            Box(Modifier.weight(1f).fillMaxHeight()) {
+                Column(Modifier.fillMaxSize()) {
+                    if (queue) QueuePanel(vm, state, Modifier.fillMaxSize(), showClear = false)
+                    else {
+                        Box(Modifier.padding(end = 44.dp)) { PlaybackHeader(vm, state, onAlbum, onArtist, compact = true, showQuality = false, showFavorite = false) }
+                        Box(Modifier.weight(1f).fillMaxWidth().padding(vertical = 12.dp)) {
+                            if (lyrics) LyricsPanel(vm, state, Modifier.fillMaxSize(), onLyrics, onArtwork)
+                            else LyricPreview(vm, track.id, state.lyrics, state.lyricsLoading, Modifier.fillMaxSize(), alignStart = true)
+                        }
+                    }
+                }
+                PlayerCollapseButton(onBack, Modifier.align(Alignment.TopEnd))
+            }
+        }
+    }
+    }
+}
+
+private val FavoriteRed = Color(0xFFE5534B)
+
+/** Previous, play/pause, next, queue, favorite and sleep timer; state shows in the icon (pause glyph, accent queue/sleep, red heart). */
+@Composable
+private fun DeckKeys(vm: MusicViewModel, track: Track, state: MusicState, queueOpen: Boolean, sleepActive: Boolean, onQueue: () -> Unit, onSleep: () -> Unit) {
+    val pending = track.id in state.pendingFavorites
+    val favorite = tactile { if (!pending) vm.favorite(track) }
+    Column(Modifier.fillMaxWidth()) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            val key = Modifier.weight(1f).height(54.dp)
+            DeckKey(stringResource(R.string.previous_track), key, onClick = tactile(vm::previous)) { Icon(Icons.Default.SkipPrevious, null) }
+            DeckKey(stringResource(if (state.playing) R.string.pause else R.string.play), key, onClick = tactile(vm::toggle)) {
+                if (delayed(state.buffering, 300)) CircularProgressIndicator(Modifier.size(30.dp), color = Accent.copy(alpha = .7f), strokeWidth = 2.dp)
+                Icon(if (state.playing) Icons.Default.Pause else Icons.Default.PlayArrow, null, Modifier.size(28.dp))
+            }
+            DeckKey(stringResource(R.string.next_track), key, onClick = tactile(vm::next)) { Icon(Icons.Default.SkipNext, null) }
+            DeckKey(stringResource(R.string.play_queue), key, onClick = tactile(onQueue)) { Icon(Icons.AutoMirrored.Filled.QueueMusic, null, tint = if (queueOpen) Accent else LocalContentColor.current) }
+            DeckKey(stringResource(if (track.loved) R.string.favorite_remove else R.string.favorite_add), key, onClick = favorite) {
+                Icon(if (track.loved) Icons.Default.Favorite else Icons.Default.FavoriteBorder, null, tint = if (track.loved) FavoriteRed else LocalContentColor.current)
+            }
+            DeckKey(stringResource(R.string.sleep_timer), key, onClick = tactile(onSleep)) {
+                Icon(Icons.Default.Bedtime, null, tint = if (sleepActive) Accent else Muted)
+            }
+        }
+        state.playbackError?.let { ErrorMessage(it) { vm.toggle() } }
+    }
+}
+
+/** A raised key: it travels down 3dp while pressed and springs back; state is shown by the icon, not by latching. The travel is a transform, so reduced motion only shortens it. */
+@Composable
+private fun DeckKey(label: String, modifier: Modifier, onClick: () -> Unit, content: @Composable BoxScope.() -> Unit) {
+    val dark = LocalDarkAppearance.current
+    val source = remember { MutableInteractionSource() }
+    val held by source.collectIsPressedAsState()
+    val down = held
+    val travel by animateDpAsState(if (down) 3.dp else 0.dp, tween(if (playbackMotionAllowed()) 90 else 0), label = "deck-key")
+    val top = if (dark) Color(0xFF3B372F) else Color(0xFFF6F3ED)
+    val bottom = if (dark) Color(0xFF2A2722) else Color(0xFFD8D4C5)
+    val shape = RoundedCornerShape(9.dp)
+    Box(modifier) {
+        // The well the key travels in, visible below it as it goes down.
+        Box(Modifier.matchParentSize().padding(top = 3.dp).clip(shape).background(Color.Black.copy(alpha = if (dark) .55f else .28f)))
+        Box(Modifier.fillMaxSize().padding(bottom = 3.dp).graphicsLayer { translationY = travel.toPx() }.clip(shape)
+            .background(Brush.verticalGradient(if (down) listOf(bottom, top) else listOf(top, bottom)))
+            .border(.75.dp, Color.White.copy(alpha = if (dark) .10f else .55f), shape)
+            .clickable(source, null, role = Role.Button, onClick = onClick)
+            .semantics { contentDescription = label },
+            contentAlignment = Alignment.Center, content = content)
+    }
+}
+
+/** Cassette body is 62% as tall as it is wide; crop the square visual canvas so only the body takes space. */
+@Composable
+private fun CassetteStage(vm: MusicViewModel, track: Track, playing: Boolean, duration: Long, rotation: PlaybackRotation,
+    side: Dp, onArtwork: () -> Unit, onLyrics: () -> Unit) {
+    Box(Modifier.size(side, side * .62f).clipToBounds()) {
+        // requiredSize content larger than the parent is centered, which already shows the middle 62%.
+        PlaybackVisual(vm, track, "cassette", playing, true, duration, rotation, Modifier.requiredSize(side), onArtwork, onLyrics)
+    }
+}
+
+/**
+ * Fixed-height lyric area under the cassette. Loading, synced, and empty states share one frame so the
+ * cassette, title and controls never move when lyrics arrive or are missing.
+ */
+@Composable
+private fun LyricPreview(vm: MusicViewModel, trackId: String, lyrics: Lyrics, loading: Boolean, modifier: Modifier = Modifier, alignStart: Boolean = false) {
+    // One random verse per track; the deck shows every verse once before any repeats, so the rotation is not noticeable.
+    val verseCount = stringArrayResource(R.array.freedom_verses).size
+    val deck = remember(verseCount) { VerseDeck(verseCount) }
+    var verse by rememberSaveable { mutableIntStateOf(0) }
+    LaunchedEffect(trackId) { verse = deck.next() }
+    val lines = remember(lyrics) { lyrics.lines.filter { it.timeMs != null && it.text.isNotBlank() } }
+    val motion = playbackMotionAllowed()
+    val phase = when { lines.isNotEmpty() -> 2; loading -> 0; else -> 1 }
+    Crossfade(phase, modifier.clipToBounds(), animationSpec = tween(if (motion) 220 else 0), label = "lyric-preview") { current ->
+        when (current) {
+            0 -> LyricSkeletonBars()
+            1 -> FreedomVerse(verse, motion, alignStart)
+            else -> SyncedLyricLines(vm, lines, alignStart)
+        }
+    }
+}
+
+@Composable
+private fun SyncedLyricLines(vm: MusicViewModel, lines: List<LyricLine>, alignStart: Boolean) {
+    val position by vm.position.collectAsStateWithLifecycle()
+    val index by remember(lines) { derivedStateOf { lines.indexOfLast { (it.timeMs ?: 0) <= position }.coerceAtLeast(0) } }
+    BoxWithConstraints(Modifier.fillMaxSize(), contentAlignment = if (alignStart) Alignment.TopStart else Alignment.TopCenter) {
+        val capacity = (maxHeight / 34.dp).toInt().coerceAtLeast(1)
+        val before = if (capacity >= 4) 1 else 0
+        val from = (index - before).coerceAtLeast(0)
+        Column(Modifier.fillMaxWidth(), horizontalAlignment = if (alignStart) Alignment.Start else Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            for (i in from until minOf(lines.size, from + capacity)) {
+                val current = i == index
+                Text(lines[i].text, Modifier.fillMaxWidth(), fontFamily = if (current) FontFamily.Serif else FontFamily.Default,
+                    fontSize = if (current) 18.sp else 14.sp, textAlign = if (alignStart) TextAlign.Start else TextAlign.Center, maxLines = if (current) 2 else 1,
+                    overflow = TextOverflow.Ellipsis, color = if (current) LocalContentColor.current else Muted.copy(alpha = if (i < index) .55f else .85f))
+            }
+        }
+    }
+}
+
+/** Faint bars in the lyric rows' positions while lyrics load. */
+@Composable
+private fun LyricSkeletonBars() {
+    Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(18.dp)) {
+        listOf(.46f, .62f, .38f).forEach { fraction ->
+            Box(Modifier.fillMaxWidth(fraction).height(14.dp).clip(RoundedCornerShape(7.dp)).background(Muted.copy(alpha = .14f)))
+        }
+    }
+}
+
+/** No lyrics: say so quietly, then one short public-domain verse about freedom with its attribution on its own line. */
+@Composable
+private fun FreedomVerse(index: Int, motion: Boolean, alignStart: Boolean) {
+    val verses = stringArrayResource(R.array.freedom_verses)
+    val horizontal = if (alignStart) Alignment.Start else Alignment.CenterHorizontally
+    val textAlign = if (alignStart) TextAlign.Start else TextAlign.Center
+    BoxWithConstraints(Modifier.fillMaxSize().testTag("lyrics-empty-verse")) {
+        val compact = maxHeight < 150.dp
+        Column(Modifier.fillMaxWidth(), horizontalAlignment = horizontal) {
+            Text(stringResource(R.string.no_lyrics), Modifier.fillMaxWidth(), color = Muted, fontSize = 13.sp, textAlign = textAlign)
+            Spacer(Modifier.height(if (compact) 10.dp else 20.dp))
+            Crossfade(index % verses.size, Modifier.fillMaxWidth(), animationSpec = tween(if (motion) 400 else 0), label = "freedom-verse") { i ->
+                val parts = verses[i].lines()
+                Column(Modifier.fillMaxWidth(), horizontalAlignment = horizontal) {
+                    Text(parts.dropLast(1).joinToString("\n"), Modifier.fillMaxWidth(), fontFamily = FontFamily.Serif, fontSize = if (compact) 15.sp else 17.sp,
+                        lineHeight = if (compact) 22.sp else 28.sp, textAlign = textAlign, color = LocalContentColor.current.copy(alpha = .78f))
+                    if (!compact) Text(parts.last(), Modifier.fillMaxWidth().padding(top = 8.dp), fontSize = 12.sp, textAlign = textAlign, color = Muted)
+                }
+            }
+        }
     }
 }
 

@@ -2083,4 +2083,57 @@
     <string name="pod_dl_err_upstream_http">源站 HTTP 请求失败 (%1$d)</string>
     <string name="pod_dl_err_network_reason">网络连接失败 (%1$s)</string>
     <string name="pod_dl_err_exception_reason">下载遇到异常: %1$s</string>
+    <string name="player_landscape_enter">横屏播放</string>
+    <string name="player_landscape_exit">退出横屏</string>
+    <string-array name="freedom_verses">
+        <item>生命诚可贵，爱情价更高。\n若为自由故，两者皆可抛。\n——裴多菲，殷夫 译</item>
+        <item>羁鸟恋旧林，池鱼思故渊。\n久在樊笼里，复得返自然。\n——陶渊明</item>
+        <item>云无心以出岫，鸟倦飞而知还。\n——陶渊明《归去来兮辞》</item>
+        <item>采菊东篱下，悠然见南山。\n——陶渊明</item>
+        <item>悟已往之不谏，知来者之可追。\n——陶渊明《归去来兮辞》</item>
+        <item>我劝天公重抖擞，\n不拘一格降人才。\n——龚自珍</item>
+        <item>九州生气恃风雷，\n万马齐喑究可哀。\n——龚自珍</item>
+        <item>安能摧眉折腰事权贵，\n使我不得开心颜。\n——李白</item>
+        <item>大鹏一日同风起，\n扶摇直上九万里。\n——李白</item>
+        <item>仰天大笑出门去，\n我辈岂是蓬蒿人。\n——李白</item>
+        <item>长风破浪会有时，\n直挂云帆济沧海。\n——李白</item>
+        <item>人生在世不称意，\n明朝散发弄扁舟。\n——李白</item>
+        <item>天生我材必有用，\n千金散尽还复来。\n——李白</item>
+        <item>北冥有鱼，其名为鲲。\n化而为鸟，其名为鹏。\n——庄子《逍遥游》</item>
+        <item>鹪鹩巢于深林，不过一枝；\n偃鼠饮河，不过满腹。\n——庄子《逍遥游》</item>
+        <item>泽雉十步一啄，百步一饮，\n不蕲畜乎樊中。\n——庄子《养生主》</item>
+        <item>子非鱼，安知鱼之乐？\n——庄子《秋水》</item>
+        <item>莫听穿林打叶声，何妨吟啸且徐行。\n竹杖芒鞋轻胜马，谁怕？\n一蓑烟雨任平生。\n——苏轼</item>
+        <item>惟江上之清风，与山间之明月，\n耳得之而为声，目遇之而成色，\n取之无禁，用之不竭。\n——苏轼《赤壁赋》</item>
+        <item>路漫漫其修远兮，\n吾将上下而求索。\n——屈原《离骚》</item>
+        <item>亦余心之所善兮，\n虽九死其犹未悔。\n——屈原《离骚》</item>
+        <item>富贵不能淫，贫贱不能移，\n威武不能屈。\n——《孟子》</item>
+        <item>三军可夺帅也，\n匹夫不可夺志也。\n——《论语》</item>
+        <item>老当益壮，宁移白首之心？\n穷且益坚，不坠青云之志。\n——王勃《滕王阁序》</item>
+        <item>会当凌绝顶，\n一览众山小。\n——杜甫《望岳》</item>
+        <item>晴空一鹤排云上，\n便引诗情到碧霄。\n——刘禹锡《秋词》</item>
+        <item>我自横刀向天笑，\n去留肝胆两昆仑。\n——谭嗣同</item>
+        <item>红日初升，其道大光。\n河出伏流，一泻汪洋。\n——梁启超《少年中国说》</item>
+        <item>有一分热，发一分光，\n就令萤火一般，也可以在黑暗里发一点光。\n——鲁迅</item>
+        <item>从来如此，便对么？\n——鲁迅《狂人日记》</item>
+        <item>思想而不自由，毋宁死耳。\n——陈寅恪</item>
+        <item>天空没有留下鸟的痕迹，\n但我已飞过。\n——泰戈尔《飞鸟集》，郑振铎 译</item>
+        <item>生如夏花之绚烂，\n死如秋叶之静美。\n——泰戈尔《飞鸟集》，郑振铎 译</item>
+        <item>人生而自由，\n却无往不在枷锁之中。\n——卢梭《社会契约论》</item>
+        <item>不自由，毋宁死！\n——帕特里克·亨利</item>
+        <item>我的国家就是世界，\n我的宗教就是行善。\n——托马斯·潘恩</item>
+        <item>唯一配称自由的，\n是以我们自己的方式去追求我们自己的善。\n——约翰·密尔《论自由》</item>
+        <item>只有每天为自由和生活而斗争的人，\n才配享有自由与生活。\n——歌德《浮士德》</item>
+        <item>走你自己的路，\n让别人去说吧。\n——但丁《神曲》</item>
+        <item>敢于运用你自己的理智！\n——康德</item>
+        <item>唯有受过教育的人才是自由的。\n——爱比克泰德</item>
+        <item>我们都是法律的仆人，\n因此才得以自由。\n——西塞罗</item>
+        <item>幸福的秘诀是自由，\n自由的秘诀是勇气。\n——修昔底德</item>
+        <item>我是博大的，\n我包含着众多的我。\n——惠特曼</item>
+        <item>我走进森林，\n是因为我想有意识地生活。\n——梭罗《瓦尔登湖》</item>
+        <item>如果冬天来了，\n春天还会远吗？\n——雪莱《西风颂》</item>
+        <item>天高任鸟飞，海阔凭鱼跃。\n——俗语</item>
+    </string-array>
+    <string name="player_landscape_prompt">手机已横放，开启横屏播放？</string>
+    <string name="player_landscape_prompt_action">开启</string>
 </resources>
