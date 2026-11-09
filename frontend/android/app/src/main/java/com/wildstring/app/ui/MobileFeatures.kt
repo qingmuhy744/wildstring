@@ -42,11 +42,23 @@ internal fun MobileShortcuts(discovery: Boolean = false, open: (String) -> Unit)
         Triple("statistics", stringResource(R.string.listening_statistics), Icons.Default.BarChart),
         Triple("settings", stringResource(R.string.settings_title), Icons.Default.Settings)
     )
-    Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp).testTag(if (discovery) "discovery-shortcuts" else "personal-shortcuts"), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    val dark = LocalDarkAppearance.current
+    Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min).padding(horizontal = 20.dp, vertical = 4.dp).testTag(if (discovery) "discovery-shortcuts" else "personal-shortcuts"), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         entries.forEach { (route, title, icon) ->
-            FilledTonalButton({ open(route) }, Modifier.weight(1f).heightIn(min = 78.dp), shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp), contentPadding = PaddingValues(vertical = 12.dp, horizontal = 4.dp)) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Icon(icon, null, Modifier.size(22.dp))
+            val primaryEntry = discovery && route == "daily"
+            val container = if (primaryEntry) MaterialTheme.colorScheme.primary.copy(alpha = if (dark) 0.16f else 0.10f) else MaterialTheme.colorScheme.surfaceContainerLow
+            val content = if (primaryEntry) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+            val border = if (primaryEntry) MaterialTheme.colorScheme.primary.copy(alpha = if (dark) 0.42f else 0.32f) else MaterialTheme.colorScheme.outlineVariant
+            OutlinedButton(
+                onClick = { open(route) },
+                modifier = Modifier.weight(1f).fillMaxHeight().heightIn(min = 54.dp),
+                shape = RoundedCornerShape(14.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, border),
+                colors = ButtonDefaults.outlinedButtonColors(containerColor = container, contentColor = content),
+                contentPadding = PaddingValues(vertical = 6.dp, horizontal = 6.dp),
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(3.dp, Alignment.CenterVertically)) {
+                    Icon(icon, null, Modifier.size(18.dp), tint = if (primaryEntry) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
                     Text(title, style = MaterialTheme.typography.labelMedium, maxLines = 2, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                 }
             }
