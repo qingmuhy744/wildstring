@@ -7,6 +7,12 @@ enum ErrorText {
             switch error.code {
             case "authentication_required": return L10n("errorText.authExpired")
             case "track_not_found": return L10n("errorText.trackNotFound")
+            case "podcast_not_found": return L10n("errorText.podcastNotFound")
+            case "podcast_publisher_not_found": return L10n("errorText.podcastPublisherNotFound")
+            case "podcast_publisher_conflict": return L10n("errorText.podcastPublisherConflict")
+            case "podcast_playback_settings_not_found": return L10n("errorText.podcastPlaybackSettingsNotFound")
+            case "episode_not_found": return L10n("errorText.episodeNotFound")
+            case "episode_unavailable": return L10n("errorText.episodeUnavailable")
             default: return L10n("errorText.serverReturnedStatus", error.statusCode)
             }
         }

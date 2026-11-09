@@ -7617,6 +7617,516 @@
         }
       }
     },
+    "macCatalog.event.summaryAutoApply": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Apply automatically"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "自动应用"
+          }
+        }
+      }
+    },
+    "macCatalog.event.summaryDraftAutoApplied": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Curation suggestion “%@” was applied under your automatic policy. You can review or revert it in the workbench."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "整理建议「%@」已按你开启的自动应用策略执行，可在工作台查看记录或撤回。"
+          }
+        }
+      }
+    },
+    "macCatalog.event.summaryDraftPending": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Curation suggestion “%@” is ready and will only modify the library after confirmation in the workbench."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "整理建议「%@」已生成，默认仅在工作台确认后才会修改曲库。"
+          }
+        }
+      }
+    },
+    "macCatalog.event.summaryImport": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Processed %d files: %d imported, %d duplicates skipped, %d awaiting review, %d failed."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "共处理 %d 个文件：已导入 %d，重复跳过 %d，待确认 %d，失败 %d。"
+          }
+        }
+      }
+    },
+    "macCatalog.event.summaryInspCounts": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Checked %d tracks, found %d issues, %d failed."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已检查 %d 首，发现 %d 项，失败 %d 首。"
+          }
+        }
+      }
+    },
+    "macCatalog.event.summaryInspErrSuffix": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": " Error: %@"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": " 错误：%@"
+          }
+        }
+      }
+    },
+    "macCatalog.event.summaryInspection": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Checked %d/%d tracks, found %d issues, and generated %d drafts."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已检查 %d/%d 首曲目，发现 %d 项问题，生成 %d 份草案。"
+          }
+        }
+      }
+    },
+    "macCatalog.event.summaryIntakeStopped": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatic import paused at a low-confidence file: %@."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "自动入库在低置信度文件处停止：%@。"
+          }
+        }
+      }
+    },
+    "macCatalog.event.summaryLibSuccess": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Task completed. View item-by-item results in Library Management."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "任务已完成，请到曲库管理查看逐项结果。"
+          }
+        }
+      }
+    },
+    "macCatalog.event.summaryLibWarning": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Task finished with items needing attention. View results in Library Management."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "任务已结束，存在需要处理的项目，请到曲库管理查看结果。"
+          }
+        }
+      }
+    },
+    "macCatalog.event.summaryLyricCounts": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%d ready to upgrade, %d to review, %d unmatched, %d failed. Review and confirm in Lyric Completion."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "可升级 %d 首，待核对 %d 首，未匹配 %d 首，失败 %d 首。请到歌词补全查看并确认。"
+          }
+        }
+      }
+    },
+    "macCatalog.event.summaryLyricScan": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Checked %d tracks: %d ready, %d need review, %d no match, %d skipped, %d failed."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "共检查 %d 首曲目：可确认 %d，需复核 %d，无匹配 %d，跳过 %d，失败 %d。"
+          }
+        }
+      }
+    },
+    "macCatalog.event.summaryManualReview": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Review before applying"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "审核后应用"
+          }
+        }
+      }
+    },
+    "macCatalog.event.summaryMetaCounts": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lookup finished: %d suggestions ready, %d unmatched, %d failed, %d stale. Review before applying."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "查询结束：建议已生成 %d 首，未匹配 %d 首，失败 %d 首，已变化 %d 首。建议需要确认后应用。"
+          }
+        }
+      }
+    },
+    "macCatalog.event.summaryMetaWarnSuffix": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": " %d tracks have source warnings."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "其中 %d 首有来源警告。"
+          }
+        }
+      }
+    },
+    "macCatalog.event.summaryMetadataBatch": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Checked %d tracks: %d ready, %d need review, %d no match, %d failed."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "共检查 %d 首曲目：可确认 %d，需复核 %d，无匹配 %d，失败 %d。"
+          }
+        }
+      }
+    },
+    "macCatalog.event.summaryPolicyAuto": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatic application of low-risk curation is enabled; complex or conflicting changes still require manual confirmation."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已开启低风险整理结果自动应用；复杂或存在冲突的整理仍需人工确认。"
+          }
+        }
+      }
+    },
+    "macCatalog.event.summaryPolicyDraftOnly": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Restored to draft-only mode; all library modifications require confirmation first."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已恢复为仅生成整理草案，所有曲库修改都需要先确认。"
+          }
+        }
+      }
+    },
+    "macCatalog.event.titleCurationAutoApplied": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Library curation applied automatically"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "曲库整理已自动应用"
+          }
+        }
+      }
+    },
+    "macCatalog.event.titleCurationDraftPending": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Library curation draft awaiting review"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "曲库整理草案待确认"
+          }
+        }
+      }
+    },
+    "macCatalog.event.titleDraftsAutoApplied": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatically applied %d low-risk curation suggestions"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已自动应用 %d 项低风险整理建议"
+          }
+        }
+      }
+    },
+    "macCatalog.event.titleDraftsFound": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Found %d curation suggestions awaiting review"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已发现 %d 项待确认整理建议"
+          }
+        }
+      }
+    },
+    "macCatalog.event.titleImportDone": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Library import or scan completed"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "曲库导入或扫描已完成"
+          }
+        }
+      }
+    },
+    "macCatalog.event.titleInspectionDone": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Library inspection completed"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "曲库巡检已完成"
+          }
+        }
+      }
+    },
+    "macCatalog.event.titleInspectionPartial": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Library inspection partially completed"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "曲库巡检未完全完成"
+          }
+        }
+      }
+    },
+    "macCatalog.event.titleIntakeDraftPending": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Import curation draft awaiting review"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "导入整理草案待确认"
+          }
+        }
+      }
+    },
+    "macCatalog.event.titleLyricAlbumDone": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Album lyric scan completed"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "专辑歌词扫描已完成"
+          }
+        }
+      }
+    },
+    "macCatalog.event.titleLyricLibraryDone": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Library lyric scan completed"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "全库歌词扫描已完成"
+          }
+        }
+      }
+    },
+    "macCatalog.event.titleMetadataBatchDone": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Batch metadata lookup completed"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "元数据批量查询已完成"
+          }
+        }
+      }
+    },
+    "macCatalog.event.titlePolicyUpdated": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Automatic curation policy updated"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "整理结果的自动处理方式已更新"
+          }
+        }
+      }
+    },
     "macCatalog.favorite": {
       "extractionState": "manual",
       "localizations": {
@@ -8858,6 +9368,40 @@
         }
       }
     },
+    "macChrome.errorEpisodeNotFound": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Episode not found."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "单集未找到。"
+          }
+        }
+      }
+    },
+    "macChrome.errorEpisodeUnavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Audio is unavailable."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "音频不可用。"
+          }
+        }
+      }
+    },
     "macChrome.errorForbidden": {
       "extractionState": "manual",
       "localizations": {
@@ -8939,6 +9483,74 @@
           "stringUnit": {
             "state": "translated",
             "value": "无法读取这个节目的 RSS，请稍后重试"
+          }
+        }
+      }
+    },
+    "macChrome.errorPodcastNotFound": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Podcast not found."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "播客未找到。"
+          }
+        }
+      }
+    },
+    "macChrome.errorPodcastPlaybackSettingsNotFound": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Podcast playback settings not found."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "播客播放设置不存在。"
+          }
+        }
+      }
+    },
+    "macChrome.errorPodcastPublisherConflict": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Publisher assignment has changed. Please reopen and try again."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "出品方归属已被修改，请重新打开后再试。"
+          }
+        }
+      }
+    },
+    "macChrome.errorPodcastPublisherNotFound": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Publisher not found."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "出品方未找到。"
           }
         }
       }
@@ -17834,6 +18446,74 @@
         }
       }
     },
+    "macRec.rankReason.communityAll": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Library-wide all-time listening stats"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "曲库用户汇总的累计收听统计"
+          }
+        }
+      }
+    },
+    "macRec.rankReason.communityDays": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Library-wide listening in the last %d days"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "曲库用户汇总的近%d天实际收听记录"
+          }
+        }
+      }
+    },
+    "macRec.rankReason.personalAll": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your all-time listening stats"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "你的累计收听统计"
+          }
+        }
+      }
+    },
+    "macRec.rankReason.personalDays": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your listening in the last %d days"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "你的近%d天实际收听记录"
+          }
+        }
+      }
+    },
     "macRec.rankingSubtitle": {
       "extractionState": "manual",
       "localizations": {
@@ -17864,6 +18544,176 @@
           "stringUnit": {
             "state": "translated",
             "value": "常听的声音"
+          }
+        }
+      }
+    },
+    "macRec.reason.artist": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "From artists you listen to or love"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "来自你听过或收藏的艺人"
+          }
+        }
+      }
+    },
+    "macRec.reason.community30d": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Popular across the library in the last 30 days"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "来自曲库用户近30天的实际收听热度"
+          }
+        }
+      }
+    },
+    "macRec.reason.familiar": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Revisit a familiar tune in your library"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "重听曲库里的熟悉旋律"
+          }
+        }
+      }
+    },
+    "macRec.reason.favorite": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "From your favorites"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "来自你的收藏"
+          }
+        }
+      }
+    },
+    "macRec.reason.feedback": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Based on your listening feedback"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "根据你之前的收听反馈"
+          }
+        }
+      }
+    },
+    "macRec.reason.lastfmPublic": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Matched in your library via public Last.fm charts/tags"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Last.fm 公共来源中找到与本库标题、艺人一致的歌曲"
+          }
+        }
+      }
+    },
+    "macRec.reason.lastfmSimilar": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Matched in your library via Last.fm similar tracks"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "根据你听过或收藏歌曲的 Last.fm 相似关系，在本地曲库找到"
+          }
+        }
+      }
+    },
+    "macRec.reason.localPick": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Selected from your local library"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "从本地曲库中选取"
+          }
+        }
+      }
+    },
+    "macRec.reason.revisit30d": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "You haven’t revisited this track in over 30 days"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "你已超过30天没有重听这首歌"
+          }
+        }
+      }
+    },
+    "macRec.reason.unplayed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Discover an unplayed track in your library"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "探索曲库中尚未听过的歌曲"
           }
         }
       }

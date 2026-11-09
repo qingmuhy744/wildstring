@@ -172,14 +172,14 @@ struct MacDiscoverView: View {
           : nil,
         trackReason: { track in
           if section == "daily" {
-            return dailyReasonByTrackID[track.id]
+            return dailyReasonByTrackID[track.id].map(localizedDailyReason)
           }
           guard let row = rankingByTrackID[track.id] else { return nil }
           let minutes = max(1, Int(row.listenedMs / 60_000))
           if row.reason.isEmpty {
             return L10n("macRec.rankPlayCountMinutes", row.playCount, minutes)
           }
-          return L10n("macRec.rankPlayCountReason", row.playCount, row.reason)
+          return L10n("macRec.rankPlayCountReason", row.playCount, localizedRankingReason(row.reason))
         },
         onRecommendationFeedback: section == "daily"
           ? { track, action in await feedback(track, action: action) } : nil
@@ -267,6 +267,37 @@ struct MacDiscoverView: View {
       rejected.insert(track.id)
       message = L10n("macRec.preferenceSaved")
     } catch { message = MacErrorText.message(for: error) }
+  }
+
+  private func localizedDailyReason(_ reason: String) -> String {
+    switch reason {
+    case "来自你的收藏": return L10n("macRec.reason.favorite")
+    case "根据你之前的收听反馈": return L10n("macRec.reason.feedback")
+    case "来自你听过或收藏的艺人": return L10n("macRec.reason.artist")
+    case "重听曲库里的熟悉旋律": return L10n("macRec.reason.familiar")
+    case "探索曲库中尚未听过的歌曲", "探索本曲库中你尚未听过的歌曲": return L10n("macRec.reason.unplayed")
+    case "来自曲库用户近30天的实际收听热度": return L10n("macRec.reason.community30d")
+    case "你已超过30天没有重听这首歌": return L10n("macRec.reason.revisit30d")
+    case "Last.fm 公共来源中找到与本库标题、艺人一致的歌曲": return L10n("macRec.reason.lastfmPublic")
+    case "根据你听过或收藏歌曲的 Last.fm 相似关系，在本地曲库找到": return L10n("macRec.reason.lastfmSimilar")
+    case "从本地曲库中选取": return L10n("macRec.reason.localPick")
+    default: return reason
+    }
+  }
+
+  private func localizedRankingReason(_ reason: String) -> String {
+    switch reason {
+    case "你的累计收听统计": return L10n("macRec.rankReason.personalAll")
+    case "曲库用户汇总的累计收听统计": return L10n("macRec.rankReason.communityAll")
+    default: break
+    }
+    if let m = try? /^你的近(\d+)天实际收听记录$/.wholeMatch(in: reason), let days = Int(m.1) {
+      return L10n("macRec.rankReason.personalDays", days)
+    }
+    if let m = try? /^曲库用户汇总的近(\d+)天实际收听记录$/.wholeMatch(in: reason), let days = Int(m.1) {
+      return L10n("macRec.rankReason.communityDays", days)
+    }
+    return reason
   }
 }
 

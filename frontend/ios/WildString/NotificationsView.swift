@@ -48,7 +48,7 @@ struct NotificationsView: View {
                                     .fill(Color.wildAccent)
                                     .frame(width: 7, height: 7)
                             }
-                            Text(notification.title)
+                            Text(localizedTitle(notification.title))
                                 .font(.subheadline.bold())
                                 .foregroundStyle(.primary)
                             Spacer()
@@ -58,7 +58,7 @@ struct NotificationsView: View {
                                     .foregroundStyle(severity == "error" ? .red : .orange)
                             }
                         }
-                        Text(notification.summary)
+                        Text(localizedSummary(notification.summary))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .lineLimit(3)
@@ -199,5 +199,46 @@ struct NotificationsView: View {
     private func dateText(_ value: String) -> String {
         let formatted = value.replacingOccurrences(of: "T", with: " ")
         return String(formatted.prefix(16))
+    }
+
+    private func localizedTitle(_ title: String) -> String {
+        switch title {
+        case "整理方式已更新", "整理结果的自动处理方式已更新": return L10n("notifications.event.titlePolicyUpdated")
+        case "曲库巡检完成", "曲库巡检已完成": return L10n("notifications.event.titleInspectionDone")
+        case "曲库巡检需要处理", "曲库巡检未完全完成": return L10n("notifications.event.titleInspectionPartial")
+        case "草案待确认", "曲库整理草案待确认", "导入整理草案待确认": return L10n("notifications.event.titleCurationDraftPending")
+        case "草案已应用", "曲库整理已自动应用": return L10n("notifications.event.titleCurationAutoApplied")
+        case "歌词补全与洗版扫描结束", "全库歌词扫描已完成", "专辑歌词扫描已完成": return L10n("notifications.event.titleLyricLibraryDone")
+        case "导入任务结束", "扫描任务结束", "曲库导入或扫描已完成": return L10n("notifications.event.titleImportDone")
+        case "元数据查询结束", "元数据批量查询已完成": return L10n("notifications.event.titleMetadataBatchDone")
+        default: return title
+        }
+    }
+
+    private func localizedSummary(_ summary: String) -> String {
+        switch summary {
+        case "自动应用": return L10n("notifications.event.summaryAutoApply")
+        case "审核后应用": return L10n("notifications.event.summaryManualReview")
+        case "任务已完成，请到曲库管理查看逐项结果。": return L10n("notifications.event.summaryLibSuccess")
+        case "任务已结束，存在需要处理的项目，请到曲库管理查看结果。": return L10n("notifications.event.summaryLibWarning")
+        default: break
+        }
+        if let m = try? /^已检查 (\d+) 首，发现 (\d+) 项，失败 (\d+) 首。(?: 错误：(.+))?$/.wholeMatch(in: summary),
+           let processed = Int(m.1), let issues = Int(m.2), let failed = Int(m.3) {
+            let base = L10n("notifications.event.summaryInspCounts", processed, issues, failed)
+            if let err = m.4 { return base + L10n("notifications.event.summaryInspErrSuffix", String(err)) }
+            return base
+        }
+        if let m = try? /^可升级 (\d+) 首，待核对 (\d+) 首，未匹配 (\d+) 首，失败 (\d+) 首。请到歌词补全查看并确认。$/.wholeMatch(in: summary),
+           let ready = Int(m.1), let review = Int(m.2), let noMatch = Int(m.3), let failed = Int(m.4) {
+            return L10n("notifications.event.summaryLyricCounts", ready, review, noMatch, failed)
+        }
+        if let m = try? /^查询结束：建议已生成 (\d+) 首，未匹配 (\d+) 首，失败 (\d+) 首，已变化 (\d+) 首。建议需要确认后应用。(?:其中 (\d+) 首有来源警告。)?$/.wholeMatch(in: summary),
+           let completed = Int(m.1), let noMatch = Int(m.2), let failed = Int(m.3), let stale = Int(m.4) {
+            let base = L10n("notifications.event.summaryMetaCounts", completed, noMatch, failed, stale)
+            if let warnStr = m.5, let warn = Int(warnStr) { return base + L10n("notifications.event.summaryMetaWarnSuffix", warn) }
+            return base
+        }
+        return summary
     }
 }
