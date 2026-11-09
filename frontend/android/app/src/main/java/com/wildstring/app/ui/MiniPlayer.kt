@@ -149,11 +149,11 @@ import androidx.compose.ui.unit.dp
                         }
                     }
                     Spacer(Modifier.width(4.dp))
-                    FilledTonalIconButton(
+                    FilledIconButton(
                         onClick = tactile(vm::toggle),
-                        colors = IconButtonDefaults.filledTonalIconButtonColors(
-                            containerColor = colors.primary.copy(alpha = 0.14f),
-                            contentColor = colors.primary,
+                        colors = IconButtonDefaults.filledIconButtonColors(
+                            containerColor = colors.primary,
+                            contentColor = colors.onPrimary,
                         ),
                         modifier = Modifier.size(38.dp),
                     ) {

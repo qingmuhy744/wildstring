@@ -172,6 +172,10 @@ class SettingsExperienceTest {
                 compose.onNodeWithText("中文专辑名").assertIsDisplayed()
                 compose.onNodeWithText("Discover").assertDoesNotExist()
                 capture("discovery-localized-zh.png")
+                compose.runOnIdle { vm.settings.appearance("dark") }
+                compose.onNodeWithTag("appearance-dark").assertExists()
+                capture("discovery-dark-zh.png")
+                compose.runOnIdle { vm.settings.appearance("system") }
                 settings()
                 category("storage")
                 compose.onNodeWithTag("setting-audio-cache").performClick()

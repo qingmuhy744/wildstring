@@ -24,7 +24,15 @@ import androidx.compose.ui.unit.dp
 
 @Composable internal fun CatalogTopBar(state: MusicState, back: () -> Unit, settings: () -> Unit, compact: Boolean = false,
     unread: Int = 0, notifications: (() -> Unit)? = null) {
-    val title: @Composable () -> Unit = { Text(catalogTitle(state), maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis) }
+    val title: @Composable () -> Unit = {
+        Text(
+            catalogTitle(state),
+            fontFamily = androidx.compose.ui.text.font.FontFamily.Serif,
+            fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
+            maxLines = 1,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+        )
+    }
     val actions: @Composable RowScope.() -> Unit = {
         notifications?.let { open -> IconButton(open, Modifier.testTag("open-notifications")) {
             BadgedBox(badge = { if (unread > 0) Badge { Text(if (unread > 99) "99+" else unread.toString()) } }) { Icon(Icons.Default.NotificationsNone, stringResource(R.string.notifications)) }
@@ -71,7 +79,7 @@ import androidx.compose.ui.unit.dp
     TextField(input, { value ->
         input = value
         if (value.composition == null && value.text != query) search(value.text)
-    }, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp).testTag("catalog-search"),
+    }, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).testTag("catalog-search"),
         placeholder = { Text(stringResource(R.string.search_music)) }, singleLine = true, shape = RoundedCornerShape(28.dp),
         leadingIcon = { Icon(Icons.Default.Search, null) }, trailingIcon = {
             if (input.text.isNotEmpty()) IconButton({ input = TextFieldValue(""); search("") }) { Icon(Icons.Default.Close, stringResource(R.string.clear_search)) }

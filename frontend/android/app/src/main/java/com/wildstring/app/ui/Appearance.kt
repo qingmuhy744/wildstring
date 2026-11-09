@@ -6,13 +6,13 @@ import androidx.compose.ui.graphics.Color
 
 internal val LocalDarkAppearance = staticCompositionLocalOf { true }
 
-// The original warm orange / deep green palette remains the classic dark appearance.
+// Warm paper daylight palette aligned with DESIGN.md §3.1.
 internal val classicLightColors = lightColorScheme(
-    primary = Color(0xFFA34527), onPrimary = Color.White, primaryContainer = Color(0xFFFFDBCC), onPrimaryContainer = Color(0xFF3A160B),
-    secondary = Color(0xFF58644F), onSecondary = Color.White, secondaryContainer = Color(0xFFDFE7D5), onSecondaryContainer = Color(0xFF20271B),
-    background = Color(0xFFF8F7F2), surface = Color(0xFFF8F7F2), surfaceVariant = Color(0xFFE8EADF),
-    onSurface = Color(0xFF282B23), onSurfaceVariant = Color(0xFF62685A),
-    surfaceContainerLowest = Color.White, surfaceContainerLow = Color(0xFFF1F1E9), surfaceContainer = Color(0xFFEDEEE4),
-    surfaceContainerHigh = Color(0xFFE7E9DE), surfaceContainerHighest = Color(0xFFE0E3D7),
-    outline = Color(0xFF797F70), outlineVariant = Color(0xFFCBCFC0),
+    primary = Color(0xFFBC5438), onPrimary = Color(0xFFFFFAF3), primaryContainer = Color(0xFFF5DDD4), onPrimaryContainer = Color(0xFF3A160B),
+    secondary = Color(0xFF57492F), onSecondary = Color(0xFFFFFAF3), secondaryContainer = Color(0xFFDDE2D0), onSecondaryContainer = Color(0xFF2A2B25),
+    background = Color(0xFFF6F3ED), surface = Color(0xFFF6F3ED), surfaceVariant = Color(0xFFE4E7DB),
+    onSurface = Color(0xFF2A2B25), onSurfaceVariant = Color(0xFF626457),
+    surfaceContainerLowest = Color(0xFFFFFDF8), surfaceContainerLow = Color(0xFFFAF9F4), surfaceContainer = Color(0xFFEEECE5),
+    surfaceContainerHigh = Color(0xFFE6E5DC), surfaceContainerHighest = Color(0xFFE4E7DB),
+    outline = Color(0xFF6A6E5B), outlineVariant = Color(0xFFDEDED2),
 )
