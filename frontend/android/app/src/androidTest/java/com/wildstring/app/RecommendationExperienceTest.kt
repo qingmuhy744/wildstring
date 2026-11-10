@@ -20,7 +20,8 @@ class RecommendationExperienceTest {
     private class Fixture(val canAddPodcasts: Boolean = true, val profile: String = "owner") : java.io.Closeable {
         val server = MockWebServer(); val requests = ConcurrentLinkedQueue<Pair<String, String>>()
         val track = """{"id":"local-a","title":"真实本库歌曲","artists":["合成艺人"],"album":"合成专辑","duration_ms":12000,"format":"mp3","status":"available","has_cover":false,"loved":false}"""
-        var preferences = """{"version":1,"use_ai":false,"use_lastfm":false,"count":20,"connection_id":"local","sources":["personal","community","discovery","revisit"],"lastfm_tags":[],"external_enabled":true,"external_refresh_days":7,"external_sources":["lastfm_charts"],"external_use_ai":false,"external_call_limit":6}"""
+        // Written on the MockWebServer thread after the request is recorded; read by the test.
+        @Volatile var preferences = """{"version":1,"use_ai":false,"use_lastfm":false,"count":20,"connection_id":"local","sources":["personal","community","discovery","revisit"],"lastfm_tags":[],"external_enabled":true,"external_refresh_days":7,"external_sources":["lastfm_charts"],"external_use_ai":false,"external_call_limit":6}"""
         var wanted = false
         @Volatile var podcastAdded = false
         @Volatile var directoryThrottled = false
@@ -129,6 +130,8 @@ class RecommendationExperienceTest {
                 compose.onNodeWithTag("ai-connection-choice").assertTextContains("我的模型 · synthetic-one")
                 compose.onNodeWithText("保存偏好").performClick()
                 compose.waitUntil(10_000) { fixture.requests.any { it.first.startsWith("PUT ") } }
+                // The request is recorded before the fixture stores its body; wait for the stored copy.
+                compose.waitUntil(10_000) { JsonParser.parseString(fixture.preferences).asJsonObject.number("version") == 2L }
                 val saved = JsonParser.parseString(fixture.preferences).asJsonObject
                 assertEquals("personal-one", saved.text("connection_id")); assertFalse(saved["sources"].asJsonArray.any { it.asString == "community" })
                 capture("recommendation-daily-phone.png")

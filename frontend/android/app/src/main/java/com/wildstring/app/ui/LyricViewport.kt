@@ -53,10 +53,18 @@ import kotlinx.coroutines.flow.first
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
-/** Browsing only moves the viewport. The explicit preview button is the only seek action. */
+/**
+ * Browsing only moves the viewport. The explicit preview button is the only seek action.
+ *
+ * [playbackClock] is the monotonic millisecond source used to interpolate the position between
+ * player updates while [playing]. The app always uses the device's elapsed realtime; tests that
+ * drive the Compose test clock inject their own source so the interpolation cannot keep producing
+ * new values (and recompositions) from wall time while the test waits for idle.
+ */
 @Composable internal fun LyricViewport(lyrics: Lyrics, position: Long, onSeek: (Long) -> Unit,
     onBlank: () -> Unit, modifier: Modifier = Modifier, onArtwork: () -> Unit = {}, followDelayMs: Long = 2_000,
-    playing: Boolean = false, lyricSize: LyricSize = LyricSize.MEDIUM) {
+    playing: Boolean = false, lyricSize: LyricSize = LyricSize.MEDIUM,
+    playbackClock: () -> Long = { SystemClock.elapsedRealtime() }) {
     val feedback = LocalTactileFeedback.current
     var follow by remember(lyrics) { mutableStateOf(true) }
     var dragging by remember(lyrics) { mutableStateOf(false) }
@@ -67,15 +75,16 @@ import kotlin.math.roundToInt
     val density = LocalDensity.current
     val measurer = rememberTextMeasurer()
     val smoothPosition = remember(lyrics) { mutableLongStateOf(position) }
+    val clock by rememberUpdatedState(playbackClock)
     LaunchedEffect(lyrics, playing, position) {
         if (!playing) {
             smoothPosition.longValue = position
             return@LaunchedEffect
         }
         smoothPosition.longValue = position
-        val anchor = SystemClock.elapsedRealtime()
+        val anchor = clock()
         while (isActive) {
-            smoothPosition.longValue = position + (SystemClock.elapsedRealtime() - anchor).coerceAtLeast(0)
+            smoothPosition.longValue = position + (clock() - anchor).coerceAtLeast(0)
             delay(16)
         }
     }
