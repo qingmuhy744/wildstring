@@ -128,9 +128,11 @@ jobs:
           # zh-CN before running it; otherwise resource lookups follow the
           # runner's default locale and every copy assertion misses.
           # android-emulator-runner runs each script line in its own shell, so
-          # the post-reboot wait must stay on one line.
+          # the post-reboot wait must stay on one line. adbd sometimes refuses
+          # the root restart right after boot ("unable to connect for root").
           script: |
-            adb root
+            adb root || { sleep 5; adb wait-for-device; adb root; } || { sleep 15; adb wait-for-device; adb root; }
+            adb wait-for-device
             adb shell setprop persist.sys.locale zh-CN
             adb reboot
             adb wait-for-device
