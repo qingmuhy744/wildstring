@@ -38,19 +38,24 @@ class LyricGestureTest {
 
     @Test fun longerPreferenceKeepsTheSelectionBeyondTheDefaultDelay() {
         show(followDelayMs = 5_000, playing = true)
-        compose.onNodeWithTag("lyric-scroll").performTouchInput { swipeUp(durationMillis = 450) }
-        // The follow timer is a coroutine delay on the Compose test clock, so time it on that
-        // clock. Wall-clock waits drift against it: waitUntil advances one 16 ms frame per
-        // ~10 ms poll, so fast runs pass five virtual seconds before 2.2 s of wall time and
-        // slow software-rendered runs reach only a few virtual seconds in a 10 s wall timeout.
-        compose.waitForIdle() // The fling settles and the five-second timer starts.
+        // The follow timer is a coroutine delay on the Compose test clock, and playback keeps a
+        // per-frame position loop running. With auto-advance on, every idle wait pumps frames for
+        // that loop, so virtual time races ahead of wall time (or lags it on a slow emulator) and
+        // wall-clock checks were flaky either way. Drive the test clock by hand instead.
         compose.mainClock.autoAdvance = false
         try {
-            compose.mainClock.advanceTimeBy(2_500)
-            // Beyond the two-second default, the longer preference still holds the selection.
+            // Input injection still advances the clock by the gesture's own duration.
+            compose.onNodeWithTag("lyric-scroll").performTouchInput { swipeUp(durationMillis = 450) }
+            val released = compose.mainClock.currentTime
+            // The timer starts only after the fling settles, so four seconds after release a
+            // five-second preference cannot have expired, while the two-second default would have.
+            compose.mainClock.advanceTimeBy(4_000)
             compose.onNodeWithTag("lyric-seek-preview").assertExists()
-            compose.mainClock.advanceTimeBy(3_500)
-            compose.onNodeWithTag("lyric-seek-preview").assertDoesNotExist()
+            while (compose.onAllNodesWithTag("lyric-seek-preview").fetchSemanticsNodes().isNotEmpty()) {
+                assertTrue("selection should be released within 10 s", compose.mainClock.currentTime - released < 10_000)
+                compose.mainClock.advanceTimeBy(250)
+            }
+            assertTrue("selection should be held for the full 5 s preference", compose.mainClock.currentTime - released >= 5_000)
         } finally {
             compose.mainClock.autoAdvance = true
         }
