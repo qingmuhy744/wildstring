@@ -3025,7 +3025,11 @@
     "showDeliveryAria": "{{title}}新集自动待播",
     "unfollowedStatus": "未关注 · 关注后生效",
     "unreadableEpisode": "这一集已经无法读取",
-    "unreadableEpisodeHelp": "这一集已经无法读取。可以移除它，或稍后重试。"
+    "unreadableEpisodeHelp": "这一集已经无法读取。可以移除它，或稍后重试。",
+    "reorderAria": "调整 {{title}} 的顺序",
+    "moveUp": "上移 {{title}}",
+    "moveDown": "下移 {{title}}",
+    "reorderFailed": "顺序保存失败，已恢复原顺序，请重试。"
   },
   "podcastOpml": {
     "closeDialog": "关闭 OPML 导入",

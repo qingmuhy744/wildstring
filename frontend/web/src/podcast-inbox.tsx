@@ -187,6 +187,7 @@ export function PodcastQueueDefaults() {
 
 interface UnifiedPendingRow {
   episode_id: string;
+  addedAt: string;
   origin: 'manual' | 'rule';
   source: 'queue' | 'inbox';
   title: string;
@@ -257,6 +258,7 @@ export function PodcastInboxDialog({
             const show = await fetchShow(episode.podcast_id);
             return {
               episode_id: item.episode_id,
+              addedAt: item.added_at ?? '',
               origin: item.origin,
               source: 'queue',
               title: episode.title,
@@ -267,6 +269,7 @@ export function PodcastInboxDialog({
           } catch {
             return {
               episode_id: item.episode_id,
+              addedAt: item.added_at ?? '',
               origin: item.origin,
               source: 'queue',
               title: t('podcastInbox.unreadableEpisode'),
@@ -286,6 +289,7 @@ export function PodcastInboxDialog({
               const show = await fetchShow(item.podcast_id || episode.podcast_id);
               return {
                 episode_id: item.episode_id,
+                addedAt: item.added_at ?? '',
                 origin: item.source === 'rule' ? 'rule' : 'manual',
                 source: 'inbox',
                 title: episode.title,
@@ -296,6 +300,7 @@ export function PodcastInboxDialog({
             } catch {
               return {
                 episode_id: item.episode_id,
+                addedAt: item.added_at ?? '',
                 origin: 'manual',
                 source: 'inbox',
                 title: t('podcastInbox.unreadableEpisode'),
@@ -318,7 +323,10 @@ export function PodcastInboxDialog({
       const sortedShows = [...followed].sort((a, b) =>
         Boolean(a.followed) === Boolean(b.followed) ? 0 : a.followed ? -1 : 1,
       );
-      setRows([...resolvedQueue, ...resolvedInbox]);
+      // Ascending join time; entries without a timestamp keep their relative order at the front.
+      setRows(
+        [...resolvedQueue, ...resolvedInbox].sort((a, b) => a.addedAt.localeCompare(b.addedAt)),
+      );
       setQueueVersion(remoteQueue.version);
       setFollowedShows(sortedShows);
       setDefaultAction(normalizeDeliveryAction(prefs.default_action));
@@ -368,6 +376,36 @@ export function PodcastInboxDialog({
       setRows((current) => current.filter((entry) => entry.episode_id !== item.episode_id));
     } catch {
       setProblem(t('podcastInbox.removeFailed'));
+    }
+  }
+
+  async function moveRow(from: number, to: number) {
+    if (from === to || to < 0 || to >= rows.length) return;
+    const previous = rows;
+    const next = [...rows];
+    const [moved] = next.splice(from, 1);
+    next.splice(to, 0, moved);
+    setRows(next);
+    setProblem('');
+    try {
+      const saved = await putPodcastQueue(
+        queueVersion,
+        next.map((item) => ({
+          episode_id: item.episode_id,
+          origin: 'manual' as const,
+          added_at: item.addedAt,
+        })),
+      );
+      setQueueVersion(saved.version);
+      setRows(
+        next.map((item) => ({ ...item, source: 'queue' as const, origin: 'manual' as const })),
+      );
+    } catch {
+      setRows(previous);
+      setProblem(t('podcastInbox.reorderFailed'));
+      // Another device may have advanced the queue; refresh the version so a retry can apply.
+      const fresh = await getPodcastQueue().catch(() => null);
+      if (fresh) setQueueVersion(fresh.version);
     }
   }
 
@@ -481,13 +519,52 @@ export function PodcastInboxDialog({
               )}
             </div>
             <ul className="podcast-inbox-list">
-              {rows.map((item) => (
-                <li className="podcast-inbox-item" key={item.episode_id}>
+              {rows.map((item, index) => (
+                <li
+                  className="podcast-inbox-item"
+                  key={item.episode_id}
+                  draggable
+                  onDragStart={(event) => {
+                    event.dataTransfer.setData('text/plain', String(index));
+                    event.dataTransfer.effectAllowed = 'move';
+                  }}
+                  onDragOver={(event) => event.preventDefault()}
+                  onDrop={(event) => {
+                    event.preventDefault();
+                    const from = Number(event.dataTransfer.getData('text/plain'));
+                    if (Number.isInteger(from)) void moveRow(from, index);
+                  }}
+                >
+                  <span className="podcast-inbox-handle" aria-hidden="true">
+                    ⠿
+                  </span>
                   <div className="podcast-inbox-copy">
                     <strong>{item.title}</strong>
                     {item.showTitle && <span>{item.showTitle}</span>}
                   </div>
                   <div className="podcast-inbox-actions">
+                    <span
+                      className="podcast-inbox-reorder"
+                      role="group"
+                      aria-label={t('podcastInbox.reorderAria', { title: item.title })}
+                    >
+                      <button
+                        type="button"
+                        aria-label={t('podcastInbox.moveUp', { title: item.title })}
+                        disabled={index === 0}
+                        onClick={() => void moveRow(index, index - 1)}
+                      >
+                        ↑
+                      </button>
+                      <button
+                        type="button"
+                        aria-label={t('podcastInbox.moveDown', { title: item.title })}
+                        disabled={index === rows.length - 1}
+                        onClick={() => void moveRow(index, index + 1)}
+                      >
+                        ↓
+                      </button>
+                    </span>
                     {item.episode && item.show && (
                       <button
                         type="button"

@@ -9,6 +9,7 @@ export type NewEpisodeAction = 'inbox' | 'queue_last' | 'queue_next' | 'ignore';
 export interface RemoteQueueItem {
   episode_id: string;
   origin: QueueOrigin;
+  added_at?: string;
 }
 
 export interface RemoteQueue {
