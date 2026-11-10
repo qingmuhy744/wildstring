@@ -39,11 +39,21 @@ class LyricGestureTest {
     @Test fun longerPreferenceKeepsTheSelectionBeyondTheDefaultDelay() {
         show(followDelayMs = 5_000, playing = true)
         compose.onNodeWithTag("lyric-scroll").performTouchInput { swipeUp(durationMillis = 450) }
-        val started = android.os.SystemClock.elapsedRealtime()
-        compose.waitUntil(3_000) { android.os.SystemClock.elapsedRealtime() - started >= 2_200 }
-        compose.onNodeWithTag("lyric-seek-preview").assertExists()
-        compose.waitUntil(10_000) { compose.onAllNodesWithTag("lyric-seek-preview").fetchSemanticsNodes().isEmpty() }
-        compose.onNodeWithTag("lyric-seek-preview").assertDoesNotExist()
+        // The follow timer is a coroutine delay on the Compose test clock, so time it on that
+        // clock. Wall-clock waits drift against it: waitUntil advances one 16 ms frame per
+        // ~10 ms poll, so fast runs pass five virtual seconds before 2.2 s of wall time and
+        // slow software-rendered runs reach only a few virtual seconds in a 10 s wall timeout.
+        compose.waitForIdle() // The fling settles and the five-second timer starts.
+        compose.mainClock.autoAdvance = false
+        try {
+            compose.mainClock.advanceTimeBy(2_500)
+            // Beyond the two-second default, the longer preference still holds the selection.
+            compose.onNodeWithTag("lyric-seek-preview").assertExists()
+            compose.mainClock.advanceTimeBy(3_500)
+            compose.onNodeWithTag("lyric-seek-preview").assertDoesNotExist()
+        } finally {
+            compose.mainClock.autoAdvance = true
+        }
         compose.runOnIdle { assertTrue(seeks.isEmpty()) }
     }
 

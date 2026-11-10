@@ -297,14 +297,18 @@ class MobileCompletionTest {
                 compose.onNodeWithText(uiString(R.string.daily_recommendations), substring = false).performClick()
                 compose.waitUntil(10_000) { compose.onAllNodesWithTag("daily-track-completion-0").fetchSemanticsNodes().isNotEmpty() }
                 capture("mobile-daily.png")
+                // A click while the panel is still busy loading lands on a disabled button and
+                // is silently dropped; wait for the enabled state instead of racing it.
+                compose.waitUntil(20_000) { compose.onAllNodes(hasTestTag("daily-save") and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
                 compose.onNodeWithTag("daily-save").performClick()
-                compose.waitUntil(10_000) { fixture.mutations.any { it.first.endsWith("/playlists/manual/tracks") } }
+                try { compose.waitUntil(20_000) { fixture.mutations.any { it.first.endsWith("/playlists/manual/tracks") } } }
+                catch (error: Throwable) { capture("mobile-daily-save-failure.png"); throw AssertionError("Daily save requests=${fixture.requests.toList()} mutations=${fixture.mutations.toList()}", error) }
                 compose.onAllNodesWithContentDescription(uiString(R.string.back)).onLast().performClick()
                 compose.waitUntil(10_000) { compose.onAllNodesWithTag("feature-daily").fetchSemanticsNodes().isEmpty() }
                 compose.onNodeWithTag("nav-assistant").performClick()
                 // Match AgentWorkspaceTest: the assistant destination is slow
                 // on the software-rendered CI emulator.
-                compose.waitUntil(15_000) { compose.onAllNodesWithTag("agent-chat-input").fetchSemanticsNodes().isNotEmpty() }
+                compose.waitUntil(30_000) { compose.onAllNodesWithTag("agent-chat-input").fetchSemanticsNodes().isNotEmpty() }
                 compose.onNodeWithTag("agent-chat-input").assertIsDisplayed()
                 compose.onNodeWithTag("nav-mine").performClick()
                 compose.onNodeWithContentDescription(uiString(R.string.playlist_new)).performClick()
