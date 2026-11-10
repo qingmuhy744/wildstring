@@ -20,11 +20,32 @@ on:
         description: "Run full emulator regression before release"
         type: boolean
         default: true
+      test_classes:
+        description: "Comma-separated instrumented test classes (empty runs every class)"
+        type: string
+        default: ""
+      test_repeat:
+        description: "Run the selected classes this many times (flake reproduction)"
+        type: string
+        default: "1"
+      test_retries:
+        description: "Retries for classes that fail (0 measures the raw failure rate)"
+        type: string
+        default: "1"
   workflow_call:
     inputs:
       run_emulator:
         type: boolean
         default: false
+      test_classes:
+        type: string
+        default: ""
+      test_repeat:
+        type: string
+        default: "1"
+      test_retries:
+        type: string
+        default: "1"
   schedule:
     # Weekly emulator regression baseline on main (Mondays 09:00 Asia/Shanghai)
     # so flaky tests surface on a known-good ref instead of during releases.
@@ -34,16 +55,20 @@ permissions:
   contents: read
 
 concurrency:
-  group: android-${{ github.event.pull_request.number || github.ref }}
+  # Manual dispatches are flake-reproduction runs; let them run side by side.
+  group: android-${{ github.event.pull_request.number || github.ref }}${{ github.event_name == 'workflow_dispatch' && format('-{0}', github.run_id) || '' }}
   cancel-in-progress: true
 
 jobs:
   apk:
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 70
     env:
       # The scheduled run doubles as the weekly emulator baseline on main.
       RUN_EMULATOR: ${{ inputs.run_emulator == true || github.event_name == 'schedule' }}
+      ANDROID_TEST_CLASSES: ${{ inputs.test_classes || '' }}
+      ANDROID_TEST_REPEAT: ${{ inputs.test_repeat || '1' }}
+      ANDROID_TEST_RETRIES: ${{ inputs.test_retries || '1' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -65,19 +90,14 @@ jobs:
         if: ${{ env.RUN_EMULATOR == 'true' }}
         with:
           version: "0.13.1"
+      - name: Build the instrumented test APK
+        if: ${{ env.RUN_EMULATOR == 'true' }}
+        run: ./frontend/android/gradlew -p frontend/android --console=plain :app:assembleDebugAndroidTest
       - name: Start disposable synthetic API for native integration
         if: ${{ env.RUN_EMULATOR == 'true' }}
         run: |
-          mkdir -p artifacts
           uv sync --frozen --project backend
-          WILDSTRING_WEB_TEST_PORT=19882 WILDSTRING_TEST_LARGE_LIBRARY=1 WILDSTRING_TEST_API_ONLY=1 uv run --frozen --project backend python scripts/serve_web_tests.py > artifacts/android-synthetic-api.log 2>&1 &
-          echo $! > "$RUNNER_TEMP/wildstring-synthetic-api.pid"
-          for _ in $(seq 1 60); do
-            if curl --fail --silent http://127.0.0.1:19882/health/ready > /dev/null; then exit 0; fi
-            sleep 1
-          done
-          cat artifacts/android-synthetic-api.log
-          exit 1
+          bash scripts/ci_synthetic_api.sh start artifacts/android-synthetic-api.log
       - name: Enable emulator acceleration
         if: ${{ env.RUN_EMULATOR == 'true' }}
         run: |
@@ -86,12 +106,14 @@ jobs:
           sudo udevadm trigger --name-match=kvm
       - name: Native login, streaming and lyrics test
         id: emulator_regression
-        # A first failure keeps the job alive so the retry below can rerun the
-        # whole suite on a freshly booted emulator; SwiftShader rendering makes
-        # single waitUntil timeouts a recurring false alarm.
-        continue-on-error: true
         if: ${{ env.RUN_EMULATOR == 'true' }}
-        timeout-minutes: 20
+        # Each test class runs in its own instrumentation process, so an app crash
+        # only fails the class that caused it. Failed classes are retried once
+        # against a restarted synthetic API; every attempt keeps its own report,
+        # logcat and screenshots under artifacts/android-instrumented/.
+        timeout-minutes: 45
+        env:
+          ANDROID_TEST_BEFORE_RETRY: bash scripts/ci_synthetic_api.sh restart artifacts/android-synthetic-api-retry.log
         uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2
         with:
           api-level: 35
@@ -107,54 +129,16 @@ jobs:
           # runner's default locale and every copy assertion misses.
           # android-emulator-runner runs each script line in its own shell, so
           # the post-reboot wait must stay on one line.
-          script: &android-test-script |
+          script: |
             adb root
             adb shell setprop persist.sys.locale zh-CN
             adb reboot
             adb wait-for-device
             adb shell 'while [ "$(getprop sys.boot_completed)" != "1" ]; do sleep 2; done'
-            make android-connected-test ANDROID_TEST_ARGS=-Pandroid.testInstrumentationRunnerArguments.realBackend=http://10.0.2.2:19882/
-      - name: Archive the first emulator attempt
-        if: ${{ steps.emulator_regression.outcome == 'failure' }}
-        run: |
-          mkdir -p artifacts/android-first-attempt
-          cp -R frontend/android/app/build/outputs/androidTest-results/connected/debug/. artifacts/android-first-attempt/ 2>/dev/null || true
-      - name: Restart the disposable synthetic API for the retry
-        if: ${{ steps.emulator_regression.outcome == 'failure' }}
-        run: |
-          # The suite mutates the synthetic library (reads, playlists, favorites),
-          # so the retry must start from a fresh backend to stay comparable.
-          if test -f "$RUNNER_TEMP/wildstring-synthetic-api.pid"; then
-            kill "$(cat "$RUNNER_TEMP/wildstring-synthetic-api.pid")" || true
-            rm -f "$RUNNER_TEMP/wildstring-synthetic-api.pid"
-            sleep 2
-          fi
-          WILDSTRING_WEB_TEST_PORT=19882 WILDSTRING_TEST_LARGE_LIBRARY=1 WILDSTRING_TEST_API_ONLY=1 uv run --frozen --project backend python scripts/serve_web_tests.py > artifacts/android-synthetic-api-retry.log 2>&1 &
-          echo $! > "$RUNNER_TEMP/wildstring-synthetic-api.pid"
-          for _ in $(seq 1 60); do
-            if curl --fail --silent http://127.0.0.1:19882/health/ready > /dev/null; then exit 0; fi
-            sleep 1
-          done
-          cat artifacts/android-synthetic-api-retry.log
-          exit 1
-      - name: Native login, streaming and lyrics test (retry after flake)
-        if: ${{ steps.emulator_regression.outcome == 'failure' }}
-        timeout-minutes: 20
-        uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2
-        with:
-          api-level: 35
-          target: default
-          arch: x86_64
-          profile: pixel_2
-          ram-size: 2048M
-          disable-animations: true
-          script: *android-test-script
+            python3 scripts/run_android_instrumented.py --arg realBackend=http://10.0.2.2:19882/ --classes=$ANDROID_TEST_CLASSES --repeat=$ANDROID_TEST_REPEAT --retries=$ANDROID_TEST_RETRIES
       - name: Stop synthetic API
         if: ${{ always() && env.RUN_EMULATOR == 'true' }}
-        run: |
-          if test -f "$RUNNER_TEMP/wildstring-synthetic-api.pid"; then
-            kill "$(cat "$RUNNER_TEMP/wildstring-synthetic-api.pid")" || true
-          fi
+        run: bash scripts/ci_synthetic_api.sh stop
       - name: Upload installable debug APK
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -170,7 +154,7 @@ jobs:
           path: |
             artifacts/android-synthetic-api.log
             artifacts/android-synthetic-api-retry.log
-            artifacts/android-first-attempt/
+            artifacts/android-instrumented/
             frontend/android/build/reports/
             frontend/android/app/build/reports/
             frontend/android/app/build/outputs/androidTest-results/
