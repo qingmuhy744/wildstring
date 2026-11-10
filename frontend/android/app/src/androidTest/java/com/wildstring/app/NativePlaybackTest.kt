@@ -294,7 +294,6 @@ class NativePlaybackTest {
             }
             compose.runOnIdle { vm.settings.playbackStyle("cover") }
             compose.waitUntil(10_000) { compose.onAllNodesWithTag("playback-visual-cover").fetchSemanticsNodes().isNotEmpty() }
-            compose.onNodeWithTag("player-visual-stage").performTouchInput { click(androidx.compose.ui.geometry.Offset(4f, 4f)) }
             compose.waitUntil(15_000) { compose.onAllNodesWithText("来自测试接口的歌词").fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithText("来自测试接口的歌词").assertIsDisplayed()
             assertTrue(kotlin.math.abs(compose.runOnIdle { player.currentPosition } - before) < 500)
@@ -661,6 +660,7 @@ class NativePlaybackTest {
         compose.onNodeWithText(uiString(R.string.connect_sign_in)).performSemanticsAction(SemanticsActions.OnClick) { it() }
         compose.waitUntil(30_000) { compose.onAllNodesWithText("接口测试专辑").fetchSemanticsNodes().isNotEmpty() }
         stage("login complete")
+        compose.runOnIdle { vm.settings.playbackStyle("cover"); vm.settings.orientation("sensor") }
         compose.onNodeWithText("接口测试专辑").performClick()
         compose.waitUntil(15_000) { compose.onAllNodesWithText("接口测试歌曲").fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithText("接口测试歌曲").performClick()
