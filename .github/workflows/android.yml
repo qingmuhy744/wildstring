@@ -139,12 +139,12 @@ jobs:
           # the post-reboot wait must stay on one line. adbd sometimes refuses
           # the root restart right after boot ("unable to connect for root").
           script: |
-            adb root || { sleep 5; adb wait-for-device; adb root; } || { sleep 15; adb wait-for-device; adb root; }
-            adb wait-for-device
+            adb root || { sleep 5; timeout 60 adb wait-for-device; adb root; } || { sleep 15; timeout 60 adb wait-for-device; adb root; }
+            timeout 60 adb wait-for-device
             adb shell setprop persist.sys.locale zh-CN
             adb reboot
-            adb wait-for-device
-            adb shell 'while [ "$(getprop sys.boot_completed)" != "1" ]; do sleep 2; done'
+            timeout 120 adb wait-for-device
+            timeout 120 adb shell 'while [ "$(getprop sys.boot_completed)" != "1" ]; do sleep 2; done'
             python3 scripts/run_android_instrumented.py --arg realBackend=http://10.0.2.2:19882/ --classes=$ANDROID_TEST_CLASSES --repeat=$ANDROID_TEST_REPEAT --retries=$ANDROID_TEST_RETRIES
       - name: Stop synthetic API
         if: ${{ always() && env.RUN_EMULATOR == 'true' }}

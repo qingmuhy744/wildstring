@@ -282,7 +282,7 @@ class NativePlaybackTest {
         val player = session.player
         val before = compose.runOnIdle { player.currentPosition }
         try {
-            shellForTest("wm size 1600x1000"); shellForTest("wm density 160")
+            shellForTest("wm density 160"); shellForTest("wm size 1600x1000")
             waitForConfigurationTag("player-tablet")
             capture("tablet-player.png", resized = true)
             for (style in listOf("vinyl", "cassette")) {
@@ -427,7 +427,7 @@ class NativePlaybackTest {
         waitForActivityWindow()
         compose.onNodeWithTag("playback-queue").assertDoesNotExist()
         try {
-            shellForTest("wm size 1600x1000"); shellForTest("wm density 160")
+            shellForTest("wm density 160"); shellForTest("wm size 1600x1000")
             waitForConfigurationTag("player-tablet")
             capture("tablet-player-before-queue.png", resized = true)
             compose.onNodeWithContentDescription(uiString(R.string.play_queue)).performClick()
