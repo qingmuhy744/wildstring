@@ -20,12 +20,16 @@ class LyricGestureTest {
     private val seeks = mutableListOf<Long>()
     private var toggles = 0
     private var previews = 0
+    // Playback interpolation reads this instead of the device clock, so a playing viewport only
+    // changes when a test moves it and idle waits cannot be kept busy by wall time.
+    private var playbackNow = 0L
     private fun show(synced: Boolean = true, followDelayMs: Long = 2_000, playing: Boolean = false) {
         val lyrics = Lyrics(if (synced) "synced" else "plain", (0..19).map {
             LyricLine(if (synced) it * 1000L else null, "测试歌词第 $it 行")
         })
         compose.setContent { MaterialTheme {
-            LyricViewport(lyrics, 0, { seeks += it }, { toggles++ }, Modifier.width(360.dp).height(400.dp), { previews++ }, followDelayMs, playing)
+            LyricViewport(lyrics, 0, { seeks += it }, { toggles++ }, Modifier.width(360.dp).height(400.dp), { previews++ }, followDelayMs, playing,
+                playbackClock = { playbackNow })
         } }
     }
 
@@ -56,10 +60,12 @@ class LyricGestureTest {
                 compose.mainClock.advanceTimeBy(250)
             }
             assertTrue("selection should be held for the full 5 s preference", compose.mainClock.currentTime - released >= 5_000)
+            // Still on the manually driven clock: with auto-advance back on, this idle wait used
+            // to race the playing viewport's position loop (ComposeNotIdleException).
+            compose.runOnIdle { assertTrue(seeks.isEmpty()) }
         } finally {
             compose.mainClock.autoAdvance = true
         }
-        compose.runOnIdle { assertTrue(seeks.isEmpty()) }
     }
 
     @Test fun scrollingPreviewsTimeAndOnlyTheConfirmButtonSeeks() {
