@@ -526,6 +526,7 @@ class MusicViewModel @Inject constructor(
     fun addPodcastEpisodeToInbox(episode: PodcastEpisode) = podcastQueues.addInbox(episode)
     fun removePodcastInboxEpisode(episodeId: String) = podcastQueues.removeInbox(episodeId)
     fun removePodcastQueueEpisode(episodeId: String) = podcastQueues.removeQueued(episodeId)
+    fun reorderPodcastPending(rows: List<PodcastQueueRow>) = podcastQueues.reorderPending(rows)
     fun movePodcastInboxToQueue(episodeId: String) = podcastQueues.moveInboxToQueue(episodeId)
     fun updatePodcastShowPreference(podcastId: String, action: String, autoLimit: Int = 3) = podcastQueues.updateShow(podcastId, action, autoLimit)
     fun updatePodcastAutoContinue(enabled: Boolean) = podcastQueues.updateAutoContinue(enabled)

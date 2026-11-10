@@ -95,6 +95,7 @@
     <string name="podcast_queue_added">✓ 已待播</string>
     <string name="podcast_queue_add">+ 待播</string>
     <string name="podcast_playing">正在播放</string>
+    <string name="podcast_pending_drag_handle">拖动排序</string>
     <string name="podcast_unified_queue_empty">待播列表为空。在单集右侧点「+ 待播」，或开启下方「新集自动加入待播」。</string>
     <string name="podcast_favorites_empty">暂无收藏单集，在单集菜单中点击「单集收藏」可标记并保护音频</string>
     <string name="podcast_auto_limit">自动入队上限</string>

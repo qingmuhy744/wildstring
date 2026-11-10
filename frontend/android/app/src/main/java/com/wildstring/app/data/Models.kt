@@ -343,6 +343,7 @@ data class PodcastSaveResult(val id: String, val saved: Boolean, val reused: Boo
 data class PodcastQueueItem(
     @SerializedName("episode_id") val episodeId: String = "",
     val origin: String = "manual",
+    @SerializedName("added_at") val addedAt: String = "",
 )
 
 data class PodcastQueueSnapshot(

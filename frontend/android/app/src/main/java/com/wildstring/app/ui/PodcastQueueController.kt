@@ -17,6 +17,7 @@ data class PodcastQueueRow(
     val podcastId: String,
     val title: String,
     val showTitle: String,
+    val addedAt: String = "",
     val unavailable: Boolean = false,
 )
 
@@ -125,6 +126,16 @@ class PodcastQueueController(
             publishInbox(inbox)
         } catch (error: CancellationException) { throw error }
         catch (error: Exception) { mutable.update { it.copy(inboxError = podcastListFailure(friendlyError(error))) } }
+    }
+
+    /** Rewrites the whole pending list in the given order; queued rows win over the inbox copy. */
+    fun reorderPending(rows: List<PodcastQueueRow>) = scope.launch {
+        val items = rows.map { PodcastQueueItem(episodeId = it.episodeId, origin = "manual", addedAt = it.addedAt) }
+        val saved = mutex.withLock { pushOrKeep(items) }
+        if (saved) {
+            val ids = rows.map { it.episodeId }.toSet()
+            mutable.update { state -> state.copy(inboxRows = state.inboxRows.filterNot { it.episodeId in ids }) }
+        }
     }
 
     fun removeQueued(episodeId: String) = scope.launch {
@@ -522,12 +533,12 @@ class PodcastQueueController(
     }
 
     private suspend fun publishInbox(items: List<PodcastInboxItem>) {
-        val rows = describe(items.map { it.episodeId to it.podcastId })
+        val rows = describe(items.map { Triple(it.episodeId, it.podcastId, it.addedAt) })
         mutable.update { it.copy(inbox = items, inboxRows = rows, inboxLoading = false) }
     }
 
     private suspend fun publishQueueRows(items: List<PodcastQueueItem>) {
-        val rows = describe(items.map { it.episodeId to "" })
+        val rows = describe(items.map { Triple(it.episodeId, "", it.addedAt) })
         val preview = computeAutoPreview(items)
         mutable.update { it.copy(queueRows = rows, queueLoading = false, autoPreview = preview) }
     }
@@ -568,17 +579,17 @@ class PodcastQueueController(
         return previewList
     }
 
-    private suspend fun describe(pairs: List<Pair<String, String>>): List<PodcastQueueRow> {
+    private suspend fun describe(pairs: List<Triple<String, String, String>>): List<PodcastQueueRow> {
         val rows = mutableListOf<PodcastQueueRow>()
         for (chunk in pairs.chunked(6)) {
             rows += coroutineScope {
-                chunk.map { (episodeId, podcastId) ->
+                chunk.map { (episodeId, podcastId, addedAt) ->
                     async {
                         val episode = repository.cachedPodcastEpisode(episodeId) ?: runCatching { repository.podcastEpisode(episodeId) }.getOrNull()
-                        if (episode == null) return@async PodcastQueueRow(episodeId, podcastId, "", "", unavailable = true)
+                        if (episode == null) return@async PodcastQueueRow(episodeId, podcastId, "", "", addedAt, unavailable = true)
                         val show = repository.cachedPodcastDetail(episode.podcastId)?.podcast?.title
                             ?: runCatching { repository.podcastDetail(episode.podcastId).podcast.title }.getOrNull().orEmpty()
-                        PodcastQueueRow(episode.id, episode.podcastId, episode.title, show)
+                        PodcastQueueRow(episode.id, episode.podcastId, episode.title, show, addedAt)
                     }
                 }.awaitAll()
             }
