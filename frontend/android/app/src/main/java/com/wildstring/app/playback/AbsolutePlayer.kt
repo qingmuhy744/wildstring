@@ -25,7 +25,13 @@ internal class AbsolutePlayer(private val engine: ExoPlayer, private val resolve
     }
     private fun uri(item: MediaItem) = item.localConfiguration?.uri?.toString().orEmpty()
     private fun requested(item: MediaItem) = uri(item).takeIf { it.isNotEmpty() }?.let(PlaybackRequest::isAac) == true
-    private fun offset(item: MediaItem): Long = if (!requested(item)) 0 else resolver.plan(uri(item))?.startMs ?: PlaybackRequest.offset(uri(item))
+    private fun offset(item: MediaItem): Long {
+        if (!requested(item)) return 0
+        val wanted = PlaybackRequest.offset(uri(item))
+        val plan = resolver.plan(uri(item)) ?: return wanted
+        if (plan.mode == "original" && wanted > 0 && engine.currentPosition < wanted) return wanted
+        return plan.startMs
+    }
     private fun duration(item: MediaItem): Long = resolver.plan(uri(item))?.durationMs?.takeIf { it > 0 }
         ?: item.mediaMetadata.durationMs?.takeIf { it > 0 }
         ?: item.mediaMetadata.extras?.getLong("duration_ms") ?: 0L

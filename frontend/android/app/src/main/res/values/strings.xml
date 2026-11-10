@@ -1587,8 +1587,10 @@
     <string name="pod_player_rewind_15">Rewind 15 seconds</string>
     <string name="pod_player_saved_article">Showing saved article.</string>
     <string name="pod_player_sleep_timer">Sleep timer</string>
+    <string name="pod_player_tab_ai_notes">AI Notes</string>
     <string name="pod_player_tab_article">Article</string>
     <string name="pod_player_tab_cover">Cover</string>
+    <string name="pod_player_ai_notes_coming_soon">AI transcription and summary are coming soon</string>
     <string name="pod_prog_conflict_resolution_notice">Another device updated this episode. Local progress is kept. Please choose a resume position next time you play.</string>
     <string name="pod_prog_load_failed_retry">Couldn\'t read episode progress right now. Please retry.</string>
     <string name="pod_prog_newer_on_other_device">This episode has newer progress on another device</string>

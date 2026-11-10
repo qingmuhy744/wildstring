@@ -145,7 +145,7 @@ struct MacTransportBar: View {
                         Text(trailingTimeText)
                             .frame(width: isPodcast ? 58 : 38, alignment: .leading)
                     }.font(MacTheme.mono(10)).foregroundStyle(MacTheme.faint).lineLimit(1)
-                    if let message = playback.errorMessage ?? playback.podcastProgressMessage {
+                    if let message = playback.errorMessage {
                         Text(message).font(.caption2).foregroundStyle(.orange).lineLimit(2).help(message)
                     }
                 }
@@ -201,7 +201,7 @@ struct MacTransportBar: View {
             .padding(.horizontal, 20)
             .frame(width: geo.size.width, height: geo.size.height)
         }
-        .frame(height: playback.errorMessage == nil && playback.podcastProgressMessage == nil ? 84 : 116)
+        .frame(height: playback.errorMessage == nil ? 84 : 116)
         .background(MacTheme.panel)
         .overlay(alignment: .top) {
             Rectangle().fill(MacTheme.border.opacity(0.5)).frame(height: 1)
@@ -614,7 +614,7 @@ struct MenuBarPlayer: View {
                         Text(playback.playbackItems[index + 1].title).font(.callout).lineLimit(2)
                     }
                 }
-                if let message = playback.errorMessage ?? playback.podcastProgressMessage {
+                if let message = playback.errorMessage {
                     Text(message).font(.caption).foregroundStyle(.orange)
                 }
                 Button { openPlayer() } label: {

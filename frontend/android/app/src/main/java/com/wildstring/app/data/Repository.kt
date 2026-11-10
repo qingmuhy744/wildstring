@@ -287,7 +287,7 @@ class Repository @Inject constructor(@param:ApplicationContext private val conte
     }
     suspend fun updatePodcastDownloadSettings(id: String, settings: PodcastDownloadSettings, expectedOwner: String? = session.cacheScope()): PodcastDownloadSettings {
         val owner = expectedOwner; requireProfile(owner)
-        return api().updatePodcastDownloadSettings(id, PodcastDownloadSettingsUpdate(settings.version, settings.downloadPolicy, settings.retentionPolicy), RequestOwner(owner)).also { requireProfile(owner) }
+        return api().updatePodcastDownloadSettings(id, PodcastDownloadSettingsUpdate(settings.version, settings.downloadPolicy, settings.retentionPolicy, settings.slowDownload), RequestOwner(owner)).also { requireProfile(owner) }
     }
     suspend fun updatePodcastServerSettings(id: String, slowDownload: Boolean, maxRetries: Int, retryBackoffBase: Int, expectedOwner: String? = session.cacheScope()): PodcastDetail {
         val owner = expectedOwner; requireProfile(owner)
@@ -298,6 +298,10 @@ class Repository @Inject constructor(@param:ApplicationContext private val conte
     suspend fun podcastDownloadQueue(): PodcastDownloadQueueInfo {
         val owner = session.cacheScope(); requireProfile(owner)
         return api().podcastDownloadQueue(RequestOwner(owner)).also { requireProfile(owner) }
+    }
+    suspend fun myPodcastDownloadQueue(): PodcastDownloadQueueInfo {
+        val owner = session.cacheScope(); requireProfile(owner)
+        return api().myPodcastDownloadQueue(RequestOwner(owner)).also { requireProfile(owner) }
     }
     suspend fun retryFailedPodcastDownloads(): PodcastRetryFailedResult {
         val owner = session.cacheScope(); requireProfile(owner)
@@ -335,10 +339,26 @@ class Repository @Inject constructor(@param:ApplicationContext private val conte
     }
     suspend fun replacePodcastQueue(version: Int, deviceId: String, items: List<PodcastQueueItem>): PodcastQueueSnapshot {
         val owner = session.cacheScope(); requireProfile(owner)
+        val normalized = podcastQueueNormalize(items)
+        suspend fun send(entries: List<PodcastQueueWriteItem>): PodcastQueueSnapshot =
+            api().replacePodcastQueue(PodcastQueueUpdate(version, deviceId, entries), RequestOwner(owner)).normalized().also { requireProfile(owner) }
         return try {
-            api().replacePodcastQueue(PodcastQueueUpdate(version, deviceId, podcastQueueNormalize(items)), RequestOwner(owner)).normalized().also { requireProfile(owner) }
+            send(normalized.map { PodcastQueueWriteItem(it.episodeId, it.origin, it.addedAt.takeIf { ts -> ts.isNotBlank() }) })
         } catch (error: HttpException) {
             if (error.code() == 409) podcastQueueConflict(error)?.let { throw it }
+            if (error.code() == 422) {
+                val withoutAddedAt = normalized.map { PodcastQueueWriteItem(it.episodeId, it.origin, null) }
+                if (normalized.any { it.addedAt.isNotBlank() }) {
+                    runCatching { return send(withoutAddedAt) }.onFailure { retryErr ->
+                        if (retryErr is HttpException && retryErr.code() == 409) podcastQueueConflict(retryErr)?.let { throw it }
+                    }
+                }
+                if (withoutAddedAt.size > 1) {
+                    runCatching { return send(listOf(withoutAddedAt.first())) }.onFailure { retryErr ->
+                        if (retryErr is HttpException && retryErr.code() == 409) podcastQueueConflict(retryErr)?.let { throw it }
+                    }
+                }
+            }
             throw error
         }
     }

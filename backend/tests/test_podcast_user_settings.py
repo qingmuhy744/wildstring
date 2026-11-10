@@ -495,3 +495,98 @@ def test_explicit_bulk_downloads_belong_to_requester_including_existing_audio(pe
     assert references(db, user) == {}
     assert path.read_bytes() == b"existing audio"
     assert manager.resources.cleanup()["candidate_count"] == 0
+
+
+def test_user_can_toggle_slow_download_and_view_own_download_queue_and_head_stream(
+    personal, settings
+):
+    owner, listener, manager, db, user, _ = personal
+    associate(db, user)
+    episodes(db)
+    listener.put(f"{ROOT}/east/follow", headers=HEADERS, json={"followed": True})
+
+    # Regular user toggles slow_download via /download-settings
+    initial = listener.get(f"{ROOT}/east/download-settings").json()
+    assert initial["slow_download"] is False
+    updated = listener.put(
+        f"{ROOT}/east/download-settings",
+        headers=HEADERS,
+        json={
+            "version": initial["version"],
+            "download_policy": "none",
+            "retention_policy": "keep",
+            "slow_download": True,
+        },
+    )
+    assert updated.status_code == 200
+    assert updated.json()["slow_download"] is True
+
+    # Regular user sees only their own referenced tasks in /downloads/mine
+    manager._failed_downloads["e1"] = {
+        "episode_id": "e1",
+        "podcast_id": "east",
+        "episode_title": "Ep 1",
+        "podcast_title": "East",
+        "status": "failed",
+        "error": "网络连接超时，源站响应过慢",
+    }
+    manager._failed_downloads["ep-west"] = {
+        "episode_id": "ep-west",
+        "podcast_id": "west",
+        "episode_title": "West Ep",
+        "podcast_title": "West",
+        "status": "failed",
+        "error": "网络连接超时，源站响应过慢",
+    }
+    assert listener.post(f"{ROOT}/episodes/e1/download", headers=HEADERS).status_code == 200
+    mine = listener.get(f"{ROOT}/downloads/mine", headers=HEADERS)
+    assert mine.status_code == 200
+    mine_data = mine.json()
+    mine_ids = {
+        item["episode_id"]
+        for bucket in ("downloading", "queued", "failed", "recent_completed")
+        for item in mine_data[bucket]
+    }
+    assert "ep-west" not in mine_ids
+
+    # HEAD /episodes/{id}/stream returns 200 and infers .m4a MIME type
+    m4a_path = settings.podcasts_dir / "cached-ep.m4a"
+    m4a_path.write_bytes(b"0123456789abcdef")
+    with db.connect(write=True) as conn:
+        conn.execute(
+            "UPDATE podcast_episodes SET local_path=?,download_status='downloaded' WHERE id='e1'",
+            (str(m4a_path),),
+        )
+    head_resp = listener.head(f"{ROOT}/episodes/e1/stream")
+    assert head_resp.status_code == 200
+    assert head_resp.headers["content-type"].startswith("audio/mp4")
+    assert head_resp.headers["content-length"] == "16"
+
+
+def test_fast_and_slow_lanes_isolate_queues_and_prioritize_interactive_saves(personal, settings):
+    from wildstring.podcast_download_settings import DownloadSettingsUpdate
+    from wildstring.podcasts import PodcastManager
+
+    _, _, _, db, user, _ = personal
+    associate(db, user)
+    episodes(db)
+    manager = PodcastManager(db, storage_dir=settings.podcasts_dir)
+
+    # Background auto-download on normal show ('east', slow_download=0) -> goes to fast lane (priority=1)
+    body = DownloadSettingsUpdate(version=1, download_policy="latest_3")
+    manager.auto_downloads.configure(user, "east", body)
+    assert manager._fast_download_queue.qsize() == 3
+    assert manager._slow_download_queue.qsize() == 0
+
+    # Interactive manual save on 'e1' (same normal show) -> goes to fast lane with priority=0 (jumps to front!)
+    manager.resources.save("e1", user)
+    assert manager._fast_download_queue.qsize() == 4
+    first_out = manager._fast_download_queue.get(timeout=0.1)
+    assert first_out == "e1"
+
+    # Enable slow_download on 'east' and save 'e2' -> isolated into slow lane
+    with db.connect(write=True) as conn:
+        conn.execute("UPDATE podcasts SET slow_download = 1 WHERE id = 'east'")
+    manager.resources.save("e2", "admin")
+    assert manager._slow_download_queue.qsize() == 1
+    assert manager._slow_download_queue.get(timeout=0.1) == "e2"

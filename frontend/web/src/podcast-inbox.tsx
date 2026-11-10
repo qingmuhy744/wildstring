@@ -212,6 +212,7 @@ export function PodcastInboxDialog({
   onRemoveQueuedEpisode?: (episodeId: string) => void;
 }) {
   const { t } = useTranslation();
+  const [tab, setTab] = useState<'episodes' | 'rules'>('episodes');
   const [rows, setRows] = useState<UnifiedPendingRow[]>([]);
   const [queueVersion, setQueueVersion] = useState(0);
   const [followedShows, setFollowedShows] = useState<PodcastSummary[]>([]);
@@ -455,6 +456,14 @@ export function PodcastInboxDialog({
   }
 
   const playableCount = rows.filter((item) => item.episode && item.show).length;
+  const sortedRuleShows = [...followedShows].sort((a, b) => {
+    const actionA = showActions[a.id] ?? defaultAction;
+    const actionB = showActions[b.id] ?? defaultAction;
+    const activeA = actionA !== 'ignore' ? 0 : 1;
+    const activeB = actionB !== 'ignore' ? 0 : 1;
+    if (activeA !== activeB) return activeA - activeB;
+    return Boolean(a.followed) === Boolean(b.followed) ? 0 : a.followed ? -1 : 1;
+  });
 
   return (
     <div className="podcasts-modal-backdrop" onClick={onClose}>
@@ -467,7 +476,42 @@ export function PodcastInboxDialog({
       >
         <div className="podcast-inbox-header">
           <h3 id="podcast-inbox-title">{t('podcastInbox.inboxTitle')}</h3>
+          {status === 'ready' && playableCount > 0 && (
+            <button
+              type="button"
+              className="podcasts-action-btn primary"
+              onClick={() => void playAllPending()}
+            >
+              {t('podcastInbox.playAll')}
+            </button>
+          )}
         </div>
+        {status === 'ready' && (
+          <div
+            className="podcast-inbox-tabs"
+            role="tablist"
+            aria-label={t('podcastInbox.inboxTitle')}
+          >
+            <button
+              type="button"
+              role="tab"
+              aria-selected={tab === 'episodes'}
+              className={`podcast-inbox-tab${tab === 'episodes' ? ' active' : ''}`}
+              onClick={() => setTab('episodes')}
+            >
+              {t('podcastInbox.pendingEpisodesTitle')} <small>{rows.length}</small>
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={tab === 'rules'}
+              className={`podcast-inbox-tab${tab === 'rules' ? ' active' : ''}`}
+              onClick={() => setTab('rules')}
+            >
+              {t('podcastInbox.autoQueueSectionTitle')} <small>{followedShows.length}</small>
+            </button>
+          </div>
+        )}
         {status === 'loading' && (
           <div
             className="podcast-inbox-list"
@@ -487,7 +531,12 @@ export function PodcastInboxDialog({
             </button>
           </div>
         )}
-        {status === 'ready' && !rows.length && (
+        {problem && (
+          <p className="podcast-inbox-problem" role="alert">
+            {problem}
+          </p>
+        )}
+        {status === 'ready' && tab === 'episodes' && !rows.length && (
           <div className="podcasts-empty" role="status">
             <p>{t('podcastInbox.emptyInbox')}</p>
             <button type="button" className="podcasts-action-btn" onClick={onBrowse}>
@@ -495,30 +544,11 @@ export function PodcastInboxDialog({
             </button>
           </div>
         )}
-        {problem && (
-          <p className="podcast-inbox-problem" role="alert">
-            {problem}
-          </p>
-        )}
-        {status === 'ready' && rows.length > 0 && (
+        {status === 'ready' && tab === 'episodes' && rows.length > 0 && (
           <section
             className="podcast-inbox-section"
             aria-label={t('podcastInbox.pendingSectionAria')}
           >
-            <div className="podcast-inbox-section-header">
-              <h4>
-                {t('podcastInbox.pendingEpisodesTitle')} <small>{rows.length}</small>
-              </h4>
-              {playableCount > 0 && (
-                <button
-                  type="button"
-                  className="podcasts-action-btn primary"
-                  onClick={() => void playAllPending()}
-                >
-                  {t('podcastInbox.playAll')}
-                </button>
-              )}
-            </div>
             <ul className="podcast-inbox-list">
               {rows.map((item, index) => (
                 <li className="podcast-inbox-item" key={item.episode_id} data-pending-index={index}>
@@ -599,41 +629,41 @@ export function PodcastInboxDialog({
             </ul>
           </section>
         )}
-        {status === 'ready' && followedShows.length > 0 && (
+        {status === 'ready' && tab === 'rules' && (
           <section
             className="podcast-inbox-section"
             aria-label={t('podcastInbox.autoQueueSectionAria')}
           >
-            <div className="podcast-inbox-section-header">
-              <h4>{t('podcastInbox.autoQueueSectionTitle')}</h4>
-            </div>
-            <ul className="podcast-inbox-list">
-              {followedShows.map((show) => {
-                const currentAction = showActions[show.id] ?? defaultAction;
-                return (
-                  <li className="podcast-inbox-item" key={`delivery-${show.id}`}>
-                    <div className="podcast-inbox-copy">
-                      <strong>{show.title}</strong>
-                      <span>
-                        {show.followed
-                          ? t('podcastInbox.followedStatus')
-                          : t('podcastInbox.unfollowedStatus')}
-                        {show.author ? ` · ${show.author}` : ''}
-                      </span>
-                    </div>
-                    <div className="podcast-inbox-actions">
-                      <ActionSelect
-                        label={t('podcastInbox.deliveryLabel')}
-                        ariaLabel={t('podcastInbox.showDeliveryAria', { title: show.title })}
-                        hideLabel
-                        value={currentAction}
-                        onChange={(value) => void updateShowDelivery(show.id, value)}
-                      />
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
+            {sortedRuleShows.length === 0 ? (
+              <div className="podcasts-empty" role="status">
+                <p>{t('podcastInbox.emptyInbox')}</p>
+                <button type="button" className="podcasts-action-btn" onClick={onBrowse}>
+                  {t('podcastInbox.browseShows')}
+                </button>
+              </div>
+            ) : (
+              <ul className="podcast-inbox-list">
+                {sortedRuleShows.map((show) => {
+                  const currentAction = showActions[show.id] ?? defaultAction;
+                  return (
+                    <li className="podcast-inbox-item compact" key={`delivery-${show.id}`}>
+                      <div className="podcast-inbox-copy">
+                        <strong>{show.title}</strong>
+                      </div>
+                      <div className="podcast-inbox-actions">
+                        <ActionSelect
+                          label={t('podcastInbox.deliveryLabel')}
+                          ariaLabel={t('podcastInbox.showDeliveryAria', { title: show.title })}
+                          hideLabel
+                          value={currentAction}
+                          onChange={(value) => void updateShowDelivery(show.id, value)}
+                        />
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
           </section>
         )}
         <button type="button" className="modal-cancel-btn" onClick={onClose}>

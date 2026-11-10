@@ -182,7 +182,7 @@ struct NowPlayingView: View {
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
-                    if let message = playback.errorMessage ?? playback.podcastProgressMessage {
+                    if let message = playback.errorMessage {
                         Text(message)
                             .font(.caption2)
                             .foregroundStyle(.orange)

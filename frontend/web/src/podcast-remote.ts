@@ -60,10 +60,30 @@ export function getPodcastQueue() {
 }
 
 export async function putPodcastQueue(version: number, items: RemoteQueueItem[]) {
-  return api<RemoteQueue>('/podcasts/queue', {
-    method: 'PUT',
-    body: JSON.stringify({ version, device_id: podcastDeviceId(), items }),
-  });
+  const normalized = items.map((item) =>
+    item.added_at
+      ? { episode_id: item.episode_id, origin: item.origin, added_at: item.added_at }
+      : { episode_id: item.episode_id, origin: item.origin },
+  );
+  try {
+    return await api<RemoteQueue>('/podcasts/queue', {
+      method: 'PUT',
+      body: JSON.stringify({ version, device_id: podcastDeviceId(), items: normalized }),
+    });
+  } catch (error) {
+    if (
+      error instanceof ApiError &&
+      error.status === 422 &&
+      normalized.some((item) => 'added_at' in item)
+    ) {
+      const legacy = normalized.map(({ episode_id, origin }) => ({ episode_id, origin }));
+      return api<RemoteQueue>('/podcasts/queue', {
+        method: 'PUT',
+        body: JSON.stringify({ version, device_id: podcastDeviceId(), items: legacy }),
+      });
+    }
+    throw error;
+  }
 }
 
 export function getInbox() {

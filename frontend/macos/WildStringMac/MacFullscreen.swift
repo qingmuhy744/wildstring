@@ -317,7 +317,7 @@ struct MacFullscreenPlayer: View {
                     }
                 }
             }
-            if let message = playback.errorMessage ?? playback.podcastProgressMessage {
+            if let message = playback.errorMessage {
                 Text(message).font(.caption).foregroundStyle(.orange).lineLimit(1)
             }
         }

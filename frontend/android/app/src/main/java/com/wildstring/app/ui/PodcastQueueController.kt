@@ -248,7 +248,9 @@ class PodcastQueueController(
         val queueItems = mutex.withLock {
             inboxResult.onSuccess { inbox = it.items }.onFailure { error ->
                 if (error is CancellationException) throw error
-                mutable.update { it.copy(inboxError = podcastListFailure(friendlyError(error))) }
+                if (error !is retrofit2.HttpException || error.code() !in listOf(404, 405)) {
+                    mutable.update { it.copy(inboxError = podcastListFailure(friendlyError(error))) }
+                }
             }
             queueResult.onSuccess { remote ->
                 if (!diverged) {
@@ -258,11 +260,15 @@ class PodcastQueueController(
                 }
             }.onFailure { error ->
                 if (error is CancellationException) throw error
-                mutable.update { it.copy(queueError = podcastListFailure(friendlyError(error))) }
+                if (error !is retrofit2.HttpException || error.code() !in listOf(404, 405)) {
+                    mutable.update { it.copy(queueError = podcastListFailure(friendlyError(error))) }
+                }
             }
             prefResult.onSuccess { applyPreferences(it) }.onFailure { error ->
                 if (error is CancellationException) throw error
-                mutable.update { it.copy(preferencesError = podcastListFailure(friendlyError(error))) }
+                if (error !is retrofit2.HttpException || error.code() !in listOf(404, 405)) {
+                    mutable.update { it.copy(preferencesError = podcastListFailure(friendlyError(error))) }
+                }
             }
             mutable.update { it.copy(inboxLoading = false, queueLoading = false, preferencesLoading = false) }
             snapshot.items
@@ -502,6 +508,10 @@ class PodcastQueueController(
 
     private fun failSync(error: Throwable?, items: List<PodcastQueueItem>) {
         snapshot = snapshot.copy(items = items)
+        if (error is retrofit2.HttpException && error.code() in listOf(404, 405)) {
+            mutable.update { it.copy(queue = items, syncError = null) }
+            return
+        }
         val reason = error?.let { friendlyError(it) }.orEmpty()
         val message = podcastSyncFailureMessage(reason, context.getString(R.string.podcast_sync_failed))
         mutable.update { it.copy(queue = items, syncError = message) }

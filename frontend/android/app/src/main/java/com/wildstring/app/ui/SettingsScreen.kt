@@ -216,11 +216,9 @@ internal enum class SettingsSection(@androidx.annotation.StringRes val title: In
                             )
                         }
                     }
-                    if (state.account?.profile in listOf("owner", "librarian")) {
-                        SettingsGroup(stringResource(R.string.podcast_download_tasks)) {
-                            SettingsAction(stringResource(R.string.podcast_download_tasks), Icons.Default.Downloading, tag = "podcast-download-tasks") {
-                                downloadTasks = true
-                            }
+                    SettingsGroup(stringResource(R.string.podcast_download_tasks)) {
+                        SettingsAction(stringResource(R.string.podcast_download_tasks), Icons.Default.Downloading, tag = "podcast-download-tasks") {
+                            downloadTasks = true
                         }
                     }
                 }

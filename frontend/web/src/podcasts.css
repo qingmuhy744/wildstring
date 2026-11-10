@@ -4123,6 +4123,54 @@
   gap: 8px 12px;
 }
 
+.podcast-inbox-tabs {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--podcast-line);
+  border-radius: 10px;
+  background: var(--podcast-panel);
+  align-self: flex-start;
+}
+
+.podcast-inbox-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  padding: 6px 12px;
+  color: var(--podcast-subtle);
+  font-size: 0.84rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.podcast-inbox-tab small {
+  font-size: 0.76rem;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.85;
+}
+
+.podcast-inbox-tab.active {
+  background: var(--podcast-panel-raised);
+  color: var(--podcast-ink);
+  font-weight: 600;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 8%);
+}
+
+.podcast-inbox-item.compact {
+  padding: 8px 12px;
+}
+
+.podcast-inbox-item.compact .podcast-inbox-copy strong {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .podcast-inbox-header h3,
 .podcast-inbox-section-header h4 {
   margin: 0;

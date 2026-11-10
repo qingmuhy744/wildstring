@@ -23,6 +23,8 @@ class PodcastPresentationTest {
         assertEquals("episode-1", restored.podcastEpisodeId)
         assertEquals("show-1", restored.podcast?.podcastId)
         assertEquals("https://example.com/cover.jpg", restored.podcast?.coverUrl)
+        assertEquals(85_000L, restored.podcast?.resumePositionMs)
+        assertEquals(0L, episode(completed = true).toTrack(show).podcast?.resumePositionMs)
         assertTrue(restored.hasCover)
         // Queues saved by an older app can still identify the episode and rehydrate it.
         assertEquals("episode-1", gson.fromJson("""{"id":"podcast_ep_episode-1","title":"old"}""", Track::class.java).podcastEpisodeId)
@@ -74,5 +76,14 @@ class PodcastPresentationTest {
         assertTrue(new > old)
         assertEquals(new, podcastPublishedMillis("2026-10-22T00:00:00Z"))
         assertEquals(0L, podcastPublishedMillis("not a date"))
+    }
+
+    @Test fun checkpointDoesNotTreatSameDeviceVersionAdvanceAsCrossDeviceConflict() {
+        val remote = EpisodeProgress(episodeId = "episode-1", positionSeconds = 2640, version = 2, sessionId = "session-1", deviceId = "device-a")
+        val update = PodcastProgressUpdate(sessionId = "session-2", deviceId = "device-a", baseVersion = 1, sequence = 1, positionSeconds = 2625, durationSeconds = 7200, event = "seek")
+        val checkpoint = EpisodeCheckpoint(remote = remote, update = update, dirty = true, conflict = false)
+        assertFalse(checkpoint.conflictsWith(remote))
+        val otherDeviceRemote = remote.copy(deviceId = "device-b")
+        assertTrue(checkpoint.conflictsWith(otherDeviceRemote))
     }
 }

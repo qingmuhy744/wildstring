@@ -17,12 +17,15 @@ import androidx.media3.common.Player
 import androidx.media3.common.util.BitmapLoader
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.okhttp.OkHttpDataSource
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.extractor.DefaultExtractorsFactory
+import androidx.media3.extractor.mp3.Mp3Extractor
 import com.wildstring.app.AppLanguage
 import com.wildstring.app.R
 import androidx.media3.session.MediaSession
@@ -49,7 +52,14 @@ fun Track.mediaItem(repository: Repository, entryId: String = UUID.randomUUID().
         .setMediaMetadata(MediaMetadata.Builder().setTitle(title).setArtist(artist).setAlbumTitle(album)
             .setDurationMs(durationMs.takeIf { it > 0 })
             .setArtworkUri(if (mayHaveCover) Uri.parse(repository.cover(id)) else null)
-            .setExtras(Bundle().apply { putString("profile", repository.session.cacheScope()); putString("track_id", id); putLong("duration_ms", durationMs); putString("format", format); putString("original_stream", repository.originalStream(id)) }).build()).build()
+            .setExtras(Bundle().apply {
+                putString("profile", repository.session.cacheScope())
+                putString("track_id", id)
+                putLong("duration_ms", durationMs)
+                putString("format", format)
+                putString("original_stream", repository.originalStream(id))
+                podcast?.resumePositionMs?.takeIf { it > 0L }?.let { putLong("podcast_fallback_position", it) }
+            }).build()).build()
 
 @OptIn(UnstableApi::class)
 @AndroidEntryPoint
@@ -68,6 +78,7 @@ class PlaybackService : MediaSessionService() {
     private var gainRequest: Job? = null
     private var podcastStart: Job? = null
     private var preparingPodcast = false
+    private var pendingPodcastAutoplay = false
     private var applyingPodcast = false
     private var progressEntry: String? = null
     private var podcastGeneration = 0L
@@ -80,28 +91,37 @@ class PlaybackService : MediaSessionService() {
         podcastProgress.checkpoint(id, player.currentPosition, player.duration, event, force)
     }
     private fun preparePodcast(automatic: Boolean = false, requestedMs: Long? = null, autoplay: Boolean = true) {
-        if (restoring || preparingPodcast || applyingPodcast) return
+        if (restoring || applyingPodcast || (preparingPodcast && requestedMs == null)) return
         val item = player.currentMediaItem ?: return
         val extras = item.mediaMetadata.extras ?: return
         val id = podcastEpisodeId(extras.getString("track_id")) ?: return
         val owner = extras.getString("profile") ?: return
         if (owner != repository.session.cacheScope()) return
-        checkpointPodcast(if (player.playbackState == Player.STATE_ENDED) "ended" else "pause", true)
+        if (!preparingPodcast) {
+            checkpointPodcast(if (player.playbackState == Player.STATE_ENDED) "ended" else "pause", true)
+            pendingPodcastAutoplay = autoplay
+        } else {
+            podcastStart?.cancel()
+            pendingPodcastAutoplay = pendingPodcastAutoplay || autoplay
+        }
         val generation = ++podcastGeneration
         preparingPodcast = true
         player.pause()
         val explicit = requestedMs ?: if (consumedPodcastIntents.add(item.mediaId) && extras.containsKey("podcast_requested_position")) extras.getLong("podcast_requested_position") else null
+        val fallback = player.currentPosition.coerceAtLeast(0L).takeIf { it > 0L }
+            ?: extras.getLong("podcast_fallback_position", 0L).takeIf { it > 0L }
+        val shouldPlay = pendingPodcastAutoplay
         podcastStart = scope.launch {
             try {
-                val position = podcastProgress.prepare(id, item.mediaMetadata.title?.toString().orEmpty(), extras.getLong("duration_ms"), explicit, automatic) ?: return@launch
+                val position = podcastProgress.prepare(id, item.mediaMetadata.title?.toString().orEmpty(), extras.getLong("duration_ms"), explicit, automatic, fallback) ?: return@launch
                 if (owner != repository.session.cacheScope() || player.currentMediaItem?.mediaId != item.mediaId) return@launch
                 applyingPodcast = true
                 player.seekTo(position)
                 progressEntry = item.mediaId
-                if (autoplay) player.play()
+                if (shouldPlay) player.play()
             } catch (error: CancellationException) { throw error }
             catch (_: Exception) { podcastProgress.playbackProblem() }
-            finally { if (generation == podcastGeneration) { applyingPodcast = false; preparingPodcast = false } }
+            finally { if (generation == podcastGeneration) { applyingPodcast = false; preparingPodcast = false; pendingPodcastAutoplay = false } }
         }
     }
 
@@ -146,8 +166,16 @@ class PlaybackService : MediaSessionService() {
                 DefaultAudioSink.Builder(context).setAudioProcessors(arrayOf(gainProcessor)).setEnableFloatOutput(false)
                     .setEnableAudioOutputPlaybackParameters(enableAudioOutputPlaybackParameters).build()
         }
+        val extractors = DefaultExtractorsFactory()
+            .setConstantBitrateSeekingEnabled(true)
+            .setMp3ExtractorFlags(Mp3Extractor.FLAG_ENABLE_CONSTANT_BITRATE_SEEKING)
+        val loadControl = DefaultLoadControl.Builder()
+            .setBackBuffer(180_000, false)
+            .setBufferDurationsMs(30_000, 180_000, 1_500, 3_000)
+            .build()
         engine = ExoPlayer.Builder(this, renderers)
-            .setMediaSourceFactory(DefaultMediaSourceFactory(resolver.factory(audioCache.factory(repository.client))))
+            .setMediaSourceFactory(DefaultMediaSourceFactory(resolver.factory(audioCache.factory(repository.client)), extractors))
+            .setLoadControl(loadControl)
             .setAudioAttributes(AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MUSIC).build(), true)
             .setHandleAudioBecomingNoisy(true).setWakeMode(C.WAKE_MODE_NETWORK).build()
         player = AbsolutePlayer(engine, resolver)
@@ -214,7 +242,7 @@ class PlaybackService : MediaSessionService() {
                     reason !in listOf(Player.MEDIA_ITEM_TRANSITION_REASON_AUTO, Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT)) {
                     sleep.cancel()
                 }
-                podcastGeneration++; podcastStart?.cancel(); preparingPodcast = false; applyingPodcast = false; progressEntry = null
+                podcastGeneration++; podcastStart?.cancel(); preparingPodcast = false; pendingPodcastAutoplay = false; applyingPodcast = false; progressEntry = null
                 if (podcastEpisodeId(mediaItem?.mediaMetadata?.extras?.getString("track_id")) == null) podcastProgress.leave()
                 listeningEntry = mediaItem?.mediaId
                 report()
@@ -257,9 +285,9 @@ class PlaybackService : MediaSessionService() {
                             oldExtras?.getLong("duration_ms") ?: 0, if (reason == Player.DISCONTINUITY_REASON_AUTO_TRANSITION) "ended" else "stop", true)
                     }
                 }
-                if (reason == Player.DISCONTINUITY_REASON_SEEK && oldPosition.mediaItem?.mediaId == newPosition.mediaItem?.mediaId && !preparingPodcast && !applyingPodcast && !restoring) {
-                    if (player.currentMediaItem?.mediaId == progressEntry && podcastEpisodeId(player.currentMediaItem?.mediaMetadata?.extras?.getString("track_id"))?.let(podcastProgress::owns) == true) checkpointPodcast("seek", true)
-                    else preparePodcast(requestedMs = newPosition.positionMs, autoplay = player.playWhenReady)
+                if (reason == Player.DISCONTINUITY_REASON_SEEK && oldPosition.mediaItem?.mediaId == newPosition.mediaItem?.mediaId && !applyingPodcast && !restoring) {
+                    if (!preparingPodcast && player.currentMediaItem?.mediaId == progressEntry && podcastEpisodeId(player.currentMediaItem?.mediaMetadata?.extras?.getString("track_id"))?.let(podcastProgress::owns) == true) checkpointPodcast("seek", true)
+                    else preparePodcast(requestedMs = newPosition.positionMs, autoplay = if (preparingPodcast) pendingPodcastAutoplay else player.playWhenReady)
                 }
                 if (oldPosition.mediaItem?.mediaMetadata?.extras?.getString("track_id") == listeningTrack && oldPosition.mediaItem?.mediaMetadata?.extras?.getString("profile") == listeningOwner) {
                     clock.sample(SystemClock.elapsedRealtime(), oldPosition.positionMs, false)
@@ -426,6 +454,12 @@ class PlaybackService : MediaSessionService() {
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? =
         if (controllerInfo.uid == Process.myUid() || controllerInfo.isTrusted) session else null
+
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        checkpointPodcast(if (player.playbackState == Player.STATE_ENDED) "ended" else if (player.isPlaying) "progress" else "pause", true)
+        persist(force = true)
+        super.onTaskRemoved(rootIntent)
+    }
 
     override fun onDestroy() {
         checkpointPodcast(if (player.playbackState == Player.STATE_ENDED) "ended" else "stop", true)

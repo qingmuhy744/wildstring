@@ -295,12 +295,17 @@ public final class PodcastCloudQueue {
                 return nil
             }
         }
+        let completed = episode.completed || (
+            episode.positionSeconds > 0 && episode.durationSeconds > 0
+                && episode.positionSeconds >= episode.durationSeconds
+        )
         return PlaybackService.Item(
             trackID: "podcast_ep_\(episode.id)",
             title: episode.title,
             artist: KitL10n("kit.podcast.defaultArtist"),
             album: nil,
-            streamPath: "api/v1/podcasts/episodes/\(episode.id)/stream?proxy=1&cache=1"
+            streamPath: "api/v1/podcasts/episodes/\(episode.id)/stream?proxy=1&cache=1",
+            resumePositionSeconds: completed ? 0 : Double(max(0, episode.positionSeconds))
         )
     }
 

@@ -62,7 +62,7 @@ data class Track(
     val unavailableReason: String? get() = unavailableReasonRes?.let { AppLanguage.string(it) }
     val isAvailable: Boolean get() = unavailableReason == null
 }
-data class PodcastTrackInfo(val podcastId: String, val coverUrl: String = "")
+data class PodcastTrackInfo(val podcastId: String, val coverUrl: String = "", val resumePositionMs: Long = 0L)
 data class Album(val id: String, val title: String, val artists: List<String>,
     @SerializedName("track_count") val trackCount: Int,
     @SerializedName("cover_track_id") val coverTrackId: String?)
@@ -210,10 +210,13 @@ data class MusicLibraryJob(val kind: String, val full: Boolean = false,
 data class PodcastFollow(val followed: Boolean)
 data class PodcastDownloadSettings(val version: Int = 1,
     @SerializedName("download_policy") val downloadPolicy: String = "none",
-    @SerializedName("retention_policy") val retentionPolicy: String = "keep", val active: Boolean = false)
+    @SerializedName("retention_policy") val retentionPolicy: String = "keep",
+    val active: Boolean = false,
+    @SerializedName("slow_download") val slowDownload: Boolean = false)
 data class PodcastDownloadSettingsUpdate(val version: Int,
     @SerializedName("download_policy") val downloadPolicy: String,
-    @SerializedName("retention_policy") val retentionPolicy: String)
+    @SerializedName("retention_policy") val retentionPolicy: String,
+    @SerializedName("slow_download") val slowDownload: Boolean? = null)
 
 data class PodcastPublisher(val id: String, val name: String,
     @SerializedName("podcast_count") val podcastCount: Int = 0)
@@ -243,6 +246,7 @@ data class PodcastEpisode(
     @SerializedName("download_status") val downloadStatus: String = "none",
 ) {
     val isFavorite: Boolean get() = loved || favorite
+    val resumePositionMs: Long get() = if (completed) 0L else positionSeconds.coerceAtLeast(0).toLong() * 1000L
 
     fun toTrack(podcast: PodcastSummary): Track = Track(
         id = "podcast_ep_$id",
@@ -253,7 +257,7 @@ data class PodcastEpisode(
         hasCover = podcastArtworkUrl(podcast.coverUrl) != null,
         format = "mp3",
         status = "available",
-        podcast = PodcastTrackInfo(podcast.id, podcastArtworkUrl(podcast.coverUrl).orEmpty()),
+        podcast = PodcastTrackInfo(podcast.id, podcastArtworkUrl(podcast.coverUrl).orEmpty(), resumePositionMs),
     )
 }
 
@@ -353,10 +357,16 @@ data class PodcastQueueSnapshot(
     @SerializedName("updated_at") val updatedAt: String? = null,
 )
 
+data class PodcastQueueWriteItem(
+    @SerializedName("episode_id") val episodeId: String,
+    val origin: String = "manual",
+    @SerializedName("added_at") val addedAt: String? = null,
+)
+
 data class PodcastQueueUpdate(
     val version: Int,
     @SerializedName("device_id") val deviceId: String,
-    val items: List<PodcastQueueItem>,
+    val items: List<PodcastQueueWriteItem>,
 )
 
 data class PodcastInboxItem(

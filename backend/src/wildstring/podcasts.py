@@ -23,7 +23,7 @@ from typing import Annotated, Any, Literal
 from urllib.parse import quote, urlsplit
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import RedirectResponse, StreamingResponse
 from filelock import FileLock, Timeout
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -756,6 +756,51 @@ def _parse_atom_feed(root: ET.Element, feed_url: str) -> dict[str, Any]:
     }
 
 
+class _EpisodeLaneQueue:
+    """Thread-safe priority queue (priority=0 for interactive saves/playback, 1 for background)."""
+
+    def __init__(self) -> None:
+        self._q: queue.PriorityQueue[tuple[int, int, str]] = queue.PriorityQueue()
+        self._seq = 0
+        self._lock = RLock()
+
+    def put(self, episode_id: str, *, priority: bool = False) -> None:
+        with self._lock:
+            self._seq += 1
+            seq = self._seq
+        self._q.put((0 if priority else 1, seq, episode_id))
+
+    def get(self, timeout: float = 1.0) -> str:
+        _, _, episode_id = self._q.get(timeout=timeout)
+        return episode_id
+
+    def task_done(self) -> None:
+        self._q.task_done()
+
+    def qsize(self) -> int:
+        return self._q.qsize()
+
+
+class _CombinedQueueView:
+    """Combined queue facade so callers checking _download_queue.qsize() see both lanes."""
+
+    def __init__(self, fast: _EpisodeLaneQueue, slow: _EpisodeLaneQueue) -> None:
+        self._fast = fast
+        self._slow = slow
+
+    def put(self, episode_id: str, *, priority: bool = False) -> None:
+        self._fast.put(episode_id, priority=priority)
+
+    def get(self, timeout: float = 1.0) -> str:
+        return self._fast.get(timeout=timeout)
+
+    def task_done(self) -> None:
+        self._fast.task_done()
+
+    def qsize(self) -> int:
+        return self._fast.qsize() + self._slow.qsize()
+
+
 class PodcastManager:
     def __init__(
         self,
@@ -774,8 +819,12 @@ class PodcastManager:
         self.thread: Thread | None = None
         self.identity_backfill: Any | None = None
 
-        # Download queue & workers
-        self._download_queue: queue.Queue[str] = queue.Queue()
+        # Download queue & workers (Fast Lane: 2 workers, Slow Lane: 1 dedicated worker)
+        self._fast_download_queue = _EpisodeLaneQueue()
+        self._slow_download_queue = _EpisodeLaneQueue()
+        self._download_queue = _CombinedQueueView(
+            self._fast_download_queue, self._slow_download_queue
+        )
         self._queued_episodes: dict[str, dict[str, Any]] = {}
         self._active_downloads: dict[str, dict[str, Any]] = {}
         self._recent_completed: deque[dict[str, Any]] = deque(maxlen=40)
@@ -897,16 +946,25 @@ class PodcastManager:
         )
         self.thread.start()
 
-        # Start 2 download workers
+        # Start 2 fast download workers and 1 dedicated slow/gentle download worker
         self._download_workers = []
         for i in range(2):
             w = Thread(
                 target=self._download_worker_loop,
-                name=f"wildstring-podcast-downloader-{i + 1}",
+                args=(False,),
+                name=f"wildstring-podcast-downloader-fast-{i + 1}",
                 daemon=True,
             )
             w.start()
             self._download_workers.append(w)
+        slow_w = Thread(
+            target=self._download_worker_loop,
+            args=(True,),
+            name="wildstring-podcast-downloader-slow-1",
+            daemon=True,
+        )
+        slow_w.start()
+        self._download_workers.append(slow_w)
 
         logger.info("Server-side podcast auto-updater and download workers started.")
 
@@ -920,23 +978,36 @@ class PodcastManager:
         self._download_workers.clear()
         logger.info("Server-side podcast auto-updater thread stopped.")
 
-    def _download_worker_loop(self):
+    def _download_worker_loop(self, slow_lane: bool = False):
+        lane_queue = self._slow_download_queue if slow_lane else self._fast_download_queue
         while not self.stopping.is_set():
             try:
-                episode_id = self._download_queue.get(timeout=1)
+                episode_id = lane_queue.get(timeout=1)
             except queue.Empty:
                 continue
 
             if episode_id in self._cancelled_downloads:
                 self._cancelled_downloads.discard(episode_id)
-                self._download_queue.task_done()
+                lane_queue.task_done()
                 continue
 
             info = self._queued_episodes.pop(episode_id, None)
-            if not info:
-                info = self._get_episode_display_info(episode_id)
+            fresh_info = self._get_episode_display_info(episode_id)
+            if fresh_info:
+                info = {**(info or {}), **fresh_info}
 
-            is_slow = bool(info.get("slow_download")) if info else False
+            is_slow = bool(info.get("slow_download")) if info else slow_lane
+            if not slow_lane and is_slow:
+                # If a podcast was switched to slow_download while queued in the fast lane,
+                # hand it off to the dedicated slow lane so it never blocks fast workers.
+                if info:
+                    self._queued_episodes[episode_id] = {**info, "status": "queued"}
+                self._slow_download_queue.put(
+                    episode_id, priority=bool(info and info.get("interactive_priority"))
+                )
+                lane_queue.task_done()
+                continue
+
             max_retries = int(info.get("max_retries", 3)) if info else 3
             backoff_base = int(info.get("retry_backoff_base", 5)) if info else 5
 
@@ -951,6 +1022,7 @@ class PodcastManager:
                 }
 
             success = False
+            handed_off_to_slow = False
             last_error = "下载失败"
 
             try:
@@ -1004,9 +1076,29 @@ class PodcastManager:
                         fail_rec = self._failed_downloads.get(episode_id)
                         if fail_rec and fail_rec.get("error"):
                             last_error = fail_rec["error"]
+                            if "429" in last_error:
+                                is_slow = True
+                                if not slow_lane:
+                                    # Demote 429 retries from the fast lane to the slow lane
+                                    # so fast workers are never blocked by rate-limited feeds.
+                                    self._active_downloads.pop(episode_id, None)
+                                    self._failed_downloads.pop(episode_id, None)
+                                    if info:
+                                        self._queued_episodes[episode_id] = {
+                                            **info,
+                                            "slow_download": True,
+                                            "status": "queued",
+                                        }
+                                    self._slow_download_queue.put(episode_id, priority=True)
+                                    handed_off_to_slow = True
+                                    break
+                                if episode_id in self._active_downloads:
+                                    self._active_downloads[episode_id]["slow_mode"] = True
                     except Exception as exc:
                         last_error = str(exc)
 
+                if handed_off_to_slow:
+                    continue
                 item = self._active_downloads.pop(episode_id, info or {})
                 if episode_id in self._cancelled_downloads:
                     self._cancelled_downloads.discard(episode_id)
@@ -1036,13 +1128,13 @@ class PodcastManager:
                     "failed_at": datetime.now(UTC).isoformat(),
                 }
             finally:
-                if is_slow and not self.stopping.is_set():
+                if slow_lane and is_slow and not self.stopping.is_set():
                     # 慢速防限流平缓模式：单集之间平缓延时 4 秒，防止源站并发触发频率限制
                     for _ in range(40):
                         if self.stopping.is_set():
                             break
                         time.sleep(0.1)
-                self._download_queue.task_done()
+                lane_queue.task_done()
 
     def _scheduler_loop(self):
         self.stopping.wait(timeout=5)
@@ -1617,7 +1709,17 @@ class PodcastManager:
             return False
         except urllib.error.HTTPError as e:
             if e.code == 429:
-                err_msg = "源站频繁请求限流 (HTTP 429 Too Many Requests)，已启动防限流冷却"
+                err_msg = "源站频繁请求限流 (HTTP 429 Too Many Requests)，已自动切换平缓下载并启动防限流冷却"
+                try:
+                    with self.database.connect(write=True) as conn:
+                        conn.execute(
+                            "UPDATE podcasts SET slow_download = 1 WHERE id = ?",
+                            (row["podcast_id"],),
+                        )
+                except Exception:
+                    logger.debug(
+                        "Failed to persist slow_download fallback for %s", row["podcast_id"]
+                    )
                 # 冷却退避 15 秒，保护源站
                 for _ in range(150):
                     if self.stopping.is_set():
@@ -1757,7 +1859,11 @@ class PodcastManager:
                            e.duration_seconds, e.download_status, p.title as podcast_title, p.cover_url,
                            COALESCE(p.slow_download, 0) as slow_download,
                            COALESCE(p.max_retries, 3) as max_retries,
-                           COALESCE(p.retry_backoff_base, 5) as retry_backoff_base
+                           COALESCE(p.retry_backoff_base, 5) as retry_backoff_base,
+                           (
+                               EXISTS(SELECT 1 FROM podcast_resource_refs r WHERE r.episode_id = e.id AND r.manual = 1)
+                               OR EXISTS(SELECT 1 FROM podcast_playback_cache c WHERE c.episode_id = e.id)
+                           ) as interactive_priority
                     FROM podcast_episodes e
                     JOIN podcasts p ON p.id = e.podcast_id
                     WHERE e.id = ?
@@ -1779,6 +1885,7 @@ class PodcastManager:
                     "slow_download": bool(row["slow_download"]),
                     "max_retries": int(row["max_retries"]),
                     "retry_backoff_base": int(row["retry_backoff_base"]),
+                    "interactive_priority": bool(row["interactive_priority"]),
                 }
         except Exception:
             return None
@@ -1789,6 +1896,7 @@ class PodcastManager:
 
     def _queue_download_episode(self, episode_id: str) -> bool:
         self._cancelled_downloads.discard(episode_id)
+        self._failed_downloads.pop(episode_id, None)
         if episode_id in self._active_downloads or episode_id in self._queued_episodes:
             return False
         info = self._get_episode_display_info(episode_id)
@@ -1806,7 +1914,10 @@ class PodcastManager:
             db.execute(
                 "UPDATE podcast_episodes SET download_status='queued' WHERE id=?", (episode_id,)
             )
-        self._download_queue.put(episode_id)
+        target_queue = (
+            self._slow_download_queue if info.get("slow_download") else self._fast_download_queue
+        )
+        target_queue.put(episode_id, priority=bool(info.get("interactive_priority")))
         return True
 
     def playback_settings(self, user_id: str) -> dict[str, Any]:
@@ -1916,6 +2027,48 @@ class PodcastManager:
             "failed": list(self._failed_downloads.values()),
         }
 
+    def get_user_download_queue_info(self, user_id: str) -> dict[str, Any]:
+        with self.database.connect() as conn:
+            ep_ids = {
+                r[0]
+                for r in conn.execute(
+                    """
+                    SELECT episode_id FROM podcast_resource_refs WHERE user_id = ? AND (manual = 1 OR automatic = 1)
+                    UNION
+                    SELECT episode_id FROM podcast_playback_cache WHERE user_id = ?
+                    """,
+                    (user_id, user_id),
+                )
+            }
+            policy_podcast_ids = {
+                r[0]
+                for r in conn.execute(
+                    "SELECT podcast_id FROM podcast_user_settings WHERE user_id = ? AND download_policy != 'none'",
+                    (user_id,),
+                )
+            }
+
+        def matches(item: dict[str, Any]) -> bool:
+            return item.get("episode_id") in ep_ids or item.get("podcast_id") in policy_podcast_ids
+
+        def sanitize(item: dict[str, Any]) -> dict[str, Any]:
+            return {k: v for k, v in item.items() if k not in {"local_path", "storage_path"}}
+
+        downloading = [sanitize(v) for v in self._active_downloads.values() if matches(v)]
+        queued = [sanitize(v) for v in self._queued_episodes.values() if matches(v)]
+        recent_completed = [sanitize(v) for v in self._recent_completed if matches(v)]
+        failed = [sanitize(v) for v in self._failed_downloads.values() if matches(v)]
+        return {
+            "active_count": len(downloading),
+            "queued_count": len(queued),
+            "failed_count": len(failed),
+            "total_pending": len(downloading) + len(queued),
+            "downloading": downloading,
+            "queued": queued,
+            "recent_completed": recent_completed,
+            "failed": failed,
+        }
+
     def retry_all_failed(self) -> int:
         retried = 0
         failed_ids = list(self._failed_downloads.keys())
@@ -1934,6 +2087,7 @@ class PodcastManager:
         client_range: str | None = None,
         *,
         download_title: str | None = None,
+        head_only: bool = False,
     ):
         try:
             audio_url = validate_remote_url(audio_url)
@@ -2003,6 +2157,10 @@ class PodcastManager:
             val = resp.headers.get(h)
             if val:
                 response_headers[h] = val
+
+        if head_only:
+            resp.close()
+            return Response(status_code=status_code, headers=response_headers)
 
         def iterfile():
             try:
@@ -2618,6 +2776,15 @@ def podcast_router(
     def get_download_queue():
         return manager.get_download_queue_info()
 
+    @router.get(
+        "/downloads/mine",
+        dependencies=[
+            Depends(auth.require_client),
+        ],
+    )
+    def get_my_download_queue(user: Annotated[dict, Depends(auth.require_session)]):
+        return manager.get_user_download_queue_info(user["id"])
+
     @router.get("/playback-settings", response_model=PodcastPlaybackSettingsResponse)
     def get_playback_settings(user: Annotated[dict, Depends(auth.require_session)]):
         return manager.playback_settings(user["id"])
@@ -2732,7 +2899,7 @@ def podcast_router(
             raise HTTPException(status_code=404, detail="episode_not_found")
         return ep
 
-    @router.get("/episodes/{episode_id}/stream")
+    @router.api_route("/episodes/{episode_id}/stream", methods=["GET", "HEAD"])
     def stream_episode(
         episode_id: str,
         request: Request,
@@ -2742,7 +2909,8 @@ def podcast_router(
         if not ep or not ep.get("audio_url"):
             raise HTTPException(status_code=404, detail="episode_unavailable")
         download = request.query_params.get("download") == "1"
-        if not download and request.query_params.get("cache") == "1":
+        head_only = request.method == "HEAD"
+        if not download and not head_only and request.query_params.get("cache") == "1":
             manager.queue_playback_cache(
                 episode_id,
                 user["id"],
@@ -2759,6 +2927,7 @@ def podcast_router(
                 ep["audio_url"],
                 request.headers.get("range"),
                 download_title=ep["title"] if download else None,
+                head_only=head_only,
             )
         return RedirectResponse(url=ep["audio_url"], status_code=status.HTTP_307_TEMPORARY_REDIRECT)
 
